@@ -675,10 +675,14 @@ inline std::unique_ptr<StateManager>
         cacheCapacity);
 }
 
-/// The same engine as makeStateManager(), but carrying @p engineName so its on-disk
-/// winner-cache shard resolves. makeStateManager() leaves the name empty, which
+/// The same engine as makeStateManager(), but carrying @p engine so its on-disk
+/// winner-cache shard resolves. makeStateManager() leaves the identity empty, which
 /// disables the disk cache, so every test that does not opt in stays in-memory only.
-inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+/// @param winnerCacheCapacity Lets a test reach the eviction bound without recording the
+///        thousands of rankings the production default holds.
+inline std::unique_ptr<StateManager> makeIdentifiedStateManager(
+    EngineIdentity engine,
+    size_t winnerCacheCapacity = StateManager::DEFAULT_WINNER_CACHE_CAPACITY)
 {
     std::vector<MatchDescriptor> matchers{
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
@@ -694,7 +698,16 @@ inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& en
         "test.graph",
         "engine 'test fixture'",
         StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
-        engineName);
+        std::move(engine),
+        winnerCacheCapacity);
+}
+
+/// An engine identified by name alone: no revision, no UHD, no model hash. Every shard
+/// test that predates the identity in the path uses this, and pairs with
+/// `winnerCacheShardPath({engineName}, ...)` naming the same default identity.
+inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+{
+    return makeIdentifiedStateManager(EngineIdentity{engineName});
 }
 
 /// Installs @p handler under @p symbol for the object's lifetime, replacing

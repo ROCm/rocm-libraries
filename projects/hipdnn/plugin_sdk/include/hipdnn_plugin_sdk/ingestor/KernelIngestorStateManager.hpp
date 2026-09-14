@@ -68,13 +68,15 @@ struct ResolvedDispatch
 /// (sortedDefinitions), getMaxWorkspaceSize (getDispatchDetails per survivor, max), and
 /// initializeExecutionContext (sortedDefinitions().front(), getDispatchDetails).
 ///
-/// Thread safety. Two independent caches, each guarding itself:
+/// Thread safety. Three `LruCache`es, each synchronizing internally -- `_catalogCache`,
+/// `_calibratedCache`, and `_winnerCache` -- plus `_winnerCacheMutex`, which guards the
+/// bookkeeping that sits AROUND the winner cache rather than inside it: the per-shard
+/// "already loaded" set and the one-shot failure-log set.
 ///
-/// - `_catalogCache` (`LruCache`) synchronizes internally.
-/// - `_winnerCache` is guarded by `_winnerCacheMutex`, as is the one-shot growth warning.
-///
-/// Neither lock is ever held across a call that takes the other, so the two cannot
-/// deadlock. Matchers, the heuristic, and the accessors below all run outside both.
+/// `_winnerCacheMutex` may be held across an `_winnerCache` call (`mightHaveWinnerFor()`
+/// asks both questions as one); the reverse never happens, since an `LruCache` calls no
+/// user code, so the ordering is total and the two cannot deadlock. Matchers, the
+/// heuristic, and the accessors below all run outside every lock.
 ///
 /// Everything between a lookup and a store is thread-local: `catalogFor` returns a
 /// `Catalog` by value and callers mutate that copy, so ordering a catalog touches no
@@ -92,10 +94,19 @@ public:
     /// wrong answer.
     static constexpr size_t DEFAULT_CATALOG_CACHE_CAPACITY = 256;
 
-    /// A tripwire, not a cap: the winner cache never evicts, because discarding a
-    /// measured ranking costs a GPU sweep or a silent quality regression. Crossing this
-    /// logs once and changes nothing.
-    static constexpr size_t WINNER_CACHE_WARNING_THRESHOLD = 4096;
+    /// How many benchmarked rankings to retain in memory.
+    ///
+    /// RFC 0019 §9.2 requires the cache to be capacity-bounded: "a working set larger than
+    /// the bound re-ranks on eviction. The bound is a tuning parameter, not a correctness
+    /// issue." This was a soft warning threshold with no eviction, on the argument that
+    /// discarding a measured ranking costs a GPU sweep. That argument does not survive the
+    /// on-disk shard: an evicted record is re-read from disk on the next lookup for its arch,
+    /// or, if this process already latched that shard, re-measured once and then DISCARDED in
+    /// favour of the line already on disk (`writeBackToShard()` adopts on a fresh miss). So
+    /// eviction costs at most one redundant sweep and never a lost measurement, while an
+    /// unbounded map costs a process that ranks many distinct graphs a monotonically growing
+    /// map it can never release.
+    static constexpr size_t DEFAULT_WINNER_CACHE_CAPACITY = 4096;
 
     /// @throws std::invalid_argument bad pack reference, or duplicate metadata tuple.
     /// @throws std::runtime_error a UMD or the engine's graph_match names a symbol this
@@ -108,11 +119,12 @@ public:
     ///        is the only one of the three that has no descriptor of its own to name:
     ///        the symbol lives on the UED, so without this the diagnostic would carry
     ///        the symbol string alone.
-    /// @param engineName The engine's own scoped name (`EngineDescriptor::name`), used to
-    ///        compose the on-disk winner-cache shard path -- not `describedBy`, which is
-    ///        a diagnostic string, not a path component. Defaults to empty so existing
-    ///        direct-construction call sites keep compiling; an empty name disables the
-    ///        disk cache rather than sharing one shard across every unnamed instance.
+    /// @param engine The engine's own identity (`EngineDescriptor::name`/`revision` plus its
+    ///        UHD's id and content hash) -- not `describedBy`, which is a diagnostic string,
+    ///        not a path component. It composes the on-disk winner-cache shard path and
+    ///        supplies the version half of every `CatalogKey`. Defaults to empty so existing
+    ///        direct-construction call sites keep compiling; an empty name disables the disk
+    ///        cache rather than sharing one shard across every unnamed instance.
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
                                std::vector<DispatchDescriptor> dispatches,
@@ -121,7 +133,8 @@ public:
                                const std::string& graphMatchSymbol,
                                const std::string& describedBy = {},
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
-                               std::string engineName = {})
+                               EngineIdentity engine = {},
+                               size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
         : _schema(std::move(schema))
         , _packs(std::move(packs))
         , _heuristic(std::move(heuristic))
@@ -129,7 +142,14 @@ public:
                             ? nullptr
                             : GraphMatchRegistry::resolve(graphMatchSymbol, describedBy))
         , _catalogCache(catalogCacheCapacity)
-        , _engineName(std::move(engineName))
+        // Same key and same capacity as _catalogCache on purpose: the two answer for the same
+        // (graph, device, engine version), so an entry in one is valid exactly when an entry
+        // in the other would be. Held beside the catalog rather than inside it because
+        // `Catalog` is handed to every matcher, scorer and dispatch formula, and none of them
+        // reads a calibrated ranking.
+        , _calibratedCache(catalogCacheCapacity)
+        , _engine(std::move(engine))
+        , _winnerCache(winnerCacheCapacity)
     {
         if(_heuristic == nullptr)
         {
@@ -191,11 +211,65 @@ public:
     }
 
     /// Calibrated model scores for exact configuration prediction, never cached timings.
-    std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
+    ///
+    /// @param full The canonical candidate set: every kernel the matchers admitted for this
+    ///        graph, before any knob pin narrows it. Also carries the bound tokens the
+    ///        scorer reads.
+    /// @param filtered What survived the caller's knob pin and workspace limit, in @p full's
+    ///        order. Pass `full.entries` for an unpinned request.
+    /// @param modelId Set to the id of the model that produced the scores.
+    ///
+    /// RFC 0019 §5 step 8 fixes the basis a ranking is decided on: "A scorer error is
+    /// resolved against the canonical candidate set -- every kernel the matchers admitted
+    /// for this graph, before any knob filter narrows it ... Knob filtering then applies to
+    /// the resulting order." §9.2 says the same thing about the cache: "What is cached is
+    /// the full applicable catalog's order ... a filtered request restricts the cached order
+    /// rather than producing its own."
+    ///
+    /// Ranking @p filtered directly breaks both, and §5 step 8 names the failure exactly:
+    /// "if scoring fails on one candidate, ranking the full catalog first would fall back
+    /// for everything, while a knob pin that happened to exclude that candidate would score
+    /// normally, and the two paths would disagree on the winner from the same inputs."
+    ///
+    /// Only a WARM cache restricts. Ranking the full catalog on a cold one would do strictly
+    /// MORE work than the caller asked for, and §9.2's justification for restricting -- it is
+    /// less work than re-ranking -- only holds once the full ranking has already been paid
+    /// for. A cold pinned request therefore ranks its subset, as before, and memoizes
+    /// nothing; an unpinned request ranks the full catalog and memoizes it, which is what
+    /// makes every later pinned request commute with it.
+    std::vector<ScoredKernel> calibratedRanking(const Catalog& full,
+                                                const std::vector<KernelDefinition>& filtered,
                                                 const MatchContext& context,
                                                 std::string& modelId) const
     {
-        return _heuristic->calibratedRanking(catalog, context, modelId);
+        const auto key = cacheKey(context);
+        if(key.has_value())
+        {
+            if(auto cached = _calibratedCache.get(*key); cached.has_value())
+            {
+                modelId = std::move(cached->modelId);
+                return restrictRanking(cached->ranking, filtered);
+            }
+        }
+
+        // `filtered` is a subsequence of `full.entries` (applyConstraints only removes), so
+        // equal sizes mean equal contents -- no element-wise comparison needed to recognize
+        // the unpinned request whose ranking IS the full catalog's.
+        const bool ranksTheFullCatalog = filtered.size() == full.entries.size();
+
+        Catalog candidates = full;
+        candidates.entries = filtered;
+        auto ranking = _heuristic->calibratedRanking(candidates, context, modelId);
+
+        if(ranksTheFullCatalog && key.has_value() && !ranking.empty())
+        {
+            // Not memoized when empty: an empty ranking is "this heuristic cannot calibrate"
+            // (IKernelHeuristic::calibratedRanking's default), a property of the heuristic
+            // rather than a result worth a cache entry, and caching it would make a miss and
+            // a hit indistinguishable.
+            _calibratedCache.put(*key, CalibratedRanking{ranking, modelId});
+        }
+        return ranking;
     }
 
     /// Every kernel that applies to the graph and device @p context names, unordered.
@@ -309,54 +383,36 @@ public:
 
         WinnerRecord adopted = writeBackToShard(key, record, cause);
 
-        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        _winnerCache[key] = std::move(adopted);
-
-        if(_winnerCache.size() > WINNER_CACHE_WARNING_THRESHOLD && !_winnerCacheGrowthWarned)
-        {
-            _winnerCacheGrowthWarned = true;
-            HIPDNN_PLUGIN_LOG_WARN(
-                "ingestor: winner cache holds "
-                << _winnerCache.size() << " entries, past the soft threshold of "
-                << WINNER_CACHE_WARNING_THRESHOLD
-                << "; it does not evict, so this is reported once rather than acted on");
-        }
+        // Bounded, least-recently-used: RFC 0019 §9.2's "the cache is capacity-bounded ...
+        // so a working set larger than the bound re-ranks on eviction". LRU rather than a
+        // cheaper policy because the access pattern this cache serves is a graph being
+        // executed repeatedly -- recency is exactly the signal that says which rankings are
+        // still being asked for. See DEFAULT_WINNER_CACHE_CAPACITY for what eviction costs.
+        _winnerCache.put(key, std::move(adopted));
     }
 
-    /// The ranking recorded for @p key, or nullopt. Returns a copy: the caller walks it
-    /// outside the lock, and a reference would outlive the guard.
+    /// The ranking recorded for @p key, or nullopt. Returns a copy, which is also what
+    /// refreshes @p key's recency: a lookup is what keeps a record alive under the bound.
     ///
     /// Read-through: an in-memory miss loads @p key's on-disk shard once per shard (a
-    /// per-shard "already loaded" flag), taking only `_winnerCacheMutex` to merge
-    /// decoded entries into `_winnerCache` -- unlike write-back, this never holds a file
-    /// lock across the read.
+    /// per-shard "already loaded" flag), taking only `_winnerCacheMutex` to guard that flag
+    /// -- unlike write-back, this never holds a file lock across the read.
     std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
     {
+        if(auto found = _winnerCache.get(key); found.has_value())
         {
-            const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-            const auto found = _winnerCache.find(key);
-            if(found != _winnerCache.end())
-            {
-                return found->second;
-            }
+            return found;
         }
 
         loadShardIfAbsent(key.device.properties().gcnArchName);
 
-        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        const auto found = _winnerCache.find(key);
-        if(found == _winnerCache.end())
-        {
-            return std::nullopt;
-        }
-        return found->second;
+        return _winnerCache.get(key);
     }
 
-    /// How many rankings are held. For tests and diagnostics; the cache never evicts, so
-    /// this only grows.
+    /// How many rankings are held; never more than the manager's winner-cache capacity.
+    /// For tests and diagnostics.
     size_t winnerCacheSize() const
     {
-        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
         return _winnerCache.size();
     }
 
@@ -395,6 +451,46 @@ public:
     }
 
 private:
+    /// One memoized full-catalog calibrated ranking. The model id travels with it because
+    /// the ranking is meaningless without the provenance the caller reports alongside it,
+    /// and re-deriving it would mean calling the heuristic again, which is the cost this
+    /// cache exists to avoid.
+    struct CalibratedRanking
+    {
+        std::vector<ScoredKernel> ranking;
+        std::string modelId;
+    };
+
+    /// @p ranking in its own order, keeping only entries naming a kernel in @p candidates.
+    ///
+    /// This is what makes filtering and ranking commute (RFC 0019 §5 step 8): the order and
+    /// the scores are the full catalog's, and the pin only removes rows. Dropping rather
+    /// than reordering matters -- a candidate the pin excluded must not influence the
+    /// relative order of two that survived, and it cannot, since the surviving rows keep
+    /// their relative positions.
+    ///
+    /// Linear scan per entry rather than a set: a catalog is tens of kernels, and building
+    /// an unordered_set of DescriptorIds costs more than the scan it replaces at that size.
+    static std::vector<ScoredKernel>
+        restrictRanking(const std::vector<ScoredKernel>& ranking,
+                        const std::vector<KernelDefinition>& candidates)
+    {
+        std::vector<ScoredKernel> restricted;
+        restricted.reserve(std::min(ranking.size(), candidates.size()));
+        for(const auto& scored : ranking)
+        {
+            const bool survived = std::any_of(
+                candidates.begin(), candidates.end(), [&scored](const KernelDefinition& kernel) {
+                    return kernel.kernelId == scored.kernelId;
+                });
+            if(survived)
+            {
+                restricted.push_back(scored);
+            }
+        }
+        return restricted;
+    }
+
     /// Validates every pack's references and builds the KernelDefinition for each of
     /// its kernels. Every field of a definition is context-independent, so this is the
     /// only place they are ever computed: buildCatalog copies them per query rather
@@ -533,7 +629,9 @@ private:
     }
 
     /// Device comes from the context, not a separate argument, so one device's catalog
-    /// never caches under another's key.
+    /// never caches under another's key. The engine revision comes from this manager, not
+    /// the context: the catalog is this engine's kernels ranked by this engine's heuristic,
+    /// and a context knows nothing about either.
     std::optional<CatalogKey> cacheKey(const MatchContext& context) const
     {
         const auto graphId = tryGetGraphId(context.graph);
@@ -541,7 +639,7 @@ private:
         {
             return std::nullopt;
         }
-        return CatalogKey{*graphId, context.deviceId};
+        return CatalogKey{*graphId, context.deviceId, _engine.version};
     }
 
     Catalog catalogFor(const MatchContext& context) const
@@ -785,7 +883,7 @@ private:
     bool mightHaveWinnerFor(const std::string& gcnArchName) const
     {
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        return !_winnerCache.empty()
+        return _winnerCache.size() != 0
                || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
                       == _loadedWinnerShards.end();
     }
@@ -806,7 +904,7 @@ private:
     {
         const std::string shardArch(stripArchFeatures(gcnArchName));
 
-        if(_engineName.empty())
+        if(_engine.name.empty())
         {
             // No engine name means no shard path; mark it loaded so later lookups take
             // the fast in-memory-only path.
@@ -825,7 +923,7 @@ private:
 
         std::vector<std::pair<WinnerKey, WinnerRecord>> decoded;
         bool attemptSettled = false;
-        auto [shard, openStatus] = openWinnerCacheShard(_engineName, gcnArchName);
+        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
         if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
         {
             // Deterministic for this process: the shard's version line will not change
@@ -852,30 +950,43 @@ private:
             }
         }
 
-        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        if(!attemptSettled)
         {
-            return;
+            const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+            if(!attemptSettled)
+            {
+                return;
+            }
+            if(!_loadedWinnerShards.insert(shardArch).second)
+            {
+                // Another thread's read-through raced this one and already merged.
+                return;
+            }
         }
-        if(!_loadedWinnerShards.insert(shardArch).second)
-        {
-            // Another thread's read-through raced this one and already merged.
-            return;
-        }
+
         // Walk in reverse and never overwrite: within the file the last line for a key
         // wins, and a key already in memory was put there by this process's own
         // measurement, which is newer than anything the file can offer.
+        //
+        // Merged outside `_winnerCacheMutex` now that `_winnerCache` locks itself. The latch
+        // above is already claimed, so no second thread reaches this loop for this shard, and
+        // a concurrent recordWinner() for one of these keys wins on its own merits --
+        // putIfAbsent declines to overwrite it, which is the rule this loop always had.
         for(auto it = decoded.rbegin(); it != decoded.rend(); ++it)
         {
             if(!it->first.graph.isUsable())
             {
                 // A key whose graph carries no content is not even equal to itself
                 // (GraphContentKey::operator==), so it can never be looked up -- and as
-                // a non-reflexive key it would violate unordered_map's requirements on
-                // KeyEqual. recordWinner() rejects these on the write side too.
+                // a non-reflexive key it would violate the cache's requirements on KeyEqual.
+                // recordWinner() rejects these on the write side too.
                 continue;
             }
-            _winnerCache.try_emplace(it->first, std::move(it->second));
+            // A shard holding more lines than the cache's capacity keeps the LAST ones it
+            // decodes, which are the file's EARLIEST: reverse iteration means capacity is
+            // spent on whichever lines happen to come first. That is arbitrary but never
+            // wrong -- an evicted key simply misses and is re-measured, and the shard still
+            // holds every line for a later process to read.
+            _winnerCache.putIfAbsent(it->first, std::move(it->second));
         }
     }
 
@@ -901,13 +1012,13 @@ private:
     WinnerRecord
         writeBackToShard(const WinnerKey& key, WinnerRecord record, WinnerWriteCause cause) const
     {
-        if(_engineName.empty())
+        if(_engine.name.empty())
         {
             return record;
         }
 
         const auto& gcnArchName = key.device.properties().gcnArchName;
-        auto [shard, openStatus] = openWinnerCacheShard(_engineName, gcnArchName);
+        auto [shard, openStatus] = openWinnerCacheShard(_engine, gcnArchName);
         if(openStatus == hipdnn_data_sdk::utilities::LineStoreStatus::VERSION_MISMATCH)
         {
             logShardFailureOnce(WinnerShardFailureKind::VERSION_MISMATCH, gcnArchName);
@@ -991,18 +1102,18 @@ private:
         case WinnerShardFailureKind::OPEN:
             HIPDNN_PLUGIN_LOG_INFO("ingestor: on-disk winner cache could not be opened for "
                                    "engine '"
-                                   << _engineName << "' arch '" << gcnArchName
+                                   << _engine.name << "' arch '" << gcnArchName
                                    << "'; on-disk miss, in-memory behavior continues");
             break;
         case WinnerShardFailureKind::LOCK:
             HIPDNN_PLUGIN_LOG_INFO(
                 "ingestor: could not lock the on-disk winner cache shard for engine '"
-                << _engineName << "' arch '" << gcnArchName
+                << _engine.name << "' arch '" << gcnArchName
                 << "'; on-disk write-back skipped for this call");
             break;
         case WinnerShardFailureKind::READ:
             HIPDNN_PLUGIN_LOG_INFO("ingestor: on-disk winner cache for engine '"
-                                   << _engineName << "' arch '" << gcnArchName
+                                   << _engine.name << "' arch '" << gcnArchName
                                    << "' could not be read; on-disk miss, in-memory behavior "
                                       "continues");
             break;
@@ -1010,12 +1121,12 @@ private:
             HIPDNN_PLUGIN_LOG_INFO(
                 "ingestor: could not append a benchmarked ranking to the on-disk winner "
                 "cache for engine '"
-                << _engineName << "' arch '" << gcnArchName
+                << _engine.name << "' arch '" << gcnArchName
                 << "'; the ranking is kept in-memory only for this process");
             break;
         case WinnerShardFailureKind::VERSION_MISMATCH:
             HIPDNN_PLUGIN_LOG_WARN("ingestor: on-disk winner cache for engine '"
-                                   << _engineName << "' arch '" << gcnArchName
+                                   << _engine.name << "' arch '" << gcnArchName
                                    << "' declined: version mismatch; on-disk miss, in-memory "
                                       "behavior continues");
             break;
@@ -1035,17 +1146,24 @@ private:
     std::shared_ptr<IKernelHeuristic> _heuristic;
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
+    /// The full applicable catalog's calibrated ranking, memoized so that a knob-pinned
+    /// request restricts it instead of ranking its own subset (RFC 0019 §9.2). See
+    /// calibratedRanking() for why only an unpinned request fills it.
+    mutable LruCache<CatalogKey, CalibratedRanking, CatalogKeyHash> _calibratedCache;
 
-    /// The engine's own scoped name, used to locate its on-disk winner-cache shard.
-    /// Empty disables the disk cache for this manager entirely.
-    std::string _engineName;
+    /// The engine's identity: its scoped name and revision plus its UHD's id and content
+    /// hash. The name locates the on-disk winner-cache shard -- empty disables the disk
+    /// cache for this manager entirely -- and the revision is the version half of every
+    /// CatalogKey this manager builds.
+    EngineIdentity _engine;
 
-    /// Unbounded, never evicted, own mutex (see WINNER_CACHE_WARNING_THRESHOLD). Separate
-    /// from _catalogCache's lock: a shared lock would serialize benchmarking write-back
-    /// against ordinary catalog lookups.
-    mutable std::unordered_map<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
+    /// Bounded and self-locking (see DEFAULT_WINNER_CACHE_CAPACITY). Its own cache rather
+    /// than a share of _catalogCache's: a shared bound would let a burst of benchmarked
+    /// rankings evict the catalogs that ordinary lookups depend on, and vice versa.
+    mutable LruCache<WinnerKey, WinnerRecord, WinnerKeyHash> _winnerCache;
+    /// Guards the bookkeeping AROUND _winnerCache -- the two sets below -- not the cache
+    /// itself, which locks internally.
     mutable std::mutex _winnerCacheMutex;
-    mutable bool _winnerCacheGrowthWarned = false;
     /// Shard arch components (`stripArchFeatures(gcnArchName)`) whose on-disk shard has
     /// been read, or deterministically declined; see loadShardIfAbsent(). Guarded by
     /// _winnerCacheMutex.
