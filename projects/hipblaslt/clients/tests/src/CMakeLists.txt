@@ -10,6 +10,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
@@ -19,12 +20,6 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
 )
-
-if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
-    target_sources(hipblaslt-test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
-    )
-endif()
 
 # NOTE: secure_env_gtest.cpp (ROCM-26729) intentionally includes the header-only
 # rocblaslt_secure_env.hpp by relative path rather than via a target include

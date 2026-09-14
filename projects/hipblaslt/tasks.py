@@ -500,7 +500,7 @@ def _resolve_fortran_compiler(explicit, rocm: Path):
         "no_compress": "Don't compress TensileLite assembly objects.",
         "keep_build_tmp": "Keep the temporary build artifacts.",
         "experimental": "Include 'Experimental' logic directories.",
-        "gemm_a2a_fusion": "Build experimental fused GEMM + all-to-all support.",
+        "gemm_a2a_fusion": "Generate experimental fused GEMM + all-to-all device kernels.",
         "logic_filter": "Logic YAML filter (e.g. 'gfx942/Equality/*').",
         "legacy_hipblas_direct": "Enable legacy HIPBLAS_DIRECT mode.",
         "disable_marker": "Disable hipBLASLt markers.",

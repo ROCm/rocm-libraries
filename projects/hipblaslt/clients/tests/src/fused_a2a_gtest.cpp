@@ -5,6 +5,8 @@
 // single-stage family rule, attribute ranges, the completeness check run at
 // descriptor attach, communicator registration, and the shape and layout
 // requirements checked before solution selection.
+// These host tests are built with GEMM+A2A device generation both enabled and
+// disabled; the public declarations and request validation are identical.
 //
 // Suite names must keep their "pre_checkin" or "multi_gpu" token. The ctest
 // presets in clients/tests/test_categories.yaml select by loose substring on
@@ -23,6 +25,15 @@
 
 namespace
 {
+    // Public IDs must not depend on which device kernels were generated.
+    static_assert(HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX == 7);
+    static_assert(HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES == 12);
+    static_assert(HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS == 13);
+    static_assert(HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT == 14);
+    static_assert(HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE == 15);
+    static_assert(HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL == 16);
+    static_assert(HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE == 106);
+
     bool gpuAvailable()
     {
         int deviceCount = 0;
@@ -752,6 +763,30 @@ namespace
                                                    &returned);
         }
 
+        // No GEMM is dispatched by these rejection tests. Null data pointers
+        // make an accidental fall-through fail instead of producing a result.
+        hipblasStatus_t matmul()
+        {
+            const float alpha = 1.f;
+            const float beta  = 0.f;
+            return hipblasLtMatmul(handle,
+                                  matmulDesc,
+                                  &alpha,
+                                  nullptr,
+                                  Adesc,
+                                  nullptr,
+                                  Bdesc,
+                                  &beta,
+                                  nullptr,
+                                  Ddesc,
+                                  nullptr,
+                                  Ddesc,
+                                  nullptr,
+                                  nullptr,
+                                  0,
+                                  nullptr);
+        }
+
         hipblasLtHandle_t                  handle     = nullptr;
         hipblasLtMatmulDesc_t              matmulDesc = nullptr;
         hipblasLtMatmulPreference_t        pref       = nullptr;
@@ -771,6 +806,14 @@ namespace
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_NOT_SUPPORTED);
     }
 
+    TEST_F(FusedA2ADispatch_pre_checkin, MatmulReportsMissingCapability)
+    {
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+        EXPECT_EQ(matmul(), HIPBLAS_STATUS_NOT_SUPPORTED);
+    }
+
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingCommunicator)
     {
         completeAndAttach();
@@ -785,25 +828,7 @@ namespace
         completeAndAttach();
         makeD();
 
-        const float alpha = 1.f;
-        const float beta  = 0.f;
-        EXPECT_EQ(hipblasLtMatmul(handle,
-                                  matmulDesc,
-                                  &alpha,
-                                  nullptr,
-                                  Adesc,
-                                  nullptr,
-                                  Bdesc,
-                                  &beta,
-                                  nullptr,
-                                  Ddesc,
-                                  nullptr,
-                                  Ddesc,
-                                  nullptr,
-                                  nullptr,
-                                  0,
-                                  nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(matmul(), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsChannelOutsideTheCommunicator)

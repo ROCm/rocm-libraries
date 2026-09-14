@@ -114,7 +114,6 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
     }
 }
 
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /********************************************************************************
  * Fused epilogue descriptor.
  *
@@ -369,7 +368,6 @@ namespace
         handle->device_comm_world    = 0;
     }
 }
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -471,12 +469,10 @@ try
     {
         CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).StreamKFlags));
     }
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     if(handle != nullptr)
     {
         release_device_comm((rocblaslt_handle)handle);
     }
-#endif
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_destroy((const rocblaslt_handle)handle));
     rocblaslt::Debug::Instance().markerStop();
@@ -689,7 +685,6 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescSetAttribute");
 
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Attaching a fused epilogue is where the stages are checked for completeness:
     // the descriptor stops being a work in progress at this call.
     if(matmulAttr == HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE && buf != nullptr
@@ -707,7 +702,6 @@ try
             }
         }
     }
-#endif
 
     auto status = RocBlasLtStatusToHIPStatus(
         rocblaslt_matmul_desc_set_attribute((rocblaslt_matmul_desc)matmulDesc,
@@ -743,7 +737,6 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
 hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc)
 try
 {
@@ -1070,7 +1063,6 @@ catch(...)
 {
     return exception_to_hipblas_status();
 }
-#endif
 
 hipblasStatus_t hipblasLtMatmulPreferenceCreate(hipblasLtMatmulPreference_t* pref)
 try
@@ -1158,7 +1150,6 @@ try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulAlgoGetHeuristic");
 
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Everything a communicating stage can be judged on before a solution exists
     // is judged here: an all-to-all's extent participates in tile selection, so a
     // request that cannot be served must not come back as a usable algo.
@@ -1169,7 +1160,6 @@ try
         rocblaslt::Debug::Instance().markerStop();
         return fused_status;
     }
-#endif
 
     OverrideSingleton& override = OverrideSingleton::getInstance();
     if(override.env_mode)
@@ -1223,14 +1213,12 @@ try
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmul");
     hipblasStatus_t return_status = HIPBLAS_STATUS_SUCCESS;
 
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
     return_status = validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
         return return_status;
     }
-#endif
 
     return_status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul((rocblaslt_handle)handle,
                                                                 (rocblaslt_matmul_desc)matmul_descr,

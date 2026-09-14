@@ -45,6 +45,12 @@ You need a ROCm install (e.g. `/opt/rocm`) and Python 3.8+. For `GPU_TARGETS`, s
 
 Supported names are in `cmake/tensilelite_supported_architectures.cmake`.
 
+### Fused GEMM + all-to-all device kernels
+
+`invoke build --gemm-a2a-fusion` (CMake: `HIPBLASLT_ENABLE_GEMM_A2A_FUSION=ON`) admits experimental fused GEMM + all-to-all kernels during device-library generation. The default is `OFF`, which excludes those kernels. The option has no effect when `HIPBLASLT_ENABLE_DEVICE=OFF`, and device-only builds do not require the hipBLASLt host library to be enabled.
+
+The fused-epilogue host functions, types, attribute IDs, and validation are available in either configuration. Building and attaching a descriptor does not guarantee that it can execute: a well-formed A2A request returns `HIPBLAS_STATUS_NOT_SUPPORTED` at heuristic selection or matmul because the host path is not yet connected to a fused kernel. The `FusedA2A*` tests are included in both builds; run `hipblaslt-test --gtest_filter='FusedA2A*'` with the device-generation option `OFF` and `ON`.
+
 ---
 
 ## Device libraries (Tensile): required for matmul tests

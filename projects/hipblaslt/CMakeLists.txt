@@ -66,14 +66,9 @@ option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
 option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
-option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Build experimental fused GEMM + all-to-all support." OFF)
-
-if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_HOST)
-    message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_HOST=ON")
-endif()
-if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT HIPBLASLT_ENABLE_DEVICE)
-    message(FATAL_ERROR "HIPBLASLT_ENABLE_GEMM_A2A_FUSION requires HIPBLASLT_ENABLE_DEVICE=ON")
-endif()
+# This option only affects device-library generation. The host API is always built
+# and reports NOT_SUPPORTED when a requested fused operation has no usable kernel.
+option(HIPBLASLT_ENABLE_GEMM_A2A_FUSION "Generate experimental fused GEMM + all-to-all device kernels." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -313,12 +308,6 @@ target_link_libraries(hipblaslt-headers INTERFACE hip::host)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-version.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
-)
-
-set(HIPBLASLT_HAS_GEMM_A2A_FUSION ${HIPBLASLT_ENABLE_GEMM_A2A_FUSION})
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-opt-in-features.h.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
 # Configure the Windows version resource (PE VERSIONINFO) embedded into
