@@ -16,6 +16,8 @@ graph out without writing any code.
   reductions, pooling and resampling, block-scale quantize/dequantize, plus
   input and output tensors.
 - Edit each node's shape, data type, and settings in the inspector.
+- Let hipDNN infer output shapes, or clear **Use defaults** on an Output node to
+  pin its dimensions yourself.
 - Save and load graphs as JSON. Your work is also auto-saved between sessions.
 - Pick which hipDNN engine to use, or let hipDNN choose the best one.
 - Run the graph with randomly filled tensors and see how long it took.
