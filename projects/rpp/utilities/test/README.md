@@ -39,10 +39,8 @@ GTEST_COLOR=yes ctest ...         # keep colour; CTest captures output, so it is
 
 > [!NOTE]
 > Registering one CTest test per *case* instead is available via `cmake -DRPP_TEST_CTEST_PER_CASE=ON ..`.
-> It isolates each of the ~25000 cases in its own process, so a segfault or GPU fault takes down one
-> case rather than its whole operator suite. The isolation costs a process start plus RPP/HIP handle
-> setup per case: roughly 0.33s each, turning a ~17s run into hours. Use it when chasing a crash,
-> not routinely.
+> It isolates each of the cases in its own process, so a segfault or GPU fault takes down one
+> case rather than its whole operator suite.
 
 ## Output
 
