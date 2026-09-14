@@ -70,7 +70,7 @@ from hkp_pack.desk_check import (  # noqa: E402
     MODES,
     DeskCheckReport,
     compiled_agreement,
-    load_kernels,
+    load_variant_set,
 )
 from hkp_pack.errors import HkpPackError  # noqa: E402
 
@@ -112,9 +112,10 @@ def _parse_args(argv):
         dest="fields",
         default=[],
         help="A KMD field the matcher keys on; repeatable. This is the "
-        "MATCHER-TUPLE identity (invariant 2). Defaults to a generic "
-        "attention-shaped list -- narrow it to your own KMD's fields for a "
-        "meaningful check. Narrowing this does NOT narrow --drift-field.",
+        "MATCHER-TUPLE identity (invariant 2). Defaults to the fields the "
+        "bundle's own specialization_contract declares it specialized on, and "
+        "only falls back to a generic attention-shaped list for a bundle that "
+        "declares no contract. Narrowing this does NOT narrow --drift-field.",
     )
     p.add_argument(
         "--drift-field",
@@ -132,7 +133,6 @@ def _parse_args(argv):
 
 def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    fields = tuple(args.fields) if args.fields else DEFAULT_MATCHER_FIELDS
     drift_fields = tuple(args.drift_fields) if args.drift_fields else None
     kdp = Path(args.kdp)
     failures = None
@@ -149,13 +149,16 @@ def main(argv=None):
         except HkpPackError as exc:
             failures = [str(exc)]
     try:
-        kernels = load_kernels(kdp)
+        kernels, declared_fields = load_variant_set(kdp)
     except HkpPackError as exc:
         # An unresolvable standalone-UKD reference means the descriptor set is not
         # readable at all. Reported, not raised: a traceback out of a gate reads as
         # a broken tool rather than as a broken artifact.
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
+    # An explicit --field always wins; the bundle's own declaration beats the
+    # generic fallback, which is left for a bundle that declares nothing.
+    fields = tuple(args.fields) or declared_fields or DEFAULT_MATCHER_FIELDS
     report = DeskCheckReport(
         kernels,
         fields,

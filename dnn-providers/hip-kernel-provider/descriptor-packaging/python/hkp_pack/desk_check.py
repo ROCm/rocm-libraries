@@ -104,10 +104,12 @@ def _values_agree(field: str, spec_v, meta_v) -> bool:
     return str(spec_v).lower() == str(meta_v).lower()
 
 
-# The KMD fields a desk-check typically compares. Callers should narrow this
-# to fields their own KMD actually declares (see `--field`); it is a default,
-# not something this module can discover on its own -- there is no schema
-# object here to introspect, only a list of kernel dicts.
+# The last-resort field list, for a bundle that declares no specialization
+# contract at all. A bundle that DOES declare one states exactly which fields
+# its kernels were specialized on, and `load_variant_set` reads that statement
+# instead: a generic guess standing in for the bundle's own declaration is how
+# distinct kernels collapse onto one matcher tuple and a clean bundle reports
+# hundreds of false collisions.
 DEFAULT_MATCHER_FIELDS = (
     "dtype",
     "batch",
@@ -131,12 +133,63 @@ class DeskCheckNoSpecFound(RuntimeError):
     and "checked, found nothing wrong" rendered identically."""
 
 
-def load_kernels(kdp_path: Path) -> list[dict]:
-    """A `.kdp.json`'s kernel descriptors, standalone-UKD references resolved."""
+def _resolve(kdp_path: Path) -> tuple[dict, list[descriptor_context.Entry]]:
+    """One `.kdp.json`'s own document and its resolved entries."""
     kdp_path = Path(kdp_path).resolve()
     index = descriptor_context.Index(str(kdp_path.parent))
     kdp = next(d for d in index.of_type("kdp") if Path(d.path) == kdp_path)
-    return [entry.ukd for entry in descriptor_context.resolve_entries(index, kdp)]
+    return kdp.doc, descriptor_context.resolve_entries(index, kdp)
+
+
+def load_kernels(kdp_path: Path) -> list[dict]:
+    """A `.kdp.json`'s kernel descriptors, standalone-UKD references resolved."""
+    return [entry.ukd for entry in _resolve(kdp_path)[1]]
+
+
+def declared_matcher_fields(kdp_doc: dict, entries) -> tuple[str, ...] | None:
+    """The matcher-tuple identity this bundle declares for itself, in
+    declaration order, or None when no entry declares a contract.
+
+    The specialization contract is the bundle's own statement of what the
+    producing compiler specialized on, so it -- not a generic list this module
+    guesses -- is the field set that distinguishes one variant from another.
+    Union across entries, because one shard may carry several consumers and a
+    field any of them keys on is distinguishing for the shard.
+
+    Resolution goes through `agreement.resolved_contract`, which already looks
+    in both places a contract may live: the kernel's own `provenance`, then the
+    enclosing KDP's. The enclosing document is offered only to inline entries,
+    the same restriction the rest of the packaging applies -- a standalone UKD
+    is its own file and inherits nothing.
+    """
+    fields: list[str] = []
+    for entry in entries:
+        contract = agreement.resolved_contract(
+            entry.ukd, kdp_doc if entry.inline else None
+        )
+        if not isinstance(contract, dict):
+            continue
+        for consumer in contract.get("consumers") or []:
+            if not isinstance(consumer, dict):
+                continue
+            for field in consumer.get("metadata_fields") or []:
+                if field not in fields:
+                    fields.append(field)
+    return tuple(fields) or None
+
+
+def load_variant_set(kdp_path: Path) -> tuple[list[dict], tuple[str, ...] | None]:
+    """A `.kdp.json`'s kernel descriptors plus the matcher fields it declares.
+
+    Both come from one walk of the descriptor tree: a shipped shard's KDP runs
+    to megabytes, and reading it twice to answer two questions about the same
+    document buys nothing.
+    """
+    kdp_doc, entries = _resolve(kdp_path)
+    return (
+        [entry.ukd for entry in entries],
+        declared_matcher_fields(kdp_doc, entries),
+    )
 
 
 def _payload(
