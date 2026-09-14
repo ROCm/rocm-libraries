@@ -41,7 +41,11 @@ _DEFAULT_PARAMS = {
 }
 
 
-def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
+def build_feature_matrix(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    generated_encoding: dict[str, dict[str, int]] | None = None,
+) -> np.ndarray:
     """Turn the raw benchmark-log columns into the float matrix LightGBM trains on.
 
     The log carries raw values: a string field such as `kernel.dtype` arrives as the
@@ -50,9 +54,11 @@ def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarra
     the same table the C++ runtime reads, so a split threshold learned here means the
     same data type when the runtime recomputes the feature.
 
-    Applied unconditionally, with nothing for the caller to select. The mapping is
-    global and fixed, so a switch could only ever produce a model whose numbers
-    disagree with what the runtime will compute.
+    The fixed table is applied unconditionally, with nothing for the caller to select:
+    it is global, so a switch could only produce a model whose numbers disagree with
+    what the runtime computes. `generated_encoding` is the §6.5 table this UHD ships for
+    its own string fields, consulted second and travelling in `features_hash` and in the
+    descriptor, so the runtime encodes those fields the same way.
 
     An unencodable value raises. Dropping the column, coercing it, or handing the
     string to LightGBM as a pandas `category` would each yield a model that trains and
@@ -78,7 +84,7 @@ def build_feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarra
         encoded = np.empty(len(series), dtype=np.float64)
         for row, raw in enumerate(series):
             try:
-                encoded[row] = encode_feature_value(reference, raw)
+                encoded[row] = encode_feature_value(reference, raw, generated_encoding)
             except (TypeError, ValueError) as error:
                 raise ValueError(f"feature column {name!r}, row {row}: {error}") from error
         columns.append(encoded)
@@ -147,6 +153,7 @@ def train_model(
     num_boost_round: int = 500,
     early_stopping_rounds: int = 50,
     n_splits: int = 5,
+    generated_encoding: dict[str, dict[str, int]] | None = None,
 ) -> lgb.Booster:
     """Train LightGBM regressor on log1p(target).
 
@@ -167,7 +174,7 @@ def train_model(
     Returns:
         Trained LightGBM Booster.
     """
-    X = build_feature_matrix(df, feature_cols)
+    X = build_feature_matrix(df, feature_cols, generated_encoding)
     y = np.log1p(df[target_col].values)
 
     if params is None:
@@ -293,6 +300,7 @@ def evaluate_regret(
     params: dict | None = None,
     num_boost_round: int = 500,
     n_splits: int = 5,
+    generated_encoding: dict[str, dict[str, int]] | None = None,
 ) -> dict:
     """Out-of-fold top-1 regret of the ranking this regressor induces.
 
@@ -313,7 +321,7 @@ def evaluate_regret(
 
     # Encoded, as train_model fits it. Raw values measure a different model, and for a
     # string feature measure nothing: LightGBM rejects the column.
-    features = build_feature_matrix(df, feature_cols)
+    features = build_feature_matrix(df, feature_cols, generated_encoding)
     measured = df[target_col].values
     groups = _problem_groups(df, problem_cols)
 

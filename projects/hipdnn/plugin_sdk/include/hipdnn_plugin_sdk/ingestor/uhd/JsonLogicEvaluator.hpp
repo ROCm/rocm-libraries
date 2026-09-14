@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -125,6 +126,21 @@ public:
     ///        nested expression would otherwise overflow the stack.
     Value evaluate(const nlohmann::json& expr, const VariableContext& ctx, size_t depth = 0) const;
 
+    /// The UHD's own string-to-code table, keyed by the reference it encodes
+    /// (`"$kernel.pipeline"`), as RFC 0019 §6.5 ships it in the descriptor.
+    ///
+    /// Consulted only after CategoricalEncoding.hpp, so a category both tables name keeps
+    /// the global number: §11.3 needs `dtype="fp16"` to be the same feature value whichever
+    /// engine asked, and a descriptor must not be able to redefine that locally. What this
+    /// adds is the case the fixed table cannot serve -- a field whose values are particular
+    /// to one engine's kernels, which is why §6.5 has the tool generate the map "while it
+    /// gathers the data" rather than requiring every such value to be upstreamed first.
+    void
+        setDescriptorEncoding(const std::map<std::string, std::map<std::string, int32_t>>* encoding)
+    {
+        _descriptorEncoding = encoding;
+    }
+
     /// Maximum expression nesting the interpreter will descend.
     static constexpr size_t MAX_EXPRESSION_DEPTH = 64;
 
@@ -133,6 +149,15 @@ public:
     static std::unordered_set<std::string> extractVariables(const nlohmann::json& expr);
 
 private:
+    /// Borrowed, not owned: the table lives in the UhdConfig the FeatureExtractor was built
+    /// from, which outlives every evaluation. Null when the descriptor shipped none, which
+    /// is every UHD that reads no engine-particular string field.
+    const std::map<std::string, std::map<std::string, int32_t>>* _descriptorEncoding = nullptr;
+
+    /// `value`'s code in the descriptor's table for `reference`, or nothing.
+    std::optional<double> encodeFromDescriptor(const std::string& reference,
+                                               const std::string& value) const;
+
     Value evaluateOp(const std::string& op,
                      const nlohmann::json& args,
                      const VariableContext& ctx,
@@ -291,6 +316,30 @@ inline double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
         {
             return *code;
         }
+        // Then the UHD's own table, for a field whose values are particular to this
+        // engine's kernels and so cannot be in a table shared across engines. Second,
+        // never first: a category the fixed table defines keeps the global number.
+        if(const auto code
+           = encodeFromDescriptor(expr.get_ref<const nlohmann::json::string_t&>(), *text);
+           code.has_value())
+        {
+            return *code;
+        }
+        // The descriptor names this field but not this value: §8.3's out-of-distribution
+        // case, and a different repair from the one below. The fixed table is not short a
+        // row -- this model was trained before this value existed, so the fix is a retrain,
+        // not an edit to a table shared by every engine.
+        if(_descriptorEncoding != nullptr
+           && _descriptorEncoding->count(expr.get_ref<const nlohmann::json::string_t&>()) != 0)
+        {
+            throw JsonLogicError(
+                "Categorical value \"" + *text
+                + "\" is not in this UHD's categorical_encoding "
+                  "for "
+                + expr.get_ref<const nlohmann::json::string_t&>()
+                + ". The catalog carries a value the model was not trained on, so ranking "
+                  "degrades to declared order; regenerate the UHD against the current pack.");
+        }
         if(isKnownCategory(category))
         {
             // Distinct from toDouble's blanket type error on purpose. The category is
@@ -307,6 +356,28 @@ inline double JsonLogicEvaluator::evaluateDouble(const nlohmann::json& expr,
     }
 
     return toDouble(value);
+}
+
+inline std::optional<double>
+    JsonLogicEvaluator::encodeFromDescriptor(const std::string& reference,
+                                             const std::string& value) const
+{
+    if(_descriptorEncoding == nullptr)
+    {
+        return std::nullopt;
+    }
+    const auto field = _descriptorEncoding->find(reference);
+    if(field == _descriptorEncoding->end())
+    {
+        return std::nullopt;
+    }
+    // Exact match, where the fixed table folds ASCII case. The generated table records the
+    // values as the corpus spelled them and the same producer supplies them at inference,
+    // so there is no second vocabulary to bridge -- and folding here would let two values a
+    // KMD deliberately distinguishes collapse onto one code.
+    const auto code = field->second.find(value);
+    return code == field->second.end() ? std::nullopt
+                                       : std::optional<double>(static_cast<double>(code->second));
 }
 
 inline JsonLogicEvaluator::Value JsonLogicEvaluator::evaluate(const nlohmann::json& expr,

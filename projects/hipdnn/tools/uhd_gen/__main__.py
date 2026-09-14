@@ -53,7 +53,11 @@ import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .evaluate import add_evaluate_arguments, run_evaluate
-from .features import build_features_signature, compute_features_hash
+from .features import (
+    build_features_signature,
+    compute_features_hash,
+    generate_categorical_encoding,
+)
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
 from .train_uhd import evaluate_regret, find_constant_feature_columns, train_model
@@ -481,6 +485,21 @@ def _run_train(args: argparse.Namespace) -> int:
             args.target,
         )
 
+    # RFC 0019 §6.5: the tool generates the encoding "while it gathers the data" for any
+    # string field the fixed table does not define, and ships it in the UHD. Built from the
+    # whole corpus before any split, so layer 1, layer 2 and the regret evaluation all encode
+    # a value the same way -- a per-fold table would give one value two numbers.
+    generated_encoding = generate_categorical_encoding(
+        {f"${name}": df[name].tolist() for name in features}
+    )
+    if generated_encoding:
+        logger.info(
+            "Generated categorical encoding for %d field(s): %s",
+            len(generated_encoding),
+            ", ".join(f"{ref} ({len(codes)} values)"
+                      for ref, codes in sorted(generated_encoding.items())),
+        )
+
     logger.info("Training on features: %s", features)
     logger.info("Target column: %s (objective: %s)", args.target, args.objective)
     if args.group_by:
@@ -518,6 +537,7 @@ def _run_train(args: argparse.Namespace) -> int:
             features,
             args.target,
             args.group_by,
+            generated_encoding=generated_encoding,
             num_boost_round=args.num_boost_round,
             early_stopping_rounds=args.early_stopping,
         )
@@ -548,6 +568,7 @@ def _run_train(args: argparse.Namespace) -> int:
                             features,
                             args.target,
                             args.group_by,
+                            generated_encoding=generated_encoding,
                             num_boost_round=args.num_boost_round,
                             early_stopping_rounds=args.early_stopping,
                         ),
@@ -573,6 +594,7 @@ def _run_train(args: argparse.Namespace) -> int:
             args.target,
             args.report_regret,
             num_boost_round=args.num_boost_round,
+            generated_encoding=generated_encoding,
         )
         logger.info(
             "Out-of-fold top-1 accuracy %.1f%% over %d problems "
@@ -599,7 +621,9 @@ def _run_train(args: argparse.Namespace) -> int:
 
     derived = _parse_derived(args.derived)
     features_signature = build_features_signature(features)
-    features_hash = compute_features_hash(features_signature, derived=derived)
+    features_hash = compute_features_hash(
+        features_signature, generated_encoding or None, derived=derived
+    )
     fb_path = output_dir / "model.bin"
     convert(
         lgbm_path,
@@ -634,6 +658,9 @@ def _run_train(args: argparse.Namespace) -> int:
         "adapter": "tree_data",
         "features_signature": features_signature,
         "features_hash": features_hash,
+        # Omitted entirely when empty, so a UHD reading no engine-particular string field
+        # emits exactly the descriptor it did before this existed.
+        **({"categorical_encoding": generated_encoding} if generated_encoding else {}),
         **({"derived": [{"name": n, "expression": e} for n, e in derived]} if derived else {}),
         "objective": args.objective,
         "score": {
@@ -666,6 +693,7 @@ def _run_train(args: argparse.Namespace) -> int:
         "features_signature": features_signature,
         "features_hash": features_hash,
         "derived": [{"name": n, "expression": e} for n, e in derived],
+        "categorical_encoding": generated_encoding,
         "target": args.target,
         "objective": args.objective,
         "score_units": args.score_units or args.target,

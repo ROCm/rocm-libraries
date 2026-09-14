@@ -7,10 +7,9 @@ Nothing here fails loudly when it breaks, which is why each property is pinned:
 
 - an unexpanded descriptor makes every configuration of a kernel identical to a model, so a
   second layer ranks but cannot prefer -- it does not error, it just never chooses;
-- a code assigned from row order changes when shards merge in a different sequence, silently
-  re-wiring every split a model learned on it;
-- a code invented for an unseen shape puts the row at an arbitrary point in a split learned
-  from other values, and nothing downstream attributes that back to here;
+- a number assigned to a word shape here would be per-corpus and outside features_hash, so
+  re-importing with one extra kernel renumbers every code while the fingerprint says nothing
+  changed -- the shape stays text, and RFC 0019 §6.5 numbers it where it can be covered;
 - NaN for an absent slot is routed by the learner's default direction, which cannot be
   distinguished from a field that exists but was not recorded.
 
@@ -20,12 +19,8 @@ pandas is absent.
 
 from __future__ import annotations
 
-import pytest
-
 from results_import.descriptor import (
     ABSENT,
-    MissingVocabularyEntry,
-    build_vocabulary,
     expand,
     numeric_slots,
     required_slots,
@@ -85,32 +80,25 @@ def test_the_word_shape_is_the_combination_not_the_words():
     assert word_key("a<Default>") != word_key("a<Default,OddC>")
 
 
-def test_codes_do_not_depend_on_row_order():
-    """A vocabulary built first-seen would renumber when shards merged in another sequence.
+def test_the_word_shape_is_returned_as_text_not_a_code():
+    """Numbering belongs to the training tool, not to an import.
 
-    Nothing would error: the model would simply have learned splits against codes that now mean
-    something else.
+    RFC 0019 §6.5 has the tool observe the values and ship the map in the UHD, covered by
+    features_hash. A code assigned here would be per-corpus and unhashed: re-importing a corpus
+    with one extra kernel renumbers every code while the signature text, and so the fingerprint,
+    stays identical -- which is the divergence §6.5 exists to close.
     """
-    assert build_vocabulary([TUPLE, TEMPLATE, INDEX]) == build_vocabulary([INDEX, TEMPLATE, TUPLE])
+    _, shapes, _ = expand([TUPLE, TEMPLATE, INDEX])
+    assert all(isinstance(shape, str) for shape in shapes)
+    assert shapes[2] == "", "a descriptor of pure digits has no word shape"
+    assert "Filter1x1Pad0" in shapes[1]
 
 
-def test_a_shape_outside_a_supplied_vocabulary_is_refused():
-    """The check that makes two corpora comparable.
-
-    The vocabulary is closed by construction -- the token sequence is fixed by the kernel -- so
-    an unknown shape means this corpus was not measured against the same kernels. Extending it
-    here would assign a code training never saw.
-    """
-    _, _, vocabulary, _ = expand([TUPLE, INDEX])
-    with pytest.raises(MissingVocabularyEntry, match="not in the supplied vocabulary"):
-        expand([TEMPLATE], vocabulary=vocabulary)
-
-
-def test_a_reused_vocabulary_encodes_identically():
-    """The round trip a validation corpus depends on."""
-    _, first, vocabulary, _ = expand([TUPLE, TEMPLATE, INDEX])
-    _, second, _, _ = expand([TUPLE, TEMPLATE, INDEX], vocabulary=vocabulary)
-    assert first == second
+def test_the_shape_is_stable_for_the_same_descriptor():
+    """The same string must always give the same shape, whatever else the corpus holds."""
+    alone = expand([TEMPLATE])[1]
+    crowded = expand([INDEX, TEMPLATE, TUPLE])[1]
+    assert alone[0] == crowded[1]
 
 
 def test_configurations_of_one_kernel_become_distinguishable():
@@ -123,6 +111,6 @@ def test_configurations_of_one_kernel_become_distinguishable():
     """
     a = "fwd,nhwc,bf16,0,0,32,64"
     b = "fwd,nhwc,bf16,0,0,128,64"
-    rows, codes, _, _ = expand([a, b])
+    rows, shapes, _ = expand([a, b])
     assert rows[0] != rows[1], "two configurations still look identical to a model"
-    assert codes[0] == codes[1], "same word shape, so only the numbers should separate them"
+    assert shapes[0] == shapes[1], "same word shape, so only the numbers should separate them"

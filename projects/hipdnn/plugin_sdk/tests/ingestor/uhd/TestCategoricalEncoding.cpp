@@ -52,6 +52,73 @@ double extractKernelFeature(const std::string& field, const std::string& value)
     return extractor.extract(ctx).at(0);
 }
 
+/// Extract `$kernel.<field>` where the UHD ships its own table for that reference.
+double extractWithDescriptorEncoding(
+    const std::string& field,
+    const std::string& value,
+    const std::map<std::string, std::map<std::string, int32_t>>& encoding)
+{
+    const FeatureExtractor extractor({"$kernel." + field}, {}, encoding);
+    FeatureExtractionContext ctx;
+    ctx.bindKernelVars({{field, value}});
+    return extractor.extract(ctx).at(0);
+}
+
+// ---- A UHD's own table, for values no shared table can hold ---------------------
+//
+// §6.5 has the tool generate the encoding "while it gathers the data" and ship it in the
+// UHD, for a field whose values are particular to one engine's kernels. The loader parsed
+// it and computeHash covered it, and nothing applied it -- so a descriptor could declare an
+// encoding the runtime agreed to hash and then refused to use, throwing on the very field
+// the table was written for.
+
+TEST(TestCategoricalEncoding, ADescriptorsOwnTableEncodesAFieldTheFixedTableDoesNotKnow)
+{
+    // `pipeline` is not a category CategoricalEncoding.hpp knows, which is the whole point:
+    // this value cannot come from the shared table, and before this it could not come from
+    // anywhere.
+    const std::map<std::string, std::map<std::string, int32_t>> encoding
+        = {{"$kernel.pipeline", {{"intrawave", 0}, {"interwave", 1}}}};
+
+    EXPECT_DOUBLE_EQ(extractWithDescriptorEncoding("pipeline", "interwave", encoding), 1.0);
+    EXPECT_DOUBLE_EQ(extractWithDescriptorEncoding("pipeline", "intrawave", encoding), 0.0);
+}
+
+TEST(TestCategoricalEncoding, TheFixedTableWinsWhereBothDefineAValue)
+{
+    // Second, never first. §11.3 needs `dtype="fp16"` to be the same number whichever engine
+    // asked, so a descriptor must not be able to redefine a shared category locally -- a
+    // model doing so would rank on an axis no other engine shares while looking calibrated.
+    const auto global = extractKernelFeature("dtype", "fp16");
+    const std::map<std::string, std::map<std::string, int32_t>> shadowing
+        = {{"$kernel.dtype", {{"fp16", 999}}}};
+
+    EXPECT_DOUBLE_EQ(extractWithDescriptorEncoding("dtype", "fp16", shadowing), global);
+    EXPECT_NE(global, 999.0) << "fixture no longer distinguishes the two tables";
+}
+
+TEST(TestCategoricalEncoding, AValueOutsideTheDescriptorsTableSaysToRegenerate)
+{
+    // §8.3: the catalog moved past what the model was trained on. The repair is a retrain,
+    // not an edit to the table every engine shares, so the message must not send an author
+    // to CategoricalEncoding.hpp for a field that is not in it.
+    const std::map<std::string, std::map<std::string, int32_t>> encoding
+        = {{"$kernel.pipeline", {{"intrawave", 0}}}};
+
+    try
+    {
+        (void)extractWithDescriptorEncoding("pipeline", "pingpong", encoding);
+        FAIL() << "an untrained categorical value was scored as if the model had seen it";
+    }
+    catch(const JsonLogicError& e)
+    {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("not in this UHD's categorical_encoding"), std::string::npos) << what;
+        EXPECT_EQ(what.find("CATEGORICAL_ENCODING_TABLE"), std::string::npos)
+            << "sent the author to the shared table for a field that is not in it: " << what;
+    }
+}
+
 // ---- The numbers are frozen ----------------------------------------------------
 //
 // The only mechanical guard that survives a maintainer who has never read this file.

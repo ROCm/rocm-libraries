@@ -299,3 +299,53 @@ def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
     assert scores[1] == pytest.approx(scores[2]), "10 and 15 must share the right-hand leaf"
     assert scores[0] == pytest.approx(np.expm1(1.0))
     assert scores[1] == pytest.approx(np.expm1(9.0))
+
+
+def test_a_generated_encoding_survives_train_then_score(tmp_path):
+    """The round trip the whole mechanism rests on.
+
+    A string field outside the fixed table can only be a feature if the tool observes its
+    values, ships the map, and the scorer reads it back. Any break gives a model that trains
+    and saves and then cannot be reproduced: before this, training encoded nothing and the
+    runtime threw on the first such value.
+    """
+    import subprocess
+    import sys
+
+    corpus = tmp_path / "corpus.csv"
+    frame = pd.DataFrame([
+        {"q.size": size, "kernel.pipeline": pipeline,
+         "tflops": size * (2.0 if pipeline == "interwave" else 1.0)}
+        # Wide enough to split: LightGBM's default min_data_in_leaf is 20, so a corpus of a
+        # couple of dozen rows trains to a single constant leaf and would fail the ordering
+        # assertion below for a reason that has nothing to do with the encoding.
+        for size in range(1, 41) for pipeline in ("interwave", "intrawave")
+    ])
+    frame.to_csv(corpus, index=False)
+
+    out = tmp_path / "model"
+    result = subprocess.run(
+        [sys.executable, "-m", "uhd_gen", "train",
+         "--input", str(corpus),
+         "--features", "q.size", "kernel.pipeline",
+         "--target", "tflops", "--group-by", "q.size",
+         "--output-dir", str(out), "--name", "encoding round trip"],
+        capture_output=True, text=True,
+        cwd=str(Path(__file__).resolve().parents[2]),
+    )
+    assert result.returncode == 0, result.stderr[-3000:]
+
+    descriptor = json.loads(next(out.glob("*.uhd.json")).read_text())
+    assert descriptor["categorical_encoding"] == {
+        "$kernel.pipeline": {"interwave": 0, "intrawave": 1}
+    }, "the tool did not ship the table it trained with"
+
+    # And the scorer reads it back: passing the raw strings must produce numbers, not an
+    # "is a string and has no categorical encoding" refusal.
+    bundle = load_model(out)
+    scores = bundle.scorer(
+        pd.DataFrame([{"q.size": 12.0, "kernel.pipeline": "interwave"},
+                      {"q.size": 12.0, "kernel.pipeline": "intrawave"}])
+    )
+    assert np.all(np.isfinite(scores))
+    assert scores[0] > scores[1], "the faster pipeline did not score higher"

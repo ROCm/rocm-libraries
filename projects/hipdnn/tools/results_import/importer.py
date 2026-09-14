@@ -27,7 +27,7 @@ from typing import Iterable
 import pandas as pd
 
 from results_import.derive import derive_metrics
-from results_import.descriptor import MissingVocabularyEntry, expand
+from results_import.descriptor import expand
 
 __all__ = [
     "ValidationError",
@@ -193,33 +193,31 @@ def _mark_incomplete_where_errored(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def expand_descriptors(
-    frame: pd.DataFrame,
-    columns: Iterable[str],
-    vocabularies: dict[str, dict[str, int]] | None = None,
-) -> tuple[pd.DataFrame, dict[str, dict[str, int]]]:
+def expand_descriptors(frame: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
     """Replace opaque configuration strings with features a grouped model can select on.
 
     The source column is kept: it is the human-readable identity of a configuration, and every
-    report that names a winner wants it. Returns the frame and the vocabularies used, which the
-    caller must persist -- a corpus scored beside this one has to encode identically, and the
-    codes are assigned here.
+    report that names a winner wants it.
+
+    `<column>.variant` is emitted as the descriptor's *word shape*, a string. RFC 0019 §6.5
+    gives numbering to the training tool, which observes the values, ships the map in the UHD's
+    `categorical_encoding`, and has it covered by `features_hash` -- so a code cannot change
+    underneath a trained model without the contract check seeing it. Numbering here instead
+    would be per-corpus and unhashed, and re-deriving it on a corpus with one extra kernel
+    would renumber every code silently.
     """
     frame = frame.copy()
-    produced: dict[str, dict[str, int]] = {}
     for column in columns:
         if column not in frame.columns:
             raise ValidationError(
                 f"--expand-descriptor names {column!r}, which this corpus does not carry "
                 f"(it has {', '.join(_kernel_columns(frame)) or 'no kernel.* columns'})"
             )
-        supplied = (vocabularies or {}).get(column)
-        rows, codes, vocabulary, slots = expand(frame[column].tolist(), vocabulary=supplied)
+        rows, shapes, slots = expand(frame[column].tolist())
         for index in range(slots):
             frame[f"{column}.cfg{index}"] = [row[index] for row in rows]
-        frame[f"{column}.variant"] = codes
-        produced[column] = vocabulary
-    return frame, produced
+        frame[f"{column}.variant"] = shapes
+    return frame
 
 
 def resolve_duplicates(frame: pd.DataFrame, latest_column: str, best_column: str) -> pd.DataFrame:
@@ -294,13 +292,8 @@ def main(argv: list[str] | None = None) -> int:
         "--expand-descriptor", action="append", default=[], dest="expand_descriptor",
         metavar="COLUMN",
         help="expand a configuration string column (e.g. kernel.descriptor) into "
-             "COLUMN.cfg0..N and COLUMN.variant, so a grouped model can rank one kernel's "
-             "configurations against each other. Repeatable.",
-    )
-    parser.add_argument(
-        "--vocabulary", type=pathlib.Path, default=None,
-        help="reuse the variant codes from a previous run's <out>.vocabulary.json. Required "
-             "for any corpus scored beside another, which must encode identically.",
+             "COLUMN.cfg0..N (numbers) and COLUMN.variant (the word shape, as a string -- "
+             "RFC 0019 §6.5 has the training tool number it and ship the map). Repeatable.",
     )
     parser.add_argument(
         "--resolve-duplicates", default=None, dest="resolve_duplicates", metavar="COLUMN",
@@ -317,11 +310,6 @@ def main(argv: list[str] | None = None) -> int:
     with args.opmeta.open() as handle:
         opmeta = json.load(handle)
 
-    vocabularies = None
-    if args.vocabulary is not None:
-        with args.vocabulary.open() as handle:
-            vocabularies = json.load(handle)
-
     # The order is the point. Resolution happens first because it settles the very duplicates
     # validation would reject; expansion happens last so those checks see the producer's own
     # columns rather than this tool's derived ones.
@@ -335,23 +323,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
             frame = resolve_duplicates(frame, args.resolve_duplicates, args.best_column)
         dataset = build_dataset(frame, opmeta)
-        used: dict[str, dict[str, int]] = {}
         if args.expand_descriptor:
-            dataset, used = expand_descriptors(dataset, args.expand_descriptor, vocabularies)
-    except (ValidationError, MissingVocabularyEntry) as error:
+            dataset = expand_descriptors(dataset, args.expand_descriptor)
+    except ValidationError as error:
         print(f"results_import: {error}", file=sys.stderr)
         return 1
 
     write_parquet(dataset, args.out)
     print(f"results_import: wrote {len(dataset)} rows to {args.out}")
 
-    # Beside the dataset rather than inside it: the codes are a property of the encoding, and a
-    # corpus scored against this one has to be given them explicitly to encode the same way.
-    if used:
-        vocabulary_path = args.out.with_suffix(".vocabulary.json")
-        with vocabulary_path.open("w", encoding="utf-8") as handle:
-            json.dump(used, handle, indent=2, sort_keys=True)
-        print(f"results_import: wrote vocabulary to {vocabulary_path}")
     return 0
 
 

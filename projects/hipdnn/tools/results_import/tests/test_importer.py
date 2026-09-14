@@ -226,14 +226,16 @@ def test_expansion_makes_two_configurations_of_one_kernel_distinguishable(matmul
     error and no warning -- only a heuristic that never picks the tuned configuration.
     """
     frame = rows(**{"kernel.descriptor": ["t,64,4", "t,128,4"]})
-    out, vocabulary = expand_descriptors(build_dataset(frame, matmul), ["kernel.descriptor"])
+    out = expand_descriptors(build_dataset(frame, matmul), ["kernel.descriptor"])
 
     assert out["kernel.descriptor.cfg0"].tolist() == [64, 128]
     assert out["kernel.descriptor.cfg1"].tolist() == [4, 4]
     # The source column survives: it is the readable identity of a configuration, and every
     # report that names a winner wants it.
     assert "kernel.descriptor" in out.columns
-    assert vocabulary["kernel.descriptor"] == {"t": 0}
+    # The word shape stays text: RFC 0019 §6.5 gives the number to the training tool, which
+    # ships the map in the UHD where features_hash covers it.
+    assert out["kernel.descriptor.variant"].tolist() == ["t", "t"]
 
 
 def test_expanding_a_column_the_corpus_lacks_is_refused(matmul):

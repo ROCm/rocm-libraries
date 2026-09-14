@@ -49,6 +49,7 @@ __all__ = [
     "compute_features_hash",
     "encode_categorical",
     "encode_feature_value",
+    "generate_categorical_encoding",
     "parse_signature_entry",
 ]
 
@@ -228,7 +229,41 @@ def encode_categorical(category: str, value: str) -> int | None:
     return _lookup_folding_ascii_case(members, value)
 
 
-def encode_feature_value(reference: str, value) -> float:
+def generate_categorical_encoding(
+    values_by_reference: dict[str, list],
+) -> dict[str, dict[str, int]]:
+    """RFC 0019 §6.5's generated table: the codes a UHD ships for its own string fields.
+
+    §6.5 has the tooling build this "while it gathers the data", for a field whose values are
+    particular to one engine's kernels and so cannot live in a table shared across engines. A
+    category the fixed table already defines is skipped: ``dtype="fp16"`` must be the same
+    number whichever engine asked (§11.3), and minting a local code for it would put this
+    model on an axis no other model shares while still looking calibrated.
+
+    Codes are assigned in sorted order, never first-seen. §6.5 rules first-seen out, and the
+    reason bites here specifically: first-seen depends on which rows a shard happened to carry,
+    so merging the same corpus in another order renumbers every code -- and because the table
+    travels in ``features_hash``, that at least fails loudly rather than silently re-pointing
+    the splits.
+
+    The order is still arbitrary as a *magnitude*: a split at ``variant < 3`` is splitting on
+    alphabetical position, which means nothing about performance. §6.5 offers two mitigations
+    (a meaningful order where one exists, one-hot where none does) and this takes neither, so a
+    generated field is a nominal axis a tree can only isolate through equality-like splits.
+    Said here rather than discovered from a model that ranks oddly.
+    """
+    table: dict[str, dict[str, int]] = {}
+    for reference, values in values_by_reference.items():
+        category = category_of_reference(reference)
+        if _lookup_folding_ascii_case(CATEGORICAL_ENCODING, category) is not None:
+            continue
+        seen = sorted({value for value in values if isinstance(value, str)})
+        if seen:
+            table[reference] = {value: code for code, value in enumerate(seen)}
+    return table
+
+
+def encode_feature_value(reference: str, value, generated: dict | None = None) -> float:
     """Turn one raw logged value into the number the model trains on.
 
     The training-side mirror of ``JsonLogicEvaluator::evaluateDouble``: the benchmark
@@ -251,6 +286,20 @@ def encode_feature_value(reference: str, value) -> float:
     code = encode_categorical(category, value)
     if code is not None:
         return float(code)
+
+    # Then this UHD's own table, second and never first, mirroring
+    # ``JsonLogicEvaluator::evaluateDouble``. Exact match where the fixed table folds ASCII
+    # case: the generated table records values as the corpus spelled them and the same
+    # producer supplies them at inference, so there is no second vocabulary to bridge.
+    if generated is not None and reference in generated:
+        if value in generated[reference]:
+            return float(generated[reference][value])
+        raise ValueError(
+            f"{reference}: {value!r} is not in this UHD's generated categorical_encoding. "
+            "The corpus carries a value the table was not built from, which means the two "
+            "were produced from different data."
+        )
+
     if _lookup_folding_ascii_case(CATEGORICAL_ENCODING, category) is not None:
         raise ValueError(
             f"{reference}: categorical value {value!r} has no code in category "

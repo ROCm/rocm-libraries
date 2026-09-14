@@ -822,9 +822,14 @@ class ModelBundle:
     #: The feature layer 1 grouped on, from the manifest. The artifact carries only a slot
     #: index, which cannot name the corpus column the report needs to decompose regret.
     group_feature: str | None = None
+    #: RFC 0019 §6.5's generated table, as the descriptor ships it. Scoring has to encode a
+    #: string the way training did, and for a field outside the fixed table the descriptor is
+    #: the only place that says how.
+    categorical_encoding: dict[str, dict[str, int]] | None = None
 
 
-def _flatbuffer_scorer(artifact: Path, features: list[str]) -> Scorer:
+def _flatbuffer_scorer(artifact: Path, features: list[str],
+                       encoding: dict[str, dict[str, int]] | None = None) -> Scorer:
     """Score with the artifact that actually ships.
 
     `train` deletes `model.lgbm` unless `--keep-lgbm`, so on an ordinary model
@@ -894,7 +899,7 @@ def _flatbuffer_scorer(artifact: Path, features: list[str]) -> Scorer:
         return total
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        matrix = build_feature_matrix(frame, features)
+        matrix = build_feature_matrix(frame, features, encoding)
         every = np.arange(len(frame))
         layer_one = ensemble(trees, matrix, every)
         if group_slot < 0 or not groups:
@@ -921,7 +926,8 @@ def _flatbuffer_scorer(artifact: Path, features: list[str]) -> Scorer:
     return score
 
 
-def _booster_scorer(model_file: Path, features: list[str]) -> Scorer:
+def _booster_scorer(model_file: Path, features: list[str],
+                    encoding: dict[str, dict[str, int]] | None = None) -> Scorer:
     import lightgbm as lgb
 
     from .train_uhd import build_feature_matrix, predict
@@ -929,7 +935,7 @@ def _booster_scorer(model_file: Path, features: list[str]) -> Scorer:
     booster = lgb.Booster(model_file=str(model_file))
 
     def score(frame: pd.DataFrame) -> np.ndarray:
-        return predict(booster, build_feature_matrix(frame, features))
+        return predict(booster, build_feature_matrix(frame, features, encoding))
 
     return score
 
@@ -970,10 +976,14 @@ def load_model(model_dir: Path, model_file: Path | None = None) -> ModelBundle:
     if not candidate.exists():
         raise ValueError(f"no model artifact at {candidate}")
 
+    # The descriptor's table, not the manifest's: the descriptor is what the runtime loads,
+    # so scoring here reads exactly what selection will.
+    encoding = descriptor.get("categorical_encoding") or None
+
     if candidate.suffix in (".lgbm", ".txt"):
-        scorer = _booster_scorer(candidate, features)
+        scorer = _booster_scorer(candidate, features, encoding)
     else:
-        scorer = _flatbuffer_scorer(candidate, features)
+        scorer = _flatbuffer_scorer(candidate, features, encoding)
 
     return ModelBundle(
         scorer=scorer,
@@ -984,6 +994,7 @@ def load_model(model_dir: Path, model_file: Path | None = None) -> ModelBundle:
         trained_on=manifest.get("input_file"),
         training_rows=manifest.get("num_samples"),
         group_feature=group_feature,
+        categorical_encoding=encoding,
     )
 
 

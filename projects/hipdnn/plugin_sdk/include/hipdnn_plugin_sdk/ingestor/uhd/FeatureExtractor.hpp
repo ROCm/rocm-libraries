@@ -199,6 +199,8 @@ private:
     /// Signature positions referencing $kernel.* — evaluated once per candidate.
     std::vector<size_t> _kernelIndices;
     std::string _signatureHash;
+    /// RFC 0019 §6.5's generated table, owned here because the evaluator borrows it.
+    std::map<std::string, std::map<std::string, int32_t>> _categoricalEncoding;
     JsonLogicEvaluator _evaluator;
 };
 
@@ -485,6 +487,14 @@ inline FeatureExtractor::FeatureExtractor(
     // failed §6.3 check 1 and degraded to declared order -- silently, a degraded ranking being
     // a legal one. Every piece of the plumbing existed except this argument.
     _signatureHash = computeHash(signature, categoricalEncoding, derived);
+
+    // And into the evaluation, which is the other half. The hash covered the table while
+    // nothing applied it: a string field outside CategoricalEncoding.hpp still threw, so a
+    // descriptor could declare an encoding the runtime agreed to hash and then refused to
+    // use. Owned here and borrowed by the evaluator, because the extractor outlives every
+    // evaluation it performs.
+    _categoricalEncoding = categoricalEncoding;
+    _evaluator.setDescriptorEncoding(&_categoricalEncoding);
 }
 
 inline std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ctx) const

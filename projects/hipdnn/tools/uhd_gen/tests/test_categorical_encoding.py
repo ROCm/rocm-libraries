@@ -260,3 +260,77 @@ def test_string_in_a_category_with_no_table_raises():
     with pytest.raises(ValueError) as excinfo:
         encode_feature_value("$kernel.pipeline", "intrawave")
     assert "no categorical encoding" in str(excinfo.value)
+
+
+# ---- The table a UHD generates for its own string fields (RFC 0019 §6.5) ------------
+
+
+def test_a_field_the_fixed_table_does_not_know_gets_a_generated_table():
+    """§6.5 has the tool generate the encoding for engine-particular values.
+
+    Without it such a field cannot be a feature at all: the fixed table is shared across
+    engines and cannot hold one engine's kernel names, so every value raises.
+    """
+    from uhd_gen.features import generate_categorical_encoding
+
+    table = generate_categorical_encoding(
+        {"$kernel.pipeline": ["interwave", "intrawave", "interwave"]}
+    )
+    assert table == {"$kernel.pipeline": {"interwave": 0, "intrawave": 1}}
+
+
+def test_a_shared_category_is_left_to_the_fixed_table():
+    """`dtype` must be the same number whichever engine asked (§11.3).
+
+    Minting a local code for it would put this model on an axis no other model shares,
+    while the score still claims to be cross-engine comparable.
+    """
+    from uhd_gen.features import generate_categorical_encoding
+
+    assert generate_categorical_encoding({"$kernel.dtype": ["fp16", "fp32"]}) == {}
+
+
+def test_codes_do_not_depend_on_row_order():
+    """First-seen order is what §6.5 rules out.
+
+    It depends on which rows a shard happened to carry, so merging the same corpus in
+    another order would renumber every code.
+    """
+    from uhd_gen.features import generate_categorical_encoding
+
+    one = generate_categorical_encoding({"$kernel.pipeline": ["b", "a", "c"]})
+    two = generate_categorical_encoding({"$kernel.pipeline": ["c", "b", "a"]})
+    assert one == two
+
+
+def test_the_generated_table_changes_the_features_hash():
+    """The property that closes the hole §6.5 exists for.
+
+    A re-derived table with different codes changes what the model reads while leaving the
+    signature text identical. If the hash did not cover it, the artifact would load cleanly
+    against a descriptor whose every split now points somewhere else.
+    """
+    from uhd_gen.features import compute_features_hash
+
+    signature = ['"$kernel.pipeline"']
+    bare = compute_features_hash(signature)
+    with_table = compute_features_hash(signature, {"$kernel.pipeline": {"intrawave": 0}})
+    moved = compute_features_hash(signature, {"$kernel.pipeline": {"intrawave": 1}})
+
+    assert bare != with_table, "the table was not in the fingerprint"
+    assert with_table != moved, "moving a code did not change the fingerprint"
+
+
+def test_a_value_outside_the_generated_table_raises_rather_than_encoding():
+    """Training and the corpus must have come from the same data.
+
+    Falling back to NaN would train the row as data with nothing in the log saying so.
+    """
+    import pytest as _pytest
+
+    from uhd_gen.features import encode_feature_value
+
+    table = {"$kernel.pipeline": {"intrawave": 0}}
+    assert encode_feature_value("$kernel.pipeline", "intrawave", table) == 0.0
+    with _pytest.raises(ValueError, match="not in this UHD's generated categorical_encoding"):
+        encode_feature_value("$kernel.pipeline", "pingpong", table)
