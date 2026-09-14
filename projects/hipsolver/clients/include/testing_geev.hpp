@@ -1020,7 +1020,7 @@ void testing_geev(Arguments& argus)
         }
 #endif
 
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             rocsolver_bench_inform(inform_invalid_size);
 
         return;

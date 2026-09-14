@@ -280,7 +280,7 @@ void testing_orgtr_ungtr(Arguments& argus)
                 API, handle, uplo, n, (T*)nullptr, lda, (T*)nullptr, (T*)nullptr, 0, (int*)nullptr),
             HIPSOLVER_STATUS_INVALID_VALUE);
 
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             rocsolver_bench_inform(inform_invalid_size);
 
         return;

@@ -826,7 +826,7 @@ void testing_syevdx_heevdx(Arguments& argus)
                                   HIPSOLVER_STATUS_INVALID_VALUE);
         }
 
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             rocsolver_bench_inform(inform_invalid_size);
 
         return;
