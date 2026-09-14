@@ -713,3 +713,50 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenStallingDisabled)
         HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &stallUsed));
     EXPECT_FALSE(stallUsed);
 }
+
+// A declined arm() must report why it declined, not a HIP failure the same gate hit on an
+// earlier attempt. Both readers of these accessors -- the Python binding, which turns them
+// into the exception the caller sees, and ProfilingControlDescriptor's decline log --
+// would otherwise blame a stale invalid-stream error for a decline the watchdog caused.
+TEST_F(TestGpuProfilingControlDescriptor, ADeclinedArmDoesNotReportAnEarlierAttemptsError)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    hipdnn_data_sdk::utilities::StallGate gate;
+    ASSERT_TRUE(gate.isUsable());
+
+    // Give the gate a real HIP failure to remember. Arming on a destroyed stream fails
+    // inside hipStreamWaitValue32 with hipErrorContextIsDestroyed, and leaves the gate
+    // unarmed, so nothing here depends on the failure's exact code.
+    hipStream_t destroyed = nullptr;
+    ASSERT_EQ(hipStreamCreate(&destroyed), hipSuccess);
+    ASSERT_EQ(hipStreamDestroy(destroyed), hipSuccess);
+    ASSERT_FALSE(gate.arm(destroyed));
+    ASSERT_NE(gate.lastError(), hipSuccess) << "the failed arm recorded nothing to go stale";
+    ASSERT_STREQ(gate.lastOperation(), "hipStreamWaitValue32");
+
+    // The failure above is deliberate, but HIP's thread-local last-error is sticky and the
+    // fixture asserts it is clean at end of test. Consume it here so this test reports its
+    // own assertions rather than the error it set on purpose.
+    static_cast<void>(hipGetLastError());
+
+    // Now make the same gate decline for an unrelated reason: another gate's timeout
+    // disables stalling for everything in this shared object.
+    {
+        hipdnn_data_sdk::utilities::StallGate tripper(std::chrono::milliseconds(300));
+        ASSERT_TRUE(tripper.isUsable());
+        ASSERT_TRUE(tripper.arm(_testStream));
+        EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+        EXPECT_TRUE(tripper.timedOut());
+    }
+    ASSERT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
+
+    EXPECT_FALSE(gate.arm(_testStream));
+    EXPECT_EQ(gate.lastError(), hipSuccess)
+        << "the disable latch declined this arm, but it still reports the earlier failure: "
+        << hipGetErrorString(gate.lastError());
+    EXPECT_EQ(gate.lastOperation(), nullptr);
+}

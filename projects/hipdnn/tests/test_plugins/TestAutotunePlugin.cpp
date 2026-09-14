@@ -149,9 +149,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            const uint32_t TOTAL_ENGINES = totalEngines();
+            const uint32_t engineCount = totalEngines();
             // When maxEngines=0, return total count for discovery; otherwise return actual count
-            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
+            *numEngines = (maxEngines == 0) ? engineCount : std::min(maxEngines, engineCount);
 
             if(maxEngines >= 1)
             {
@@ -180,7 +180,7 @@ public:
                 engineIds[5] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEngineWorkspaceGrows>();
             }
-            if(maxEngines >= 7 && TOTAL_ENGINES >= 7)
+            if(maxEngines >= 7 && engineCount >= 7)
             {
                 engineIds[6]
                     = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>();
@@ -211,9 +211,9 @@ public:
             }
             hipdnn_plugin_sdk::throwIfNull(numEngines);
 
-            const uint32_t TOTAL_ENGINES = totalEngines();
+            const uint32_t engineCount = totalEngines();
             // When maxEngines=0, return total count for discovery; otherwise return actual count
-            *numEngines = (maxEngines == 0) ? TOTAL_ENGINES : std::min(maxEngines, TOTAL_ENGINES);
+            *numEngines = (maxEngines == 0) ? engineCount : std::min(maxEngines, engineCount);
 
             if(maxEngines >= 1)
             {
@@ -242,7 +242,7 @@ public:
                 engineIds[5] = hipdnn_tests::plugin_constants::engineId<
                     AutotunePluginEngineWorkspaceGrows>();
             }
-            if(maxEngines >= 7 && TOTAL_ENGINES >= 7)
+            if(maxEngines >= 7 && engineCount >= 7)
             {
                 engineIds[6]
                     = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>();
