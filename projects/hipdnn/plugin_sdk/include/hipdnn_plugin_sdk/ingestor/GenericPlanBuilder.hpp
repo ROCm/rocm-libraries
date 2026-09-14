@@ -222,65 +222,73 @@ public:
             throwUnsatisfiableKnobFilter(settings.knobFilter, catalog.entries.size());
         }
 
-        // Coverage and orderability are checked against the knob-filtered candidates
-        // here, independent of the same check against the full catalog in
-        // sortedCatalog(): one can fail while the other passes.
+        // Orderability is the FULL catalog's question, answered once, in sortedCatalog():
+        // `catalog.orderedFromRecord` says a benchmarked record covered and ordered every
+        // kernel the matchers admitted, and `filtered` is that order with rows removed, so
+        // it is the measured order restricted.
+        //
+        // Asking again here against `filtered` -- which is what this did -- makes the answer
+        // depend on the pin. A record covering the pinned subset but not the full catalog
+        // said "measured" to a pinned request and "heuristic" to an unpinned one over the
+        // same candidates, and the two orders need not agree. RFC 0019 §5 step 8 fixes the
+        // basis for exactly this reason: the decision is "resolved against the canonical
+        // candidate set -- every kernel the matchers admitted for this graph, before any knob
+        // filter narrows it ... Knob filtering then applies to the resulting order."
         const WinnerKey winnerKey{
             hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
             DeviceKey{context.deviceProperties}};
         const auto record = _stateManager.winnerFor(winnerKey);
-        if(record.has_value())
+        if(catalog.orderedFromRecord)
         {
-            if(const auto ranked = orderIfFullyCovered(*record, filtered); ranked.has_value())
+            // Walks the ranked list instead of committing to its front: constructing
+            // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
+            // prepare (GenericPlan.hpp:33-41), and a cache hit must not be stricter
+            // than an empty cache.
+            for(size_t rank = 0; rank < filtered.size(); ++rank)
             {
-                // Walks the ranked list instead of committing to its front: constructing
-                // a GenericPlan runs prepare()/workspaceBytes() and throws on a null
-                // prepare (GenericPlan.hpp:33-41), and a cache hit must not be stricter
-                // than an empty cache.
-                for(size_t rank = 0; rank < ranked->size(); ++rank)
+                try
                 {
-                    try
-                    {
-                        auto plan = std::make_unique<GenericPlan<THandle>>(
-                            _stateManager.getDispatchDetails((*ranked)[rank]),
-                            context,
-                            catalog.bound);
+                    auto plan = std::make_unique<GenericPlan<THandle>>(
+                        _stateManager.getDispatchDetails(filtered[rank]), context, catalog.bound);
 
-                        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                               << _engine.name << "' served kernel "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
-                                               << rank << " from a benchmarked record of "
-                                               << record->size() << " entry(s) for "
-                                               << filtered.size() << " candidate(s)");
+                    // The record itself may have been evicted from the bounded winner cache
+                    // since the catalog was ordered by it; the order survives on the cached
+                    // catalog either way, so only the entry count in this line is unavailable.
+                    HIPDNN_PLUGIN_LOG_INFO(
+                        "ingestor: engine '"
+                        << _engine.name << "' served kernel " << toString(filtered[rank].kernelId)
+                        << " at rank " << rank << " from a benchmarked record of "
+                        << (record.has_value() ? std::to_string(record->size()) : "?")
+                        << " entry(s) for " << filtered.size() << " candidate(s)");
 
-                        executionContext.setPlan(std::move(plan));
-                        return;
-                    }
-                    catch(const std::exception& error)
-                    {
-                        HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                               << _engine.name << "' could not build a plan for "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
-                                               << rank << ": " << error.what()
-                                               << "; trying the next ranked entry");
-                    }
+                    executionContext.setPlan(std::move(plan));
+                    return;
                 }
+                catch(const std::exception& error)
+                {
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                           << _engine.name << "' could not build a plan for "
+                                           << toString(filtered[rank].kernelId) << " at rank "
+                                           << rank << ": " << error.what()
+                                           << "; trying the next ranked entry");
+                }
+            }
 
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                       << _engine.name
-                                       << "' found a benchmarked record whose entries no longer "
-                                          "resolve; falling back to normal selection");
-            }
-            else if(settings.benchmarkingEnabled)
-            {
-                // A record only ever reorders candidates measured together; it never
-                // replaces the heuristic's pick, so a record that does not fully cover
-                // `filtered` is ignored rather than partially trusted.
-                HIPDNN_PLUGIN_LOG_INFO(
-                    "ingestor: engine '"
-                    << _engine.name << "' has a benchmarked record that does not fully cover "
-                    << filtered.size() << " candidate(s); re-benchmarking all of them");
-            }
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                   << _engine.name
+                                   << "' found a benchmarked record whose entries no longer "
+                                      "resolve; falling back to normal selection");
+        }
+        else if(record.has_value() && settings.benchmarkingEnabled)
+        {
+            // A record only ever reorders candidates measured together; it never
+            // replaces the heuristic's pick, so a record that does not fully cover
+            // the catalog is ignored rather than partially trusted.
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ingestor: engine '"
+                << _engine.name << "' has a benchmarked record that does not fully cover its "
+                << catalog.entries.size() << " applicable kernel(s); re-benchmarking "
+                << filtered.size() << " candidate(s)");
         }
 
         if(!settings.benchmarkingEnabled)
@@ -611,9 +619,19 @@ public:
         initializeExecutionSettings(handle, graph, config, executionSettings);
         const auto context = contextFor(handle, graph);
         auto catalog = _stateManager.unsortedCatalog(context);
-        catalog.entries = applyConstraints(catalog, executionSettings.ingestorSettings, context);
+        const auto filtered
+            = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         std::string modelId;
-        const auto ranking = _stateManager.calibratedRanking(catalog, context, modelId);
+        // Both halves of the catalog go in: the full one is the basis the ranking is decided
+        // on, the filtered one is what the answer may name. Passing only the filtered set --
+        // which is what this did -- ranked the pinned subset fresh and bypassed the cached
+        // full-catalog order entirely, so a pin could reorder two candidates relative to each
+        // other and a scorer that threw only on an excluded candidate degraded the unpinned
+        // prediction while the pinned one scored normally. RFC 0019 §9.2 and §5 step 8; see
+        // KernelIngestorStateManager::calibratedRanking().
+        const auto ranking
+            = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
+        catalog.entries = filtered;
         result.reason = "No calibrated configuration prediction is available";
         for(const auto& scored : ranking)
         {

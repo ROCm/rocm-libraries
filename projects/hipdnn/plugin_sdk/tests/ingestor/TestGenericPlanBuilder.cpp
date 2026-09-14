@@ -1616,6 +1616,90 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
            "filtered set re-benchmarked, not served from the narrow subset";
 }
 
+/// RFC 0019 §5 step 8 fixes the basis a ranking is decided on at the CANONICAL candidate
+/// set -- "every kernel the matchers admitted for this graph, before any knob filter
+/// narrows it" -- so a record that covers a narrowed request but not the whole catalog is
+/// refused for BOTH. Orderability used to be re-decided against the narrowed set here,
+/// independently of the same decision in sortedCatalog(), and that is the divergence: one
+/// record served a measured order to the narrowed run and a heuristic order to the whole
+/// one, over candidates both runs share, so the same two kernels came back in opposite
+/// relative order depending only on a constraint that removed a third.
+///
+/// Narrowed by the workspace limit rather than a knob pin because both go through
+/// applyConstraints() and the limit is the only one that can leave more than one candidate
+/// here: the engine exposes a single integer knob over three distinct block sizes, so a pin
+/// always leaves exactly one kernel and makes any ordering question vacuous.
+///
+/// Falsifying mutation: order from `orderIfFullyCovered(*record, filtered)` again instead of
+/// from `catalog.orderedFromRecord`, and the narrowed run serves kernel_128.
+TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarrowedRunToo)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0xD8));
+    const auto properties = testDeviceProperties();
+
+    // A prior run measured only the two small kernels, and ranked kernel_128 ahead of
+    // kernel_64 -- the opposite of the heuristic's priority order, so which order was used
+    // is visible in the workspace of the plan that comes back.
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+        << "this test needs the heuristic front to differ from the record's";
+    WinnerRecord partial;
+    for(const auto& kernel : catalog)
+    {
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        if(blockSize == 128)
+        {
+            partial.push_back(rankedEntryFor(kernel, 0.1));
+        }
+    }
+    for(const auto& kernel : catalog)
+    {
+        if(kernel.getIntMetadata(BLOCK_SIZE) == 64)
+        {
+            partial.push_back(rankedEntryFor(kernel, 9.0));
+        }
+    }
+    ASSERT_EQ(partial.size(), 2U) << "the record must cover the narrowed set and nothing more";
+    manager->recordWinner(winnerKeyFor(graph, properties), partial, WinnerWriteCause::FRESH_MISS);
+
+    flatbuffers::FlatBufferBuilder wideBuilder;
+    const auto wideConfig = makeEmptyEngineConfig(wideBuilder);
+    KnobFilterSettings wideSettings;
+    builder.initializeExecutionSettings(0, graph, wideConfig, wideSettings);
+    ASSERT_FALSE(wideSettings.ingestorSettings.workspaceLimit.has_value());
+    KnobFilterContext wideRun;
+    wideRun.setExecutionSettings(wideSettings);
+    builder.buildPlan(0, graph, wideConfig, wideRun);
+
+    // 200 bytes admits kernel_64 and kernel_128 and excludes kernel_256, leaving exactly
+    // the set the record covers.
+    flatbuffers::FlatBufferBuilder narrowBuilder;
+    const auto narrowConfig = makeIntKnobEngineConfig(
+        narrowBuilder, hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, 200);
+    KnobFilterSettings narrowSettings;
+    builder.initializeExecutionSettings(0, graph, narrowConfig, narrowSettings);
+    ASSERT_EQ(narrowSettings.ingestorSettings.workspaceLimit, 200);
+    KnobFilterContext narrowRun;
+    narrowRun.setExecutionSettings(narrowSettings);
+    builder.buildPlan(0, graph, narrowConfig, narrowRun);
+
+    EXPECT_EQ(wideRun.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "a record that does not cover the whole catalog cannot order it";
+    EXPECT_EQ(narrowRun.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
+        << "the narrowed run must read the same order source as the wide one: the record "
+           "covers what survived the limit, but orderability is the full catalog's question";
+}
+
 /// Two buildPlan calls for the same graph and device: the first populates the cache by
 /// benchmarking, the second is served from it with no BenchmarkPlan built -- the shape
 /// an EXHAUSTIVE autotune() run takes, minus autotune itself.
