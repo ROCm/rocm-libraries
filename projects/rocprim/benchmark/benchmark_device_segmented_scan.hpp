@@ -138,7 +138,7 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
         }
     }
 
-    void run_benchmark(primbench::state&& state, size_t desired_segment)
+    void run(primbench::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.size;
@@ -147,78 +147,106 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
         using offset_type = int;
         using value_type  = T;
 
-        size_t items = bytes / sizeof(T);
+        const size_t items            = bytes / sizeof(T);
+        const int    num_input_arrays = m_desired_segments.size();
 
-        // Generate data
+        // Shared input values, generated once
         engine_type gen(seed);
-
-        // The minimal average length should at least be 1 to prevent infinite loop.
-        const double avg_segment_length
-            = std::max(1.0, static_cast<double>(items) / desired_segment);
-        std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
-
-        // Create random sizes for segments.
-        std::vector<offset_type> offsets;
-        unsigned int             segments_count = 0;
-        size_t                   offset         = 0;
-        while(offset < items)
-        {
-            const size_t segment_length = std::round(segment_length_dis(gen));
-            offsets.push_back(offset);
-            segments_count++;
-            offset += segment_length;
-        }
-        offsets.push_back(items);
 
         std::vector<value_type> values_input(items);
         std::iota(values_input.begin(), values_input.end(), 0);
-
-        common::device_ptr<offset_type> d_offsets(offsets);
-
         common::device_ptr<value_type> d_values_input(values_input);
 
+        // Build offsets per desired segment count
+        std::vector<std::vector<offset_type>> offsets_arrays(num_input_arrays);
+        std::vector<unsigned int>             segments_counts(num_input_arrays);
+        unsigned int                          max_segments_count = 0;
+
+        for(int i = 0; i < num_input_arrays; ++i)
+        {
+            const size_t desired_segment = m_desired_segments[i];
+
+            // The minimal average length should at least be 1 to prevent infinite loop.
+            const double avg_segment_length
+                = std::max(1.0, static_cast<double>(items) / desired_segment);
+            std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
+
+            std::vector<offset_type>& offsets        = offsets_arrays[i];
+            unsigned int              segments_count = 0;
+            size_t                    offset         = 0;
+            while(offset < items)
+            {
+                const size_t segment_length = std::round(segment_length_dis(gen));
+                offsets.push_back(offset);
+                segments_count++;
+                offset += segment_length;
+            }
+            offsets.push_back(items);
+
+            segments_counts[i] = segments_count;
+            max_segments_count = std::max(max_segments_count, segments_count);
+        }
+
+        std::vector<common::device_ptr<offset_type>> d_offsets_arrays(num_input_arrays);
+        for(int i = 0; i < num_input_arrays; ++i)
+        {
+            d_offsets_arrays[i].store(offsets_arrays[i]);
+        }
+
+        // Shared, reused across all runs (sized to the largest)
         common::device_ptr<value_type> d_values_output(items);
 
         value_type init(5);
 
-        size_t temporary_storage_bytes = 0;
+        const auto dispatch_input = [&](void*        d_temp_storage,
+                                        size_t&      temp_storage_size_bytes,
+                                        offset_type* d_offsets,
+                                        unsigned int segments_count)
+        {
+            HIP_CHECK(run_device_segmented_scan(d_temp_storage,
+                                                temp_storage_size_bytes,
+                                                d_values_input.get(),
+                                                d_values_output.get(),
+                                                segments_count,
+                                                d_offsets,
+                                                d_offsets + 1,
+                                                init,
+                                                stream));
+        };
 
-        HIP_CHECK(run_device_segmented_scan(nullptr,
-                                            temporary_storage_bytes,
-                                            d_values_input.get(),
-                                            d_values_output.get(),
-                                            segments_count,
-                                            d_offsets.get(),
-                                            d_offsets.get() + 1,
-                                            init,
-                                            stream));
+        // Query temp storage size per run, track the max
+        std::vector<size_t> temp_storage_bytes_per_run(num_input_arrays);
+        size_t              max_temporary_storage_bytes = 0;
 
-        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+        for(int i = 0; i < num_input_arrays; ++i)
+        {
+            size_t temp_storage_size_bytes = 0;
+            dispatch_input(nullptr,
+                           temp_storage_size_bytes,
+                           d_offsets_arrays[i].get(),
+                           segments_counts[i]);
+
+            temp_storage_bytes_per_run[i] = temp_storage_size_bytes;
+            max_temporary_storage_bytes
+                = std::max(max_temporary_storage_bytes, temp_storage_size_bytes);
+        }
+
+        common::device_ptr<void> d_temp_storage(max_temporary_storage_bytes);
 
         state.set_items(items);
-        state.add_reads<T>(items);
+        state.add_reads<T>(items * num_input_arrays);
 
         state.run(
             [&]
             {
-                HIP_CHECK(run_device_segmented_scan(d_temporary_storage.get(),
-                                                    temporary_storage_bytes,
-                                                    d_values_input.get(),
-                                                    d_values_output.get(),
-                                                    segments_count,
-                                                    d_offsets.get(),
-                                                    d_offsets.get() + 1,
-                                                    init,
-                                                    stream));
+                for(int i = 0; i < num_input_arrays; ++i)
+                {
+                    dispatch_input(d_temp_storage.get(),
+                                   temp_storage_bytes_per_run[i],
+                                   d_offsets_arrays[i].get(),
+                                   segments_counts[i]);
+                }
             });
-    }
-
-    void run(primbench::state& state) override
-    {
-        for(const auto desired_segment : m_desired_segments)
-        {
-            run_benchmark(std::forward<primbench::state>(state), desired_segment);
-        }
     }
 
 private:
