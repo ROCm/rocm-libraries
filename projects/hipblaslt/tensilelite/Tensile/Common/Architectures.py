@@ -69,8 +69,8 @@ architectureMap = {
     "gfx1200": "gfx1200",
     "gfx1201": "gfx1201",
     "gfx1250": "gfx1250",
-    # Spelled as clang and ROCr both spell it. Shares gfx1250's ISA, so `all` --
-    # built from SUPPORTED_ISA -- cannot name it; ask for it by name.
+    # Spelled as clang and ROCr both spell it. Shares gfx1250's ISA, so
+    # SUPPORTED_ISA cannot name it; this entry is where `all` picks it up.
     "gfx1250-strict": "gfx1250-strict",
 }
 
@@ -191,14 +191,39 @@ def isaToGfx(arch: IsaVersion) -> str:
 SUPPORTED_GFX = [isaToGfx(isa) for isa in SUPPORTED_ISA]
 
 
+def supportedSteppings() -> List[str]:
+    """The stepping names ``all`` covers, in ``architectureMap`` order.
+
+    A stepping shares the ISA of the architecture it steps from, so
+    ``SUPPORTED_ISA`` cannot name one; they are read off ``architectureMap``
+    instead. Only steppings of an architecture already covered qualify: being a
+    stepping does not make an unsupported architecture supported.
+
+    Returns:
+        The supported stepping names.
+    """
+    covered = set(SUPPORTED_GFX)
+    return [
+        name
+        for name in architectureMap
+        if steppingArchOf(name) in covered
+    ]
+
+
 def expandAllArchitectures(archs: List[str]) -> List[str]:
     """Replaces the ``all`` keyword with the architectures it covers.
 
-    ``all`` is built from SUPPORTED_ISA, so it cannot name an architecture that
-    shares another's ISA; those names survive alongside it and reach the
-    mixed-build guard, rather than being dropped into a silent build of the
-    other stepping. Qualified specs (``gfx942:xnack+``) name architectures
-    ``all`` already covers, so they stay absorbed.
+    ``all`` means every supported architecture, steppings included. Their names
+    come from two places because a stepping shares the ISA it steps from:
+    SUPPORTED_ISA names the rest, ``architectureMap`` names the steppings. A
+    stepping and its base cannot be built in one run, so the expansion collides
+    with itself by design and the caller partitions it; see
+    ``isaCollisionFreeGroups``.
+
+    Names the expansion does not cover survive beside it and reach the
+    mixed-build guard, rather than being dropped into a silent build of another
+    architecture. Qualified specs (``gfx942:xnack+``) name architectures ``all``
+    already covers, so they stay absorbed.
 
     Empty entries are dropped: cmake joins ``GPU_TARGETS`` with ``;``, so a
     trailing one arrives as an empty spec the predicate splitter would reject.
@@ -212,8 +237,9 @@ def expandAllArchitectures(archs: List[str]) -> List[str]:
     archs = [a.strip() for a in archs if a.strip()]
     if "all" not in archs:
         return archs
-    covered = set(SUPPORTED_GFX)
-    return SUPPORTED_GFX + [
+    expanded = SUPPORTED_GFX + supportedSteppings()
+    covered = set(expanded)
+    return expanded + [
         a for a in archs if a != "all" and baseArchName(a) not in covered
     ]
 
