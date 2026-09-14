@@ -42,7 +42,10 @@ machine, device and allocation identities under the workspace's evidence policy.
 ## 1. Entry and early feasibility
 
 Record the entry contract; for extend, inventory the installed baseline according
-to [extend.md](extend.md). Select `direct_load` or `packaged` before staging files.
+to [extend.md](extend.md). Select `direct_load` or `packaged` before staging files,
+and for `direct_load` select `embedded_source` or `hiprtc_file`: the first is embedded
+into the provider at configure time, the second ships as a source bundle beside the
+descriptors and needs no rebuild. See [hiprtc-mining.md](hiprtc-mining.md).
 Establish that the graph is representable and has a capable independent numerical
 reference using [graph-contract.md](graph-contract.md). A reference's skip is not
 verification; unavailable semantics require an explicit scope/reference decision.
@@ -60,7 +63,18 @@ Exit 0 proves feasibility only, exit 1 a device/path/write failure, and exit 2 a
 invalid invocation. For rocKE, confirm the actual builder/spec and `(spec, *, arch)`
 interface; an unknown architecture inventory needs source investigation.
 
-**Gate:** feasible target/workspace, representable scope and capable reference. A
+For `hiprtc_file`, feasibility is a symbol question before it is a device one. The
+target installation must already register every `match_symbol`, `graph_match`,
+`dispatch_symbol` and score symbol the new set names, and the entry point must take the
+same arguments in the same order as that pack's registered `IKernelDispatchHandler`
+launches. `loadValidatedDescriptorSets` pre-flights those symbols and drops the whole
+engine on any miss with one `LOG_ERROR`, which is indistinguishable from a healthy
+decline at the API. Confirm both against the installed provider's native pack source
+per [hiprtc-mining.md](hiprtc-mining.md). A genuinely new native symbol is a rebuild:
+it is ordinary engine work through stages 3-5, not a drop-in.
+
+**Gate:** feasible target/workspace, representable scope and capable reference; for a
+drop-in, an installed pack whose symbols and launch ABI the new variants reuse. A
 missing dependency blocks its gate; host-only research may continue while a device
 allocation is pending, but cannot discharge device proof.
 
@@ -304,7 +318,48 @@ still requires an explicit expected arch and descriptor root. Check retained
 extension inventory and heuristic-disabled score absence per
 [native-pack.md](native-pack.md).
 
-**Gate:** current installation, artifact checks at their stated strength, and real
+### Drop-in install: `hiprtc_file` variants, no build and no packaging
+
+A `hiprtc_file` variant set of an **already-installed** pack skips this stage's build,
+packaging and `cmake --install` entirely: nothing native changes, so nothing is
+compiled here. Generate into an empty destination as in stage 3, then copy the
+generated `descriptors/<pack>/` directory **whole** — its descriptor JSONs plus the
+staged bundle directory — into a drop-in root, and point the installed process at it:
+
+```bash
+DROPIN_ROOT=/absolute/path/to/drop-in-descriptor-root
+cp -r "$GENERATED/descriptors/<pack>" "$DROPIN_ROOT/"
+export HIPDNN_DESCRIPTOR_RUNTIME_DIR="$DROPIN_ROOT"
+```
+
+That root is additive to the shipped tree, and a descriptor redefining an installed
+id is refused, not honoured. To add variants to an already-installed engine rather than
+ship a new one, copy only the `.kdp.json` and its bundle, with `engine`, `dispatch` and
+`matchers` rewritten to the installed set's uuids and fresh uuids for the KDP and its
+kernels — but that shape is served under the **installed** engine's id, so stage 5 cannot
+attribute a dispatch to it; a full set with its own UED over the installed pack's symbols
+can. Choose deliberately: [hiprtc-mining.md](hiprtc-mining.md) §Scope. `packs/`, `tests/`
+and `fragments/` are the rebuild-requiring half and are
+not part of a drop-in. Nothing is picked up until the consuming process restarts —
+discovery is memoized per process — and a restart is also what clears the
+process-lifetime compile cache after a bundle source is edited in place.
+
+Validate with a `hipdnn_validate_descriptors` built from a provider that knows
+`hiprtc_file`; an older one rejects `bundle` and `defines` as unknown `kernel_source`
+keys, which is a validator-vintage failure and not a defect in the tree. Pass both
+roots in runtime order, since a KDP-only drop-in resolves its cross-references against
+the installed tree and validates as nothing on its own:
+
+```bash
+"$VALIDATOR" "$FINAL_DESCRIPTOR_ROOT" "$DROPIN_ROOT" --expect-engine "$ENGINE" --json
+```
+
+Packaging checks and the packaged census do not apply: there is no `kind: kpack`
+descriptor and no per-arch shard. Proof that a drop-in works is stage 5's device
+dispatch from the unchanged installation, not this copy.
+
+**Gate:** current installation — or, for a drop-in, an unchanged installation plus a
+validated drop-in root — artifact checks at their stated strength, and real
 registration/loading plus applicable inventory/census checks. Report `NOT VERIFIED
 HERE` separately. Neither the structural validator's stubs nor host loading proves
 dispatch.
