@@ -6,9 +6,10 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/utilities/StallGate.hpp>
+#include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
-#include <optional>
+#include <nanobind/stl/unique_ptr.h>
 #include <stdexcept>
 #include <string>
 
@@ -150,89 +151,42 @@ void deviceSynchronize()
     throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize");
 }
 
-// Thin adapter over the shared stall gate, which owns the signal-memory sequence. This
-// class only adds the binding's throwing contract and the explicit destroy() that Python
-// callers use.
-class HipStallGate
+using StallGate = hipdnn_data_sdk::utilities::StallGate;
+
+std::unique_ptr<StallGate> createStallGate()
 {
-private:
-    // The optional models destroy(): the core gate has no destroyed state, and arm or
-    // release on a destroyed gate must raise rather than touch a freed signal.
-    std::optional<hipdnn_data_sdk::utilities::StallGate> _gate;
-
-    hipdnn_data_sdk::utilities::StallGate& getChecked()
+    auto gate = std::make_unique<StallGate>();
+    if(gate->isUsable())
     {
-        if(!_gate.has_value())
-        {
-            throw std::runtime_error("HIP stall gate has been destroyed");
-        }
-        return *_gate;
+        return gate;
     }
 
-public:
-    HipStallGate()
+    // hipSuccess means no HIP call failed, so the device simply lacks support.
+    if(gate->lastError() == hipSuccess)
     {
-        _gate.emplace();
-        if(!_gate->isUsable())
-        {
-            // hipSuccess means no HIP call failed, so the device simply lacks support.
-            if(_gate->lastError() == hipSuccess)
-            {
-                throw std::runtime_error("hipStreamWaitValue32 unsupported on this device");
-            }
-            throwOnHipError(_gate->lastError(), _gate->lastOperation());
-        }
+        throw std::runtime_error("hipStreamWaitValue32 unsupported on this device");
+    }
+    throwOnHipError(gate->lastError(), gate->lastOperation());
+    return nullptr;
+}
+
+void armStallGate(StallGate& gate, uintptr_t stream)
+{
+    if(gate.arm(toHipStream(stream)))
+    {
+        return;
     }
 
-    ~HipStallGate() = default;
-
-    HipStallGate(const HipStallGate&) = delete;
-    HipStallGate& operator=(const HipStallGate&) = delete;
-    // Pinned, like the core gate: it owns a mutex and a watchdog thread. nanobind
-    // constructs in place, so nothing needs to move one.
-    HipStallGate(HipStallGate&&) = delete;
-    HipStallGate& operator=(HipStallGate&&) = delete;
-
-    // Reset the signal, then enqueue a wait packet that blocks all later work on the
-    // stream until the host releases the gate.
-    void arm(uintptr_t stream)
-    {
-        auto& gate = getChecked();
-        if(!gate.arm(toHipStream(stream)))
-        {
-            // Safe to read as this attempt's cause: arm() resets the error state on every
-            // attempt by a usable gate, and the constructor already rejected an unusable
-            // one, so this cannot be a leftover from an earlier arm().
-            throwOnHipError(gate.lastError(), gate.lastOperation());
-            // Reached only when no HIP call failed, so an earlier watchdog timeout
-            // disabled stalling for this shared object. Raising is the only way the caller
-            // can tell that the stream is unstalled and the next span includes host time.
-            throw std::runtime_error("HIP stall gate is disabled after a stall watchdog timeout");
-        }
-    }
-
-    // True when the watchdog, not this object, released the most recent arm(). The span
-    // measured across that arm contains the timeout and is not a measurement.
-    bool timedOut()
-    {
-        return getChecked().timedOut();
-    }
-
-    // Release the gate with a host write; no host synchronization is needed.
-    void release()
-    {
-        getChecked().release();
-    }
-
-    void destroy() noexcept
-    {
-        _gate.reset();
-    }
-};
+    throwOnHipError(gate.lastError(), gate.lastOperation());
+    // Reached only when no HIP call failed, so an earlier watchdog timeout
+    // disabled stalling for this shared object. Raising is the only way the caller
+    // can tell that the stream is unstalled and the next span includes host time.
+    throw std::runtime_error("HIP stall gate is disabled after a stall watchdog timeout");
+}
 
 } // namespace
 
-// NOTE: HipEvent, HipStallGate, and the hip_* stream/device helpers are HIP
+// NOTE: HipEvent, StallGate, and the hip_* stream/device helpers are HIP
 // primitives, not hipDNN concepts. They are exposed through the hipDNN frontend
 // bindings only provisionally; treat them as an internal, unstable surface and
 // avoid depending on them.
@@ -267,20 +221,17 @@ void hipBindings(nb::module_& m)
           "Block until a HIP stream pointer encoded as an integer is idle");
     m.def("hip_get_device_count", &getDeviceCount, "Return the number of visible HIP devices");
 
-    nb::class_<HipStallGate>(m, "HipStallGate")
-        .def(nb::init<>(), "Create a host-released device-side stall gate")
+    nb::class_<StallGate>(m, "HipStallGate")
+        .def(nb::new_(&createStallGate), "Create a host-released device-side stall gate")
         .def("arm",
-             &HipStallGate::arm,
+             &armStallGate,
              nb::arg("stream") = 0,
              nb::call_guard<nb::gil_scoped_release>(),
              "Stall a HIP stream pointer encoded as an integer until release() is called")
-        .def("release",
-             &HipStallGate::release,
-             "Release the gate so stalled work on the stream proceeds")
+        .def("release", &StallGate::release, "Release the gate so stalled work proceeds")
         .def("timed_out",
-             &HipStallGate::timedOut,
-             "Return whether the stall watchdog, not release(), ended the last arm()")
-        .def("destroy", &HipStallGate::destroy, "Destroy the stall gate");
+             &StallGate::timedOut,
+             "Return whether the stall watchdog, not release(), ended the last arm()");
 
     m.def("hip_device_synchronize",
           &deviceSynchronize,

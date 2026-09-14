@@ -64,24 +64,6 @@ def test_stall_gate_orders_events() -> None:
     assert start.elapsed_time(stop) >= 0.0
 
 
-@pytest.mark.gpu
-def test_stall_gate_raises_after_destroy() -> None:
-    if fe.hip_get_device_count() <= 0:
-        pytest.skip("No HIP GPU available")
-    if not fe.hip_can_use_stream_wait_value():
-        pytest.skip("Device does not support hipStreamWaitValue32")
-
-    gate = fe.HipStallGate()
-    gate.destroy()
-
-    # A destroyed gate must reject arm/release with a clear error instead of
-    # issuing stream ops on freed signal memory.
-    with pytest.raises(RuntimeError, match="destroyed"):
-        gate.arm(0)
-    with pytest.raises(RuntimeError, match="destroyed"):
-        gate.release()
-
-
 # Runs in a child process: the watchdog latch that this test trips is shared by this module and
 # has no Python reset, so tripping it in-process would silently unstall every later test.
 _TIMEOUT_SCRIPT = textwrap.dedent(
