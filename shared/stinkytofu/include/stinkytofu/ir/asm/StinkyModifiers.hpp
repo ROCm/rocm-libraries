@@ -315,6 +315,7 @@ struct Modifier {
         CALL_TARGETS,
         EXEC_GROUP,
         LOOP_CARRIED_WAR,
+        LOOP_CARRIED_RAW,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1107,6 +1108,30 @@ struct LoopCarriedWarData : public TypedModifier<LoopCarriedWarData> {
 
     LoopCarriedWarData(const std::vector<int>& tokens = {}, int distance = 1)
         : TypedModifier<LoopCarriedWarData>(), tokens(tokens), distance(distance) {}
+};
+
+/// A loop-carried read-after-write: the instruction carrying this consumes LDS
+/// that a fill `distance` trips back produced.
+///
+/// The mirror of LoopCarriedWarData, and invisible for the same reason -- the
+/// producing fill carried a different tag, because a memtoken names a physical
+/// buffer only for the trip it was emitted from. Here the wait lands on the
+/// producer's counter (tensorcnt for a TDM fill) rather than dscnt.
+///
+/// Carrying this also opts the block out of the CK_Tensor freeze: a declared
+/// loop-carried tensor dependence is exactly the state restoreTensorState
+/// discards, so the two cannot both apply.
+struct LoopCarriedRawData : public TypedModifier<LoopCarriedRawData> {
+    static constexpr Modifier::Type Type = Modifier::Type::LOOP_CARRIED_RAW;
+
+    /// Tags the producing fill carried `distance` trips ago.
+    std::vector<int> tokens;
+    /// Trips back. Always >= 1; distance 0 is an ordinary same-trip RAW, which
+    /// the SSA def-use chain already covers.
+    int distance = 1;
+
+    LoopCarriedRawData(const std::vector<int>& tokens = {}, int distance = 1)
+        : TypedModifier<LoopCarriedRawData>(), tokens(tokens), distance(distance) {}
 };
 
 /// Buffer pool index for WMMA instructions in double/triple/N-buffered GEMM kernels.

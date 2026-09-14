@@ -491,6 +491,13 @@ bool serializeVisit(const LoopCarriedWarData& mod, std::ostream& os) {
     return true;
 }
 
+// LoopCarriedRawData
+bool serializeVisit(const LoopCarriedRawData& mod, std::ostream& os) {
+    os << ", mod.loopcarriedraw = { tokens = " << vectorToString(mod.tokens)
+       << ", distance = " << mod.distance << " }";
+    return true;
+}
+
 // LabelData
 bool serializeVisit(const LabelData& mod, std::ostream& os) {
     os << ", mod.label = { label = \"" << mod.label << "\""
@@ -519,7 +526,8 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
                           SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData,
-                          LoopCarriedWarData, LabelData, CallTargetData>(mod, os);
+                          LoopCarriedWarData, LoopCarriedRawData, LabelData, CallTargetData>(mod,
+                                                                                             os);
 }
 
 /*
@@ -661,6 +669,11 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
     } else if (attrKey == "mod.loopcarriedwar") {
         if (fields.contains("tokens")) {
             inst->addModifier(LoopCarriedWarData(getIntVector(fields, "tokens"),
+                                                 static_cast<int>(getInt(fields, "distance", 1))));
+        }
+    } else if (attrKey == "mod.loopcarriedraw") {
+        if (fields.contains("tokens")) {
+            inst->addModifier(LoopCarriedRawData(getIntVector(fields, "tokens"),
                                                  static_cast<int>(getInt(fields, "distance", 1))));
         }
     } else if (attrKey == "mod.label") {
