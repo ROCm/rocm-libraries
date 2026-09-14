@@ -159,6 +159,7 @@ def main() -> int:
         block_n=tile.tile_n,
         block_k=tile.tile_k,
         threads_per_block=spec.block_size,
+        dtype=args.dtype,
         default_shape=(args.m, args.n, args.k),
         atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{args.dtype}"],
     )

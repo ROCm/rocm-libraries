@@ -129,7 +129,8 @@ def _register_builtin_runners() -> None:
         "transpose_fp16",
     ):
         register_manifest_runner(kind, run_simple_op_manifest_problem)
-    register_manifest_runner("gemm_fp16", run_gemm_manifest_problem)
+    for kind in ("gemm_fp16", "gemm_bf16"):
+        register_manifest_runner(kind, run_gemm_manifest_problem)
     register_manifest_runner("gemm_iu8", run_gemm_iu8_manifest_problem)
     register_manifest_runner("batched_gemm_fp16", run_batched_gemm_manifest_problem)
     register_manifest_runner("matmul_nbits_fp16", run_matmul_nbits_manifest_problem)

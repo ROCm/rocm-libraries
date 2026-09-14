@@ -13,7 +13,7 @@ Schema (version `ck.dsl.example.manifest/v1`):
 
     {
       "schema": "ck.dsl.example.manifest/v1",
-      "kind": "gemm_fp16" | "conv_fp16" | "conv_bf16" | "conv_fp32",
+      "kind": "gemm_fp16" | "gemm_bf16" | "conv_fp16" | "conv_bf16" | "conv_fp32",
       "kernel_name": <str>,
       "hsaco": <basename of the .hsaco file next to this manifest>,
       "block_m": <int>, "block_n": <int>, "block_k": <int>,
@@ -122,7 +122,9 @@ def _provenance_fields() -> Dict[str, str]:
 # ---------------------------------------------------------------------
 
 
-def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
+def gemm_args_signature(
+    *, dtype: str = "fp16", with_bytes: bool = False
+) -> List[Dict[str, Any]]:
     """Standard GEMM kernel args signature: A, B, C ptrs + M, N, K i32s.
 
     `with_bytes=True` adds A_bytes/B_bytes/C_bytes args before the
@@ -130,10 +132,15 @@ def gemm_args_signature(*, with_bytes: bool = False) -> List[Dict[str, Any]]:
     signature; the universal GEMM doesn't need them since it doesn't
     use buffer_rsrc).
     """
+    dtype = {"f16": "fp16"}.get(dtype, dtype)
+    if dtype not in ("fp16", "bf16"):
+        raise ValueError(f"unsupported GEMM manifest dtype {dtype!r}")
+    ir_type = "f16" if dtype == "fp16" else "bf16"
+    ptr_type = f"ptr<{ir_type}, global>"
     sig: List[Dict[str, Any]] = [
-        {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "B", "type": "ptr<f16, global>", "size_bytes": 8},
-        {"name": "C", "type": "ptr<f16, global>", "size_bytes": 8},
+        {"name": "A", "type": ptr_type, "size_bytes": 8},
+        {"name": "B", "type": ptr_type, "size_bytes": 8},
+        {"name": "C", "type": ptr_type, "size_bytes": 8},
     ]
     if with_bytes:
         sig += [
@@ -290,6 +297,7 @@ def make_gemm_manifest(
     block_n: int,
     block_k: int,
     threads_per_block: int,
+    dtype: str = "fp16",
     default_shape: Sequence[int] = (3328, 4096, 4096),
     warmup_iters: int = 5,
     timed_iters: int = 100,
@@ -299,7 +307,7 @@ def make_gemm_manifest(
     notes: str = "",
     extra: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Build the v1 manifest JSON object for one GEMM kernel.
+    """Build the v1 manifest JSON object for one FP16 or BF16 GEMM kernel.
 
     `grid_order` chooses how the runner translates `(M_tiles, N_tiles)`
     to `(gx, gy)`:
@@ -309,13 +317,23 @@ def make_gemm_manifest(
     The default `"NM"` (block.x->N) is the universal-GEMM / host-launcher
     convention; the gfx1151 WMMA GEMM passes `"MN"` to flip to block.x->M.
 
+    `dtype` selects both the manifest kind and default pointer signature.
+
     `extra` lets you splice in kernel-specific fields (e.g. an MLIR
     config dump, a transform-DAG JSON, dispatcher metadata).
     """
-    args = args_signature if args_signature is not None else gemm_args_signature()
+    dtype = {"f16": "fp16"}.get(dtype, dtype)
+    if dtype not in ("fp16", "bf16"):
+        raise ValueError(f"unsupported GEMM manifest dtype {dtype!r}")
+    args = (
+        args_signature
+        if args_signature is not None
+        else gemm_args_signature(dtype=dtype)
+    )
     manifest: Dict[str, Any] = {
         "schema": MANIFEST_SCHEMA,
-        "kind": "gemm_fp16",
+        "kind": f"gemm_{dtype}",
+        "dtype": dtype,
         "kernel_name": artifact.kernel_name,
         "hsaco": f"{artifact.kernel_name}.hsaco",
         "block_m": int(block_m),

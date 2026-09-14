@@ -12,6 +12,19 @@ from ....runtime.hip_module import Runtime
 from .utils import as_u8_buffer, nbytes, require_numpy
 
 
+def _float32_to_bf16(np, values):
+    """Encode float32 values as native-endian BF16 bit patterns."""
+    bits = np.ascontiguousarray(values, dtype=np.float32).view(np.uint32)
+    rounding_bias = np.uint32(0x7FFF) + ((bits >> 16) & np.uint32(1))
+    return ((bits + rounding_bias) >> 16).astype(np.uint16)
+
+
+def _bf16_to_float32(np, values):
+    """Decode native-endian BF16 bit patterns into float32 values."""
+    bits = np.ascontiguousarray(values, dtype=np.uint16).astype(np.uint32) << 16
+    return bits.view(np.float32)
+
+
 def run_gemm_manifest_problem(
     manifest: dict, shape: Optional[Tuple[int, int, int]], verify: bool
 ) -> tuple:
@@ -21,10 +34,20 @@ def run_gemm_manifest_problem(
         M, N, K = int(ds[0]), int(ds[1]), int(ds[2])
     else:
         M, N, K = shape
+    dtype = str(manifest.get("dtype") or manifest.get("kind", "").removeprefix("gemm_"))
+    if dtype not in ("fp16", "bf16"):
+        raise ValueError(f"unsupported GEMM manifest dtype {dtype!r}")
     rng = np.random.default_rng(0xC0FFEE)
-    A = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float16)
-    B = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float16)
-    C = np.empty((M, N), dtype=np.float16)
+    A_values = rng.integers(-5, 6, size=(M, K), dtype=np.int16)
+    B_values = rng.integers(-5, 6, size=(N, K), dtype=np.int16)
+    if dtype == "bf16":
+        A = _float32_to_bf16(np, A_values)
+        B = _float32_to_bf16(np, B_values)
+        C = np.empty((M, N), dtype=np.uint16)
+    else:
+        A = A_values.astype(np.float16)
+        B = B_values.astype(np.float16)
+        C = np.empty((M, N), dtype=np.float16)
     gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
     gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
     if manifest.get("grid_order") == "MN":
@@ -51,10 +74,20 @@ def run_gemm_manifest_problem(
         if not verify:
             return 0.0, 0, C.size
         rt.memcpy_d2h(as_u8_buffer(C), ptrs[2], nbytes(C))
-        ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
-        ref_f32 = ref.astype(np.float32)
+        if dtype == "bf16":
+            A_f32 = _bf16_to_float32(np, A)
+            B_f32 = _bf16_to_float32(np, B)
+            C_f32 = _bf16_to_float32(np, C)
+            ref_f32 = _bf16_to_float32(
+                np, _float32_to_bf16(np, A_f32 @ B_f32.T)
+            )
+        else:
+            C_f32 = C.astype(np.float32)
+            ref_f32 = (
+                A.astype(np.float32) @ B.astype(np.float32).T
+            ).astype(np.float16).astype(np.float32)
         tol = 1e-2
-        err = np.abs(C.astype(np.float32) - ref_f32)
+        err = np.abs(C_f32 - ref_f32)
         bad = err > tol + tol * np.abs(ref_f32)
         return float(err.max()), int(np.count_nonzero(bad)), C.size
 
