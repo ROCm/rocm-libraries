@@ -19837,6 +19837,33 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
+    # gfx1250 F8 swizzled-B in the wave-separated (parity) builder. Same 2-D swizzle descriptor
+    # as the single-wave path (initTDMDescriptor ~19626), but each component loads its nO band:
+    #   tile1 = swzRows = (MacroTile/MI_N) // numComp
+    # numComp=1 (M-only split) -> full nO band. Per-component global base comes from
+    # calculateStartAddrWaveSeparated; per-component LDS base is the wId*dataBytes above.
+    if bool(tP.get("isSwizzledTDM")):
+      swzMiN    = kernel["MatrixInstN"]
+      swzInnerK = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+      swzK      = (kernel["WavefrontSize"] // swzMiN) * swzInnerK   # host swizzle K granule (32 for fp8)
+      swzTile0  = swzMiN * du                             # per-nO DepthU slice (elements)
+      swzRows   = (mt // swzMiN) // numComp               # nO rows per component
+      mod.add(comp.setIterationEnabled(descSgprName(1), False))
+      mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+      with self.allocTmpSgpr(1, tag="swzTDM_descWS") as swzTmp:
+        sIdx = swzTmp.idx
+        mod.add(SAddU32(sgpr(sIdx), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+        mod.add(SAndB32(sgpr(sIdx), sgpr(sIdx), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+        mod.add(SMulI32(sgpr(sIdx), sgpr(sIdx), swzMiN, "stride0 = MI_N * paddedK"))
+        mod.add(comp.setTensorStride0(descSgprName(1), sIdx, 0))
+        mod.add(SMovB32(sgpr(sIdx), swzTile0, "swizzled B: dim0 = tile0 = MI_N*DepthU"))
+        mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
+        mod.add(SMovB32(sgpr(sIdx), swzRows, "swizzled B: dim1 = tile1 = #nO per component"))
+        mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
+      mod.add(comp.setTensorTile0(descSgprName(1), swzTile0, self, 0))
+      mod.add(comp.setTensorTile1(descSgprName(1), swzRows, self))
+      return mod
+
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter = 1 if dtype.isFloat4() else 0
     sizeShifter += ceil(log2(duScale))
