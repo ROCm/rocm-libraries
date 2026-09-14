@@ -296,21 +296,22 @@ void RMSnormValidator::checkActivationModeSupported(
         return;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
-        if(!pointwiseAttr.relu_lower_clip_slope().has_value())
+        if(pointwiseAttr.relu_lower_clip_slope().has_value())
         {
-            return;
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Rmsnorm fused activation does not support Leaky ReLU.");
         }
         if(pointwiseAttr.relu_lower_clip().has_value()
-           && pointwiseAttr.relu_lower_clip().value() != 0.0f)
+           && pointwiseAttr.relu_lower_clip().value() != 0.0f
+           && !pointwiseAttr.relu_upper_clip().has_value())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Rmsnorm fused activation does not support standard ReLU with a non-zero "
                 "lower_clip.");
         }
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Rmsnorm fused activation does not support Leaky ReLU.");
+        return;
     default:
         const std::string activationModeName(EnumNamePointwiseMode(pointwiseAttr.operation()));
         throw hipdnn_plugin_sdk::HipdnnPluginException(
