@@ -134,8 +134,8 @@ namespace rocsparse
         {
             for(uint32_t i = 0; i < NNZ_PER_THREAD; ++i)
             {
-                values[i] = (offset + i < nnz) ? static_cast<T1>(rocsparse::conj_val(
-                                                     nontemporal_load(csr_val + offset + i), conj))
+                values[i] = (offset + i < nnz) ? static_cast<T1>(
+                                rocsparse::conj_val(nontemporal_load(csr_val + offset + i), conj))
                                                : static_cast<T1>(0);
             }
         }
