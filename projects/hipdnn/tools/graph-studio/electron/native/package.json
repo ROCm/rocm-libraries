@@ -5,7 +5,6 @@
   "description": "N-API addon bridging Electron to the hipDNN frontend C++ API.",
   "main": "build/Release/hipdnn_engine.node",
   "scripts": {
-    "install": "node-gyp rebuild",
     "build": "node-gyp rebuild",
     "clean": "node-gyp clean"
   },

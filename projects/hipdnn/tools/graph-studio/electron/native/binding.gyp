@@ -1,54 +1,37 @@
 {
-    "variables": {
-        # Root of the ROCm/hipDNN SDK. Override with:
-        #   HIPDNN_SDK=/path/to/_rocm_sdk_devel npm run build:native
-        "hipdnn_sdk%": "<!(node -p \"process.env.HIPDNN_SDK || 'D:/develop/latest_wheels_nightly/Lib/site-packages/_rocm_sdk_devel'\")"
-    },
+    # hipdnn-config.gypi is generated next to this file by build-addon.cjs. It
+    # resolves either an in-tree hipDNN build tree or an installed SDK into
+    # hipdnn_include_dirs / hipdnn_defines / hipdnn_libraries, and names the
+    # source and node-addon-api directories so this file works from a staged
+    # copy in the build tree as well as from here.
+    "includes": ["hipdnn-config.gypi"],
     "targets": [
         {
             "target_name": "hipdnn_engine",
-            "sources": ["src/engine.cpp", "src/graph_translate.cpp"],
+            "sources": [
+                "<(hipdnn_native_src_dir)/engine.cpp",
+                "<(hipdnn_native_src_dir)/graph_translate.cpp",
+            ],
             "include_dirs": [
-                "<!@(node -p \"require('node-addon-api').include\")",
-                "<(hipdnn_sdk)/include",
-                "<(hipdnn_sdk)/include/hipdnn/frontend",
-                "<(hipdnn_sdk)/include/hipdnn/backend",
-                "<(hipdnn_sdk)/include/hipdnn/data_sdk",
-                "<(hipdnn_sdk)/include/hipdnn/flatbuffers_sdk",
-                "<(hipdnn_sdk)/include/hipdnn/plugin_sdk",
+                "<(hipdnn_napi_include_dir)",
+                "<@(hipdnn_include_dirs)",
             ],
             "defines": [
                 "NAPI_DISABLE_CPP_EXCEPTIONS",
-                "HIPDNN_FRONTEND_SKIP_JSON_LIB",
                 "__HIP_PLATFORM_AMD__",
+                "<@(hipdnn_defines)",
             ],
+            "libraries": ["<@(hipdnn_libraries)"],
             "cflags_cc": ["-std=c++17"],
             "conditions": [
                 [
                     "OS=='win'",
                     {
-                        "libraries": [
-                            "<(hipdnn_sdk)/lib/hipdnn_backend.lib",
-                            "<(hipdnn_sdk)/lib/amdhip64.lib",
-                        ],
                         "msvs_settings": {
                             "VCCLCompilerTool": {
                                 "AdditionalOptions": ["/std:c++17", "/EHsc"]
                             }
                         },
-                    },
-                ],
-                [
-                    "OS=='linux'",
-                    {
-                        "libraries": [
-                            "-L<(hipdnn_sdk)/lib",
-                            "-lhipdnn_backend",
-                            "-lamdhip64",
-                            "-Wl,-rpath,<(hipdnn_sdk)/lib",
-                        ],
-                        "include_dirs": ["/opt/rocm/include"],
-                        "library_dirs": ["/opt/rocm/lib"],
                     },
                 ],
             ],

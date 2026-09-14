@@ -31,7 +31,7 @@ To edit graphs:
 To also build and run graphs on a GPU, you additionally need:
 
 - An AMD GPU with ROCm installed.
-- A hipDNN SDK (headers and libraries).
+- An in-tree hipDNN build, or an installed hipDNN SDK (headers and libraries).
 - Node.js 20+, Python 3.9+, and a C++ compiler — on Windows, Visual Studio 2022
   with the "Desktop development with C++" workload; on Linux, GCC or Clang.
 
@@ -68,8 +68,31 @@ normal download.
 
 ## Turning on the GPU engine
 
-The GPU support lives in a small native add-on that is built separately. Point
-`HIPDNN_SDK` at your SDK folder and build it once:
+The GPU support lives in a small native add-on that links hipDNN. The easiest
+way to get one is the repository superbuild, which builds hipDNN, every DNN
+provider, and the Studio (including this add-on) in one go:
+
+```
+cmake --preset hipdnn-graph-studio -B build
+cmake --build build
+```
+
+Everything it produces stays in the build tree, under `build/graph-studio/`:
+`dist/` (web bundle), `native/` (the add-on plus its node-gyp intermediates),
+and `build-config.json`, which records the include paths, libraries and plugin
+directory of that build. Launch it from there with:
+
+```
+build\bin\start-graph-studio.bat        # Linux: build/bin/start-graph-studio.sh
+```
+
+Running from this directory works too — `start.bat` and `bun run build:native`
+pick up `<repo>/build` automatically, so the app finds hipDNN and the provider
+plugins with nothing else to set up. Point `HIPDNN_BUILD_DIR` at a different
+build directory to use that one instead.
+
+To build the add-on against an installed SDK rather than a build tree, set
+`HIPDNN_SDK` instead:
 
 Windows (PowerShell):
 
@@ -88,9 +111,11 @@ cd electron/native && bun install && cd ../..
 HIPDNN_SDK=/path/to/sdk bun run build:native
 ```
 
-Start the app with the same `HIPDNN_SDK` value set, so it can find the hipDNN
-libraries at runtime. The engine panel shows which device it found, or explains
-why it could not load.
+Without a build tree the outputs stay here instead (`dist/` and
+`electron/native/build/`); set `GRAPH_STUDIO_OUT_DIR` to move them elsewhere.
+Start the app with the same environment variables set, so it resolves the same
+hipDNN and the same outputs at runtime. The engine panel shows which device it
+found, or explains why it could not load.
 
 If the add-on is missing or fails to load, the app keeps working with Build and
 Execute switched off — rebuilding it is the only fix needed.
@@ -104,6 +129,9 @@ src/engine/     Talks to the GPU engine, with a no-op version for the browser
 src/platform/   File dialogs and settings storage, per platform
 electron/       Desktop shell (window, file dialogs, engine bridge)
 electron/native/  C++ add-on that calls hipDNN
+electron/paths.cjs  Finds hipDNN and the build-output locations
+electron/native/build-addon.cjs  Drives node-gyp against those locations
+CMakeLists.txt  Superbuild hook (the hipdnn-graph-studio component)
 ```
 
 ## Commands
