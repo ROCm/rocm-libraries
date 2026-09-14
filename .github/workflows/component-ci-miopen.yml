@@ -189,14 +189,15 @@ jobs:
           sudo apt-get install -y clang-tidy-23
           # Prepare MIOpen deps for clang-tidy in a venv
           python3 -m venv .venv
-          . .venv/bin/activate
+          VENV_BIN="$(pwd)/.venv/bin"
+          . $VENV_BIN/activate
           pip install 'cmake<4' https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz
           cp projects/miopen/requirements.txt /tmp/requirements.txt
           cp projects/miopen/rbuild.ini /tmp/rbuild.ini
           cp projects/miopen/dev-requirements.txt /tmp/dev-requirements.txt
           sed -i '/composablekernel/d; /half/d; /rocMLIR/d' /tmp/requirements.txt
-          cd /tmp && CMAKE_GENERATOR=Ninja .venv/bin/python -m pip install -r requirements.txt
-          cd /tmp && CMAKE_GENERATOR=Ninja .venv/bin/python -m rbuild prepare -s develop -d /tmp/miopen-deps
+          cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/python -m pip install -r requirements.txt
+          cd /tmp && CMAKE_GENERATOR=Ninja $VENV_BIN/python -m rbuild prepare -s develop -d /tmp/miopen-deps
       - name: Build
         if: matrix.job_id != 'clang-tidy'
         run: cmake --build build ${{ matrix.build_target }} -j$(nproc)
