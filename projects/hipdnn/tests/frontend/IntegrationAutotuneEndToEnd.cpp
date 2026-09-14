@@ -14,7 +14,29 @@
 #include <optional>
 #include <string>
 #if defined(_WIN32)
+// Only the macro names must not escape this translation unit, not the lean include
+// itself: define both only if not already defined, and undefine only what this block
+// defined, right after <windows.h>. Without NOMINMAX, <windows.h> leaks object-like
+// max/min macros that mangle the max()/min() overloads and std::numeric_limits<T>::max()
+// calls in every hipDNN header included below, including Bfloat16.hpp and Allocators.hpp
+// -- matches the guard in PlatformUtils.windows.hpp.
+#ifndef NOMINMAX
+#define NOMINMAX
+#define HIPDNN_UNDEF_NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#define HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
+#ifdef HIPDNN_UNDEF_NOMINMAX
+#undef NOMINMAX
+#undef HIPDNN_UNDEF_NOMINMAX
+#endif
+#ifdef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#undef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#endif
 #else
 #include <unistd.h>
 #endif
