@@ -1,0 +1,134 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "float",
+  "is_override_shape_enabled": false,
+  "name": "BatchnormInferenceTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "bias_tensor_uid": 2,
+        "inv_variance_tensor_uid": 3,
+        "mean_tensor_uid": 4,
+        "scale_tensor_uid": 5,
+        "x_tensor_uid": 1
+      },
+      "name": "BatchnormInference_0",
+      "outputs": {
+        "y_tensor_uid": 0
+      },
+      "type": "BatchnormInferenceAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "float",
+      "dims": [
+        1,
+        3,
+        14,
+        14
+      ],
+      "name": "BatchnormInference_0::Y",
+      "strides": [
+        588,
+        196,
+        14,
+        1
+      ],
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "float",
+      "dims": [
+        1,
+        3,
+        14,
+        14
+      ],
+      "name": "X",
+      "strides": [
+        588,
+        196,
+        14,
+        1
+      ],
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "float",
+      "dims": [
+        1,
+        3,
+        1,
+        1
+      ],
+      "name": "bias",
+      "strides": [
+        3,
+        1,
+        1,
+        1
+      ],
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "data_type": "float",
+      "dims": [
+        1,
+        3,
+        1,
+        1
+      ],
+      "name": "inv_variance",
+      "strides": [
+        3,
+        1,
+        1,
+        1
+      ],
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "data_type": "float",
+      "dims": [
+        1,
+        3,
+        1,
+        1
+      ],
+      "name": "mean",
+      "strides": [
+        3,
+        1,
+        1,
+        1
+      ],
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "data_type": "float",
+      "dims": [
+        1,
+        3,
+        1,
+        1
+      ],
+      "name": "scale",
+      "strides": [
+        3,
+        1,
+        1,
+        1
+      ],
+      "uid": 5,
+      "virtual": false
+    }
+  ]
+}

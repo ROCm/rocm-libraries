@@ -1,0 +1,119 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+#
+# Loop exercise. Same two steps as rtc-kernel-review.yaml, but the generator is told to
+# write a deliberately naive first kernel -- hard-coded dims, no bounds guard, assumed
+# contiguity -- so the reviewer has real defects to find and the loop has to iterate.
+#
+# Expected shape of a good run:
+#   iteration 1: naive kernel   -> review: changes_required, critical_count > 0
+#   iteration 2: repaired       -> review: pass, critical_count == 0, loop exits
+#
+# If it exits satisfied on iteration 1, the exercise failed: either the generator
+# ignored its instructions or the reviewer is not reading the code.
+#
+#   python orchestrate.py run configs/flows/rtc-kernel-review-naive.yaml \
+#       --input graph=test-graphs/matmul_fp32_batched.json --tee
+version: 1
+name: rtc-kernel-review-naive
+description: Loop exercise - naive first kernel, repaired from review feedback.
+
+inputs:
+  graph:
+    description: hipDNN graph JSON the kernel must satisfy
+    type: path
+    required: true
+  arch:
+    description: Target GPU architecture the kernel is written for
+    default: gfx1151
+
+vars:
+  kernel_dir: "${run.dir}/kernel"
+
+steps:
+  - id: review_cycle
+    loop:
+      max_iterations: 3
+      until: "${steps.review.outputs.critical_count} == 0"
+      on_exhausted: fail
+      # A step that fails takes its whole iteration down and the cycle starts over
+      # with the reason recorded in feedback.md. Retrying one step in place would
+      # re-ask a question whose inputs have not changed.
+      on_step_failure: retry
+      feedback_from: "${steps.review.outputs.feedback}"
+    steps:
+
+      - id: generate
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "json"
+          - "--permission-mode"
+          - "acceptEdits"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${run.dir}"
+        prompt_file: ../prompts/generate_kernel_naive.md
+        result_file: "${loop.attempt_dir}/generate.json"
+        result_schema:
+          required: [kernel_path, entry_point, launch_config, assumptions]
+        timeout: 1800
+        outputs:
+          kernel_path: { json_file: result, path: "$.kernel_path", type: path }
+          # The one authoritative kernel path; see rtc-kernel-review.yaml.
+          expected_kernel: { file: "${vars.kernel_dir}/kernel.hip", type: path }
+          kernel_sha: { sha256: "${vars.kernel_dir}/kernel.hip" }
+          entry_point: { json_file: result, path: "$.entry_point" }
+          assumptions: { json_file: result, path: "$.assumptions", type: json }
+        assert:
+          - that: "${steps.generate.outputs.kernel_path} == ${steps.generate.outputs.expected_kernel}"
+            message: "the kernel must be written to <run>/kernel/kernel.hip - a kernel written elsewhere is reviewed but never hash-checked"
+
+      # Fresh session. Write stays enabled -- it is how the reviewer produces its own
+      # result file -- but the surgical edit tools are denied, and the kernel is
+      # hash-checked below. A reviewer that quietly fixes the kernel drives
+      # critical_count to zero for the wrong reason and the loop reports success on
+      # work the generator never did.
+      - id: review
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "json"
+          - "--permission-mode"
+          - "acceptEdits"
+          - "--disallowedTools"
+          - "Edit"
+          - "MultiEdit"
+          - "NotebookEdit"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${run.dir}"
+        prompt_file: ../prompts/review_kernel.md
+        result_file: "${loop.attempt_dir}/review.json"
+        result_schema:
+          required: [verdict, critical_count, critical_issues, feedback]
+        timeout: 1800
+        outputs:
+          verdict: { json_file: result, path: "$.verdict" }
+          # Measured from the issue list, not from the agent's own tally.
+          critical_count: { json_file: result, path: "$.critical_issues", type: count }
+          reported_critical_count: { json_file: result, path: "$.critical_count", type: int }
+          kernel_sha: { sha256: "${vars.kernel_dir}/kernel.hip" }
+          feedback: { json_file: result, path: "$.feedback" }
+        assert:
+          - that: "${steps.review.outputs.reported_critical_count} == ${steps.review.outputs.critical_count}"
+            message: "critical_count disagrees with the number of entries in critical_issues"
+          - that: "${steps.review.outputs.verdict} == pass or ${steps.review.outputs.verdict} == changes_required"
+            message: "verdict must be exactly 'pass' or 'changes_required'"
+          - that: "${steps.review.outputs.critical_count} == 0 or ${steps.review.outputs.verdict} == changes_required"
+            message: "review listed critical issues but returned verdict 'pass'"
+          - that: "${steps.review.outputs.kernel_sha} == ${steps.generate.outputs.kernel_sha}"
+            message: "the kernel changed during review - the reviewer edited what it was reviewing"
+          - that: "${steps.review.outputs.critical_count} > 0 or ${steps.review.outputs.verdict} == pass"
+            message: "review returned verdict 'changes_required' with zero critical issues"

@@ -3,6 +3,7 @@
 
 #include "bindings.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <nanobind/nanobind.h>
@@ -243,12 +244,27 @@ public:
                         "hipStreamWaitValue32");
     }
 
-    // Release the gate from the (otherwise idle) control stream; the work stream
-    // proceeds device-side, no host sync needed.
+    // Release the gate so the work stream proceeds device-side; no host sync needed.
+    //
+    // On Windows a hipStreamWriteValue32 issued from the control stream never becomes
+    // visible to a stream blocked in hipStreamWaitValue32: the work stream never drains
+    // and the HIP PAL backend spins forever on "PAL fence isn't ready!". Verified with a
+    // standalone probe (no hipDNN, no MIOpen): arm + stream-write release hangs for both
+    // hipStreamWaitValueGte and hipStreamWaitValueEq, while releasing the same signal
+    // with a host store drains the work stream immediately in both cases.
+    //
+    // hipMallocSignalMemory is host-accessible, so store directly. The seq_cst fence
+    // publishes the write before the device observes the signal.
     void release()
     {
         throwIfDestroyed();
+#ifdef _WIN32
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+        *static_cast<volatile uint32_t*>(_signal) = 1U;
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+#else
         throwOnHipError(hipStreamWriteValue32(_control, _signal, 1U, 0), "hipStreamWriteValue32");
+#endif
     }
 
     void destroy() noexcept
