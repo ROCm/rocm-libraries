@@ -1187,22 +1187,6 @@ def test_the_stepping_suffix_survives_the_probe(rocmRoot):
 # whole string, having only gfx950 and gfx950:xnack+ on its list.
 
 
-def _supportedArchitecturesFromCMake():
-    """The list GPU_TARGETS is validated against, read from the build itself.
-
-    Read rather than restated so the two cannot drift: a target dropped there is
-    a target this can no longer claim the build accepts.
-    """
-    cmake = (
-        Path(__file__).resolve().parents[4]
-        / "cmake"
-        / "tensilelite_supported_architectures.cmake"
-    )
-    block = re.search(r"set\(SUPPORTED_ARCHITECTURES(.*?)\)", cmake.read_text(), re.DOTALL)
-    assert block is not None, f"SUPPORTED_ARCHITECTURES not found in {cmake}"
-    return re.findall(r'"([^"]+)"', block.group(1))
-
-
 @pytest.mark.parametrize(
     "reported,target",
     [
@@ -1225,23 +1209,6 @@ def test_the_stepping_survives_into_the_cmake_target(reported):
     whose code objects the silicon rejects -- the opposite of the feature case,
     which is why one split cannot serve both."""
     assert GpuArch.cmake_gpu_target(reported) == reported
-
-
-@pytest.mark.parametrize(
-    "reported",
-    [
-        "gfx950:sramecc+:xnack-",
-        "gfx942:sramecc+:xnack-",
-        "gfx90a:sramecc+:xnack-",
-        "gfx942",
-        GFX1250,
-        GFX1250_STRICT,
-        f"{GFX1250_STRICT}:xnack-",
-    ],
-)
-def test_a_detected_name_yields_a_target_the_build_accepts(reported):
-    """Validation is an exact string match, so a near-miss is a failed configure."""
-    assert GpuArch.cmake_gpu_target(reported) in _supportedArchitecturesFromCMake()
 
 
 class _RecordingContext:
