@@ -466,9 +466,20 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
     EXPECT_EQ(knob.default_value.AsIntValue()->value, 256);
 }
 
-TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValues)
+/// Admits every kernel, so the catalog holds both dtypes -- the case an ordinal exists for.
+inline bool acceptEveryKernel(const MatchContext& /*context*/,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& /*kernel*/)
 {
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    return true;
+}
+
+TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsAnOrdinal)
+{
+    // Supersedes GetCustomKnobsSkipsFieldsWithNoIntegerValues, which pinned the gap rather
+    // than a contract: a string field was advertised as nothing, so the two block_size=64
+    // kernels this catalog holds could not be told apart through the knob surface.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
     const TestDeviceResolver resolver;
@@ -477,8 +488,44 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValue
     const TestGraph graph(makeGraphId(0x95));
     const auto knobs = builder.getCustomKnobs(0, graph);
 
-    ASSERT_EQ(knobs.size(), 1U);
-    EXPECT_EQ(knobs.front().knob_id, BLOCK_SIZE);
+    ASSERT_EQ(knobs.size(), 2U);
+    const auto dtype = std::find_if(
+        knobs.begin(), knobs.end(), [](const auto& knob) { return knob.knob_id == DTYPE; });
+    ASSERT_NE(dtype, knobs.end());
+    ASSERT_TRUE(dtype->constraint.AsIntConstraint() != nullptr);
+    // "FLOAT" then "HALF": the engine's distinct values in the order that numbers them.
+    auto advertised = dtype->constraint.AsIntConstraint()->valid_values;
+    std::sort(advertised.begin(), advertised.end());
+    EXPECT_EQ(advertised, (std::vector<int64_t>{0, 1}));
+    // The caller is told these are indices; 0 and 1 are not dtypes.
+    EXPECT_NE(dtype->description.find("ordinal"), std::string::npos);
+}
+
+TEST(TestIngestorGenericPlanBuilder, AnOrdinalPinSelectsTheKernelCarryingThatValue)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    // The catalog is {64 FLOAT, 256 FLOAT, 64 HALF} and the score is the block size, so
+    // unpinned the winner is 256 FLOAT. Pinning dtype alone -- ordinal 1, "HALF" -- selects
+    // a kernel the block_size knob cannot reach on its own: 64 names two of them.
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeIntKnobEngineConfig(fbb, DTYPE, 1);
+    const TestGraph graph(makeGraphId(0x96));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().kernel().getStringMetadata(DTYPE), "HALF");
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
 }
 
 TEST(TestIngestorGenericPlanBuilder, HonorsAnExplicitKnobSettingOverTheHeuristicDefault)
