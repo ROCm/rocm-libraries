@@ -193,6 +193,7 @@ Each `gen.py` wraps a generator from `rocke.examples` or `rocke.instances`. The 
 | `python/rocke/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
 | `python/rocke/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
 | `dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
+| `dsl_docs/fusion/adding_fused_kernels.md` | Fused-kernel decision guide: when a fusion pays, when it doesn't, how to land one. |
 | `dsl_docs/` | This documentation tree. |
 | `python/rocke/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
 | `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |
