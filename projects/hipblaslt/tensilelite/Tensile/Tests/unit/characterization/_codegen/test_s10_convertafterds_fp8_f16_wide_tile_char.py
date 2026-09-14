@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from config_harness import emit_kernels_from_config
+from config_harness import assert_config_emits_golden
 
 pytestmark = pytest.mark.unit
 
@@ -42,22 +42,6 @@ _CONFIG = os.path.join(
 )
 
 
-def test_s10_convertafterds_fp8_f16_wide_tile_emits():
-    """ConvertAfterDS fp8->f16 wide-tile config emits kernels, all err==0."""
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
-    assert len(results) >= 1, f"expected >=1 kernel, got {len(results)}"
-    for base, src, err in results:
-        assert err == 0, f"kernel {base!r} emitted with err={err}"
-        assert base.startswith("Cijk_")
-        assert ".amdgcn_target" in src, f"kernel {base!r}: missing .amdgcn_target"
-        assert "gfx950" in src, f"kernel {base!r}: wrong arch in assembly"
-
-
 def test_s10_convertafterds_fp8_f16_wide_tile_golden(snapshot):
     """P3 golden: order-invariant {basename, err} digest of the emit."""
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
-    digest = sorted(
-        ({"basename": b, "err": e} for (b, _s, e) in results),
-        key=lambda d: d["basename"],
-    )
-    assert digest == snapshot
+    assert_config_emits_golden(_CONFIG, _ARCH, snapshot, limit=8, validate_source=True)
