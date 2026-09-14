@@ -436,9 +436,13 @@ TEST_F(TestGpuProfilingControlDescriptor, WatchdogBreaksSelfInflictedDeadlock)
     constexpr auto TIMEOUT = std::chrono::milliseconds(300);
     hipdnn_data_sdk::utilities::StallGate gate(TIMEOUT);
     ASSERT_TRUE(gate.isUsable());
+    // Sampled before arm(), because arm() sets the deadline to its own now() + TIMEOUT.
+    // Starting the clock after arm() returns puts that gap outside the measured window, so
+    // `waited` comes out just under TIMEOUT and the bound below only holds when watchdog
+    // wakeup latency happens to cover the difference. Measured under TSAN: 299.995 ms.
+    const auto begin = std::chrono::steady_clock::now();
     ASSERT_TRUE(gate.arm(_testStream));
 
-    const auto begin = std::chrono::steady_clock::now();
     // Never returns unless something else releases the gate.
     EXPECT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
     const auto waited = std::chrono::steady_clock::now() - begin;
