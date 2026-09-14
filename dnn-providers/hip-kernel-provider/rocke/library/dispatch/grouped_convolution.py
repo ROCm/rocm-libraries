@@ -497,6 +497,19 @@ class ConvGroupedSpec:
         ]
         if self.direction in ("wgrad", "dgrad") and self.split_k != 1:
             parts.append(f"spk{self.split_k}")
+        # These two change the emitted body, so they have to reach the name --
+        # this is the layer whose names key the host-side compile cache, and the
+        # instance-level WgradConvSpec.kernel_name() already tags both.
+        #   lds_k_outer: different LDS tile shape and a transpose-read operand
+        #     fetch rather than a transpose-on-store.
+        #   force_deterministic: to_wgrad_spec promotes it to two_stage when the
+        #     resolved split_k > 1, which adds the `ws` workspace pointer to the
+        #     signature and a second (reduce) kernel -- an ABI change, not just a
+        #     codegen one.
+        if self.direction in ("wgrad", "dgrad") and self.lds_k_outer:
+            parts.append("kouter")
+        if self.direction == "wgrad" and self.force_deterministic:
+            parts.append("det")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -1122,7 +1135,11 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
 
 
 def _wgrad_lds_k_outer(req: "ConvGroupedRequest", warp_tile_mn: int) -> bool:
-    """Whether the gfx950 wgrad candidate should use the K-outer LDS layout.
+    """Whether a wgrad candidate should use the K-outer LDS layout.
+
+    Used by both the gfx950 (wave64 MFMA) and gfx1250 (wave32 WMMA) candidates;
+    the wave size is resolved from ``req.arch`` below rather than assumed, so
+    the one gate covers both regimes.
 
     wgrad's stride-1 global axis is the GEMM *free* axis, so an M-outer LDS tile
     forces a transpose on store: one ``ds_write_b16`` per element, all of them
@@ -1135,8 +1152,9 @@ def _wgrad_lds_k_outer(req: "ConvGroupedRequest", warp_tile_mn: int) -> bool:
     field docs on ``WgradConvSpec``.
 
     Gated to exactly what the transpose-read lane mapping is validated for:
-    gfx950 (the instruction does not exist on gfx942), wave64 MFMA, 16-bit A/B
-    operands, and a 16- or 32-wide atom edge.
+    16-bit A/B operands, and either wave64 MFMA on gfx950 (``ds_read_b64_tr_b16``
+    does not exist on gfx942) with a 16- or 32-wide atom edge, or wave32 WMMA on
+    gfx1250 (``ds_load_tr16_b128``) with the 16-wide edge.
 
     Delegates so dispatch and the sweep driver cannot drift: this used to be a
     second copy of the gate that compared the module constant against a tuple
@@ -1440,6 +1458,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             pipeline=_PIPELINE,
             epilogue="default",
             split_k=1,
+            lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
         )
 
     def support(req: OperatorRequest) -> Tuple[bool, str]:
@@ -1479,6 +1498,7 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=1,
+            lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             force_deterministic=req.force_deterministic,
             name=name,
         )

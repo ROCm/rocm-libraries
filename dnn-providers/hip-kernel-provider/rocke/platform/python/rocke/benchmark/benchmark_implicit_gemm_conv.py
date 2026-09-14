@@ -1519,6 +1519,19 @@ def _build_wgrad_two_stage_one(args_tuple):
         epilogue=epilogue,
         split_k=resolved_split_k,
         two_stage=True,
+        # Same per-combo K-outer gate the single-stage leg uses
+        # (_build_wgrad_one). Without it the two-stage leg builds M-outer
+        # kernels while the atomic leg builds K-outer ones, so the two sets of
+        # timings the driver prints side by side are not comparable and the
+        # K-outer win is never measured on the deterministic path.
+        lds_k_outer=WgradConvSpec.default_lds_k_outer(
+            arch=arch,
+            dtype_a=dtype,
+            dtype_b=dtype,
+            warp_tile_m=warp_tile_mn,
+            warp_tile_n=warp_tile_mn,
+            wave_size=target.wave_size,
+        ),
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:

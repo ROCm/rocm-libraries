@@ -119,9 +119,19 @@ int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
-    /* split_k <= 1: plain store, always deterministic.
-     * split_k > 1 + two_stage: workspace-reduce path, deterministic.
-     * split_k > 1 without two_stage: atomic adds, non-deterministic. */
+    /* split_k == 1 (and the -1 auto sentinel, which only ever resolves to >= 1):
+     *   plain store, always deterministic.
+     * split_k > 1 + two_stage (or force_deterministic, which the builder
+     *   promotes to two_stage at split_k > 1): workspace-reduce, deterministic.
+     * split_k > 1 without either: atomic adds, non-deterministic.
+     * split_k == 0 is the RUNTIME-degree encoding: the degree rides a kernel
+     *   argument and the epilogue is always packed atomics. It can never be
+     *   promoted to two-stage -- both effective_two_stage_v and the builder's
+     *   promotion require sk > 1 -- so it is never deterministic, and
+     *   force_deterministic cannot make it so. Treating 0 as "<= 1" here would
+     *   tell a host that an atomic kernel produces reproducible dW. */
+    if(s->split_k == 0)
+        return false;
     return (s->split_k <= 1) || s->two_stage || s->force_deterministic;
 }
 
@@ -239,8 +249,18 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         n_flags++;
     }
 
+    /* Tag the EFFECTIVE two-stage flag, not the raw field.  The builder promotes
+     * force_deterministic to two-stage at split_k > 1 into a local
+     * (effective_two_stage) without writing back to spec->two_stage, so naming
+     * off s->two_stage would emit a two-stage body -- which carries an extra
+     * `ws` workspace pointer parameter and needs a Stage-2 reduce launch --
+     * under a symbol identical to the split-K atomic kernel built from the same
+     * spec with force_deterministic=false.  That is both an ABI collision for a
+     * cache keyed on the kernel name (same hazard the lds_k_pad comment above
+     * describes) and a byte-identity break against Python, which promotes by
+     * rewriting the spec before the IRBuilder is named. */
     flag_names[n_flags] = "twostage";
-    flag_on[n_flags] = s->two_stage ? 1 : 0;
+    flag_on[n_flags] = (s->two_stage || (s->force_deterministic && s->split_k > 1)) ? 1 : 0;
     n_flags++;
 
     return rocke_kernel_name_join(

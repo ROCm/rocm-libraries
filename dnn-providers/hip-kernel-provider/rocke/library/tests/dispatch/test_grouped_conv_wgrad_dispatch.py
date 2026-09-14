@@ -328,5 +328,89 @@ class TestGroupedDgradDispatch(unittest.TestCase):
         inst.validate()
 
 
+class TestGfx1250WgradKOuterReachable(unittest.TestCase):
+    """The gfx1250 wgrad candidate must actually enable the K-outer layout.
+
+    ``WgradConvSpec.default_lds_k_outer`` returns True for every fp16/bf16
+    gfx1250 wgrad request (wave32, 16x16 atom edge), but the candidate used to
+    never ask -- so the headline transpose-read path was unreachable through
+    library dispatch and was exercised only by the sweep driver and the
+    direct-build tests.
+    """
+
+    def _spec(self, dtype="fp16"):
+        return dispatch_conv_grouped(_wgrad("gfx1250", G=4, dtype=dtype)).spec
+
+    def test_dispatch_spec_enables_k_outer(self):
+        for dtype in ("fp16", "bf16"):
+            self.assertTrue(
+                self._spec(dtype).lds_k_outer,
+                f"gfx1250 wgrad dispatch must enable lds_k_outer for {dtype}",
+            )
+
+    def test_decision_survives_into_the_instance_spec(self):
+        r = dispatch_conv_grouped(_wgrad("gfx1250", G=4))
+        inst = r.spec.to_wgrad_spec(_problem(r.request))
+        self.assertTrue(inst.lds_k_outer)
+        inst.validate()
+
+    def test_agrees_with_the_selection_policy(self):
+        # Dispatch must not hand-roll the gate; it must match the one policy
+        # function the sweep driver also calls.
+        from rocke.core.arch import ArchTarget
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        spec = self._spec()
+        self.assertEqual(
+            spec.lds_k_outer,
+            WgradConvSpec.default_lds_k_outer(
+                arch="gfx1250",
+                dtype_a="fp16",
+                dtype_b="fp16",
+                warp_tile_m=spec.warp_tile_mn,
+                warp_tile_n=spec.warp_tile_mn,
+                wave_size=ArchTarget.from_gfx("gfx1250").wave_size,
+            ),
+        )
+
+
+class TestGroupedSpecKernelNameDistinguishesBody(unittest.TestCase):
+    """Dispatch kernel names must separate specs that emit different bodies.
+
+    This is the layer whose names key the host-side compile cache, so two specs
+    that lower differently sharing one name is a cache-collision bug, not a
+    cosmetic one.
+    """
+
+    def test_k_outer_changes_the_name(self):
+        from dispatch.grouped_convolution import ConvGroupedSpec
+
+        base = dispatch_conv_grouped(_wgrad("gfx950", G=4)).spec
+        from dataclasses import replace
+
+        on = replace(base, lds_k_outer=True)
+        off = replace(base, lds_k_outer=False)
+        self.assertNotEqual(
+            on.kernel_name(),
+            off.kernel_name(),
+            "lds_k_outer changes the LDS tile shape and operand fetch",
+        )
+        self.assertIn("kouter", on.kernel_name())
+        assert isinstance(base, ConvGroupedSpec)
+
+    def test_force_deterministic_changes_the_name(self):
+        from dataclasses import replace
+
+        base = dispatch_conv_grouped(_wgrad("gfx942", G=4)).spec
+        det = replace(base, force_deterministic=True)
+        plain = replace(base, force_deterministic=False)
+        self.assertNotEqual(
+            det.kernel_name(),
+            plain.kernel_name(),
+            "force_deterministic promotes to two_stage, which adds the `ws` "
+            "workspace pointer to the signature -- an ABI change",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

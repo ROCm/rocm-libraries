@@ -497,12 +497,25 @@ class WgradConvSpec:
                     f"got cpg={self.problem.cpg} (C={self.problem.C}, groups={self.problem.groups})"
                 )
         # The cshuffle requirement is an atomic-epilogue constraint only. Neither
-        # split_k == 1 (direct store) nor two_stage (f32 workspace store, which
-        # force_deterministic is promoted to above) emits packed atomics, so the
-        # default epilogue is fine for both. Gating on _needs_atomic rather than
-        # on dtype alone keeps the non-atomic 16-bit output path reachable -- it
-        # is the only one WMMA wgrad can use, since WMMA rejects cshuffle.
-        _needs_atomic = (self.split_k == 0 or self.split_k > 1) and not self.two_stage
+        # split_k == 1 (direct store) nor two_stage (f32 workspace store) emits
+        # packed atomics, so the default epilogue is fine for both. Gating on
+        # _needs_atomic rather than on dtype alone keeps the non-atomic 16-bit
+        # output path reachable -- it is the only one WMMA wgrad can use, since
+        # WMMA rejects cshuffle.
+        #
+        # force_deterministic is folded in here rather than relied on being
+        # already promoted: build_implicit_gemm_conv_wgrad promotes it to
+        # two_stage before calling validate(), but validate() is a public method
+        # on a public dataclass and callers reach it directly on un-promoted
+        # specs. Without this term such a spec is reported valid by
+        # is_valid_wgrad_spec and then raises here -- the two predicates must
+        # agree. Mirrors effective_two_stage_v in the C++ is_valid_wgrad_spec.
+        _effective_two_stage = self.two_stage or (
+            self.force_deterministic and self.split_k > 1
+        )
+        _needs_atomic = (
+            self.split_k == 0 or self.split_k > 1
+        ) and not _effective_two_stage
         if (
             _needs_atomic
             and self.data.dtype_d in ("bf16", "fp16")
@@ -775,9 +788,34 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     sk = spec.split_k
     if sk < -1:
         return False, f"split_k must be -1 (auto), 0 (runtime), 1, or >1 (got {sk})"
+    # Mirror of validate(): two_stage has nothing to reduce at split_k == 1.
+    # Without this the public predicate blesses a spec that then raises inside
+    # the builder's spec.validate() call.
+    if spec.two_stage and sk == 1:
+        return False, (
+            "two_stage=True requires split_k > 1 (or split_k=-1 for auto); "
+            "with split_k=1 there is nothing to reduce and two_stage is a no-op"
+        )
     # -1 = auto: resolved at build time; always valid at the spec-check stage.
     # 0 = runtime atomic; validate constraints identically to >1 without a degree.
     _is_atomic = sk == 0 or sk > 1
+    # force_deterministic is promoted to two_stage by the builder, but this
+    # predicate is public and is reached on un-promoted specs, so fold it in.
+    # Mirrors effective_two_stage_v in the C++ is_valid_wgrad_spec.
+    _effective_two_stage = spec.two_stage or (spec.force_deterministic and sk > 1)
+    # The two-stage workspace-store epilogue is MFMA-only. The packed *atomic*
+    # epilogue does have a WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so
+    # split-K itself is fine on wave32 -- but _emit_wgrad_workspace_store_epilogue
+    # calls c_warp_params(atom), and `atom` is None on the WMMA path. The
+    # epilogue dispatch tests _is_two_stage BEFORE the wmma branch, so a
+    # two-stage wave32 spec reaches the MFMA-only emitter and dies with an
+    # AttributeError rather than a validation error. Reject it here, where every
+    # pre-filter (dispatch support(), the sweep drivers, benchmarks) can see it.
+    if _effective_two_stage and family == "wmma":
+        return False, (
+            f"two-stage deterministic wgrad is CDNA-only (got family 'wmma' on "
+            f"{arch}); the workspace-store epilogue has no WMMA variant"
+        )
     if _is_atomic and spec.data.dtype_d not in ("fp32", "bf16", "fp16"):
         return False, (
             f"split_k atomic requires dtype_d in fp32/bf16/fp16 "
@@ -800,12 +838,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # store, and under two_stage it is an f32 workspace store; neither emits
     # packed atomics, so 'default' is fine. split_k == 1 + 'default' is also the
     # only combination WMMA wgrad can use, since WMMA rejects cshuffle outright.
-    #
-    # Unlike validate(), this predicate is public and is called by dispatch and
-    # the benchmarks on specs that have NOT been through the builder's
-    # force_deterministic -> two_stage promotion, so fold that in here. Mirrors
-    # effective_two_stage_v in the C++ is_valid_wgrad_spec.
-    _effective_two_stage = spec.two_stage or (spec.force_deterministic and sk > 1)
+    # (_effective_two_stage is computed above, with the split-K validity gates.)
     if (
         _is_atomic
         and not _effective_two_stage
@@ -943,8 +976,19 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
 
     _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
     _lds_layout = spec.effective_lds_layout()
-    _a_shape = _lds_layout.storage_shape(spec.tile_m)
-    _b_shape = _lds_layout.storage_shape(spec.tile_n)
+    if spec.lds_k_outer:
+        # The K-outer tile transposes the LDS allocation: the builder allocates
+        # (tile_k, tile_mn + _KOUTER_PAD) rather than the M-outer
+        # (tile_mn, tile_k + pad). Charging the M-outer shape here under-counts
+        # whenever tile_k > tile_mn -- for 32x32x64 that is 1 KB per spec -- so a
+        # spec that overflows the cap passes validation and fails later at
+        # smem_alloc. Keep this in sync with the _KOUTER_PAD block in the builder.
+        _KOUTER_PAD = 0 if spec.async_dma else 8
+        _a_shape = (spec.tile_k, spec.tile_m + _KOUTER_PAD)
+        _b_shape = (spec.tile_k, spec.tile_n + _KOUTER_PAD)
+    else:
+        _a_shape = _lds_layout.storage_shape(spec.tile_m)
+        _b_shape = _lds_layout.storage_shape(spec.tile_n)
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes

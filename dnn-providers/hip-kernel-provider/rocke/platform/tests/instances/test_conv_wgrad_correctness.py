@@ -1691,5 +1691,236 @@ class TestConvWgradTwoStage(unittest.TestCase):
         self._check(shape, "bf16", "mem", groups=2, seed=42)
 
 
+class TestWgradValidatorAgreement(unittest.TestCase):
+    """``is_valid_wgrad_spec`` and ``validate()`` must accept the same specs.
+
+    These are the two halves of one contract: callers pre-filter with the public
+    predicate and the builder then calls ``validate()``. Any spec the predicate
+    blesses but ``validate()`` rejects surfaces as an exception thrown *after* a
+    caller was told the spec was fine, which is exactly the shape of bug a
+    pre-filter exists to prevent.
+    """
+
+    def _spec(self, **kw):
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        base = dict(
+            problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="bf16"),
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        base.update(kw)
+        return WgradConvSpec(**base)
+
+    def _agree(self, spec, arch="gfx950"):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        ok, why = is_valid_wgrad_spec(spec, arch)
+        try:
+            spec.validate()
+            raised = None
+        except ValueError as e:
+            raised = str(e)
+        if ok and raised is not None:
+            self.fail(f"is_valid_wgrad_spec said valid but validate() raised: {raised}")
+        return ok, why
+
+    def test_force_deterministic_accepted_by_both(self):
+        # force_deterministic is promoted to two_stage by the builder, so the
+        # workspace-store epilogue applies and 'default' is legal for 16-bit dW.
+        # validate() used to miss the promotion and demand cshuffle.
+        ok, why = self._agree(
+            self._spec(split_k=4, force_deterministic=True, epilogue="default")
+        )
+        self.assertTrue(ok, why)
+
+    def test_plain_atomic_still_requires_cshuffle(self):
+        # The exemption must not leak to the genuinely atomic path.
+        ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
+        self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
+
+    def test_force_deterministic_does_not_exempt_runtime_degree(self):
+        # split_k == 0 is the runtime-degree atomic encoding and can never be
+        # promoted to two-stage, so it still needs cshuffle.
+        ok, _ = self._agree(
+            self._spec(split_k=0, force_deterministic=True, epilogue="default")
+        )
+        self.assertFalse(ok, "split_k=0 is atomic regardless of force_deterministic")
+
+    def test_two_stage_with_split_k_1_rejected_by_predicate(self):
+        # validate() and the C++ both reject this; the public predicate used to
+        # bless it and let the builder raise.
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
+        ok, why = self._agree(
+            self._spec(
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+                split_k=1,
+                two_stage=True,
+            )
+        )
+        self.assertFalse(ok, "two_stage with split_k=1 must be rejected")
+        self.assertIn("two_stage", why)
+
+
+class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
+    """Two-stage wgrad must be rejected on WMMA rather than crashing the builder.
+
+    ``_emit_wgrad_workspace_store_epilogue`` is MFMA-only -- it calls
+    ``c_warp_params(atom)`` and ``atom`` is None on wave32 -- and the epilogue
+    dispatch tests ``_is_two_stage`` before the WMMA branch. Without a validator
+    gate a two-stage wave32 spec reaches that emitter and dies with an
+    ``AttributeError``, which no caller pre-filters against.
+    """
+
+    def _gfx1250_spec(self, **kw):
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        base = dict(
+            problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="default",
+        )
+        base.update(kw)
+        return WgradConvSpec(**base)
+
+    def test_two_stage_rejected_on_wmma(self):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        ok, why = is_valid_wgrad_spec(
+            self._gfx1250_spec(split_k=4, two_stage=True), "gfx1250"
+        )
+        self.assertFalse(ok, "two-stage on WMMA must be rejected")
+        self.assertIn("CDNA", why)
+
+    def test_two_stage_build_raises_value_error_not_attribute_error(self):
+        # The failure mode that matters: a clean ValueError a caller can handle,
+        # never an AttributeError out of the epilogue emitter.
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
+
+        with self.assertRaises(ValueError):
+            build_implicit_gemm_conv_wgrad(
+                self._gfx1250_spec(split_k=4, two_stage=True), arch="gfx1250"
+            )
+
+    def test_split_k_atomic_still_valid_on_wmma(self):
+        # The gate is two-stage-specific: the packed atomic epilogue DOES have a
+        # WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so plain split-K must
+        # stay reachable on wave32.
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        ok, why = is_valid_wgrad_spec(self._gfx1250_spec(split_k=4), "gfx1250")
+        self.assertTrue(ok, f"WMMA split-K atomic must stay valid: {why}")
+
+
+class TestWgradKOuterLdsBudget(unittest.TestCase):
+    """The LDS budget check must charge the shape the builder actually allocates.
+
+    Under ``lds_k_outer`` the builder allocates ``(tile_k, tile_mn + _KOUTER_PAD)``
+    while the validator used to charge the M-outer ``(tile_mn, tile_k + pad)``.
+    The two agree only when ``tile_k == tile_m == tile_n``.
+
+    Note on reachability: the divergence is bounded by
+    ``2 * pad * (tile_k - tile_mn) * dtype_bytes``, i.e. at most ~1.5 KB over the
+    legal tile space, against a 160 KB gfx950 cap -- so no *currently reachable*
+    spec is accepted by one accounting and rejected by the other. This is
+    correctness hardening, and it is asserted on the reported byte count rather
+    than on an accept/reject flip, because there is no such flip to assert.
+    """
+
+    def _spec(self, tile_m, tile_n, tile_k):
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        return WgradConvSpec(
+            problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            lds_k_outer=True,
+            unroll_k=True,
+        )
+
+    def test_reported_budget_uses_the_k_outer_shape(self):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        tile_m = tile_n = 512
+        tile_k = 64
+        spec = self._spec(tile_m, tile_n, tile_k)
+        ok, why = is_valid_wgrad_spec(spec, "gfx950")
+        self.assertFalse(ok, "this tile is over the gfx950 LDS cap either way")
+
+        pad = 0 if spec.async_dma else 8
+        double = 2 if (spec.async_dma or spec.unroll_k) else 1
+        k_outer_bytes = (tile_k * (tile_m + pad) + tile_k * (tile_n + pad)) * 2 * double
+        m_outer = spec.effective_lds_layout()
+        m_outer_bytes = (
+            sum(
+                d[0] * d[1]
+                for d in (
+                    m_outer.storage_shape(tile_m),
+                    m_outer.storage_shape(tile_n),
+                )
+            )
+            * 2
+            * double
+        )
+        self.assertNotEqual(
+            k_outer_bytes,
+            m_outer_bytes,
+            "test is vacuous unless the two accountings differ",
+        )
+        self.assertIn(
+            f"LDS budget {k_outer_bytes} bytes",
+            why,
+            f"validator should charge the K-outer shape ({k_outer_bytes}), "
+            f"not the M-outer one ({m_outer_bytes}); got: {why}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
