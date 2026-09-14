@@ -197,6 +197,7 @@ public:
                 // than an empty cache.
                 for(size_t rank = 0; rank < ranked->size(); ++rank)
                 {
+                    std::string failure;
                     try
                     {
                         auto plan = std::make_unique<GenericPlan<THandle>>(
@@ -214,14 +215,27 @@ public:
                         executionContext.setPlan(std::move(plan));
                         return;
                     }
+                    catch(const HipdnnPluginException& error)
+                    {
+                        // A malformed descriptor is the author's mistake, not a kernel that
+                        // happens not to fit this graph: falling past it would hide the fault
+                        // and silently serve a different kernel than the one authored.
+                        if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                        {
+                            throw;
+                        }
+                        failure = error.what();
+                    }
                     catch(const std::exception& error)
                     {
-                        HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                               << _engine.name << "' could not build a plan for "
-                                               << toString((*ranked)[rank].kernelId) << " at rank "
-                                               << rank << ": " << error.what()
-                                               << "; trying the next ranked entry");
+                        failure = error.what();
                     }
+
+                    HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                           << _engine.name << "' could not build a plan for "
+                                           << toString((*ranked)[rank].kernelId) << " at rank "
+                                           << rank << ": " << failure
+                                           << "; trying the next ranked entry");
                 }
 
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
@@ -294,6 +308,10 @@ public:
                                                     << " before knob filtering), ranked front "
                                                     << toString(filtered.front().kernelId));
 
+        // Every candidate walk applies the same policy: an unbuildable candidate is a reason
+        // to carry, a malformed descriptor stops the build. Absorbing here what the others
+        // rethrow would make the diagnosis a consequence of a tuning setting.
+        std::vector<std::string> benchmarkFailures;
         std::vector<typename BenchmarkPlan<THandle>::Candidate> candidates;
         candidates.reserve(filtered.size());
         for(const auto& kernel : filtered)
@@ -306,17 +324,35 @@ public:
                          _stateManager.getDispatchDetails(kernel), context, catalog.bound),
                      kernel.packId,
                      kernel.dispatchId});
+                continue;
+            }
+            catch(const HipdnnPluginException& error)
+            {
+                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                {
+                    throw;
+                }
+                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
             }
             catch(const std::exception& error)
             {
-                HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                       << _engine.name << "' dropped benchmarking candidate '"
-                                       << toString(kernel.kernelId) << "': " << error.what());
+                benchmarkFailures.emplace_back(toString(kernel.kernelId) + ": " + error.what());
             }
+
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '" << _engine.name
+                                                        << "' dropped benchmarking candidate '"
+                                                        << toString(kernel.kernelId)
+                                                        << "': " << benchmarkFailures.back());
         }
 
-        // An empty vector here (every candidate's GenericPlan threw) throws
-        // INTERNAL_ERROR out of BenchmarkPlan's constructor, propagating unhandled.
+        // Every candidate dropped. Reported here, with the reasons gathered above, rather
+        // than left to BenchmarkPlan's constructor, whose INTERNAL_ERROR names neither the
+        // engine nor a single kernel that failed or why.
+        if(candidates.empty())
+        {
+            throwNoBuildableKernel(filtered.size(), benchmarkFailures);
+        }
+
         // The callback is the write-back channel, already bound to the key: it captures
         // the state manager by reference, which the engine owns and which strictly
         // outlives every plan it hands out.

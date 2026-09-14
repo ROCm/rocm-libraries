@@ -35,6 +35,9 @@ ARCH = "gfx942"
 PAYLOAD = b"\x7fELF-not-really-a-code-object"
 PAYLOAD_SHA = hashlib.sha256(PAYLOAD).hexdigest()
 SYMBOL = "attention_dense_bf16_d128"
+# One argument in the shape kernel_signature emits -- `name` is present only when the
+# code object carries one, so a bare kind/size/offset triple is a valid produced entry.
+DEMO_SIGNATURE = [{"kind": "global_buffer", "size": 8, "offset": 0}]
 
 
 @dataclass(frozen=True)
@@ -521,7 +524,13 @@ def shipped_ukd(**overrides):
             ]
         ),
     )
-    doc = pipeline._rewrite_ukd_kpack(record, ARCH, "vk-demo", PAYLOAD_SHA)
+    doc = pipeline._rewrite_ukd_kpack(
+        record, ARCH, "vk-demo", PAYLOAD_SHA, signature=DEMO_SIGNATURE
+    )
+    # The producer stamps the ABI signature into the same kernel_source this helper's
+    # callers read the provenance out of, so assert it here: it is the one place both
+    # the signature thread and the agreement thread write the same document.
+    assert doc["kernel_source"]["signature"] == DEMO_SIGNATURE
     return doc, record.consumers
 
 

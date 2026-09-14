@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -383,6 +384,21 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
     return *it->second;
 }
 
+/// The argument list this pack marshals: three device pointers, in operand order, matching
+/// the launch() below one for one. It sits here rather than in the adapter that consumes it
+/// so that it is edited alongside that launch -- a stale copy rejects the correct kernel
+/// rather than the drifted one.
+///
+/// Names are empty and offsets zero because neither is compared for a HIP-produced kernel;
+/// see requireSignatureMatch.
+const std::vector<KernelArgument>& pointwiseKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer, s_buffer, s_buffer};
+    return s_signature;
+}
+
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise
  *        kernel. Shared across packs -- the operation is just the selected kernel's
@@ -429,8 +445,8 @@ public:
         options.add("HIP_PLUGIN_POINTWISE_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_POINTWISE_BLOCK_SIZE", blockSize);
 
-        auto code
-            = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
+        auto code = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, pointwiseKernelSignature());
 
         code.kernel->setBlockSize(blockSize, 1, 1);
         code.kernel->setGridSize(1, 1, 1);
@@ -455,6 +471,7 @@ public:
         const auto output
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.output, deviceBuffers, numDeviceBuffers);
 
+        // Changing this argument list means changing pointwiseKernelSignature() with it.
         preparedPointwise.kernel().launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
     }
 

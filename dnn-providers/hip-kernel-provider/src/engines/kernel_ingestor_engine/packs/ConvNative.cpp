@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -24,8 +25,11 @@
 
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
 /**
@@ -446,18 +450,48 @@ const data_objects::TensorAttributes& requireTensor(const MatchContext& context,
     return *it->second;
 }
 
+/// The argument list this pack launches ConvFwd with, mirroring the launch() below one
+/// for one. It sits here rather than in the adapter that consumes it so that it is edited
+/// alongside that launch -- a stale copy rejects the correct kernel rather than the
+/// drifted one.
+///
+/// Names are empty and offsets zero because neither is compared for a HIP-produced kernel;
+/// see requireSignatureMatch.
+const std::vector<KernelArgument>& convFwdKernelSignature()
+{
+    static const KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    // The seven trailing extents (n, c, h, width, k, r, s), each an int.
+    static const KernelArgument s_extent{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
+    static const std::vector<KernelArgument> s_signature{s_buffer,
+                                                         s_buffer,
+                                                         s_buffer,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent,
+                                                         s_extent};
+    return s_signature;
+}
+
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches the conv
- *        kernel. Splits per RFC 0017 §8.5: everything graph/kernel-derived resolves
- *        once at prepare(); execute() only resolves buffers and launches, so nothing
- *        mutates once prepared and concurrent execution is safe.
+ *        kernel. Everything graph/kernel-derived resolves once at prepare(); execute()
+ *        only resolves buffers and launches, so nothing mutates once prepared and
+ *        concurrent execution is safe.
  */
 class ConvFwdDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
-    explicit ConvFwdDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
+    /// @param kpackLoader Same must-outlive contract. Which of the two is consulted
+    /// depends on the selected kernel's source kind, decided in buildIngestorKernelCode.
+    ConvFwdDispatchHandler(const compilation::IKernelCompiler& kernelCompiler,
+                           const compilation::KpackKernelLoader& kpackLoader)
         : _kernelCompiler(kernelCompiler)
+        , _kpackLoader(kpackLoader)
     {
     }
 
@@ -498,24 +532,23 @@ public:
         options.add("HIP_PLUGIN_CONV_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_CONV_BLOCK_SIZE", blockSize);
 
-        // The only KernelSourceKind this dispatch handler knows how to load.
-        auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
-        auto runnableKernel = program->getKernel(kernel.source.entryPoint);
+        auto code = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, convFwdKernelSignature());
 
         const auto p = h - r + 1;
         const auto q = width - s + 1;
         // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits. A 32-bit
-        // product here previously wrapped silently, corrupting both the grid size and
-        // the kernel's own bounds guard (ConvFwd.cpp).
+        // product would wrap, corrupting both the grid size and the kernel's own bounds
+        // guard (ConvFwd.cpp).
         const int64_t total = static_cast<int64_t>(n) * k * p * q;
         const auto gridSize = static_cast<unsigned int>(
             (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
 
-        runnableKernel->setBlockSize(blockSize, 1, 1);
-        runnableKernel->setGridSize(gridSize, 1, 1);
+        code.kernel->setBlockSize(blockSize, 1, 1);
+        code.kernel->setGridSize(gridSize, 1, 1);
 
         return std::make_unique<PreparedConvFwd>(
-            std::move(program), std::move(runnableKernel), binding, n, c, h, width, k, r, s);
+            std::move(code.program), std::move(code.kernel), binding, n, c, h, width, k, r, s);
     }
 
     void launch(const Handle& handle,
@@ -549,15 +582,33 @@ public:
 
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
+    const compilation::KpackKernelLoader& _kpackLoader;
 };
+
+} // namespace
+
+compilation::KpackModuleCache& convFwdKpackModuleCache()
+{
+    static compilation::KpackModuleCache s_moduleCache;
+    return s_moduleCache;
+}
+
+void resetConvFwdModuleCache()
+{
+    convFwdKpackModuleCache().clear();
+}
+
+namespace
+{
 
 /// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
 /// pointer to it, but a provider's Container is created and destroyed per handle, so
-/// it (and the compiler it holds) must outlive every Container.
+/// it (and the compiler and loader it holds) must outlive every Container.
 const ConvFwdDispatchHandler& convFwdDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const ConvFwdDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    static const compilation::KpackKernelLoader s_kpackLoader(convFwdKpackModuleCache());
+    static const ConvFwdDispatchHandler s_dispatchHandler(s_kernelCompiler, s_kpackLoader);
     return s_dispatchHandler;
 }
 
