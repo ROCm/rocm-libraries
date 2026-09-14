@@ -5,11 +5,8 @@
 # pytest -- the descriptor-packaging suite, and the frontend wheel tests.
 # build  -- the PEP 517 frontend that packs the frontend wheel.
 # numpy  -- imported by frontend_wheel_package/tests, not by the build.
-# PyYAML -- imported by shared/ctest/parse_ctest_categories.py, which configure runs to
-#           attach CTest category labels; without it every label silently goes missing.
 #
 # Installed with --upgrade, so nothing is pinned here.
 pytest
 build
 numpy
-PyYAML

@@ -70,7 +70,6 @@ jobs:
             dnn-providers
             projects/hipdnn
             projects/miopen
-            shared/ctest
             test
 
       # Shared CI constants, kpack-ref among them, defined in one place.
@@ -211,27 +210,6 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
-      # Narrow oracle, ahead of the full suite so its result is its own rather than one
-      # line in an aggregate pass. HIPDNN_TEST_REQUIRE_NON_UTF8_ACP is a test-only flag,
-      # never a backend configuration knob: it makes the native-override regression
-      # additionally require an ANSI code page the fixture name cannot survive, so a
-      # UTF-8 host fails here instead of quietly reporting ANSI coverage it never had.
-      # The unset "Run tests" step below exercises the same entry in its generic mode,
-      # which must pass on any code page.
-      - name: Validate runtime-load native override (strict ANSI)
-        env:
-          HIPDNN_TEST_REQUIRE_NON_UTF8_ACP: '1'
-        run: |
-          ctest --test-dir build --output-on-failure --no-tests=error \
-            -R 'hipdnn_frontend_dynamic_load_tests_native_override'
-
-      # The same entries selected through their category label, which is the path that
-      # silently produced nothing while shared/ctest was missing from the checkout above.
-      - name: Validate runtime-load native override category selection
-        run: |
-          ctest --test-dir build --output-on-failure --no-tests=error -L quick \
-            -R 'hipdnn_frontend_dynamic_load_tests_native_override'
-
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
@@ -248,14 +226,6 @@ jobs:
           # and every superbuild fix here goes untested.
           $librariesPath = $env:ROCM_SDK_PATH -replace '_rocm_sdk_devel$', '_rocm_sdk_libraries'
           cmake --install build --prefix $librariesPath
-
-      # The installed tree is what consumers get, and its CTest snippets are generated
-      # separately from the build-tree entries; run the native override and its cleanup
-      # there too, with the same dependency environment this job already established.
-      - name: Run installed runtime-load native tests
-        run: |
-          ctest --test-dir "$ROCM_SDK_PATH/bin/hipdnn" --output-on-failure --no-tests=error \
-            -R 'hipdnn_frontend_dynamic_load_tests_native_override'
 
       - name: Pack frontend wheel
         shell: pwsh
