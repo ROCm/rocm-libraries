@@ -228,3 +228,74 @@ def test_no_decomposition_is_reported_without_a_group_column():
     )
     assert result.report["metrics"]["two_stage"] is None
     assert all(problem.group_regret is None for problem in result.problems)
+
+
+def _strict_less_than_model(directory: Path) -> Path:
+    """An artifact whose one split uses `<` rather than `<=`.
+
+    Built through the object API rather than by training: LightGBM emits only `<=` and `==`
+    decision types, so `lgbm_to_flatbuffer` always writes `decision_lte=True` and no trained
+    model can exercise the other branch. A hand-written or foreign artifact can -- which is
+    exactly what `TestTreeDataAdapter` and the rocKE model generator produce.
+    """
+    import flatbuffers
+
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
+    from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
+
+    tree = GbdtTreeT()
+    # Root splits slot 0 at 10. Left leaf 1.0, right leaf 9.0, with `<` semantics: a row at
+    # exactly 10 belongs on the RIGHT. Under `<=` it would go left, and under the complement
+    # (`>`) every row would swap sides -- so the three readings give three different answers.
+    tree.featureIndices = [0, 0, 0]
+    tree.thresholds = [10.0, 0.0, 0.0]
+    tree.leftChildren = [1, -1, -1]
+    tree.rightChildren = [2, -1, -1]
+    tree.leafValues = [0.0, 1.0, 9.0]
+    tree.defaultLeft = [True, True, True]
+    tree.decisionLte = [False, False, False]
+
+    model = GbdtModelT()
+    model.trees = [tree]
+    model.baseScore = 0.0
+    model.numFeatures = 1
+    model.featuresHash = "sha256:strict_lt"
+    model.groupByFeatureIndex = -1
+
+    builder = flatbuffers.Builder(1024)
+    builder.Finish(model.Pack(builder))
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "model.bin").write_bytes(bytes(builder.Output()))
+    (directory / "train_manifest.json").write_text(
+        json.dumps({"features": ["q.size"], "target": "tflops", "objective": "max"}),
+        encoding="utf-8",
+    )
+    (directory / "heuristic.uhd.json").write_text(
+        json.dumps({"objective": "max", "tree_data": {"artifact": "model.bin"},
+                    "features_signature": ["$q.size"]}),
+        encoding="utf-8",
+    )
+    return directory
+
+
+def test_a_strict_less_than_split_routes_the_way_the_runtime_routes_it():
+    """`decision_lte` false means `<`, and the complement is not the same thing.
+
+    Regression: this traversal used `x > threshold` for the false case, which is the complement
+    of `<=` rather than `<`. Every row went down the opposite subtree, so the evaluator ranked
+    such a model backwards while the C++ runtime scored it correctly -- a disagreement that
+    would read as a bad model rather than a bad reader. The schema and TreeDataAdapter both say
+    `<`; the test mirror in test_converter.py already had it right.
+    """
+    with_tmp = Path(__import__("tempfile").mkdtemp())
+    bundle = load_model(_strict_less_than_model(with_tmp / "strict_lt"))
+
+    scores = bundle.scorer(pd.DataFrame([{"q.size": 5.0}, {"q.size": 10.0}, {"q.size": 15.0}]))
+
+    # Under `<`: 5 goes left (1.0), 10 and 15 go right (9.0). expm1 is monotonic, so the
+    # comparison holds on the returned values.
+    assert scores[0] < scores[1], "a value below the threshold took the wrong branch"
+    assert scores[1] == pytest.approx(scores[2]), "10 and 15 must share the right-hand leaf"
+    assert scores[0] == pytest.approx(np.expm1(1.0))
+    assert scores[1] == pytest.approx(np.expm1(9.0))

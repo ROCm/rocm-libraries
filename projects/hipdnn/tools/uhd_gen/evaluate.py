@@ -883,7 +883,11 @@ def _flatbuffer_scorer(artifact: Path, features: list[str]) -> Scorer:
                 at = np.flatnonzero(internal)
                 here = node[at]
                 x = matrix[rows[at], feature_index[here]]
-                go_left = np.where(lte[here], x <= threshold[here], x > threshold[here])
+                # `decision_lte` false means `<`, not `>`: the schema says "true = use <=
+                # (LightGBM default), false = use <", and TreeDataAdapter reads it that way.
+                # The complement sends every row down the opposite subtree, so a model that
+                # uses the `<` form ranked backwards here while scoring correctly at runtime.
+                go_left = np.where(lte[here], x <= threshold[here], x < threshold[here])
                 go_left = np.where(np.isnan(x), default_left[here], go_left)
                 node[at] = np.where(go_left, left[here], right[here])
             total += leaf[node]

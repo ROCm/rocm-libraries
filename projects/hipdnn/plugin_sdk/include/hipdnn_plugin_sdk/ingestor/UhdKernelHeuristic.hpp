@@ -580,11 +580,33 @@ private:
                 scored.push_back({scoreFromRaw(raw[index]), &catalog.entries[index], group});
             }
 
-            const auto outOfRange = static_cast<size_t>(
-                std::count_if(scored.begin(), scored.end(), [](const Ranked& candidate) {
-                    return !std::isfinite(candidate.score.ordering);
-                }));
-            reportOutOfRangeOnce(outOfRange, scored.size());
+            // Two different things arrive as -infinity here, and reporting them alike turns
+            // §12's loudest diagnostic into noise.
+            //
+            // The adapter returns -infinity for a candidate it declines to score: a grouped
+            // model excludes every group but the one layer 1 chose. That is a decision the
+            // model made, and counting it would report "predicted a score its target cannot
+            // take" on every grouped ranking -- an error message about a training defect,
+            // emitted for the design working exactly as intended.
+            //
+            // A finite raw score that fails the range check is the real thing that error is
+            // for. Only those are counted, and only the candidates the model actually scored
+            // are the population it is counted against, so "every candidate was affected"
+            // keeps meaning "the model contributed nothing".
+            size_t declined = 0;
+            size_t outOfRange = 0;
+            for(size_t index = 0; index < scored.size(); ++index)
+            {
+                if(raw[index] == -std::numeric_limits<double>::infinity())
+                {
+                    ++declined;
+                }
+                else if(!std::isfinite(scored[index].score.ordering))
+                {
+                    ++outOfRange;
+                }
+            }
+            reportOutOfRangeOnce(outOfRange, scored.size() - declined);
 
             // scoreCandidate already replaced any non-finite value with -infinity, so the
             // comparator sees only real numbers. That matters beyond tidiness: NaN compares

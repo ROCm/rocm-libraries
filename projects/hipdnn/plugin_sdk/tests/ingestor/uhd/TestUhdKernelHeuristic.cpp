@@ -1557,6 +1557,38 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, TheReportedGroupIsTheOneThatScored)
     EXPECT_DOUBLE_EQ(scored.front().group, 128.0);
 }
 
+TEST(TestIngestorUhdKernelHeuristicGrouped, ExcludingAGroupIsNotReportedAsATrainingDefect)
+{
+    // Regression. A candidate outside the chosen group comes back from the adapter as
+    // -infinity, which the range check in scoreFromRaw caught and counted alongside a model
+    // predicting a negative throughput. Every grouped ranking therefore logged, at ERROR,
+    // that the model "predicted a score its target cannot take" -- for the design doing
+    // exactly what it was built to do.
+    //
+    // §12 reserves ERROR for a model that is actually broken. An error emitted on every
+    // correct ranking is one nobody reads by the time a real one arrives.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_not_a_defect");
+    const auto fixture = writeGroupedFixture(dir.path());
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    // The exclusion happened -- otherwise this would pass by not grouping at all.
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_DOUBLE_EQ(scored.back().score, 0.0);
+    EXPECT_DOUBLE_EQ(scored.back().group, 64.0);
+
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "cannot take"))
+        << "a group layer 1 declined to pick was reported as a model predicting out of range";
+}
+
 TEST(TestIngestorUhdKernelHeuristicGrouped, TheGroupFeatureIsNamed)
 {
     // A group value is a feature value: 128 is actionable only once something says it is a
