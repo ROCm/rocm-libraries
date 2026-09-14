@@ -24,7 +24,9 @@ def _timing(page):
             ("engine_id", "graph_id", "device_id", "device_arch", "engine_descriptor_id", "engine_name", "problem_features", "device_features")} | {
         "results": [{"candidate_id": candidate["id"], "knob_settings": candidate["knob_settings"],
                      "kernel_features": candidate["kernel_features"], "succeeded": True,
-                     "is_valid": True, "robust_time_ms": 2.5, "min_time_ms": 2.0, "avg_time_ms": 2.6,
+                     "is_valid": True, "numerically_valid": True,
+                     "validation": "agrees_with_catalog: 2 of 2 cross-checked candidates produced this output",
+                     "robust_time_ms": 2.5, "min_time_ms": 2.0, "avg_time_ms": 2.6,
                      "stddev_ms": 0.01, "iterations": 40}]}
 
 
@@ -126,3 +128,59 @@ def test_a_collected_corpus_activates_the_evaluate_noise_band(monkeypatch, tmp_p
     ).report
     assert report["ties"]["noise_band_applied"] is True
     assert "standard errors" in report["ties"]["policy"]
+
+
+def test_a_numerically_invalid_candidate_keeps_its_row_but_loses_its_timing(monkeypatch, tmp_path):
+    """RFC 0019 §13.2: recorded with its measurement suppressed and an invalid marker.
+
+    The two halves are one rule. Dropping the row loses the failure surface the section
+    wants the model to learn; keeping the timing hands the ranker the group's best time,
+    because a kernel that does not compute the answer is the fastest one in it.
+    """
+    page = _page()
+    timed = _timing(page)
+    timed["results"][0].update(numerically_valid=False,
+                               validation="output_mismatch: tensor 'Y' element 2 is 9.9e+01")
+    row = _collect(monkeypatch, tmp_path, [page, timed])[0][0]
+
+    assert row["numerically_valid"] is False
+    assert row["validation"].startswith("output_mismatch")
+    # Suppressed where the row is built, so `corpus.json`, `corpus.csv` and the `evaluate`
+    # regret pass that reads the corpus back all see the same absence.
+    assert [row[column] for column in ("robustMeanMs", "minTimeMs", "avgTimeMs", "stddevMs")] == [None] * 4
+    # No derived rate either: a throughput computed from a suppressed time would put the
+    # measurement back under a different column name.
+    assert "tflops" not in row
+    # The candidate stays visible: which kernel was wrong, on which problem, and why.
+    assert (row["kernel"], row["benchmark"], row["succeeded"], row["is_valid"]) == ("kernel-a", "graph", True, True)
+
+
+def test_an_undecided_verdict_is_carried_rather_than_treated_as_correct(monkeypatch, tmp_path):
+    """A null verdict keeps its measurement but never claims the candidate was checked.
+
+    Open Question 19(a) has not settled what reference each op validates against, so a
+    single-candidate problem is genuinely undecidable. Suppressing those timings would
+    train on nothing; recording them as `True` would be the silent pass §13.2 forbids.
+    """
+    page = _page()
+    timed = _timing(page)
+    timed["results"][0].update(numerically_valid=None, validation="no_reference: one candidate ran")
+    row = _collect(monkeypatch, tmp_path, [page, timed])[0][0]
+
+    assert row["numerically_valid"] is None
+    assert row["robustMeanMs"] == 2.5
+
+
+@pytest.mark.parametrize("missing", ["numerically_valid", "validation"])
+def test_a_benchmark_that_records_no_verdict_is_refused(monkeypatch, tmp_path, missing):
+    """§13.2 records the verdict on the row, so an absent one is a tool that did not check.
+
+    Refused rather than defaulted. Any default is wrong: `True` inverts the oracle, and
+    `None` would let a benchmark silently regress out of validating while the corpus still
+    looks well-formed.
+    """
+    page = _page()
+    timed = _timing(page)
+    timed["results"][0].pop(missing)
+    with pytest.raises(ValueError, match="numerical-validation verdict"):
+        _collect(monkeypatch, tmp_path, [page, timed])
