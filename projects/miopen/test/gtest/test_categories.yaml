@@ -312,17 +312,19 @@ test_categories:
 
     exclude:
       # Exactly Jenkins' MIOPEN_GTEST_FILTER negative list (gfx942 Full Tests
-      # stage): DBSync/DeepBench/MIOpenTestConv are off by default there too,
-      # LstmMSRnn/1095 is a known-flaky gfx94X exclusion, LargeStride OOMs when
-      # shards share a GPU, HipGraphExist OOMs the LLVM JIT under concurrent
-      # GPU pressure (Jenkins re-adds it as a separate RUN_SERIAL entry, which
-      # this POC category does not attempt to replicate).
+      # stage), minus HipGraphExist: DBSync/DeepBench/MIOpenTestConv are off
+      # by default there too, LstmMSRnn/1095 is a known-flaky gfx94X
+      # exclusion, LargeStride OOMs when shards share a GPU. Jenkins also
+      # excludes HipGraphExist from its parallel shards (LLVM JIT OOM under
+      # concurrent GPU pressure on its node) and reruns it as a separate
+      # RUN_SERIAL entry instead; left un-excluded here as an experiment --
+      # if our 16-way (4-per-GPU) sharding hits the same contention, re-add
+      # "*HipGraphExist*" and give it a dedicated serial step instead.
       - "*DBSync*"
       - "*DeepBench*"
       - "*MIOpenTestConv*"
       - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
       - "*UnitTestConvSolver*LargeStride*"
-      - "*HipGraphExist*"
       # Datatype parity: Jenkins' 4 gfx942 gtest jobs only cover BFP16, FP16,
       # FP32, TF32 (+ NONE, which always runs). "*" positively selects every
       # suite, so without these, this category also picks up I8/I16/I32/I64/
