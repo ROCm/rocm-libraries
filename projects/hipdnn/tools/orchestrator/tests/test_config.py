@@ -177,6 +177,76 @@ def test_duplicate_step_ids_are_rejected(tmp_path):
         Flow.load(flow)
 
 
+def test_malformed_until_is_rejected_when_the_flow_loads(tmp_path):
+    """A single `=` used to pass validation *and* the run: its operands were folded into
+    a non-empty string and the loop reported success while the step it measured failed.
+    """
+    flow = write(
+        tmp_path / "f.yaml",
+        FLOW_HEAD + "steps:\n"
+        "  - id: cycle\n"
+        "    loop:\n"
+        "      max_iterations: 2\n"
+        '      until: "${steps.probe.outputs.failed} = 0"\n'
+        "    steps:\n"
+        "      - id: probe\n"
+        "        tool: agent\n",
+    )
+    with pytest.raises(ConfigError, match="did you mean '=='"):
+        Flow.load(flow)
+
+
+def test_incomplete_assert_is_rejected_when_the_flow_loads(tmp_path):
+    """`1 ==` used to pass `validate` and fail only after the loop body had run."""
+    flow = write(
+        tmp_path / "f.yaml",
+        FLOW_HEAD + "steps:\n"
+        "  - id: probe\n"
+        "    tool: agent\n"
+        "    assert:\n"
+        '      - that: "1 =="\n',
+    )
+    with pytest.raises(ConfigError, match="ends where a value was expected"):
+        Flow.load(flow)
+
+
+def test_previous_output_typo_is_rejected(tmp_path):
+    """Only the step id was checked, so a misspelled output name reached a live prompt
+    as `<unresolved:...>`."""
+    flow = write(
+        tmp_path / "f.yaml",
+        FLOW_HEAD + "steps:\n"
+        "  - id: cycle\n"
+        "    loop:\n"
+        "      max_iterations: 2\n"
+        '      until: "${steps.review.outputs.exit_code} == 0"\n'
+        "    steps:\n"
+        "      - id: generate\n"
+        "        tool: agent\n"
+        "        outputs:\n"
+        '          kernel_path: {regex: "wrote (.+)"}\n'
+        "      - id: review\n"
+        "        tool: agent\n"
+        '        args: ["${loop.previous.generate.outputs.kernel_paht}"]\n',
+    )
+    with pytest.raises(ConfigError, match="names output 'kernel_paht'"):
+        validate_refs(Flow.load(flow), {})
+
+
+def test_cli_rejects_an_iteration_budget_below_one(tmp_path):
+    """`--max-iterations 0` silently used the configured budget; `-1` ran nothing and
+    reported success under `on_exhausted: continue`."""
+    from orchestrate import main
+
+    flow = write(
+        tmp_path / "f.yaml", FLOW_HEAD + "steps:\n  - id: p\n    tool: agent\n"
+    )
+    for budget in ("0", "-1"):
+        with pytest.raises(SystemExit) as failure:
+            main(["run", str(flow), "--max-iterations", budget])
+        assert failure.value.code == 2
+
+
 # -- inputs -----------------------------------------------------------------
 
 
@@ -238,10 +308,14 @@ def test_unknown_input_is_rejected(tmp_path):
 # -- the shipped configuration ---------------------------------------------
 
 
-def test_shipped_flow_and_registry_validate_together():
-    """The flow and prompts we ship must pass their own validation."""
+def test_every_shipped_flow_validates_against_the_registry():
+    """The flows and prompts we ship must pass their own validation -- all of them, so a
+    second flow cannot rot while the first keeps the check green."""
     root = Path(__file__).resolve().parents[1]
     registry = ToolRegistry.load(root / "configs" / "tools.yaml")
-    flow = Flow.load(root / "configs" / "flows" / "rtc-kernel-review.yaml")
-    validate_refs(flow, registry.vars)
-    assert flow.tools_used() <= set(registry.tools)
+    flows = sorted((root / "configs" / "flows").glob("*.yaml"))
+    assert flows
+    for path in flows:
+        flow = Flow.load(path)
+        validate_refs(flow, registry.vars)
+        assert flow.tools_used() <= set(registry.tools)

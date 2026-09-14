@@ -67,6 +67,8 @@ Write a JSON object to exactly this path:
 
 Consistency rules the orchestrator enforces -- a violation fails this step:
 
-- `critical_count` must equal the number of entries in `critical_issues`.
+- `critical_count` must equal the number of entries in `critical_issues`. The
+  orchestrator counts the list itself and fails this step if your tally disagrees with
+  it; the loop's exit condition is measured from the list, not from your count.
 - `verdict` is `pass` **iff** `critical_count` is 0. Never return `pass` with issues
   listed, and never return `changes_required` with none.

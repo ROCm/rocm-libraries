@@ -14,7 +14,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import yaml
 
 from .errors import ConfigError
-from .refs import iter_refs
+from .refs import Condition, iter_refs, parse_condition
 
 IMPLICIT_OUTPUTS = (
     "exit_code",
@@ -27,9 +27,18 @@ IMPLICIT_OUTPUTS = (
 )
 RUN_FIELDS = ("id", "name", "dir", "feedback_path")
 LOOP_FIELDS = ("iteration", "attempt", "attempt_dir", "feedback_path", "max_iterations")
-EXTRACTOR_KINDS = ("regex", "json", "json_file", "file", "glob", "tail", "lines")
+EXTRACTOR_KINDS = (
+    "regex",
+    "json",
+    "json_file",
+    "file",
+    "glob",
+    "tail",
+    "lines",
+    "sha256",
+)
 OUTPUT_KEYS = set(EXTRACTOR_KINDS) | {"type", "group", "path", "from"}
-OUTPUT_TYPES = ("string", "int", "float", "bool", "path", "json")
+OUTPUT_TYPES = ("string", "int", "float", "bool", "path", "json", "count")
 INPUT_TYPES = ("string", "text", "int", "float", "bool", "path")
 STEP_KEYS = {
     "id",
@@ -46,11 +55,16 @@ STEP_KEYS = {
     "assert",
     "when",
     "expect_exit",
-    "retries",
     "continue_on_error",
     "after",
 }
-LOOP_KEYS = {"max_iterations", "until", "on_exhausted", "feedback_from"}
+LOOP_KEYS = {
+    "max_iterations",
+    "until",
+    "on_exhausted",
+    "feedback_from",
+    "on_step_failure",
+}
 FLOW_KEYS = {"version", "name", "description", "inputs", "vars", "steps"}
 
 
@@ -75,6 +89,14 @@ class OutputSpec:
     source: str = "stdout"
 
 
+@dataclass(frozen=True)
+class Assertion:
+    """A post-step check. `that` is parsed when the flow loads, not when it fires."""
+
+    that: Condition
+    message: str = ""
+
+
 @dataclass
 class Step:
     id: str
@@ -88,10 +110,9 @@ class Step:
     result_file: str | None = None
     result_schema: dict[str, Any] = field(default_factory=dict)
     outputs: list[OutputSpec] = field(default_factory=list)
-    asserts: list[dict[str, str]] = field(default_factory=list)
-    when: str | None = None
+    asserts: list[Assertion] = field(default_factory=list)
+    when: Condition | None = None
     expect_exit: tuple[int, ...] = (0,)
-    retries: int = 0
     continue_on_error: bool = False
     after: tuple[str, ...] = ()
 
@@ -103,9 +124,14 @@ class Step:
 @dataclass(frozen=True)
 class LoopSpec:
     max_iterations: int
-    until: str
+    until: Condition
     on_exhausted: str = "fail"
     feedback_from: str | None = None
+    #: What to do when a step inside the loop fails. `fail` aborts the run. `retry`
+    #: abandons the rest of that iteration and starts the next one, recording why in the
+    #: feedback file. The loop is the unit of retry -- re-running one step in the middle
+    #: of a half-finished iteration repeats work whose inputs have not changed.
+    on_step_failure: str = "fail"
 
 
 @dataclass
@@ -234,6 +260,11 @@ def _loop_group(entry: Mapping[str, Any], path: Path) -> LoopGroup:
         raise ConfigError(
             f"{path}: loop '{group_id}': on_exhausted must be 'fail' or 'continue'"
         )
+    on_step_failure = str(raw_loop.get("on_step_failure", "fail"))
+    if on_step_failure not in ("fail", "retry"):
+        raise ConfigError(
+            f"{path}: loop '{group_id}': on_step_failure must be 'fail' or 'retry'"
+        )
 
     steps = [_step(item, path) for item in (entry.get("steps") or [])]
     if not steps:
@@ -242,8 +273,9 @@ def _loop_group(entry: Mapping[str, Any], path: Path) -> LoopGroup:
         id=str(group_id),
         loop=LoopSpec(
             max_iterations=max_iterations,
-            until=str(until),
+            until=_condition(until, path, f"loop '{group_id}' until"),
             on_exhausted=on_exhausted,
+            on_step_failure=on_step_failure,
             feedback_from=(
                 str(raw_loop["feedback_from"])
                 if raw_loop.get("feedback_from")
@@ -300,7 +332,10 @@ def _step(entry: Mapping[str, Any], path: Path) -> Step:
             raise ConfigError(f"{path}: step '{step_id}': each assert needs a 'that'")
         _reject_unknown(item, {"that", "message"}, f"{path}: step '{step_id}' assert")
         asserts.append(
-            {"that": str(item["that"]), "message": str(item.get("message") or "")}
+            Assertion(
+                that=_condition(item["that"], path, f"step '{step_id}' assert"),
+                message=str(item.get("message") or ""),
+            )
         )
 
     expect = entry.get("expect_exit", [0])
@@ -333,9 +368,12 @@ def _step(entry: Mapping[str, Any], path: Path) -> Step:
         },
         outputs=outputs,
         asserts=asserts,
-        when=(str(entry["when"]) if entry.get("when") else None),
+        when=(
+            _condition(entry["when"], path, f"step '{step_id}' when")
+            if entry.get("when")
+            else None
+        ),
         expect_exit=expect_exit,
-        retries=int(entry.get("retries", 0)),
         continue_on_error=bool(entry.get("continue_on_error", False)),
         after=tuple(str(item) for item in after),
     )
@@ -352,7 +390,10 @@ def _output(step_id: str, name: str, spec: Any, path: Path) -> OutputSpec:
             f"({', '.join(EXTRACTOR_KINDS)}); got {len(kinds)}"
         )
     kind = kinds[0]
-    out_type = str(spec.get("type", "string"))
+    # `glob` is the one extractor whose natural result is a list, so it defaults to the
+    # type that can hold one. Every other extractor yields a single value, and a scalar
+    # type that receives a list is now an error rather than a silent pass-through.
+    out_type = str(spec.get("type", "json" if kind == "glob" else "string"))
     if out_type not in OUTPUT_TYPES:
         raise ConfigError(
             f"{path}: step '{step_id}' output '{name}': type '{out_type}' is not one of "
@@ -377,6 +418,14 @@ def _output(step_id: str, name: str, spec: Any, path: Path) -> OutputSpec:
         path=(str(spec["path"]) if spec.get("path") else None),
         source=source,
     )
+
+
+def _condition(text: Any, path: Path, where: str) -> Condition:
+    """Parse a condition at load time so a malformed one never reaches a launch."""
+    try:
+        return parse_condition(str(text))
+    except ConfigError as error:
+        raise ConfigError(f"{path}: {where}: {error}") from None
 
 
 # -- validation -------------------------------------------------------------
@@ -419,7 +468,7 @@ def validate_refs(flow: Flow, machine_vars: Mapping[str, Any]) -> None:
                     {**available, **loop_scope},
                     known_vars,
                     in_loop=True,
-                    loop_steps={s.id for s in node.steps},
+                    loop_steps={s.id: s.output_names for s in node.steps},
                 )
                 loop_scope[step.id] = step.output_names
             # `until` and `feedback_from` are evaluated after an iteration, so every
@@ -427,11 +476,11 @@ def validate_refs(flow: Flow, machine_vars: Mapping[str, Any]) -> None:
             scope = {**available, **loop_scope}
             _check_refs_in(
                 flow,
-                node.loop.until,
+                node.loop.until.text,
                 scope,
                 known_vars,
                 True,
-                {s.id for s in node.steps},
+                {s.id: s.output_names for s in node.steps},
                 f"loop '{node.id}' until",
             )
             if node.loop.feedback_from:
@@ -441,13 +490,13 @@ def validate_refs(flow: Flow, machine_vars: Mapping[str, Any]) -> None:
                     scope,
                     known_vars,
                     True,
-                    {s.id for s in node.steps},
+                    {s.id: s.output_names for s in node.steps},
                     f"loop '{node.id}' feedback_from",
                 )
             available.update(loop_scope)
         else:
             _check_step_refs(
-                flow, node, available, known_vars, in_loop=False, loop_steps=set()
+                flow, node, available, known_vars, in_loop=False, loop_steps={}
             )
             available[node.id] = node.output_names
 
@@ -458,7 +507,7 @@ def _check_step_refs(
     available: Mapping[str, set[str]],
     known_vars: set[str],
     in_loop: bool,
-    loop_steps: set[str],
+    loop_steps: Mapping[str, set[str]],
 ) -> None:
     for missing in step.after:
         if missing not in available:
@@ -473,7 +522,7 @@ def _check_step_refs(
         step.stdin,
         step.prompt_file,
         step.result_file,
-        step.when,
+        step.when.text if step.when else None,
     ]
     fields += [spec.argument for spec in step.outputs]
     fields += [spec.path for spec in step.outputs if spec.path]
@@ -496,7 +545,7 @@ def _check_step_refs(
     for item in step.asserts:
         _check_refs_in(
             flow,
-            item["that"],
+            item.that.text,
             own_scope,
             known_vars,
             in_loop,
@@ -532,7 +581,7 @@ def _check_refs_in(
     available: Mapping[str, set[str]],
     known_vars: set[str],
     in_loop: bool,
-    loop_steps: set[str],
+    loop_steps: Mapping[str, set[str]],
     where: str,
     has_result_file: bool = False,
 ) -> None:
@@ -582,6 +631,14 @@ def _check_refs_in(
                     raise ConfigError(
                         f"{flow.path}: {where}: '${{{ref}}}' names '{rest[1]}', which is "
                         f"not a step of this loop"
+                    )
+                # The output name matters as much as the step id: an unvalidated typo
+                # here renders as `<unresolved:...>` in a live prompt instead of failing.
+                if rest[3] not in loop_steps[rest[1]]:
+                    known = ", ".join(sorted(loop_steps[rest[1]])) or "(none)"
+                    raise ConfigError(
+                        f"{flow.path}: {where}: '${{{ref}}}' names output '{rest[3]}', "
+                        f"which step '{rest[1]}' does not declare; it has: {known}"
                     )
             elif len(rest) != 1 or rest[0] not in LOOP_FIELDS:
                 raise ConfigError(

@@ -106,14 +106,16 @@ steps:
 
 **Step keys**: `id`, `tool`, `args`, `env`, `cwd`, `timeout`, `stdin`, `prompt_file`,
 `after`, `outputs`, `result_file`, `result_schema`, `assert`, `when`, `expect_exit`,
-`retries`, `continue_on_error`. The step is the *only* place an invocation is described; the
+`continue_on_error`. The step is the *only* place an invocation is described; the
 registry contributes nothing but the executable and its launch wiring. Step `env` merges
 over the tool's `env`, step wins. `stdin` and `prompt_file` are mutually exclusive.
+There is deliberately **no per-step retry** — see §5.1.
 
 **Implicit outputs on every step**: `exit_code`, `stdout`, `stderr`, `stdout_path`,
 `stderr_path`, `duration_s`, `workdir`.
 **Declared extractors**: `regex` (+`group`, `type`), `json` (JSONPath-lite over stdout),
 `json_file` (over a file the step produced — the one that matters for agents, §4),
+`sha256` (content identity of a file, for proving a later step did not modify it),
 `file`, `glob`, `lines`/`tail`.
 
 **Reference syntax**: `${inputs.x}`, `${vars.x}`, `${env.X}`, `${platform.x}`,
@@ -149,7 +151,6 @@ whatever the CLI wraps it in. Parsing it for `kernel_path` is a trap. Instead th
     prompt_file: prompts/generate_kernel.md     # tells the agent to write ${step.result_file}
     result_file: "${loop.attempt_dir}/generate.json"
     result_schema: { required: [kernel_path, entry_point, launch_notes] }
-    retries: 2                                  # malformed/missing result => re-ask
     timeout: 3600
     outputs:
       kernel_path:  { json_file: result, path: "$.kernel_path", type: path }
@@ -159,8 +160,15 @@ whatever the CLI wraps it in. Parsing it for `kernel_path` is a trap. Instead th
 
 `result_file` is exported to the prompt as `${step.result_file}` so the instruction and
 the extractor can never disagree about the path. A missing file, invalid JSON, or a
-missing `required` key fails the step *before* any downstream step consumes garbage —
-and `retries` makes the common case (agent forgot the file) self-healing.
+missing `required` key fails the step *before* any downstream step consumes garbage.
+
+**Give the agent the tools its contract needs.** Denying the review step `Write` — to
+stop it editing the kernel — also removed the only way it could produce `review.json`.
+Every session ended "I completed the review, but the Write tool is disabled", the step
+failed on a missing result, and the loop never reached its `until`. Deny the surgical
+edit tools (`Edit`, `MultiEdit`, `NotebookEdit`) instead, and *verify* rather than trust:
+both flows take a `sha256` of the kernel in `generate` and again in `review` and assert
+the two match.
 
 **Threading agent to agent.** Two shapes, both plain refs: stateless chaining
 (interpolate `${steps.generate.outputs.kernel_path}` into the next prompt) or session
@@ -196,7 +204,6 @@ generate again. That is expressed as one `loop` step group, not `goto`:
         prompt_file: prompts/generate_kernel.md
         result_file: "${loop.attempt_dir}/generate.json"
         result_schema: { required: [kernel_path, entry_point, launch_notes] }
-        retries: 2
         timeout: 3600
         outputs:
           kernel_path: { json_file: result, path: "$.kernel_path", type: path }
@@ -209,7 +216,6 @@ generate again. That is expressed as one `loop` step group, not `goto`:
         prompt_file: prompts/ingest_kernel.md
         result_file: "${loop.attempt_dir}/ingest.json"
         result_schema: { required: [descriptor_dir, engine_name, checks_passed] }
-        retries: 1
         timeout: 5400
         outputs:
           engine_name: { json_file: result, path: "$.engine_name" }
@@ -221,20 +227,23 @@ generate again. That is expressed as one `loop` step group, not `goto`:
         cwd: "${vars.repo_root}"
         timeout: 7200
 
+      # Imported into a run-owned directory, not into the checkout's bundle tree: a
+      # validation run should not leave bundles behind.
       - id: bundle
         tool: import_graph
         args: ["${vars.repo_root}/dnn-providers/integration-tests/migration-scripts/import_graph.py",
                "--graph", "${inputs.graph}",
-               "--bundle-dir", "${vars.repo_root}/dnn-providers/integration-tests/integration-test-bundles/",
+               "--bundle-dir", "${vars.bundle_dir}",
                "--tier", "${vars.tier}"]
-        outputs:
-          bundle_filter: { regex: 'registered suite:\s+(\S+)' }
 
       - id: validate
         tool: integration_tests
         args: ["--test-engine", "${steps.ingest.outputs.engine_name}",
                "--verification-mode", "cpu",
-               "--gtest_filter", "${steps.bundle.outputs.bundle_filter}"]
+               # The binary defaults its bundle root to <exe>/../lib/integration-test-bundles/,
+               # so a run-owned import has to be named explicitly.
+               "--golden-data-dir", "${vars.bundle_dir}",
+               "--gtest_filter", "${steps.bundle.outputs.case_filter}"]
         cwd: "${vars.build_dir}"
         expect_exit: [0, 1]                      # a real failure is data, not a crash
         outputs:
@@ -256,6 +265,18 @@ generate again. That is expressed as one `loop` step group, not `goto`:
         timeout: 1800
 ```
 
+**`case_filter` does not exist yet, and neither does anything that could produce it.**
+`import_graph.py` emits nothing machine-readable: its dry run prints nothing on stdout
+and its human-readable `created new bundle: ...` goes to stderr. An earlier draft of this
+section extracted `registered suite:\s+(\S+)` from it; that string is the integration
+binary's *zero-tests diagnostic* (`src/main.cpp`), not importer output, and matching it
+here would have filtered on a value the importer never prints. Resolving this is a
+prerequisite for the flow, not a detail of it — see §12.2.
+
+Without a stable bundle/case identity the assert above is weaker than it looks: it
+proves *some* case ran, not that **this graph's** case ran and passed. Those are the
+same statement only when the filter is known to select exactly this graph.
+
 ### 5.1 Loop semantics
 
 - `until:` is evaluated **after** each iteration over that iteration's outputs. True →
@@ -275,9 +296,24 @@ generate again. That is expressed as one `loop` step group, not `goto`:
 - **Attempts are cumulative, not isolated.** Iteration 2 fixes iteration 1's kernel in
   the checkout; `attempt_dir` holds evidence (prompts, logs, result JSON), not sources.
   An optional `snapshot` step (`git -C ${vars.repo_root} diff` → `attempt_dir/work.diff`)
-  gives per-iteration forensics without the runner knowing about git.
+  gives per-iteration forensics without the runner knowing about git. One scratch
+  worktree per *run*, with iterations accumulating inside it, is the natural next step
+  if a bad iteration ever needs discarding wholesale (§12.5).
+- **`acceptEdits` plus a broad `--add-dir` is a trust model, not a sandbox.** The agent
+  can write anywhere those flags reach, including this run's own evidence. The kernel
+  hash pairing in the review flow is a narrow integrity check on one file — it catches a
+  reviewer that edits what it is reviewing; it does not protect the checkout or the run
+  directory, and is not meant to. Run this against a checkout you are willing to have an
+  agent edit.
 - `when:` skips a step on a false condition (same closed grammar), recording it as
   `skipped` rather than failing the iteration.
+- **The loop is the unit of retry.** A step that fails is never re-run in place: its
+  inputs have not changed, so a second attempt asks the same question of the same state
+  and fails the same way at the same cost. `on_step_failure: retry` abandons the rest of
+  that iteration, writes the reason into `feedback.md`, and starts the next iteration
+  from the first step; `fail` (the default) stops the run. This replaced a per-step
+  `retries:` count, which in practice re-ran a review three times against a kernel and a
+  permission set that had not changed between attempts.
 
 ### 5.2 Why the exit condition is measured, not asked
 
@@ -295,6 +331,15 @@ actually executed. `--verification-mode cpu` is pinned because a freshly importe
 has no golden data and `auto` would silently degrade to SKIP. Agents supply diagnosis;
 they never supply the verdict.
 
+**The shipped review-only flow does not meet that bar, and should not be described as
+if it does.** Nothing it runs is compiled or executed, so its exit condition can only be
+a number an agent wrote. What the runner can enforce is consistency: the count is
+derived from the `critical_issues` list, the reviewer's own `critical_count` must agree
+with it, verdict and count must not contradict each other, and the kernel must be
+byte-identical before and after review. A clean result there means **review accepted** —
+well-formed, self-consistent, nothing critical found — not *validated*. Correctness
+claims start at §5's build and run against a reference.
+
 ## 6. Execution model
 
 - Steps execute in **declaration order**, sequentially. `after:` is a validated
@@ -303,20 +348,28 @@ they never supply the verdict.
   steps declared before it, so declaration order is always a valid topological order.
   A `loop` group is that same sequence, re-executed per iteration.
 - Each step: resolved argv + env + cwd → `subprocess.Popen`, output streamed to files
-  (never buffered in memory), optional live tee (`--tee`).
+  (never buffered in memory — `stdout`/`stderr` are exposed as outputs but read from
+  disk on demand), optional live tee (`--tee`). One deadline covers the whole
+  interaction, prompt delivery included: a child that never drains stdin cannot hold the
+  orchestrator outside its own timeout.
 - Timeout → process **tree** kill (`taskkill /T /F` on Windows, process-group kill on
   POSIX), recorded as `timed_out`.
-- Failure policy per step: `expect_exit: [0]`, `retries: N`, `continue_on_error: true`.
+- Failure policy: per step `expect_exit: [0]`, `continue_on_error: true`; per loop
+  `on_step_failure: fail|retry` (§5.1). No per-step retry count.
 - Run artifacts:
   ```
-  runs/<flow-name>/<utc-stamp>/
-    run.json            # resolved inputs/vars, per-iteration step status/outputs/timings
+  runs/<flow-name>/<utc-stamp>-<suffix>/
+    run.json            # resolved inputs/vars, provenance, per-iteration step status/outputs/timings
     inputs.json         # exactly what this run was asked to do
     feedback.md         # accumulated cross-iteration context
     integrate/iter-00/<step-id>/{cmd.txt,argv.json,stdin.txt,stdout.log,stderr.log,result.json}
     integrate/iter-01/...
   ```
-  `run.json` is the machine-readable result and the basis for later `--resume`.
+  `run.json` is the machine-readable result and the basis for later `--resume`. It is
+  rewritten atomically after every step transition, so a run that dies mid-flight still
+  leaves a report and a running one can be inspected while it runs. Run directories are
+  created, never reused: the stamp carries a random suffix, and an explicit `--run-dir`
+  that already holds a run is refused rather than written over.
 
 ## 7. Multiple runs / sweeps (later phase)
 
@@ -371,8 +424,9 @@ projects/hipdnn/tools/orchestrator/
   pyproject.toml  requirements.txt  .gitignore
 ```
 
-The ingest/build/validate flow of §5 is the next flow to add; it needs no runner
-changes, only `configs/flows/kernel-integration.yaml` plus its prompts.
+The ingest/build/validate flow of §5 is the next flow to add. It is mostly YAML and
+prompts, but not only: it needs a machine-readable bundle/case identity out of the
+import step (§12.2) before its `validate` gate can prove the requested graph ran.
 
 Conventions carried over: MIT + AMD copyright header on every file, `from __future__
 import annotations`, argparse, typed dataclasses, pytest config in `pyproject.toml`.
@@ -382,11 +436,11 @@ import annotations`, argparse, typed dataclasses, pytest config in `pyproject.to
 | Phase | Content | Status |
 |---|---|---|
 | P1 | registry + flow load/validate, `inputs:`/`prompt_file` rendering, strict refs (including inside prompts), sequential execution, `result_file`+`result_schema`, extractors, run dir + `run.json`, CLI `run/validate/inputs/doctor/tools/--dry-run` | **done** |
-| P2 | `loop` (`until`/`max_iterations`/`on_exhausted`/`feedback_from`), `${loop.*}` refs, `feedback.md` accumulation, `when:`, `assert`, `expect_exit`, `retries`, `continue_on_error` | **done** |
+| P2 | `loop` (`until`/`max_iterations`/`on_exhausted`/`on_step_failure`/`feedback_from`), `${loop.*}` refs, `feedback.md` accumulation, `when:`, `assert`, `expect_exit`, `continue_on_error` | **done** |
 | P3 | `--resume`, `matrix`/`for_each`, bounded parallelism, no-progress detection (identical failure signature twice → stop early) | not started |
 
-The §5 kernel-integration loop is not blocked on P3: it is a flow file, and every
-construct it uses exists today.
+The §5 kernel-integration loop is not blocked on P3, but it is blocked on the bundle
+identity contract of §12.2: every *runner* construct it uses exists today.
 
 ## 11. Decisions taken (challenge any)
 
@@ -396,7 +450,9 @@ construct it uses exists today.
 - **No expression `eval`** — closed grammar for refs, `when`, `assert`, `until`.
 - **Agent results arrive as a validated file**, not as parsed prose.
 - **Agents diagnose; binaries decide** — the loop's exit condition is measured test
-  counts, never an agent's self-assessment (§5.2).
+  counts, never an agent's self-assessment (§5.2). The shipped review-only flow cannot
+  reach that bar yet; it enforces consistency and reports *review accepted*, which is a
+  weaker claim and is described as one.
 - **Bounded loop, explicit budget** — `max_iterations` with `on_exhausted: fail`. An
   unbounded repair loop burns hours and hardware unattended.
 - **Context is data, not runner state** — `inputs`, refs, an accumulated feedback file,
@@ -410,19 +466,25 @@ construct it uses exists today.
    implies a full provider rebuild each iteration (the `build` step, ~minutes to tens of
    minutes). Is that the intended loop cost, or is there a faster direct-load path
    (`kind: direct_load` per the ingestor skill) that skips the packaged rebuild?
-2. **Graph → bundle.** `import_graph.py` is the documented path for turning a graph JSON
-   into a runnable bundle, and it dedups by structure hash. Do we import the input graph
-   into the real `integration-test-bundles/` tree (mutates the checkout) or into a
-   throwaway dir pointed at by `--golden-data-dir`? I lean throwaway — a validation run
-   should not leave bundles behind.
+2. **Graph → bundle, and what identifies the result.** `import_graph.py` is the
+   documented path for turning a graph JSON into a runnable bundle, and it dedups by
+   structure hash. Two things need settling. Import into a throwaway dir pointed at by
+   `--golden-data-dir` rather than the checkout's `integration-test-bundles/` tree — I
+   lean throwaway, a validation run should not leave bundles behind. And: how does the
+   flow learn *which* bundle/case it just created? The importer prints only prose, on
+   stderr. Either it grows a machine-readable line (`--emit-json`), or the flow derives
+   the identity from the graph the same way the importer does. Until then `validate`
+   cannot prove that this graph's case ran, only that something did.
 3. **Correctness reference.** `--verification-mode cpu` compares against the CPU
    reference. Is a CPU reference guaranteed to exist for every graph we will feed this?
    If not, iteration can end in "skipped, no reference" — which must be a loop failure,
    not a pass.
 4. **Which agent CLI** — `claude` only, or Codex too? No runner code depends on it, but
    the shipped prompts and the `session_id` extractor match one CLI's JSON shape.
-5. **Iteration isolation** — cumulative edits in one checkout (assumed above), or a
-   scratch worktree per attempt so a bad iteration can be discarded wholesale?
+5. **Iteration isolation** — cumulative edits in one checkout (assumed above), one
+   scratch worktree per run, or one per attempt so a bad iteration can be discarded
+   wholesale? Per run looks like the right default: it isolates the run from the
+   checkout without making "fix the kernel you wrote last time" span worktrees.
 6. **Ingest agent's own tests.** "Basic tests to ensure the integration is valid" — is
    that the ingestor skill's internal host-side census (agent-reported, inside
    `ingest.json`), or should the flow run an explicit deterministic gate (e.g. `ctest -L

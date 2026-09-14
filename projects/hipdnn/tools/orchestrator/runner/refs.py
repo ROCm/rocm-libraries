@@ -217,13 +217,26 @@ def _stringify(value: Any) -> str:
 
 # -- condition grammar ------------------------------------------------------
 #
-#   condition := clause (("and" | "or") clause)*        left to right, no precedence
-#   clause    := operand OP operand | operand           bare operand -> truthiness
-#   operand   := term ("+" term)*                       numeric sum, or string concat
-#   term      := ${ref} | number | 'string' | "string" | bareword
-#   OP        := == != < <= > >= contains matches
+#   condition   := disjunction
+#   disjunction := conjunction ("or" conjunction)*
+#   conjunction := clause ("and" clause)*
+#   clause      := operand [OP operand]                bare operand -> truthiness
+#   operand     := term ("+" term)*                    numeric sum, or string concat
+#   term        := ${ref} | number | 'string' | "string" | bareword
+#   OP          := == != < <= > >= contains matches
+#
+# `and` binds tighter than `or`, as it does everywhere else, and both short-circuit.
+#
+# The grammar is closed and every position is checked when the condition is *parsed*,
+# which happens while the flow loads -- before any process launches. That is
+# load-bearing. Two adjacent terms with no `+` between them are a syntax error rather
+# than a silent concatenation: `${steps.review.outputs.failed} = 0` (one `=`, not two)
+# used to fold into the non-empty string "1=0" and evaluate truthy, so a malformed exit
+# condition reported success while the thing it measured was failing.
 
 _COMPARATORS = ("==", "!=", "<=", ">=", "<", ">", "contains", "matches")
+_WORD_OPERATORS = ("contains", "matches")
+_JOINERS = ("and", "or")
 #: Order matters: refs and quoted strings first, then operators, then numbers, and a
 #: catch-all bareword last. The bareword is deliberately anything non-blank -- operands
 #: are values like `.json`, `^changes` or `gfx1151`, and a character-class allowlist
@@ -259,79 +272,179 @@ def _tokenize(text: str) -> list[tuple[str, str]]:
     return tokens
 
 
-def evaluate(condition: str, resolver: Resolver) -> bool:
-    """Evaluate a `when` / `until` / `assert` condition. Never uses eval()."""
-    tokens = _tokenize(condition)
-    if not tokens:
-        raise ConfigError("empty condition")
-    result: bool | None = None
-    joiner: str | None = None
-    index = 0
-    while index < len(tokens):
-        clause_tokens: list[tuple[str, str]] = []
-        while index < len(tokens) and not (
-            tokens[index][0] == "word" and tokens[index][1] in ("and", "or")
-        ):
-            clause_tokens.append(tokens[index])
-            index += 1
-        value = _clause(clause_tokens, condition, resolver)
-        if result is None:
-            result = value
-        elif joiner == "and":
-            result = result and value
-        else:
-            result = result or value
-        if index < len(tokens):
-            joiner = tokens[index][1]
-            index += 1
-            if index >= len(tokens):
-                raise ConfigError(f"condition ends with '{joiner}': {condition!r}")
-    return bool(result)
+@dataclass(frozen=True)
+class _Term:
+    kind: str
+    text: str
 
-
-def _clause(tokens: list[tuple[str, str]], condition: str, resolver: Resolver) -> bool:
-    operator_at = next(
-        (
-            i
-            for i, (kind, value) in enumerate(tokens)
-            if kind == "op" or (kind == "word" and value in ("contains", "matches"))
-        ),
-        None,
-    )
-    if operator_at is None:
-        return _truthy(_operand(tokens, condition, resolver))
-    operator = tokens[operator_at][1]
-    left = _operand(tokens[:operator_at], condition, resolver)
-    right = _operand(tokens[operator_at + 1 :], condition, resolver)
-    return _compare(left, operator, right, condition)
-
-
-def _operand(tokens: list[tuple[str, str]], condition: str, resolver: Resolver) -> Any:
-    if not tokens:
-        raise ConfigError(f"missing operand in condition {condition!r}")
-    values = [_term(kind, value, resolver) for kind, value in tokens if kind != "plus"]
-    if len(values) == 1:
-        return values[0]
-    numbers = [_as_number(value) for value in values]
-    if all(number is not None for number in numbers):
-        return sum(numbers)  # type: ignore[arg-type]
-    return "".join(_stringify(value) for value in values)
-
-
-def _term(kind: str, value: str, resolver: Resolver) -> Any:
-    if kind == "ref":
-        return resolver.lookup(value[2:-1])
-    if kind in ("sq", "dq"):
-        return value[1:-1]
-    if kind == "num":
-        return float(value) if "." in value else int(value)
-    if kind == "word":
-        if value == "true":
+    def evaluate(self, resolver: "Resolver") -> Any:
+        if self.kind == "ref":
+            return resolver.lookup(self.text[2:-1])
+        if self.kind in ("sq", "dq"):
+            return self.text[1:-1]
+        if self.kind == "num":
+            return float(self.text) if "." in self.text else int(self.text)
+        if self.text == "true":
             return True
-        if value == "false":
+        if self.text == "false":
             return False
-        return value
-    raise ConfigError(f"unexpected token {value!r} in condition")
+        return self.text
+
+
+@dataclass(frozen=True)
+class _Sum:
+    terms: tuple[_Term, ...]
+
+    def evaluate(self, resolver: "Resolver") -> Any:
+        if len(self.terms) == 1:
+            return self.terms[0].evaluate(resolver)
+        values = [term.evaluate(resolver) for term in self.terms]
+        numbers = [_as_number(value) for value in values]
+        if all(number is not None for number in numbers):
+            return sum(numbers)  # type: ignore[arg-type]
+        return "".join(_stringify(value) for value in values)
+
+
+@dataclass(frozen=True)
+class _Compare:
+    left: _Sum
+    operator: str
+    right: _Sum
+    condition: str
+
+    def evaluate(self, resolver: "Resolver") -> bool:
+        return _compare(
+            self.left.evaluate(resolver),
+            self.operator,
+            self.right.evaluate(resolver),
+            self.condition,
+        )
+
+
+@dataclass(frozen=True)
+class _Truthy:
+    operand: _Sum
+
+    def evaluate(self, resolver: "Resolver") -> bool:
+        return _truthy(self.operand.evaluate(resolver))
+
+
+@dataclass(frozen=True)
+class _All:
+    clauses: tuple[Any, ...]
+
+    def evaluate(self, resolver: "Resolver") -> bool:
+        return all(bool(clause.evaluate(resolver)) for clause in self.clauses)
+
+
+@dataclass(frozen=True)
+class _Any:
+    clauses: tuple[Any, ...]
+
+    def evaluate(self, resolver: "Resolver") -> bool:
+        return any(bool(clause.evaluate(resolver)) for clause in self.clauses)
+
+
+@dataclass(frozen=True)
+class Condition:
+    """A parsed `when` / `until` / `assert` condition. Never uses eval().
+
+    Parsed once, when the flow loads; evaluated once per check. `str(condition)` is the
+    source text, which is what failure messages and the run manifest should show.
+    """
+
+    text: str
+    node: Any
+
+    def __str__(self) -> str:
+        return self.text
+
+    def evaluate(self, resolver: "Resolver") -> bool:
+        return bool(self.node.evaluate(resolver))
+
+
+def parse_condition(text: str) -> Condition:
+    """Parse a condition or raise `ConfigError`. Nothing may launch before this runs."""
+    tokens = _tokenize(text)
+    if not tokens:
+        raise ConfigError(f"empty condition: {text!r}")
+    parser = _Parser(tokens, text)
+    node = parser.disjunction()
+    parser.expect_end()
+    return Condition(text=text, node=node)
+
+
+class _Parser:
+    def __init__(self, tokens: list[tuple[str, str]], text: str) -> None:
+        self.tokens = tokens
+        self.text = text
+        self.index = 0
+
+    def disjunction(self) -> Any:
+        clauses = [self.conjunction()]
+        while self._at_joiner("or"):
+            self.index += 1
+            clauses.append(self.conjunction())
+        return clauses[0] if len(clauses) == 1 else _Any(tuple(clauses))
+
+    def conjunction(self) -> Any:
+        clauses = [self.clause()]
+        while self._at_joiner("and"):
+            self.index += 1
+            clauses.append(self.clause())
+        return clauses[0] if len(clauses) == 1 else _All(tuple(clauses))
+
+    def clause(self) -> Any:
+        left = self.operand()
+        token = self._peek()
+        if token is not None and (
+            token[0] == "op" or (token[0] == "word" and token[1] in _WORD_OPERATORS)
+        ):
+            self.index += 1
+            return _Compare(left, token[1], self.operand(), self.text)
+        return _Truthy(left)
+
+    def operand(self) -> _Sum:
+        terms = [self.term()]
+        while self._peek() is not None and self.tokens[self.index][0] == "plus":
+            self.index += 1
+            terms.append(self.term())
+        return _Sum(tuple(terms))
+
+    def term(self) -> _Term:
+        token = self._peek()
+        if token is None:
+            raise ConfigError(
+                f"condition {self.text!r} ends where a value was expected"
+            )
+        kind, value = token
+        if kind == "plus":
+            raise ConfigError(f"condition {self.text!r}: '+' with no value before it")
+        if kind == "op" or (kind == "word" and value in _WORD_OPERATORS + _JOINERS):
+            raise ConfigError(
+                f"condition {self.text!r}: found operator {value!r} where a value was "
+                f"expected"
+            )
+        self.index += 1
+        return _Term(kind, value)
+
+    def expect_end(self) -> None:
+        token = self._peek()
+        if token is None:
+            return
+        hint = " (did you mean '=='?)" if token[1] == "=" else ""
+        raise ConfigError(
+            f"condition {self.text!r}: unexpected {token[1]!r} after a complete value"
+            f"{hint}. Values must be joined by '+', a comparison "
+            f"({', '.join(_COMPARATORS)}), 'and', or 'or'."
+        )
+
+    def _peek(self) -> tuple[str, str] | None:
+        return self.tokens[self.index] if self.index < len(self.tokens) else None
+
+    def _at_joiner(self, word: str) -> bool:
+        token = self._peek()
+        return token is not None and token[0] == "word" and token[1] == word
 
 
 def _as_number(value: Any) -> float | int | None:

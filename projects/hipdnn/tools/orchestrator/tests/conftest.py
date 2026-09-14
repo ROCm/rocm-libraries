@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 #: stdout, exactly like `claude --print --output-format json` does.
 FAKE_AGENT = textwrap.dedent(
     """
-    import argparse, json, pathlib, sys
+    import argparse, json, pathlib, sys, time
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--result")
@@ -25,8 +25,12 @@ FAKE_AGENT = textwrap.dedent(
     parser.add_argument("--counter")
     parser.add_argument("--sequence", default="")
     parser.add_argument("--skip-result", action="store_true")
+    parser.add_argument("--skip-result-on", type=int, default=None)
     parser.add_argument("--exit-code", type=int, default=0)
+    parser.add_argument("--sleep", type=float, default=0.0)
     args = parser.parse_args()
+
+    time.sleep(args.sleep)
 
     index = 0
     if args.counter:
@@ -43,7 +47,8 @@ FAKE_AGENT = textwrap.dedent(
         payload["critical_issues"] = [{"title": f"issue {n}"} for n in range(value)]
         payload["feedback"] = f"round {index}: {value} critical issue(s)"
 
-    if not args.skip_result and args.result:
+    skip = args.skip_result or args.skip_result_on == index
+    if not skip and args.result:
         pathlib.Path(args.result).write_text(json.dumps(payload))
     print(json.dumps({"session_id": "session-123", "result": "ok", "round": index}))
     sys.exit(args.exit_code)

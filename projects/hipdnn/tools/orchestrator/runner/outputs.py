@@ -4,15 +4,16 @@
 
 An agent's stdout is prose wrapped in whatever its CLI emits. Parsing it for a file
 path is a trap, so an agent step instead dictates a result file and validates it: a
-missing file, invalid JSON, or a missing required key fails that step -- with a retry
-budget -- instead of handing an empty string to the next agent.
+missing file, invalid JSON, or a missing required key fails that step instead of
+handing an empty string to the next agent.
 """
 from __future__ import annotations
 
 import glob as globlib
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,28 +27,73 @@ class Artifacts:
     stderr_path: Path
     workdir: Path
     result_path: Path | None = None
+    #: One read per log per step. Several extractors over the same log are normal (a
+    #: regex, a tail, a JSON envelope); re-reading a multi-megabyte build log once per
+    #: extractor is not. The cache dies with the step, so nothing is retained after it.
+    _cache: dict[str, str] = field(default_factory=dict, repr=False, compare=False)
+
+    def path_for(self, source: str) -> Path:
+        return self.stdout_path if source == "stdout" else self.stderr_path
 
     def text(self, source: str) -> str:
-        path = self.stdout_path if source == "stdout" else self.stderr_path
-        try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return ""
+        if source not in self._cache:
+            self._cache[source] = read_text(self.path_for(source))
+        return self._cache[source]
+
+
+class LazyText:
+    """A log's contents, read only when something actually asks for them.
+
+    `stdout` and `stderr` are implicit outputs of every step, but flows overwhelmingly
+    pass the *paths* downstream. Materialising a build log into the run's state on the
+    chance that some later condition reads it is how a long run ends up holding every
+    log it ever produced. Deliberately uncached: retaining the text is the thing being
+    avoided, and anything that needs it repeatedly should declare a real extractor.
+    """
+
+    __slots__ = ("path",)
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def __str__(self) -> str:
+        return read_text(self.path)
+
+    def __repr__(self) -> str:
+        return f"LazyText({self.path})"
+
+
+def read_text(path: Path) -> str:
+    """Log text for humans and extractors. Undecodable bytes are replaced, not fatal --
+    the byte-exact log on disk is the evidence, this is a view of it."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def read_json(path: Path, what: str) -> Any:
+    """Parse a JSON file, turning every way that can fail into a `StepError`."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise StepError(f"{what}: {path} is not valid UTF-8: {error}") from None
+    except OSError as error:
+        raise StepError(f"{what}: {path} cannot be read: {error}") from None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        raise StepError(f"{what}: {path} is not valid JSON: {error}") from None
 
 
 def load_result(step_id: str, path: Path, required: list[str]) -> dict[str, Any]:
-    """Read and check a step's result file. Raises StepError so `retries` can re-ask."""
+    """Read and check a step's result file. A violation fails the step."""
     if not path.is_file():
         raise StepError(
             f"step '{step_id}': result file {path} was not written. The prompt must "
             f"instruct the agent to write its structured result to that exact path."
         )
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise StepError(
-            f"step '{step_id}': result file {path} is not valid JSON: {error}"
-        ) from None
+    data = read_json(path, f"step '{step_id}': result file")
     if not isinstance(data, dict):
         raise StepError(
             f"step '{step_id}': result file {path} must contain a JSON object"
@@ -81,12 +127,17 @@ def _raw(
 ) -> Any:
     if spec.kind == "regex":
         text = artifacts.text(spec.source)
-        matches = list(re.finditer(str(argument), text, re.MULTILINE))
+        try:
+            matches = list(re.finditer(str(argument), text, re.MULTILINE))
+        except re.error as error:
+            raise StepError(
+                f"output '{spec.name}': {argument!r} is not a valid regular "
+                f"expression: {error}"
+            ) from None
         if not matches:
             raise StepError(
                 f"output '{spec.name}': pattern {argument!r} matched nothing in {spec.source} "
-                f"({artifacts.text(spec.source).count(chr(10)) + 1} lines at "
-                f"{artifacts.stdout_path if spec.source == 'stdout' else artifacts.stderr_path})"
+                f"({text.count(chr(10)) + 1} lines at {artifacts.path_for(spec.source)})"
             )
         # Last match wins: summaries print at the end, and a retry inside one log should
         # not be read as the final answer.
@@ -101,7 +152,7 @@ def _raw(
     if spec.kind == "json":
         text = artifacts.text(spec.source)
         try:
-            document = json.loads(text)
+            document: Any = json.loads(text)
         except json.JSONDecodeError as error:
             raise StepError(
                 f"output '{spec.name}': {spec.source} is not JSON ({error}). If the tool "
@@ -113,17 +164,12 @@ def _raw(
         if argument == "result":
             if result is None:
                 raise StepError(f"output '{spec.name}': step has no result file")
-            document: Any = result
+            document = result
         else:
             path = Path(str(argument))
             if not path.is_file():
                 raise StepError(f"output '{spec.name}': {path} does not exist")
-            try:
-                document = json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as error:
-                raise StepError(
-                    f"output '{spec.name}': {path} is not valid JSON: {error}"
-                ) from None
+            document = read_json(path, f"output '{spec.name}'")
         return _json_path(spec, document, str(spec.path))
 
     if spec.kind == "file":
@@ -136,6 +182,16 @@ def _raw(
 
     if spec.kind == "glob":
         return sorted(globlib.glob(str(argument), recursive=True))
+
+    # Content identity of a file the step touched. Pairing this with an assert is how a
+    # flow proves a later step did NOT modify an artifact an earlier step produced --
+    # tool permissions are a request, a hash is evidence.
+    if spec.kind == "sha256":
+        path = Path(str(argument))
+        if not path.is_file():
+            raise StepError(f"output '{spec.name}': {path} does not exist")
+        with path.open("rb") as handle:
+            return hashlib.file_digest(handle, "sha256").hexdigest()
 
     if spec.kind in ("tail", "lines"):
         count = int(argument)
@@ -184,8 +240,26 @@ def _tokens(path: str) -> list[str | int]:
 
 
 def _coerce(spec: OutputSpec, value: Any) -> Any:
-    if spec.type in ("string", "json") or isinstance(value, list):
-        return value if spec.type == "json" or isinstance(value, list) else str(value)
+    if spec.type == "json":
+        return value
+    if spec.type == "count":
+        if isinstance(value, (list, tuple, dict)):
+            return len(value)
+        raise StepError(
+            f"output '{spec.name}': type 'count' needs a list or mapping, got "
+            f"{type(value).__name__} ({value!r})"
+        )
+    # A structure reaching a scalar type means the extractor and the declared type
+    # disagree. Passing it through unchanged is how an `int` output ends up holding
+    # [1, 2] and every later comparison against it becomes meaningless.
+    if isinstance(value, (list, tuple, dict)):
+        raise StepError(
+            f"output '{spec.name}': extracted a {type(value).__name__} where type "
+            f"'{spec.type}' expects a single value ({value!r}). Use 'type: json' to keep "
+            f"the structure, or 'type: count' for its length."
+        )
+    if spec.type == "string":
+        return str(value)
     if spec.type == "int":
         try:
             return int(str(value).strip())
