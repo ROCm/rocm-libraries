@@ -15,6 +15,7 @@ find_package(Threads REQUIRED)
 add_executable(hipdnn_plugin_sdk_tests
     main.cpp
     TestArchMatch.cpp
+    TestDeviceQuery.cpp
     TestPluginDataTypeHelpers.cpp
     TestPluginException.cpp
     TestPluginHelpers.cpp
@@ -28,6 +29,9 @@ add_executable(hipdnn_plugin_sdk_tests
     TestVersion.cpp
     TestPluginDeviceBuffers.cpp
     TestRuntimePassByValue.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestJsonExpression.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestJsonDataSource.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestJsonValue.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestLruCache.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestNativeRegistry.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelHeuristic.cpp>

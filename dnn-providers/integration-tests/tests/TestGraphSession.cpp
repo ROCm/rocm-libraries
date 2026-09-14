@@ -114,6 +114,7 @@ TEST(TestGraphSession, DefaultSessionHasNoGraphAndAcceptsNothing)
     const GraphSession session;
 
     EXPECT_EQ(session.graph, nullptr);
+    EXPECT_FALSE(session.buildFailed);
     EXPECT_TRUE(session.buildError.empty());
     EXPECT_FALSE(session.engines.accepted);
     EXPECT_TRUE(session.engines.rankedIds.empty());
@@ -124,12 +125,14 @@ TEST(TestGraphSession, DefaultSessionHasNoGraphAndAcceptsNothing)
 TEST(TestGraphSession, SessionIsMovable)
 {
     GraphSession session;
+    session.buildFailed = true;
     session.buildError = "from_binary failed";
     session.engines.rankedIds = {UNDER_TEST_ID};
     session.engines.accepted = true;
 
     const GraphSession moved = std::move(session);
 
+    EXPECT_TRUE(moved.buildFailed);
     EXPECT_EQ(moved.buildError, "from_binary failed");
     EXPECT_TRUE(moved.engines.accepted);
     ASSERT_EQ(moved.engines.rankedIds.size(), 1u);
