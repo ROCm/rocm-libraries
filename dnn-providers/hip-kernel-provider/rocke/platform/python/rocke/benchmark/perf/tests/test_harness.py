@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from rocke.benchmark.perf import harness
 
@@ -545,6 +546,128 @@ class TestProfileTimingSource(unittest.TestCase):
         self.assertEqual(rec["timing_source"], "perfjson")
         self.assertEqual(rec["wall"]["ms_median"], 1.0)
         self.assertEqual(self.wall_calls, [["x"]])
+
+
+class TestProfileArtifacts(unittest.TestCase):
+    """Retained workspaces preserve profiler bytes, including partial captures."""
+
+    _CSV = (
+        b"Kernel_Name,Dispatch_Id,Counter_Name,Counter_Value\r\n"
+        b"gemm,1,GRBM_GUI_ACTIVE,9000\r\n"
+        b"gemm,2,GRBM_GUI_ACTIVE,1000\r\n"
+        b"other,3,GRBM_GUI_ACTIVE,7000\r\n"
+    )
+    _RAW_FILES = {
+        "prof/pmc_1/host_counter_collection.csv": _CSV,
+        "prof/pmc_1/agent_info.csv": b'"Agent_Id","Name"\r\n"0","gfx950"\r\n',
+        "prof/diagnostics.bin": b"\x00\xffpartial\r\n",
+    }
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.artifacts = Path(temporary.name) / "capture"
+        self.profiler_ok = True
+        self.workspace = None
+        self.discover = self._patch(
+            harness._counters,
+            "discover",
+            return_value={"busy_cycles": "GRBM_GUI_ACTIVE"},
+        )
+        self.run = self._patch(
+            harness, "_run_rocprofv3", side_effect=self._produce_capture
+        )
+        self.wall = self._patch(harness, "_wall", return_value=({"ms_median": 1.0}, {}))
+
+    def _patch(self, target, name, **kwargs):
+        patcher = patch.object(target, name, **kwargs)
+        mocked = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mocked
+
+    def _produce_capture(self, cmd, pmc_input, outdir, env, timeout):
+        self.workspace = outdir.parent
+        for relative, contents in self._RAW_FILES.items():
+            path = self.workspace / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(contents)
+        return self.profiler_ok, 'PerfJSON: {"ms": 2.5}\n'
+
+    def _assert_raw_retained(self):
+        self.assertEqual(self.workspace, self.artifacts)
+        self.assertEqual(
+            (self.artifacts / "pmc.txt").read_bytes(), b"pmc: GRBM_GUI_ACTIVE\n"
+        )
+        for relative, contents in self._RAW_FILES.items():
+            with self.subTest(file=relative):
+                self.assertEqual((self.artifacts / relative).read_bytes(), contents)
+
+    def test_success_retains_unfiltered_original_bytes(self):
+        record = harness.profile(
+            ["x"], "gfx950", match="gemm", warmup=1, artifacts_dir=self.artifacts
+        )
+        self.assertEqual(record["counters"], {"busy_cycles": 1000})
+        self.assertEqual(
+            record["profile_capture"],
+            {
+                "status": "complete",
+                "counter_map": {"busy_cycles": "GRBM_GUI_ACTIVE"},
+                "counter_groups": [["GRBM_GUI_ACTIVE"]],
+                "match_kernel": "gemm",
+                "warmup_per_pass": 1,
+                "raw_includes_warmup": True,
+                "raw_includes_other_kernels": True,
+            },
+        )
+        self._assert_raw_retained()
+
+    def test_profiler_failure_retains_partial_output(self):
+        self.profiler_ok = False
+        record = harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self.assertEqual(record["profile_capture"]["status"], "failed")
+        self.assertEqual(record["counters"], {})
+        self.assertEqual(record["wall"], {"ms_median": 1.0})
+        self._assert_raw_retained()
+
+    def test_parsing_exception_retains_original_bytes(self):
+        self._patch(
+            harness, "_read_counter_csvs", side_effect=ValueError("malformed CSV")
+        )
+        with self.assertRaisesRegex(ValueError, "malformed CSV"):
+            harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self._assert_raw_retained()
+        self.wall.assert_not_called()
+
+    def test_existing_directory_refused_before_discovery_or_launch(self):
+        self.artifacts.mkdir()
+        sentinel = self.artifacts / "previous.bin"
+        sentinel.write_bytes(b"previous capture\x00\xff")
+        with self.assertRaises(FileExistsError):
+            harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self.assertEqual(sentinel.read_bytes(), b"previous capture\x00\xff")
+        self.assertEqual(list(self.artifacts.iterdir()), [sentinel])
+        self.discover.assert_not_called()
+        self.run.assert_not_called()
+        self.wall.assert_not_called()
+
+    def test_default_omits_artifact_metadata_and_removes_workspace(self):
+        record = harness.profile(["x"], "gfx950", match="gemm", warmup=1)
+        self.assertNotIn("profile_capture", record)
+        self.assertEqual(record["counters"], {"busy_cycles": 1000})
+        self.assertIsNotNone(self.workspace)
+        self.assertFalse(self.workspace.exists())
+
+    def test_no_profiler_reports_unavailable_capture(self):
+        self.discover.return_value = {}
+        record = harness.profile(["x"], "gfx950", artifacts_dir=self.artifacts)
+        self.assertEqual(record["profile_capture"]["status"], "unavailable")
+        self.assertEqual(record["profile_capture"]["counter_map"], {})
+        self.assertEqual(record["profile_capture"]["counter_groups"], [])
+        self.assertEqual(record["counters"], {})
+        self.assertEqual(record["wall"], {"ms_median": 1.0})
+        self.assertTrue(self.artifacts.is_dir())
+        self.assertEqual(list(self.artifacts.iterdir()), [])
+        self.run.assert_not_called()
 
 
 if __name__ == "__main__":

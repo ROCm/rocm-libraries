@@ -42,6 +42,8 @@ post-processing:
     env and the sidecar step, so the trace opens with Python correlation
   - `emit_inline_frames.py` — `inline_frames.json` sidecar recovering the inlining
     call stack rocprofv3 flattens away
+  - `capture_wavescope_pmc.py` — uses perf primitives to emit raw PMC CSVs for
+    WaveScope and versioned measurement JSON for a future JSON reader
   - `README.md`                    — install the extension, capture, and read a trace
 - `stage3_extract_isa/`
   - `count_instructions.py`

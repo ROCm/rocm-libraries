@@ -5,10 +5,10 @@
 Lives at `rocke/platform/python/rocke/benchmark/perf/`, alongside the other
 `benchmark/` harnesses; invoked by rocKE kernel-launch commands.
 
-LAYER 1 - primitives (this package). They return records / values and never persist
-them, so any consumer (the user tool OR an external perf framework) can use them
-without inheriting filesystem writes. `perfjson.emit` writes only its one launcher
-protocol line to a caller-selected stream.
+LAYER 1 - primitives (this package). They return records / values without persisting
+measurement records. The harness normally uses temporary profiler files; callers
+may explicitly retain that workspace with artifacts_dir. `perfjson.emit` writes
+only its launcher protocol line to a caller-selected stream.
 
   schema.py     - measurement-record schema + validate (the seam)
   perfjson.py   - emit/parse the `PerfJSON:` launcher line (optional wall timing)
@@ -18,8 +18,8 @@ protocol line to a caller-selected stream.
   aggregate.py  - K records -> median/spread/derived
   report.py     - record -> JSON string/dict (serialize; no writes)
 
-LAYER 2 - the user tool lives in a SEPARATE package `rocke.benchmark.perf.tool` (store, self-
-check, CLI). It imports these primitives; primitives never import it.
+LAYER 2 - the user tool lives in a SEPARATE package `rocke.benchmark.perf.tool`
+(history, artifact bundles, self-check, CLI). Primitives never import it.
 """
 
 from . import perfjson, schema

@@ -25,6 +25,7 @@ import statistics
 import subprocess
 import tempfile
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, Sequence
@@ -309,6 +310,7 @@ def profile(
     env: Optional[dict] = None,
     timeout: int = 1800,
     warn: Optional[Callable[[str], None]] = None,
+    artifacts_dir: Optional[os.PathLike[str] | str] = None,
 ) -> dict:
     """Profile the kernel launched by `cmd` and return a measurement record.
 
@@ -330,6 +332,11 @@ def profile(
     counter values (all dispatches, keyed by Dispatch_Id) for downstream profiling.
     Opt-in (off by default) because it is much larger than the aggregate.
 
+    `artifacts_dir`: retain the original profiler workspace in this new directory
+    instead of deleting it after capture. Existing paths and retention errors raise;
+    partial output survives failures. Adds `profile_capture` metadata to the record:
+    status describes profiler execution, not whether matching counters populated.
+
     Timing sources, in order: the launcher's `PerfJSON:` line (gives wall + profiled
     timing plus tflops/gbs), else the profiler's dispatch timestamps (gives profiled
     timing only). `record["timing_source"]` says which was used. With neither - i.e.
@@ -347,6 +354,10 @@ def profile(
     if warmup < 0:
         raise ValueError("warmup must be non-negative")
 
+    if artifacts_dir is not None:
+        artifacts_dir = Path(artifacts_dir)
+        artifacts_dir.mkdir(parents=True, exist_ok=False)
+
     env = {**os.environ, **(env or {})}
     sel = _counters.discover(arch)  # normalized -> raw
     raw_to_norm = {raw: norm for norm, raw in sel.items()}
@@ -361,7 +372,12 @@ def profile(
             f"no PMU counters available for {arch} "
             "(rocprofv3 missing/unsupported); producing a wall-only record"
         )
-    with tempfile.TemporaryDirectory(prefix="rocke_perf_prof_") as tmp:
+    workspace = (
+        nullcontext(artifacts_dir)
+        if artifacts_dir is not None
+        else tempfile.TemporaryDirectory(prefix="rocke_perf_prof_")
+    )
+    with workspace as tmp:
         tmp = Path(tmp)
         outdir = tmp / "prof"
         ran = False
@@ -509,5 +525,15 @@ def profile(
     }
     if per_dispatch:
         record["counter_samples"] = samples  # raw per-dispatch values (opt-in)
+    if artifacts_dir is not None:
+        record["profile_capture"] = {
+            "status": "complete" if ran else "failed" if sel else "unavailable",
+            "counter_map": sel,
+            "counter_groups": groups,
+            "match_kernel": match,
+            "warmup_per_pass": warmup,
+            "raw_includes_warmup": True,
+            "raw_includes_other_kernels": True,
+        }
     _schema.validate(record)
     return record

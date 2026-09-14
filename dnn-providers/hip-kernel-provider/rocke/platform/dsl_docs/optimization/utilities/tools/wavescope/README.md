@@ -2,16 +2,18 @@
 
 **WaveScope** is the viewer that turns an ATT trace into a per-wave timeline, an
 ISA listing, and a Source tab that maps instructions back to the Python that
-authored them. The two scripts here produce what it reads.
+authored them. The scripts here produce trace, source-attribution, and PMC artifacts.
 
-Both are stdlib-only, import no rocke, and run from any directory against any
-trace, so the commands below work as written from wherever you are once you point
-at them. From `platform/`, that is
+All scripts use the Python standard library and run from any working directory.
+The PMC utility selects the adjacent `platform/python` perf package; the ATT and
+inline-frame utilities import no rocKE. From `platform/`, these tools live in
 `dsl_docs/optimization/utilities/tools/wavescope/`. Each takes `--help`.
 
 - `capture_wavescope_trace.py` — capture a source-correlated trace end to end.
 - `emit_inline_frames.py` — write the inline-frames sidecar for a trace you
   already decoded.
+- `capture_wavescope_pmc.py` — capture hardware-counter CSVs for WaveScope and
+  versioned measurement JSON for future JSON import, through the perf primitives.
 
 ## What WaveScope shows
 
@@ -22,7 +24,7 @@ stall totals, and — if the kernel was built with source locations — a Source
 that highlights the Python lines those instructions came from, clickable in both
 directions.
 
-WaveScope lives in its own repo, <https://github.com/aghamari/WaveScope>. It is
+WaveScope lives in its own repo, <https://github.com/ROCm/WaveScope>. It is
 not published to the marketplace, so installing means building the `.vsix` once.
 
 ## Install
@@ -81,6 +83,70 @@ by hand. It sets `ROCKE_DEBUG_LOC=1` on the process that *builds* the kernel
 [`env_flags.md`](../../../../reference/env_flags.md)), runs the capture via
 `../stage2_capture/capture_att_trace.py`, generates the inline-frames sidecar, and
 prints the folder to open. Unrecognized flags are forwarded to the capture script.
+
+## Capture PMC evidence (CSV and JSON)
+
+This is separate from ATT tracing. The utility delegates to the existing rocKE
+perf CLI; it does not reimplement profiling or require WaveScope to be installed.
+From `platform/`:
+
+```bash
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py \
+  --output-dir /tmp/gemm-pmc-before \
+  --arch gfx950 --op gemm --shape '{"M":512,"N":512,"K":512}' \
+  --kernel-name my_gemm --match-kernel my_gemm --repeats 3 --warmup 5 \
+  --per-dispatch -- python3 /path/to/bench.py
+```
+
+Choose the actual operation (attention, convolution, GEMM, etc.), shape, target,
+kernel and warmup count. The launcher runs in your current working directory.
+The adjacent perf package is added to the child `PYTHONPATH`; existing entries
+are preserved. Add the rocKE `library` path yourself if your launcher needs it.
+The output directory must be new. No prior capture or ATT files are modified.
+
+**Both formats are always emitted when measurement succeeds:**
+
+```text
+gemm-pmc-before/
+  manifest.json                 versioned entry point, file hashes and relative paths
+  measurement.json              aggregate measurement/v1 (medians and spread)
+  comparison.json               existing perf selfcheck result
+  samples/0000/
+    measurement.json            single-repeat measurement and capture metadata
+    raw/pmc.txt                 requested hardware-counter recipe
+    raw/prof/.../*counter_collection.csv
+  samples/0001/...
+```
+
+For **WaveScope today**, open the ATT dispatch, select **Bottlenecks**, and upload
+one of the printed CSV paths. Each repeat stays separate. A replay pass may hold
+only part of the counter set; keep all relevant pass files from one repeat when
+colocating them with a trace, without overwriting identically named files. Do not
+combine multiple repeats into one CSV import. The raw files retain warmup and
+other-kernel dispatches, while JSON medians select the target and exclude warmup.
+
+For **future JSON import**, retain the entire bundle and read `manifest.json`.
+It uses `rocke.bench.artifacts/v1`; measurements use `rocke.bench.measurement/v1`.
+See the [artifact contract](../../../../../python/rocke/benchmark/perf/README.md#portable-artifacts-csv-now-measurement-json-for-future-consumers)
+for selection, repeat identity, SHA-256 inventory and timing-source semantics.
+WaveScope can implement this reader later without another producer change.
+There is no format switch or WaveScope-version detection in the utility.
+
+The utility defaults to **export-only** (no history writes). Add `--store-history`
+to compare later captures against stored baselines; `--cache`, `--threshold`,
+`--noise-k` and `--json` pass through to the perf CLI. Progress and import paths
+go to stderr so `--json` stdout stays machine-readable. Regressions retain exit 1.
+
+The manifest distinguishes complete measurement export from actual profiler
+availability. Without usable PMC collection, a launcher emitting `PerfJSON:` may
+still produce wall-only JSON: the utility explicitly reports no PMC CSVs rather
+than claiming a successful counter capture. Failed captures retain partial
+artifacts and do not report a finalized baseline.
+
+**Association is UNBOUND.** These counters were collected separately from ATT.
+Check workload, shape, GPU and build before correlating them. File hashes prove
+artifact integrity, not that two captures ran the same binary. Export retains the
+existing perf counter set; it does not add the full roofline or LDS-conflict set.
 
 ## Open it
 
