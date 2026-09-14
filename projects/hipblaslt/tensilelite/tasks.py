@@ -22,11 +22,32 @@ from Tensile.RocisaStatus import _rocisa_install_status
 # Architecture detection, steppings included, lives in the packaged Tensile tree
 # (invoke-free) so CI test artifacts can exercise it directly; these @task
 # wrappers only expose it on the invoke command line.
-from Tensile.GpuArch import detect_gpu_arch
+from Tensile.GpuArch import cmake_gpu_target, detect_gpu_arch
 
 
 def _cmake_bool(value):
     return "ON" if value else "OFF"
+
+
+def _cmake_gpu_targets(spec):
+    """``GPU_TARGETS`` for cmake: keep steppings, drop colon-delimited features.
+
+    Invoke accepts a comma-separated list. Each entry is passed through
+    ``cmake_gpu_target`` so ``gfx942:sramecc+:xnack-`` (what tox forwards from
+    an unstripped probe) becomes ``gfx942``.
+    """
+    return ",".join(
+        cmake_gpu_target(part.strip()) for part in spec.split(",") if part.strip()
+    )
+
+
+def _resolve_gpu_targets(spec):
+    if spec is None:
+        detected = detect_gpu_arch()
+        if not detected:
+            return None, None
+        return detected, _cmake_gpu_targets(detected)
+    return None, _cmake_gpu_targets(spec)
 
 
 def _detect_rocm():
@@ -53,7 +74,9 @@ def _detect_rocm():
 
 @task
 def get_gpu_arch(c):
-    print(detect_gpu_arch())
+    detected = detect_gpu_arch()
+    if detected:
+        print(cmake_gpu_target(detected))
 
 
 @task(
@@ -202,10 +225,12 @@ def build_client(
     if enable_asan and enable_tsan:
         raise Exit("Error: ASAN and TSAN cannot be enabled simultaneously", code=1)
 
-    if gpu_targets is None:
-        gpu_targets = detect_gpu_arch()
-        if not gpu_targets:
-            raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
+    detected, gpu_targets = _resolve_gpu_targets(gpu_targets)
+    if not gpu_targets:
+        raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
+    if detected is not None and detected != gpu_targets:
+        print(f"warning: No GPU targets specified. Detected {detected}, using: {gpu_targets}")
+    elif detected is not None:
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
     if rocm_path:
@@ -323,11 +348,10 @@ def build_coverage(
     Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
     Run tests with tox -e coverage-cpp to generate coverage reports.
     """
-    if gpu_targets is None:
-        gpu_targets = detect_gpu_arch()
-        if not gpu_targets:
-            print("Error: No GPU detected and no gpu_targets provided.")
-            return
+    _, gpu_targets = _resolve_gpu_targets(gpu_targets)
+    if not gpu_targets:
+        print("Error: No GPU detected and no gpu_targets provided.")
+        return
 
     if clean and os.path.exists(build_dir):
         c.run(f"rm -rf {shlex.quote(build_dir)}")
