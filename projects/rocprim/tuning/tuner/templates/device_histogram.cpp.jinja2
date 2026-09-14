@@ -8,7 +8,7 @@ constexpr unsigned int channels = {{ channels }};
 constexpr unsigned int active_channels = {{ active_channels }};
 {% endblock %}
 {% block benchmark_type %}
-using benchmark_type = device_multi_histogram_even_benchmark<value_type, channels, active_channels, false, config>;
+using benchmark_type = device_multi_histogram_even_benchmark<value_type, channels, active_channels, config>;
 {% endblock %}
 
 {% block benchmark_queue %}
