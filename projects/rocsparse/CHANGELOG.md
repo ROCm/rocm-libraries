@@ -3,7 +3,13 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## (Unreleased) rocSPARSE 5.1.0
+## (Unreleased) rocSPARSE 5.2.0
+
+### Changed
+* rocSPARSE no longer depends on rocBLAS. The dependency was used only by the `rocsparse_sddmm_alg_dense` algorithm, which densified the sparse output and called a dense GEMM.
+* Deprecated `rocsparse_sddmm_alg_dense`. It remains a valid value of `rocsparse_sddmm_alg` and keeps its numerical value, so existing source and binaries continue to work, but it now selects `rocsparse_sddmm_alg_default`. As a result, `rocsparse_sddmm_buffer_size` reports a zero-sized buffer for this algorithm, and batched SDDMM on the CSR, CSC, COO, COO AoS, and ELL formats, which previously returned `rocsparse_status_not_implemented` with this algorithm, is now supported.
+
+## rocSPARSE 5.1.0 for ROCm 10.1
 
 ### Added
 * Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.
@@ -12,10 +18,6 @@ Documentation for rocSPARSE is available at
 * Added `rocsparse_sddmm` batched support to CSR, CSC, COO, COO AoS, and ELL formats.
 * Added ELL format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
 * Added the `rocsparse_solve_mode` enum (`triangular`, `diagonal`) and the `rocsparse_diagonal_modifier` enum (`none`, `absolute`) to enable diagonal-only solves in `rocsparse_sptrsv` and `rocsparse_sptrsm`, together with the `rocsparse_sptrsv_input_solve_mode` / `rocsparse_sptrsm_input_solve_mode` and `rocsparse_sptrsv_input_diagonal_modifier` / `rocsparse_sptrsm_input_diagonal_modifier` set-input values. The modifier selects the function applied to each diagonal value (`d` or `|d|`). CSR and CSC formats are supported.
-
-### Changed
-* rocSPARSE no longer depends on rocBLAS. The dependency was used only by the `rocsparse_sddmm_alg_dense` algorithm, which densified the sparse output and called a dense GEMM.
-* Deprecated `rocsparse_sddmm_alg_dense`. It remains a valid value of `rocsparse_sddmm_alg` and keeps its numerical value, so existing source and binaries continue to work, but it now selects `rocsparse_sddmm_alg_default`. As a result, `rocsparse_sddmm_buffer_size` reports a zero-sized buffer for this algorithm, and batched SDDMM on the CSR, CSC, COO, COO AoS, and ELL formats, which previously returned `rocsparse_status_not_implemented` with this algorithm, is now supported.
 
 ### Optimized
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
