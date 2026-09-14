@@ -124,7 +124,7 @@ see whether a change improved or regressed a workload. It persists history as
 dashboards remain external. Artifact export preserves profiler-owned CSV bytes;
 it does not reconstruct CSV from normalized medians or depend on WaveScope.
 
-### Portable artifacts: CSV now, measurement JSON for future consumers
+### Portable artifacts: counter CSVs and measurement JSON
 
 For the WaveScope workflow, use
 [`capture_wavescope_pmc.py`](../../../../dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py)
@@ -172,7 +172,7 @@ Failed exports must not be consumed as finalized baselines. A regression still
 exports a complete bundle and exits 1. `--no-store` suppresses history writes,
 not an explicitly requested bundle. Without the flag, behavior is unchanged.
 
-**WaveScope today:** open the ATT trace and upload a raw counter CSV from one
+**WaveScope CSV import:** open the ATT trace and upload a raw counter CSV from one
 sample through Bottlenecks, or copy that sample's relevant counter files beside
 `code.json`. Original pass directories and filenames are preserved, not flattened
 or merged. Use the JSON manifest to locate every pass; a single uploaded CSV may
@@ -230,10 +230,10 @@ python -m rocke.benchmark.perf.examples.profile_gemm_sweep --arch gfx950 --shape
 
 Counter names differ by family, so the harness probes and normalizes them - never
 hardcode a counter list. On CDNA (gfx94x/gfx950) the full panel populates. On RDNA4
-(gfx1201) the instruction and L2 counters currently read 0 (a `rocprofv3`
-limitation), so the panel there is clock/wave-only; the primary cycle metric works
-on both. `captured_counters` in each record lists exactly which counters populated,
-so a record never overstates coverage.
+(gfx1201, verified on-box 2026-07) the instruction and L2 counters read 0 - a
+`rocprofv3` support gap, not a parse error - so the panel there is clock/wave-only;
+the primary cycle metric works on both. `captured_counters` in each record lists
+exactly which counters populated, so a record never overstates coverage.
 
 ## Tests
 
