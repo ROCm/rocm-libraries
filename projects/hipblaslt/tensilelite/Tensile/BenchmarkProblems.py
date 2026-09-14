@@ -236,7 +236,7 @@ def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, s
         wavefrontSize = solution["WavefrontSize"]
 
         if len(mi) == 9:
-            miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap)
+            miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap, solution.get("SourceSwap", False))
             solution.update(miParams)
         elif len(mi) == 0:
             solution["EnableMatrixInstruction"] = False
@@ -309,7 +309,7 @@ def _getCustomKernelSolutionObj(
     workgroup = sol.get("WorkGroup", None)
 
     if len(mi) == 9:
-        miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap)
+        miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap, sol.get("SourceSwap", False))
         sol.update(miParams)
     elif len(mi) == 0:
         sol["EnableMatrixInstruction"] = False
