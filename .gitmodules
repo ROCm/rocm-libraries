@@ -11,3 +11,8 @@
 [submodule "third_party/ffts"]
 	path = projects/rpp/third_party/ffts
 	url = https://github.com/anthonix/ffts.git
+
+[submodule "dnn-benchmarking"]
+	path = projects/hipdnn/tools/dnn-benchmarking
+	url = https://github.com/ROCm/dnn-benchmarking.git
+	branch = users/sareeder/hipdnn-studio-integration

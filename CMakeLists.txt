@@ -58,6 +58,7 @@ set(AVAILABLE_COMPONENTS
     hipblaslt-provider
     hip-kernel-provider
     hipdnn-samples
+    hipdnn-graph-studio
     hipdnn-python
 )
 
@@ -270,6 +271,21 @@ if("hipdnn-samples" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     foreach(_provider_target miopen_plugin hipblaslt_plugin hip_kernel_provider)
         if(TARGET ${_provider_target})
             add_dependencies(hipdnn_samples ${_provider_target})
+        endif()
+    endforeach()
+endif()
+
+if("hipdnn-graph-studio" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT graph-studio
+        PREFIX_PATH projects/hipdnn/tools
+        EXPECT_TARGET hipdnn_graph_studio
+    )
+
+    # The Studio loads the provider plugins at runtime, so build them first
+    foreach(_provider_target miopen_plugin hipblaslt_plugin hip_kernel_provider)
+        if(TARGET ${_provider_target})
+            add_dependencies(hipdnn_graph_studio ${_provider_target})
         endif()
     endforeach()
 endif()
