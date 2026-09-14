@@ -12,7 +12,7 @@ import math
 import re
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from .caps import glc_bit_name_from_caps, slc_bit_name_from_caps
 from .enum import CacheScope, NonVolatile, SelectBit, TemporalHint, UnusedBit
@@ -181,6 +181,7 @@ class RegisterContainer(Container):
         "isAbs",
         "isMacro",
         "isOff",
+        "halfSelect",
     )
 
     def __init__(
@@ -205,6 +206,7 @@ class RegisterContainer(Container):
         self.isAbs: bool = isAbs
         self.isMacro: bool = isMacro
         self.isOff: bool = isOff
+        self.halfSelect: Optional[Any] = None
 
     # --- Setters. ---------------------------------------------------------
 
@@ -221,6 +223,28 @@ class RegisterContainer(Container):
         """Return a copy with ``isMinus=True`` (for negation operands)."""
         c = self._shallow_clone()
         c.setMinus(True)
+        return c
+
+    # --- true16 half-word select. -----------------------------------------
+
+    def setHalfSelect(self, sel: Any) -> None:
+        """Select the ``.l``/``.h`` half-word in place."""
+        self.halfSelect = sel
+
+    def lo(self) -> "RegisterContainer":
+        """Return a copy selecting the low half-word (``.l``)."""
+        from .enum import HighBitSel  # noqa: WPS433
+
+        c = self._shallow_clone()
+        c.halfSelect = HighBitSel.LOW
+        return c
+
+    def hi(self) -> "RegisterContainer":
+        """Return a copy selecting the high half-word (``.h``)."""
+        from .enum import HighBitSel  # noqa: WPS433
+
+        c = self._shallow_clone()
+        c.halfSelect = HighBitSel.HIGH
         return c
 
     # --- regName mutation. ------------------------------------------------
@@ -355,6 +379,7 @@ class RegisterContainer(Container):
         # Empty when HasVgprMSB cap isn't set or rocIsa wasn't initialised,
         # so __str__ stays side-effect-free for unit tests.
         msb_str = self._msb_suffix()
+        half_str = self._half_suffix()
 
         if self.isInlineAsm:
             return minus_str + "%" + str(self.regIdx) + abs_str
@@ -372,6 +397,7 @@ class RegisterContainer(Container):
                     + str(self.regName)
                     + msb_str
                     + "]"
+                    + half_str
                     + abs_str
                 )
             return (
@@ -403,9 +429,10 @@ class RegisterContainer(Container):
                     + str(self.regIdx)
                     + msb_str
                     + "]"
+                    + half_str
                     + abs_str
                 )
-            return minus_str + self.regType + str(self.regIdx) + abs_str
+            return minus_str + self.regType + str(self.regIdx) + half_str + abs_str
 
         return (
             minus_str
@@ -419,6 +446,18 @@ class RegisterContainer(Container):
             + "]"
             + abs_str
         )
+
+    def _half_suffix(self) -> str:
+        """``.l`` / ``.h`` for a selected half-word, else empty.
+
+        ``NONE`` renders as empty just like an unset ``halfSelect``, matching
+        the native ``halfSelect.has_value() && *halfSelect != NONE`` guard.
+        """
+        from .enum import HighBitSel  # noqa: WPS433
+
+        if self.halfSelect is None or self.halfSelect == HighBitSel.NONE:
+            return ""
+        return ".h" if self.halfSelect == HighBitSel.HIGH else ".l"
 
     def _msb_suffix(self) -> str:
         """Compute the ``-256*msb`` suffix appended to ``toString``."""
@@ -469,6 +508,7 @@ class RegisterContainer(Container):
         c.isAbs = self.isAbs
         c.isMacro = self.isMacro
         c.isOff = self.isOff
+        c.halfSelect = self.halfSelect
         return c
 
     def _deep_clone(self) -> "RegisterContainer":
@@ -482,7 +522,7 @@ class RegisterContainer(Container):
     def __deepcopy__(self, memo: dict) -> "RegisterContainer":
         return self._shallow_clone()
 
-    def __getstate__(self) -> Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int]:
+    def __getstate__(self) -> Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int, Any]:
         return (
             self.regType,
             deepcopy(self.regName),
@@ -494,11 +534,12 @@ class RegisterContainer(Container):
             self.isMacro,
             self.isOff,
             self.msb,
+            None if self.halfSelect is None else int(self.halfSelect),
         )
 
     def __setstate__(
         self,
-        state: Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int],
+        state: Tuple[str, Optional[RegName], int, int, bool, bool, bool, bool, bool, int, Any],
     ) -> None:
         (
             self.regType,
@@ -511,7 +552,11 @@ class RegisterContainer(Container):
             self.isMacro,
             self.isOff,
             self.msb,
+            half,
         ) = state
+        from .enum import HighBitSel
+
+        self.halfSelect = None if half is None else HighBitSel(half)
 
     # --- logicalIR handoff -------------------------------------------------
 
@@ -834,15 +879,20 @@ class HolderContainer(RegisterContainer):
         independent: subsequent mutation of either side does not bleed.
         """
         if self.holderType == 0:
-            return RegisterContainer(self.regType, None, self.regIdx, self.regNum)
-        return RegisterContainer(
-            self.regType,
-            RegName(self.regName.name, list(self.regName.offsets))
-            if self.regName is not None
-            else None,
-            self.regIdx,
-            self.regNum,
-        )
+            rc = RegisterContainer(self.regType, None, self.regIdx, self.regNum)
+        else:
+            rc = RegisterContainer(
+                self.regType,
+                RegName(self.regName.name, list(self.regName.offsets))
+                if self.regName is not None
+                else None,
+                self.regIdx,
+                self.regNum,
+            )
+        # Preserve the true16 half-select, else the .l/.h suffix is lost and
+        # the operand is invalid on NoSDWA (same as the native getCopiedRC).
+        rc.halfSelect = self.halfSelect
+        return rc
 
     # --- splitRegContainer override. --------------------------------------
 

@@ -117,17 +117,27 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
 
 /**
  * True16Modifiers set on a LogicalInstruction must survive logical->asm
- * lowering and render as the .l/.h operand suffix. This is the channel the
- * pure-Python rocisa_stinkytofu_adaptor uses to carry t16 half-selects (op_sel
- * would bypass stinkytofu's true16-aware SSA/wait passes).
+ * lowering and render as the .l/.h operand suffix, for every instruction shape
+ * that can carry a half. The modifier is the channel a half-select has to ride
+ * on through the logical IR, because op_sel would bypass stinkytofu's
+ * true16-aware SSA/wait passes.
+ *
+ * Scope: this covers lowering and emission only. Producers are tested where
+ * they live -- the pure-Python rocisa_stinkytofu_adaptor's
+ * t16 -> _apply_true16 -> to_stinky_logical chain in its own
+ * tests/test_true16.py and tests/test_emission_consistency.py (the t16-tagged
+ * three-path cases), and the C++ bridge's
+ * attachTrue16ModifiersFromOperands in the rocisa conversion tests. Do not
+ * read a pass here as coverage of either.
  */
 TEST_F(IRToAsmPipelineTest, True16HalfSelectSurvivesLowering) {
     using H = HighBitSel;
     Function func("kernel");
     BasicBlock* entryBB = func.createBasicBlock("entry");
 
-    // Inject an already-derived modifier; deriving it from tagged operands is
-    // tested elsewhere (adaptor _apply_true16 / attachTrue16ModifiersFromOperands).
+    // Inject an already-derived modifier: this test deliberately starts after
+    // the derivation step, so it says nothing about whether a producer tags its
+    // operands correctly (see the scope note above).
     auto add = [&](LogicalInstruction* inst, H dst0, const std::vector<H>& srcs) {
         inst->true16 = True16Modifiers(dst0, H::NONE, srcs);
         entryBB->appendIR(static_cast<IRBase*>(inst));

@@ -9,7 +9,6 @@ Each exposes to_stinky_logical() for logical IR lowering.
 from __future__ import annotations
 
 from copy import deepcopy as _deepcopy
-from enum import IntEnum as _IntEnum
 from typing import Any, Dict, List, Optional
 
 from ._dummy import make_dummy_class, make_dummy_func
@@ -456,42 +455,39 @@ def _to_stinky_register(arg: Any) -> Any:
     )
 
 
-class _StHalf(_IntEnum):
-    """stinkytofu HighBitSel wire values passed to ``set_true16``.
-
-    These are stinkytofu's HighBitSel integers, NOT the adaptor's ``HighBitSel``
-    dummy enum (that one is 0-based: NONE=0/LOW=1/HIGH=2).
-    """
-
-    NONE = -1
-    LOW = 0
-    HIGH = 1
-
-
 def _true16_half_int(op: Any) -> int:
-    """stinkytofu HighBitSel int for a ``t16``-tagged operand, else NONE."""
-    if isinstance(op, _True16Wrap):
-        return _StHalf.HIGH if op._suffix == ".h" else _StHalf.LOW
-    return _StHalf.NONE
+    """``HighBitSel`` carried by @p op, or ``NONE`` when it carries none.
+
+    Port of ``regHalf`` in ``attachTrue16ModifiersFromOperands``
+    (ToStinkyTofuUtils.cpp): only register operands hold a half-select, so
+    immediates / raw strings / VCC read as NONE.
+    """
+    from .enum import HighBitSel  # noqa: WPS433
+
+    sel = getattr(op, "halfSelect", None)
+    return HighBitSel.NONE if sel is None else sel
 
 
 def _apply_true16(inst: Any, dst: Any, srcs: Any, dst1: Any = None) -> None:
-    """Attach a True16 (.l/.h) modifier derived from ``t16``-tagged operands.
+    """Attach a True16 (.l/.h) modifier derived from half-tagged operands.
 
-    ``t16`` carries the half on a ``_True16Wrap`` whose register lowers to a
-    plain (structured) StinkyRegister, so the ``.l``/``.h`` must ride on the
-    instruction as a True16Modifiers — the channel stinkytofu's true16-aware
-    SSA/wait passes read (op_sel would bypass them). Mirrors the compiled path's
-    ``attachTrue16ModifiersFromOperands`` (ToStinkyTofuUtils.cpp); a no-op when
-    no operand is tagged, so 32-bit/packed ops are unaffected.
+    The half rides on the operand (``RegisterContainer.halfSelect``, as in
+    native rocisa) but has to be re-hung on the *instruction* as a
+    True16Modifiers: the register lowers to a plain (structured)
+    StinkyRegister, and stinkytofu's true16-aware SSA/wait passes read the
+    instruction modifier (op_sel would bypass them). Mirrors the compiled
+    path's ``attachTrue16ModifiersFromOperands`` (ToStinkyTofuUtils.cpp); a
+    no-op when no operand is tagged, so 32-bit/packed ops are unaffected.
     """
+    from .enum import HighBitSel  # noqa: WPS433
+
     if not hasattr(inst, "set_true16"):
         return
-    dst0 = _true16_half_int(dst) if dst is not None else _StHalf.NONE
-    dstHi = _true16_half_int(dst1) if dst1 is not None else _StHalf.NONE
+    none = HighBitSel.NONE
+    dst0 = _true16_half_int(dst) if dst is not None else none
+    dstHi = _true16_half_int(dst1) if dst1 is not None else none
     src_sels = [_true16_half_int(s) for s in srcs]
-    if (dst0 == _StHalf.NONE and dstHi == _StHalf.NONE
-            and all(s == _StHalf.NONE for s in src_sels)):
+    if dst0 == none and dstHi == none and all(s == none for s in src_sels):
         return
     inst.set_true16(int(dst0), int(dstHi), [int(s) for s in src_sels])
 
@@ -855,7 +851,6 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
                 op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
                 byte_sel=list(getattr(v, "byte_sel", None) or []),
             )
-        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -904,7 +899,6 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         inst = factory(dst_reg, src_reg, comment=self.comment)
         if getattr(self, 'vop3', None) is not None:
             inst.set_vop3(op_sel=self.vop3.op_sel)
-        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -1351,7 +1345,6 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
                 op_sel_hi=list(getattr(v, "op_sel_hi", None) or []),
                 byte_sel=list(getattr(v, "byte_sel", None) or []),
             )
-        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -1405,9 +1398,6 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
-        # srcs = [shiftHex, value]; the true16 half rides on dst/value (the shift
-        # amount has no half). Sels align with printed source positions.
-        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -1548,8 +1538,6 @@ class VCndMaskB16(CommonInstruction):
         src1_reg = _to_stinky_register(self.srcs[1])
         src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
         inst = _st.VCndMaskB16(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
-        # src2 is the VCC mask (no half); align sels with printed src positions.
-        _apply_true16(inst, self.dst, self.srcs[:2], self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -2099,7 +2087,6 @@ def _make_vcmp_class(class_name: str, mnemonic: str, inst_type: "InstType"):
         src1_reg = _to_stinky_register(self.srcs[1])
         factory = getattr(_st, class_name)
         inst = factory(dst_reg, src0_reg, src1_reg, comment=self.comment)
-        _apply_true16(inst, self.dst, self.srcs, self.dst1)
         return inst
 
     def __deepcopy__(self, memo):
@@ -5225,41 +5212,24 @@ def _is_container(val: Any) -> bool:
 # ==========================================================================
 
 
-class _True16Wrap:
-    """Wraps a register/input and appends a True16 ``.h``/``.l`` suffix."""
-
-    __slots__ = ("_inner", "_suffix")
-
-    def __init__(self, inner: Any, sel: Any) -> None:
-        from .enum import HighBitSel  # noqa: WPS433
-        self._inner = inner
-        self._suffix = ".h" if sel == HighBitSel.HIGH else ".l"
-
-    def toString(self) -> str:
-        return _input_to_str(self._inner) + self._suffix
-
-    def to_stinky(self) -> Any:
-        """Return the inner register as a proper StinkyRegister.
-
-        The True16 .h/.l selection is encoded via the VOP3 op_sel modifier
-        on the instruction, NOT as a string suffix on the register. Returning
-        the structured register preserves the physical index needed by
-        InsertVgprMsbPass for correct MSB computation.
-        """
-        if hasattr(self._inner, "to_stinky"):
-            return self._inner.to_stinky()
-        import stinkytofu as _st  # noqa: WPS433
-        return _st.Register(self.toString())
-
-    def __str__(self) -> str:
-        return self.toString()
-
-
 def _input_with_half(src: Any, sel: Any) -> Any:
-    from .container import RegisterContainer
+    """Port of ``rocisa::inputWithHalf``/``regWithHalf`` (extension.hpp).
+
+    Only register operands take a half-select; the C++ helper guards on
+    ``dynamic_pointer_cast<RegisterContainer>`` and returns non-register inputs
+    (immediates, raw strings) untouched. Python is untyped, so the same guard is
+    applied here - without it an immediate would render nonsense like ``1.0.l``.
+
+    Returns a *copy*: ``regWithHalf`` clones before setting the half so the
+    caller's operand is not mutated when the same VGPR is reused for both
+    halves.
+    """
+    from .container import RegisterContainer  # noqa: WPS433
 
     if isinstance(src, RegisterContainer):
-        return _True16Wrap(src, sel)
+        c = src._shallow_clone()
+        c.setHalfSelect(sel)
+        return c
     return src
 
 
