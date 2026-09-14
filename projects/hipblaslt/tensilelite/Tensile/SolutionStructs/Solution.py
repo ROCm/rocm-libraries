@@ -3835,16 +3835,22 @@ class Solution(collections.abc.Mapping):
         if (not state["enableLDSTrB"]) and (state["ProblemType"]["Sparse"] == 2):
           state["LocalReadVectorWidthB"] = min(state["LocalReadVectorWidthB"], state["MIInputPerThreadB"])
 
+      def maxLocalReadVectorWidth(tc):
+        # One local read moves at most MAX_NUM_DS_LOAD_BYTES, so the widest lrvw is
+        # however many elements that holds. 6-bit float is the exception: b128 plus
+        # b64 mimic a b192, which reaches 32 elements.
+        numBytes = state["ProblemType"]["MacDataType%s" % tc].numBytes()
+        if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and numBytes == 0.75:
+          return 32
+        return int(Solution.MAX_NUM_DS_LOAD_BYTES // numBytes)
+
       def calLRVW():
         # Default LocalReadVectorWidth
         if state["EnableMatrixInstruction"]:
           # Default LocalReadVectorWidth
           autoLRVWA = False
           maxNumDsLoadBytesA = Solution.MAX_NUM_DS_LOAD_BYTES
-          maxLRVWA = int(maxNumDsLoadBytesA // state["ProblemType"]["MacDataTypeA"].numBytes())
-          # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
-          if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeA"].numBytes() == 0.75:
-            maxLRVWA = 32
+          maxLRVWA = maxLocalReadVectorWidth("A")
           if state["LocalReadVectorWidthA"] == -1:
             autoLRVWA = True
             if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeA"].numBytes() > maxNumDsLoadBytesA):
@@ -3876,10 +3882,7 @@ class Solution(collections.abc.Mapping):
           # Default LocalReadVectorWidth
           autoLRVWB = False
           maxNumDsLoadBytesB = Solution.MAX_NUM_DS_LOAD_BYTES
-          maxLRVWB = int(maxNumDsLoadBytesB // state["ProblemType"]["MacDataTypeB"].numBytes())
-          # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
-          if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["MacDataTypeB"].numBytes() == 0.75:
-            maxLRVWB = 32
+          maxLRVWB = maxLocalReadVectorWidth("B")
           if state["LocalReadVectorWidthB"] == -1:
             autoLRVWB = True
             if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeB"].numBytes() > maxNumDsLoadBytesB):
@@ -4054,6 +4057,54 @@ class Solution(collections.abc.Mapping):
         calLRVWFor950MX()
       else:
         calLRVW()
+
+      # gfx1250 constrains the local read widths from two independent directions.
+      # Both checks sit after calLRVW so they see the derived widths, not just the
+      # ones spelled out in the config: calLRVW's own lrvw rule only guards values
+      # the user set, while the auto path can still halve a width for scheduling.
+      # Gated on the arch as well as the cap, the way TileSpan is: gfx950 also
+      # carries ds_load_tr, and the geometry reasoned about below is gfx1250's.
+      isGfx1250 = state["ISA"] == IsaVersion(12, 5, 0)
+      if isGfx1250 and isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+
+        # ds_load_tr's unroll increments are hard-coded per bpe in LocalRead and
+        # spell out one full-width read, so a sub-ceiling lrvw re-tiles the reads
+        # while the increments stay put and the offsets stop lining up. Below two
+        # bytes the read loop is range(lrvw // 8), which a narrow width empties
+        # out entirely. Two-byte reads cancel lrvw out of their increment and are
+        # exempt. Pinning is per operand, so mixed element sizes still read at
+        # genuinely different widths.
+        for tc in ("A", "B"):
+          if not state["enableLDSTr%s" % tc]:
+            continue
+          if state["ProblemType"]["MacDataType%s" % tc].numBytes() == 2:
+            continue
+          maxLRVW = maxLocalReadVectorWidth(tc)
+          if state["LocalReadVectorWidth%s" % tc] != maxLRVW:
+            reject(state, printRejectionReason,
+                   "ds_load_tr on gfx1250 requires LocalReadVectorWidth%s == %u for %s, got %u" \
+                   % (tc, maxLRVW, state["ProblemType"]["MacDataType%s" % tc],
+                      state["LocalReadVectorWidth%s" % tc]))
+            return
+
+        # WMMA takes the A and B local reads as one operand pair, so both have to
+        # walk the unroll dimension in the same order. A lane reads K row
+        #   kId * lrvw + lrvw * (rIdx // lrvw) + rIdx * numElementPerRead
+        # so operands of equal element size share numElementPerRead and lrvw alone
+        # decides the order, which makes equal widths mandatory. That keys off
+        # element size, not datatype identity, so f8 against bf8 is still one size.
+        # ds_load_tr does not read along this permutation, and the loop above
+        # already pins both operands to the same ceiling once their sizes match,
+        # so the pair only has to agree when they are not both read that way.
+        if not (state["enableLDSTrA"] and state["enableLDSTrB"]) \
+           and state["ProblemType"]["MacDataTypeA"].numBytes() \
+               == state["ProblemType"]["MacDataTypeB"].numBytes() \
+           and state["LocalReadVectorWidthA"] != state["LocalReadVectorWidthB"]:
+          reject(state, printRejectionReason,
+                 "gfx1250 requires LocalReadVectorWidthA == LocalReadVectorWidthB for equally "
+                 "sized operands, got %u and %u" \
+                 % (state["LocalReadVectorWidthA"], state["LocalReadVectorWidthB"]))
+          return
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.

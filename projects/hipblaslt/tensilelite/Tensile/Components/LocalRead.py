@@ -986,7 +986,7 @@ class LocalReadMFMA(LocalRead):
                         incrementBytes = int(numberLRVWPerMIInput*UnrollStride*kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]*tP["bpeDS"])
 
                         sparseDenseOffset = 0
-                        if numberLRVWPerMIInput == 4:
+                        if numberLRVWPerMIInput == 4 and kernel["ProblemType"]["Sparse"] != 0:
                             # generally numberLRVWPerMIInput should be 2, for the dense matrix of sparse cases, it will be 4
                             incrementBytes = incrementBytes // 2
                             sparseDenseOffset = incrementBytes // 2  # for sparse dense matrix, we read the 2nd half of the data seperately.
@@ -996,7 +996,7 @@ class LocalReadMFMA(LocalRead):
                         offset_split, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)
                         ds = DSModifiers(na=1, offset=offset_split)
                         self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCode, comment="LDS Transpose")
-                        if numberLRVWPerMIInput == 4:
+                        if numberLRVWPerMIInput == 4 and kernel["ProblemType"]["Sparse"] != 0:
                             # for the dense case when sparse.
                             if halfPLR:
                                 valuStr = writer.getHalfPLRValuStr(writer.states.halfPLRGroups, wtRegStride*tIdx + blockWidth * 2, tc)
