@@ -4181,6 +4181,15 @@ class Solution(collections.abc.Mapping):
         if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
           reject(state, printRejectionReason, f"Tensor B swizzling supports TN only")
 
+        # Multi-wave swizzled-B TDM uses the wave-separated (parity) builder: numComp = NumWaves//2
+        # B-loading components split B's nO rows, while the local read partitions N by MIWaveGroup[1].
+        # These band counts must agree, so restrict to numComp == MIWaveGroup[1] for now.
+        if swizzleBIsTDM and state["NumWaves"] > 1:
+          numComp = state["NumWaves"] // 2
+          if numComp != state["MIWaveGroup"][1]:
+            reject(state, printRejectionReason,
+                   f"Swizzled-B TDM multi-wave requires numComp(NumWaves//2={numComp}) == MIWaveGroup[1]({state['MIWaveGroup'][1]})")
+
       # Force GRVW the same when UnrollLoopSwapGlobalReadOrder = 1.
       if genGRVWA and state["UnrollLoopSwapGlobalReadOrder"] == 1:
         state["GlobalReadVectorWidthA"] = min(state["GlobalReadVectorWidthA"], state["GlobalReadVectorWidthB"])

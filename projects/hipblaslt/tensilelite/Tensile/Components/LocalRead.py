@@ -712,13 +712,16 @@ class LocalReadMFMA(LocalRead):
         kOStride    = kMcount * blockOff                 # read-block (kO) stride
         nOStride    = miN * depthU                       # N-tile (nO) stride
         numNtile    = kernel["MIWaveTile"][tile01]
+        # N-waves interleave at MI_N: a wave's sub-tiles stride by MIWaveGroup[N] nO rows
+        # (the per-wave base offset is added in lraTileAssignmentSwizzledTDM). ==1 -> single wave.
+        nWaveN      = kernel["MIWaveGroup"][tile01]
         numKChunk   = kernel["MIInputPerThread%s" % tc] // innerK
         regsPerLoad = int(blockWidth)                    # VGPRs per ds_load_b128
         regsPerNtile = numKChunk * regsPerLoad
         swapByteOff = tP["localReadSwapByteOffset"]
         for nt in range(numNtile):
             for r in range(numKChunk):
-                off = nt * nOStride + r * kOStride + swapByteOff
+                off = nt * nWaveN * nOStride + r * kOStride + swapByteOff
                 reg = nt * regsPerNtile + r * regsPerLoad
                 offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
                 ds = DSModifiers(na=1, offset=offSplit)

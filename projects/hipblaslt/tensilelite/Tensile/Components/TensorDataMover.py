@@ -215,6 +215,20 @@ class TensorDataMoverLoad(TensorDataMover):
                 else:
                     # M/N-splitting: offset within same k_group along tile dimension
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * mxUnit * bpe), f"woffset = wCompId * mt//numComp({mt // numComp}) * mxUnit({mxUnit}) * bpe({bpe})"))
+            elif tp.get("isSwizzledTDM"):
+                # Swizzled-B: host buffer is nO-major with row stride0 = MI_N*paddedK (elements),
+                # paddedK = roundup(SizeL, swzK). Component wCompId loads rowsPerComp nO rows ->
+                # woffset = wCompId * rowsPerComp * MI_N * paddedK * bpe.
+                swzMiN      = kernel["MatrixInstN"]
+                swzInnerK   = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())
+                swzK        = (wavelen // swzMiN) * swzInnerK
+                rowsPerComp = (mt // swzMiN) // numComp
+                with writer.allocTmpSgpr(1, tag="swzWSglobal") as swzTmp:
+                    pk = swzTmp.idx
+                    mod.add(SAddU32(sgpr(pk), sgpr("SizeL"), swzK - 1, "paddedK = SizeL + swzK-1"))
+                    mod.add(SAndB32(sgpr(pk), sgpr(pk), hex(0xFFFFFFFF & ~(swzK - 1)), "paddedK &= ~(swzK-1)"))
+                    mod.add(SMulI32(sgpr(pk), sgpr(pk), round(swzMiN * rowsPerComp * bpe), f"stride0*rowsPerComp*bpe = MI_N*paddedK*{rowsPerComp}*{bpe}"))
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(pk), "woffset = wCompId * rowsPerComp * MI_N*paddedK*bpe"))
             else:
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))

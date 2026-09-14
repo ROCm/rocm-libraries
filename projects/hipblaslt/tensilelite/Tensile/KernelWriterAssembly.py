@@ -5868,6 +5868,9 @@ class KernelWriterAssembly(KernelWriter):
     miN       = kernel["MatrixInstN"]
     innerK    = 16 // int(kernel["ProblemType"]["DataType%s" % tP["tensorChar"]].numBytes())  # elems per ds_load_b128
     blockOff  = miN * innerK                              # inner [nI,kI] block = kM stride
+    tile01    = tP["tile01Idx"]
+    miWaveGroup = kernel["MIWaveGroup"]
+    num1DWaves  = miWaveGroup[tile01]                     # N-axis wave count for B
     tReg    = self.vgprPool.checkOut(1, "lroSwizTDM")     # result, kept for lraFinalOffset
     lReg    = self.vgprPool.checkOut(1, "laneSwizTDM")
     dummy   = self.vgprPool.checkOut(1, "dummySwizTDM")
@@ -5879,6 +5882,20 @@ class KernelWriterAssembly(KernelWriter):
       module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), blockOff, tmpSgprInfo, "kM * (MI_N*innerK)"))
       module.add(vectorStaticRemainder(dummy, lReg, lReg, miN, tmpVgprRes, tmpSgprInfo, "nIdx = L mod MI_N"))
       module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(lReg), innerK, vgpr(tReg), tmpSgprInfo, "lro = nIdx*innerK + kM*blockOff"))
+      # Multi-wave N split: this wave's nO band. Mirror LraTileAssignment's wtid0 term.
+      # wtid0 = (Serial // (waveWidth*MIWaveGroup[0])) % MIWaveGroup[1]. N-waves interleave at
+      # MI_N granularity (strideWave == one nO), and a wave's MIWaveTile sub-tiles stride by
+      # MIWaveGroup[N] nO (applied in _localReadSwizzledTDM) -> lro += wtid0 * nOStride.
+      if num1DWaves > 1:
+        depthU   = kernel["_DepthU%s" % tP["tensorChar"]]
+        nOStride = miN * depthU
+        strideWaveN = nOStride
+        dividedForWaveId = waveWidth if tile01 == 0 else waveWidth * miWaveGroup[0]
+        wReg = self.vgprPool.checkOut(1, "waveSwizTDM")
+        module.add(vectorStaticDivide(wReg, "Serial", dividedForWaveId, tmpVgprRes, "wtid = Serial // (waveWidth*MIWaveGroup[0])"))
+        module.add(vectorStaticRemainder(dummy, wReg, wReg, num1DWaves, tmpVgprRes, tmpSgprInfo, "wtid0 = wtid %% MIWaveGroup[N]"))
+        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(wReg), strideWaveN, vgpr(tReg), tmpSgprInfo, "lro += wtid0 * MIWaveTile[N]*nOStride"))
+        self.vgprPool.checkIn(wReg)
     tP["gpr"]["lro"] = tReg
     self.vgprPool.checkIn(dummy)
     self.vgprPool.checkIn(lReg)
