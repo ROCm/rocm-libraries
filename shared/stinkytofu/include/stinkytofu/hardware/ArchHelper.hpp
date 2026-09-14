@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <limits>
@@ -46,8 +47,8 @@ class STINKYTOFU_EXPORT ArchHelper {
     struct ArchInfo {
         ArchInfo(std::string name, uint32_t major, uint32_t minor, uint32_t stepping,
                  uint32_t waveFrontSize, uint32_t totalVgprPerSimd = 0,
-                 uint32_t vgprAllocGranule = 0, uint32_t maxVGPR = 0, uint32_t maxSGPR = 0,
-                 uint32_t maxAGPR = 0)
+                 uint32_t vgprAllocGranule = 0, uint32_t maxWavesPerSimd = 0, uint32_t maxVGPR = 0,
+                 uint32_t maxSGPR = 0, uint32_t maxAGPR = 0)
             : name(std::move(name)),
               major(major),
               minor(minor),
@@ -55,6 +56,7 @@ class STINKYTOFU_EXPORT ArchHelper {
               waveFrontSize(waveFrontSize),
               totalVgprPerSimd(totalVgprPerSimd),
               vgprAllocGranule(vgprAllocGranule),
+              maxWavesPerSimd(maxWavesPerSimd),
               maxVGPR(maxVGPR),
               maxSGPR(maxSGPR),
               maxAGPR(maxAGPR) {}
@@ -85,6 +87,11 @@ class STINKYTOFU_EXPORT ArchHelper {
 
         const uint32_t totalVgprPerSimd;
         const uint32_t vgprAllocGranule;
+
+        // Waves the hardware will run on one SIMD however few registers a
+        // kernel uses. Registers stop being the limit at this point, so an
+        // occupancy figure without it grows without bound.
+        const uint32_t maxWavesPerSimd;
 
         // Directly addressable registers per class, from DEF_ARCH in
         // <Arch>Formats.def. maxVGPR is the range an operand can name without
@@ -157,6 +164,12 @@ inline uint32_t getVgprAllocGranule(GfxArchID archID) {
     return archInfo->vgprAllocGranule;
 }
 
+inline uint32_t getMaxWavesPerSimd(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->maxWavesPerSimd;
+}
+
 // Addressable registers per class, from the architecture's DEF_ARCH. Scalars
 // rather than a RegType lookup, so this layer stays free of the asm IR types;
 // mapping a register class onto them belongs above.
@@ -183,6 +196,13 @@ inline uint32_t getMaxAGPR(GfxArchID archID) {
 // Returns std::numeric_limits<int>::max() for inputs without enough information
 // to compute occupancy: unknown arch caps, unknown allocation (`kernelVgprs == 0`),
 // or a kernel that asks for more VGPRs than the SIMD physically has.
+//
+// Registers round up to the allocation granule first: the hardware reserves
+// whole granules, so a kernel occupies the SIMD as though it used them all.
+//
+// The result is then capped at the wave limit. A small enough kernel stops
+// being register-bound, and without the cap this reports occupancy the chip
+// cannot reach.
 inline int getWavesPerSimd(GfxArchID archID, int kernelVgprs) {
     assert(kernelVgprs >= 0 && "kernelVgprs must be non-negative");
     const uint32_t total = getTotalVgprPerSimd(archID);
@@ -191,7 +211,12 @@ inline int getWavesPerSimd(GfxArchID archID, int kernelVgprs) {
     if (kernelVgprs <= 0) return std::numeric_limits<int>::max();
     const uint32_t rounded = ((kernelVgprs + granule - 1) / granule) * granule;
     if (rounded > total) return std::numeric_limits<int>::max();
-    return static_cast<int>(total / rounded);
+
+    const uint32_t byRegisters = total / rounded;
+    const uint32_t cap = getMaxWavesPerSimd(archID);
+    // An arch that does not declare a cap keeps the old register-only answer,
+    // rather than silently reporting one wave.
+    return static_cast<int>(cap == 0 ? byRegisters : std::min(byRegisters, cap));
 }
 
 inline std::string getArchName(GfxArchID archID) {
