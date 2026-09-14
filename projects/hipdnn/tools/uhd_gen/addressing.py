@@ -40,30 +40,31 @@ from pathlib import Path
 from .provenance import descriptor_id, load_descriptor_tree
 
 
-def engine_kernels(tree: Path, ued_id: str, arch: str | None = None) -> list[dict]:
-    """Every kernel the engine owns, under the same arch rule the runtime loads by.
+#: KMD metadata types, per `hkp_pack/descriptors.py::_METADATA_TYPES`.
+METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 
-    The ordinal tables are the ENGINE's value set, so they must be built over the same packs
-    the runtime will join into the catalog: the arch filter here mirrors
-    `provenance_for_engine`, and a pack for another arch contributes no values because its
-    kernels never become candidates on this machine.
+#: Types that address themselves: the value IS the pin.
+NATIVE_TYPES = ("int",)
+
+
+def engine_kernels(tree: Path, ued_id: str) -> list[dict]:
+    """Every kernel the engine owns, across every arch -- the runtime's own view.
+
+    Deliberately NOT arch-filtered. `KernelIngestorStateManager` holds all of the engine's
+    packs and filters by arch only when it builds a catalog for a device
+    (`archSupports(pack.arch, ...)`), so its value set is engine-wide; a table built here from
+    one arch's packs would number the shared values differently and address a different kernel.
+
+    Engine-wide is also the property a recorded row needs: a pin means the same kernel on a
+    machine that has a second arch's packs installed as on the one that measured it.
     """
     index = load_descriptor_tree(tree)
     kernels: list[dict] = []
     for path, pack in index["kdp"].values():
         if descriptor_id(pack.get("engine"), f"{path}.engine") != ued_id:
             continue
-        arches = pack.get("arch", [])
-        if arch not in (None, "default") and arches and arch not in arches:
-            continue
         kernels.extend(entry for entry in pack.get("kernelDescriptors", []) if isinstance(entry, dict))
     return kernels
-
-#: KMD metadata types, per `hkp_pack/descriptors.py::_METADATA_TYPES`.
-METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
-
-#: Types that address themselves: the value IS the pin.
-NATIVE_TYPES = ("int",)
 
 
 def _sort_key(field_type: str, value):
