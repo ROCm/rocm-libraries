@@ -211,6 +211,92 @@ public:
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
+    /// \brief Performs inclusive scan across threads in a logical warp.
+    ///
+    /// \tparam BinaryFunction type of binary function used for scan. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] scan_op binary operation function object that will be used for scan.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// The examples present inclusive min scan operations performed on groups of 32 threads,
+    /// each provides one \p float value, result is returned using the same variable as for input.
+    /// Hardware warp size is 64. Block (tile) size is 256.
+    ///
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...) // blockDim.x = 256
+    /// {
+    ///     // specialize warp_scan for float and logical warp of 32 threads
+    ///     using warp_scan_f = rocprim::warp_scan<float, 32>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ warp_scan_float::storage_type temp[8]; // 256/32 = 8
+    ///
+    ///     int logical_warp_id = threadIdx.x/32;
+    ///     float value = ...;
+    ///     int block_valid_items = 35;
+    ///     int valid_items = block_valid_items - logical_warp_id * 32;
+    ///     // execute inclusive min scan
+    ///     warp_scan_float().partial_inclusive_scan(
+    ///         value, // input
+    ///         value, // output
+    ///         valid_items,
+    ///         temp[logical_warp_id],
+    ///         rocprim::minimum<float>()
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// If the input values across threads in a block/tile are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then
+    /// output values in the first logical warp will be <tt>{1, -2, -2, -4, -4, ..., -32}</tt>, in the second:
+    /// <tt>{33, -34, -34, 35, -36, ... , 63, -64}</tt>, in subsequent warps: output contains the unchanged input.
+    /// \endparblock
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                storage_type&  storage,
+                                BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
+                                void>::type
+    {
+        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
+        {
+            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
+            {
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+            }
+        }
+        base_type::partial_inclusive_scan(input, output, valid_items, storage, scan_op);
+    }
+
+    /// \brief Performs inclusive scan across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(
+        T, T&, int, storage_type&, BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    {
+        (void)scan_op;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+
     /// \brief Performs seeded inclusive scan across threads in a logical warp.
     ///
     /// \tparam BinaryFunction type of binary function used for scan. Default type
@@ -295,6 +381,97 @@ public:
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
+    /// \brief Performs seeded inclusive scan across threads in a logical warp.
+    ///
+    /// \tparam BinaryFunction type of binary function used for scan. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] init initial value to seed the inclusive scan.
+    /// \param [in] scan_op binary operation function object that will be used for scan.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// The examples present seeded inclusive min scan operations performed on groups of 32 threads,
+    /// each provides one \p float value, result is returned using the same variable as for input.
+    /// Hardware warp size is 64. Block (tile) size is 256.
+    ///
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...) // blockDim.x = 256
+    /// {
+    ///     // specialize warp_scan for float and logical warp of 32 threads
+    ///     using warp_scan_f = rocprim::warp_scan<float, 32>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ warp_scan_float::storage_type temp[8]; // 256/32 = 8
+    ///
+    ///     int logical_warp_id = threadIdx.x/32;
+    ///     float value = ...;
+    ///     int block_valid_items = 35;
+    ///     int valid_items = block_valid_items - logical_warp_id * 32;
+    ///     float init  = ...;
+    ///     // execute inclusive min scan
+    ///     warp_scan_float().partial_inclusive_scan(
+    ///         value, // input
+    ///         value, // output
+    ///         valid_items,
+    ///         temp[logical_warp_id],
+    ///         init,
+    ///         rocprim::minimum<float>()
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// If the input values across threads in a block/tile are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>
+    /// and the value for seeding the scan is -1, then output values in the first logical warp will be
+    /// <tt>{-1, -2, -2, -4, -4, ..., -32}</tt>, in the second: <tt>{-1, -34, -34, 35, -36, ... , 63, -64}</tt>,
+    /// in subsequent warps: output contains the unchanged input.
+    /// \endparblock
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                storage_type&  storage,
+                                T              init,
+                                BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
+                                void>::type
+    {
+        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
+        {
+            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
+            {
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+            }
+        }
+        base_type::partial_inclusive_scan(input, output, valid_items, storage, scan_op, init);
+    }
+
+    /// \brief Performs seeded inclusive scan across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(
+        T, T&, int, storage_type&, T, BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    {
+        (void)scan_op;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+
     /// \brief Performs inclusive scan and reduction across threads in a logical warp.
     ///
     /// \tparam BinaryFunction type of binary function used for scan. Default type
@@ -371,6 +548,95 @@ public:
              unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto inclusive_scan(T, T&, T&, storage_type&, BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    {
+        (void)scan_op;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+    /// \brief Performs inclusive scan and reduction across threads in a logical warp.
+    ///
+    /// \tparam BinaryFunction type of binary function used for scan. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param [out] reduction result of reducing of all \p input values in logical warp.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] scan_op binary operation function object that will be used for scan.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// The examples present inclusive prefix sum operations performed on groups of 64 threads,
+    /// each thread provides one \p int value. Hardware warp size is 64. Block (tile) size is 256.
+    ///
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...) // blockDim.x = 256
+    /// {
+    ///     // specialize warp_scan for int and logical warp of 64 threads
+    ///     using warp_scan_int = rocprim::warp_scan<int, 64>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ warp_scan_int::storage_type temp[4]; // 256/64 = 4
+    ///
+    ///     int logical_warp_id = threadIdx.x/64;
+    ///     int input = ...;
+    ///     int output, reduction;
+    ///     int block_valid_items = 35;
+    ///     int valid_items = block_valid_items - logical_warp_id * 64;
+    ///     // inclusive prefix sum
+    ///     warp_scan_int().partial_inclusive_scan(
+    ///         input,
+    ///         output,
+    ///         valid_items,
+    ///         reduction,
+    ///         temp[logical_warp_id]
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// If the \p input values across threads in a block/tile are <tt>{1, 1, 1, 1, ..., 1, 1}</tt>, then
+    /// \p output values in the first logical warp will be <tt>{1, 2, 3, 4, ..., 64}</tt>, in the second
+    /// warp will be <tt>{1, 2, 3, 1, ..., 1}</tt> and for subsequent warps <tt>{1, 1, 1, 1, ..., 1, 1}</tt>.
+    /// The \p reduction will be equal \p 64 for the first logical warp, \p 3 for the second one, and it
+    /// will be undefined for subsequent warps.
+    /// \endparblock
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T&             reduction,
+                                storage_type&  storage,
+                                BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
+                                void>::type
+    {
+        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
+        {
+            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
+            {
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+            }
+        }
+        base_type::partial_inclusive_scan(input, output, valid_items, reduction, storage, scan_op);
+    }
+
+    /// \brief Performs inclusive scan and reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(
+        T, T&, int, T&, storage_type&, BinaryFunction scan_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
@@ -459,6 +725,108 @@ public:
              unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto inclusive_scan(T, T&, T&, storage_type&, T, BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    {
+        (void)scan_op;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+
+    /// \brief Performs seeded inclusive scan and reduction across threads in a logical warp.
+    ///
+    /// \tparam BinaryFunction type of binary function used for scan. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param [out] reduction result of reducing of all \p input values in logical warp.
+    /// This does not include \p init.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] init initial value to seed the inclusive scan.
+    /// \param [in] scan_op binary operation function object that will be used for scan.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// The examples present seeded inclusive prefix sum operations performed on groups of 64 threads,
+    /// each thread provides one \p int value. Hardware warp size is 64. Block (tile) size is 256.
+    ///
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...) // blockDim.x = 256
+    /// {
+    ///     // specialize warp_scan for int and logical warp of 64 threads
+    ///     using warp_scan_int = rocprim::warp_scan<int, 64>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ warp_scan_int::storage_type temp[4]; // 256/64 = 4
+    ///
+    ///     int logical_warp_id = threadIdx.x/64;
+    ///     int input = ...;
+    ///     int init  = ...;
+    ///     int output, reduction;
+    ///     int block_valid_items = 35;
+    ///     int valid_items = block_valid_items - logical_warp_id * 64;
+    ///     // inclusive prefix sum
+    ///     warp_scan_int().partial_inclusive_scan(
+    ///         input,
+    ///         output,
+    ///         valid_items,
+    ///         reduction,
+    ///         temp[logical_warp_id],
+    ///         init
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// If the \p input values across threads in a block/tile are <tt>{1, 1, 1, 1, ..., 1, 1}</tt>
+    /// and the value for seeding the scan is 1, then
+    /// \p output values in the first logical warp will be <tt>{2, 3, 4, ..., 65}</tt>, in the second
+    /// warp will be <tt>{2, 3, 4, ..., 1}</tt> and for subsequent warps <tt>{1, 1, 1, 1, ..., 1, 1}</tt>.
+    /// The \p reduction will be equal \p 65 for the first logical warp, \p 4 for the second one, and it
+    /// will be undefined for subsequent warps.
+    /// \endparblock
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T&             reduction,
+                                storage_type&  storage,
+                                T              init,
+                                BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
+                                void>::type
+    {
+        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
+        {
+            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
+            {
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+            }
+        }
+        base_type::partial_inclusive_scan(input,
+                                          output,
+                                          valid_items,
+                                          reduction,
+                                          storage,
+                                          scan_op,
+                                          init);
+    }
+
+    /// \brief Performs seeded inclusive scan and reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(
+        T, T&, int, T&, storage_type&, T, BinaryFunction scan_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)scan_op;
@@ -975,6 +1343,15 @@ public:
     {
         dispatch{}([](auto impl, auto&&... args)
                    { impl.inclusive_scan(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_inclusive_scan(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.partial_inclusive_scan(std::forward<decltype(args)>(args)...); },
                    std::forward<Args>(args)...);
     }
 

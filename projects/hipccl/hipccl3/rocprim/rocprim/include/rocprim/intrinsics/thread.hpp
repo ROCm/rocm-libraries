@@ -295,7 +295,7 @@ namespace detail
     auto logical_lane_id()
         -> typename std::enable_if<detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
     {
-        return lane_id() & (LogicalWarpSize-1); // same as land_id()%WarpSize
+        return lane_id() & (LogicalWarpSize - 1); // same as lane_id() % LogicalWarpSize
     }
 
     template<unsigned int LogicalWarpSize>
@@ -303,7 +303,23 @@ namespace detail
     auto logical_lane_id()
         -> typename std::enable_if<!detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
     {
-        return lane_id()%LogicalWarpSize;
+        return lane_id() % LogicalWarpSize;
+    }
+
+    template<unsigned int LogicalWarpSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto logical_lane_id(unsigned int lane_id) ->
+        typename std::enable_if<detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
+    {
+        return lane_id & (LogicalWarpSize - 1);
+    }
+
+    template<unsigned int LogicalWarpSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto logical_lane_id(unsigned int lane_id) ->
+        typename std::enable_if<!detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
+    {
+        return lane_id % LogicalWarpSize;
     }
 
     // Return id of "logical warp" in a block
