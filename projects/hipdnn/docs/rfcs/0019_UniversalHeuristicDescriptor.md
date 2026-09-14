@@ -243,7 +243,7 @@ Within that namespace the containment runs one way, and the asymmetry is the who
   A separate *pack* is not among them: the catalog is engine-scoped, so a new KDP joining the same engine
   contributes to the same catalog under the same heuristic and separates nothing. The
   considerations that bear on it: **variant explosion**, since every added knob multiplies the space the
-  generation pipeline must cover ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)); whether the
+  generation pipeline must cover ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)); whether the
   variants differ in **function** rather than only in performance, which argues for a separate engine
   ([Section 3.3](#33-coupling-rules)); and whether a candidate knob **changes the meaning of other knobs**,
   which makes the feature space conditional and is poorly modelled by a single flat ranker.
@@ -254,7 +254,7 @@ Within that namespace the containment runs one way, and the asymmetry is the who
 
 **Benchmark wide, expose what the caller needs.** Generation still sweeps the full space — every
 addressable KMD field is exposed on the *generation* UED so every kernel is individually addressable and
-timeable ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). Feature selection then prunes the axes
+timeable ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). Feature selection then prunes the axes
 that do not earn their place **in the model**. The **emitted** UED keeps the engine's authored knobs,
 and the surviving feature set is checked to be contained in them.
 
@@ -278,7 +278,7 @@ the knob list were a product of training.
   Nothing in the knob-range report expresses which *combinations* are valid, and for a sparse catalog
   over many knobs the valid set is a vanishing fraction of the cross-product. Generation therefore never
   reconstructs candidates from knob ranges: it enumerates the applicable catalog directly and enrolls
-  what it finds ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)).
+  what it finds ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)).
 - **A knob's default is the UHD's choice.** Whatever the heuristic ranks first is the reported default, so
   leaving knobs alone reproduces the out-of-the-box selection. **This is one of the demand triggers that
   loads the UHD:** answering a knob query means ranking that engine's catalog — see
@@ -2122,7 +2122,7 @@ provider-specific service.
    fully functional and model-free from day one. (An author who prefers the intent recorded rather than
    inferred can name an explicit `static_order` UHD; it is not required.)
 2. **Generate a real heuristic from on-hardware timings.** A standalone generation tool loads the pack
-   **through a UED exposing every KMD field** ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)),
+   **through a UED exposing every KMD field** ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)),
    times its kernels across a corpus of problem shapes, trains a model, and emits an updated UED/UHD —
    now `adapter: tree_data` pointing at an exported model, with the categorical encoding and
    `trained_against` revisions it was built from. Dropping that updated engine descriptor set back in
@@ -2191,29 +2191,53 @@ one candidate's, so removing the kernel that *was* the winner for a cohort inval
 candidate, a cohort, or a device the sweep never saw has no evidence behind it, and no amount of
 refitting manufactures any.
 
-### 13.2 Benchmarking via hipDNN Autotune
+### 13.2 Benchmarking via the hipDNN Bench CLI
 
-The timing substrate is hipDNN's own autotune ([RFC 0013](0013_Autotune.md)), not a bespoke sweep.
-Autotune is provider-agnostic: it times whatever engine/kernel actually runs, so it exercises a rocKE
-pack exactly as it would any other engine. **The UHD itself never runs kernels** — it is scored data.
-The generation tool is a separate program that wraps hipDNN, drives the timing, logs the results, and
-trains the model; it reaches the engine only through the public Graph API:
+The timing substrate is **`hipdnn_bench`**, hipDNN's own benchmark tool, driving hipDNN's timing loop
+over explicitly enrolled candidates. It is provider-agnostic: it times whatever engine/kernel actually
+runs, so it exercises a rocKE pack exactly as it would any other engine. **The UHD itself never runs
+kernels** — it is scored data. The generation tool is a separate program that shells out to the bench
+CLI, logs the results, and trains the model; it reaches the engine only through that tool's public
+surface, which is itself only the public Graph API:
 
 - **Enumerate the applicable catalog** for a graph, paged and with a total count, so a large catalog is
   walked in bounded requests rather than held whole. Each entry arrives with its full knob tuple, which
   is the identity a timing is attributed to.
-- **Enroll one enumerated candidate per timed run**, by its complete knob tuple. Complete settings
-  replace collection pins rather than combining with them: one enrolled tuple times exactly one
-  candidate, so a measurement is never attributed to a set.
+- **Enroll every enumerated candidate of one graph in a single invocation**, each by its complete knob
+  tuple. Collection pins *restrict* which candidates are enrolled; a candidate's own settings are never
+  combined with them. One enrolled tuple times exactly one candidate, so a measurement is never
+  attributed to a set.
 - **Time each enrolled candidate** to convergence, iterating until the trailing-window coefficient of
   variation settles rather than for a fixed iteration count.
 - **Record per-candidate results** — the engine, the knob tuple, min / mean / robust-mean / stddev
   timings, iteration count, and workspace size — persisted as JSON. That JSON, joined with the feature
   row, is the training dataset.
 
-Enrolling enumerated candidates one at a time, rather than sweeping a Cartesian product of knob axes, is
-what makes the pipeline viable on a sparse catalog: cost scales with the number of kernels that exist,
-not with the product of the ranges they span.
+Enrolling enumerated candidates, rather than sweeping a Cartesian product of knob axes, is what makes
+the pipeline viable on a sparse catalog: cost scales with the number of kernels that exist, not with the
+product of the ranges they span.
+
+**One process per graph, not per candidate.** A corpus is 10^4–10^6 rows, and a process per row pays
+plugin load, graph build and kernel compilation for every one of them — costs that are identical across
+the candidates of one graph and dominate the sub-millisecond kernels being timed. Sweeping inside one
+process amortises all three. Measured on a 185-graph collection, a process per row spent ≈0.87 s per
+row against kernels running well under a millisecond; nearly all of it was startup.
+
+The cost of amortising is **crash isolation granularity**, and it is a deliberate trade rather than an
+oversight. A candidate that fails to build, fails to run, or is declined is reported as an unsuccessful
+result and still reaches the corpus as the failure it is — that is unaffected. A candidate that *crashes
+the process* takes its graph's remaining rows with it rather than only its own. Per-graph is the right
+granularity for that: a graph is the unit a row is already grouped by, the loss is bounded and visible
+as thin coverage ([Section 13.5](#135-sweep-space-grid-vs-constraint)) rather than as silent corruption,
+and the collection's total exposure falls because it finishes in a fraction of the wall time.
+
+**Autotune is not the substrate, and deliberately so.** hipDNN's autotune ([RFC 0013](0013_Autotune.md))
+exists to *select* a winner and to persist that winner; this pipeline needs a *measurement for every
+candidate*, which is the opposite shape. Driving selection to obtain a dataset means fighting its
+purpose: its job is to stop early and keep one answer, and every row it discards is a row this pipeline
+exists to record. The bench CLI already drives the same timing loop over explicitly enrolled variants
+with no selection step, so the statistics are hipDNN's own either way — what differs is that nothing
+decides on the generator's behalf.
 
 **A timing is only a training label once the candidate is known correct.** The tool validates each
 candidate's numerical output against a reference before accepting its measurement, and records the
@@ -2293,7 +2317,7 @@ The tool freezes and emits two contracts:
    expression op set must cover the derived features — [Section 6.2](#62-the-features_signature)'s
    `log2`/`/`/`min`/`max` extension. A computation outside that set uses the `custom_library` featurizer
    escape hatch.)
-2. **Kernel-identity contract.** The candidate autotune timed must map 1:1 to the **UKD** it stands for
+2. **Kernel-identity contract.** The candidate the bench timed must map 1:1 to the **UKD** it stands for
    in the emitted pack, so the model's argmax over timed candidates maps exactly to argmax over UKDs at
    runtime. The join key is the knob tuple reported on each result; because generation runs against a
    fully-exposed UED, that tuple is the kernel's metadata tuple, which is unique engine-wide and validated
@@ -2310,7 +2334,7 @@ The tool freezes and emits two contracts:
 
 ### 13.4 New Stage: Package (Stage P)
 
-From one timing run ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)) the tool trains the catalog ranker
+From one timing run ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)) the tool trains the catalog ranker
 (`sort_kernel_catalog`) and, when needed, the engine estimate (`predict_engine_tflops`)
 ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). A package stage then emits (or
 updates) the engine's descriptor set:
@@ -2339,7 +2363,7 @@ This is the intent of the two-stage design — the expensive artifacts (compiled
 the heuristics are layered on afterward as data.
 
 The one case that reaches back into the pack is a correctness defect the timing run exposed
-([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). Emission is gated on none being outstanding,
+([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). Emission is gated on none being outstanding,
 and clearing one is a matcher or kernel change rather than a heuristic change. That is a deliberate
 exception to the layering, not a hole in it: the stage that discovers an incorrect kernel is the only
 stage positioned to refuse to ship it.
@@ -2352,7 +2376,7 @@ supplied by the author as representative shapes, or a per-op default) and option
 *filters* the catalog ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), so
 sweeping knobs explores user-visible restrictions, not new kernels. The variant space is fixed: it is the
 pack's existing child UKDs, so the tool does not enumerate or build variants but enrolls the shipped ones
-and times them ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). That holds within this pipeline;
+and times them ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). That holds within this pipeline;
 deciding which variants exist, and pruning them once a heuristic exists, is the upstream
 package-creation-time stage of
 [Section 14](#14-package-creation-time-selection-knobs-and-aot-kernels).
@@ -2362,7 +2386,7 @@ One subtlety for anything that *drives* a sweep from a descriptor: a validity *c
 triple ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)) makes a regular axis enumerable
 without guessing the increment, which covers most numeric knobs; an irregular axis still needs an
 explicit `sweep_values` list. Neither addresses *cross-knob* validity — that is the enumeration gap of
-[Section 13.2](#132-benchmarking-via-hipdnn-autotune). **OPEN**: standardize where the shape corpus and
+[Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli). **OPEN**: standardize where the shape corpus and
 any knob grid live (a tool-side config vs. a descriptor field), so a heuristic can be regenerated
 reproducibly without out-of-band inputs.
 
@@ -2500,7 +2524,7 @@ It is a distinct heuristics area, and it closes a loop with
 knobs, and the pruned knob set then changes which kernels are worth compiling.
 
 > **Requirements, not a design — and likely a separate RFC.** This section exists to record what the
-> UHD must *support* for package creation to work: that the same autotune substrate is reusable when the
+> UHD must *support* for package creation to work: that the same timing substrate is reusable when the
 > variant space itself is what varies, that a trained heuristic's feature importances are a usable
 > pruning signal, and that a regenerated knob set feeds back into both the KMD and the feature space.
 > The algorithms — prioritization objective, search-space refinement, pruning thresholds — are
@@ -2545,7 +2569,7 @@ engine's own generator before hipDNN sees anything.
 4. **Modify the KDP** to include the AOT kernels selected (or newly created) by that evaluation, on
    coverage / frequency / performance.
 
-Step 2 uses the same autotune substrate as [Section 13.2](#132-benchmarking-via-hipdnn-autotune); what
+Step 2 uses the same timing substrate as [Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli); what
 differs is *what varies* (the variant space itself, not just the shape corpus) and *what the output
 drives* (the pack's kernel set, not a model).
 
@@ -2673,7 +2697,7 @@ dependency-gated and land only when a concrete need appears.
 | Risk | Description | Mitigation |
 |------|-------------|------------|
 | **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; four-part load-time check ([Section 6.3](#63-contract-enforcement)); computed features are **inline**, so the signature *is* the computation and `features_hash` cannot miss a redefinition ([Section 6.4](#64-computed-features)) |
-| **Catalog not enumerable** | Reconstructing candidates from independently reported knob ranges yields a cross-product a sparse catalog barely intersects, so a large knob space cannot be swept | Generation enumerates the applicable catalog directly, paged, and enrolls one complete candidate per timed run, so cost is linear in the catalog rather than in the cross-product ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)) |
+| **Catalog not enumerable** | Reconstructing candidates from independently reported knob ranges yields a cross-product a sparse catalog barely intersects, so a large knob space cannot be swept | Generation enumerates the applicable catalog directly, paged, and enrolls one complete candidate per timed run, so cost is linear in the catalog rather than in the cross-product ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)) |
 | **Knob-set churn** | A retrain drops a feature and takes a caller's knob with it | Cannot happen: `UED.knobs` is the engine's authored public surface and the model's feature set is a subset of it, so feature selection never withdraws a knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement)). Removing a knob is a deliberate engine-authoring change, stamped as a breaking content revision ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); an unread knob is reported so the author can decide |
 | **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Generation runs fully exposed, so the join key is the full metadata tuple; verify `knobSettings` round-trips; a collision during generation fails loudly ([Section 13.3](#133-one-source-of-truth-translated-once)) |
 | **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model | Explicit revision rule at load (breaking `==`, additive `<=`) over the KMD's content revision, which is a separate axis from its file-format `version`; additive changes need no retrain until exposed ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); model disabled (not request failed) on mismatch |
@@ -2804,7 +2828,7 @@ dependency-gated and land only when a concrete need appears.
 12. **Enumerating the valid catalog — RESOLVED.** The generation path enumerates the applicable catalog
     directly, paged, with a total count, and enrolls one complete candidate per timed run rather than
     reconstructing candidates from a Cartesian product of knob ranges
-    ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). Enumeration returns candidates with their
+    ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)). Enumeration returns candidates with their
     full knob tuple, so the identity a timing is attributed to is the one the catalog published, and a
     tuple collision during enumeration is a hard error rather than a silent join
     ([Section 13.3](#133-one-source-of-truth-translated-once)). This removes the sparse-catalog
@@ -2812,7 +2836,7 @@ dependency-gated and land only when a concrete need appears.
     stays open is narrower and belongs to the hipDNN API rather than to this document — whether the
     enumeration is public or generation-only, and whether `[min, max, step]` lives on the KMD field or
     the UED knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
-    *(Impacts [Section 13.2](#132-benchmarking-via-hipdnn-autotune), [Section 15](#15-phased-delivery) phase 5.)*
+    *(Impacts [Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli), [Section 15](#15-phased-delivery) phase 5.)*
 
 13. **Publishing the schema file.** [Section 4.1](#41-field-reference-normative) now carries a normative Draft-7
     block, validated against every shipping `version: "1.0"` descriptor. What remains is packaging it as
@@ -2870,14 +2894,14 @@ dependency-gated and land only when a concrete need appears.
     *(Impacts [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement), [Section 8.1](#81-descriptor-versions-and-uhd-coupling).)*
 
 19. **Validating the training oracle.** A timing becomes a training label only after the candidate is
-    shown correct ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)), which leaves two questions.
+    shown correct ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)), which leaves two questions.
     (a) **What reference?** Options are a CPU reference executor, a trusted in-catalog kernel, or a
     cross-engine result; each differs in cost and in what it can certify, and the choice may be per op.
     (b) **Is matcher coverage checked?** An over-narrow matcher silently omits candidates, so a problem
     can produce a plausible-looking but impoverished candidate set. Generation could flag a problem whose
     candidate count is anomalous for its cohort, but distinguishing "correctly narrow" from "wrongly
     narrow" needs a definition of expected coverage this RFC does not have.
-    *(Impacts [Section 13.2](#132-benchmarking-via-hipdnn-autotune), [Section 13.3](#133-one-source-of-truth-translated-once).)*
+    *(Impacts [Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli), [Section 13.3](#133-one-source-of-truth-translated-once).)*
 
 ---
 
@@ -2934,7 +2958,7 @@ dependency-gated and land only when a concrete need appears.
   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). Note also that the
   *cross-product* of legal knob values is not the set of legal tuples: most combinations match no
   kernel, which is why the catalog is enumerated directly rather than reconstructed from knob ranges
-  ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)).
+  ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)).
 
 - **Benchmark wide, expose what the caller needs:** Generate against a UED exposing every addressable
   KMD field — so every kernel is individually timeable — then let feature selection prune the axes that
