@@ -97,11 +97,11 @@ Tests:
   transB: [rocsparse_operation_none]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
   solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
-  baseA: [rocsparse_index_base_zero]
+  diagonal_modifier: *all_rocsparse_diagonal_modifier
+  baseA: *all_rocsparse_index_base
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_random]
 
@@ -146,7 +146,7 @@ Tests:
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  diagonal_modifier: *all_rocsparse_diagonal_modifier
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_random]
@@ -192,7 +192,7 @@ Tests:
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  diagonal_modifier: *all_rocsparse_diagonal_modifier
   baseA: [rocsparse_index_base_zero]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_random]
@@ -216,7 +216,7 @@ Tests:
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   solve_mode: [rocsparse_solve_mode_diagonal]
-  diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
+  diagonal_modifier: *all_rocsparse_diagonal_modifier
   baseA: [rocsparse_index_base_one]
   sptrsm_alg: [rocsparse_sptrsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]

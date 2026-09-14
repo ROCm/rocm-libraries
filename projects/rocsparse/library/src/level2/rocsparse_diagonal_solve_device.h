@@ -25,80 +25,77 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
-#include "rocsparse_scalar.hpp"
 
 namespace rocsparse
 {
+    // Solves D y = alpha x for a single batch entry: val, x, y and zero_pivot have
+    // already been shifted to that entry by the caller. One thread owns one row,
+    // and walks the right-hand sides along the y dimension of the grid.
     template <uint32_t BLOCKSIZE, typename I, typename J, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void diagonal_solve_kernel(J m,
-                               J nrhs,
-                               ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                               const I* __restrict__ diag_ind,
-                               const I* __restrict__ transposed_perm,
-                               const T* __restrict__ val,
-                               int64_t val_batch_stride,
-                               const T* __restrict__ x,
-                               int64_t x_row_stride,
-                               int64_t x_col_stride,
-                               int64_t x_batch_stride,
-                               T* __restrict__ y,
-                               int64_t y_row_stride,
-                               int64_t y_col_stride,
-                               int64_t y_batch_stride,
-                               J* __restrict__ zero_pivot,
-                               int64_t                     zero_pivot_stride,
-                               rocsparse_index_base        base,
-                               rocsparse_diagonal_modifier modifier,
-                               bool                        conj,
-                               bool                        conj_x,
-                               bool                        is_host_mode)
+    ROCSPARSE_DEVICE_ILF void diagonal_solve_device(J m,
+                                                    J nrhs,
+                                                    T alpha,
+                                                    const I* __restrict__ diag_ind,
+                                                    const I* __restrict__ transposed_perm,
+                                                    const T* __restrict__ val,
+                                                    const T* __restrict__ x,
+                                                    int64_t x_row_inc,
+                                                    int64_t x_rhs_inc,
+                                                    T* __restrict__ y,
+                                                    int64_t y_row_inc,
+                                                    int64_t y_rhs_inc,
+                                                    J* __restrict__ zero_pivot,
+                                                    rocsparse_index_base        base,
+                                                    rocsparse_diagonal_modifier modifier,
+                                                    bool                        conj,
+                                                    bool                        conj_x)
     {
-        const J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const auto row = static_cast<J>(hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x);
         if(row >= m)
         {
             return;
         }
 
-        const uint32_t batch = hipBlockIdx_z;
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        // Where A[row,row] sits, as recorded by the analysis stage. It is negative
+        // when the row has no diagonal entry at all.
+        const I diag_pos = diag_ind[row];
 
-        const I p     = diag_ind[row];
-        bool    pivot = (p < 0);
-        T       d     = static_cast<T>(1);
+        // A row with a missing or zero diagonal is reported as a pivot and left
+        // unscaled, which is what keeping the neutral divisor below amounts to.
+        bool pivot = (diag_pos < 0);
+        T    denom = static_cast<T>(1);
         if(!pivot)
         {
-            const I q = (transposed_perm != nullptr) ? transposed_perm[p] : p;
-            d         = val[batch * val_batch_stride + q];
-            if(d == static_cast<T>(0))
+            // A CSC matrix is analysed through its transpose, so the position in the
+            // value array is reached through the permutation the analysis left behind.
+            const I val_pos = (transposed_perm != nullptr) ? transposed_perm[diag_pos] : diag_pos;
+            const T diag_value = val[val_pos];
+
+            pivot = (diag_value == static_cast<T>(0));
+            if(!pivot)
             {
-                pivot = true;
-                d     = static_cast<T>(1);
+                denom = (modifier == rocsparse_diagonal_modifier_absolute)
+                            ? static_cast<T>(rocsparse::abs(diag_value))
+                            : (conj ? rocsparse::conj(diag_value) : diag_value);
             }
         }
 
-        if(hipBlockIdx_y == 0 && pivot)
+        // Every block along the right-hand sides sees the same pivot, so only the
+        // first one reports it. atomic_min would be idempotent otherwise, but a
+        // singular matrix with many right-hand sides would contend for nothing.
+        if(pivot && hipBlockIdx_y == 0)
         {
-            rocsparse::atomic_min(zero_pivot + batch * zero_pivot_stride,
-                                  static_cast<J>(row + base));
+            rocsparse::atomic_min(zero_pivot, static_cast<J>(row + base));
         }
 
-        const T denom = pivot ? static_cast<T>(1)
-                              : ((modifier == rocsparse_diagonal_modifier_absolute)
-                                     ? static_cast<T>(rocsparse::abs(d))
-                                     : (conj ? rocsparse::conj(d) : d));
-
-        for(J col = hipBlockIdx_y; col < nrhs; col += hipGridDim_y)
+        // Only the diagonal of the matrix was needed, and it has been read above.
+        // What is left is dividing every right-hand side of this row by it.
+        for(J rhs = hipBlockIdx_y; rhs < nrhs; rhs += hipGridDim_y)
         {
-            T xval = x[batch * x_batch_stride + row * x_row_stride + col * x_col_stride];
-            if(conj_x)
-            {
-                xval = rocsparse::conj(xval);
-            }
-            const T xv = alpha * xval;
+            const T xval = x[row * x_row_inc + rhs * x_rhs_inc];
 
-            y[batch * y_batch_stride + row * y_row_stride + col * y_col_stride]
-                = pivot ? xv : (xv / denom);
+            y[row * y_row_inc + rhs * y_rhs_inc]
+                = (alpha * (conj_x ? rocsparse::conj(xval) : xval)) / denom;
         }
     }
 }
