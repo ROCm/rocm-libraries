@@ -11,9 +11,12 @@ namespace roc::host_numerics::python_bindings {
 Tensor scalarFromPython(nanobind::handle value);
 Tensor tensorOperand(nanobind::handle value, ScalarType scalarType);
 
+void registerCoreBindings(nanobind::module_& module);
+void registerSelectionBindings(nanobind::module_& module);
 void registerComparisonBindings(nanobind::module_& module);
 void registerGenerationBindings(nanobind::module_& module);
 void registerGemmBindings(nanobind::module_& module);
 void registerMxBindings(nanobind::module_& module);
 void registerOperationBindings(nanobind::module_& module);
+void registerTensorBindings(nanobind::module_& module);
 }  // namespace roc::host_numerics::python_bindings
