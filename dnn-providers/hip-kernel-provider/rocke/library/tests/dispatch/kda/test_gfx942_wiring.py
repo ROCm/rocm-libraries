@@ -50,7 +50,7 @@ def _candidate(name: str):
 
 class TestRegistration(unittest.TestCase):
     def test_every_kernel_is_registered(self):
-        self.assertEqual({c.name for c in kda_candidates()}, set(_ALL))
+        self.assertLessEqual(set(_ALL), {c.name for c in kda_candidates()})
 
     def test_identity(self):
         for name, algorithm, spec_id in (
@@ -83,6 +83,9 @@ class TestRegistration(unittest.TestCase):
 class TestRouting(unittest.TestCase):
     def test_default_routing_is_the_fused_kernel(self):
         self.assertEqual(dispatch_kda(_req()).candidate.name, _FUSED)
+
+    def test_unspecified_chunk_uses_the_gfx942_default(self):
+        self.assertEqual(dispatch_kda(_req(chunk_size=None)).spec.tile.chunk, 16)
 
     def test_named_algorithm_selects_a_split_half(self):
         for name, algorithm in ((_PREP, "chunk_prep"), (_SCAN, "chunk_scan")):
@@ -121,7 +124,7 @@ class TestArchGate(unittest.TestCase):
 
     def test_registry_serves_them_only_to_gfx942(self):
         self.assertEqual({c.name for c in KDA_REGISTRY.for_arch("gfx942")}, set(_ALL))
-        self.assertEqual(KDA_REGISTRY.for_arch("gfx950"), ())
+        self.assertFalse(set(_ALL) & {c.name for c in KDA_REGISTRY.for_arch("gfx950")})
 
 
 class TestCapabilityGates(unittest.TestCase):

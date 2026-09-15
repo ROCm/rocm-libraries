@@ -60,8 +60,10 @@ def test_run_bench_happy_path_invokes_standard_benchmark(monkeypatch: pytest.Mon
     rc = pipeline.run_bench(str(hip), str(workload), out_dir, devices=[0], benchmark_duration=0.1)
     assert rc == 0
     assert dumped["path"].is_file()
+    assert (out_dir / "wkld.csv").is_file()
     assert called["kwargs"]["devices"] == [0]
     assert called["kwargs"]["duration"] == 0.1
+    assert called["kwargs"]["custom_lib_dir"] is None
 
 
 def test_run_bench_device_alias_overrides_devices(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -84,6 +86,93 @@ def test_run_bench_device_alias_overrides_devices(monkeypatch: pytest.MonkeyPatc
     rc = pipeline.run_bench(str(hip), str(workload), tmp_path / "out", devices=[0, 1], device=2)
     assert rc == 0
     assert called["devices"] == [2]
+
+
+def test_run_bench_uses_custom_lib_dir_over_custom_lib_src(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    custom_src = tmp_path / "src_libs"
+    custom_src.mkdir()
+    custom_dir = tmp_path / "custom_build"
+    custom_dir.mkdir()
+
+    monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
+
+    create_called = {"n": 0}
+    monkeypatch.setattr(
+        pipeline.library.operations,
+        "create",
+        lambda *_a, **_k: create_called.__setitem__("n", create_called["n"] + 1),
+    )
+
+    called = {}
+
+    def _fake_standard(*_args, **kwargs):
+        called["custom_lib_dir"] = kwargs["custom_lib_dir"]
+        return pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench, "standard_benchmark", _fake_standard)
+
+    rc = pipeline.run_bench(
+        str(hip),
+        str(workload),
+        out_dir,
+        devices=[0],
+        custom_lib_src=str(custom_src),
+        custom_lib_dir=str(custom_dir),
+    )
+    assert rc == 0
+    assert create_called["n"] == 0
+    assert called["custom_lib_dir"] == custom_dir
+
+
+def test_run_bench_builds_custom_lib_from_src(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    custom_src = tmp_path / "src_libs"
+    custom_src.mkdir()
+
+    monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
+
+    created = {}
+
+    def _fake_create(_hip, src, out):
+        created["src"] = Path(src)
+        created["out"] = Path(out)
+
+    monkeypatch.setattr(pipeline.library.operations, "create", _fake_create)
+
+    called = {}
+
+    def _fake_standard(*_args, **kwargs):
+        called["custom_lib_dir"] = kwargs["custom_lib_dir"]
+        return pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench, "standard_benchmark", _fake_standard)
+
+    rc = pipeline.run_bench(
+        str(hip),
+        str(workload),
+        out_dir,
+        devices=[0],
+        custom_lib_src=str(custom_src),
+    )
+    assert rc == 0
+    assert created["src"] == custom_src
+    assert created["out"] == out_dir / "ref_build"
+    assert called["custom_lib_dir"] == out_dir / "ref_build"
 
 
 def test_run_configure_rejects_invalid_device(tmp_path: Path) -> None:
@@ -211,8 +300,21 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
             p.mkdir(parents=True, exist_ok=True)
             (p / "lib.yaml").write_text("x\n")
 
-    monkeypatch.setattr(pipeline.library.operations, "extract_solutions", lambda *_a, **_k: _FakeLibs())
-    monkeypatch.setattr(pipeline.optim, "analyze", lambda *_a, **_k: (pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])))
+    extracted = {}
+
+    def _fake_extract(_winners, match_table):
+        extracted["match_table"] = Path(match_table)
+        return _FakeLibs()
+
+    monkeypatch.setattr(pipeline.library.operations, "extract_solutions", _fake_extract)
+
+    analyze_called = {}
+
+    def _fake_analyze(*_a, **kwargs):
+        analyze_called["ref_custom_lib_dir"] = kwargs.get("ref_custom_lib_dir")
+        return pd.DataFrame([{"dummy": 1}]), pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])
+
+    monkeypatch.setattr(pipeline.optim, "analyze", _fake_analyze)
     monkeypatch.setattr(
         pipeline.library,
         "from_dataframe",
@@ -226,6 +328,98 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(workdir))
     assert (workdir / "final_libs" / "lib.yaml").is_file()
+    assert extracted["match_table"] == hip / "build/release/device-library/MatchTable.yaml"
+    assert analyze_called["ref_custom_lib_dir"] is None
+
+
+def test_run_search_with_custom_lib_src_builds_ref_lib_and_uses_ref_matchtable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    (hip / "build/release/device-library").mkdir(parents=True)
+    workload = _make_workload(tmp_path / "wkld.yaml")
+    workdir = tmp_path / "w"
+    src_lib = tmp_path / "src_lib"
+    src_lib.mkdir()
+
+    summary = pd.DataFrame(
+        [
+            {
+                "transA": "N",
+                "transB": "N",
+                "batch_count": 1,
+                "m": 16,
+                "n": 16,
+                "k": 16,
+                "a_type": "f16_r",
+                "b_type": "f16_r",
+                "c_type": "f16_r",
+                "d_type": "f16_r",
+                "compute_type": "c_f32_r",
+            }
+        ]
+    )
+    winners = summary.copy()
+    winners["solutionIdx"] = 0
+
+    monkeypatch.setattr(pipeline.bench.log, "summarize", lambda *_a, **_k: (summary, summary))
+    monkeypatch.setattr(pipeline.search, "configure", lambda *_a, **_k: [{"M": 16}])
+    monkeypatch.setattr(pipeline.search, "run", lambda *_a, **_k: winners)
+
+    class _FakeLibs(list):
+        def dump(self, out_dir):
+            p = Path(out_dir)
+            p.mkdir(parents=True, exist_ok=True)
+            (p / "lib.yaml").write_text("x\n")
+
+    cwd_match = tmp_path / "MatchTable.yaml"
+    cwd_match.write_text("{}\n")
+
+    created = {}
+
+    def _fake_create(_hip, src, out):
+        created["src"] = Path(src)
+        created["out"] = Path(out)
+
+    monkeypatch.setattr(pipeline.library.operations, "create", _fake_create)
+
+    extracted = {}
+
+    def _fake_extract(_winners, match_table):
+        extracted["match_table"] = Path(match_table)
+        return _FakeLibs()
+
+    monkeypatch.setattr(pipeline.library.operations, "extract_solutions", _fake_extract)
+
+    analyze_called = {}
+
+    def _fake_analyze(*_a, **kwargs):
+        analyze_called["ref_custom_lib_dir"] = kwargs.get("ref_custom_lib_dir")
+        return None, pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "lib.yaml"}])
+
+    monkeypatch.setattr(pipeline.optim, "analyze", _fake_analyze)
+    monkeypatch.setattr(pipeline.library, "from_full_dataframe", lambda *_a, **_k: _FakeLibs())
+
+    prev_cwd = Path.cwd()
+    try:
+        import os
+        os.chdir(tmp_path)
+        pipeline.run_search(
+            str(hip),
+            str(workload),
+            devices=[0],
+            workdir=str(workdir),
+            custom_lib_src=str(src_lib),
+        )
+    finally:
+        import os
+        os.chdir(prev_cwd)
+
+    assert created["src"] == src_lib
+    assert created["out"] == workdir / "ref_build"
+    assert (workdir / "ref_matchtable.yaml").is_file()
+    assert extracted["match_table"] == workdir / "ref_matchtable.yaml"
+    assert analyze_called["ref_custom_lib_dir"] == workdir / "ref_build"
 
 
 def test_run_search_success_without_analysis_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

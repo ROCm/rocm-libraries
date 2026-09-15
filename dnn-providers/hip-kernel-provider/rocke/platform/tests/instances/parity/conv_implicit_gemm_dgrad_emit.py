@@ -253,6 +253,79 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 11:
+        # K-outer B tile + ds_read_tr16_b64 transpose read, 32x32x16 atom.
+        # cshuffle deliberately: the validator rejects 16-bit dtype_d with the
+        # default epilogue, and a rejected config lands as BOTH_REJECTED, which
+        # the gate counts as a pass -- it would compare nothing.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=128,
+                tile_n=128,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 12:
+        # Same path on the 16x16x16 atom, where b_frag_len is 4 rather than 8:
+        # one ds_read_tr16_b64 per fragment instead of two. Pins the per-atom
+        # fragment length -- hardcoding 8 reads past the end of the tile.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=64,
+                tile_n=64,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+                pipeline="mem",
+                epilogue="cshuffle",
+                lds_k_outer=True,
+            ),
+            "gfx950",
+        )
+
+    if idx == 13:
+        # gfx1250 wave32 WMMA 16x16x32 K-outer. The shared transpose-read helper
+        # takes its wave32 branch here and lowers to ds_load_tr16_b128 (8 per
+        # lane), so a 16-element fragment is two reads. Configs 11 and 12 are
+        # both wave64, so without this the dgrad wave32 path shipped with no
+        # cross-engine coverage at all.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_outer=True,
+            ),
+            "gfx1250",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 

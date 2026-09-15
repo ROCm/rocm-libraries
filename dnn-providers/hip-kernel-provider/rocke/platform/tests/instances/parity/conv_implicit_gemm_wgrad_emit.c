@@ -22,6 +22,13 @@
  *   8  3-D conv N4Di14H14W14C32_K32Z3Y3X3, t64x64x64, w2x2, a32x32x16, mem/default, gfx950
  *   9  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 bf16
  *  10  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, chiplet_swizzle
+ *  11  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/cshuffle,     gfx950, lds_k_outer
+ *  12  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, lds_k_outer + async_dma, split_k=4 fp32
+ *  13  N8H56W56C64_K64Y3X3, t64x64x16, w2x2, a16x16x16, mem/cshuffle,     gfx950, lds_k_outer (4 operand elems/lane)
+ *  14  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, basic/default,    gfx950, split_k=4 fp32
+ *  15  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a32x32x16, mem/default,      gfx950, split_k=4 two_stage fp16
+ *  16  N8H56W56C64_K64Y3X3, t64x64x64, w2x2, a16x16x16, mem/default,      gfx942, split_k=4 two_stage fp16
+ *  17  N8H56W56C64_K64Y3X3 pad1, t32x32x32, w1x1, a16x16x32, mem/default, gfx1250 (WMMA w32), lds_k_outer fp32 out
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,6 +131,87 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
         spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         spec->chiplet_swizzle = true;
         *arch = "gfx950";
+        return 0;
+    case 11:
+        /* K-outer LDS tile + gfx950 ds_read_b64_tr_b16 transpose reads. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 12:
+        /* K-outer + direct load (async_dma). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->dtype_d = "fp32";
+        spec->lds_k_outer = true;
+        spec->async_dma = true;
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 13:
+        /* K-outer with the 16x16x16 atom: 4 MFMA operand elements per lane
+         * rather than 8, so the transpose-read k-stride between lane groups
+         * is 4. Cases 11 and 12 both use 32x32x16 (8 per lane). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->tile_k = 16;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->epilogue = "cshuffle";
+        spec->lds_k_outer = true;
+        *arch = "gfx950";
+        return 0;
+    case 14:
+        /* pipeline="basic": unrolled global-read/compute overlap loop. Needs a
+         * compile-time trip count, hence the fixed split_k. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->pipeline = "basic";
+        spec->dtype_d = "fp32";
+        spec->split_k = 4;
+        *arch = "gfx950";
+        return 0;
+    case 15:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx950. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx950";
+        return 0;
+    case 16:
+        /* Two-stage deterministic: workspace-store epilogue, split_k=4, fp16, gfx942
+         * (16x16x16 MFMA only). */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
+        spec->split_k = 4;
+        spec->two_stage = true;
+        *arch = "gfx942";
+        return 0;
+    case 17:
+        /* gfx1250 wave32 WMMA 16x16x32 K-outer. The transpose read lowers to
+         * ds_load_tr16_b128 (8 per lane), so a 16-element fragment is two
+         * reads. dtype_d=fp32 because WMMA wgrad supports only the 'default'
+         * epilogue, which rejects 16-bit dW. */
+        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
+        spec->problem.pH = 1;
+        spec->problem.pW = 1;
+        spec->dtype_a = "fp16";
+        spec->dtype_b = "fp16";
+        spec->dtype_d = "fp32";
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->lds_k_outer = true;
+        *arch = "gfx1250";
         return 0;
     default:
         return -1;
