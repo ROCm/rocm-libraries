@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Benchmark"
+  short_description: "Benchmark hipDNN graphs with dnn-benchmarking"
+  default_prompt: "Use $hipdnn-benchmark to run hipDNN graph benchmarks through dnn-benchmarking and follow that checkout's agent instructions for setup and usage."
