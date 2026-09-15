@@ -1245,7 +1245,16 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     }
     ctx.A_LDS_M = (ctx.two_buf ? 2 : 1) * ctx.block_m;
     ctx.B_LDS_N = (ctx.two_buf ? 2 : 1) * ctx.block_n;
-    ctx.lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
+    /* Padding applies on the VGPR-staged path and on gfx1250 direct-to-LDS
+     * (per-lane addressed, so the padded stride is free). The gfx9
+     * buffer_load_lds family writes wave-contiguous bytes from one
+     * wave-uniform base and has nowhere to put a per-row gap. */
+    {
+        const int dtl_lane_addressed = (arch != NULL && strcmp(arch, "gfx1250") == 0);
+        ctx.lds_pad = (spec->trait.direct_to_lds && !dtl_lane_addressed)
+                          ? 0
+                          : spec->trait.lds_k_pad;
+    }
     ctx.lds_k = ctx.block_k + ctx.lds_pad;
     {
         int a_shape[2] = {ctx.A_LDS_M, ctx.lds_k};

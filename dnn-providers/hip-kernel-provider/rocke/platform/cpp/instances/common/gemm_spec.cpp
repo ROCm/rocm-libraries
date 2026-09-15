@@ -638,10 +638,11 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             {
                 CK_GEMM_REJECT("WMMA path does not support direct_to_lds on %s", arch);
             }
-            if(spec->trait.lds_k_pad != 0)
-            {
-                CK_GEMM_REJECT("gfx1250 WMMA direct_to_lds does not support lds_k_pad");
-            }
+            /* lds_k_pad IS supported here: gfx1250's global_load_async_to_lds
+             * is per-lane addressed, so a padded LDS row stride costs nothing.
+             * lds_swizzle still is not -- it XORs the *global* column so the
+             * LDS destination can stay wave-contiguous, a gfx9-shaped
+             * assumption that does not carry over. */
             if(spec->trait.lds_swizzle)
             {
                 CK_GEMM_REJECT("gfx1250 WMMA direct_to_lds does not support lds_swizzle");
