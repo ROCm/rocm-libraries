@@ -1,44 +1,31 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Make every kernel addressable by a knob tuple, whatever its metadata types are.
+"""What a knob ordinal means, learned from the engine rather than re-derived.
 
-RFC 0019 §13.2: "The generation UED therefore exposes every addressable KMD field, making the
-knob tuple equal to the metadata tuple and every catalog entry individually reachable. A field
-the exposure cannot carry leaves its kernels sharing a tuple, and generation stops on that
-collision rather than timing an ambiguous candidate."
+RFC 0019 §13.2: "The generation UED therefore exposes every addressable KMD field, making
+the knob tuple equal to the metadata tuple and every catalog entry individually reachable."
 
-A knob value is an integer end to end — the bench CLI parses `--knob name=value` as a number,
-the backend carries an int64, and the ingestor matches it against the kernel's metadata with
-`std::get_if<int64_t>`. So `int` fields address themselves and the other four KMD types
-(`bool`, `float`, `string`, `int_list`) cannot be pinned at all. Exposing only `int` was the
-honest response to that; it is also why two kernels differing solely in `dtype` share a tuple
-and abort the run.
+A knob value is an integer end to end -- the bench CLI parses `--knob name=value` as a
+number, the backend carries an int64, and the ingestor matches it against the kernel's
+metadata. So `int` fields address themselves and the other four KMD types (`bool`, `float`,
+`string`, `int_list`) are addressed by an INDEX into the engine's value set for that field.
 
-**Ordinal encoding** closes the gap without changing the wire type. For a non-integer field,
-the pinned integer is an INDEX into that field's sorted distinct values, and the kernel whose
-value sits at that index is the kernel addressed.
+**The engine owns that numbering, and this module does not reproduce it.** Enumeration
+already returns, for every candidate, both halves of the mapping:
 
-Two properties make this safe to compute independently on both sides rather than shipping a
-table:
+    knob_settings   {"dtype": 0, "block_m": 256, ...}   <- what addresses this kernel
+    kernel_features {"kernel.dtype": "BF16", ...}       <- what the kernel actually is
 
-* **The value set is the engine's, not the graph's.** Indices are assigned over every kernel
-  the engine owns, not over the catalog that matched one graph. A per-graph set would give the
-  same index different meanings for different graphs, so a recorded tuple would address a
-  different kernel when replayed.
-* **The order is total and specified.** `bool` false before true, `float` and `int` numerically,
-  `string` by code point, `int_list` lexicographically by element. Both sides sort the same
-  values the same way, so both arrive at the same index without exchanging anything.
+so `0 -> "BF16"` is an observation, not a derivation. An earlier version of this module
+computed the table a second time from the descriptor tree and held the two in agreement by
+contract: sort the same way, apply KMD defaults the same way, span the same packs. Each of
+those is a way to disagree silently -- a mismatch produces a valid integer that addresses
+the wrong kernel -- and the defaults rule had already been got wrong once.
 
-The encoding is recorded in the generation manifest anyway — not because the runtime needs it,
-but because an index in a stored row is unreadable without it, and a mismatch between the two
-sides should be diagnosable rather than merely wrong.
+What is observed is exactly what is addressable: a value no candidate carried cannot be
+pinned, so its absence from the table costs nothing.
 """
 from __future__ import annotations
-
-from pathlib import Path
-
-from .provenance import descriptor_id, load_descriptor_tree
-
 
 #: KMD metadata types, per `hkp_pack/descriptors.py::_METADATA_TYPES`.
 METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
@@ -46,138 +33,91 @@ METADATA_TYPES = ("bool", "int", "float", "string", "int_list")
 #: Types that address themselves: the value IS the pin.
 NATIVE_TYPES = ("int",)
 
+KERNEL_PREFIX = "kernel."
 
-def engine_kernels(tree: Path, ued_id: str) -> list[dict]:
-    """Every kernel the engine owns, across every arch -- the runtime's own view.
 
-    Deliberately NOT arch-filtered. `KernelIngestorStateManager` holds all of the engine's
-    packs and filters by arch only when it builds a catalog for a device
-    (`archSupports(pack.arch, ...)`), so its value set is engine-wide; a table built here from
-    one arch's packs would number the shared values differently and address a different kernel.
+def _hashable(value):
+    """A JSON value as a dict key: `int_list` arrives as a list, which is not one."""
+    return tuple(value) if isinstance(value, list) else value
 
-    Engine-wide is also the property a recorded row needs: a pin means the same kernel on a
-    machine that has a second arch's packs installed as on the one that measured it.
+
+def observe(candidates, table: dict | None = None) -> dict:
+    """Extend `table` with the (knob, ordinal) -> value pairs these candidates show.
+
+    `candidates` are enumerated catalog entries as the bench emits them: each carries a
+    complete `knob_settings` tuple and the `kernel_features` of the kernel that tuple
+    addresses. A knob whose pinned integer equals the kernel's own value is a native `int`
+    field and is recorded as such, so a reader can tell "the value is 256" from "the value
+    is the one at index 0".
+
+    Raises on a contradiction rather than overwriting. Two candidates disagreeing about
+    what ordinal 1 means is the engine's numbering shifting mid-corpus, which would make
+    every recorded row before the shift address a different kernel on replay.
     """
-    index = load_descriptor_tree(tree)
-    kernels: list[dict] = []
-    for path, pack in index["kdp"].values():
-        if descriptor_id(pack.get("engine"), f"{path}.engine") != ued_id:
-            continue
-        kernels.extend(entry for entry in pack.get("kernelDescriptors", []) if isinstance(entry, dict))
-    return kernels
-
-
-def _sort_key(field_type: str, value):
-    """A total order per type, so two implementations agree without sharing state."""
-    if field_type == "bool":
-        return (0, int(bool(value)))
-    if field_type in ("int", "float"):
-        return (0, float(value))
-    if field_type == "string":
-        # By code point, not by locale: a locale-dependent collation would assign different
-        # indices on two machines and silently address different kernels.
-        return (0, str(value))
-    if field_type == "int_list":
-        return (0, tuple(int(item) for item in value))
-    raise ValueError(f"unknown KMD field type {field_type!r}")
-
-
-def _canonical(field_type: str, value):
-    """The value as it is compared and recorded, independent of JSON spelling."""
-    if field_type == "bool":
-        return bool(value)
-    if field_type == "int":
-        return int(value)
-    if field_type == "float":
-        return float(value)
-    if field_type == "string":
-        return str(value)
-    if field_type == "int_list":
-        return tuple(int(item) for item in value)
-    raise ValueError(f"unknown KMD field type {field_type!r}")
-
-
-def encodings(kmd: dict, kernels: list[dict]) -> dict[str, list]:
-    """Ordinal tables for every non-native field the KMD declares, in index order.
-
-    `kernels` is the engine's whole kernel inventory -- every `kernelDescriptors` entry of
-    every pack that joins it.
-
-    **KMD defaults are applied first.** The runtime builds its catalog from completed metadata
-    (`KernelIngestorStateManager::validateAndIndexPacks` -> `completeMetadata`, which fills a
-    field the kernel omits from the KMD's `default`), so a table built from authored values
-    alone would be missing exactly the values the defaults supply. The two sides would then
-    number the same field differently and a recorded pin would address a different kernel --
-    silently, because both indices are valid integers. A kernel that omits a field the KMD
-    gives no default for is a load error there and contributes nothing here.
-    """
-    tables: dict[str, list] = {}
-    for field in kmd.get("fields", []):
-        name, field_type = field["name"], field["type"]
-        if field_type in NATIVE_TYPES:
-            continue
-        if field_type not in METADATA_TYPES:
-            raise ValueError(f"KMD field {name!r} has unknown type {field_type!r}")
-        has_default = "default" in field
-        observed = set()
-        for kernel in kernels:
-            metadata = kernel.get("metadata")
-            if not isinstance(metadata, dict):
+    table = {} if table is None else table
+    for candidate in candidates:
+        knobs = candidate.get("knob_settings") or {}
+        features = candidate.get("kernel_features") or {}
+        for name, pinned in knobs.items():
+            actual = features.get(KERNEL_PREFIX + name)
+            if actual is None:
+                # The knob names no kernel field this candidate published; nothing to learn.
                 continue
-            if name in metadata:
-                observed.add(_canonical(field_type, metadata[name]))
-            elif has_default:
-                observed.add(_canonical(field_type, field["default"]))
-        if observed:
-            tables[name] = [value for value in sorted(observed, key=lambda v: _sort_key(field_type, v))]
-    return tables
+            entry = table.setdefault(name, {})
+            known = entry.get(pinned)
+            observed = _hashable(actual)
+            if known is not None and known != observed:
+                raise ValueError(
+                    f"knob {name!r} ordinal {pinned} addressed {known!r} and then {observed!r}; "
+                    "the engine's numbering changed during collection, so rows recorded "
+                    "before the change no longer address the kernels they measured")
+            entry[pinned] = observed
+    return table
 
 
-def exposable(kmd: dict, tables: dict[str, list]) -> list[str]:
-    """The knob names the collection UED exposes: native fields plus every encoded one."""
-    names = []
-    for field in kmd.get("fields", []):
-        if field["type"] in NATIVE_TYPES or field["name"] in tables:
-            names.append(field["name"])
-    return names
+def is_ordinal(table: dict, name: str) -> bool:
+    """Does this knob address by index rather than by its own value?
 
-
-def pin(field_type: str, value, table: list | None) -> int:
-    """The integer that addresses `value` for a field of this type.
-
-    A value the table does not contain is a caller error rather than a miss: the table was
-    built from the same inventory the kernel came from, so an absent value means the two sides
-    disagree about what the engine owns -- which is exactly the condition that would otherwise
-    address the wrong kernel silently.
+    True when any observed pin differs from the value it addressed -- which is what an
+    ordinal IS. An `int` field pins its own value, so every pair agrees.
     """
-    if field_type in NATIVE_TYPES:
-        return int(value)
-    canonical = _canonical(field_type, value)
-    if table is None:
-        raise ValueError(f"no ordinal table for a {field_type} field")
-    try:
-        return table.index(canonical)
-    except ValueError as error:
-        raise ValueError(
-            f"value {canonical!r} is not in the engine's value set for this field; "
-            "the generator and the descriptor set disagree about the kernel inventory"
-        ) from error
+    return any(pinned != value for pinned, value in table.get(name, {}).items())
 
 
-def decode(field_type: str, index: int, table: list | None):
-    """The value a pin addressed -- for reading a recorded row back."""
-    if field_type in NATIVE_TYPES:
-        return int(index)
-    if table is None or not 0 <= index < len(table):
-        raise ValueError(f"ordinal {index} is outside this field's value set")
-    return table[index]
+def decode(table: dict, name: str, pinned: int):
+    """The value an ordinal addressed, for reading a recorded row back.
 
-
-def unaddressable(kmd: dict, tables: dict[str, list]) -> list[str]:
-    """Fields no kernel carries, which therefore address nothing.
-
-    Reported rather than silently omitted: a field declared and never populated is a pack
-    defect, and the collision it eventually causes is far from the cause.
+    Refuses an unobserved ordinal rather than guessing: an index the corpus never saw
+    names no kernel here, and returning the neighbour that happens to sit at it is how a
+    replay silently measures something else.
     """
-    return [field["name"] for field in kmd.get("fields", [])
-            if field["type"] not in NATIVE_TYPES and field["name"] not in tables]
+    entry = table.get(name)
+    if entry is None or pinned not in entry:
+        raise ValueError(f"knob {name!r} has no observed value for ordinal {pinned}")
+    return entry[pinned]
+
+
+def as_manifest(table: dict) -> dict:
+    """The table in a form that survives JSON and stays readable.
+
+    Ordinals are dict keys, which JSON stringifies, so each knob becomes a list ordered by
+    ordinal with explicit indices. Recorded for reading, not for use: the runtime derives
+    its own numbering and the corpus is unreadable without knowing what the integers meant.
+    """
+    manifest = {}
+    for name, entry in sorted(table.items()):
+        manifest[name] = {
+            "ordinal": is_ordinal(table, name),
+            "values": [{"pin": pin, "value": list(value) if isinstance(value, tuple) else value}
+                       for pin, value in sorted(entry.items())],
+        }
+    return manifest
+
+
+def unaddressable(exposed_knobs, table: dict) -> list[str]:
+    """Exposed knobs no candidate ever pinned.
+
+    Reported rather than ignored: a knob the engine advertises and never uses addresses
+    nothing, and the tuple collision it eventually causes surfaces far from this cause.
+    """
+    return sorted(name for name in exposed_knobs if not table.get(name))

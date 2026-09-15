@@ -31,10 +31,15 @@ def _timing(page):
 
 
 def _sweep(page, *results):
-    """One response per graph carrying every candidate's row, as `--sweep --json` emits."""
-    return {key: copy.deepcopy(page[key]) for key in
-            ("engine_id", "graph_id", "device_id", "device_arch", "engine_descriptor_id",
-             "engine_name", "problem_features", "device_features")} | {"results": list(results)}
+    """The single `--sweep --json` response: the catalog it enumerated AND what it timed.
+
+    One process per graph enumerates and times, so both halves arrive together; the old
+    protocol paid a second bench startup per graph to get the first half.
+    """
+    response = copy.deepcopy(page)
+    response["results"] = list(results) if results else [
+        _timing(page)["results"][0]]
+    return response
 
 
 def _collect(monkeypatch, tmp_path, responses, calls=None):
@@ -50,7 +55,7 @@ def _collect(monkeypatch, tmp_path, responses, calls=None):
                          engine_descriptor_id="13ab344f-4818-4772-bb8e-8e1441fec82c")
 
 
-@pytest.mark.parametrize("mutation", ["candidate", "device", "arch", "knobs", "kernel_features", "provenance"])
+@pytest.mark.parametrize("mutation", ["candidate", "knobs", "kernel_features", "provenance"])
 def test_timing_must_resolve_exact_enrolled_identity(monkeypatch, tmp_path, mutation):
     page = _page()
     timed = _timing(page)
@@ -58,24 +63,19 @@ def test_timing_must_resolve_exact_enrolled_identity(monkeypatch, tmp_path, muta
         page["engine_descriptor_id"] = "not-the-trained-engine"
     elif mutation == "candidate":
         timed["results"][0]["candidate_id"] = "kernel-b"
-    elif mutation == "device":
-        timed["device_id"] = "other-board"
-    elif mutation == "arch":
-        page["device_arch"] = "gfx942:sramecc+:xnack-"
-        timed["device_arch"] = "gfx942:sramecc-:xnack-"
     elif mutation == "knobs":
         timed["results"][0]["knob_settings"] = {"tile_m": 64}
     else:
         timed["results"][0]["kernel_features"] = {"kernel.tile_m": 64}
     with pytest.raises(ValueError):
-        _collect(monkeypatch, tmp_path, [page, timed])
+        _collect(monkeypatch, tmp_path, [_sweep(page, timed["results"][0])])
 
 
 def test_incomplete_enumeration_is_not_a_training_corpus(monkeypatch, tmp_path):
     page = _page()
     page["total_count"] = 2
     with pytest.raises(ValueError, match="truncation"):
-        _collect(monkeypatch, tmp_path, [page])
+        _collect(monkeypatch, tmp_path, [_sweep(page)])
 
 
 def test_ambiguous_enrolled_tuple_is_rejected_before_timing(monkeypatch, tmp_path):
@@ -85,20 +85,20 @@ def test_ambiguous_enrolled_tuple_is_rejected_before_timing(monkeypatch, tmp_pat
     page["candidates"].append(duplicate)
     page["total_count"] = 2
     with pytest.raises(ValueError, match="unique"):
-        _collect(monkeypatch, tmp_path, [page])
+        _collect(monkeypatch, tmp_path, [_sweep(page)])
 
 
 def test_feature_suffixed_device_uses_bare_training_architecture(monkeypatch, tmp_path):
     page = _page()
     page["device_arch"] = "gfx942:sramecc+:xnack-"
-    rows, _ = _collect(monkeypatch, tmp_path, [page, _timing(page)])
+    rows, _ = _collect(monkeypatch, tmp_path, [_sweep(page)])
     assert {row["arch"] for row in rows} == {"gfx942"}
 
 
 def test_collected_rows_carry_the_noise_columns_and_the_calibrated_rate(monkeypatch, tmp_path):
     """§8.3's envelope, and §11.1's cross-engine score off §11.2's statistic."""
     page = _page()
-    row = _collect(monkeypatch, tmp_path, [page, _timing(page)])[0][0]
+    row = _collect(monkeypatch, tmp_path, [_sweep(page)])[0][0]
     assert (row["stddevMs"], row["iters"]) == (0.01, 40)
     # graph.flops / (avgTimeMs * 1e9): the mean, not the robust mean, because §11.2
     # (:2003) pins a calibrated score to `avgTimeMs`. Off robust_time_ms=2.5 this
@@ -110,7 +110,7 @@ def test_an_engine_that_publishes_no_work_count_gets_no_fabricated_throughput(mo
     """§8.3: `tflops` is derived from a declared FLOP count or it is absent."""
     page = _page()
     page["problem_features"].pop("graph.flops")
-    row = _collect(monkeypatch, tmp_path, [page, _timing(page)])[0][0]
+    row = _collect(monkeypatch, tmp_path, [_sweep(page)])[0][0]
     assert "tflops" not in row
 
 
@@ -134,7 +134,7 @@ def test_a_collected_corpus_activates_the_evaluate_noise_band(monkeypatch, tmp_p
                          robust_time_ms=2.51, min_time_ms=2.01, avg_time_ms=2.61)
     page["candidates"].append(second)
     page["total_count"] = 2
-    rows, _ = _collect(monkeypatch, tmp_path, [page, _sweep(page, first_result, second_result)])
+    rows, _ = _collect(monkeypatch, tmp_path, [_sweep(page, first_result, second_result)])
 
     report = evaluate_corpus(
         pd.DataFrame(rows), lambda frame: frame["avgTimeMs"].to_numpy(dtype=float),
@@ -155,7 +155,7 @@ def test_a_numerically_invalid_candidate_keeps_its_row_but_loses_its_timing(monk
     timed = _timing(page)
     timed["results"][0].update(numerically_valid=False,
                                validation="output_mismatch: tensor 'Y' element 2 is 9.9e+01")
-    row = _collect(monkeypatch, tmp_path, [page, timed])[0][0]
+    row = _collect(monkeypatch, tmp_path, [_sweep(page, timed["results"][0])])[0][0]
 
     assert row["numerically_valid"] is False
     assert row["validation"].startswith("output_mismatch")
@@ -179,7 +179,7 @@ def test_an_undecided_verdict_is_carried_rather_than_treated_as_correct(monkeypa
     page = _page()
     timed = _timing(page)
     timed["results"][0].update(numerically_valid=None, validation="no_reference: one candidate ran")
-    row = _collect(monkeypatch, tmp_path, [page, timed])[0][0]
+    row = _collect(monkeypatch, tmp_path, [_sweep(page, timed["results"][0])])[0][0]
 
     assert row["numerically_valid"] is None
     assert row["robustMeanMs"] == 2.5
@@ -197,7 +197,7 @@ def test_a_benchmark_that_records_no_verdict_is_refused(monkeypatch, tmp_path, m
     timed = _timing(page)
     timed["results"][0].pop(missing)
     with pytest.raises(ValueError, match="numerical-validation verdict"):
-        _collect(monkeypatch, tmp_path, [page, timed])
+        _collect(monkeypatch, tmp_path, [_sweep(page, timed["results"][0])])
 
 
 def test_every_candidate_is_timed_by_one_invocation_per_graph(monkeypatch, tmp_path):
@@ -218,14 +218,17 @@ def test_every_candidate_is_timed_by_one_invocation_per_graph(monkeypatch, tmp_p
                          kernel_features={"kernel.tile_m": 64})
 
     calls = []
-    rows, _ = _collect(monkeypatch, tmp_path, [page, _sweep(page, first_result, second_result)], calls)
+    rows, _ = _collect(monkeypatch, tmp_path, [_sweep(page, first_result, second_result)], calls)
 
-    assert len(calls) == 2
+    # ONE process for a two-candidate graph: the sweep enumerates and times together.
+    # It was two -- an `enumerate` run that built the catalog and discarded its timings,
+    # then the sweep that rebuilt the same catalog to time it.
+    assert len(calls) == 1
     assert [row["kernel"] for row in rows] == ["kernel-a", "kernel-b"]
-    assert "--sweep" in calls[1] and "--json" in calls[1]
+    assert "--sweep" in calls[0] and "--json" in calls[0]
     # The collection pins restrict the sweep; they are not replaced by one candidate's tuple,
     # which is what made the old protocol need one process per row.
-    assert "--knob" not in calls[1]
+    assert "--knob" not in calls[0]
 
 
 def test_a_sweep_that_times_fewer_candidates_than_it_enumerated_is_not_a_corpus(monkeypatch, tmp_path):
@@ -240,5 +243,5 @@ def test_a_sweep_that_times_fewer_candidates_than_it_enumerated_is_not_a_corpus(
     page["total_count"] = 2
     only_one = _timing(page)["results"][0]
 
-    with pytest.raises(ValueError, match="exactly the enumerated candidates"):
-        _collect(monkeypatch, tmp_path, [page, _sweep(page, only_one)])
+    with pytest.raises(ValueError, match="whole catalog|exactly the catalog it reported"):
+        _collect(monkeypatch, tmp_path, [_sweep(page, only_one)])
