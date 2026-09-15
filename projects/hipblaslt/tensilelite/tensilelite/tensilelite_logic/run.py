@@ -198,8 +198,8 @@ def _runChecks(
     return keep, total, known_bug_skips, chip_id_failures, stale_known_bugs
 
 
-def _setup():
-    args = parseArguments()
+def _setup(argv=None):
+    args = parseArguments() if argv is None else parseArguments(argv)
 
     setVerbosity(args.Verbose)
     jobs = int(args.Jobs)
@@ -256,13 +256,15 @@ def _progress_loop(stop_event: threading.Event, interval: float = 5.0) -> None:
     sys.stdout.flush()
 
 
-def main():
+def main(argv=None):
     # Suppress noisy joblib warnings (serial fallback, timeout) before any imports that pull in joblib
     warnings.filterwarnings("ignore", message=".*will operate in serial mode.*")
     warnings.filterwarnings("ignore", message=".*timeout.*will not be used.*")
 
     reset_reported_failures()
-    jobs, isaInfoMap, logicPath, files, check, args = _setup()
+    jobs, isaInfoMap, logicPath, files, check, args = (
+        _setup() if argv is None else _setup(argv)
+    )
 
     # Cross-file invariants (sibling DeviceNames, gfx1250v0-overlay
     # consistency) run only when --check-all is given, and only over the
@@ -297,7 +299,7 @@ def main():
         )
     except (ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
-        exit(1)
+        raise SystemExit(1)
 
     # Use more, smaller batches for better load balancing (workers stay busy as tasks complete)
     num_batches_target = min(len(files), jobs * 8)
@@ -353,4 +355,5 @@ def main():
         )
     strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
     if rejects > 0 or chip_id_failures > 0 or strict_stale:
-        exit(1)
+        raise SystemExit(1)
+    return 0
