@@ -1,4 +1,5 @@
 {
+  "_test_comment": "Test change for changed_projects CI trigger validation",
   "repositories": [
     {
       "name": "miopen",
