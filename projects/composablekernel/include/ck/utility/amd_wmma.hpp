@@ -64,7 +64,9 @@ struct intrin_wmma_f32_16x16x16_bf16_w32<16, 16>
 #if defined(__gfx11__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(
-                reg_a, reg_b, reg_c.template AsType<float8_t>()[Number<0>{}]);
+                bit_cast<int16x16_t>(reg_a),
+                bit_cast<int16x16_t>(reg_b),
+                reg_c.template AsType<float8_t>()[Number<0>{}]);
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -112,8 +114,11 @@ struct intrin_wmma_bf16_16x16x16_bf16_w32<16, 16, Opsel>
         // true : D0.[16:31]= result
 #if defined(__gfx11__)
         reg_c.template AsType<bhalf16_t>()(Number<0>{}) =
-            __builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32(
-                reg_a, reg_b, reg_c.template AsType<bhalf16_t>()[Number<0>{}], Opsel);
+            bit_cast<bhalf16_t>(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32(
+                bit_cast<int16x16_t>(reg_a),
+                bit_cast<int16x16_t>(reg_b),
+                bit_cast<int16x16_t>(reg_c.template AsType<bhalf16_t>()[Number<0>{}]),
+                Opsel));
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -184,7 +189,9 @@ struct intrin_wmma_f32_16x16x16_bf16_w64<16, 16>
 #if defined(__gfx11__)
         reg_c.template AsType<float4_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_f32_16x16x16_bf16_w64(
-                reg_a, reg_b, reg_c.template AsType<float4_t>()[Number<0>{}]);
+                bit_cast<int16x16_t>(reg_a),
+                bit_cast<int16x16_t>(reg_b),
+                reg_c.template AsType<float4_t>()[Number<0>{}]);
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -232,8 +239,11 @@ struct intrin_wmma_bf16_16x16x16_bf16_w64<16, 16, Opsel>
         // true : D0.[16:31]= result
 #if defined(__gfx11__)
         reg_c.template AsType<bhalf8_t>()(Number<0>{}) =
-            __builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64(
-                reg_a, reg_b, reg_c.template AsType<bhalf8_t>()[Number<0>{}], Opsel);
+            bit_cast<bhalf8_t>(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64(
+                bit_cast<int16x16_t>(reg_a),
+                bit_cast<int16x16_t>(reg_b),
+                bit_cast<int16x8_t>(reg_c.template AsType<bhalf8_t>()[Number<0>{}]),
+                Opsel));
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -311,7 +321,9 @@ struct intrin_wmma_f32_16x16x16_bf16_w32_gfx12<16, 16>
 #if defined(__gfx120__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-                reg_a, reg_b, reg_c.template AsType<float8_t>()[Number<0>{}]);
+                bit_cast<int16x8_t>(reg_a),
+                bit_cast<int16x8_t>(reg_b),
+                reg_c.template AsType<float8_t>()[Number<0>{}]);
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -483,8 +495,16 @@ struct intrin_wmma_bf16_16x16x32_bf16<16, 16>
         // false: D0.[0:15] = result
         // true : D0.[16:31]= result
 #if defined(__gfx125__)
-        reg_c.template AsType<bhalf8_t>()(Number<0>{}) = __builtin_amdgcn_wmma_bf16_16x16x32_bf16(
-            0, reg_a, 0, reg_b, 0, reg_c.template AsType<bhalf8_t>()[Number<0>{}], false, false);
+        reg_c.template AsType<bhalf8_t>()(Number<0>{}) =
+            bit_cast<bhalf8_t>(__builtin_amdgcn_wmma_bf16_16x16x32_bf16(
+                0,
+                bit_cast<llvm_bf16x16_t>(reg_a),
+                0,
+                bit_cast<llvm_bf16x16_t>(reg_b),
+                0,
+                bit_cast<llvm_bf16x8_t>(reg_c.template AsType<bhalf8_t>()[Number<0>{}]),
+                false,
+                false));
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -529,8 +549,15 @@ struct intrin_wmma_f32_16x16x32_bf16<16, 16>
     __device__ static void Run(const bhalf16_t& reg_a, const bhalf16_t& reg_b, FloatC& reg_c)
     {
 #if defined(__gfx125__)
-        reg_c.template AsType<float8_t>()(Number<0>{}) = __builtin_amdgcn_wmma_f32_16x16x32_bf16(
-            0, reg_a, 0, reg_b, 0, reg_c.template AsType<float8_t>()[Number<0>{}], false, false);
+        reg_c.template AsType<float8_t>()(Number<0>{}) =
+            __builtin_amdgcn_wmma_f32_16x16x32_bf16(0,
+                                                    bit_cast<llvm_bf16x16_t>(reg_a),
+                                                    0,
+                                                    bit_cast<llvm_bf16x16_t>(reg_b),
+                                                    0,
+                                                    reg_c.template AsType<float8_t>()[Number<0>{}],
+                                                    false,
+                                                    false);
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -551,9 +578,16 @@ struct intrin_wmma_bf16f32_16x16x32_bf16<16, 16>
     Run(const bhalf16_t& reg_a, const bhalf16_t& reg_b, FloatC& reg_c, FloatD& reg_d)
     {
 #if defined(__gfx125__)
-        reg_d
-            .template AsType<bhalf8_t>()(Number<0>{}) = __builtin_amdgcn_wmma_bf16f32_16x16x32_bf16(
-            0, reg_a, 0, reg_b, 0, reg_c.template AsType<float8_t>()[Number<0>{}], false, false);
+        reg_d.template AsType<bhalf8_t>()(Number<0>{}) =
+            bit_cast<bhalf8_t>(__builtin_amdgcn_wmma_bf16f32_16x16x32_bf16(
+                0,
+                bit_cast<llvm_bf16x16_t>(reg_a),
+                0,
+                bit_cast<llvm_bf16x16_t>(reg_b),
+                0,
+                reg_c.template AsType<float8_t>()[Number<0>{}],
+                false,
+                false));
 #else
         ignore = reg_a;
         ignore = reg_b;
@@ -1009,6 +1043,13 @@ struct intrin_wmma_f32_16x16x4_f32<16, 16>
 namespace wmma_impl {
 #ifndef CK_CODE_GEN_RTC
 // utils for f8f6f4 instructions
+enum ScaleFormat : uint8_t
+{
+    SCALE_E8M0 = 0x0,
+    SCALE_E5M3 = 0x1,
+    SCALE_E4M3 = 0x2
+};
+
 template <typename T>
 struct ScaleTypeSelector
 {
@@ -1018,43 +1059,43 @@ struct ScaleTypeSelector
 template <>
 struct ScaleTypeSelector<int32_t>
 {
-    static constexpr int value = 0x0;
+    static constexpr int value = ScaleFormat::SCALE_E8M0;
 };
 
 template <>
 struct ScaleTypeSelector<e8m0x4_bexp_t>
 {
-    static constexpr int value = 0x0;
+    static constexpr int value = ScaleFormat::SCALE_E8M0;
 };
 
 template <>
 struct ScaleTypeSelector<e8m0x8_bexp_t>
 {
-    static constexpr int value = 0x0;
+    static constexpr int value = ScaleFormat::SCALE_E8M0;
 };
 
 template <>
 struct ScaleTypeSelector<e5m3x4_scale_t>
 {
-    static constexpr int value = 0x1;
+    static constexpr int value = ScaleFormat::SCALE_E5M3;
 };
 
 template <>
 struct ScaleTypeSelector<e5m3x8_scale_t>
 {
-    static constexpr int value = 0x1;
+    static constexpr int value = ScaleFormat::SCALE_E5M3;
 };
 
 template <>
 struct ScaleTypeSelector<e4m3x4_scale_t>
 {
-    static constexpr int value = 0x2;
+    static constexpr int value = ScaleFormat::SCALE_E4M3;
 };
 
 template <>
 struct ScaleTypeSelector<e4m3x8_scale_t>
 {
-    static constexpr int value = 0x2;
+    static constexpr int value = ScaleFormat::SCALE_E4M3;
 };
 
 enum InputFormat : uint8_t
@@ -1112,6 +1153,26 @@ struct MxTypeSelector<f4x64_t>
 {
     static constexpr InputFormat value = InputFormat::E2M1;
 };
+
+// v_wmma_scale{,16}_f32_16x16x128_f8f6f4 accepts only 43 of the 225 (matrix
+// format, scale format) tuples: FP8/BF8/FP6/BF6 operands are E8M0-scaled only,
+// FP4 operands also accept E5M3 and E4M3, and two FP4 operands must agree.
+constexpr bool is_valid_mx_scale_fmt(InputFormat fmt, int scale_fmt)
+{
+    return fmt == InputFormat::E2M1 || scale_fmt == ScaleFormat::SCALE_E8M0;
+}
+
+template <typename TypeA, typename ScaleTypeA, typename TypeB, typename ScaleTypeB>
+constexpr bool is_valid_mx_scale_fmt_combination()
+{
+    constexpr InputFormat FmtA = MxTypeSelector<TypeA>::value;
+    constexpr InputFormat FmtB = MxTypeSelector<TypeB>::value;
+    constexpr int ScaleFmtA    = ScaleTypeSelector<ScaleTypeA>::value;
+    constexpr int ScaleFmtB    = ScaleTypeSelector<ScaleTypeB>::value;
+
+    return is_valid_mx_scale_fmt(FmtA, ScaleFmtA) && is_valid_mx_scale_fmt(FmtB, ScaleFmtB) &&
+           (FmtA != InputFormat::E2M1 || FmtB != InputFormat::E2M1 || ScaleFmtA == ScaleFmtB);
+}
 
 template <typename MxType>
 constexpr auto bit_cast_mx_reg(const MxType& reg_mx)
@@ -1245,8 +1306,12 @@ struct intrin_wmma_scale_f32_16x16x128_f8f6f4<16,
                                const ScaleTypeB& scale_b,
                                FloatC& reg_c)
     {
-        // keep int32_t for backward compatibility
+        static_assert(
+            wmma_impl::is_valid_mx_scale_fmt_combination<TypeA, ScaleTypeA, TypeB, ScaleTypeB>(),
+            "unsupported matrix/scale format combination for "
+            "v_wmma_scale_f32_16x16x128_f8f6f4");
 
+        // keep int32_t for backward compatibility
 #if defined(__gfx125__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
@@ -1301,6 +1366,11 @@ struct intrin_wmma_scale16_f32_16x16x128_f8f6f4<16,
                                const ScaleTypeB& scale_b,
                                FloatC& reg_c)
     {
+        static_assert(
+            wmma_impl::is_valid_mx_scale_fmt_combination<TypeA, ScaleTypeA, TypeB, ScaleTypeB>(),
+            "unsupported matrix/scale format combination for "
+            "v_wmma_scale16_f32_16x16x128_f8f6f4");
+
 #if defined(__gfx125__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(

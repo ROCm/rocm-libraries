@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -73,6 +74,15 @@ struct RegKeyHash {
     }
 };
 
+/// Human-readable key, e.g. "v20", "s4", "acc10", or "v20.lo" for a True16 half.
+inline std::string regKeyToString(const RegKey& key) {
+    std::string text = key.type == RegType::AGPR ? "acc" : regTypeToString(key.type);
+    text += std::to_string(key.idx);
+    if (key.half == RegHalf::LOW) text += ".lo";
+    if (key.half == RegHalf::HIGH) text += ".hi";
+    return text;
+}
+
 template <typename V>
 using RegKeyMap = std::unordered_map<RegKey, V, RegKeyHash>;
 
@@ -98,6 +108,20 @@ void forEachRegUnit(const StinkyRegister& reg, Fn&& fn) {
     for (unsigned i = 0; i < reg.reg.num; ++i) {
         fn(toRegKey(reg, i));
     }
+}
+
+inline void addSources(RegKeySet& sources, const StinkyInstruction& inst) {
+    for (const StinkyRegister& src : inst.getSrcRegs())
+        forEachRegUnit(src, [&](const RegKey& key) { sources.insert(key); });
+}
+
+inline bool hasDestSourceOverlap(const StinkyInstruction& inst, const RegKeySet& sources) {
+    for (const StinkyRegister& dest : inst.getDestRegs()) {
+        bool overlaps = false;
+        forEachRegUnit(dest, [&](const RegKey& key) { overlaps |= sources.contains(key); });
+        if (overlaps) return true;
+    }
+    return false;
 }
 
 }  // namespace stinkytofu

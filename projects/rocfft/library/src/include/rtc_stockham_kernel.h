@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,9 +32,8 @@ struct RTCKernelStockham : public RTCKernel
     {
     }
 
-    static RTCKernel::RTCGenerator generate_from_node(const LeafNode&    node,
-                                                      const std::string& gpu_arch,
-                                                      bool               enable_callbacks);
+    static RTCKernel::RTCGenerator
+        generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
 
     virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
 

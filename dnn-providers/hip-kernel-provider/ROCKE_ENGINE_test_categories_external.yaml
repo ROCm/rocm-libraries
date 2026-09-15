@@ -35,3 +35,15 @@ test_categories:
       - "quick"
       - "pre-commit"
       - "smoke"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
+    test_patterns:
+      - "rocke_ir_serialize_roundtrip"
+      - "rocke_mma_frag_ssot"
+      - "rocke_tiled_attention_2d_reentrancy"
+      - "rocke_python_import_smoke"
+      - "rocke_golden_static"
+      - "rocke_pytest"
+    labels:
+      - "ffm-full"

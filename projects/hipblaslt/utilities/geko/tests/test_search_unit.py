@@ -107,6 +107,44 @@ def test_run_rejects_non_positive_chunk_size(tmp_path: Path) -> None:
         )
 
 
+def test_run_raises_for_unbuilt_custom_library_before_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+
+    cfg = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "M": 32,
+        "N": 32,
+        "K": 32,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "f32_r",
+    }
+
+    custom_lib = tmp_path / "custom"
+    custom_lib.mkdir()
+
+    def _runner_should_not_be_called(*_args, **_kwargs):
+        raise AssertionError("Runner should not be launched for unbuilt custom_lib_dir")
+
+    monkeypatch.setattr(search, "Runner", _runner_should_not_be_called)
+
+    with pytest.raises(ValueError, match="is not built"):
+        search.run(
+            hip,
+            [cfg],
+            tmp_path / "out",
+            custom_lib_dir=custom_lib,
+            devices=[0],
+        )
+
+
 def test_run_empty_configs_returns_empty_df(tmp_path: Path) -> None:
     hip = tmp_path / "hip"
     hip.mkdir()

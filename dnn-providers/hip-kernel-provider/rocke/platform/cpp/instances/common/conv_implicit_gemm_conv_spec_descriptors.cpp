@@ -316,6 +316,8 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
 
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.cshuffle_no_alias = false; /* default: alias cshuffle C onto A/B */
+
+    s.num_load_waves = 2; /* wavelet pipeline: default 2 load waves */
     return s;
 }
 
@@ -323,6 +325,15 @@ int rocke_implicit_gemm_conv_spec_block_size(const rocke_implicit_gemm_conv_spec
 {
     /* warp_m * warp_n * wave_size */
     return s->warp_m * s->warp_n * s->wave_size;
+}
+
+int rocke_implicit_gemm_conv_spec_launch_block_size(const rocke_implicit_gemm_conv_spec_t* s)
+{
+    /* wavelet: block_size + num_load_waves * wave_size; else block_size */
+    int block_size = rocke_implicit_gemm_conv_spec_block_size(s);
+    if(s->pipeline != NULL && strcmp(s->pipeline, "wavelet") == 0)
+        return block_size + s->num_load_waves * s->wave_size;
+    return block_size;
 }
 
 int rocke_implicit_gemm_conv_spec_k_atoms_per_tile_k(const rocke_implicit_gemm_conv_spec_t* s)
@@ -794,7 +805,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
             int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
             c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
         }
-        total_lds = s->cshuffle_no_alias ? (ab_lds + c_lds) : ((ab_lds > c_lds) ? ab_lds : c_lds);
+        {
+            /* wavelet keeps A/B live across the whole scf_if_else, so the LDS
+             * packer cannot alias C onto A/B even when cshuffle_no_alias=False. */
+            int no_alias
+                = s->cshuffle_no_alias || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0);
+            total_lds = no_alias ? (ab_lds + c_lds) : ((ab_lds > c_lds) ? ab_lds : c_lds);
+        }
 
         if(!rocke_archtarget_fits_lds(target, (long)total_lds))
         {
@@ -823,11 +840,22 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                 s->warp_tile_k,
                 arch);
         }
-        if(!(s->pipeline && strcmp(s->pipeline, "mem") == 0))
+        if(!(s->pipeline
+             && (strcmp(s->pipeline, "mem") == 0 || strcmp(s->pipeline, "wavelet") == 0)))
         {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only the 'mem' pipeline (got '%s') on %s",
-                                s->pipeline ? s->pipeline : "",
+            ROCKE_CONVVS_REJECT(
+                "WMMA conv supports only 'mem' or 'wavelet' pipeline (got '%s') on %s",
+                s->pipeline ? s->pipeline : "",
+                arch);
+        }
+        if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0 && s->async_dma)
+        {
+            ROCKE_CONVVS_REJECT("pipeline='wavelet' is incompatible with async_dma=True on %s",
                                 arch);
+        }
+        if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0 && s->num_load_waves < 1)
+        {
+            ROCKE_CONVVS_REJECT("pipeline='wavelet' requires num_load_waves >= 1");
         }
         if(!(s->epilogue
              && (strcmp(s->epilogue, "default") == 0 || strcmp(s->epilogue, "cshuffle") == 0)))

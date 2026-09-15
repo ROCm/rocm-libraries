@@ -25,26 +25,26 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 TEST(TestIngestorNativeRegistry, ResolvesARegisteredSymbol)
 {
-    GraphMatcherRegistry::registerSymbol("registry.resolves", acceptGraph);
+    GraphMatchRegistry::registerSymbol("registry.resolves", acceptGraph);
 
-    EXPECT_EQ(GraphMatcherRegistry::resolve("registry.resolves"), acceptGraph);
+    EXPECT_EQ(GraphMatchRegistry::resolve("registry.resolves"), acceptGraph);
 
-    GraphMatcherRegistry::unregisterSymbol("registry.resolves");
+    GraphMatchRegistry::unregisterSymbol("registry.resolves");
 }
 
 TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)
 {
-    GraphMatcherRegistry::registerSymbol("registry.duplicate", acceptGraph);
+    GraphMatchRegistry::registerSymbol("registry.duplicate", acceptGraph);
 
-    EXPECT_THROW(GraphMatcherRegistry::registerSymbol("registry.duplicate", rejectGraph),
+    EXPECT_THROW(GraphMatchRegistry::registerSymbol("registry.duplicate", rejectGraph),
                  std::runtime_error);
 
-    GraphMatcherRegistry::unregisterSymbol("registry.duplicate");
+    GraphMatchRegistry::unregisterSymbol("registry.duplicate");
 }
 
 TEST(TestIngestorNativeRegistry, FailsClosedOnUnknownSymbol)
 {
-    EXPECT_THROW(GraphMatcherRegistry::resolve("registry.never_registered"), std::runtime_error);
+    EXPECT_THROW(GraphMatchRegistry::resolve("registry.never_registered"), std::runtime_error);
 }
 
 } // namespace

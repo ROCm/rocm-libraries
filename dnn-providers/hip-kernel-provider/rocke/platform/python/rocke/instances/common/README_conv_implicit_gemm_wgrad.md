@@ -31,13 +31,19 @@ The B descriptor for X reuses `make_a_descriptor` from `_conv_implicit_gemm_comm
 
 ### Epilogues
 
-Three epilogue paths are supported, selected automatically based on `spec.epilogue` and `spec.split_k`:
+Four epilogue paths are supported, selected automatically based on `spec.epilogue` and `spec.split_k`:
 
 | Path | Condition | Output |
 |------|-----------|--------|
 | Direct store | `epilogue="default"`, `split_k=1` | Per-lane scalar write to dW via the KYXC descriptor |
 | CShuffleEpilogue | `epilogue="cshuffle"`, `split_k=1` | LDS-staged vectorised store |
-| Split-K atomic epilogue | `split_k > 1` | `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` |
+| Split-K direct atomic | `epilogue="default"`, `split_k > 1`, `dtype_d="fp32"` | `global_atomic_add` per MFMA-lane directly from accumulators |
+| Split-K cshuffle atomic | `epilogue="cshuffle"`, `split_k > 1` | LDS scatter + `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` from LDS |
+
+For bf16/fp16 output `epilogue="cshuffle"` is **required** when `split_k > 1`.
+The direct-atomic path emits zero-filled packed atomics at the scattered MFMA
+layout; the cshuffle path produces genuinely contiguous adjacent pairs after the
+LDS shuffle, which is necessary for correct `<2 x dtype>` packed atomics.
 
 ---
 
@@ -88,6 +94,42 @@ parameters are required.
 build time using `select_split_k_wgrad` (the CK formula:
 `floor((waves_per_cu × num_cus) / base_grid)`, clamped to `[1, wg_K]`).
 
+### Split-K cshuffle atomic epilogue
+
+Added `CShuffleEpilogue.atomic_store` and `_emit_wgrad_split_k_cshuffle_epilogue`
+to support split-K for bf16/fp16 output dtypes without the zero-fill artefact of
+the direct-atomic path.
+
+**Motivation:** The existing split-K epilogue (`_emit_wgrad_split_k_epilogue`)
+emits one `global_atomic_add_pk_f16/bf16` per MFMA accumulator slot. Because
+each slot's column index may be odd or even, the code resolves the column parity
+at runtime and fills the unused half of the `<2 x dtype>` pair with zero. This
+avoids touching a neighbour's data but produces two overlapping atomics for each
+adjacent pair of lanes — one with `(val, 0)` and one with `(0, val)` — which
+serialise on the same address and are wasteful.
+
+The cshuffle path avoids this entirely:
+1. MFMA accumulators are scattered to an LDS staging buffer in row-major order
+   (identical to the non-atomic `CShuffleEpilogue.store` path).
+2. After a barrier, each thread reads back an `sv`-wide chunk of consecutive
+   N-position elements in one row.  Because the cshuffle guarantees row-major
+   order, adjacent elements `(col, col+1)` are always in the same row and
+   consecutive in N, forming a genuine `<2 x dtype>` pair — no zero-fill needed.
+3. Paired `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` are issued,
+   one per pair.
+
+**Constraints:**
+- `epilogue="cshuffle"` is now **required** for bf16/fp16 split-K (enforced by
+  `WgradConvSpec.validate()` and `is_valid_wgrad_spec`).
+- `store_vec` (`sv`) must be even for bf16/fp16 (guaranteed by `from_grid` via
+  the existing `cpg % 2 == 0` constraint).
+- The caller must zero-initialise `dW` before launch (atomic-adds only).
+
+The benchmark driver (`benchmark_implicit_gemm_conv.py`) was updated to generate
+only `split_k=0` (runtime-atomic) combos by default instead of `(1, 0)`, so the
+`epilogue="cshuffle"` requirement is respected without filtering cshuffle combos
+out of the sweep.
+
 ### Pointwise explicit-GEMM fast path
 
 For **pointwise convolutions** (`Y=X=1`, `sH=sW=1`, `pH=pW=0` — and for 3-D: `Z=1`, `sD=1`, `pD=0`) the wgrad kernel automatically bypasses the coordinate-transform descriptor DAG and replaces all three operand address computations with flat multiply-add arithmetic.
@@ -108,46 +150,113 @@ The split-K epilogue (`global_atomic_add` / `global_atomic_add_pk_*`) already us
 
 ---
 
-## Next steps
+## Changelog (continued)
 
-### Enable vector loads for A and B
+### Free-axis vector loads for A and B
 
-Currently `load_vec_a` and `load_vec_b` are hard-coded to 1
-(`conv_implicit_gemm_wgrad.py:822`). The root cause is that the K_wg reduction
-axis is not the innermost dimension of either tensor:
+The K_wg reduction axis is not the innermost dimension of either input tensor:
 
 - **A (dY, NHWK):** consecutive K_wg positions are separated by stride K
-  (output channels).
-- **B (X, NHWC):** consecutive K_wg positions are separated by stride C
-  (input channels).
+  (output channels); the stride-1 axis is `k_out` (= GEMM **M**, the free axis).
+- **B (X, NHWC):** consecutive K_wg positions are separated by stride C (input
+  channels); the stride-1 axis is the inner C of `N_wg` (the free axis).
 
-`buffer_load_vN` with `N > 1` would read N consecutive *channel* values at the
-same spatial position instead of the intended N consecutive spatial positions.
-Enabling wider loads requires either rearranging the load tile so that the fast
-axis aligns with the last tensor dimension, or introducing a transposing LDS
-stage so the data lands in LDS in the order the MFMA atoms expect it.
+A `buffer_load_vN` along K_wg would read N consecutive *channel* values at one
+spatial position — wrong data — which is why the loads were historically scalar.
+The fix rearranges the load tile so the vector runs along the **free** axis
+(the last tensor dimension) instead of the reduction axis: the loader's new
+`vector_axis="row"` mode (`helpers/loads.py`) issues one coalesced
+`buffer_load_dwordx4` (V=8 fp16/bf16) along the stride-1 free axis, then
+*transposes on store* — scattering the V elements into `[row+i, col]` of the
+existing row-major `(M/N, K)` LDS tile. The MFMA consumer still reads that tile
+K-contiguously, unchanged (no new LDS layout, no consumer-read change).
 
-### Async DMA for all pipelines
+Enabled for the **sync CDNA-MFMA** path (`op.family == "mma"`): the width is
+`vec_a | K` (A) and `vec_b | C` (B, so a vector never crosses a `(y,x)` filter
+boundary), falling back to the scalar `vector_axis="col"` path (byte-identical)
+when a width > 1 is not admissible. The WMMA path is a follow-on. This
+vectorised load is what makes the *store* side the remaining cost, which the
+K-outer tile below removes.
 
-`async_dma=True` works today but is gated to the software-pipelined (`unroll_k`)
-path. The `mem` and `compv4` pipelines fall back to synchronous
-`CoalescedTileLoader` because `raw_ptr_buffer_load_lds` writes a packed
-lane-contiguous tile that is incompatible with non-zero `lds_k_pad`. To extend
-async DMA to all pipelines the load path needs to either:
+### K-outer LDS tile + transpose-read operand fetch (`lds_k_outer`)
 
-- Accept the packed layout and downstream adjust SMEM read indexing to match, or
-- Introduce a padding-aware async path that inserts the `lds_k_pad` columns
-  during the DMA itself.
+The free-axis vector load above leaves a transpose *on store*: the loader reads
+`load_vec` contiguous elements along the free axis, then scatters them into
+`[row+i, col]` of the row-major `(M/N, K)` tile — one narrow `ds_write_b16` per
+element plus its address math (`CoalescedTileLoader._store_tile` in `"row"`
+mode). Those writes are bank-degenerate by construction: adjacent lanes step the
+tile by `load_vec` **rows**, so the inter-lane dword delta is
+`load_vec × (block_k + lds_k_pad) / 2`, an exact multiple of the 32-dword bank
+period at every swept `tile_k` (16 / 32 / 64) and either pad (0 or 8).
+`lds_k_pad` cannot fix this — that pad is derived for a row step of 1, i.e. for
+the *read* path.
+
+`lds_k_outer=True` stores the tile K-outer (`LDS[k][mn]`, row stride
+`block_mn + _KOUTER_PAD` with `_KOUTER_PAD = 8`, or `0` under `async_dma`) and
+recovers the MFMA operand layout with transpose reads instead:
+
+| Side | M-outer | K-outer |
+|------|---------|---------|
+| Store | `load_vec` × `ds_write_b16` + address math per chunk | one wide `smem_store_vN` (`b128` for a 16-bit 8-wide vector); drops `load_vec − 1` address adds and `load_vec` `vec_extract`s per chunk |
+| Read | one `smem_load_vN` per fragment | `n / 4` × `ds_read_b64_tr_b16` (wave64) or `n / 8` × `ds_load_tr16_b128` (wave32), for per-lane fragment length `n` |
+
+Net read-side delta is **+1** instruction per fragment on the `n = 8` atoms
+(`32x32x16`, `16x16x32`) and exactly **zero** on the `n = 4` atoms (`16x16x16`,
+`32x32x8`). Global `buffer_load`s are unchanged: `choose_vec` tests `tile_rows`
+in `"row"` mode and `tile_cols` in `"col"` mode, and the flip transposes the tile
+too, so both calls test the same free-axis extent — only the LDS store
+instruction changes.
+
+**Wgrad flips both operands.** A (`dY`, NHWK) and B (`X`, NHWC) are both
+contiguous along the GEMM free axis and strided along the reduction axis, so both
+paid the scatter. (Dgrad flips B only — see its README.)
+
+**Gating.** Two regimes, `_LDS_K_OUTER_ARCH_WAVE = {"gfx950": 64,
+"gfx1250": 32}`, each arch pinned to its wave size so a mismatched spec is
+rejected rather than emitting a lane formula the hardware does not implement.
+gfx950 wave64 admits `warp_tile ∈ (16, 32)` and `ds_read_b64_tr_b16` (4 elements
+per lane); gfx1250 wave32 admits only the `16x16x32` atom and
+`ds_load_tr16_b128` (8 per lane, so its 16-element fragment is two reads). Plus
+16-bit A/B.
+
+**Not a knob.** The spec field still defaults `False` (existing goldens are
+unmoved); the value is deduced by the keyword-only
+`WgradConvSpec.default_lds_k_outer(*, arch, dtype_a, dtype_b, warp_tile_m,
+warp_tile_n, wave_size=64)`, which both library dispatch
+(`library/dispatch/grouped_convolution.py`) and the sweep driver call.
+
+### Async DMA on the K-outer tile
+
+`async_dma=True` no longer depends on `unroll_k`. `SchedulePolicy.for_pipeline`
+is selected as `"async_dma" if spec.async_dma else spec.pipeline`, so the async
+leg pins its own schedule (interwave, `s_setprio 1`) and ignores `spec.pipeline`
+rather than being gated by it; it double-buffers on its own
+(`_double = spec.async_dma or spec.unroll_k`). This is why the sweep driver pins
+the pipeline to `"mem"` on that leg instead of compiling one body under several
+kernel names.
+
+The old blocker — `raw_ptr_buffer_load_lds` writes a packed lane-contiguous tile
+incompatible with a non-zero `lds_k_pad` — was resolved by *accepting* the packed
+layout: the K-outer tile **is** that layout. Hence `async_dma` now **requires**
+`lds_k_outer=True` on wgrad (`validate()` and `is_valid_wgrad_spec`), and forces
+the K-outer row pad to 0. It remains incompatible with `pipeline="basic"`.
+
+Both loops that Python-unroll the K iteration — `pipeline="basic"` and
+`async_dma` — are bounded by `_MAX_UNROLLED_K_ITERS` (128). Over the cap the spec
+is rejected; raise `split_k` or `tile_k` rather than the constant.
+
+## Next steps
 
 ### K0-M-K1 LDS layout
 
-The current LDS layout stores tiles in `(M, K)` row-major order with a small
-`lds_k_pad` column pad to break bank conflicts. A `K0-M-K1` layout (also called
-the transposed or interleaved LDS layout, after the CK naming convention)
-reorders the tile as `(K0, M, K1)` where `K = K0 × K1`. This means each MFMA
-atom's K slice is contiguous in LDS, which eliminates the bank-conflict
-cross-section that the current padding only partially mitigates and enables
-wider ds_read instructions. Adding this layout requires:
+Superseded for the bank-conflict case by `lds_k_outer` above, which reaches the
+same goal (conflict-free LDS traffic, wide stores) with a 2-D `LDS[k][mn]` tile
+and a transpose read rather than a new 3-D layout. A true `K0-M-K1` layout —
+`(K0, M, K1)` with `K = K0 × K1`, after the CK naming convention — would still be
+needed to make each atom's K slice contiguous for consumers that cannot use a
+transpose-read intrinsic (no `ds_read_b64_tr_b16` / `ds_load_tr16_b128` on the
+target, or non-16-bit operands, both of which `lds_k_outer` rejects today).
+Adding it requires:
 
 1. A new `LdsLayout` variant that encodes the `(K0, M, K1)` stride formula.
 2. Updated `CoalescedTileLoader` / `AsyncTileLoader` store-index calculations
