@@ -165,8 +165,8 @@ TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- tensilelite/Tests -m common
 ```
 
 `invoke build-client` follows the existing `tensilelite` CMake preset by default.
-In this repo, `/opt/rocm` compiler settings come from the preset,
-`CMAKE_EXPORT_COMPILE_COMMANDS` is enabled by default, and the client build includes rocisa.
+In this repo, `/opt/rocm` compiler settings come from the preset and
+`CMAKE_EXPORT_COMPILE_COMMANDS` is enabled by default.
 
 Use these flags when you want to override or make that behavior explicit:
 
