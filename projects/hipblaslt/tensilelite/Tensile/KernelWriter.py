@@ -66,8 +66,8 @@ from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
-from Tensile.SolutionStructs.Naming import getKernelNameMin
-from Tensile.Toolchain.Component import Assembler
+from .SolutionStructs.Naming import getKernelNameMin
+from .Toolchain.Component import Assembler
 
 import rocisa
 import math
@@ -115,7 +115,6 @@ class MatrixInfo:
 
   numSgprStrides: int            = -1
   tileInfo: object = field(init=False)  # TileInfo for all tile types
-
 
 
 @dataclass
@@ -5416,7 +5415,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
 
 
-
     # List of tiles that need to be read form
     readtileInfoList = [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]
 
@@ -5538,7 +5536,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       ####################################
       # NOT LocalSplitU
       ####################################
-
 
 
       # global write indices
@@ -9851,7 +9848,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.totalVgprs = vgprIdx
 
       return
-
 
 
     # Dispatch to different VGPR allocation logic for subtile-based impl

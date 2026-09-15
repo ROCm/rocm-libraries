@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from Tensile import __version__
+from .. import __version__
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
@@ -652,7 +652,6 @@ for paramDict in defaultBenchmarkCommonParameters:
     for key, value in paramDict.items():
         defaultSolution[key] = value[0]
 # other non-benchmark options for solutions
-
 
 
 defaultProblemSizes = [{"Range": [[2880], 0, 0]}]
