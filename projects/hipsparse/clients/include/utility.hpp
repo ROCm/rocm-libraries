@@ -7634,9 +7634,7 @@ double get_time_us_sync(hipStream_t stream);
 }
 #endif
 
-// Mirror of _rocsparse_hyb_mat's layout. ell_nnz must be int64_t here to match
-// rocSPARSE, where it was widened so that ell_width * m cannot overflow when
-// sizing the ELL allocations; a 32-bit field would desynchronize the layout.
+// Must mirror the layout of rocSPARSE's _rocsparse_hyb_mat.
 struct testhyb
 {
     int                     m;
