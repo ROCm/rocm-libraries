@@ -9,13 +9,14 @@ import therock_configure_ci
 
 
 class ConfigureCITest(unittest.TestCase):
-    def test_host_asan_presubmit_builds_phase5_artifact_stages(self):
+    def test_host_asan_presubmit_builds_admitted_artifact_stages(self):
         repo_root = Path(__file__).parents[3]
         workflow = (
             repo_root / ".github/workflows/therock-multi-arch-ci-asan.yml"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "'compiler-runtime,runtime-tests,math-libs,storage-libs'", workflow
+            "'compiler-runtime,runtime-tests,math-libs,comm-libs,storage-libs'",
+            workflow,
         )
 
     def test_workflow_dispatch_can_select_host_asan_without_gpu_builds(self):
