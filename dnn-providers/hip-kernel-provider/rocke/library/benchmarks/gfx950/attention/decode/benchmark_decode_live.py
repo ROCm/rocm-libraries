@@ -156,15 +156,17 @@ def _make_inputs(
     if shape.use_fp8:
         # KV cache quantized to fp8; compute stays ``dtype``. *0.5 keeps values
         # in e4m3 range. k_scale/v_scale are the dequant multipliers.
-        fp8_dtype = (
-            torch.float8_e4m3fnuz if shape.fp8_fnuz else torch.float8_e4m3fn
+        fp8_dtype = torch.float8_e4m3fnuz if shape.fp8_fnuz else torch.float8_e4m3fn
+        kc = (
+            (torch.randn(*kv_shape, dtype=torch.float32, device="cuda") * 0.5)
+            .to(fp8_dtype)
+            .contiguous()
         )
-        kc = (torch.randn(*kv_shape, dtype=torch.float32, device="cuda") * 0.5).to(
-            fp8_dtype
-        ).contiguous()
-        vc = (torch.randn(*kv_shape, dtype=torch.float32, device="cuda") * 0.5).to(
-            fp8_dtype
-        ).contiguous()
+        vc = (
+            (torch.randn(*kv_shape, dtype=torch.float32, device="cuda") * 0.5)
+            .to(fp8_dtype)
+            .contiguous()
+        )
         k_scale = v_scale = 1.0
     else:
         kc = torch.randn(*kv_shape, dtype=dtype, device="cuda") * 0.1

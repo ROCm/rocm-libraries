@@ -238,7 +238,11 @@ def main() -> int:
             # fp16 2D only, so this covers the fp8 long-KV decode -> 3D split-KV
             # cohort the routing gate re-routes. Self-skips (exit 0) off gfx950.
             decode3d = (
-                LIBRARY / "builders" / "gfx950" / "attention" / "decode"
+                LIBRARY
+                / "builders"
+                / "gfx950"
+                / "attention"
+                / "decode"
                 / "fp8_decode_3d_verify.py"
             )
             if decode3d.exists() and (

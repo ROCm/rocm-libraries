@@ -38,8 +38,8 @@ Every candidate lever was ruled out, each with evidence, not assumption:
 
 - **Routing gate** (an earlier `_enable_fp8_decode_3d` forcing 3D) — **redundant**.
   #10583 already routes the cohort to 3D on a full part; a gate-on/off A/B at the
-  production-resolved `num_cus` (`fp8_decode_gate_ab.py`) showed identical routed
-  path and kernel. Removed.
+  production-resolved `num_cus` showed identical routed path and kernel with the
+  gate off. Both the gate and its A/B harness were removed.
 - **`waves_per_eu = 3`** — **neutral**. A same-run A/B (the knob the only
   difference, median of ≥5, `fp8_decode_wpe3_ab.py`) showed no win and no
   regression across the cohort. An occupancy hint with no measured effect does not
@@ -78,7 +78,6 @@ python benchmarks/gfx950/attention/decode/benchmark_decode_live.py \
 python benchmarks/gfx950/attention/decode/fp8_decode_vs_baselines.py     # vs AITER/Triton
 
 # investigation evidence (the "no lever" finding):
-python benchmarks/gfx950/attention/decode/fp8_decode_gate_ab.py          # routing gate redundant
 python benchmarks/gfx950/attention/decode/fp8_decode_wpe3_ab.py          # waves_per_eu neutral
 python benchmarks/gfx950/attention/decode/fp8_decode_nseg_sweep.py --repeat 5  # split at plateau
 python benchmarks/gfx950/attention/decode/fp8_decode_isa_inspect.py      # VALU-bound (no GPU)
@@ -94,4 +93,4 @@ Measured latency / speedup: **Confluence** (compliance — not in the repo).
 | On-GPU numeric gate | `builders/gfx950/attention/decode/fp8_decode_3d_verify.py` (this dir) |
 | Benchmark scenario + fp8 harness support | `benchmarks/gfx950/attention/decode/gpt_oss_fp8_decode_shapes.json`, `benchmark_decode_live.py` |
 | Cross-backend comparison harness | `benchmarks/gfx950/attention/decode/fp8_decode_vs_baselines.py` |
-| Investigation A/Bs (evidence for "no lever") | `benchmarks/gfx950/attention/decode/fp8_decode_{gate_ab,wpe3_ab,nseg_sweep,isa_inspect}.py` |
+| Investigation A/Bs (evidence for "no lever") | `benchmarks/gfx950/attention/decode/fp8_decode_{wpe3_ab,nseg_sweep,isa_inspect}.py` |

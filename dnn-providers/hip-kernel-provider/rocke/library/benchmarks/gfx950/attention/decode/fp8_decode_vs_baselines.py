@@ -62,8 +62,15 @@ def _build_inputs(batch, sk, fp8_dtype, use_sinks, seed):
         if use_sinks
         else None
     )
-    return dict(q=q, kc=kc, vc=vc, cu_q=cu_q, kv_lens=kv_lens,
-                block_table=block_table, sinks=sinks)
+    return dict(
+        q=q,
+        kc=kc,
+        vc=vc,
+        cu_q=cu_q,
+        kv_lens=kv_lens,
+        block_table=block_table,
+        sinks=sinks,
+    )
 
 
 def _reference(data, batch, sk, sinks):
@@ -71,7 +78,7 @@ def _reference(data, batch, sk, sinks):
     import torch
 
     q = data["q"].float()
-    scale = _HD ** -0.5
+    scale = _HD**-0.5
     nrep = _NHQ // _NHK
     out = torch.empty(batch, _NHQ, _HD, dtype=torch.float32, device="cuda")
     for b in range(batch):
@@ -125,9 +132,19 @@ class RockeBackend:
         from dispatch.attention import AttentionRequest
 
         return AttentionRequest(
-            batch=batch, nhead_q=_NHQ, nhead_k=_NHK, seqlen_q=1, seqlen_k=sk,
-            hdim_q=_HD, hdim_v=_HD, arch=self._arch, kv_block_size=_BS,
-            dtype="bf16", use_sinks=use_sinks, use_fp8=True, fp8_fnuz=self._fnuz,
+            batch=batch,
+            nhead_q=_NHQ,
+            nhead_k=_NHK,
+            seqlen_q=1,
+            seqlen_k=sk,
+            hdim_q=_HD,
+            hdim_v=_HD,
+            arch=self._arch,
+            kv_block_size=_BS,
+            dtype="bf16",
+            use_sinks=use_sinks,
+            use_fp8=True,
+            fp8_fnuz=self._fnuz,
         )
 
     def make_launch(self, data, batch, sk, use_sinks, out, stream):
@@ -140,19 +157,37 @@ class RockeBackend:
         path = result.spec.path
 
         prob = UnifiedAttentionProblem(
-            total_q=batch, num_seqs=batch, num_query_heads=_NHQ, num_kv_heads=_NHK,
-            head_size=_HD, block_size=_BS, max_seqlen_q=1, max_seqlen_k=sk,
-            dtype="bf16", use_fp8=True, fp8_fnuz=self._fnuz, use_sinks=use_sinks,
+            total_q=batch,
+            num_seqs=batch,
+            num_query_heads=_NHQ,
+            num_kv_heads=_NHK,
+            head_size=_HD,
+            block_size=_BS,
+            max_seqlen_q=1,
+            max_seqlen_k=sk,
+            dtype="bf16",
+            use_fp8=True,
+            fp8_fnuz=self._fnuz,
+            use_sinks=use_sinks,
         )
 
         def launch():
             run_unified_attention_torch(
-                problem=prob, q=data["q"], k=data["kc"], v=data["vc"], out=out,
-                cu_seqlens_q=data["cu_q"], seqused_k=data["kv_lens"],
-                softmax_scale=_HD ** -0.5, block_table=data["block_table"],
-                softcap=0.0, sinks=data["sinks"],
+                problem=prob,
+                q=data["q"],
+                k=data["kc"],
+                v=data["vc"],
+                out=out,
+                cu_seqlens_q=data["cu_q"],
+                seqused_k=data["kv_lens"],
+                softmax_scale=_HD**-0.5,
+                block_table=data["block_table"],
+                softcap=0.0,
+                sinks=data["sinks"],
                 backend=("tiled" if path == "2d" else path),
-                k_scale=_K_SCALE, v_scale=_V_SCALE, stream=stream,
+                k_scale=_K_SCALE,
+                v_scale=_V_SCALE,
+                stream=stream,
             )
 
         return launch, path
@@ -222,9 +257,13 @@ class TritonBackend:
         try:
             import aiter.ops.triton as at  # noqa: F401
 
-            cands = [n for n in dir(at) if "decode" in n.lower() or "attention" in n.lower()]
+            cands = [
+                n for n in dir(at) if "decode" in n.lower() or "attention" in n.lower()
+            ]
             if cands:
-                entry = f"aiter.ops.triton.{cands[0]}{_signature(getattr(at, cands[0]))}"
+                entry = (
+                    f"aiter.ops.triton.{cands[0]}{_signature(getattr(at, cands[0]))}"
+                )
         except Exception:  # noqa: BLE001
             pass
         if entry is None:
@@ -267,17 +306,22 @@ def _measure(backend, data, batch, sk, use_sinks, ref, timing, stream):
     n_bad = int(torch.isnan(out).sum() + torch.isinf(out).sum())
     err = (out.float() - ref).abs().max().item()
     if n_bad or err >= _TOL:
-        return dict(status=("NaN" if n_bad else "DIFF"), path=path,
-                    reason=f"max_abs={err:.3e}", max_abs=err, us=None)
+        return dict(
+            status=("NaN" if n_bad else "DIFF"),
+            path=path,
+            reason=f"max_abs={err:.3e}",
+            max_abs=err,
+            us=None,
+        )
 
     med = []
     for _ in range(timing["repeat"]):
-        ms = time_launches(launch, warmup=timing["warmup"], iters=timing["iters"],
-                           stream=stream)
+        ms = time_launches(
+            launch, warmup=timing["warmup"], iters=timing["iters"], stream=stream
+        )
         med.append(ms * 1e3)
     med.sort()
-    return dict(status="OK", path=path, reason="", max_abs=err,
-                us=med[len(med) // 2])
+    return dict(status="OK", path=path, reason="", max_abs=err, us=med[len(med) // 2])
 
 
 def main() -> int:
@@ -307,8 +351,11 @@ def main() -> int:
     stream = int(torch.cuda.current_stream().cuda_stream)
     timing = dict(warmup=args.warmup, iters=args.iters, repeat=args.repeat)
 
-    backends = [RockeBackend(arch, fnuz), AiterBackend(fp8_dtype),
-                TritonBackend(fp8_dtype)]
+    backends = [
+        RockeBackend(arch, fnuz),
+        AiterBackend(fp8_dtype),
+        TritonBackend(fp8_dtype),
+    ]
 
     # Probe once up front and report availability.
     active, skipped = [], []
@@ -321,9 +368,13 @@ def main() -> int:
             skipped.append(b.name)
             print(f"backend {b.name:<8} SKIPPED:  {exc}")
 
-    print(f"\narch={arch}  fp8={fmt}  warmup={args.warmup} iters={args.iters} "
-          f"repeat={args.repeat}  (D{_HD} {_NHQ}x{_NHK} bs{_BS})")
-    header = f"{'shape':<18} {'backend':<8} {'path':<4} {'max_abs':>10} {'us':>9}  status"
+    print(
+        f"\narch={arch}  fp8={fmt}  warmup={args.warmup} iters={args.iters} "
+        f"repeat={args.repeat}  (D{_HD} {_NHQ}x{_NHK} bs{_BS})"
+    )
+    header = (
+        f"{'shape':<18} {'backend':<8} {'path':<4} {'max_abs':>10} {'us':>9}  status"
+    )
     print(header)
     print("-" * len(header))
 
@@ -341,8 +392,10 @@ def main() -> int:
                     rows.append(dict(shape=shape, backend=b.name, **r))
                     us = f"{r['us']:.2f}" if r["us"] is not None else "--"
                     ma = f"{r['max_abs']:.3e}" if r["max_abs"] is not None else "--"
-                    print(f"{shape:<18} {b.name:<8} {r['path']:<4} {ma:>10} "
-                          f"{us:>9}  {r['status']}")
+                    print(
+                        f"{shape:<18} {b.name:<8} {r['path']:<4} {ma:>10} "
+                        f"{us:>9}  {r['status']}"
+                    )
                     if r["status"] not in ("OK", "SKIP"):
                         failed = True
     synchronize_and_release(stream)
@@ -350,8 +403,11 @@ def main() -> int:
     print("-" * len(header))
     if skipped:
         print(f"skipped backends: {', '.join(skipped)} (see reasons above)")
-    print("comparison INCOMPLETE — a backend errored/diverged above" if failed
-          else "comparison complete for all available backends")
+    print(
+        "comparison INCOMPLETE — a backend errored/diverged above"
+        if failed
+        else "comparison complete for all available backends"
+    )
 
     if args.json:
         with open(args.json, "w") as fh:

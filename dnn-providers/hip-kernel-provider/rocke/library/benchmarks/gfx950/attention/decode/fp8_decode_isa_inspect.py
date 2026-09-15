@@ -16,7 +16,9 @@ import sys
 
 from rocke.assets import dsl_docs_dir
 
-sys.path.insert(0, str(dsl_docs_dir() / "optimization" / "utilities" / "tools" / "dsl_probes"))
+sys.path.insert(
+    0, str(dsl_docs_dir() / "optimization" / "utilities" / "tools" / "dsl_probes")
+)
 
 from probe_isa_inspect import probe_isa_inspect  # noqa: E402
 from kernels.gfx950.attention_tiled_2d import (  # noqa: E402
@@ -40,10 +42,15 @@ _BASE = dict(
 
 def main() -> int:
     specs = [
-        ("flash_shipped(nw1t32)", UnifiedAttention2DTiledSpec(**_BASE, use_sinks=False)),
+        (
+            "flash_shipped(nw1t32)",
+            UnifiedAttention2DTiledSpec(**_BASE, use_sinks=False),
+        ),
         ("sink_shipped(nw1t32)", UnifiedAttention2DTiledSpec(**_BASE, use_sinks=True)),
-        ("flash_fp8qk", UnifiedAttention2DTiledSpec(
-            **_BASE, use_sinks=False, use_fp8_mfma_qk=True)),
+        (
+            "flash_fp8qk",
+            UnifiedAttention2DTiledSpec(**_BASE, use_sinks=False, use_fp8_mfma_qk=True),
+        ),
     ]
     entries = [
         (label, build_unified_attention_2d_tiled(spec, arch="gfx950"))

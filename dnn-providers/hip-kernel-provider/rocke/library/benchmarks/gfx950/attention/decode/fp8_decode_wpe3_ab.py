@@ -44,19 +44,30 @@ def _build_inputs(batch, sk, fp8_dtype, use_sinks, seed):
     vc = v_f32.to(fp8_dtype).contiguous()
     cu_q = torch.arange(0, batch + 1, dtype=torch.int32, device="cuda")
     kv_lens = torch.full((batch,), sk, dtype=torch.int32, device="cuda")
-    block_table = torch.randint(0, pool, (batch, num_blks), dtype=torch.int32, device="cuda")
-    sinks = (
-        torch.randn(_NHQ, dtype=torch.bfloat16, device="cuda") * 0.1 if use_sinks else None
+    block_table = torch.randint(
+        0, pool, (batch, num_blks), dtype=torch.int32, device="cuda"
     )
-    return dict(q=q, kc=kc, vc=vc, cu_q=cu_q, kv_lens=kv_lens,
-                block_table=block_table, sinks=sinks)
+    sinks = (
+        torch.randn(_NHQ, dtype=torch.bfloat16, device="cuda") * 0.1
+        if use_sinks
+        else None
+    )
+    return dict(
+        q=q,
+        kc=kc,
+        vc=vc,
+        cu_q=cu_q,
+        kv_lens=kv_lens,
+        block_table=block_table,
+        sinks=sinks,
+    )
 
 
 def _reference(data, batch, sk, sinks):
     import torch
 
     q = data["q"].float()
-    scale = _HD ** -0.5
+    scale = _HD**-0.5
     nrep = _NHQ // _NHK
     out = torch.empty(batch, _NHQ, _HD, dtype=torch.float32, device="cuda")
     for b in range(batch):
@@ -109,28 +120,68 @@ def main() -> int:
     stream = int(torch.cuda.current_stream().cuda_stream)
 
     def _num_cus(batch, sk, use_sinks):
-        return _resolve_num_cus(AttentionRequest(
-            batch=batch, nhead_q=_NHQ, nhead_k=_NHK, seqlen_q=1, seqlen_k=sk,
-            hdim_q=_HD, hdim_v=_HD, arch=arch, kv_block_size=_BS, dtype="bf16",
-            use_sinks=use_sinks, use_fp8=True, fp8_fnuz=fnuz, num_cus=0))
+        return _resolve_num_cus(
+            AttentionRequest(
+                batch=batch,
+                nhead_q=_NHQ,
+                nhead_k=_NHK,
+                seqlen_q=1,
+                seqlen_k=sk,
+                hdim_q=_HD,
+                hdim_v=_HD,
+                arch=arch,
+                kv_block_size=_BS,
+                dtype="bf16",
+                use_sinks=use_sinks,
+                use_fp8=True,
+                fp8_fnuz=fnuz,
+                num_cus=0,
+            )
+        )
 
     def _problem(batch, sk, use_sinks, cus):
         return au.UnifiedAttentionProblem(
-            total_q=batch, num_seqs=batch, num_query_heads=_NHQ, num_kv_heads=_NHK,
-            head_size=_HD, block_size=_BS, max_seqlen_q=1, max_seqlen_k=sk,
-            dtype="bf16", use_fp8=True, fp8_fnuz=fnuz, use_sinks=use_sinks, num_cus=cus)
+            total_q=batch,
+            num_seqs=batch,
+            num_query_heads=_NHQ,
+            num_kv_heads=_NHK,
+            head_size=_HD,
+            block_size=_BS,
+            max_seqlen_q=1,
+            max_seqlen_k=sk,
+            dtype="bf16",
+            use_fp8=True,
+            fp8_fnuz=fnuz,
+            use_sinks=use_sinks,
+            num_cus=cus,
+        )
 
     def _run(prob, data, out):
         run_unified_attention_torch(
-            problem=prob, q=data["q"], k=data["kc"], v=data["vc"], out=out,
-            cu_seqlens_q=data["cu_q"], seqused_k=data["kv_lens"],
-            softmax_scale=_HD ** -0.5, block_table=data["block_table"], softcap=0.0,
-            sinks=data["sinks"], backend="3d", k_scale=_K_SCALE, v_scale=_V_SCALE,
-            stream=stream)
+            problem=prob,
+            q=data["q"],
+            k=data["kc"],
+            v=data["vc"],
+            out=out,
+            cu_seqlens_q=data["cu_q"],
+            seqused_k=data["kv_lens"],
+            softmax_scale=_HD**-0.5,
+            block_table=data["block_table"],
+            softcap=0.0,
+            sinks=data["sinks"],
+            backend="3d",
+            k_scale=_K_SCALE,
+            v_scale=_V_SCALE,
+            stream=stream,
+        )
 
-    print(f"arch={arch}  fp8={'e4m3fnuz' if fnuz else 'e4m3fn'}  "
-          f"warmup={args.warmup} iters={args.iters} repeat={args.repeat}")
-    print(f"{'shape':<18} {'cus':>4}  {'wpe=3':>9} {'default':>9}  {'verdict':>9}  {'max_abs':>9}")
+    print(
+        f"arch={arch}  fp8={'e4m3fnuz' if fnuz else 'e4m3fn'}  "
+        f"warmup={args.warmup} iters={args.iters} repeat={args.repeat}"
+    )
+    print(
+        f"{'shape':<18} {'cus':>4}  {'wpe=3':>9} {'default':>9}  {'verdict':>9}  {'max_abs':>9}"
+    )
     print("-" * 72)
 
     losses = []
@@ -148,7 +199,9 @@ def main() -> int:
                     au._select_3d_waves_per_eu = lambda _p: wpe
                     au._ATTN_3D_TILED_CACHE.clear()  # cache_key excludes wpe -> force rebuild
                     try:
-                        out = torch.empty(batch, _NHQ, _HD, dtype=torch.bfloat16, device="cuda")
+                        out = torch.empty(
+                            batch, _NHQ, _HD, dtype=torch.bfloat16, device="cuda"
+                        )
                         _run(_problem(batch, sk, use_sinks, cus), data, out)
                         torch.cuda.synchronize()
                         err = (out.float() - ref).abs().max().item()
@@ -156,8 +209,13 @@ def main() -> int:
                         us = []
                         for _ in range(args.repeat):
                             ms = time_launches(
-                                lambda: _run(_problem(batch, sk, use_sinks, cus), data, out),
-                                warmup=args.warmup, iters=args.iters, stream=stream)
+                                lambda: _run(
+                                    _problem(batch, sk, use_sinks, cus), data, out
+                                ),
+                                warmup=args.warmup,
+                                iters=args.iters,
+                                stream=stream,
+                            )
                             us.append(ms * 1e3)
                         us.sort()
                         return err, nan, us[len(us) // 2]
@@ -167,7 +225,9 @@ def main() -> int:
 
                 err_on, nan_on, us_on = _measure(3)
                 err_off, nan_off, us_off = _measure(None)
-                delta = (us_off - us_on) / us_off if us_off else 0.0  # >0 => wpe3 faster
+                delta = (
+                    (us_off - us_on) / us_off if us_off else 0.0
+                )  # >0 => wpe3 faster
                 if abs(delta) < _NOISE:
                     verdict = "neutral"
                 elif delta > 0:
@@ -176,14 +236,18 @@ def main() -> int:
                     verdict = "LOSS"
                     losses.append(label)
                 bad = max(err_on, err_off) >= _TOL or nan_on or nan_off
-                print(f"{label:<18} {cus:>4}  {us_on:>9.2f} {us_off:>9.2f}  {verdict:>9}  "
-                      f"{max(err_on, err_off):>9.3e}{'  !CORRECTNESS' if bad else ''}")
+                print(
+                    f"{label:<18} {cus:>4}  {us_on:>9.2f} {us_off:>9.2f}  {verdict:>9}  "
+                    f"{max(err_on, err_off):>9.3e}{'  !CORRECTNESS' if bad else ''}"
+                )
 
     synchronize_and_release(stream)
     print("-" * 72)
     if losses:
-        print(f"HONEST LOSSES: waves_per_eu=3 regresses {len(losses)} shape(s): "
-              f"{', '.join(losses)}")
+        print(
+            f"HONEST LOSSES: waves_per_eu=3 regresses {len(losses)} shape(s): "
+            f"{', '.join(losses)}"
+        )
     else:
         print("No regressions: waves_per_eu=3 is a win-or-neutral across the cohort.")
     return 0
