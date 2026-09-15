@@ -23,10 +23,16 @@ Coverage:
   - Dtypes: fp16, bf16
 
 The vector-load path is enabled for every sync MMA family (MFMA and WMMA); only
-the async-DMA path is excluded. The GPU numeric sweep here is MFMA-only
-(gfx942/gfx950) because that is the hardware available for verification; the WMMA
-path is covered by ``TestConvWgradVectorLoad`` (CPU IR-emission guard) and awaits
-gfx1250 hardware for a numeric sign-off. Requires a ROCm GPU and torch. Run:
+the async-DMA path is excluded. The sweep runs on MFMA (gfx942/gfx950) and, for
+the K-outer transpose-read tests, on gfx1250 wave32 WMMA -- the lane mapping is
+per-wave-size, so one arch being green says nothing about the other.
+
+WMMA wgrad accepts only ``epilogue='default'``, so the K-outer sweeps ask for the
+one their arch supports. A sweep requesting the wrong epilogue skips every
+subTest -- and a test whose subTests all skip still reports *passed*, so
+``_assert_ran`` makes an all-skipped K-outer sweep a hard failure instead.
+
+Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python <torch-python> -m pytest \\
         rocke/platform/tests/instances/test_conv_wgrad_correctness.py
 """
@@ -47,15 +53,30 @@ _HAS_TORCH = importlib.util.find_spec("torch") is not None
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 
+# Arches with a K-outer transpose-read regime. The lane mapping is per-wave-size
+# (gfx950 wave64 ds_read_b64_tr_b16, gfx1250 wave32 ds_load_tr16_b128), so a
+# green run on one says nothing about the other -- both must be exercised.
+# Configs with no counterpart on the running arch are rejected by
+# is_valid_wgrad_spec and skip through _check's existing reason path.
+_KOUTER_ARCHES = ("gfx950", "gfx1250")
+
+# WMMA wgrad accepts only the 'default' epilogue (is_valid_wgrad_spec), so the
+# K-outer sweeps below have to ask for the one their arch supports. Requesting
+# 'cshuffle' on gfx1250 makes every subTest skip -- and a test whose subTests all
+# skip still reports *passed*, which is exactly the false green these tests exist
+# to prevent. _assert_ran() below is the backstop.
+_KOUTER_EPILOGUE = "cshuffle" if _IS_MFMA else "default"
+
 
 def _skip_reason() -> str:
     if not GPU_ARCH:
         return "no ROCm GPU detected"
     if not _HAS_TORCH:
         return "torch not importable"
-    if not _IS_MFMA:
+    if not _IS_MFMA and GPU_ARCH not in _KOUTER_ARCHES:
         return (
-            f"wgrad vector-load path is MFMA-only; got {GPU_ARCH} (need gfx942/gfx950)"
+            f"wgrad numeric sweep needs MFMA (gfx942/gfx950) or a K-outer WMMA "
+            f"arch ({'/'.join(_KOUTER_ARCHES)}); got {GPU_ARCH}"
         )
     return ""
 
@@ -455,6 +476,21 @@ class TestConvWgradCorrectness(unittest.TestCase):
             f"FAIL {shape.id} {dtype} {pipeline}/{epilogue} spk{split_k} "
             f"{'kouter ' if lds_k_outer else ''}on {GPU_ARCH}: {reason}",
         )
+        return True
+
+    def _assert_ran(self, ran: int, what: str) -> None:
+        """A sweep whose every subTest skipped still reports *passed*.
+
+        That is the false green this suite exists to catch, so make an
+        all-skipped K-outer sweep a hard failure instead of a silent pass.
+        """
+        self.assertGreater(
+            ran,
+            0,
+            f"{what}: every config skipped on {GPU_ARCH}, so the K-outer "
+            f"transpose-read path was never executed -- this is a false green, "
+            f"not a pass. Check the epilogue/atom/split_k the sweep requests.",
+        )
 
     def _sweep_pipeline(self, pipeline: str) -> None:
         for dtype in _DTYPES:
@@ -474,12 +510,23 @@ class TestConvWgradCorrectness(unittest.TestCase):
         This is the test that has to exist -- the last change to this LDS path
         (async_dma) shipped silently wrong because nothing exercised it.
         """
-        if not _IS_MFMA:
-            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+        if GPU_ARCH not in _KOUTER_ARCHES:
+            self.skipTest(
+                f"lds_k_outer needs {'/'.join(_KOUTER_ARCHES)}; got {GPU_ARCH}"
+            )
+        ran = 0
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
-                    self._check(shape, dtype, "mem", "cshuffle", lds_k_outer=True)
+                    self._check(
+                        shape,
+                        dtype,
+                        "mem",
+                        _KOUTER_EPILOGUE,
+                        lds_k_outer=True,
+                    )
+                    ran += 1
+        self._assert_ran(ran, "lds_k_outer vs default")
 
     def test_lds_k_outer_atom_16x16x16(self):
         """K-outer with the 4-element-per-lane atom.
@@ -490,9 +537,17 @@ class TestConvWgradCorrectness(unittest.TestCase):
         file pins ``_WARP_TILE_MN = 32``, so nothing exercised the n=4 stride.
         With the stride hardcoded at 8 this config read past the end of a
         16-row K-outer tile and produced NaN.
+
+        MFMA-only on purpose. This test pins the 16x16x16 atom, which exists
+        only in the MFMA table -- gfx1250's WMMA fp16/bf16 atom is 16x16x32, so
+        ``select_largest_k`` returns None there and every subTest would skip.
+        A class whose subTests all skip still reports ``passed``, so widening
+        the gate to _KOUTER_ARCHES would buy a false green rather than wave32
+        coverage. gfx1250's atom is already covered by
+        ``test_lds_k_outer_matches_default``.
         """
         if not _IS_MFMA:
-            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+            self.skipTest(f"the 16x16x16 atom is MFMA-only; got {GPU_ARCH}")
         for dtype in _DTYPES:
             for shape in _SHAPES:
                 with self.subTest(shape=shape.id, dtype=dtype):
@@ -500,20 +555,33 @@ class TestConvWgradCorrectness(unittest.TestCase):
                         shape,
                         dtype,
                         "mem",
-                        "cshuffle",
+                        _KOUTER_EPILOGUE,
                         lds_k_outer=True,
                         warp_tile_mn=16,
                         tile_k=16,
                     )
 
     def test_lds_k_outer_split_k(self):
-        """K-outer under split-K atomics (the shipping configuration)."""
+        """K-outer under split-K atomics (the shipping configuration).
+
+        MFMA-only on purpose. On gfx1250 ``_KOUTER_EPILOGUE`` is ``default``
+        (WMMA rejects cshuffle), and the atomic guard rejects 16-bit dtype_d
+        with the default epilogue at split_k > 1 -- so this bf16 + split_k=8
+        request is invalid on wave32 and every subTest would skip. Widening the
+        gate would report ``passed`` while executing nothing. Add a supported
+        wave32 atomic configuration before extending this test.
+        """
         if not _IS_MFMA:
-            self.skipTest(f"lds_k_outer is MFMA/gfx950-only; got {GPU_ARCH}")
+            self.skipTest(f"wgrad split-K atomics are MFMA-only; got {GPU_ARCH}")
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(
-                    shape, "bf16", "mem", "cshuffle", split_k=8, lds_k_outer=True
+                    shape,
+                    "bf16",
+                    "mem",
+                    _KOUTER_EPILOGUE,
+                    split_k=8,
+                    lds_k_outer=True,
                 )
 
     def test_lds_k_outer_async_dma(self):
@@ -1621,6 +1689,237 @@ class TestConvWgradTwoStage(unittest.TestCase):
     def test_bf16_grouped(self):
         shape = _Shape("3x3_G2_bf16", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1)
         self._check(shape, "bf16", "mem", groups=2, seed=42)
+
+
+class TestWgradValidatorAgreement(unittest.TestCase):
+    """``is_valid_wgrad_spec`` and ``validate()`` must accept the same specs.
+
+    These are the two halves of one contract: callers pre-filter with the public
+    predicate and the builder then calls ``validate()``. Any spec the predicate
+    blesses but ``validate()`` rejects surfaces as an exception thrown *after* a
+    caller was told the spec was fine, which is exactly the shape of bug a
+    pre-filter exists to prevent.
+    """
+
+    def _spec(self, **kw):
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        base = dict(
+            problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="bf16"),
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        base.update(kw)
+        return WgradConvSpec(**base)
+
+    def _agree(self, spec, arch="gfx950"):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        ok, why = is_valid_wgrad_spec(spec, arch)
+        try:
+            spec.validate()
+            raised = None
+        except ValueError as e:
+            raised = str(e)
+        if ok and raised is not None:
+            self.fail(f"is_valid_wgrad_spec said valid but validate() raised: {raised}")
+        return ok, why
+
+    def test_force_deterministic_accepted_by_both(self):
+        # force_deterministic is promoted to two_stage by the builder, so the
+        # workspace-store epilogue applies and 'default' is legal for 16-bit dW.
+        # validate() used to miss the promotion and demand cshuffle.
+        ok, why = self._agree(
+            self._spec(split_k=4, force_deterministic=True, epilogue="default")
+        )
+        self.assertTrue(ok, why)
+
+    def test_plain_atomic_still_requires_cshuffle(self):
+        # The exemption must not leak to the genuinely atomic path.
+        ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
+        self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
+
+    def test_force_deterministic_does_not_exempt_runtime_degree(self):
+        # split_k == 0 is the runtime-degree atomic encoding and can never be
+        # promoted to two-stage, so it still needs cshuffle.
+        ok, _ = self._agree(
+            self._spec(split_k=0, force_deterministic=True, epilogue="default")
+        )
+        self.assertFalse(ok, "split_k=0 is atomic regardless of force_deterministic")
+
+    def test_two_stage_with_split_k_1_rejected_by_predicate(self):
+        # validate() and the C++ both reject this; the public predicate used to
+        # bless it and let the builder raise.
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
+        ok, why = self._agree(
+            self._spec(
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+                split_k=1,
+                two_stage=True,
+            )
+        )
+        self.assertFalse(ok, "two_stage with split_k=1 must be rejected")
+        self.assertIn("two_stage", why)
+
+
+class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
+    """Two-stage wgrad must be rejected on WMMA rather than crashing the builder.
+
+    ``_emit_wgrad_workspace_store_epilogue`` is MFMA-only -- it calls
+    ``c_warp_params(atom)`` and ``atom`` is None on wave32 -- and the epilogue
+    dispatch tests ``_is_two_stage`` before the WMMA branch. Without a validator
+    gate a two-stage wave32 spec reaches that emitter and dies with an
+    ``AttributeError``, which no caller pre-filters against.
+    """
+
+    def _gfx1250_spec(self, **kw):
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        base = dict(
+            problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="default",
+        )
+        base.update(kw)
+        return WgradConvSpec(**base)
+
+    def test_two_stage_rejected_on_wmma(self):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        ok, why = is_valid_wgrad_spec(
+            self._gfx1250_spec(split_k=4, two_stage=True), "gfx1250"
+        )
+        self.assertFalse(ok, "two-stage on WMMA must be rejected")
+        self.assertIn("CDNA", why)
+
+    def test_two_stage_build_raises_value_error_not_attribute_error(self):
+        # The failure mode that matters: a clean ValueError a caller can handle,
+        # never an AttributeError out of the epilogue emitter.
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
+
+        with self.assertRaises(ValueError):
+            build_implicit_gemm_conv_wgrad(
+                self._gfx1250_spec(split_k=4, two_stage=True), arch="gfx1250"
+            )
+
+    def test_split_k_atomic_still_valid_on_wmma(self):
+        # The gate is two-stage-specific: the packed atomic epilogue DOES have a
+        # WMMA variant (_emit_wgrad_split_k_epilogue_wmma), so plain split-K must
+        # stay reachable on wave32.
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        ok, why = is_valid_wgrad_spec(self._gfx1250_spec(split_k=4), "gfx1250")
+        self.assertTrue(ok, f"WMMA split-K atomic must stay valid: {why}")
+
+
+class TestWgradKOuterLdsBudget(unittest.TestCase):
+    """The LDS budget check must charge the shape the builder actually allocates.
+
+    Under ``lds_k_outer`` the builder allocates ``(tile_k, tile_mn + _KOUTER_PAD)``
+    while the validator used to charge the M-outer ``(tile_mn, tile_k + pad)``.
+    The two agree only when ``tile_k == tile_m == tile_n``.
+
+    Note on reachability: the divergence is bounded by
+    ``2 * pad * (tile_k - tile_mn) * dtype_bytes``, i.e. at most ~1.5 KB over the
+    legal tile space, against a 160 KB gfx950 cap -- so no *currently reachable*
+    spec is accepted by one accounting and rejected by the other. This is
+    correctness hardening, and it is asserted on the reported byte count rather
+    than on an accept/reject flip, because there is no such flip to assert.
+    """
+
+    def _spec(self, tile_m, tile_n, tile_k):
+        from rocke.instances.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        return WgradConvSpec(
+            problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+            lds_k_outer=True,
+            unroll_k=True,
+        )
+
+    def test_reported_budget_uses_the_k_outer_shape(self):
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+        )
+
+        tile_m = tile_n = 512
+        tile_k = 64
+        spec = self._spec(tile_m, tile_n, tile_k)
+        ok, why = is_valid_wgrad_spec(spec, "gfx950")
+        self.assertFalse(ok, "this tile is over the gfx950 LDS cap either way")
+
+        pad = 0 if spec.async_dma else 8
+        double = 2 if (spec.async_dma or spec.unroll_k) else 1
+        k_outer_bytes = (tile_k * (tile_m + pad) + tile_k * (tile_n + pad)) * 2 * double
+        m_outer = spec.effective_lds_layout()
+        m_outer_bytes = (
+            sum(
+                d[0] * d[1]
+                for d in (
+                    m_outer.storage_shape(tile_m),
+                    m_outer.storage_shape(tile_n),
+                )
+            )
+            * 2
+            * double
+        )
+        self.assertNotEqual(
+            k_outer_bytes,
+            m_outer_bytes,
+            "test is vacuous unless the two accountings differ",
+        )
+        self.assertIn(
+            f"LDS budget {k_outer_bytes} bytes",
+            why,
+            f"validator should charge the K-outer shape ({k_outer_bytes}), "
+            f"not the M-outer one ({m_outer_bytes}); got: {why}",
+        )
 
 
 if __name__ == "__main__":
