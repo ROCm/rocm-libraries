@@ -26,7 +26,7 @@ bool runtime_options::read_heuristics_from_env() {
 }
 
 double runtime_options::read_heuristics_variance_from_env() {
-  constexpr double default_variance = 0.01;  // 1%
+  constexpr double default_variance = 0.0;  // Disabled by default
 
   if (const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE")) {
     try {

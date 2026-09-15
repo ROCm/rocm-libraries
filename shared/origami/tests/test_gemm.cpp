@@ -2345,6 +2345,47 @@ TEST_CASE("GEMM: epilogue SourceSwap store pattern", "[gemm][sourceswap]") {
   }
 }
 
+// SourceSwap store-pattern cost: a SourceSwap=true kernel (M-contiguous stores,
+// IDEAL pattern -> 1x issue_insts) must have a lower store-instruction cost than
+// a SourceSwap=false kernel (N-direction stores, NONCONTIG -> split_count=4 and
+// 2x address overhead => ~3x issue_insts) for the same tile.
+TEST_CASE("GEMM: SourceSwap lowers store-instruction cost", "[gemm][sourceswap]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hw = make_hardware(gpu_arch);
+      // Make the epilogue store-instruction-bound: huge store bandwidth drives
+      // the store_memory term to ~0, exposing the store_issue difference.
+      hw.mem3_perf_ratio *= 1.0e6;
+
+      // Two otherwise-identical configs: only source_swap differs.  gwvw_d=4 =
+      // MI_M/4 makes the IDEAL path fire for swap=true (contiguous_svw=4,
+      // split_count=1); swap=false forces natural_svw=1 -> NONCONTIG.
+      auto make_cfg = [](bool swap) {
+        // make_config: mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, hand_opt, wgm, occ,
+        //              hints_a, hints_b, stream_k
+        auto c = make_config(256, 256, 32, 16, 16, 16, false, 1, 2, 0, 0, 0);
+        c.gwvw_d                   = 4;
+        c.tensile().source_swap    = swap;
+        return c;
+      };
+
+      auto p = make_problem(4096, 4096, 128);
+      auto lat_epi = [&](bool swap) {
+        auto c = make_cfg(swap);
+        origami::gemm::context_t ctx(p, hw, c);
+        return origami::gemm::compute_epilogue_latency(p, hw, c, ctx);
+      };
+      double lat_swap   = lat_epi(true);
+      double lat_noswap = lat_epi(false);
+      INFO("swap=" << lat_swap << "  noswap=" << lat_noswap
+           << "  ratio=" << lat_noswap / lat_swap);
+      // Store-issue-bound: NONCONTIG (~3x issue) must be clearly slower, not a
+      // rounding-margin sliver.  Expect a substantial (>25%) gap.
+      REQUIRE(lat_noswap > lat_swap * 1.25);
+    }
+  }
+}
+
 // Wave-group layout controls how many epilogue waves run per SIMD batch.
 // simds_per_cu=4 for CDNA; wave_batches = ceil(wave_num / min(wave_num, 4)).
 //
