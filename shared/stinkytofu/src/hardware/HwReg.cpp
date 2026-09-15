@@ -92,8 +92,18 @@ SubField schedModeDepMode(GfxArchID arch) {
     return {0, 0};
 }
 
+// Each arch declares its own bit position; the HW doc is the only source, it is not probeable.
+// One row per encoding, rows must be mutually exclusive.
 SubField schedModeDisableXdlArbStall(GfxArchID arch) {
-    if (isGfx12Plus(arch)) return {/*offset=*/4, /*size=*/1};
+    static const struct {
+        bool (*cond)(GfxArchID);
+        SubField field;
+    } kRows[] = {
+        {isGfx125, {/*offset=*/2, /*size=*/1}},
+        // A new arch adds a row here; do not widen an existing predicate.
+    };
+    for (const auto& row : kRows)
+        if (row.cond(arch)) return row.field;
     return {0, 0};
 }
 
