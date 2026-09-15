@@ -34,6 +34,7 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "OnlineTuner.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_mat_utils.hpp"
@@ -44,6 +45,7 @@
 #include "rocroller_host.hpp"
 #endif
 
+#include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -58,6 +60,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <complex>
 #include <exception>
@@ -4571,6 +4574,43 @@ inline void reportNoSolutionFound(TensileLite::ContractionProblemGemm const& ten
     std::cerr << msg.str();
 }
 
+// Move the candidate online tuning wants to sample next to the front of the
+// ranking, leaving the order of the rest alone.
+//
+// Candidates the caller's workspace cannot cover are withheld from the tuner:
+// they rank, but runContractionProblem refuses to dispatch them.
+inline void promoteOnlineTuningCandidate(
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+    const TensileLite::ContractionProblemGemm&                      tensile_prob,
+    const TensileLite::Hardware&                                    hardware)
+{
+    std::vector<int>    rankedSolutionIndices;
+    std::vector<size_t> rankedPositions;
+    rankedSolutionIndices.reserve(solutions.size());
+    rankedPositions.reserve(solutions.size());
+
+    for(size_t i = 0; i < solutions.size(); ++i)
+    {
+        if(solutions[i]->requiredWorkspaceSize(tensile_prob, hardware)
+           > tensile_prob.workspaceSize())
+            continue;
+
+        rankedSolutionIndices.push_back(solutions[i]->index);
+        rankedPositions.push_back(i);
+    }
+
+    // The measurement hook keys on this same hash, taken from the same problem.
+    const size_t problemKey = std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob);
+
+    const int promote
+        = rocblaslt::OnlineTuner::getInstance().selectCandidate(problemKey, rankedSolutionIndices);
+    if(promote < 0)
+        return;
+
+    const auto picked = solutions.begin() + rankedPositions[promote];
+    std::rotate(solutions.begin(), picked, picked + 1);
+}
+
 template <typename T>
 inline auto getSolutions(
     const T& inputs,
@@ -4588,10 +4628,28 @@ inline auto getSolutions(
     if(reportEmpty)
         TensileLite::uniformSummationOrderSelectionTallyReset();
 
-    auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+    auto&      tuner        = rocblaslt::OnlineTuner::getInstance();
+    const bool onlineTuning = tuner.enabled();
+
+    // Exploration rotates through the top K, and the caller may well have asked
+    // for one. CachingLibrary grows its entry in place on the deeper request, so
+    // only the first lookup of a problem pays for it.
+    const int fetchCount
+        = onlineTuning ? std::max(requestedAlgoCount, tuner.topK()) : requestedAlgoCount;
+
+    auto solutions = library->findTopSolutions(tensile_prob, *hardware, fetchCount);
 
     if(reportEmpty && solutions.empty())
         reportNoSolutionFound(tensile_prob);
+
+    if(onlineTuning)
+    {
+        promoteOnlineTuningCandidate(solutions, tensile_prob, *hardware);
+
+        // The extra candidates were for the tuner, not for the caller.
+        if(solutions.size() > static_cast<size_t>(requestedAlgoCount))
+            solutions.resize(requestedAlgoCount);
+    }
 
     return solutions;
 }
