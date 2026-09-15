@@ -3199,6 +3199,14 @@ class Solution(collections.abc.Mapping):
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockA"], state["AssertSummationElementMultiple"])
     state["AssertSummationElementMultiple"] = max(state["ProblemType"]["MXBlockB"], state["AssertSummationElementMultiple"])
 
+    # A 2D scaling tile divides the free dimension of the scale tensor, so a
+    # partial last tile would need a scale covering fewer than MXBlockFree
+    # rows/columns; require the free dimension to be tile-aligned instead.
+    # Free0 is M (A's free index), Free1 is N, as in the 6-bit branch above.
+    # Both extents default to 1, making this a no-op for 1xMXBlock scaling.
+    state["AssertFree0ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeA"], state["AssertFree0ElementMultiple"])
+    state["AssertFree1ElementMultiple"] = max(state["ProblemType"]["MXBlockFreeB"], state["AssertFree1ElementMultiple"])
+
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
     #  On gfx1250, i8, f8, it seem working for 1LDSBuffer=0 "BUT EPS=0", haven't checked for other archs/types, so we still reject by 1LDSBuffer only

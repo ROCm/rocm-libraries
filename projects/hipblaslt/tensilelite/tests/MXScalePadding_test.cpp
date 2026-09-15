@@ -30,7 +30,8 @@ static ContractionProblemGemm makeMXProblem(size_t M,
                                             size_t batch                 = 1,
                                             bool   transA                = true,
                                             bool   transB                = false,
-                                            bool   padScaleTensorFreeDim = true)
+                                            bool   padScaleTensorFreeDim = true,
+                                            int    mxBlockFree           = 1)
 {
     auto problem = ContractionProblemGemm::GEMM_Strides(
         transA,
@@ -48,8 +49,8 @@ static ContractionProblemGemm makeMXProblem(size_t M,
         M, M * N,
         0.0);
 
-    problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, padScaleTensorFreeDim);
-    problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, padScaleTensorFreeDim);
+    problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, padScaleTensorFreeDim, mxBlockFree);
+    problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, padScaleTensorFreeDim, mxBlockFree);
     return problem;
 }
 
@@ -242,4 +243,97 @@ TEST(MXScalePadding, BatchAndStridesCorrect)
     // totalAllocatedElements includes padding
     EXPECT_EQ(problem.mxsa().totalAllocatedElements(), sa[0] * sa[1] * sa[2]);
     EXPECT_GT(problem.mxsa().totalAllocatedElements(), (size_t)(300 / 32) * 80 * 3);
+}
+
+// ============================================================================
+// 2D scaling tile (MXBlockFreeA / MXBlockFreeB)
+//
+// mxBlockFree is the extent of one scale along the free dimension: M for A,
+// N for B. mxBlockFree == 1 is the original 1xmxBlock layout, one scale per
+// (row, K-block); mxBlockFree == 128 with mxBlock == 128 gives a 128x128 tile.
+// setMXScaleA/B divide the free dimension with CeilDivide, so a partial last
+// tile still gets a scale even though kernels require alignment through
+// AssertFree{0,1}ElementMultiple.
+// ============================================================================
+
+// Params: mxBlockFree, M, N, K, expectedScaleM, expectedScaleN
+class MXScaleFreeTileTest
+    : public ::testing::TestWithParam<
+          std::tuple<int, size_t, size_t, size_t, size_t, size_t>>
+{
+};
+
+TEST_P(MXScaleFreeTileTest, FreeDimensionDividedByTileExtent)
+{
+    auto [mxBlockFree, M, N, K, expectedScaleM, expectedScaleN] = GetParam();
+    const int mxBlock = 128;
+
+    auto problem = makeMXProblem(M, N, K, mxBlock, /*batch=*/1, /*transA=*/true,
+                                 /*transB=*/false, /*padScaleTensorFreeDim=*/false,
+                                 mxBlockFree);
+
+    auto const& sa = problem.mxsa().sizes();
+    auto const& sb = problem.mxsb().sizes();
+
+    EXPECT_EQ(sa[1], expectedScaleM);
+    EXPECT_EQ(sb[1], expectedScaleN);
+
+    // The bound dimension is unaffected by the free-dimension tiling.
+    EXPECT_EQ(sa[0], CeilDivide(K, (size_t)mxBlock));
+    EXPECT_EQ(sb[0], CeilDivide(K, (size_t)mxBlock));
+
+    // Batch untouched.
+    EXPECT_EQ(sa[2], 1u);
+    EXPECT_EQ(sb[2], 1u);
+
+    // The problem must report back what it was built with.
+    EXPECT_EQ(problem.mxBlockFreeA(), (size_t)mxBlockFree);
+    EXPECT_EQ(problem.mxBlockFreeB(), (size_t)mxBlockFree);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ScaleFreeTile,
+    MXScaleFreeTileTest,
+    ::testing::Values(
+        //   mxBlockFree,    M,    N,     K, scaleM, scaleN
+        // Default: free dimension carries through verbatim (regression guard).
+        std::make_tuple(  1, 256u, 256u, 2048u, 256u, 256u),
+        std::make_tuple(  1, 257u, 256u, 2048u, 257u, 256u),
+        // 128x128, aligned M and N.
+        std::make_tuple(128, 256u, 256u, 2048u,   2u,   2u),
+        std::make_tuple(128, 128u, 128u,  128u,   1u,   1u),
+        std::make_tuple(128, 384u, 256u, 2048u,   3u,   2u),
+        // Partial last tile: CeilDivide still allocates a scale for it.
+        std::make_tuple(128, 257u, 256u, 2048u,   3u,   2u),
+        std::make_tuple(128, 256u, 129u, 2048u,   2u,   2u),
+        std::make_tuple(128,   1u,   1u,  128u,   1u,   1u),
+        // Other tile extents divide the same way.
+        std::make_tuple( 32, 256u, 256u, 2048u,   8u,   8u),
+        std::make_tuple( 32, 100u, 256u, 2048u,   4u,   8u)
+    )
+);
+
+// mxBlockFree == 0 would be a division by zero for every reader; setMXScaleA/B
+// clamp it to 1, which is the no-tiling layout.
+TEST(MXScaleFreeTile, ZeroTileExtentClampsToOne)
+{
+    auto problem = makeMXProblem(256, 256, 2048, 128, 1, true, false,
+                                 /*padScaleTensorFreeDim=*/false, /*mxBlockFree=*/0);
+
+    EXPECT_EQ(problem.mxBlockFreeA(), 1u);
+    EXPECT_EQ(problem.mxBlockFreeB(), 1u);
+    EXPECT_EQ(problem.mxsa().sizes()[1], 256u);
+    EXPECT_EQ(problem.mxsb().sizes()[1], 256u);
+}
+
+// On the padded (non-gfx1250) path the tile divide happens first and the
+// round-up to 32 applies to the already-divided count, not to M/N.
+TEST(MXScaleFreeTile, TileDivideHappensBeforeFreeDimensionPadding)
+{
+    auto problem = makeMXProblem(256, 512, 2048, 128, 1, true, false,
+                                 /*padScaleTensorFreeDim=*/true, /*mxBlockFree=*/128);
+
+    // ceil(256/128) = 2 -> 32, ceil(512/128) = 4 -> 32
+    EXPECT_EQ(problem.mxsa().sizes()[1], 32u);
+    EXPECT_EQ(problem.mxsb().sizes()[1], 32u);
 }

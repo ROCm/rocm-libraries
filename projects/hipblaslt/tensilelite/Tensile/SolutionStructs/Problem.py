@@ -506,9 +506,16 @@ _defaultProblemType = {
     "SwizzleTensorB": False,
     "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
     "MetadataLayout": 0,
-    # MX Block
+    # MX Block: extent of one MX scaling block along the bound (K) dimension.
+    # A config may also write it as a [free, k] list, which normalizeMXBlockTile
+    # splits into these keys.
     "MXBlockA": 0,
     "MXBlockB": 0,
+    # Extent of the same block along the *free* dimension (M for A, N for B),
+    # so the pair describes a MXBlockFree x MXBlock scaling tile. The 1 default
+    # is the 1xMXBlock shape: one scale per (row, K-block).
+    "MXBlockFreeA": 1,
+    "MXBlockFreeB": 1,
     "DataTypeMXSA": "E8",
     "DataTypeMXSB": "E8",
 }
@@ -768,6 +775,27 @@ _expectedProblemTypeParamTypes = {
 }
 
 
+def normalizeMXBlockTile(state, ab: str, srcFile: str = ""):
+  """Split the optional list form of ``MXBlock<ab>`` into its two int keys.
+
+  The scaling tile is written innermost (bound) extent last, so ``[k]`` -- or a
+  bare ``k`` -- is one scale per (row, k K-elements) and ``[free, k]`` shares
+  that scale across ``free`` free-dimension elements. Everything downstream
+  reads ``MXBlock<ab>`` as an int, so normalize before the type gate runs.
+  """
+  from Tensile.Common.TypeValidationErrors import ConfigTypeError
+
+  key = "MXBlock" + ab
+  tile = state[key]
+  if not isinstance(tile, (list, tuple)):
+    return
+  if len(tile) not in (1, 2):
+    raise ConfigTypeError(
+        f"{srcFile}: ProblemType.{key} = {list(tile)}: expected [k] or [free, k]")
+  state[key] = tile[-1]
+  state["MXBlockFree" + ab] = tile[0] if len(tile) == 2 else 1
+
+
 def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: bool = True,
                                        keyPathPrefix: str = "ProblemType"):
   """Validate that every ProblemType parameter has the correct Python type.
@@ -845,6 +873,10 @@ class ProblemType(Mapping):
 
     for key in _defaultProblemType:
       assignParameterWithDefault(self.state, key, config, _defaultProblemType)
+
+    # Must precede the type gate, which only accepts the int form.
+    normalizeMXBlockTile(self.state, "A", srcFile)
+    normalizeMXBlockTile(self.state, "B", srcFile)
 
     # Validate parameter types against the _defaultProblemType registry
     validateProblemTypeParameterTypes(
@@ -1308,11 +1340,19 @@ class ProblemType(Mapping):
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
 
+    # "<free>x" is prefixed only for a 2D scaling tile, so every kernel name
+    # generated before MXBlockFree* existed is unchanged.
     if self["MXBlockA"]:
-      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + str(self["MXBlockA"]))
+      tile = str(self["MXBlockA"])
+      if self["MXBlockFreeA"] != 1:
+        tile = str(self["MXBlockFreeA"]) + "x" + tile
+      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + tile)
 
     if self["MXBlockB"]:
-      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
+      tile = str(self["MXBlockB"])
+      if self["MXBlockFreeB"] != 1:
+        tile = str(self["MXBlockFreeB"]) + "x" + tile
+      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + tile)
 
     if self["SwizzleTensorA"]:
       name.append("STA")

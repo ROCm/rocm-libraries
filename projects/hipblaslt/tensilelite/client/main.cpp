@@ -232,6 +232,8 @@ namespace TensileLite
                 ("f32-xdl-math-op",          po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Use xf32 compute for float input and output matrices.")
                 ("mx-a-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix A")
                 ("mx-b-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix B")
+                ("mx-a-free-block",          po::value<int>()->default_value(1), "free-dimension (M) extent of one mx scaling tile for matrix A; 1 = one scale per row")
+                ("mx-b-free-block",          po::value<int>()->default_value(1), "free-dimension (N) extent of one mx scaling tile for matrix B; 1 = one scale per column")
                 ("mx-a-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix A")
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")

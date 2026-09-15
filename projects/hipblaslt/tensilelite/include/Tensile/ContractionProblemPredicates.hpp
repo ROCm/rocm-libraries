@@ -3155,6 +3155,77 @@ namespace TensileLite
                 }
             };
 
+            // Free-dimension extent of the MX scaling tile. Without these a
+            // 128x128 problem could match a 1x128 solution, since MXBlockA/B only
+            // constrain the K extent.
+            struct MXBlockFreeA
+                : public Predicate_CRTP<MXBlockFreeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeA() = default;
+                MXBlockFreeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeA(), "==", "sol", value);
+                }
+            };
+
+            struct MXBlockFreeB
+                : public Predicate_CRTP<MXBlockFreeB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeB() = default;
+                MXBlockFreeB(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeB(), "==", "sol", value);
+                }
+            };
+
             struct DataTypeMXSA
                 : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
             {
