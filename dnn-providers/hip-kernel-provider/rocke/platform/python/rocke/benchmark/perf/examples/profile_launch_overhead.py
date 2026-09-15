@@ -143,7 +143,12 @@ def segment_costs(fn: Callable[[], Any], n: int, segments: int = 4) -> List[floa
 
 
 def in_chunk_stepup(
-    fn: Callable[[], Any], n: int, segments: int = 4, tol: float = 1.15
+    fn: Callable[[], Any],
+    n: int,
+    segments: int = 4,
+    tol: float = 1.15,
+    reps: int = 5,
+    drain: Callable[[], None] = None,
 ) -> Dict[str, Any]:
     """Back-pressure detector INSIDE one undrained chunk.
 
@@ -152,14 +157,27 @@ def in_chunk_stepup(
     signature of a queue filling up. A saturated queue produces a flat
     across-chunk series (every chunk saturates the same way) and a rising
     within-chunk one, so this is the check that catches it.
+
+    Min over `reps` per segment, for the same reason :func:`micro` does it: one
+    timing of a segment measures the segment plus whatever else the machine did
+    during it. A shared node injects stalls large enough to move a single
+    sample past `tol`, and this check's job is to invalidate a run -- a false
+    positive throws away a good measurement. Back-pressure is systematic, so it
+    survives the minimum; a scheduler stall does not.
     """
-    seg = segment_costs(fn, n, segments)
-    ratio = (seg[-1] / seg[0]) if seg[0] else float("nan")
+    best: List[float] = []
+    for _ in range(max(1, reps)):
+        if drain is not None:
+            drain()
+        seg = segment_costs(fn, n, segments)
+        best = seg if not best else [min(p, q) for p, q in zip(best, seg)]
+    ratio = (best[-1] / best[0]) if best[0] else float("nan")
     return {
         "checked": True,
-        "segments_us": seg,
-        "first_segment_us": seg[0],
-        "last_segment_us": seg[-1],
+        "reps": max(1, reps),
+        "segments_us": best,
+        "first_segment_us": best[0],
+        "last_segment_us": best[-1],
         "ratio": ratio,
         "back_pressured": bool(ratio > tol),
     }
@@ -171,6 +189,7 @@ def chunk_size_sensitivity(
     small: int,
     large: int,
     tol: float = 1.15,
+    reps: int = 5,
 ) -> Dict[str, Any]:
     """Does per-launch cost depend on how long we go between drains?
 
@@ -178,6 +197,10 @@ def chunk_size_sensitivity(
     once. If the larger chunk is more expensive per launch, the extra time is
     the device throttling the queue, and any host-overhead number taken at that
     chunk size includes device time.
+
+    Min over `reps` at each size -- see :func:`in_chunk_stepup`. Measured on a
+    shared node, a single timing of each size false-positives whenever a stall
+    lands in the numerator and not the denominator.
     """
 
     def per_launch(count: int) -> float:
@@ -190,11 +213,12 @@ def chunk_size_sensitivity(
         drain()
         return out
 
-    small_us = per_launch(small)
-    large_us = per_launch(large)
+    small_us = min(per_launch(small) for _ in range(max(1, reps)))
+    large_us = min(per_launch(large) for _ in range(max(1, reps)))
     ratio = (large_us / small_us) if small_us else float("nan")
     return {
         "checked": True,
+        "reps": max(1, reps),
         "small_chunk": small,
         "large_chunk": large,
         "small_us_per_launch": small_us,
@@ -255,6 +279,8 @@ def substitute_share(
     swap: Sequence[Tuple[float, float]] = (),
     pack_target_armA_us: float = None,
     pack_target_armB_us: float = None,
+    noise_floor_us: float = None,
+    rel_tol: float = 0.005,
 ) -> Dict[str, float]:
     """Packing's share of the launch path, optionally for a DIFFERENT signature.
 
@@ -283,8 +309,15 @@ def substitute_share(
 
     `remainder_residual_us` is the model's own consistency check: the two arms
     differ only in their packer, so their non-packing remainders should agree.
-    A residual larger than the run's noise floor means that assumption does not
-    hold and the modelled share should not be quoted.
+    Pass `noise_floor_us` to have that judged here -- `remainder_within_tol`
+    then says whether the modelled share is safe to quote.
+
+    The tolerance is `max(noise_floor_us, rel_tol * remainder)`, NOT the noise
+    floor alone. Against the floor alone the check gets HARDER to pass the
+    quieter the run: a very quiet run drives the floor toward zero, so an
+    absolutely negligible residual (0.009 us on a ~9 us remainder, 0.1%) reads
+    as a 4x violation. A relative term floors the tolerance at a residual
+    genuinely too small to matter.
     """
     remainder_armA = total_armA_us - pack_armA_us
     remainder_armB = total_armB_us - pack_armB_us
@@ -301,12 +334,18 @@ def substitute_share(
     else:
         nonpack = remainder_armB
         tA, tB = total_armA_us, total_armB_us
+    residual = remainder_armA - remainder_armB
+    tolerance = max(noise_floor_us or 0.0, rel_tol * abs(remainder_armB))
     return {
         "model_estimate": modelled,
         "nonpacking_us": nonpack,
         "remainder_armA_us": remainder_armA,
         "remainder_armB_us": remainder_armB,
-        "remainder_residual_us": remainder_armA - remainder_armB,
+        "remainder_residual_us": residual,
+        "remainder_tolerance_us": tolerance,
+        "remainder_within_tol": (
+            None if noise_floor_us is None else bool(abs(residual) <= tolerance)
+        ),
         "packing_us_armA": pa,
         "packing_us_armB": pb,
         "total_us_armA": tA,
@@ -644,7 +683,7 @@ def main(argv: Sequence[str] = None) -> int:
         launcher._packer = packers["B"]
         drain()
         d["in_chunk_stepup"] = in_chunk_stepup(
-            lambda: launcher(values, config=cfg), args.chunk_size
+            lambda: launcher(values, config=cfg), args.chunk_size, drain=drain
         )
         drain()
         d["chunk_size_sensitivity"] = chunk_size_sensitivity(
@@ -735,7 +774,11 @@ def main(argv: Sequence[str] = None) -> int:
     for dname in ("D1_explicit_stream", "D2_default_stream0"):
         w = R["wall_clock"][dname]["summary"]["p10_us"]
         R["derived"][dname] = substitute_share(
-            w["armA_us"], w["armB_us"], comp["pack_args_us"], comp["compile_packer_us"]
+            w["armA_us"],
+            w["armB_us"],
+            comp["pack_args_us"],
+            comp["compile_packer_us"],
+            noise_floor_us=w["noise_floor_us"],
         )
         R["derived"][dname].update(
             {

@@ -32,6 +32,17 @@ def _saturating(cost_us=8.0, free=50, blocked_us=40.0):
     return fn, state
 
 
+def _fixed_cost(us):
+    """A call whose cost does not depend on how often it is called."""
+
+    def fn():
+        end = ex.PERF() + us * 1e-6
+        while ex.PERF() < end:
+            pass
+
+    return fn
+
+
 class TestSigShape(unittest.TestCase):
     def test_kernarg_layout_matches_the_alignment_rule(self):
         # 11 pointers (88 B) then an i32 at offset 88: already 4-aligned, so
@@ -108,6 +119,25 @@ class TestSubstituteShare(unittest.TestCase):
             with_swap["nonpacking_us"], numerator_only["nonpacking_us"] + 0.27
         )
 
+    def test_residual_tolerance_does_not_tighten_as_the_run_gets_quieter(self):
+        """A quieter run drives the noise floor toward zero. Judged against the
+        floor alone, a residual of 0.1% of the remainder then reads as a 4x
+        violation -- the check would get harder to pass the better the
+        measurement. The relative term floors it."""
+        quiet = ex.substitute_share(
+            9.009, 9.0, 1.0, 1.0, noise_floor_us=0.0023  # residual 0.009 us on 8 us
+        )
+        self.assertTrue(quiet["remainder_within_tol"])
+        self.assertGreater(quiet["remainder_tolerance_us"], 0.0023)
+        # A residual that is genuinely large still fails.
+        skewed = ex.substitute_share(10.0, 9.0, 1.0, 1.0, noise_floor_us=0.0023)
+        self.assertFalse(skewed["remainder_within_tol"])
+        # Without a noise floor the helper reports the residual and judges
+        # nothing, so a caller cannot read a verdict that was never computed.
+        self.assertIsNone(
+            ex.substitute_share(10.0, 9.0, 1.0, 1.0)["remainder_within_tol"]
+        )
+
 
 class TestBackPressureDetection(unittest.TestCase):
     """Async enqueue is only a host clock while the host outruns the device."""
@@ -130,13 +160,49 @@ class TestBackPressureDetection(unittest.TestCase):
     def test_chunk_size_sensitivity_catches_cost_growing_with_chunk(self):
         # Pure host work cannot care how long we go between drains.
         fn, state = _saturating(free=30)
-        out = ex.chunk_size_sensitivity(fn, lambda: state.update(n=0), 20, 200)
+        out = ex.chunk_size_sensitivity(fn, lambda: state.update(n=0), 20, 200, reps=1)
         self.assertTrue(out["back_pressured"])
+        # A path whose cost does not depend on the drain interval stays quiet.
+        # The fixture spends a fixed 3 us per call so per-call cost is set by
+        # the work, not by loop overhead that scales with iteration count.
         self.assertFalse(
-            ex.chunk_size_sensitivity(lambda: None, lambda: None, 200, 2000)[
+            ex.chunk_size_sensitivity(_fixed_cost(3.0), lambda: None, 50, 200)[
                 "back_pressured"
             ]
         )
+
+    def test_one_stall_trips_the_single_sample_gate_but_not_min_of_reps(self):
+        """Both gates invalidate a run, so a false positive throws away a good
+        measurement. Timing each size exactly once, one scheduler stall in the
+        large-chunk timing is enough to fire -- which is what was observed on a
+        shared node. Min-of-reps keeps a systematic effect and drops a one-off,
+        the same reason micro() takes a minimum.
+
+        Call 100 is chosen so the stall lands in the LARGE timing at reps=1
+        (small takes calls 1-50, large 51-250) and in a discarded SMALL rep at
+        reps=5 (small takes 1-250 across five reps, large starts at 251)."""
+
+        def stalling_fixture(stall_on=100, stall_us=400.0):
+            state = {"call": 0}
+
+            def fn():
+                state["call"] += 1
+                if state["call"] == stall_on:
+                    end = ex.PERF() + stall_us * 1e-6
+                    while ex.PERF() < end:
+                        pass
+
+            return fn
+
+        single = ex.chunk_size_sensitivity(
+            stalling_fixture(), lambda: None, 50, 200, reps=1
+        )
+        self.assertTrue(single["back_pressured"])
+        repeated = ex.chunk_size_sensitivity(
+            stalling_fixture(), lambda: None, 50, 200, reps=5
+        )
+        self.assertFalse(repeated["back_pressured"])
+        self.assertEqual(repeated["reps"], 5)
 
 
 if __name__ == "__main__":
