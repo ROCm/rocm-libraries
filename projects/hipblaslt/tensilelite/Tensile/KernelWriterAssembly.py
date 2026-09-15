@@ -2763,8 +2763,9 @@ class KernelWriterAssembly(KernelWriter):
 
   def disableWmmaArbStall(self) -> Module:
     mod = Module()
-    if self.states.archCaps["HasWmmaArbStallBit"]:
-      mod.add(SSetRegIMM32B32(HWRegContainer(reg="26", value=[4, 1]), src=1, comment="Disable WMMA arb stall"))
+    bitPos = self.states.archCaps["WmmaArbStallBitOffset"]
+    if bitPos >= 0:
+      mod.add(SSetRegIMM32B32(HWRegContainer(reg="26", value=[bitPos, 1]), src=1, comment="Disable WMMA arb stall"))
     return mod
 
   def defineAndResources(self, kernel, tPA, tPB, tPM):
