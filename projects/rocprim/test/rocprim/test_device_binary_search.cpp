@@ -95,13 +95,23 @@ using Params = ::testing::Types<
 
 struct RocprimDeviceBinarySearchNameGenerator
 {
+    // A unique token per distinct config
+    template<class Config>
+    static std::string config_tag()
+    {
+        if constexpr(std::is_same_v<Config, ::rocprim::default_config>) return "";
+        else if constexpr(std::is_same_v<Config, use_custom_config>) return "_CfgCustom";
+        else
+            static_assert(dependent_false<Config>::value,
+                          "config_tag: add a unique token for this config");
+    }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
         std::string n = type_tag<typename Params::haystack_type>() + "_"
                         + type_tag<typename Params::needle_type>();
-        if constexpr(std::is_same_v<typename Params::config, use_custom_config>)
-            n += "_Cfg";
+        n += config_tag<typename Params::config>();
         if constexpr(Params::use_graphs)
             n += "_Graphs";
         return n;

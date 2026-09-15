@@ -168,6 +168,19 @@ struct RocprimDeviceSortTestsNameGenerator
             return type_tag<T>();
     }
 
+    // A unique token per distinct config
+    template<class Config>
+    static std::string config_tag()
+    {
+        if constexpr(std::is_same_v<Config, ::rocprim::default_config>) return "";
+        else if constexpr(std::is_same_v<Config,
+                                         ::rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>)
+            return "_CfgMs128";
+        else
+            static_assert(dependent_false<Config>::value,
+                          "config_tag: add a unique token for this config");
+    }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
@@ -175,7 +188,7 @@ struct RocprimDeviceSortTestsNameGenerator
                         + type_tag_or_custom<typename Params::value_type>();
         if constexpr(Params::use_graphs) n += "_Graphs";
         if constexpr(Params::use_indirect_iterator) n += "_Indirect";
-        if constexpr(!std::is_same_v<typename Params::config, ::rocprim::default_config>) n += "_Cfg";
+        n += config_tag<typename Params::config>();
         return n;
     }
 };

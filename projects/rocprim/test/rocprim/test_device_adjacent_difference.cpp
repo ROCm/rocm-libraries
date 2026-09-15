@@ -236,10 +236,14 @@ struct RocprimDeviceAdjacentDifferenceTestsNameGenerator
                         + (Params::left ? "Left" : "Right") + "_"
                         + adjacent_difference_alias_tag(Params::aliasing);
         using cfg = typename Params::config;
-        if constexpr(std::is_same_v<cfg, custom_config_0>) n += "_Cfg0";
+        if constexpr(std::is_same_v<cfg, rocprim::default_config>) { /* no suffix */ }
+        else if constexpr(std::is_same_v<cfg, custom_config_0>) n += "_Cfg0";
         else if constexpr(std::is_same_v<cfg, custom_size_limit_config<64>>) n += "_Sl64";
         else if constexpr(std::is_same_v<cfg, custom_size_limit_config<8192>>) n += "_Sl8192";
         else if constexpr(std::is_same_v<cfg, custom_size_limit_config<10240>>) n += "_Sl10240";
+        else
+            static_assert(dependent_false<cfg>::value,
+                          "adjacent_difference config: add a unique token for this config");
         if constexpr(Params::use_identity_iterator) n += "_Ident";
         if constexpr(Params::use_graphs) n += "_Graphs";
         if constexpr(Params::use_indirect_iterator) n += "_Indirect";

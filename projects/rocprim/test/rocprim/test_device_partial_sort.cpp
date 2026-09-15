@@ -192,13 +192,46 @@ struct RocprimDevicePartialSortTestsNameGenerator
         else return type_tag<U>();
     }
 
+    // A unique token per distinct config
+    template<class Config>
+    static std::string config_tag()
+    {
+        if constexpr(std::is_same_v<Config, ::rocprim::default_config>) return "";
+        else if constexpr(std::is_same_v<
+                              Config,
+                              ::rocprim::partial_sort_config<::rocprim::nth_element_config<
+                                  128,
+                                  4,
+                                  32,
+                                  16,
+                                  ::rocprim::block_radix_rank_algorithm::basic>>>)
+            return "_CfgNth128";
+        else
+            static_assert(dependent_false<Config>::value,
+                          "config_tag: add a unique token for this config");
+    }
+
+    // A unique token per distinct decomposer
+    template<class Decomposer>
+    static std::string decomposer_tag()
+    {
+        if constexpr(std::is_same_v<Decomposer, ::rocprim::identity_decomposer>) return "";
+        else if constexpr(std::is_same_v<
+                              Decomposer,
+                              test_utils::custom_test_type_decomposer<
+                                  common::custom_type<int, int, true>>>)
+            return "_DecompCustomInt2";
+        else
+            static_assert(dependent_false<Decomposer>::value,
+                          "decomposer_tag: add a unique token for this decomposer");
+    }
+
     template<class Params>
     static std::string GetName(int /*index*/)
     {
         std::string n = type_tag_or_custom<typename Params::key_type>();
-        if constexpr(!std::is_same_v<typename Params::config, ::rocprim::default_config>) n += "_Cfg";
-        if constexpr(!std::is_same_v<typename Params::decomposer, ::rocprim::identity_decomposer>)
-            n += "_Decomp";
+        n += config_tag<typename Params::config>();
+        n += decomposer_tag<typename Params::decomposer>();
         if constexpr(Params::use_graphs) n += "_Graphs";
         if constexpr(Params::use_indirect_iterator) n += "_Indirect";
         return n;
