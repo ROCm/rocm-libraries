@@ -11,7 +11,7 @@ import type {
 /**
  * Projects a run into the shape the timeline draws. Pure: no React, no IPC, no
  * clock — the same input always yields the same output, which is what makes it
- * the tested seam of the Authoring tab.
+ * the tested seam of the Implement tab.
  *
  * It decides *layout*, never *meaning*. Every string it carries is either read
  * out of the run or assembled from numbers the run reported; nothing here

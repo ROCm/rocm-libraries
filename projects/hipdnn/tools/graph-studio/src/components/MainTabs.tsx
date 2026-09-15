@@ -1,6 +1,6 @@
 import { useRef } from "react";
 
-export type TabId = "create" | "authoring" | "implement" | "verify";
+export type TabId = "create" | "implement" | "verify";
 
 interface Tab {
   id: TabId;
@@ -9,7 +9,6 @@ interface Tab {
 
 const TABS: readonly Tab[] = [
   { id: "create", label: "Create" },
-  { id: "authoring", label: "Authoring" },
   { id: "implement", label: "Implement" },
   { id: "verify", label: "Verify" },
 ];
