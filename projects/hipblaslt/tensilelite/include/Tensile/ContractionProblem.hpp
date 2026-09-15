@@ -1265,14 +1265,26 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
+        /// mxBlockFree is the extent of one scaling tile along the free dimension
+        /// (M for A, N for B); mxBlock is its extent along the bound (K)
+        /// dimension. mxBlockFree == 1 is the original 1xmxBlock layout, one
+        /// scale per (row, K-block).
+        void setMXScaleA(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> saStride              = {},
+                         bool                padScaleTensorFreeDim = true,
+                         int                 mxBlockFree           = 1);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
+        void setMXScaleB(rocisa::DataType    mxType,
+                         int                 mxBlock,
+                         std::vector<size_t> sbStride              = {},
+                         bool                padScaleTensorFreeDim = true,
+                         int                 mxBlockFree           = 1);
 
         rocisa::DataType mxTypeB() const
         {
@@ -1337,6 +1349,19 @@ namespace TensileLite
         size_t mxBlockB() const
         {
             return m_mxBlockB;
+        }
+
+        /// Extent of one scaling tile along the free dimension: M for A, N for
+        /// B. 1 means one scale per row/column, the layout that predates 2D MX
+        /// scaling. Never 0, so callers can divide by it unconditionally.
+        size_t mxBlockFreeA() const
+        {
+            return m_mxBlockFreeA;
+        }
+
+        size_t mxBlockFreeB() const
+        {
+            return m_mxBlockFreeB;
         }
 
         /// Allocated elements excluding batch dimensions
@@ -1615,6 +1640,8 @@ namespace TensileLite
         int              m_metadataLayout          = 0;
         int              m_mxBlockA                = 0;
         int              m_mxBlockB                = 0;
+        int              m_mxBlockFreeA            = 1;
+        int              m_mxBlockFreeB            = 1;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
 
