@@ -898,7 +898,7 @@ namespace rocsparse
             m_tsizes[buffer]    = buffer_size_;
         }
 
-        buffer_layout_inplace_t() {};
+        buffer_layout_inplace_t(){};
 
     private:
         void*  m_buffer{};
@@ -1628,7 +1628,8 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_async_inplace>
                 RETURN_IF_ROCSPARSE_ERROR(
                     (compute_iter<BLOCKSIZE, T, I, J>::light_run)(handle_,
                                                                   options_,
-                                                                  nmaxiter_[0] + nmaxiter_[0] * nfreeiter_,
+                                                                  nmaxiter_[0] 
+                                                                      + nmaxiter_[0] * nfreeiter_,
                                                                   m_,
                                                                   nnz_,
                                                                   ptr_,
