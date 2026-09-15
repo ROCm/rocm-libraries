@@ -122,12 +122,17 @@ inline auto quantizing_store(DType dt) {
 //   convention.
 // sd and dd differ only when the op converts layout; the source is sampled through sd's strides
 // and the result written through dd's, so the transpose needs no special-casing here.
+//
+// borderMode selects what a sample outside the ROI rectangle resolves to (see
+// framework/interpolation.hpp). It defaults to Constant, whose value is the dtype's black, which
+// is the only behaviour any op used before the mode existed -- so an op opts in to replicate/
+// wrap/reflect deliberately, and no golden changes until one does.
 template <typename T, typename InvMap>
 void geometric_reference(const T* src, const RpptDesc& sd, T* dst, const RpptDesc& dd, DType dt,
                          const RpptROI* roi, RpptRoiType roiType,
                          const std::vector<OutSize>& outSize, RpptInterpolationType interp,
-                         InvMap invMap) {
-    const double border = dtype_black(dt);
+                         InvMap invMap, BorderMode borderMode = BorderMode::Constant) {
+    const Border border{borderMode, dtype_black(dt)};
     for_each_roi_plane(
         sd, dd, roi, roiType,
         [&](Rpp32u n, const RoiBounds& b, Rpp32u, std::size_t srcBase, std::size_t dstBase) {
