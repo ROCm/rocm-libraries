@@ -1151,9 +1151,19 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
     spec = _spec(head_size=64, dtype="bf16", waves_per_eu=4)
     kernel = build_attention_dense(spec, arch="gfx942")
     assert kernel.attrs.get("waves_per_eu") == 4
-    # anchored on the full baked suffix, not a bare "_wpe4" (which "_wpe14" would
-    # also match): batch + arch + wpe are all part of the identity.
-    assert gfx942_kernel_name(spec).endswith("_gfx942_b1_wpe4")
+    # Anchored on the full suffix, not a bare "_wpe4" (which "_wpe14" would also
+    # match). The batch token is present only OFF the runtime-shape path: there
+    # batch is a kernel param, sizes nothing baked, and keeping it in the symbol
+    # would give two specs sharing ONE cache key two different names. Asserted
+    # both ways so this stays a name-identity check rather than drifting into an
+    # unintended assertion about which path the spec is on.
+    assert spec.runtime_shape
+    assert gfx942_kernel_name(spec).endswith("_gfx942_wpe4")
+    assert "_b1" not in gfx942_kernel_name(spec)
+
+    baked = dataclasses.replace(spec, persistent=True, num_persistent=64)
+    assert not baked.runtime_shape
+    assert gfx942_kernel_name(baked).endswith("_gfx942_b1_wpe4")
 
 
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
