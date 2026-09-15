@@ -72,7 +72,7 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
+                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -297,6 +297,9 @@ class ProblemType:
 
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
+        # Free-dimension extent of the scaling tile; 1 == the original 1xMXBlock.
+        rv.mxBlockFreeA = d.get('MXBlockFreeA', 1)
+        rv.mxBlockFreeB = d.get('MXBlockFreeB', 1)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
         # mxScaleFormat is a Solution-level parameter and is populated by
@@ -433,9 +436,11 @@ class ProblemType:
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
                 predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+                predicates.append(ProblemPredicate("MXBlockFreeA", value=self.mxBlockFreeA))
             predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
+                predicates.append(ProblemPredicate("MXBlockFreeB", value=self.mxBlockFreeB))
         return predicates
 
 def extractDimPredicate(cls, key, value, predicateName):

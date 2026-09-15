@@ -59,6 +59,8 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
+            , m_mxBlockFreeA(args["mx-a-free-block"].as<int>())
+            , m_mxBlockFreeB(args["mx-b-free-block"].as<int>())
             , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
@@ -525,11 +527,11 @@ namespace TensileLite
                             rv.back().setUseDeviceUserArguments(m_useUserArgs);
                             if(m_mxBlockA)
                             {
-                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleA(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSA], m_mxBlockA, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeA);
                             }
                             if(m_mxBlockB)
                             {
-                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim);
+                                rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim, m_mxBlockFreeB);
                             }
                             // StreamK=5 hybrid-mode toggle. Accepts the full
                             // tri-state {0=OFF (static), 1=ON (dynamic per-XCD

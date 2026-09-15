@@ -23,7 +23,8 @@ namespace
                                          size_t           M,
                                          size_t           N,
                                          size_t           K,
-                                         int              mxBlock)
+                                         int              mxBlock,
+                                         int              mxBlockFree = 1)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                             false,
@@ -45,8 +46,10 @@ namespace
                                                             M * N,
                                                             0.0);
 
-        problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
-        problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
+        problem.setMXScaleA(
+            rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false, mxBlockFree);
+        problem.setMXScaleB(
+            rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false, mxBlockFree);
         problem.setComputeInputTypeA(typeA);
         problem.setComputeInputTypeB(typeB);
         problem.setAlphaType(rocisa::DataType::Float);
@@ -463,6 +466,180 @@ TEST(ReferenceMXBlock128Demo, Block128EqualsBlock32WithReplicatedScales)
 
     for(size_t i = 0; i < d128.size(); ++i)
         ASSERT_FLOAT_EQ(d128[i], d32[i]) << "at index " << i;
+}
+
+// ============================================================================
+// 2D scaling tile (MXBlockFreeA / MXBlockFreeB)
+//
+// mxBlockFree free-dimension elements share one scale, so the scale tensor's
+// free dimension holds ceil(M/mxBlockFree) (resp. ceil(N/mxBlockFree)) entries
+// and the reference divides the free coordinate before indexing it.
+//
+// The defining property, mirroring Block128EqualsBlock32WithReplicatedScales
+// along the other axis: a 128x128 tile must be exactly equivalent to the same
+// scale replicated across 128 rows of a 1x128 tensor. The two runs build
+// independent problems over identical data, so an off-by-grouping in the free
+// direction cannot hide. Both the fast and the slow path are checked, since
+// they index the scale tensor through completely separate code.
+// ============================================================================
+
+namespace
+{
+    // M, N, K, mxBlockFree
+    using FreeTileParam = std::tuple<size_t, size_t, size_t, int>;
+}
+
+class ReferenceMXFreeTileTest : public ::testing::TestWithParam<FreeTileParam>
+{
+};
+
+TEST_P(ReferenceMXFreeTileTest, EqualsReplicatedPerRowScales)
+{
+    auto [M, N, K, mxBlockFree] = GetParam();
+    const int    mxBlock = 128;
+    const size_t kBlocks = K / mxBlock;
+
+    auto pTile = makeMXProblem(rocisa::DataType::Float8,
+                               rocisa::DataType::Float8,
+                               M, N, K, mxBlock, mxBlockFree);
+    auto pFlat = makeMXProblem(
+        rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
+
+    const size_t tilesM = (M + mxBlockFree - 1) / mxBlockFree;
+    const size_t tilesN = (N + mxBlockFree - 1) / mxBlockFree;
+
+    // NN layout: mxsa is {free, kBlock}, mxsb is {kBlock, free}.
+    ASSERT_EQ(pTile.mxsa().sizes()[0], tilesM);
+    ASSERT_EQ(pTile.mxsa().sizes()[1], kBlocks);
+    ASSERT_EQ(pTile.mxsb().sizes()[0], kBlocks);
+    ASSERT_EQ(pTile.mxsb().sizes()[1], tilesN);
+    ASSERT_EQ(pFlat.mxsa().sizes()[0], M);
+    ASSERT_EQ(pFlat.mxsb().sizes()[1], N);
+
+    std::vector<Float8> a(M * K);
+    std::vector<Float8> b(K * N);
+    std::vector<float>  c(M * N, 0.0f);
+    std::vector<float>  dTileFast(M * N, 0.0f), dTileSlow(M * N, 0.0f);
+    std::vector<float>  dFlatFast(M * N, 0.0f);
+
+    std::mt19937 gen(31337);
+    fillBinary(a, gen);
+    fillBinary(b, gen);
+
+    std::vector<E8> saTile(pTile.mxsa().totalAllocatedElements(), E8(1.0f));
+    std::vector<E8> sbTile(pTile.mxsb().totalAllocatedElements(), E8(1.0f));
+    std::vector<E8> saFlat(pFlat.mxsa().totalAllocatedElements(), E8(1.0f));
+    std::vector<E8> sbFlat(pFlat.mxsb().totalAllocatedElements(), E8(1.0f));
+
+    // E8 is UE8M0, so every scale must be an exact power of two. Vary with both
+    // the free tile and the K block so a swapped index would change the result.
+    auto tileScale = [](size_t tile, size_t j) {
+        return std::ldexp(1.0f, (int)((tile + 2 * j) % 5) - 2);
+    };
+
+    auto const saTileStride = pTile.mxsa().strides();
+    auto const sbTileStride = pTile.mxsb().strides();
+    auto const saFlatStride = pFlat.mxsa().strides();
+    auto const sbFlatStride = pFlat.mxsb().strides();
+
+    for(size_t j = 0; j < kBlocks; ++j)
+    {
+        for(size_t t = 0; t < tilesM; ++t)
+            saTile[t * saTileStride[0] + j * saTileStride[1]] = E8(tileScale(t, j));
+        for(size_t t = 0; t < tilesN; ++t)
+            sbTile[j * sbTileStride[0] + t * sbTileStride[1]] = E8(tileScale(t, j));
+
+        // The flat tensor repeats each tile's scale across its mxBlockFree rows.
+        for(size_t m = 0; m < M; ++m)
+            saFlat[m * saFlatStride[0] + j * saFlatStride[1]]
+                = E8(tileScale(m / mxBlockFree, j));
+        for(size_t n = 0; n < N; ++n)
+            sbFlat[j * sbFlatStride[0] + n * sbFlatStride[1]]
+                = E8(tileScale(n / mxBlockFree, j));
+    }
+
+    ContractionInputs inTileFast(a.data(), b.data(), c.data(), dTileFast.data(), 1.0f, 0.0f);
+    inTileFast.mxsa = saTile.data();
+    inTileFast.mxsb = sbTile.data();
+    ContractionInputs inTileSlow(a.data(), b.data(), c.data(), dTileSlow.data(), 1.0f, 0.0f);
+    inTileSlow.mxsa = saTile.data();
+    inTileSlow.mxsb = sbTile.data();
+    ContractionInputs inFlatFast(a.data(), b.data(), c.data(), dFlatFast.data(), 1.0f, 0.0f);
+    inFlatFast.mxsa = saFlat.data();
+    inFlatFast.mxsb = sbFlat.data();
+
+    SolveGemmCPU(pTile, inTileFast, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+    SolveGemmCPU(pTile, inTileSlow, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
+    SolveGemmCPU(pFlat, inFlatFast, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+    for(size_t i = 0; i < dTileFast.size(); ++i)
+    {
+        ASSERT_FLOAT_EQ(dTileFast[i], dFlatFast[i])
+            << "tiled fast path disagrees with replicated scales at index " << i;
+        ASSERT_FLOAT_EQ(dTileSlow[i], dFlatFast[i])
+            << "tiled slow path disagrees with replicated scales at index " << i;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FreeTile,
+    ReferenceMXFreeTileTest,
+    ::testing::Values(
+        //              M,    N,    K, mxBlockFree
+        // mxBlockFree == 1 is the pre-existing layout; both problems are
+        // identical, so this is a pure regression guard.
+        std::make_tuple(64u,  64u, 256u,   1),
+        // Small tiles keep the test cheap while still exercising the divide.
+        std::make_tuple(64u,  64u, 256u,   4),
+        std::make_tuple(64u,  32u, 512u,  16),
+        // Free dimension not a multiple of the tile: the last tile is partial
+        // and covers fewer than mxBlockFree rows.
+        std::make_tuple(70u,  50u, 256u,  16),
+        // The shipping shape: 128x128.
+        std::make_tuple(256u, 256u, 256u, 128),
+        std::make_tuple(200u, 160u, 384u, 128)
+    )
+);
+
+// Hand-checkable 128x128: with all data and scales at 1 except a single tile,
+// the result splits into exactly four constant quadrants.
+TEST(ReferenceMXFreeTileDemo, SingleTileScaleAffectsOnlyItsQuadrant)
+{
+    const size_t M = 256, N = 256, K = 128;
+    const int    mxBlock = 128, mxBlockFree = 128;
+
+    auto problem = makeMXProblem(rocisa::DataType::Float8,
+                                 rocisa::DataType::Float8,
+                                 M, N, K, mxBlock, mxBlockFree);
+
+    ASSERT_EQ(problem.mxsa().sizes()[0], 2u);
+    ASSERT_EQ(problem.mxsb().sizes()[1], 2u);
+
+    std::vector<Float8> a(M * K, Float8(1.0f));
+    std::vector<Float8> b(K * N, Float8(1.0f));
+    std::vector<float>  c(M * N, 0.0f);
+    std::vector<float>  d(M * N, 0.0f);
+    std::vector<E8>     mxsa(problem.mxsa().totalAllocatedElements(), E8(1.0f));
+    std::vector<E8>     mxsb(problem.mxsb().totalAllocatedElements(), E8(1.0f));
+
+    // scaleA of the second row-tile is 4, scaleB of the second column-tile is 2.
+    //   D[m][n] = K * scaleA(m/128) * scaleB(n/128)
+    mxsa[1 * problem.mxsa().strides()[0]] = E8(4.0f);
+    mxsb[1 * problem.mxsb().strides()[1]] = E8(2.0f);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.mxsa = mxsa.data();
+    inputs.mxsb = mxsb.data();
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+    for(size_t m = 0; m < M; ++m)
+        for(size_t n = 0; n < N; ++n)
+        {
+            const float sa       = (m < 128) ? 1.0f : 4.0f;
+            const float sb       = (n < 128) ? 1.0f : 2.0f;
+            const float expected = (float)K * sa * sb;
+            ASSERT_FLOAT_EQ(d[m + n * M], expected) << "at m=" << m << " n=" << n;
+        }
 }
 
 // ============================================================================

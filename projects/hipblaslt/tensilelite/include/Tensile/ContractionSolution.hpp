@@ -1026,6 +1026,11 @@ namespace TensileLite
             int  metadataLayout             = 0;
             int  mxBlockA                   = 0;
             int  mxBlockB                   = 0;
+            // Free-dimension extent of the MX scaling tile (M for A, N for B).
+            // 1 == the original 1xmxBlock layout; absent from older logic files,
+            // where mapOptional leaves it at 1.
+            int  mxBlockFreeA               = 1;
+            int  mxBlockFreeB               = 1;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
 
