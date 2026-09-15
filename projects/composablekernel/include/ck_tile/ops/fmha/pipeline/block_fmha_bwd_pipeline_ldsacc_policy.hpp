@@ -18,19 +18,23 @@ namespace ck_tile {
 // index is a compile-time constant; the wait count falls out of the depth as
 // kTdmPerTile * (slots - 2) -- see the derivation in the pipeline.
 //
-// Default 2, i.e. no behaviour change. Deeper measured SLOWER on gfx1250,
-// b2h8 s4096 d128 bf16 nomask, 5 reps with the arm order rotated, correctness
-// 6/6, causal flat within 0.2% as the control:
+// Depth alone is not the lever. Measured on gfx1250, b2h8 s4096 d128 bf16
+// nomask, arm order rotated, causal flat as the control:
 //
 //     slots=2  0.7124 ms  (baseline)
 //     slots=3  0.7244 ms  -1.66%
 //     slots=4  0.8040 ms  -11.39%, and run-to-run spread widens 1% -> 8.6%
 //
-// So the depth is not the lever here -- but this is one shape on one box, and
-// b07-3 is memory-limited where c3-2 is closer to compute-bound, so the knob
-// stays rather than the code being reverted.
+// Default is nevertheless 3, because depth pairs with
+// CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE: that fold frees `s_wait_xcnt` but strips
+// the address VALU that was covering the TDM transfer, and the extra in-flight
+// tile covers it instead. Neither change wins alone (+0.2% and +1.1%); together
+// they are -2.18% nomask with causal neutral (n=8 interleaved, all valid).
+// Re-measured 2026-09-15 on b07-3; see the comment on DQ_STATIC_STRIDE in
+// kernel/fmha_bwd_kernel.hpp for the ATT stall counters. slots=4 was not
+// re-tested against the fold.
 #ifndef CK_TILE_FMHA_BWD_QDO_SLOTS
-#define CK_TILE_FMHA_BWD_QDO_SLOTS 2
+#define CK_TILE_FMHA_BWD_QDO_SLOTS 3
 #endif
 
 // Depth for masked instances, which do not benefit: the per-pixel mask VALU
