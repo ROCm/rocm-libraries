@@ -200,5 +200,25 @@ public:
     {
         return top_k;
     }
+
+    /**
+     * @brief Custom equality hook for MoE-grouped-matmul-specific attributes
+     *
+     * Compares the routing mode and top-k count — the fields that define the
+     * mathematical semantics of the operation rather than tensor layout, so
+     * logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const MoeGroupedMatmulAttributes& other) const
+    {
+        return mode == other.mode && top_k == other.top_k;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const MoeGroupedMatmulAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
+typedef MoeGroupedMatmulAttributes Moe_grouped_matmul_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

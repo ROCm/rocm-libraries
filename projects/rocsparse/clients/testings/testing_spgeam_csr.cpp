@@ -782,6 +782,300 @@ static void testing_spgeam_csr_extra_wrong_stages(const Arguments& arg)
 #undef PARAMS
 }
 
+//
+// This test walks the split symbolic/numeric pipeline and, at every stage,
+// exercises the invalid stage-transition error branches of spgeam_checkarg.
+// A failed (invalid) call returns rocsparse_status_invalid_value without
+// advancing the descriptor stage, so many invalid nexts can be probed from a
+// single valid pipeline position.
+//
+static void testing_spgeam_csr_extra_stage_transitions(const Arguments& arg)
+{
+    const int32_t              m       = 4;
+    const int32_t              n       = 4;
+    const int32_t              nnz_A   = 4;
+    const int32_t              nnz_B   = 4;
+    const float                h_alpha = 1.0f;
+    const float                h_beta  = 1.0f;
+    const rocsparse_index_base base_A  = rocsparse_index_base_zero;
+    const rocsparse_index_base base_B  = rocsparse_index_base_zero;
+    const rocsparse_index_base base_C  = rocsparse_index_base_zero;
+    const rocsparse_operation  trans_A = rocsparse_operation_none;
+    const rocsparse_operation  trans_B = rocsparse_operation_none;
+    const rocsparse_spgeam_alg alg     = rocsparse_spgeam_alg_default;
+    const rocsparse_datatype   ttype   = rocsparse_datatype_f32_r;
+
+    rocsparse_local_handle handle;
+    hipStream_t            stream = handle.get_stream();
+
+    // Simple diagonal A and B so C = A + B is well defined.
+    host_csr_matrix<float> hA(m, n, nnz_A, base_A);
+    host_csr_matrix<float> hB(m, n, nnz_B, base_B);
+    for(int32_t i = 0; i < m; i++)
+    {
+        hA.ptr[i] = i;
+        hB.ptr[i] = i;
+        hA.ind[i] = i;
+        hB.ind[i] = i;
+        hA.val[i] = 1.0f;
+        hB.val[i] = 2.0f;
+    }
+    hA.ptr[m] = nnz_A;
+    hB.ptr[m] = nnz_B;
+
+    device_csr_matrix<float> dA(hA), dB(hB);
+    rocsparse_local_spmat    mat_A(dA), mat_B(dB);
+
+    rocsparse_spgeam_descr descr;
+    CHECK_ROCSPARSE_ERROR(rocsparse_create_spgeam_descr(&descr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_scalar_datatype, &ttype, sizeof(ttype), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_compute_datatype, &ttype, sizeof(ttype), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_scalar_alpha, &h_alpha, sizeof(&h_alpha), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_scalar_beta, &h_beta, sizeof(&h_beta), nullptr));
+
+    size_t buffer_size = 0;
+    void*  buffer      = nullptr;
+
+#define PARAMS(stage) handle, descr, mat_A, mat_B, mat_C, stage, buffer_size, buffer
+#define EXPECT_INVALID(stage)                                             \
+    do                                                                    \
+    {                                                                     \
+        ROCSPARSE_DEBUG_VERBOSE_OFF;                                      \
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(stage), nullptr), \
+                                rocsparse_status_invalid_value);          \
+        ROCSPARSE_DEBUG_VERBOSE_ON;                                       \
+    } while(0)
+
+    // Symbolic analysis (mat_C not needed yet).
+    rocsparse_spmat_descr mat_C = nullptr;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_buffer_size(handle,
+                                                       descr,
+                                                       mat_A,
+                                                       mat_B,
+                                                       nullptr,
+                                                       rocsparse_spgeam_stage_symbolic_analysis,
+                                                       &buffer_size,
+                                                       nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
+                                           descr,
+                                           mat_A,
+                                           mat_B,
+                                           nullptr,
+                                           rocsparse_spgeam_stage_symbolic_analysis,
+                                           buffer_size,
+                                           buffer,
+                                           nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    buffer = nullptr;
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+    int64_t nnz_C;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_get_output(
+        handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, sizeof(int64_t), nullptr));
+
+    device_csr_matrix<float> dC;
+    dC.define(m, n, nnz_C, base_C);
+    rocsparse_local_spmat local_C(dC);
+    mat_C = local_C;
+
+    // previous_stage == symbolic_analysis: every non symbolic_compute stage is invalid.
+    buffer_size = 0;
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_compute);
+    EXPECT_INVALID(rocsparse_spgeam_stage_numeric_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_numeric_compute);
+
+    // Symbolic compute (valid).
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_buffer_size(handle,
+                                                       descr,
+                                                       mat_A,
+                                                       mat_B,
+                                                       mat_C,
+                                                       rocsparse_spgeam_stage_symbolic_compute,
+                                                       &buffer_size,
+                                                       nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
+                                           descr,
+                                           mat_A,
+                                           mat_B,
+                                           mat_C,
+                                           rocsparse_spgeam_stage_symbolic_compute,
+                                           buffer_size,
+                                           buffer,
+                                           nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    buffer = nullptr;
+
+    // previous_stage == symbolic_compute: analysis/compute/symbolic_* are invalid.
+    buffer_size = 0;
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_compute);
+    EXPECT_INVALID(rocsparse_spgeam_stage_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_compute);
+
+    // Numeric analysis (valid after symbolic_compute).
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
+                                           descr,
+                                           mat_A,
+                                           mat_B,
+                                           mat_C,
+                                           rocsparse_spgeam_stage_numeric_analysis,
+                                           buffer_size,
+                                           buffer,
+                                           nullptr));
+
+    // previous_stage == numeric_analysis: symbolic_*/analysis/compute are invalid.
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_numeric_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_compute);
+    EXPECT_INVALID(rocsparse_spgeam_stage_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_compute);
+
+    // Numeric compute (valid).
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_buffer_size(handle,
+                                                       descr,
+                                                       mat_A,
+                                                       mat_B,
+                                                       mat_C,
+                                                       rocsparse_spgeam_stage_numeric_compute,
+                                                       &buffer_size,
+                                                       nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
+                                           descr,
+                                           mat_A,
+                                           mat_B,
+                                           mat_C,
+                                           rocsparse_spgeam_stage_numeric_compute,
+                                           buffer_size,
+                                           buffer,
+                                           nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    buffer = nullptr;
+
+    // previous_stage == numeric_compute: symbolic_*/analysis are invalid.
+    buffer_size = 0;
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_analysis);
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_compute);
+    EXPECT_INVALID(rocsparse_spgeam_stage_analysis);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spgeam_descr(descr));
+
+    //
+    // Second descriptor: the analysis/compute (fused) path, checking the
+    // invalid transitions that are only reachable from those stages.
+    //
+    rocsparse_spgeam_descr descr2;
+    CHECK_ROCSPARSE_ERROR(rocsparse_create_spgeam_descr(&descr2));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr2, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr2, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr2, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr2, rocsparse_spgeam_input_scalar_datatype, &ttype, sizeof(ttype), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr2, rocsparse_spgeam_input_compute_datatype, &ttype, sizeof(ttype), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr2, rocsparse_spgeam_input_scalar_alpha, &h_alpha, sizeof(&h_alpha), nullptr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr2, rocsparse_spgeam_input_scalar_beta, &h_beta, sizeof(&h_beta), nullptr));
+
+    buffer_size = 0;
+    buffer      = nullptr;
+#undef PARAMS
+#undef EXPECT_INVALID
+#define PARAMS(stage) handle, descr2, mat_A, mat_B, mat_C2, stage, buffer_size, buffer
+#define EXPECT_INVALID(stage)                                             \
+    do                                                                    \
+    {                                                                     \
+        ROCSPARSE_DEBUG_VERBOSE_OFF;                                      \
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(stage), nullptr), \
+                                rocsparse_status_invalid_value);          \
+        ROCSPARSE_DEBUG_VERBOSE_ON;                                       \
+    } while(0)
+
+    rocsparse_spmat_descr mat_C2 = nullptr;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_buffer_size(handle,
+                                                       descr2,
+                                                       mat_A,
+                                                       mat_B,
+                                                       nullptr,
+                                                       rocsparse_spgeam_stage_analysis,
+                                                       &buffer_size,
+                                                       nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
+                                           descr2,
+                                           mat_A,
+                                           mat_B,
+                                           nullptr,
+                                           rocsparse_spgeam_stage_analysis,
+                                           buffer_size,
+                                           buffer,
+                                           nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    buffer = nullptr;
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+    int64_t nnz_C2;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_get_output(
+        handle, descr2, rocsparse_spgeam_output_nnz, &nnz_C2, sizeof(int64_t), nullptr));
+
+    device_csr_matrix<float> dC2;
+    dC2.define(m, n, nnz_C2, base_C);
+    rocsparse_local_spmat local_C2(dC2);
+    mat_C2 = local_C2;
+
+    // previous_stage == analysis: symbolic_compute is invalid here.
+    buffer_size = 0;
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_compute);
+
+    // Compute (valid).
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_buffer_size(handle,
+                                                       descr2,
+                                                       mat_A,
+                                                       mat_B,
+                                                       mat_C2,
+                                                       rocsparse_spgeam_stage_compute,
+                                                       &buffer_size,
+                                                       nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
+                                           descr2,
+                                           mat_A,
+                                           mat_B,
+                                           mat_C2,
+                                           rocsparse_spgeam_stage_compute,
+                                           buffer_size,
+                                           buffer,
+                                           nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    buffer = nullptr;
+
+    // previous_stage == compute: symbolic_compute is invalid here.
+    buffer_size = 0;
+    EXPECT_INVALID(rocsparse_spgeam_stage_symbolic_compute);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spgeam_descr(descr2));
+#undef PARAMS
+#undef EXPECT_INVALID
+}
+
 void testing_spgeam_csr_extra(const Arguments& arg)
 {
     if(rocsparse_clients::current_arch_from(rocsparse_clients::archnames::gfx90a))
@@ -790,4 +1084,5 @@ void testing_spgeam_csr_extra(const Arguments& arg)
     }
 
     testing_spgeam_csr_extra_wrong_stages(arg);
+    testing_spgeam_csr_extra_stage_transitions(arg);
 }

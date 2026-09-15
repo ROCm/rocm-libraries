@@ -79,6 +79,8 @@ namespace
                 testing_aux_matmul_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext"))
                 testing_aux_matmul_streamk_tile_scheduling_ext(arg);
+            else if(!strcmp(arg.function, "aux_matmul_uniform_summation_order_ext"))
+                testing_aux_matmul_uniform_summation_order_ext(arg);
             else if(!strcmp(arg.function, "aux_matmul_pref_sm_count_target"))
                 testing_aux_matmul_pref_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init_bad_arg"))
@@ -173,6 +175,7 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr")
                    || !strcmp(arg.function, "aux_matmul_sm_count_target")
                    || !strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext")
+                   || !strcmp(arg.function, "aux_matmul_uniform_summation_order_ext")
                    || !strcmp(arg.function, "aux_matmul_pref_sm_count_target")
 #ifdef CODE_COVERAGE
                    || !strcmp(arg.function, "aux_auxiliary_func")

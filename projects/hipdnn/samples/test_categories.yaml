@@ -31,6 +31,14 @@ test_categories:
       - "standard"
       - "comprehensive"
       - "full"
+      - "sample_test"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    test_patterns:
+      - ".*"
+    labels:
+      - "ffm-full"
 
 execution_settings:
   default_timeout: 300

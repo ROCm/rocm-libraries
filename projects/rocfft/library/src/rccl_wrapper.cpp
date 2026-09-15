@@ -24,18 +24,14 @@
 
 #include "rccl_wrapper.h"
 #include "../../shared/array_predicate.h"
+#include "../../shared/hip_object_wrapper.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/rocfft_hip.h"
 #include "logging.h"
 #include <map>
 #include <mutex>
 #include <stdexcept>
-
-// process-wide cache of communicators keyed by device set.
-// different plans may use different GPU subsets, so each distinct
-// set gets its own RCCL communicator.
-static std::map<std::set<int>, rocfft_rccl_comm_t> comm_cache;
-static std::mutex                                  comm_cache_mutex;
+#include <utility>
 
 // map a rocFFT precision to the corresponding NCCL datatype.
 // rocFFT half/float/double map to ncclFloat16/32/64.
@@ -62,33 +58,95 @@ static ncclDataType_t get_nccl_dtype(rocfft_precision precision)
 // implementation details shared by all copies of a handle via shared_ptr
 struct rocfft_rccl_comm_t::Impl
 {
-    // one communicator per device, keyed by device_id.
-    std::map<int, ncclComm_t> device_to_comm;
+    // per-device state: comm + the stream it launches on. RCCL requires a
+    // comm to always use the same stream (NCCL "CUDA Stream Semantics"), so
+    // the stream is owned here, not borrowed from a plan. Completion events
+    // stay plan-side and are recorded onto this stream.
+    struct device_state_t
+    {
+        device_state_t(const std::set<int>& devices, size_t rank, const ncclUniqueId& unique_id)
+        {
+            if(rank >= devices.size())
+                throw std::out_of_range("device_state_t constructor: rank is out of range");
+            device_id = *std::next(devices.begin(), rank);
+            rocfft_scoped_device dev(device_id);
+            stream.alloc();
+            auto nccl_ret = ncclCommInitRank(
+                &comm, static_cast<int>(devices.size()), unique_id, static_cast<int>(rank));
+            if(nccl_ret != ncclSuccess)
+            {
+                throw rocfft_rccl_exception_t(
+                    "ncclCommInitRank failed in device_state_t constructor", nccl_ret);
+            }
+        }
+
+        ~device_state_t()
+        {
+            try
+            {
+                if(comm)
+                {
+                    rocfft_scoped_device dev(device_id);
+                    auto                 nccl_ret = ncclCommFinalize(comm);
+                    if(nccl_ret != ncclSuccess)
+                        throw rocfft_rccl_exception_t("ncclCommFinalize failed in destructor",
+                                                      nccl_ret);
+                    nccl_ret = ncclCommDestroy(comm);
+                    if(nccl_ret != ncclSuccess)
+                        throw rocfft_rccl_exception_t("ncclCommDestroy failed in destructor",
+                                                      nccl_ret);
+                }
+            }
+            catch(const std::exception& e)
+            {
+                log_trace(__func__, "Failure in device_state_t destructor", e.what());
+            }
+            catch(...)
+            {
+                log_trace(__func__,
+                          "Failure in device_state_t destructor with unexpected exception");
+            }
+        }
+
+        ncclComm_t get_comm() const
+        {
+            if(!comm)
+                throw std::runtime_error("device_state_t::get_comm: comm is null");
+            return comm;
+        }
+        hipStream_t get_stream() const
+        {
+            if(!stream)
+                throw std::runtime_error("device_state_t::get_stream: stream is null");
+            return stream;
+        }
+
+    private:
+        int                 device_id;
+        hipStream_wrapper_t stream;
+        ncclComm_t          comm;
+    };
+
+    // keyed by device_id.
+    std::map<int, device_state_t> device_to_state;
 
     // unique id used to bootstrap this communicator group.
     // stored so it can be broadcast via MPI for multi-node in the future.
     ncclUniqueId uniqueId{};
 
-    ~Impl()
-    {
-        for(auto& [dev, comm] : device_to_comm)
-        {
-            if(comm)
-            {
-                ncclCommFinalize(comm);
-                ncclCommDestroy(comm);
-            }
-        }
-    }
+    // no explicit destructor: each device_state_t RAII-cleans its comm then
+    // stream when device_to_state is destroyed
 };
+
+// static cache definitions; placed after Impl so shared_ptr<Impl> is complete
+std::map<std::set<int>, rocfft_rccl_comm_t> rocfft_rccl_comm_t::comm_cache;
+std::mutex                                  rocfft_rccl_comm_t::comm_cache_mutex;
 
 rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
 {
     // need at least 2 devices for a meaningful communicator
     if(devices.size() < 2)
-    {
-        return {};
-    }
+        throw std::invalid_argument("rocfft_rccl_comm_t::create: need at least 2 devices");
 
     // look up or create a communicator for this exact device set.
     // guard with a mutex so concurrent plan creation from
@@ -98,10 +156,10 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
     auto it = comm_cache.find(devices);
     if(it != comm_cache.end())
     {
+        // reuse is safe: the comm owns its stream, so the comm/stream
+        // pairing holds across sequential and overlapping plans.
         return it->second;
     }
-
-    const int ndevices = static_cast<int>(devices.size());
 
     rocfft_rccl_comm_t new_comm;
     new_comm.pimpl = std::make_shared<Impl>();
@@ -111,47 +169,24 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
     // rank would broadcast this via MPI_Bcast
     ncclResult_t result = ncclGetUniqueId(&new_comm.pimpl->uniqueId);
     if(result != ncclSuccess)
-    {
-        // log and return empty so the caller falls back to P2P/A2A
-        log_trace(__func__, "ncclGetUniqueId failed", result);
-        return {};
-    }
+        throw rocfft_rccl_exception_t("ncclGetUniqueId failed in rocfft_rccl_comm_t::create",
+                                      result);
 
     // init one communicator per device using ncclCommInitRank,
     // batched inside a group call for single-process efficiency.
     // ranks are assigned in sorted device-id order
-    try
+    rocfft_rccl_group_t group;
+    for(size_t rank = 0; rank < devices.size(); rank++)
     {
-        rocfft_rccl_group_t group;
-        int                 rank = 0;
-        for(int dev : devices)
-        {
-            rocfft_scoped_device set_dev(dev);
-            ncclComm_t           comm = nullptr;
-            result = ncclCommInitRank(&comm, ndevices, new_comm.pimpl->uniqueId, rank);
-            if(result != ncclSuccess)
-            {
-                // log and return empty so the caller falls back to P2P/A2A
-                log_trace(__func__, "ncclCommInitRank failed on device", dev, result);
-                return {};
-            }
-            new_comm.pimpl->device_to_comm[dev] = comm;
-            ++rank;
-        }
-
-        group.end();
+        new_comm.pimpl->device_to_state.try_emplace(
+            *std::next(devices.begin(), rank), devices, rank, new_comm.pimpl->uniqueId);
     }
-    catch(const rocfft_rccl_exception_t& e)
-    {
-        // swallowed here (fall back to P2P/A2A), so log it - the
-        // general handler never sees it
-        log_trace(__func__, "RCCL communicator setup failed", e.what());
-        return {};
-    }
+    group.end();
 
-    comm_cache[devices] = std::move(new_comm);
+    // owning ref: comm (and its streams) persists for reuse; freed at reset_all()
+    comm_cache[devices] = new_comm;
 
-    return comm_cache[devices];
+    return new_comm;
 }
 
 void rocfft_rccl_comm_t::reset_all()
@@ -162,28 +197,38 @@ void rocfft_rccl_comm_t::reset_all()
 
 ncclComm_t rocfft_rccl_comm_t::get_comm(int device_id) const
 {
-    auto it = pimpl->device_to_comm.find(device_id);
-    if(it == pimpl->device_to_comm.end())
+    auto it = pimpl->device_to_state.find(device_id);
+    if(it == pimpl->device_to_state.end())
         throw std::invalid_argument("rocfft_rccl_comm_t::get_comm: device_id "
                                     + std::to_string(device_id)
                                     + " is not part of this communicator");
-    return it->second;
+    return it->second.get_comm();
+}
+
+hipStream_t rocfft_rccl_comm_t::get_stream(int device_id) const
+{
+    auto it = pimpl->device_to_state.find(device_id);
+    if(it == pimpl->device_to_state.end())
+        throw std::invalid_argument("rocfft_rccl_comm_t::get_stream: device_id "
+                                    + std::to_string(device_id)
+                                    + " is not part of this communicator");
+    return it->second.get_stream();
 }
 
 size_t rocfft_rccl_comm_t::num_ranks() const
 {
-    return pimpl->device_to_comm.size();
+    return pimpl->device_to_state.size();
 }
 
 int rocfft_rccl_comm_t::get_rank(int device_id) const
 {
-    auto it = pimpl->device_to_comm.find(device_id);
-    if(it == pimpl->device_to_comm.end())
+    auto it = pimpl->device_to_state.find(device_id);
+    if(it == pimpl->device_to_state.end())
         throw std::invalid_argument("rocfft_rccl_comm_t::get_rank: device_id "
                                     + std::to_string(device_id)
                                     + " is not part of this communicator");
     int          rank   = -1;
-    ncclResult_t result = ncclCommUserRank(it->second, &rank);
+    ncclResult_t result = ncclCommUserRank(it->second.get_comm(), &rank);
     if(result != ncclSuccess)
     {
         // logged by the general rocfft_handle_exception handler when it propagates
@@ -198,8 +243,8 @@ std::vector<int> rocfft_rccl_comm_t::get_devices() const
     // ranks are assigned in sorted device-id order in create(), so
     // std::map's natural ordering already gives us devices in rank order.
     std::vector<int> devices;
-    devices.reserve(pimpl->device_to_comm.size());
-    for(const auto& [dev, comm] : pimpl->device_to_comm)
+    devices.reserve(pimpl->device_to_state.size());
+    for(const auto& [dev, state] : pimpl->device_to_state)
         devices.push_back(dev);
     return devices;
 }
@@ -253,19 +298,17 @@ rocfft_rccl_group_t::~rocfft_rccl_group_t() noexcept
 
 void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
                                   const std::vector<void*>&       recvbufs,
-                                  const std::vector<hipStream_t>& streams,
                                   size_t                          count,
                                   rocfft_precision                precision,
                                   rocfft_array_type               array_type) const
 {
     const auto nranks = num_ranks();
-    if(sendbufs.size() != nranks || recvbufs.size() != nranks || streams.size() != nranks)
+    if(sendbufs.size() != nranks || recvbufs.size() != nranks)
         throw std::invalid_argument(
-            "rocfft_rccl_comm_t::alltoall: sendbufs/recvbufs/streams must each have size "
+            "rocfft_rccl_comm_t::alltoall: sendbufs/recvbufs must each have size "
             "num_ranks() ("
             + std::to_string(nranks) + "); got sendbufs=" + std::to_string(sendbufs.size())
-            + ", recvbufs=" + std::to_string(recvbufs.size())
-            + ", streams=" + std::to_string(streams.size()));
+            + ", recvbufs=" + std::to_string(recvbufs.size()));
 
     // resolve precision/complex/device mapping once outside the loop
     const auto devices = get_devices();
@@ -273,17 +316,20 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
     const auto nccl_count = count * (array_type_is_interleaved(array_type) ? 2 : 1);
     const auto dtype      = get_nccl_dtype(precision);
 
-    // batch all per-device calls in a single RCCL group so they
-    // actually launch together (NCCL requires per-device calls
-    // inside ncclGroupStart/End for single-process multi-GPU)
+    // batch per-device calls in one RCCL group (required for single-process
+    // multi-GPU); each device launches on its comm-owned stream.
     rocfft_rccl_group_t group;
 
     for(size_t r = 0; r < nranks; ++r)
     {
         rocfft_scoped_device dev(devices[r]);
 
-        ncclResult_t result = ncclAllToAll(
-            sendbufs[r], recvbufs[r], nccl_count, dtype, get_comm(devices[r]), streams[r]);
+        ncclResult_t result = ncclAllToAll(sendbufs[r],
+                                           recvbufs[r],
+                                           nccl_count,
+                                           dtype,
+                                           get_comm(devices[r]),
+                                           get_stream(devices[r]));
 
         if(result != ncclSuccess)
         {
@@ -300,7 +346,6 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
                               size_t            count,
                               int               peer_device_id,
                               int               device_id,
-                              hipStream_t       stream,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
@@ -312,7 +357,7 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
                                    get_nccl_dtype(precision),
                                    peer_rank,
                                    comm,
-                                   stream);
+                                   get_stream(device_id));
 
     if(result != ncclSuccess)
     {
@@ -327,7 +372,6 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
                               size_t            count,
                               int               peer_device_id,
                               int               device_id,
-                              hipStream_t       stream,
                               rocfft_precision  precision,
                               rocfft_array_type array_type) const
 {
@@ -339,7 +383,7 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
                                    get_nccl_dtype(precision),
                                    peer_rank,
                                    comm,
-                                   stream);
+                                   get_stream(device_id));
 
     if(result != ncclSuccess)
     {

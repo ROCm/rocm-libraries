@@ -4,6 +4,8 @@
 #pragma once
 
 #include <optional>
+#include <stdexcept>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -20,18 +22,20 @@ namespace hipdnn_test_sdk::detail
 
 struct SdpaFwdParams
 {
-    SdpaFwdParams(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
-                  std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
-                  int64_t leftBound,
-                  int64_t rightBound,
-                  bool topLeftAlignment,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
-                  = nullptr,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes
-                  = nullptr)
+    SdpaFwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
+        std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
+        int64_t leftBound,
+        int64_t rightBound,
+        bool topLeftAlignment,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* lseAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleQAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleKAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* descaleVAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
@@ -46,6 +50,15 @@ struct SdpaFwdParams
         , lseTensor(lseAttributes != nullptr
                         ? std::make_optional(unpackTensorAttributes(*lseAttributes))
                         : std::nullopt)
+        , descaleQTensor(descaleQAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*descaleQAttributes))
+                             : std::nullopt)
+        , descaleKTensor(descaleKAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*descaleKAttributes))
+                             : std::nullopt)
+        , descaleVTensor(descaleVAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*descaleVAttributes))
+                             : std::nullopt)
     {
     }
 
@@ -59,6 +72,9 @@ struct SdpaFwdParams
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleKTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleVTensor;
 };
 
 template <typename QDataType, typename KDataType, typename VDataType, typename ODataType>
@@ -105,6 +121,28 @@ public:
                                                           variantPack.at(_params.lseTensor->uid));
         }
 
+        // FP8 descale tensors (float32). Absent for non-fp8 graphs.
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleQ;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleK;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDescaleV;
+        if(_params.descaleQTensor.has_value())
+        {
+            shallowDescaleQ = createShallowTensor<float>(
+                *_params.descaleQTensor, variantPack.at(_params.descaleQTensor->uid));
+        }
+        if(_params.descaleKTensor.has_value())
+        {
+            shallowDescaleK = createShallowTensor<float>(
+                *_params.descaleKTensor, variantPack.at(_params.descaleKTensor->uid));
+        }
+        if(_params.descaleVTensor.has_value())
+        {
+            shallowDescaleV = createShallowTensor<float>(
+                *_params.descaleVTensor, variantPack.at(_params.descaleVTensor->uid));
+        }
+
+        // Runtime attention scale: resolve the folded scale operand (runtime tensor
+        // or baked attn_scale_value) to a scalar; nullopt => reference default 1/sqrt(D).
         std::optional<float> effectiveScale;
         if(_params.scaleTensor.has_value())
         {
@@ -122,7 +160,10 @@ public:
             _params.leftBound,
             _params.rightBound,
             _params.topLeftAlignment,
-            shallowLseTensor.get());
+            shallowLseTensor.get(),
+            shallowDescaleQ.get(),
+            shallowDescaleK.get(),
+            shallowDescaleV.get());
     }
 
 private:
@@ -201,11 +242,26 @@ public:
             return false;
         }
 
-        // Unsupported: FP8 quantization / descaling
-        if(nodeAttributes->descale_q_tensor_uid().has_value()
-           || nodeAttributes->descale_k_tensor_uid().has_value()
-           || nodeAttributes->descale_v_tensor_uid().has_value()
-           || nodeAttributes->descale_s_tensor_uid().has_value()
+        // FP8 quantization: descales are required for fp8 inputs (mirrors AITER's
+        // requirement that q/k/v descales are all provided for fp8) and rejected
+        // for non-fp8 inputs.
+        constexpr bool IS_FP8_INPUT
+            = QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2
+              || QDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ;
+        const int numQkvDescales
+            = static_cast<int>(nodeAttributes->descale_q_tensor_uid().has_value())
+              + static_cast<int>(nodeAttributes->descale_k_tensor_uid().has_value())
+              + static_cast<int>(nodeAttributes->descale_v_tensor_uid().has_value());
+        if((IS_FP8_INPUT && numQkvDescales != 3) || (!IS_FP8_INPUT && numQkvDescales != 0))
+        {
+            return false;
+        }
+
+        // Unsupported regardless of dtype: softmax/output (de)quantization. The
+        // forward reference models only q/k/v descales.
+        if(nodeAttributes->descale_s_tensor_uid().has_value()
            || nodeAttributes->scale_s_tensor_uid().has_value()
            || nodeAttributes->scale_o_tensor_uid().has_value()
            || nodeAttributes->amax_s_tensor_uid().has_value()
@@ -214,11 +270,23 @@ public:
             return false;
         }
 
-        // Unsupported: max/sum_exp stats outputs (LSE is supported)
+        // Unsupported: max / running-sum softmax stats outputs (the reference does not
+        // produce these). The log-sum-exp stats tensor IS supported and handled below.
         if(nodeAttributes->max_tensor_uid().has_value()
            || nodeAttributes->sum_exp_tensor_uid().has_value())
         {
             return false;
+        }
+
+        // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
+        // be FLOAT (LSE is always float). The rank reconciliation to [B, H, Sq] is enforced
+        // in execute().
+        if(nodeAttributes->stats_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->stats_tensor_uid().value(),
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
@@ -257,6 +325,16 @@ public:
                                  ? tensorMap.at(nodeAttributes->stats_tensor_uid().value())
                                  : nullptr;
 
+        const auto* descaleQPtr = nodeAttributes->descale_q_tensor_uid().has_value()
+                                      ? tensorMap.at(nodeAttributes->descale_q_tensor_uid().value())
+                                      : nullptr;
+        const auto* descaleKPtr = nodeAttributes->descale_k_tensor_uid().has_value()
+                                      ? tensorMap.at(nodeAttributes->descale_k_tensor_uid().value())
+                                      : nullptr;
+        const auto* descaleVPtr = nodeAttributes->descale_v_tensor_uid().has_value()
+                                      ? tensorMap.at(nodeAttributes->descale_v_tensor_uid().value())
+                                      : nullptr;
+
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaFwdPlan");
 
@@ -270,7 +348,10 @@ public:
                           rightBound,
                           isTopLeft,
                           attnMaskPtr,
-                          lsePtr));
+                          lsePtr,
+                          descaleQPtr,
+                          descaleKPtr,
+                          descaleVPtr));
     }
 };
 

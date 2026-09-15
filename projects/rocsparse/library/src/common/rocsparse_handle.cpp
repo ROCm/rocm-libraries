@@ -38,7 +38,6 @@ static hipStream_t main_stream{};
  * Uses function-try-block to ensure cleanup of partially-allocated GPU resources
  * if an exception is thrown during initialization.
  ******************************************************************************/
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
 {
     try
@@ -173,7 +172,10 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
         throw;
     }
 }
-#else
+
+// Default constructor used by rocsparse_create_handle. It performs synchronous
+// initialization on an internally-managed stream. The stream-based constructor
+// above is used by rocsparse_handle_create for non-blocking handle creation.
 _rocsparse_handle::_rocsparse_handle()
 {
     try
@@ -198,7 +200,7 @@ _rocsparse_handle::_rocsparse_handle()
         // ASIC revision
         asic_rev = properties.asicRevision;
 #else
-        asic_rev = 0;
+        asic_rev  = 0;
 #endif
 
         // Layer mode
@@ -305,7 +307,6 @@ _rocsparse_handle::_rocsparse_handle()
         throw;
     }
 }
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 /*******************************************************************************
  * destructor

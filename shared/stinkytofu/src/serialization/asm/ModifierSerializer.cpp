@@ -288,13 +288,23 @@ bool serializeVisit(const DPPModifiers& mod, std::ostream& os) {
 // VOP3Modifiers
 bool serializeVisit(const VOP3Modifiers& mod, std::ostream& os) {
     os << ", mod.vop3 = {";
-    os << " neg_src0 = " << (mod.neg_src0 ? "true" : "false")
-       << ", neg_src1 = " << (mod.neg_src1 ? "true" : "false")
-       << ", neg_src2 = " << (mod.neg_src2 ? "true" : "false")
-       << ", abs_src0 = " << (mod.abs_src0 ? "true" : "false")
-       << ", abs_src1 = " << (mod.abs_src1 ? "true" : "false")
-       << ", abs_src2 = " << (mod.abs_src2 ? "true" : "false")
-       << ", clamp = " << (mod.clamp ? "true" : "false") << ", omod = " << mod.omod;
+    bool first = true;
+    auto emitFlag = [&](const char* name, bool val) {
+        if (!val) return;
+        os << (first ? " " : ", ") << name << " = true";
+        first = false;
+    };
+    emitFlag("neg_src0", mod.neg_src0);
+    emitFlag("neg_src1", mod.neg_src1);
+    emitFlag("neg_src2", mod.neg_src2);
+    emitFlag("abs_src0", mod.abs_src0);
+    emitFlag("abs_src1", mod.abs_src1);
+    emitFlag("abs_src2", mod.abs_src2);
+    emitFlag("clamp", mod.clamp);
+    if (mod.omod != 0) {
+        os << (first ? " " : ", ") << "omod = " << mod.omod;
+        first = false;
+    }
     os << " }";
     return true;
 }
@@ -345,6 +355,12 @@ bool serializeVisit(const SWaitCntData& mod, std::ostream& os) {
 // SWaitTensorCntData
 bool serializeVisit(const SWaitTensorCntData& mod, std::ostream& os) {
     os << ", mod.swaittensorcnt = { tlcnt = " << static_cast<int>(mod.tlcnt) << " }";
+    return true;
+}
+
+// SWaitAsyncCntData
+bool serializeVisit(const SWaitAsyncCntData& mod, std::ostream& os) {
+    os << ", mod.swaitasynccnt = { asynccnt = " << static_cast<int>(mod.asynccnt) << " }";
     return true;
 }
 
@@ -491,11 +507,12 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 }  // namespace
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
-    return serializeVisit<
-        DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers, CacheScopeModifiers,
-        SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers, True16Modifiers,
-        EXEC, VCC, SWaitCntData, SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
-        MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData, CallTargetData>(mod, os);
+    return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
+                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
+                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
+                          SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
+                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
+                          CallTargetData>(mod, os);
 }
 
 /*
@@ -553,6 +570,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                                        static_cast<int8_t>(getInt(fields, "kmcnt", -1))));
     } else if (attrKey == "mod.swaittensorcnt") {
         inst->addModifier(SWaitTensorCntData(static_cast<int8_t>(getInt(fields, "tlcnt", -1))));
+    } else if (attrKey == "mod.swaitasynccnt") {
+        inst->addModifier(SWaitAsyncCntData(static_cast<int8_t>(getInt(fields, "asynccnt", -1))));
     } else if (attrKey == "mod.swaitstorecnt") {
         inst->addModifier(SWaitStoreCntData(static_cast<int8_t>(getInt(fields, "storecnt", -1))));
     } else if (attrKey == "mod.mfma") {

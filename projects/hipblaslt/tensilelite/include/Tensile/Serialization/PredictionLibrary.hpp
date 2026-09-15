@@ -129,6 +129,7 @@ namespace TensileLite
                                 .cache_hints_b             = solution->sizeMapping.nonTemporalB,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                                .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
                             };
 

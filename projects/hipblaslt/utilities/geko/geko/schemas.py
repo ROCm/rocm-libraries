@@ -22,14 +22,14 @@ Contents:
 
 import json
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 from typing import ClassVar, List, Tuple
 
 from .constants import DTYPE, GEMM_LOG_FIELDS
 from .utils import get_utc_timestamp, compute_file_sha256
 
-TRANSPOSE_TYPES = ("N", "T")
+TRANSPOSE_TYPES = ("N", "T", "C")
 
 
 def _compute_type_for_workload_log(compute_type: str) -> str:
@@ -128,6 +128,11 @@ class GemmType:
         dest_data_type = Dc
         compute_data_type = Dcomp
 
+        # Complex data types use real accumulation in hipBLASLt but Tensile
+        # tags compute_data_type as C/Z.
+        if Da in ("C", "Z") and Dcomp in ("S", "D"):
+            compute_data_type = Da
+
         if Dcomp == "X":
             if (Da != Db != "S") or Dc != "S":
                 raise NotImplementedError(
@@ -209,7 +214,12 @@ class GemmType:
         if dt == "X" and dd == "S" and cd == "S":
             return "xf32_r", "f32_r", "f32_r", "xf32_r"
 
-        if len(dt) == 1:
+        if dt in m:
+            try:
+                a_type = b_type = m[dt]
+            except KeyError as e:
+                raise ValueError(f"Unknown Tensile DataType letter {dt!r}") from e
+        elif len(dt) == 1:
             try:
                 a_type = b_type = m[dt]
             except KeyError as e:
@@ -230,10 +240,14 @@ class GemmType:
         except KeyError as e:
             raise ValueError(f"Unknown Tensile DestDataType letter {dd!r}") from e
 
-        try:
-            compute_type = m[cd]
-        except KeyError as e:
-            raise ValueError(f"Unknown Tensile ComputeDataType letter {cd!r}") from e
+        _COMPLEX_COMPUTE_TO_REAL = {"C": "f32_r", "Z": "f64_r"}
+        if cd in _COMPLEX_COMPUTE_TO_REAL:
+            compute_type = _COMPLEX_COMPUTE_TO_REAL[cd]
+        else:
+            try:
+                compute_type = m[cd]
+            except KeyError as e:
+                raise ValueError(f"Unknown Tensile ComputeDataType letter {cd!r}") from e
 
         check_dt, check_dd, check_cd = GemmType._hipblaslt_to_tensile(
             a_type, b_type, c_type, compute_type
@@ -281,6 +295,18 @@ class GemmType:
         if not (self.data_type and self.dest_data_type and self.compute_data_type):
             raise ValueError(
                 "data_type, dest_data_type, and compute_data_type must be non-empty strings"
+            )
+
+        _COMPLEX_DTYPES = ("C", "Z")
+        if self.transA == "C" and self.data_type not in _COMPLEX_DTYPES:
+            raise ValueError(
+                f"transA='C' (conjugate-transpose) is only valid for complex data types "
+                f"({_COMPLEX_DTYPES}), got data_type='{self.data_type}'"
+            )
+        if self.transB == "C" and self.data_type not in _COMPLEX_DTYPES:
+            raise ValueError(
+                f"transB='C' (conjugate-transpose) is only valid for complex data types "
+                f"({_COMPLEX_DTYPES}), got data_type='{self.data_type}'"
             )
 
     def workload_log_type_fields(self) -> dict:
@@ -396,7 +422,8 @@ class RunState:
         """Load RunState from a JSON file."""
         with Path(path).open("r") as f:
             data = json.load(f)
-        return cls(**data)
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
     def verify(self, current_input: str | Path) -> None:
         """Validate that the current input matches the one used to create this run.

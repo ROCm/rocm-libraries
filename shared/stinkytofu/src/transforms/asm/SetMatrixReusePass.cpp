@@ -140,9 +140,6 @@ class SetMatrixReusePassImpl : public StinkyInstPass {
    public:
     static char ID;
 
-    explicit SetMatrixReusePassImpl(std::vector<Function*> functions)
-        : functions(std::move(functions)) {}
-
     const char* getName() const override {
         return "SetMatrixReusePass";
     }
@@ -153,29 +150,17 @@ class SetMatrixReusePassImpl : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& /*passCtx*/,
                           AnalysisManager& /*AM*/) override {
-        // Whole-kernel: process the entry function and every callable function
-        // in isolation so reuse never chains across a function boundary. Falls
-        // back to the single pipeline Function when no function list is given.
-        if (!functions.empty()) {
-            for (Function* f : functions) {
-                if (f) setMatrixReuseInFunction(*f);
-            }
-        } else {
-            setMatrixReuseInFunction(func);
-        }
+        setMatrixReuseInFunction(func);
         return preserveCFGAnalyses();
     }
-
-   private:
-    std::vector<Function*> functions;
 };
 
 char SetMatrixReusePassImpl::ID = 0;
 
 }  // anonymous namespace
 
-std::unique_ptr<Pass> createSetMatrixReusePass(std::vector<Function*> functions) {
-    return std::make_unique<SetMatrixReusePassImpl>(std::move(functions));
+std::unique_ptr<Pass> createSetMatrixReusePass() {
+    return std::make_unique<SetMatrixReusePassImpl>();
 }
 
 }  // namespace stinkytofu

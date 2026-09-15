@@ -148,6 +148,30 @@ struct MxGemmKernel
     static constexpr index_t NXdlPackEff = MxGemmPipeline::NXdlPackEff;
     static constexpr index_t KXdlPackEff = MxGemmPipeline::KXdlPackEff;
 
+    // Large tensor support (when M is large, N and K are relatively small): RunGemm shifts the
+    // A / E / A-scale base pointers by the M tile and clamps kargs.M, so those descriptors span
+    // at most one M tile however large M is.
+    static constexpr bool kOffsetPtrsByTileCoords =
+        std::is_same_v<tensor_layout::gemm::RowMajor,
+                       remove_cvref_t<std::tuple_element_t<0, AsLayout>>> &&
+        std::is_same_v<tensor_layout::gemm::RowMajor, CLayout> && !BaseKernel::ClusterLaunch;
+
+    // The shift leaves ds_ptr at its base while clamping kargs.M, so the D windows would be built
+    // at origin 0 and every workgroup would read D rows [0, MPerBlock). Before enabling D here,
+    // shift ds_ptr alongside e_ptr and fold the Ds layouts into kOffsetPtrsByTileCoords.
+    static_assert(!kOffsetPtrsByTileCoords || NumDTensor == 0,
+                  "MX GEMM: the per-M-tile base-pointer shift does not offset the D pointers.");
+
+    // The shift shifts every A pointer by stride_As[i], which is a row offset only for RowMajor A,
+    // but the predicate above inspects AsLayout[0] alone.
+    static_assert(!kOffsetPtrsByTileCoords || NumATensor == 1,
+                  "MX GEMM: the per-M-tile base-pointer shift assumes a single RowMajor A.");
+
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorMOffsettingSupported()
+    {
+        return kOffsetPtrsByTileCoords;
+    }
+
     using KernelArgs = MxGemmKernelArgs<NumATensor, NumBTensor, NumDTensor>;
 
     CK_TILE_HOST static constexpr KernelArgs
@@ -239,34 +263,17 @@ struct MxGemmKernel
         // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
         const index_t k_scale_offset = k_elem_offset / BlockScaleSize / KXdlPackEff;
 
-        // Scale16: descriptor order [packs_m, MThreadPerXdl, packs_k] -- K contiguous per M-row,
-        //          no pre-shuffle needed (natural row-major layout matches).
-        // Scale32: descriptor order [packs_m, packs_k, MThreadPerXdl] -- original layout,
-        //          requires pre-shuffle to match.
-        const auto scale_a_naive_desc = [&]() {
-            if constexpr(BlockScaleSize == 16)
-                return make_naive_tensor_descriptor_packed(
-                    make_tuple(scale_packs_m, MThreadPerXdl, scale_packs_k));
-            else
-                return make_naive_tensor_descriptor_packed(
-                    make_tuple(scale_packs_m, scale_packs_k, MThreadPerXdl));
-        }();
-        const auto scale_a_desc = [&]() {
-            if constexpr(BlockScaleSize == 16)
-                return transform_tensor_descriptor(
-                    scale_a_naive_desc,
-                    make_tuple(make_merge_transform(make_tuple(scale_packs_m, MThreadPerXdl)),
-                               make_pass_through_transform(scale_packs_k)),
-                    make_tuple(sequence<0, 1>{}, sequence<2>{}),
-                    make_tuple(sequence<0>{}, sequence<1>{}));
-            else
-                return transform_tensor_descriptor(
-                    scale_a_naive_desc,
-                    make_tuple(make_merge_transform(make_tuple(scale_packs_m, MThreadPerXdl)),
-                               make_pass_through_transform(scale_packs_k)),
-                    make_tuple(sequence<0, 2>{}, sequence<1>{}),
-                    make_tuple(sequence<0>{}, sequence<1>{}));
-        }();
+        // Unified coalesced scale layout for all block sizes: descriptor order
+        // [packs_m, packs_k, MThreadPerXdl] (M-thread fastest) so consecutive lanes read
+        // consecutive addresses. The host pre-shuffle writes scales in this order.
+        const auto scale_a_naive_desc = make_naive_tensor_descriptor_packed(
+            make_tuple(scale_packs_m, scale_packs_k, MThreadPerXdl));
+        const auto scale_a_desc = transform_tensor_descriptor(
+            scale_a_naive_desc,
+            make_tuple(make_merge_transform(make_tuple(scale_packs_m, MThreadPerXdl)),
+                       make_pass_through_transform(scale_packs_k)),
+            make_tuple(sequence<0, 2>{}, sequence<1>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
         const auto& scale_a_tensor_view = generate_tuple(
             [&](auto i) {
                 return make_tensor_view<address_space_enum::global>(as_scale_ptr[i], scale_a_desc);
@@ -313,30 +320,14 @@ struct MxGemmKernel
         // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
         const index_t k_scale_offset = k_elem_offset / BlockScaleSize / KXdlPackEff;
 
-        const auto scale_b_naive_desc = [&]() {
-            if constexpr(BlockScaleSize == 16)
-                return make_naive_tensor_descriptor_packed(
-                    make_tuple(scale_packs_n, NThreadPerXdl, scale_packs_k));
-            else
-                return make_naive_tensor_descriptor_packed(
-                    make_tuple(scale_packs_n, scale_packs_k, NThreadPerXdl));
-        }();
-        const auto scale_b_desc = [&]() {
-            if constexpr(BlockScaleSize == 16)
-                return transform_tensor_descriptor(
-                    scale_b_naive_desc,
-                    make_tuple(make_merge_transform(make_tuple(scale_packs_n, NThreadPerXdl)),
-                               make_pass_through_transform(scale_packs_k)),
-                    make_tuple(sequence<0, 1>{}, sequence<2>{}),
-                    make_tuple(sequence<0>{}, sequence<1>{}));
-            else
-                return transform_tensor_descriptor(
-                    scale_b_naive_desc,
-                    make_tuple(make_merge_transform(make_tuple(scale_packs_n, NThreadPerXdl)),
-                               make_pass_through_transform(scale_packs_k)),
-                    make_tuple(sequence<0, 2>{}, sequence<1>{}),
-                    make_tuple(sequence<0>{}, sequence<1>{}));
-        }();
+        const auto scale_b_naive_desc = make_naive_tensor_descriptor_packed(
+            make_tuple(scale_packs_n, scale_packs_k, NThreadPerXdl));
+        const auto scale_b_desc = transform_tensor_descriptor(
+            scale_b_naive_desc,
+            make_tuple(make_merge_transform(make_tuple(scale_packs_n, NThreadPerXdl)),
+                       make_pass_through_transform(scale_packs_k)),
+            make_tuple(sequence<0, 2>{}, sequence<1>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
         const auto& scale_b_tensor_view = generate_tuple(
             [&](auto i) {
                 return make_tensor_view<address_space_enum::global>(bs_scale_ptr[i], scale_b_desc);
@@ -426,13 +417,8 @@ struct MxGemmKernel
         std::array<ScalePtrType, NumATensor> as_scale_ptr;
         std::array<const ADataType*, NumATensor> as_ptr_;
         index_t block_idx_m_;
-        // Large tensor support (when M is large, N and K are relatively small)
-        using ALayout = remove_cvref_t<std::tuple_element_t<0, AsLayout>>;
-        constexpr bool offset_ptrs_by_tile_coords =
-            std::is_same_v<tensor_layout::gemm::RowMajor, ALayout> &&
-            std::is_same_v<tensor_layout::gemm::RowMajor, CLayout> && !BaseKernel::ClusterLaunch;
 
-        if constexpr(offset_ptrs_by_tile_coords)
+        if constexpr(kOffsetPtrsByTileCoords)
         {
             static_for<0, NumATensor, 1>{}([&](auto i) {
                 as_ptr_[i] = as_ptr[i] + static_cast<std::ptrdiff_t>(block_idx_m) *
@@ -445,7 +431,7 @@ struct MxGemmKernel
                                       (kargs.K / BlockScaleSize / KXdlPackEff);
             });
 
-            kargs.M      = std::min(kargs.M - block_idx_m, TilePartitioner::MPerBlock);
+            kargs.M      = BaseKernel::ClampMToOffsettedTile(kargs.M, block_idx_m);
             block_idx_m_ = 0;
         }
         else

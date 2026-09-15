@@ -28,6 +28,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "layernorm_backward_attributes_generated.h"
 #include "matmul_attributes_generated.h"
 #include "moe_grouped_matmul_attributes_generated.h"
+#include "moe_grouped_matmul_bwd_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "reduction_attributes_generated.h"
 #include "resample_bwd_attributes_generated.h"
@@ -47,6 +48,8 @@ struct NodeT;
 
 struct EngineApiVersion;
 
+struct Uuid;
+
 struct Graph;
 struct GraphBuilder;
 struct GraphT;
@@ -55,6 +58,8 @@ bool operator==(const NodeT &lhs, const NodeT &rhs);
 bool operator!=(const NodeT &lhs, const NodeT &rhs);
 bool operator==(const EngineApiVersion &lhs, const EngineApiVersion &rhs);
 bool operator!=(const EngineApiVersion &lhs, const EngineApiVersion &rhs);
+bool operator==(const Uuid &lhs, const Uuid &rhs);
+bool operator!=(const Uuid &lhs, const Uuid &rhs);
 bool operator==(const GraphT &lhs, const GraphT &rhs);
 bool operator!=(const GraphT &lhs, const GraphT &rhs);
 
@@ -82,11 +87,12 @@ enum class NodeAttributes : uint8_t {
   LayernormBackwardAttributes = 20,
   ResampleBwdAttributes = 21,
   MoeGroupedMatmulAttributes = 22,
+  MoeGroupedMatmulBwdAttributes = 23,
   MIN = NONE,
-  MAX = MoeGroupedMatmulAttributes
+  MAX = MoeGroupedMatmulBwdAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[23] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[24] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -110,13 +116,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[23] {
     NodeAttributes::ResampleFwdAttributes,
     NodeAttributes::LayernormBackwardAttributes,
     NodeAttributes::ResampleBwdAttributes,
-    NodeAttributes::MoeGroupedMatmulAttributes
+    NodeAttributes::MoeGroupedMatmulAttributes,
+    NodeAttributes::MoeGroupedMatmulBwdAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[24] = {
+  static const char * const names[25] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -140,13 +147,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "LayernormBackwardAttributes",
     "ResampleBwdAttributes",
     "MoeGroupedMatmulAttributes",
+    "MoeGroupedMatmulBwdAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::MoeGroupedMatmulAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::MoeGroupedMatmulBwdAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -243,6 +251,10 @@ template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::Moe
   static const NodeAttributes enum_value = NodeAttributes::MoeGroupedMatmulAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::MoeGroupedMatmulBwdAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -333,6 +345,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects
 
 template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::MoeGroupedMatmulAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::MoeGroupedMatmulBwdAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -541,6 +557,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::MoeGroupedMatmulAttributes ?
       reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT *>(value) : nullptr;
   }
+  hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *AsMoeGroupedMatmulBwdAttributes() {
+    return type == NodeAttributes::MoeGroupedMatmulBwdAttributes ?
+      reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *AsMoeGroupedMatmulBwdAttributes() const {
+    return type == NodeAttributes::MoeGroupedMatmulBwdAttributes ?
+      reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -638,6 +662,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
       return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT *>(rhs.value));
     }
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
+      return *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(rhs.value));
+    }
     default: {
       return false;
     }
@@ -697,6 +725,36 @@ inline bool operator==(const EngineApiVersion &lhs, const EngineApiVersion &rhs)
 }
 
 inline bool operator!=(const EngineApiVersion &lhs, const EngineApiVersion &rhs) {
+    return !(lhs == rhs);
+}
+
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(1) Uuid FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint8_t bytes_[16];
+
+ public:
+  Uuid()
+      : bytes_() {
+  }
+  Uuid(::flatbuffers::span<const uint8_t, 16> _bytes) {
+    ::flatbuffers::CastToArray(bytes_).CopyFromSpan(_bytes);
+  }
+  const ::flatbuffers::Array<uint8_t, 16> *bytes() const {
+    return &::flatbuffers::CastToArray(bytes_);
+  }
+  ::flatbuffers::Array<uint8_t, 16> *mutable_bytes() {
+    return &::flatbuffers::CastToArray(bytes_);
+  }
+};
+FLATBUFFERS_STRUCT_END(Uuid, 16);
+
+inline bool operator==(const Uuid &lhs, const Uuid &rhs) {
+  return
+      (*lhs.bytes() == *rhs.bytes());
+}
+
+inline bool operator!=(const Uuid &lhs, const Uuid &rhs) {
     return !(lhs == rhs);
 }
 
@@ -801,6 +859,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   }
   const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes *attributes_as_MoeGroupedMatmulAttributes() const {
     return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes *>(attributes()) : nullptr;
+  }
+  const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *attributes_as_MoeGroupedMatmulBwdAttributes() const {
+    return attributes_type() == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes ? static_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *>(attributes()) : nullptr;
   }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
@@ -908,6 +969,10 @@ template<> inline const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAt
   return attributes_as_MoeGroupedMatmulAttributes();
 }
 
+template<> inline const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *Node::attributes_as<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes>() const {
+  return attributes_as_MoeGroupedMatmulBwdAttributes();
+}
+
 struct NodeBuilder {
   typedef Node Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
@@ -977,6 +1042,7 @@ struct GraphT : public ::flatbuffers::NativeTable {
   ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt;
   bool is_override_shape_enabled = false;
   std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion> min_required_engine_api_version{};
+  std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::Uuid> id{};
   GraphT() = default;
   GraphT(const GraphT &o);
   GraphT(GraphT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -995,7 +1061,8 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_NODES = 14,
     VT_PREFERRED_ENGINE_ID = 16,
     VT_IS_OVERRIDE_SHAPE_ENABLED = 18,
-    VT_MIN_REQUIRED_ENGINE_API_VERSION = 20
+    VT_MIN_REQUIRED_ENGINE_API_VERSION = 20,
+    VT_ID = 22
   };
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
@@ -1051,6 +1118,12 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *mutable_min_required_engine_api_version() {
     return GetStruct<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *>(VT_MIN_REQUIRED_ENGINE_API_VERSION);
   }
+  const hipdnn_flatbuffers_sdk::data_objects::Uuid *id() const {
+    return GetStruct<const hipdnn_flatbuffers_sdk::data_objects::Uuid *>(VT_ID);
+  }
+  hipdnn_flatbuffers_sdk::data_objects::Uuid *mutable_id() {
+    return GetStruct<hipdnn_flatbuffers_sdk::data_objects::Uuid *>(VT_ID);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
@@ -1067,6 +1140,7 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<int64_t>(verifier, VT_PREFERRED_ENGINE_ID, 8) &&
            VerifyField<uint8_t>(verifier, VT_IS_OVERRIDE_SHAPE_ENABLED, 1) &&
            VerifyField<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(verifier, VT_MIN_REQUIRED_ENGINE_API_VERSION, 4) &&
+           VerifyField<hipdnn_flatbuffers_sdk::data_objects::Uuid>(verifier, VT_ID, 1) &&
            verifier.EndTable();
   }
   GraphT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -1105,6 +1179,9 @@ struct GraphBuilder {
   void add_min_required_engine_api_version(const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version) {
     fbb_.AddStruct(Graph::VT_MIN_REQUIRED_ENGINE_API_VERSION, min_required_engine_api_version);
   }
+  void add_id(const hipdnn_flatbuffers_sdk::data_objects::Uuid *id) {
+    fbb_.AddStruct(Graph::VT_ID, id);
+  }
   explicit GraphBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1126,9 +1203,11 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>> nodes = 0,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
     bool is_override_shape_enabled = false,
-    const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version = nullptr) {
+    const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version = nullptr,
+    const hipdnn_flatbuffers_sdk::data_objects::Uuid *id = nullptr) {
   GraphBuilder builder_(_fbb);
   if(preferred_engine_id) { builder_.add_preferred_engine_id(*preferred_engine_id); }
+  builder_.add_id(id);
   builder_.add_min_required_engine_api_version(min_required_engine_api_version);
   builder_.add_nodes(nodes);
   builder_.add_tensors(tensors);
@@ -1150,7 +1229,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> *nodes = nullptr,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
     bool is_override_shape_enabled = false,
-    const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version = nullptr) {
+    const hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion *min_required_engine_api_version = nullptr,
+    const hipdnn_flatbuffers_sdk::data_objects::Uuid *id = nullptr) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto tensors__ = tensors ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>(*tensors) : 0;
   auto nodes__ = nodes ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>(*nodes) : 0;
@@ -1164,7 +1244,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
       nodes__,
       preferred_engine_id,
       is_override_shape_enabled,
-      min_required_engine_api_version);
+      min_required_engine_api_version,
+      id);
 }
 
 ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -1228,7 +1309,8 @@ inline bool operator==(const GraphT &lhs, const GraphT &rhs) {
       (lhs.nodes.size() == rhs.nodes.size() && std::equal(lhs.nodes.cbegin(), lhs.nodes.cend(), rhs.nodes.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.preferred_engine_id == rhs.preferred_engine_id) &&
       (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled) &&
-      ((lhs.min_required_engine_api_version == rhs.min_required_engine_api_version) || (lhs.min_required_engine_api_version && rhs.min_required_engine_api_version && *lhs.min_required_engine_api_version == *rhs.min_required_engine_api_version));
+      ((lhs.min_required_engine_api_version == rhs.min_required_engine_api_version) || (lhs.min_required_engine_api_version && rhs.min_required_engine_api_version && *lhs.min_required_engine_api_version == *rhs.min_required_engine_api_version)) &&
+      ((lhs.id == rhs.id) || (lhs.id && rhs.id && *lhs.id == *rhs.id));
 }
 
 inline bool operator!=(const GraphT &lhs, const GraphT &rhs) {
@@ -1243,7 +1325,8 @@ inline GraphT::GraphT(const GraphT &o)
         io_data_type(o.io_data_type),
         preferred_engine_id(o.preferred_engine_id),
         is_override_shape_enabled(o.is_override_shape_enabled),
-        min_required_engine_api_version((o.min_required_engine_api_version) ? new hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion(*o.min_required_engine_api_version) : nullptr) {
+        min_required_engine_api_version((o.min_required_engine_api_version) ? new hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion(*o.min_required_engine_api_version) : nullptr),
+        id((o.id) ? new hipdnn_flatbuffers_sdk::data_objects::Uuid(*o.id) : nullptr) {
   tensors.reserve(o.tensors.size());
   for (const auto &tensors_ : o.tensors) { tensors.emplace_back((tensors_) ? new hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT(*tensors_) : nullptr); }
   nodes.reserve(o.nodes.size());
@@ -1260,6 +1343,7 @@ inline GraphT &GraphT::operator=(GraphT o) FLATBUFFERS_NOEXCEPT {
   std::swap(preferred_engine_id, o.preferred_engine_id);
   std::swap(is_override_shape_enabled, o.is_override_shape_enabled);
   std::swap(min_required_engine_api_version, o.min_required_engine_api_version);
+  std::swap(id, o.id);
   return *this;
 }
 
@@ -1281,6 +1365,7 @@ inline void Graph::UnPackTo(GraphT *_o, const ::flatbuffers::resolver_function_t
   { auto _e = preferred_engine_id(); _o->preferred_engine_id = _e; }
   { auto _e = is_override_shape_enabled(); _o->is_override_shape_enabled = _e; }
   { auto _e = min_required_engine_api_version(); if (_e) _o->min_required_engine_api_version = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(new hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion(*_e)); }
+  { auto _e = id(); if (_e) _o->id = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::Uuid>(new hipdnn_flatbuffers_sdk::data_objects::Uuid(*_e)); }
 }
 
 inline ::flatbuffers::Offset<Graph> Graph::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -1300,6 +1385,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
   auto _preferred_engine_id = _o->preferred_engine_id;
   auto _is_override_shape_enabled = _o->is_override_shape_enabled;
   auto _min_required_engine_api_version = _o->min_required_engine_api_version ? _o->min_required_engine_api_version.get() : nullptr;
+  auto _id = _o->id ? _o->id.get() : nullptr;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGraph(
       _fbb,
       _name,
@@ -1310,7 +1396,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
       _nodes,
       _preferred_engine_id,
       _is_override_shape_enabled,
-      _min_required_engine_api_version);
+      _min_required_engine_api_version,
+      _id);
 }
 
 inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *obj, NodeAttributes type) {
@@ -1404,6 +1491,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
     }
     case NodeAttributes::MoeGroupedMatmulAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;
@@ -1513,6 +1604,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1608,6 +1703,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT *>(value);
       return CreateMoeGroupedMatmulAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(value);
+      return CreateMoeGroupedMatmulBwdAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1700,6 +1799,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::MoeGroupedMatmulAttributes: {
       value = new hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
+      value = new hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT(*reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(u.value));
       break;
     }
     default:
@@ -1816,6 +1919,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::MoeGroupedMatmulAttributes: {
       auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributesT *>(value);
       delete ptr;
       break;
     }

@@ -15,6 +15,25 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 
+## rocSOLVER 3.37.0 for ROCm 10.1.0
+
+### Added
+
+* 2-stage reduction to tridiagonal in the Hermitian eigensolver (SYEVD/HEEVD) and generalized Hermitian eigensolver (SYGVD/HEGVD).
+* Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
+    - CHOLQR (with batched and strided\_batched versions)
+    - CHOLQR_64 (with batched and strided\_batched versions)
+* Hessenberg reduction auxiliary routine
+    * LAHR2
+* 64-bit APIs for existing functions:
+    - LARFT_64
+
+### Optimized
+
+* Improved the performance of sygst/hegst.
+
+
+
 ## rocSOLVER 3.36.0 for ROCm 10.0.0
 
 ### Added
