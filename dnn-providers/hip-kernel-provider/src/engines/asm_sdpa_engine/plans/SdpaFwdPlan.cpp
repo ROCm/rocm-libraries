@@ -129,6 +129,14 @@ void SdpaFwdPlan::execute(const Handle& handle,
 
     if(const auto& group = _params.group)
     {
+        // Group mode locates each batch via the ragged (seqstart) offsets, not a
+        // batch stride; a non-zero s_*_Bs would double-advance the base pointer.
+        // Mirrors AITER's varlen path (batch_stride_{q,k,v,o} = 0).
+        args.s_Bs = 0;
+        args.s_k_Bs = 0;
+        args.s_v_Bs = 0;
+        args.s_o_Bs = 0;
+
         args.ptr_qseq_padding = uidToPtrMap[group->qoRaggedOffsetUid];
         if(group->qoCuSeqLengthsUid)
         {

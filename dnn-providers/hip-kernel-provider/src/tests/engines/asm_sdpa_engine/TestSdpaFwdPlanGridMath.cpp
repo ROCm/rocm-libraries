@@ -6,6 +6,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdLaunchParams.hpp"
 
 using asm_sdpa_engine::computeFwdLaunchParams;
+using asm_sdpa_engine::SdpaFwdGroupModeParams;
 using asm_sdpa_engine::SdpaFwdParams;
 using asm_sdpa_engine::plan_utils::MaskType;
 
@@ -171,6 +172,59 @@ TEST(TestSdpaFwdPlanGridMath, Hd192x128CausalSmallSeqCoversAllTiles)
     EXPECT_EQ(lp.gridDimY, 2U); // full tile count
     EXPECT_EQ(lp.gridDimZ, 2U);
     EXPECT_EQ(lp.blockDimX, 256U);
+}
+
+// =============================================================================
+// Group (ragged) mode grid tests — gridDimX=nhead, gridDimY=batch,
+// gridDimZ=ceil(per-batch-S-tiles / tgDiv). hipDNN group tensors are padded
+// [B, S, H, D] with batch carried by gridDimY, so Q-tiles use per-batch seqLen
+// (not a packed total_q). Grid math only reads params.group.has_value().
+// =============================================================================
+
+TEST(TestSdpaFwdPlanGridMath, GroupCausalRemapsGridToNheadBatchTiles)
+{
+    auto p = makeHd128Params();
+    p.group = SdpaFwdGroupModeParams{100, 101};
+    p.maskType = MaskType::TOP_LEFT_CAUSAL;
+    // qTiles = ceil(2048/256) = 8; tgDiv = 2; gdz = ceil(8/2) = 4.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 16U); // nhead
+    EXPECT_EQ(lp.gridDimY, 2U); // batch
+    EXPECT_EQ(lp.gridDimZ, 4U);
+    EXPECT_EQ(lp.blockDimX, 512U);
+}
+
+TEST(TestSdpaFwdPlanGridMath, GroupUnmaskedKeepsFullTileCountInZ)
+{
+    auto p = makeHd128Params();
+    p.group = SdpaFwdGroupModeParams{100, 101};
+    p.batchSize = 4U;
+    p.seqLenQ = 512U;
+    p.tileSizeQo = 128U;
+    // qTiles = ceil(512/128) = 4; tgDiv = 1; gdz = 4.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 16U); // nhead
+    EXPECT_EQ(lp.gridDimY, 4U); // batch
+    EXPECT_EQ(lp.gridDimZ, 4U);
+    EXPECT_EQ(lp.blockDimX, 512U);
+}
+
+// Regression: group hd192x128/gfx942 must NOT merge causal head/tail (tgDiv=1),
+// so gridDimZ stays at the full per-batch tile count rather than halving.
+TEST(TestSdpaFwdPlanGridMath, GroupHd192x128CausalUsesTgDivOne)
+{
+    auto p = makeHd192x128Params();
+    p.group = SdpaFwdGroupModeParams{100, 101};
+    p.maskType = MaskType::TOP_LEFT_CAUSAL;
+    p.seqLenQ = 1024U;
+    p.tileSizeQo = 128U;
+    // qTiles = ceil(1024/128) = 8; tgDiv = 1 (group+hd192x128); gdz = 8.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 16U); // nhead
+    EXPECT_EQ(lp.gridDimY, 2U); // batch
+    EXPECT_EQ(lp.gridDimZ, 8U);
+    EXPECT_EQ(lp.blockDimX, 256U);
+    EXPECT_EQ(lp.tuneOpt, 0U);
 }
 
 // =============================================================================
