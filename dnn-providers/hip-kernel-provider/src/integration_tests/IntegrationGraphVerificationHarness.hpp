@@ -46,7 +46,8 @@ private:
         float relativeTolerance = 0.0f;
         hipdnn_frontend::DataType validatorType = hipdnn_frontend::DataType::NOT_SET;
         /// A caller-supplied validator owns its own comparison rules and is never rebuilt from
-        /// the tolerances below.
+        /// the tolerances below. Any later registration for the same output, whether a tolerance
+        /// or a second comparator, is a test-authoring error and is rejected rather than honoured.
         bool suppliedByCaller = false;
         std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
     };
@@ -177,6 +178,23 @@ protected:
         ASSERT_TRUE(belongsToGraph) << "Validator output does not belong to the context's graph";
     }
 
+    /// Reports and refuses any registration that would displace a caller-supplied comparator,
+    /// whether the displacing registration is a tolerance or a second comparator, and answers
+    /// whether the caller's registration was refused. Reports nonfatally so a suite sees every
+    /// offending output rather than only the first.
+    static bool refuseDuplicateOfCallerValidator(
+        const GraphVerificationContext::Registration& registration,
+        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr)
+    {
+        if(!registration.suppliedByCaller)
+        {
+            return false;
+        }
+        ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
+                      << attr->get_name() << "); keeping first registration";
+        return true;
+    }
+
     void registerValidator(GraphVerificationContext& context,
                            const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr,
                            float tolerance)
@@ -192,6 +210,10 @@ protected:
         ASSERT_NO_FATAL_FAILURE(assertOutputBelongsToGraph(context, attr));
 
         auto& registration = context._registrations[attr];
+        if(refuseDuplicateOfCallerValidator(registration, attr))
+        {
+            return;
+        }
         if(registration.absoluteTolerance != absoluteTolerance
            || registration.relativeTolerance != relativeTolerance)
         {
@@ -202,7 +224,8 @@ protected:
     }
 
     /// Registers a caller-built comparator for one output, for the outputs whose correct values
-    /// the tolerance-based default validator cannot express.
+    /// the tolerance-based default validator cannot express. One output holds at most one
+    /// comparator: a second registration is rejected and the first keeps deciding the output.
     void registerValidator(
         GraphVerificationContext& context,
         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& attr,
@@ -212,6 +235,10 @@ protected:
         ASSERT_NO_FATAL_FAILURE(assertOutputBelongsToGraph(context, attr));
 
         auto& registration = context._registrations[attr];
+        if(refuseDuplicateOfCallerValidator(registration, attr))
+        {
+            return;
+        }
         registration.validator = std::move(validator);
         registration.suppliedByCaller = true;
     }

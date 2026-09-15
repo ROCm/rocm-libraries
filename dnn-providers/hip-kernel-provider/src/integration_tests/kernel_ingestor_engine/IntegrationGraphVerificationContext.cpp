@@ -4,8 +4,11 @@
 #include <gtest/gtest-spi.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+
+#include <string>
 
 namespace hip_kernel_provider::test_utilities
 {
@@ -35,6 +38,48 @@ std::shared_ptr<TensorAttributes> makePointwise(Graph& graph, DataType dataType)
     auto output = graph.pointwise(makeInput(1, dataType), makeInput(2, dataType), attributes);
     output->set_uid(3).set_output(true).set_data_type(dataType);
     return output;
+}
+
+/// Accepts every comparison, so a verdict this comparator reaches is distinguishable from the
+/// one a tolerance-built validator would reach on the same tensors.
+class AcceptEverythingValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
+{
+public:
+    bool allClose(hipdnn_data_sdk::utilities::ITensor& /*reference*/,
+                  hipdnn_data_sdk::utilities::ITensor& /*implementation*/) const override
+    {
+        return true;
+    }
+};
+
+/// Refuses every comparison, so which of two caller comparators is in effect is decidable from
+/// the verdict alone, on data both a tolerance-built validator and its rival would accept.
+class RejectEverythingValidation : public hipdnn_test_sdk::utilities::IReferenceValidation
+{
+public:
+    bool allClose(hipdnn_data_sdk::utilities::ITensor& /*reference*/,
+                  hipdnn_data_sdk::utilities::ITensor& /*implementation*/) const override
+    {
+        return false;
+    }
+};
+
+// Capture only the intentionally rejected registration, which reports nonfatally so the caller
+// sees every offending tensor rather than the first one.
+template <typename Register>
+void expectRegistrationFailure(Register&& registration, const std::string& expectedMessage)
+{
+    testing::TestPartResultArray results;
+    {
+        const testing::ScopedFakeTestPartResultReporter reporter(
+            testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &results);
+        registration();
+    }
+    ASSERT_EQ(results.size(), 1);
+    const auto& result = results.GetTestPartResult(0);
+    EXPECT_TRUE(result.nonfatally_failed());
+    EXPECT_NE(std::string(result.message()).find(expectedMessage), std::string::npos)
+        << result.message();
 }
 
 // Capture only the intentionally rejected verification, not setup or its positive control.
@@ -111,6 +156,39 @@ TEST_F(IntegrationGraphVerificationContext, FutureGraphCannotReplaceCurrentCompa
     ASSERT_NO_FATAL_FAILURE(verifyBuiltGraph(currentContext, 0));
     registerValidator(currentContext, currentOutput, 0.0f);
     expectVerificationFailure([&] { verifyBuiltGraph(currentContext, 0); });
+}
+
+TEST_F(IntegrationGraphVerificationContext, ToleranceCannotDisplaceACallerComparator)
+{
+    Graph graph;
+    auto output = makePointwise(graph, DataType::FLOAT);
+    GraphVerificationContext context(graph);
+    registerValidator(context, output, std::make_unique<AcceptEverythingValidation>());
+
+    expectRegistrationFailure([&] { registerValidator(context, output, 1e-6f); },
+                              "Duplicate validator for tensor "
+                                  + std::to_string(output->get_uid()));
+
+    // The caller's comparator still decides this output: it accepts inputs that the rejected
+    // tolerance would reject, and it is a live validator rather than one the rejected call cleared.
+    _differentInputs = true;
+    ASSERT_NO_FATAL_FAILURE(verifyGraph(context, 0));
+}
+
+TEST_F(IntegrationGraphVerificationContext, ACallerComparatorCannotDisplaceAnother)
+{
+    Graph graph;
+    auto output = makePointwise(graph, DataType::FLOAT);
+    GraphVerificationContext context(graph);
+    registerValidator(context, output, std::make_unique<RejectEverythingValidation>());
+
+    expectRegistrationFailure(
+        [&] { registerValidator(context, output, std::make_unique<AcceptEverythingValidation>()); },
+        "Duplicate validator for tensor " + std::to_string(output->get_uid()));
+
+    // Both the rejected comparator and a tolerance-built validator accept these matching outputs,
+    // so only the first comparator can produce a mismatch: the verdict names which one survived.
+    expectVerificationFailure([&] { verifyGraph(context, 0); });
 }
 
 #ifdef HIPDNN_ENABLE_SDPA
