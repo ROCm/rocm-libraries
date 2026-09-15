@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import collections
 import json
+import re
 import uuid
 from pathlib import Path
 
@@ -30,7 +31,7 @@ import pytest
 
 from corpus_build import assemble, build as pipeline, graphs, kernels, model_shapes, sweep
 from corpus_build.__main__ import main
-from corpus_build.shapes import Filter, Shape
+from corpus_build.shapes import Candidate, Filter, Shape
 
 REPO = pipeline.REPO
 SHIPPED = REPO / "dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/bshd"
@@ -158,15 +159,38 @@ def test_the_regime_names_the_population_a_problem_belongs_to(shape, expected, c
     assert Shape(dtype="bf16", batch=1, head_dim=128, causal=causal, **shape).regime == expected
 
 
-def test_a_causal_cross_attention_shape_is_refused_rather_than_emitted_unlabellable():
-    """`sdpa_fwd.opmeta.json` counts a causal problem's work as Sq*Sk - Sq*(Sq-1)/2,
-    which goes non-positive once the queries outrun the keys. The graph is legal and an
-    engine will run it; what cannot exist is a training row, because the label is derived
-    from that count -- "full-graph graph.flops must be a positive finite number" ended
-    AITER's 843-graph collection (run 67929589) on exactly these shapes."""
-    with pytest.raises(ValueError, match="causal cross attention"):
-        Shape(dtype="bf16", batch=1, head_dim=128, causal=True,
-              seqlen_q=512, seqlen_kv=256, heads_q=8, heads_kv=8)
+def test_a_causal_shape_with_more_queries_than_keys_is_refused_only_at_bottom_right():
+    """The asymmetry is the runtime's, not this tool's. `EngineFeatures.hpp` computes a
+    causal problem's pair count on two arms: bottom-right subtracts `Sq*(Sq-1)/2` from
+    `Sq*Sk` and returns nullopt outright when `Sq > Sk`, while top-left computes
+    `t*(t+1)/2 + (Sq-t)*Sk` with `t = min(Sq, Sk)`, which is strictly positive there.
+
+    Refusing both arms on the bottom-right formula deleted 28 of
+    `gfx942_attention_dense`'s 664 compiled geometries from the corpus and recorded
+    them as unlabellable -- coverage of shapes the runtime labels without complaint.
+    """
+    geometry = dict(dtype="bf16", batch=1, head_dim=128, causal=True,
+                    seqlen_q=512, seqlen_kv=256, heads_q=8, heads_kv=8)
+
+    admitted = Shape(alignment="top_left", **geometry)
+    assert admitted.phase == "cross"
+    triangle = min(admitted.seqlen_q, admitted.seqlen_kv)
+    pairs = triangle * (triangle + 1) / 2 + (admitted.seqlen_q - triangle) * admitted.seqlen_kv
+    assert pairs > 0, "the arm the runtime uses for this shape does not go non-positive"
+
+    with pytest.raises(ValueError, match="bottom-right causal diagonal"):
+        Shape(alignment="bottom_right", **geometry)
+
+
+def test_head_counts_the_runtime_cannot_group_are_refused_at_construction():
+    """`EngineFeatures.hpp:185` declines a graph whose `heads % kv_heads != 0`, so a
+    4-query-head/8-KV-head shape never binds `graph.flops` and `uhd_gen/immediate.py`
+    raises "full-graph graph.flops must be a positive finite number" hours into a
+    collection. The guard used to accept it whenever EITHER count divided the other,
+    which admitted exactly this shape and then labelled it `gqa`."""
+    with pytest.raises(ValueError, match="head counts must divide"):
+        Shape(dtype="bf16", batch=1, head_dim=128, causal=False,
+              seqlen_q=512, seqlen_kv=512, heads_q=4, heads_kv=8)
 
 
 def test_the_regime_travels_on_the_graph_as_well_as_the_manifest(tmp_path, sources):
@@ -481,6 +505,57 @@ def test_the_sweep_fills_the_grouping_axis_the_packs_leave_thin():
                for candidate in found)
 
 
+def test_both_samplers_fall_back_to_the_same_mixture_shares():
+    """Two samplers read one `sdpa_fwd.opmeta.json`: this module and `corpus_gen`'s
+    `ProblemSpace.hpp`, which cannot be merged because it samples against a live
+    engine and so lives behind a GPU-requiring executable. The shares are the part
+    they must not disagree on -- they ARE the corpus composition, and a declaration
+    that omits `mixture` is the case where each half invents its own.
+
+    The C++ side is asserted by parsing `OperationMetadata.hpp`, where the fallback
+    `ProblemSpace.hpp` consumes is written (`metadata.mixture` and `struct Mixture`'s
+    member initialisers). Building it to ask is not an option here: this suite runs
+    with no GPU and no compiler, and restating the constants in Python would pin a
+    copy instead of the declaration's own arithmetic.
+    """
+    header = (REPO / "projects/hipdnn/tools/corpus_gen/include/hipdnn_corpus_gen"
+              / "OperationMetadata.hpp").read_text(encoding="utf-8")
+    body = re.search(r"struct Mixture\s*\{(.*?)\n\};", header, re.S)
+    assert body, "struct Mixture moved; this test's parse is stale, not the shares"
+    members = re.findall(r"double\s+(\w+)\s*=\s*([0-9.]+);", body.group(1))
+    anchored = re.search(r"metadata\.mixture\s*=\s*Mixture\{([^}]*)\};", header)
+    assert anchored, "the archetypes-but-no-mixture fallback moved"
+
+    # `struct Mixture`'s member initialisers ARE the no-archetypes fallback: nothing
+    # assigns the field on that path, which is the state `isExplorationOnly()` names.
+    assert {name: float(value) for name, value in members} == sweep.EXPLORATION_ONLY
+    # `Mixture{...}` is positional, so the brace list is read in member order.
+    assert dict(zip([name for name, _ in members],
+                    [float(share) for share in anchored.group(1).split(",")])) \
+        == sweep.ANCHORED_MIXTURE
+
+    declaration = sweep.load(REPO / sweep.DEFAULT_DECLARATION)
+    assert sweep.mixture(declaration) == declaration["mixture"], "a declared mixture wins"
+    assert sweep.mixture({k: v for k, v in declaration.items() if k != "mixture"}) \
+        == sweep.ANCHORED_MIXTURE
+
+
+def test_a_declaration_with_nothing_to_anchor_on_reports_an_exploration_only_pool():
+    """The consequence of the fallback above, and the reason it is not cosmetic. With
+    no archetypes there is nothing to draw from or perturb, so every point comes from
+    the exploration -- but the shares decide what the draw is COUNTED as. Falling back
+    to the anchored 0.2/0.6/0.2 here filed 80% of an exploration-only pool under
+    `archetypes` and `neighbourhood`, so the manifest reported a composition the
+    corpus did not have and `origin` read `archetypes:exploration`."""
+    declaration = sweep.load(REPO / sweep.DEFAULT_DECLARATION)
+    unanchored = {key: value for key, value in declaration.items()
+                  if key not in ("archetypes", "mixture")}
+    found, stats = sweep.sample(unanchored, 40, seed=0, max_bytes=2 ** 31)
+    assert stats["shapes"] == 40
+    assert stats["by_kind"] == {"archetypes": 0, "neighbourhood": 0, "exploration": 40}
+    assert all(candidate.origin == "exploration:exploration" for candidate in found)
+
+
 # ------------------------------------------------------------------------ allocation
 
 
@@ -499,6 +574,39 @@ def test_every_source_is_represented_even_in_a_small_corpus():
     allocation = assemble.allocate(
         30, {"model": 50, "kernel": 500, "sweep": 500}, assemble.DEFAULT_SHARES)
     assert all(count > 0 for count in allocation.values())
+
+
+def test_a_truncated_model_pool_keeps_its_regime_mix_rather_than_an_alphabetical_prefix():
+    """`model_shapes.from_shape_dir` walks `sorted(root.rglob("*"))`, so the model pool
+    arrives grouped by file name with each file's rows contiguous. Taking the front of
+    that is taking the alphabet: against the cluster's published `~/model-shapes` it
+    dropped 95 of 200 shapes, and any regime that happened to be written down in a
+    late-named file left the corpus entirely. The packs are spread by
+    `make_sdpa_bundles.stratified` and the sweep is drawn in its declared mixture
+    proportions; this is the third source's version of the same guarantee.
+
+    Proportional, not one row of each: the model pool's own mix is what real models
+    run, so a quarter of the pool should look like the pool.
+    """
+    prefill = [Candidate(shape=Shape(dtype="bf16", batch=batch, heads_q=8, heads_kv=8,
+                                     seqlen_q=512, seqlen_kv=512, head_dim=128,
+                                     causal=False),
+                         source="model", origin=f"a_models.json:m{batch}")
+               for batch in range(1, 81)]
+    decode = [Candidate(shape=Shape(dtype="bf16", batch=batch, heads_q=32, heads_kv=8,
+                                    seqlen_q=1, seqlen_kv=4096, head_dim=128,
+                                    causal=False),
+                        source="model", origin=f"z_models.json:m{batch}")
+              for batch in range(1, 21)]
+
+    selected, allocation = assemble.select({"model": prefill + decode}, 20,
+                                           {"model": 1.0, "kernel": 0.0, "sweep": 0.0})
+    assert allocation["model"] == 20
+    assert collections.Counter(candidate.shape.regime for candidate in selected) == {
+        "prefill_short_mha": 16, "decode_long_gqa": 4}, (
+        "a 4:1 pool truncated to a fifth is still 4:1, not 20 rows of whichever file "
+        "sorted first")
+    assert len({candidate.shape.key for candidate in selected}) == 20
 
 
 def test_a_zero_share_excludes_its_source_rather_than_deferring_it():
