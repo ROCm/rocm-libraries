@@ -11125,21 +11125,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     insertedCount = 0
     annotatedRawCount = 0
 
-    # Barriers pass-2 provably cannot regenerate, matched on their comment.
-    #
-    # Pass-2 derives barriers from memtoken phase transitions, and models one
-    # back edge: the unroll loop's. A barrier that guards the PERSISTENT loop is
-    # outside that model twice over -- it carries no memtoken, and
-    # _detectLoopHeadInfo only recognises "LoopBegin" labels, so the tile
-    # boundary at label_PersistentLoopStart is walked as straight-line code.
-    # Deleting one is therefore permanent, and it takes a real StreamK hazard
-    # with it: tile N's LDS reads against tile N+1's prefetch writing the same
-    # buffers. See the emission site, gated on StreamK > 0.
-    preservedBarrierComments = ("For stream-k / persistent loop",)
-
-    def _isPreservedBarrier(barrier) -> bool:
-      text = str(barrier)
-      return any(marker in text for marker in preservedBarrierComments)
+    # NOTE: the StreamK persistent-loop barrier is deleted here and never rebuilt
+    # (it carries no memtoken, and the label_PersistentLoopStart back edge is not
+    # modelled), which loses a real cross-tile LDS hazard. Preserving it was tried
+    # and reverted: a barrier is a CK_Tensor consumer, so it drains and trims the
+    # queue in solver sweep 0, and restoreTensorState then propagates that empty
+    # snapshot downstream -- a TDMPlusLdsBuf=0 StreamK kernel lost the
+    # s_wait_tensorcnt inside its own main loop as a result. Adding a wait must
+    # not remove later ones; fix the freeze before reinstating the barrier.
 
     # Pass-1: remove existing barriers first.
     modulesToScan = [rootModule]
@@ -11150,8 +11143,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0] \
-             and not _isPreservedBarrier(item):
+        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]:
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
