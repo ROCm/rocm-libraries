@@ -26,9 +26,14 @@ interface CommandPanelProps {
   /** Distinct per tab: separates the saved command, the output and the temp file. */
   scope: string;
   getGraph(): Graph;
+  /**
+   * Main content for the tab. With it the output pane docks below at a fixed
+   * height; without it the output fills the panel.
+   */
+  children?: React.ReactNode;
 }
 
-export function CommandPanel({ scope, getGraph }: CommandPanelProps) {
+export function CommandPanel({ scope, getGraph, children }: CommandPanelProps) {
   const [command, setCommand] = useState(DEFAULT_COMMAND);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [running, setRunning] = useState(false);
@@ -138,7 +143,7 @@ export function CommandPanel({ scope, getGraph }: CommandPanelProps) {
   }, []);
 
   return (
-    <div className="command">
+    <div className="command" data-docked={children != null}>
       <div className="command__bar">
         <label className="command__label" htmlFor={`command-${scope}`}>
           Command:
@@ -165,6 +170,7 @@ export function CommandPanel({ scope, getGraph }: CommandPanelProps) {
           {running ? "Stop" : "Execute"}
         </button>
       </div>
+      {children != null && <div className="command__main">{children}</div>}
       <div className="command__output" ref={outputRef}>
         {segments.length === 0 ? (
           <div className="command__output-empty">
