@@ -25,6 +25,7 @@ from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.ValidParameters import validParameters
 from Tensile.Components import TDMFuse as TF
 from Tensile.Components import DecouplePGR as DP
+from Tensile.Components import TDMCross as TC
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 
 pytestmark = pytest.mark.unit
@@ -371,6 +372,10 @@ def test_b_mx_separates_a_from_b():
     assert TF.tdmGroupingSeparatesAB(ks()) is True
 
 
+def test_b_mx_inherits_the_nothing_to_cross_rejection():
+    """One partitioned group, so crossing is refused with no new branch."""
+    assert TC.tdmCrossRejectReason(ks(TDMCross=1)) is not None
+    assert "nothing to cross" in TC.tdmCrossRejectReason(ks(TDMCross=1))
 
 
 def test_b_mx_inherits_the_pap_rejection():
