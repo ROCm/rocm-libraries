@@ -319,7 +319,7 @@ void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
     args.nextResultRunningVariance = nextRunningVariancePtr;
     args.n = static_cast<long long>(n);
     args.c = static_cast<long long>(c);
-    args.hw = static_cast<long long>(h * w);
+    args.hw = static_cast<long long>(h) * static_cast<long long>(w);
 
     launchKernel(
         kernel.function(), {BLOCK_SIZE, 1, 1}, {checkedNarrowToUInt(c), 1, 1}, &args, sizeof(args));

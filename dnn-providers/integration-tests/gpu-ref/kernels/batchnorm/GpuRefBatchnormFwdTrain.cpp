@@ -21,6 +21,7 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
     constexpr bool isChannelLastLayout = static_cast<bool>(IS_CHANNEL_LAST_LAYOUT);
     const auto chw = args.c * args.hw;
     const auto nhw = args.n * args.hw;
+    const COMPUTE_TYPE invNhw = static_cast<COMPUTE_TYPE>(1.0) / static_cast<COMPUTE_TYPE>(nhw);
 
     COMPUTE_TYPE pvScale;
     COMPUTE_TYPE pvBias;
@@ -45,9 +46,8 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
     }
     __syncthreads();
 
-    // Accumulate sum(x) and sum(x*x) over the N*H*W elements
+    // Pass 1: Accumulate sum(x) over the N*H*W elements
     COMPUTE_TYPE sum = static_cast<COMPUTE_TYPE>(0);
-    COMPUTE_TYPE sqSum = static_cast<COMPUTE_TYPE>(0);
     for(long long i = lid; i < nhw; i += localSize)
     {
         const long long nidx = i / args.hw;
@@ -64,31 +64,59 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
 
         const COMPUTE_TYPE xVal = toAccum(input[index]);
         sum += xVal;
-        sqSum += xVal * xVal;
     }
     lclReduceSum[lid] = sum;
-    lclReduceSqSum[lid] = sqSum;
     __syncthreads();
 
-    // Block reduction to compute the total sum and sum of squares for the channel
+    // Pass 1: Block reduce sum(x) and compute mean for the channel
     for(long long s = localSize >> 1; s > 0; s >>= 1)
     {
         if(lid < s)
         {
             lclReduceSum[lid] += lclReduceSum[lid + s];
+        }
+        __syncthreads();
+    }
+    mean = lclReduceSum[0] * invNhw;
+
+    // Pass 2: Accumulate sum((x - mean)^2) over the N*H*W elements
+    COMPUTE_TYPE sqSum = static_cast<COMPUTE_TYPE>(0);
+    for(long long i = lid; i < nhw; i += localSize)
+    {
+        const long long nidx = i / args.hw;
+        const long long hwidx = i - (nidx * args.hw);
+
+        if constexpr(isChannelLastLayout)
+        {
+            index = nidx * chw + hwidx * args.c + grpid;
+        }
+        else
+        {
+            index = nidx * chw + grpid * args.hw + hwidx;
+        }
+
+        const COMPUTE_TYPE xVal = toAccum(input[index]);
+        sqSum += (xVal - mean) * (xVal - mean);
+    }
+    lclReduceSqSum[lid] = sqSum;
+    __syncthreads();
+
+    // Pass 2: Block reduce sum((x - mean)^2) and compute variance for the channel
+    for(long long s = localSize >> 1; s > 0; s >>= 1)
+    {
+        if(lid < s)
+        {
             lclReduceSqSum[lid] += lclReduceSqSum[lid + s];
         }
         __syncthreads();
     }
-
-    // Compute mean, variance and invVariance for the channel
-    const COMPUTE_TYPE invNhw = static_cast<COMPUTE_TYPE>(1.0) / static_cast<COMPUTE_TYPE>(nhw);
-    mean = lclReduceSum[0] * invNhw;
-    variance = lclReduceSqSum[0] * invNhw - mean * mean;
+    variance = lclReduceSqSum[0] * invNhw;
     if(variance < static_cast<COMPUTE_TYPE>(0))
     {
         variance = static_cast<COMPUTE_TYPE>(0);
     }
+
+    // Compute inverse variance and load scale and bias into registers
     invVariance = rsqrt(variance + toAccum(args.epsilon));
     pvScale = lclScale;
     pvBias = lclBias;
