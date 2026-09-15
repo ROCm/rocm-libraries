@@ -967,7 +967,7 @@ class ProblemType(Mapping):
               raise Exception("SetConstStride%s=%s anchorDim=%u is not in IndexAssignments%s"%(tc, sc, anchorDim, tc))
 
     # Bias
-    # If compute data type is not equal to dest data type, tensile will run conversion kernel.
+    # If compute data type is not equal to dest data type, TensileLite will run conversion kernel.
     # In this case we don't need to apply bias in beta only kernel.
     if "UseBias" in config:
       if self["ComputeDataType"] != self["DestDataType"]:
@@ -1180,7 +1180,7 @@ class ProblemType(Mapping):
     state["NumIndicesBatch"] = len(state["IndicesBatch"])
     state["NumIndicesSummation"] = len(state["IndicesSummation"])
     if not state["AllowNoFreeDims"] and state["NumIndicesFree"] < 2 :
-      raise Exception("Tensile requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
+      raise Exception("TensileLite requires >= 2 free indices or set AllowNoFreeDims; FreeIndices=%s."% state["IndicesFree"])
 
     # by default, unroll index will be the last/inner summation index
     state["IndexUnroll"] = state["IndicesSummation"][len(state["IndicesSummation"])-1]
