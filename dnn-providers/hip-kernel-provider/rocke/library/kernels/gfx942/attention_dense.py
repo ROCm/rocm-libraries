@@ -450,6 +450,47 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         without this class restating it."""
         return int(self.waves_per_eu)
 
+    @property
+    def runtime_shape(self) -> bool:
+        """Whether the body reads the problem shape *only* from its kernel params,
+        baking it nowhere -- so ONE compiled kernel serves every shape and the three
+        fields drop out of the cache key. This is what collapses the AOT
+        batch x seqlen instance explosion.
+
+        On gfx942 this coincides with ``_has_shape_params``: unlike gfx950, the
+        sub-modes that take the params but still bake the shape somewhere else
+        (ragged / varlen / paged) are rejected outright by
+        :func:`supports_attention_dense`, so the only spec that reaches the builder
+        and is NOT runtime-shape is the persistent one -- and that one declares no
+        shape params at all, because its work-item space ``W = NQB*Hq*B`` is a
+        host-visible Python int feeding the grid-stride bound.
+
+        The predicate text is kept identical to the gfx950 twin on purpose even
+        though ``ragged``/``varlen``/``paged``/``sliding_window`` are inert here: if
+        one of those sub-modes is later admitted on gfx942, it lands already excluded
+        rather than silently claiming a cache identity its body does not have."""
+        return not (
+            self.persistent
+            or self.ragged
+            or self.varlen
+            or self.paged
+            or self.sliding_window > 0
+        )
+
+    @property
+    def runtime_param_fields(self) -> tuple[str, ...]:
+        """The shape fields this body reads *only* from its kernel params, and so
+        the fields ``attention_dense_cache_key`` may drop.
+
+        Kept in sync with the body by hand, and with :meth:`kernel_name` -- which
+        drops ``sq``/``sk`` (via :meth:`_shape_name_parts`) and ``b{batch}`` for
+        exactly this tuple. A field declared here but still baked anywhere would be a
+        cache collision serving one shape's binary to another."""
+        return ("batch", "seqlen_q", "seqlen_kv") if self.runtime_shape else ()
+
+    def _shape_name_parts(self) -> tuple[str, ...]:
+        return () if self.runtime_shape else super()._shape_name_parts()
+
     def kernel_name(self) -> str:
         """The gfx942 kernel symbol: the shared name plus everything THIS body bakes.
 
@@ -477,9 +518,17 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         do_qk addressing, but it lives in the shared ``lds_k_group_pad`` field and the
         base ``kernel_name()`` already emits a ``kpad{N}`` token for it on the packed
         path. A second gfx942 tag would restate the same fact under another name.
+
+        Under ``runtime_shape`` the ``b{batch}`` token drops, for the same reason the
+        base drops ``sq``/``sk``: batch is a kernel param there, it sizes nothing
+        baked, and keeping it would give two specs that share ONE cache key two
+        DIFFERENT symbol names -- which the ``assert art.kernel_name ==
+        spec.kernel_name()`` in :func:`run_attention_dense_torch` would then trip on
+        the second shape served from the cache.
         """
+        batch_part = "" if self.runtime_shape else f"_b{self.batch}"
         return (
-            f"{super().kernel_name()}_gfx942_b{self.batch}"
+            f"{super().kernel_name()}_gfx942{batch_part}"
             f"_wpe{self.resolved_waves_per_eu()}{_tuning_name_tags(self)}"
         )
 
@@ -1127,6 +1176,25 @@ def _build_attention_dense_single_buffer(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    # Problem shape as kernel params, so ONE compiled binary serves every
+    # (batch, seqlen_q, seqlen_kv). Declared right after scale to fix their ABI
+    # position -- mirrored by hand in attention_dense_signature, which is the only
+    # place a silent kernarg skew can enter (and is what the signature test guards).
+    #
+    # Gated on ``spec.runtime_shape``, which on gfx942 is exactly "not persistent":
+    # the persistent body's work-item space W = NQB*Hq*B is a host-visible Python int
+    # feeding the grid-stride bound and the b.mod/b.div work decode, so the shape
+    # cannot become a param there without that bound following it (out of scope --
+    # runtime operands would turn those strength-reduced divides into real integer
+    # division inside the grid-stride loop, a perf question needing a benchmark).
+    # Keeping the persistent path's declaration empty is also what holds its IR --
+    # and the 5 persist golden cases -- byte-identical.
+    if spec.runtime_shape:
+        batch_p = b.param("batch", I32)
+        seqlen_q_p = b.param("seqlen_q", I32)
+        seqlen_kv_p = b.param("seqlen_kv", I32)
+    else:
+        batch_p = seqlen_q_p = seqlen_kv_p = None
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -1212,8 +1280,25 @@ def _build_attention_dense_single_buffer(
     # cfvst feeds V via buffer_load + perm_b32 + smem_store (no async-DMA handle); the
     # naive D64 path still lands V through async_buffer_load_lds, which needs the base.
     V_lds_addr = None if USE_CFVST else b.smem_addr_of(V_lds)
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
+    # num_records must track THIS launch's real extent: under runtime_shape one
+    # kernel serves every seqlen, and a baked bound would silently drop valid reads
+    # for a larger one (buffer loads past num_records return 0 with no fault).
+    #
+    # Emit a SEPARATE product per buffer_rsrc rather than one shared node: develop
+    # emits two num_records nodes here, so sharing one breaks byte-identity against
+    # the golden. The baked branch keeps const_i32(B*Skv*...) verbatim -- the
+    # persistent path's IR must not move.
+    _kv_elem_bytes = Hkv * D * 2
+    if spec.runtime_shape:
+        k_rsrc = b.buffer_rsrc(
+            k, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+        v_rsrc = b.buffer_rsrc(
+            v, b.mul(b.mul(batch_p, seqlen_kv_p), b.const_i32(_kv_elem_bytes))
+        )
+    else:
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
 
     # ---- conflict-free V (P1): perm_b32 store-path transpose into V_lds[dim, token] ----
     # Load V naturally [token, dim] (coalesced VMEM over the contiguous dim axis),
@@ -1342,12 +1427,14 @@ def _build_attention_dense_single_buffer(
         CTA-invariant and closed over."""
         hkv = b.div(hq, b.const_i32(gqa))
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+        _sq_n = seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)
+        _skv_n = seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)
         q_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, _sq_n), b.const_i32(stride_q_tok)),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Skv)), b.const_i32(stride_k_tok)),
+            b.mul(b.mul(bt, _skv_n), b.const_i32(stride_k_tok)),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -1505,7 +1592,14 @@ def _build_attention_dense_single_buffer(
                     )
 
         # n_up: causal clamps the KV loop to the diagonal tile of this query block.
-        n_ktiles_c = b.const_i32(n_ktiles)
+        # BN is a power of two, so the runtime divide lowers to a shift. The causal
+        # clamp below needs no further edit -- it consumes n_ktiles_c, so converting
+        # the trip count carries it.
+        n_ktiles_c = (
+            b.div(seqlen_kv_p, b.const_i32(BN))
+            if spec.runtime_shape
+            else b.const_i32(n_ktiles)
+        )
         if causal:
             n_up = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
             n_up = b.select(b.cmp_lt(n_up, n_ktiles_c), n_up, n_ktiles_c)
@@ -1657,7 +1751,7 @@ def _build_attention_dense_single_buffer(
         # Epilogue: O[query,dim] = (P@V)/l, from the transposed C[dim,query] accum.
         rcp_l = b.rcp(l_i)
         o_base = b.add(
-            b.mul(b.mul(bt, b.const_i32(Sq)), b.const_i32(stride_q_tok)),
+            b.mul(b.mul(bt, _sq_n), b.const_i32(stride_q_tok)),
             b.mul(hq, b.const_i32(D)),
         )
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
@@ -1773,7 +1867,8 @@ def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:
 
 
 def attention_dense_signature(spec: AttentionDenseSpec):
-    """ABI signature: q/k/v/o pointers + f32 scale.
+    """ABI signature: q/k/v/o pointers + f32 scale, plus batch/seqlen_q/seqlen_kv as
+    i32 when the body takes the shape at runtime (``spec.runtime_shape``).
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -1784,15 +1879,24 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     """
     from rocke.helpers.spec import SignatureBuilder
 
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
         .ptr("k_ptr", spec.dtype)
         .ptr("v_ptr", spec.dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
-        .build()
     )
+    if _as_gfx942_spec(spec).runtime_shape:
+        # Mirrors the batch/seqlen_q/seqlen_kv params declared right after scale in
+        # build_attention_dense. Mirrored BY HAND: a skew here fails no other test --
+        # it mis-binds kernargs at launch and corrupts results on GPU only.
+        sig = (
+            sig.scalar("batch", "i32")
+            .scalar("seqlen_q", "i32")
+            .scalar("seqlen_kv", "i32")
+        )
+    return sig.build()
 
 
 _DENSE_LAUNCHER_CACHE: dict = {}
@@ -1819,10 +1923,11 @@ def run_attention_dense_torch(
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
 
     Mirrors ``kernels.gfx950.attention_dense.run_attention_dense_torch`` and keys
-    the launcher cache by ``attention_dense_cache_key``. gfx942 declares no
-    ``runtime_param_fields`` -- it bakes the whole problem shape -- so every
-    current and future IR-live field participates in that key without relying on
-    manual name tokens.
+    the launcher cache by ``attention_dense_cache_key``. On the runtime-shape path
+    (``spec.runtime_shape``, i.e. everything but persistent) batch/seqlen_q/seqlen_kv
+    are kernel params and drop out of that key, so one compiled binary serves every
+    shape; every other IR-live field still participates without relying on manual
+    name tokens. The persistent path keeps its fully-baked per-shape identity.
 
     varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
     ABI is always the 5-arg (q, k, v, o, scale) form; passing ``cu_seqlens_*`` is a
@@ -1858,8 +1963,13 @@ def run_attention_dense_torch(
             signature=attention_dense_signature(spec),
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
+    vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.runtime_shape:
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
     launcher(
-        {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)},
+        vals,
         config=LaunchConfig(
             grid=attention_dense_grid(spec),
             block=attention_dense_block(spec),
