@@ -16,6 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AuthoringPanel } from "./components/AuthoringPanel";
 import { CommandPanel } from "./components/CommandPanel";
 import { Inspector } from "./components/Inspector";
 import { EnginePanel } from "./components/EnginePanel";
@@ -360,6 +361,9 @@ function Studio() {
           onResultsReset={onResultsReset}
           onShowResults={onShowResults}
         />
+      </TabPanel>
+      <TabPanel id="authoring" active={activeTab}>
+        <AuthoringPanel getGraph={getGraph} active={activeTab === "authoring"} />
       </TabPanel>
       <TabPanel id="implement" active={activeTab}>
         <CommandPanel scope="implement" getGraph={getGraph} />
