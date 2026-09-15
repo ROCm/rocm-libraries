@@ -264,7 +264,7 @@ def validate_sets(sets: Sequence[Tuple[str, List[Any]]]) -> None:
     allowed values. A registry entry of ``-1`` means "skip value check".
     """
     try:
-        from Tensile.Common.ValidParameters import validParameters
+        from .Common.ValidParameters import validParameters
     except Exception as e:  # ModuleNotFoundError (rocisa), RuntimeError, etc.
         raise ExperimentalLibraryError(
             "Parameter validation needs Tensile.Common which requires a built "
@@ -465,7 +465,7 @@ def count_solutions(logic_yaml_path: str) -> int:
     and falls back to a structural scan of the raw yaml.
     """
     try:
-        from Tensile import LibraryIO
+        from . import LibraryIO
 
         raw = LibraryIO.readYAML(logic_yaml_path)
         if not raw:
@@ -905,7 +905,7 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
     # somewhere on the host, not that the benchmarked device (config `Device`)
     # is that arch. Device pinning on mixed-arch hosts is a follow-up.
     if not args.dry_run:
-        from Tensile.Common.Architectures import detectHostGfxArchs, hostHasArch
+        from .Common.Architectures import detectHostGfxArchs, hostHasArch
 
         if not hostHasArch(args.arch):
             detected = detectHostGfxArchs()
