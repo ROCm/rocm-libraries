@@ -59,7 +59,7 @@
 #define launch_csr2bsr_nnz_block_per_row_multipass_kernel(blocksize, blockdim)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                               \
         (rocsparse::csr2bsr_nnz_block_per_row_multipass_kernel<blocksize, blockdim>), \
-        dim3(rocsparse::min(mb, static_cast<J>(handle->properties.maxGridSize[0]))),                   \
+        dim3(rocsparse::min(mb, static_cast<J>(handle->properties.maxGridSize[0]))),  \
         dim3(blocksize),                                                              \
         0,                                                                            \
         handle->stream,                                                               \
@@ -376,24 +376,24 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
 
         I* temp1 = reinterpret_cast<I*>(temp_storage_ptr);
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((csr2bsr_nnz_65_inf_kernel<block_size, I, J>),
-                                           dim3(rocsparse::min(
-                                               mb, static_cast<J>(handle->properties.maxGridSize[0]))),
-                                           dim3(block_size),
-                                           0,
-                                           handle->stream,
-                                           m,
-                                           n,
-                                           mb,
-                                           nb,
-                                           block_dim,
-                                           rows_per_segment,
-                                           csr_descr->base,
-                                           csr_row_ptr,
-                                           csr_col_ind,
-                                           bsr_descr->base,
-                                           bsr_row_ptr,
-                                           temp1);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (csr2bsr_nnz_65_inf_kernel<block_size, I, J>),
+            dim3(rocsparse::min(mb, static_cast<J>(handle->properties.maxGridSize[0]))),
+            dim3(block_size),
+            0,
+            handle->stream,
+            m,
+            n,
+            mb,
+            nb,
+            block_dim,
+            rows_per_segment,
+            csr_descr->base,
+            csr_row_ptr,
+            csr_col_ind,
+            bsr_descr->base,
+            bsr_row_ptr,
+            temp1);
 
         if(temp_alloc)
         {

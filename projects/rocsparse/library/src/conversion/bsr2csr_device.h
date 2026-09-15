@@ -88,11 +88,13 @@ namespace rocsparse
 
                     if(direction == rocsparse_direction_row)
                     {
-                        csr_val[offset + j] = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r * BLOCK_DIM + j];
+                        csr_val[offset + j]
+                            = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r * BLOCK_DIM + j];
                     }
                     else
                     {
-                        csr_val[offset + j] = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r + BLOCK_DIM * j];
+                        csr_val[offset + j]
+                            = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r + BLOCK_DIM * j];
                     }
                 }
             }
