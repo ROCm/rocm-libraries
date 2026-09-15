@@ -83,7 +83,7 @@ and it still owes a real test.
 > <details>
 > <summary>The full account: the churn, the deadlock, and the plan that makes the net unnecessary</summary>
 >
-> [`KernelWriterAssembly.py`](Tensile/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
+> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
 > assembly, which makes it one of the highest-consequence files in the repository. It is 20,259 lines.
 > Since the monorepo reorganization in April 2025 it has taken 303 commits from 78 authors, adding
 > 13,810 lines and removing 7,277. That window undercounts the file, which is years older than this
@@ -209,7 +209,7 @@ fixture or pinning current behavior. In spirit this is closer to
 validate tuning data rather than code, and where each one lives follows from that.
 
 Two of these checks — sibling-`DeviceNames` consistency and the gfx1250v0-overlay's logic-tree shape —
-are implemented in `Tensile.TensileLogic.ValidCorpusConsistency` and run unconditionally inside
+are implemented in `tensilelite.TensileLogic.ValidCorpusConsistency` and run unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks them regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy of each also lives in
@@ -433,7 +433,7 @@ of reaching a customer's model three months earlier in the story. There is no wa
 times that has already happened, because a build that fails on line one of a bad YAML file does not
 generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
 
-Its known-bug list, [`Tensile/TensileLogic/known_bugs.yaml`](Tensile/TensileLogic/known_bugs.yaml), is
+Its known-bug list, [`tensilelite/TensileLogic/known_bugs.yaml`](tensilelite/TensileLogic/known_bugs.yaml), is
 the best-structured quarantine in the component (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc). Entries are keyed on the logic file path plus the solution's `SolutionNameMin`, a
@@ -715,7 +715,7 @@ and Windows are not tracked separately. The exclusions in
 rather than product modules. The kernel writers are sometimes described as uncovered exceptions, but
 they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/Solution.py` all
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
-including `ExperimentalLibrary.py` at zero and much of `Tensile/Components/`.
+including `ExperimentalLibrary.py` at zero and much of `tensilelite/Components/`.
 
 **No C++ coverage target exists** for the reasons given under
 [../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
