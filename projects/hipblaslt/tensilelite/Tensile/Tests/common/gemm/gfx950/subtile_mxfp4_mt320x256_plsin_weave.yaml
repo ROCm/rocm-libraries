@@ -1,0 +1,135 @@
+########################################
+# MXFP4 MT320x256 last-K PLSIN Weave numeric check.
+#
+# MIWT [10,8] is the transpose of MT256x320 last-K Weave: fused NLL weaves
+# last-K MFMAs into the store after lending K=0 A/B. The fused arm uses
+# v_permlane16_swap; the plain-NLL / edge store keeps ds_bpermute.
+#
+# Pin HIP_VISIBLE_DEVICES to an idle GPU (this machine: 6 or 7) before running.
+# Tensile Device: 0 is the first *visible* device after that pin.
+########################################
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  PrintSolutionRejectionReason: True
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeBias: 1
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+  ########################################
+  # Full-tile fused path (K multiple of DU) + K-tail / M-N edges (plain NLL).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256, MIWT=[10,8]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - PostLoopStoreInNll: [true]
+        - PLSINStoreMode: ["Weave"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Fused full-tile (beta=0, K % DU == 0)
+          - Exact: [320, 256, 1, 256]
+          - Exact: [320, 256, 1, 512]
+          - Exact: [640, 512, 1, 256]
+          # Plain NLL: K not a multiple of DepthU. K must be a multiple of MX
+          # block 32 and at least DepthU (K<DU never reaches NLL / PLSIN).
+          - Exact: [320, 256, 1, 384]
+          - Exact: [320, 256, 1, 288]
+          # M/N edges (partial tiles)
+          - Exact: [300, 240, 1, 256]
+          - Exact: [319, 255, 1, 256]
+          - Exact: [321, 257, 1, 256]
+          - Exact: [160, 128, 1, 256]
+          # Odd + batched edges
+          - Exact: [317, 251, 1, 256]
+          - Exact: [320, 256, 2, 256]
+          - Exact: [321, 255, 2, 384]
+
+  ########################################
+  # Same tile with StreamK=3 (fused owner + split/partial fallback).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - PostLoopStoreInNll: [true]
+        - PLSINStoreMode: ["Weave"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [320, 256, 1, 256]
+          - Exact: [320, 256, 1, 384]
+          - Exact: [319, 255, 1, 256]
+          - Exact: [640, 512, 1, 512]
+          - Exact: [960, 768, 1, 1024]

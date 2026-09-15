@@ -233,6 +233,90 @@ def test_small_tile_weave_policy_lends_nothing():
     assert lend == []
 
 
+def test_mt320x256_last_k_dead_tiles_are_k0_ab_and_unused_scale():
+    """Transpose of 256x320: MIWT [10,8], K=0 A/B plus the n+1 scale half are dead."""
+    cfg = make_cfg_320x256_fp4(pgr=1)
+    sched = LogicalScheduler(cfg)
+    sched.build()
+    assert cfg.numMFMATilesM == 10 and cfg.numMFMATilesN == 8
+    assert cfg.numSubIterK == 2
+    assert sched.tile_peaks == {"A": 20, "B": 16, "SA": 10, "SB": 8}
+
+    dead0 = sched._deadOperandTileIds(0)
+    live0 = sched._lastKLiveTileIds(0)
+    assert dead0["A"] == set(range(10))
+    assert live0["A"] == set(range(10, 20))
+    assert dead0["B"] == set(range(8))
+    assert live0["B"] == set(range(8, 16))
+    assert dead0["SA"] == {5, 6, 7, 8, 9}
+    assert live0["SA"] == {0, 1, 2, 3, 4}
+    assert dead0["SB"] == {4, 5, 6, 7}
+    assert live0["SB"] == {0, 1, 2, 3}
+    for t in ("A", "B", "SA", "SB"):
+        assert not (dead0[t] & live0[t])
+        assert dead0[t] | live0[t] == set(range(sched.tile_peaks[t]))
+
+    dead1 = sched._deadOperandTileIds(1)
+    live1 = sched._lastKLiveTileIds(1)
+    assert dead1["A"] == dead0["A"] and live1["A"] == live0["A"]
+    assert dead1["B"] == dead0["B"] and live1["B"] == live0["B"]
+    assert dead1["SA"] == {0, 1, 2, 3, 4}
+    assert live1["SA"] == {5, 6, 7, 8, 9}
+    assert dead1["SB"] == {0, 1, 2, 3}
+    assert live1["SB"] == {4, 5, 6, 7}
+
+
+def test_mt320x256_weave_policy_lends_only_dead_k0_tiles():
+    """Weave on 320x256 matches 256x320: last-K weave, lend K=0 holes only."""
+    kernel = create_kernel(320, 256, fp4=True)
+    writer, tiA, tiB, scaleTiA, scaleTiB, _d = make_writer_and_tileinfos(
+        kernel, fp4=True)
+    cfg = make_cfg_320x256_fp4(pgr=1)
+    sched = LogicalScheduler(cfg)
+    sched.build()
+    try:
+        sched.allocVgprTiles(writer, tiA, tiB, scaleTiA, scaleTiB)
+        kernel["PLSINStoreMode"] = "Weave"
+        weaveGroups, lend = sched._selectPlsinFusedStorePolicy(kernel, unroll_iter=0)
+        assert weaveGroups == {}
+        dead_vgprs = 10 * 4 + 8 * 4 + 5 * 1 + 4 * 1  # A + B + SA + SB
+        assert sum(sz for _base, sz in lend) == dead_vgprs
+        live_ids = sched._lastKLiveTileIds(0)
+        live_bases = set()
+        for t, tiles in (("A", sched.vgprTilesA), ("B", sched.vgprTilesB),
+                         ("SA", sched.vgprTilesSA), ("SB", sched.vgprTilesSB)):
+            for tid in live_ids[t]:
+                live_bases.add(tiles[tid].regList.indices[0])
+        assert not any(base in live_bases for base, _sz in lend)
+
+        kernel["PLSINStoreMode"] = "Lend"
+        wgLend, lendAll = sched._selectPlsinFusedStorePolicy(kernel, unroll_iter=0)
+        assert wgLend is None
+        all_vgprs = 20 * 4 + 16 * 4 + 10 * 1 + 8 * 1
+        assert sum(sz for _base, sz in lendAll) == all_vgprs
+    finally:
+        sched.deallocVgprTiles(writer)
+
+
+def test_mt320x256_permlane16_only_on_fused_weave():
+    """Fused Weave may use v_permlane16_swap; serial 320x256 keeps ds_bpermute."""
+    from Tensile.Components.GlobalWriteBatch import plsinStorePermlane16Active
+
+    kernel = {
+        "ISA": (9, 5, 0),
+        "MatrixInstM": 16,
+        "MacroTile0": 320,
+        "MacroTile1": 256,
+    }
+    assert plsinStorePermlane16Active(kernel, {}) is True
+    assert plsinStorePermlane16Active(kernel, None) is False
+    small = dict(kernel, MacroTile0=256, MacroTile1=256)
+    assert plsinStorePermlane16Active(small, None) is True
+    assert plsinStorePermlane16Active(small, {}) is True
+    wide_n = dict(kernel, MacroTile0=256, MacroTile1=320)
+    assert plsinStorePermlane16Active(wide_n, None) is True
+
+
 def makeTileInfo(tc, kernel):
     """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
     fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
@@ -448,6 +532,35 @@ def make_cfg_256x256_fp4(depthU=256, k_gran=1, partSizeM=0, partSizeN=0,
                              k=scaleTiA.localMMATileGrid[1] * grSA_k_gran),
         grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0] * grSB_mn_gran,
                              k=scaleTiB.localMMATileGrid[1] * grSB_k_gran),
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
+        pgr=pgr,
+    )
+
+
+def make_cfg_320x256_fp4(pgr=1, partSizeM=0, partSizeN=0):
+    """MT320x256 fp4 (MIWT [10,8], two subIterK) — transpose of the 256x320 weave target."""
+    kernel = create_kernel(320, 256, fp4=True)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    scaleTiA = makeTileInfo('MXSA', kernel)
+    scaleTiB = makeTileInfo('MXSB', kernel)
+    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=grA,
+        grB=grB,
+        lrSA=ReadGranularity(mn=2, k=2),
+        lrSB=ReadGranularity(mn=2, k=2),
+        grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                             k=scaleTiA.localMMATileGrid[1]),
+        grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                             k=scaleTiB.localMMATileGrid[1]),
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=pgr,
