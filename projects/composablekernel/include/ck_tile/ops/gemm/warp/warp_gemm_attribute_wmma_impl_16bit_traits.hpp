@@ -191,14 +191,20 @@ struct WmmaTraits<gfx125_t, bf16_t, bf16_t, bf16_t, 16, 16, 32>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
-        return __builtin_amdgcn_wmma_bf16_16x16x32_bf16(0,
-                                                        bit_cast<llvm_bf16x16_t>(a_vec),
-                                                        0,
-                                                        bit_cast<llvm_bf16x16_t>(b_vec),
-                                                        0,
-                                                        c_vec,
-                                                        P::reuse_a,
-                                                        P::reuse_b);
+        CVecType result = __builtin_amdgcn_wmma_bf16_16x16x32_bf16(0,
+                                                                   bit_cast<llvm_bf16x16_t>(a_vec),
+                                                                   0,
+                                                                   bit_cast<llvm_bf16x16_t>(b_vec),
+                                                                   0,
+                                                                   c_vec,
+                                                                   P::reuse_a,
+                                                                   P::reuse_b);
+        // T0-01 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): narrow-accumulate WMMA WAR hazard — see
+        // the amdgcn_mma<bf16_t, bf16_t, bf16_t, ...> specialization in wmma_gfx12.hpp for the
+        // full mechanism. This legacy WarpGemm codepath calls the same builtin directly
+        // (bypassing amdgcn_mma), so it needs its own barrier at this issue site.
+        __builtin_amdgcn_sched_barrier(0);
+        return result;
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
