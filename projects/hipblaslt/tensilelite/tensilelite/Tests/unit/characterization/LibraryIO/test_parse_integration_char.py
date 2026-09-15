@@ -135,7 +135,7 @@ def test_parse_library_logic_data_version_warning(assembler, isa_info_map, capsy
     ]
     assert warnings == [
         "Tensile::WARNING: Version = {} in library logic file 1.0.0 "
-        "does not match Tensile version = {}".format(_FIXTURE, L.__version__)
+        "does not match TensileLite version = {}".format(_FIXTURE, L.__version__)
     ]
     assert _summarize_logic(logic) == snapshot
 
@@ -230,7 +230,7 @@ def test_parse_solutions_data_version_warning(written_solutions, assembler, isa_
     ]
     assert warnings == [
         "Tensile::WARNING: Version = {} in solution file 1.0.0 "
-        "does not match Tensile version = {}".format(written_solutions, L.__version__)
+        "does not match TensileLite version = {}".format(written_solutions, L.__version__)
     ]
     assert {
         "n_solutions": len(solutions),
