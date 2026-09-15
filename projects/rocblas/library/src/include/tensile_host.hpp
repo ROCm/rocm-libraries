@@ -269,13 +269,30 @@ struct RocblasContractionProblem
 };
 
 /*******************************************************************************
- * This function determines whether or not to use the hipBLASLt backend based
- * on problem specific conditions. This is passed on to the handle's useHipBLASLt
- * function to consolidate with the architecture specific conditions and
- * environment variable state.
-******************************************************************************/
-template <typename Ti, typename To, typename Tc>
-bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& problem);
+ * Whether to use the hipBLASLt backend for input type Ti, based on handle
+ * architecture, ROCBLAS_USE_HIPBLASLT, and (for pointer-batched) stream capture.
+ * Pass batched=false for strided GEMM (including K-split detection).
+ ******************************************************************************/
+template <typename Ti>
+inline bool useHipBLASLt(rocblas_handle handle, bool batched)
+{
+#ifdef BUILD_WITH_HIPBLASLT
+    if constexpr(sizeof(Ti) != 2)
+    {
+        if(!handle->isHipBLASLtForcedOn())
+        {
+            // gfx950: hipBLASLt is used only for fp16/bf16
+            // TODO remove after all types are supported
+            if(handle->getArch() == 950)
+                return false;
+        }
+    }
+
+    return handle->tryHipBLASLt(batched);
+#else
+    return false;
+#endif
+}
 
 /*******************************************************************************
  * runContractionProblem() solves a RocblasContractionProblem                  *
