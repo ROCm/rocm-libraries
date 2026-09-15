@@ -39,7 +39,10 @@ python3 -m pip install --quiet --break-system-packages "zstandard>=0.20.0" msgpa
 
 step "source: $BRANCH${UHD_COMMIT:+ @ $UHD_COMMIT}"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
-GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --single-branch --branch "$BRANCH" \
+# --depth 200, not 1: a bundle carries commits relative to a base, and a one-commit
+# clone has no ancestor for it to apply against ("Repository lacks these prerequisite
+# commits", run 67933122, on a node whose mirror was current rather than stale).
+GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 || exit 1
 if [ -n "${UHD_COMMIT:-}" ]; then
     # An opaque engine's model records the provider build it was measured on, and the
@@ -97,6 +100,7 @@ while read -r candidate; do
 done < <(find "$BUILD" -type d -name asm_kernels 2>/dev/null)
 [ -n "$AITER_ASM" ] && export HIPDNN_AITER_ASM_DIR="$AITER_ASM"
 echo "tree root: $TREE_ROOT"; echo "aiter asm: ${AITER_ASM:-NONE}"
+
 
 step "install every trained model into the one tree"
 cd "$SRC/projects/hipdnn/tools" || exit 1
