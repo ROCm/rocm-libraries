@@ -212,6 +212,10 @@ globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # host for non-SK5 solutions. Default keeps behavior unchanged for
 # existing tests.
 globalParameters["StreamKHybridMode"] = [0]
+# Runtime batch ABI used by the Tensile client: 0=strided, 1=pointer array.
+# This is intentionally independent of ProblemType.StridedBatched so universal
+# strided kernels can exercise their ArgType==3 general-batched path.
+globalParameters["BatchMode"] = 0
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )

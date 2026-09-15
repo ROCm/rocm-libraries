@@ -2772,11 +2772,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #TODO: TDM handles MXSA and MXSB
       if tdmA:
         if not tdmInited:
-          module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
-          if kernel["UseSubtileImpl"]:
-            module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
-          else:
-            module.add(self.initTDMDescriptor(kernel, tensorParametersA))
+          # Init resolves ArgType 3 A; offsets then apply to the selected matrix.
+          module.add(self.initTDMDescriptor(kernel, tensorParametersA))
+          module.add(self.tdmGlobalOffset(kernel, tensorParametersA, useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment a")
         module.add(self.graTileAssignment(kernel, tensorParametersA))
@@ -2789,8 +2787,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if tdmMetadata:
           if not tdmMetadataInited:
             # TODO: TDM global offset for metadata
-            module.add(self.tdmGlobalOffset(kernel, tPM))
             module.add(self.initTDMDescriptor(kernel, tPM))
+            module.add(self.tdmGlobalOffset(kernel, tPM, useDescriptor=True))
             tdmMetadataInited = True
         else:
           module.addComment1("global read addresses: tile offset assignment metadata")
@@ -2806,11 +2804,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.graTileAssignment(kernel, tensorParametersB["MX"]))
       if tdmB:
         if not tdmInited:
-          module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
-          if kernel["UseSubtileImpl"]:
-            module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
-          else:
-            module.add(self.initTDMDescriptor(kernel, tensorParametersB))
+          # Init resolves ArgType 3 B; offsets then apply to the selected matrix.
+          module.add(self.initTDMDescriptor(kernel, tensorParametersB))
+          module.add(self.tdmGlobalOffset(kernel, tensorParametersB, useDescriptor=True))
       else:
         module.addComment1("global read addresses: tile offset assignment b")
         module.add(self.graTileAssignment(kernel, tensorParametersB))
@@ -11426,7 +11422,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
-  def tdmGlobalOffset(self, kernel, tP) -> Module:
+  def tdmGlobalOffset(self, kernel, tP, useDescriptor=False) -> Module:
     assert False, "Should be overrided"
 
   def tdmGlobalOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
