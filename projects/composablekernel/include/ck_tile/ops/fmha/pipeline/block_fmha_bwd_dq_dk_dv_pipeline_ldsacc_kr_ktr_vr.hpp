@@ -1172,9 +1172,12 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 #if CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
                     return raw_lse;
 #else
-                    return raw_lse == -numeric<LSEDataType>::infinity()
-                               ? type_convert<LSEDataType>(0.f)
-                               : raw_lse;
+                    // A fully masked row has raw_lse == -inf; only finiteness
+                    // matters, not the value. Every s_acc in such a row is -inf,
+                    // so any finite row_lse gives exp2(-inf) == 0. The sentinel
+                    // must stay finite after the log2e scaling below, which
+                    // rules out -FLT_MAX. One v_max replaces a compare+select.
+                    return max(raw_lse, type_convert<LSEDataType>(-1e30f));
 #endif
                 }
                 else
@@ -1643,8 +1646,8 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
 #if CK_TILE_FMHA_BWD_ABLATE_NO_LSE_VALIDATE
                 return raw_lse;
 #else
-                return raw_lse == -numeric<LSEDataType>::infinity() ? type_convert<LSEDataType>(0.f)
-                                                                    : raw_lse;
+                // See the hot-loop copy: the sentinel only has to be finite.
+                return max(raw_lse, type_convert<LSEDataType>(-1e30f));
 #endif
             }
             else
