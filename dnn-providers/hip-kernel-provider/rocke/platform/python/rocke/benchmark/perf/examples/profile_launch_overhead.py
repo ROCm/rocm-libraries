@@ -21,17 +21,10 @@ and the format-string assembly. It does **not** meaningfully save a format
 strings, so re-`struct.pack`ing the same format is a cache lookup, not a
 recompile. Do not describe this as "avoids recompiling the format string".
 
-Two views are produced because each alone misleads:
-
-  1. `cProfile` over a block of launches -> packing's cumulative share. The
-     profiler charges per Python frame, and the single largest real cost in the
-     path is one ctypes FFI call it barely charges for. This view therefore
-     OVERSTATES packing's share: treat it as an upper bound.
-  2. `perf_counter` wall clock on the unprofiled path -> the per-launch delta
-     between the arms. This is the real number.
-
-They will disagree. That is expected, and reporting only the flattering one is
-the failure mode this script exists to prevent.
+Timing is `perf_counter` wall clock around enqueue only. A cProfile view was
+dropped deliberately: it charges per Python frame while the single largest real
+cost in this path is one ctypes FFI call it barely charges for, so it only ever
+produced an upper bound that had to be explained away.
 
 Run: `python -m rocke.benchmark.perf.examples.profile_launch_overhead --arch gfx950`
 (needs rocKE importable + a GPU).
@@ -40,12 +33,10 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import cProfile
 import ctypes
 import functools
 import json
 import os
-import pstats
 import statistics
 import sys
 import time
@@ -56,27 +47,6 @@ PERF = time.perf_counter
 # ---------------------------------------------------------------------
 # Pure helpers -- no GPU, no rocKE import. Unit-testable.
 # ---------------------------------------------------------------------
-
-
-def sig_shape(sig: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
-    """(nargs, nptr, nscalar, kernarg_bytes) for a manifest-style signature.
-
-    Reproduces the AMDGPU natural-alignment rule that `packing.py` implements:
-    8-byte alignment for ptr/i64, 4-byte for i32/f32.
-    """
-    nptr = sum(1 for a in sig if str(a["type"]).startswith("ptr<"))
-    off = 0
-    for a in sig:
-        ty = str(a["type"])
-        size = 8 if (ty.startswith("ptr<") or ty == "i64") else 4
-        off += (-off) % size
-        off += size
-    return {
-        "nargs": len(sig),
-        "nptr": nptr,
-        "nscalar": len(sig) - nptr,
-        "kernarg_bytes": off,
-    }
 
 
 def stats(samples: Sequence[float]) -> Dict[str, float]:
@@ -94,34 +64,6 @@ def stats(samples: Sequence[float]) -> Dict[str, float]:
         "max_us": us[-1],
         "mean_us": statistics.fmean(us),
         "stdev_us": statistics.pstdev(us) if n > 1 else 0.0,
-    }
-
-
-def stepup_check(samples: Sequence[float]) -> Dict[str, Any]:
-    """ACROSS-chunk drift detector.
-
-    Async enqueue is only a valid host clock while the host outruns the device.
-    If the device falls behind, the HIP queue fills and enqueue starts
-    blocking. This catches the case where that condition *develops* over a run:
-    later chunks systematically slower than earlier ones.
-
-    BLIND SPOT, by construction: the queue is drained between chunks, so every
-    chunk starts from the same empty queue. If a chunk is long enough to
-    saturate the queue, EVERY chunk saturates identically and this series is
-    flat -- ratio ~1.0 with substantial blocking inside each chunk. Use
-    :func:`in_chunk_stepup` and :func:`chunk_size_sensitivity` for that case;
-    this check alone must never gate a host-overhead conclusion.
-    """
-    n = len(samples)
-    if n < 6:
-        return {"checked": False}
-    a = statistics.median(samples[: n // 2]) * 1e6
-    b = statistics.median(samples[n // 2 :]) * 1e6
-    return {
-        "checked": True,
-        "first_half_median_us": a,
-        "second_half_median_us": b,
-        "ratio": (b / a) if a else float("nan"),
     }
 
 
@@ -152,11 +94,10 @@ def in_chunk_stepup(
 ) -> Dict[str, Any]:
     """Back-pressure detector INSIDE one undrained chunk.
 
-    Where :func:`stepup_check` asks "did the run get slower over time", this
-    asks "does enqueue get slower the longer we go without draining" -- the
-    signature of a queue filling up. A saturated queue produces a flat
-    across-chunk series (every chunk saturates the same way) and a rising
-    within-chunk one, so this is the check that catches it.
+    Asks "does enqueue get slower the longer we go without draining" -- the
+    signature of a queue filling up. Comparing chunk MEANS cannot see this:
+    the queue is drained between chunks, so uniform saturation makes every
+    chunk identical and the series flat.
 
     Min over `reps` per segment, for the same reason :func:`micro` does it: one
     timing of a segment measures the segment plus whatever else the machine did
@@ -265,94 +206,53 @@ def summarize_ab(
             "noise_floor_us": noise,
             "delta_exceeds_noise": abs(delta) > noise,
             "delta_over_noise": (abs(delta) / noise) if noise else float("inf"),
-            "packing_share_armA_pct": None,  # filled by substitute_share
         }
     return out
 
 
-def substitute_share(
+def packing_share(
     total_armA_us: float,
     total_armB_us: float,
     pack_armA_us: float,
     pack_armB_us: float,
     *,
-    swap: Sequence[Tuple[float, float]] = (),
-    pack_target_armA_us: float = None,
-    pack_target_armB_us: float = None,
     noise_floor_us: float = None,
     rel_tol: float = 0.005,
 ) -> Dict[str, float]:
-    """Packing's share of the launch path, optionally for a DIFFERENT signature.
+    """Packing's share of the launch path, per arm, from measured totals only.
 
-    Two modes, and the difference matters:
+    Each arm's share is computed against THAT arm's own measured total --
+    nothing is reconstructed from the other arm.
 
-    * **measured** (no `swap`, no `pack_target_*`): each arm's share is
-      computed against *that arm's own measured total*. Nothing is
-      reconstructed.
-    * **model** (`swap` or a `pack_target_*` given): the target signature was
-      never launched, so its total has to be built -- non-packing remainder
-      plus the target's packing cost. The result carries
-      `model_estimate: True`.
-
-    The remainder is taken from arm B (`total_armB - pack_armB`). Only the
-    denominator terms that actually read the signature or the values dict may
-    be swapped -- pass them as `swap=[(measured_here, measured_there), ...]`.
-
-    In `KernelLauncher.__call__` there are exactly two such terms:
-      * `from_buffer_copy` of the packed blob (kernarg bytes differ), and
-      * `retain_for_stream`'s genexp over `values.values()` (arg count differs).
-    Everything else is signature-invariant, including the ctypes launch
-    envelope, which is a FIXED 5-entry HIP_LAUNCH_PARAM array (the arguments
-    ride as one opaque blob behind BUFFER_POINTER) and is NOT a per-argument
-    array. Scaling the numerator without also swapping these would bias the
-    substituted share high.
-
-    `remainder_residual_us` is the model's own consistency check: the two arms
-    differ only in their packer, so their non-packing remainders should agree.
-    Pass `noise_floor_us` to have that judged here -- `remainder_within_tol`
-    then says whether the modelled share is safe to quote.
-
-    The tolerance is `max(noise_floor_us, rel_tol * remainder)`, NOT the noise
-    floor alone. Against the floor alone the check gets HARDER to pass the
-    quieter the run: a very quiet run drives the floor toward zero, so an
-    absolutely negligible residual (0.009 us on a ~9 us remainder, 0.1%) reads
-    as a 4x violation. A relative term floors the tolerance at a residual
-    genuinely too small to matter.
+    `remainder_residual_us` is the consistency check: the arms differ only in
+    their packer, so their non-packing remainders should agree. Pass
+    `noise_floor_us` and `remainder_within_tol` says whether they do. The
+    tolerance is `max(noise_floor, rel_tol * remainder)`, not the floor alone --
+    against the floor alone the check gets HARDER to pass the quieter the run,
+    so a residual of 0.1% of the remainder can read as a 4x violation.
     """
     remainder_armA = total_armA_us - pack_armA_us
     remainder_armB = total_armB_us - pack_armB_us
-    modelled = bool(swap) or (
-        pack_target_armA_us is not None or pack_target_armB_us is not None
-    )
-    pa = pack_armA_us if pack_target_armA_us is None else pack_target_armA_us
-    pb = pack_armB_us if pack_target_armB_us is None else pack_target_armB_us
-    if modelled:
-        nonpack = remainder_armB
-        for here, there in swap:
-            nonpack += there - here
-        tA, tB = nonpack + pa, nonpack + pb
-    else:
-        nonpack = remainder_armB
-        tA, tB = total_armA_us, total_armB_us
     residual = remainder_armA - remainder_armB
     tolerance = max(noise_floor_us or 0.0, rel_tol * abs(remainder_armB))
     return {
-        "model_estimate": modelled,
-        "nonpacking_us": nonpack,
-        "remainder_armA_us": remainder_armA,
-        "remainder_armB_us": remainder_armB,
+        "nonpacking_us": remainder_armB,
         "remainder_residual_us": residual,
         "remainder_tolerance_us": tolerance,
         "remainder_within_tol": (
             None if noise_floor_us is None else bool(abs(residual) <= tolerance)
         ),
-        "packing_us_armA": pa,
-        "packing_us_armB": pb,
-        "total_us_armA": tA,
-        "total_us_armB": tB,
-        "packing_share_armA_pct": pa / tA * 100.0 if tA else float("nan"),
-        "packing_share_armB_pct": pb / tB * 100.0 if tB else float("nan"),
-        "saving_us": pa - pb,
+        "packing_us_armA": pack_armA_us,
+        "packing_us_armB": pack_armB_us,
+        "total_us_armA": total_armA_us,
+        "total_us_armB": total_armB_us,
+        "packing_share_armA_pct": (
+            pack_armA_us / total_armA_us * 100.0 if total_armA_us else float("nan")
+        ),
+        "packing_share_armB_pct": (
+            pack_armB_us / total_armB_us * 100.0 if total_armB_us else float("nan")
+        ),
+        "saving_us": pack_armA_us - pack_armB_us,
     }
 
 
@@ -541,7 +441,6 @@ def main(argv: Sequence[str] = None) -> int:
     ap.add_argument("--chunk-size", type=int, default=300)
     ap.add_argument("--passes", type=int, default=3)
     ap.add_argument("--warmup", type=int, default=4000)
-    ap.add_argument("--profile-launches", type=int, default=30000)
     ap.add_argument("--json-out", default=None)
     args = ap.parse_args(argv)
 
@@ -597,7 +496,7 @@ def main(argv: Sequence[str] = None) -> int:
         "hsaco_bytes": S["hsaco_bytes"],
         "grid": list(S["grid"]),
         "block": list(S["block"]),
-        "probe_signature": sig_shape(sig),
+        "probe_signature": {"nargs": len(sig)},
         "shape": {"M": S["M"], "N": S["N"], "K": S["K"], "batch": 1},
     }
 
@@ -674,7 +573,6 @@ def main(argv: Sequence[str] = None) -> int:
             acc["Aprime"] += run_arm("A", cfg)
             acc["Bprime"] += run_arm("B", cfg)
         d = {k: stats(v) for k, v in acc.items()}
-        d["stepup"] = {k: stepup_check(v) for k, v in acc.items()}
         # Back-pressure gate. The across-chunk series above cannot see a queue
         # that saturates identically inside every chunk (it is drained between
         # them), so the two checks below probe an UNDRAINED chunk and the
@@ -735,36 +633,6 @@ def main(argv: Sequence[str] = None) -> int:
     R["components"] = comp
     drain()
 
-    # ---- View 1: cProfile (upper bound) ----
-    prof: Dict[str, Any] = {}
-    for which in ("A", "B"):
-        launcher._packer = packers[which]
-        for _ in range(500):
-            launcher(values, config=cfg_default)
-        drain()
-        pr = cProfile.Profile()
-        pr.enable()
-        for _ in range(args.profile_launches):
-            launcher(values, config=cfg_default)
-        pr.disable()
-        drain()
-        call_cum, pack_cum = None, 0.0
-        for (fn_, _ln, func), (_cc, _nc, _tt, ct, _cal) in pstats.Stats(
-            pr
-        ).stats.items():
-            if func == "__call__" and fn_.endswith("launcher.py"):
-                call_cum = ct
-            if fn_.endswith("packing.py") and func in ("pack_args", "packer"):
-                pack_cum += ct
-        n = args.profile_launches
-        prof[which] = {
-            "launches": n,
-            "launcher_call_us_per_launch": call_cum / n * 1e6 if call_cum else None,
-            "packing_us_per_launch": pack_cum / n * 1e6,
-            "packing_share_pct": pack_cum / call_cum * 100.0 if call_cum else None,
-        }
-    R["profile"] = prof
-
     torch.cuda.synchronize()
     launcher_mod.synchronize_and_release(stream)
     es.close()
@@ -773,7 +641,7 @@ def main(argv: Sequence[str] = None) -> int:
     R["derived"] = {}
     for dname in ("D1_explicit_stream", "D2_default_stream0"):
         w = R["wall_clock"][dname]["summary"]["p10_us"]
-        R["derived"][dname] = substitute_share(
+        R["derived"][dname] = packing_share(
             w["armA_us"],
             w["armB_us"],
             comp["pack_args_us"],

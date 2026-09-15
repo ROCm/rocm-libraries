@@ -43,25 +43,6 @@ def _fixed_cost(us):
     return fn
 
 
-class TestSigShape(unittest.TestCase):
-    def test_kernarg_layout_matches_the_alignment_rule(self):
-        # 11 pointers (88 B) then an i32 at offset 88: already 4-aligned, so
-        # 92 B with no hole. This is GDN decode's signature shape.
-        sig = [{"name": f"p{i}", "type": "ptr<bf16>"} for i in range(11)]
-        sig.append({"name": "n", "type": "i32"})
-        self.assertEqual(
-            ex.sig_shape(sig),
-            {"nargs": 12, "nptr": 11, "nscalar": 1, "kernarg_bytes": 92},
-        )
-        # i32 at 0..4 then a pointer must start at 8 -- 4 bytes of padding.
-        self.assertEqual(
-            ex.sig_shape(
-                [{"name": "n", "type": "i32"}, {"name": "p", "type": "ptr<f32>"}]
-            )["kernarg_bytes"],
-            16,
-        )
-
-
 class TestSummarizeAB(unittest.TestCase):
     def test_effect_above_repeat_spread_is_real(self):
         out = ex.summarize_ab(
@@ -79,14 +60,13 @@ class TestSummarizeAB(unittest.TestCase):
         self.assertFalse(out["delta_exceeds_noise"])
 
 
-class TestSubstituteShare(unittest.TestCase):
+class TestPackingShare(unittest.TestCase):
     def test_each_arm_share_uses_its_own_measured_total(self):
         """Regression: arm A's total was rebuilt from arm B's remainder, so a
         measured arm A could change tenfold without moving the reported
         share."""
-        low = ex.substitute_share(10.0, 9.0, 2.0, 1.0)
-        high = ex.substitute_share(100.0, 9.0, 2.0, 1.0)
-        self.assertFalse(low["model_estimate"])
+        low = ex.packing_share(10.0, 9.0, 2.0, 1.0)
+        high = ex.packing_share(100.0, 9.0, 2.0, 1.0)
         self.assertAlmostEqual(low["packing_share_armA_pct"], 20.0)
         self.assertAlmostEqual(high["total_us_armA"], 100.0)
         self.assertAlmostEqual(high["packing_share_armA_pct"], 2.0)
@@ -94,29 +74,7 @@ class TestSubstituteShare(unittest.TestCase):
         # the residual is what exposes it when they do not.
         self.assertAlmostEqual(low["remainder_residual_us"], 0.0)
         self.assertAlmostEqual(
-            ex.substitute_share(12.5, 9.0, 2.0, 1.0)["remainder_residual_us"], 2.5
-        )
-
-    def test_substitution_swaps_denominator_terms_and_says_it_is_a_model(self):
-        # Scaling only the numerator is the bias this exists to avoid: the
-        # target signature also makes two denominator terms more expensive.
-        common = dict(
-            total_armA_us=10.0,
-            total_armB_us=9.0,
-            pack_armA_us=2.0,
-            pack_armB_us=1.0,
-            pack_target_armA_us=3.0,
-            pack_target_armB_us=1.5,
-        )
-        numerator_only = ex.substitute_share(**common)
-        with_swap = ex.substitute_share(**common, swap=[(0.14, 0.20), (0.69, 0.90)])
-        self.assertTrue(with_swap["model_estimate"])
-        self.assertGreater(
-            numerator_only["packing_share_armA_pct"],
-            with_swap["packing_share_armA_pct"],
-        )
-        self.assertAlmostEqual(
-            with_swap["nonpacking_us"], numerator_only["nonpacking_us"] + 0.27
+            ex.packing_share(12.5, 9.0, 2.0, 1.0)["remainder_residual_us"], 2.5
         )
 
     def test_residual_tolerance_does_not_tighten_as_the_run_gets_quieter(self):
@@ -124,31 +82,21 @@ class TestSubstituteShare(unittest.TestCase):
         floor alone, a residual of 0.1% of the remainder then reads as a 4x
         violation -- the check would get harder to pass the better the
         measurement. The relative term floors it."""
-        quiet = ex.substitute_share(
+        quiet = ex.packing_share(
             9.009, 9.0, 1.0, 1.0, noise_floor_us=0.0023  # residual 0.009 us on 8 us
         )
         self.assertTrue(quiet["remainder_within_tol"])
         self.assertGreater(quiet["remainder_tolerance_us"], 0.0023)
         # A residual that is genuinely large still fails.
-        skewed = ex.substitute_share(10.0, 9.0, 1.0, 1.0, noise_floor_us=0.0023)
+        skewed = ex.packing_share(10.0, 9.0, 1.0, 1.0, noise_floor_us=0.0023)
         self.assertFalse(skewed["remainder_within_tol"])
         # Without a noise floor the helper reports the residual and judges
         # nothing, so a caller cannot read a verdict that was never computed.
-        self.assertIsNone(
-            ex.substitute_share(10.0, 9.0, 1.0, 1.0)["remainder_within_tol"]
-        )
+        self.assertIsNone(ex.packing_share(10.0, 9.0, 1.0, 1.0)["remainder_within_tol"])
 
 
 class TestBackPressureDetection(unittest.TestCase):
     """Async enqueue is only a host clock while the host outruns the device."""
-
-    def test_across_chunk_check_is_blind_to_uniform_saturation(self):
-        # Why the other two checks exist: the queue is drained between chunks,
-        # so every chunk saturates identically and the series is flat.
-        self.assertLess(abs(ex.stepup_check([12.0e-6] * 20)["ratio"] - 1.0), 0.01)
-        self.assertAlmostEqual(
-            ex.stepup_check([10e-6] * 10 + [20e-6] * 10)["ratio"], 2.0
-        )
 
     def test_in_chunk_stepup_catches_a_queue_filling_mid_chunk(self):
         fn, _ = _saturating()
