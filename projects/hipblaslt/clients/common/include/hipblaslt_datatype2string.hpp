@@ -107,6 +107,11 @@ inline int w4a16GroupSize(hipblaslt_scaling_format s)
     case hipblaslt_scaling_format::Block_32_16F:
     case hipblaslt_scaling_format::Block_32_16F_ZP:
         return 32;
+    case hipblaslt_scaling_format::Block_64_16BF:
+    case hipblaslt_scaling_format::Block_64_16BF_ZP:
+    case hipblaslt_scaling_format::Block_64_16F:
+    case hipblaslt_scaling_format::Block_64_16F_ZP:
+        return 64;
     case hipblaslt_scaling_format::Block_128_16BF:
     case hipblaslt_scaling_format::Block_128_16BF_ZP:
     case hipblaslt_scaling_format::Block_128_16F:
@@ -129,8 +134,10 @@ inline bool isW4A16ZeroPoint(hipblaslt_scaling_format s)
     switch(s)
     {
     case hipblaslt_scaling_format::Block_32_16BF_ZP:
+    case hipblaslt_scaling_format::Block_64_16BF_ZP:
     case hipblaslt_scaling_format::Block_128_16BF_ZP:
     case hipblaslt_scaling_format::Block_32_16F_ZP:
+    case hipblaslt_scaling_format::Block_64_16F_ZP:
     case hipblaslt_scaling_format::Block_128_16F_ZP:
         return true;
     default:
@@ -144,8 +151,10 @@ inline hipDataType w4a16ScaleType(hipblaslt_scaling_format s)
     switch(s)
     {
     case hipblaslt_scaling_format::Block_32_16F:
+    case hipblaslt_scaling_format::Block_64_16F:
     case hipblaslt_scaling_format::Block_128_16F:
     case hipblaslt_scaling_format::Block_32_16F_ZP:
+    case hipblaslt_scaling_format::Block_64_16F_ZP:
     case hipblaslt_scaling_format::Block_128_16F_ZP:
         return HIP_R_16F;
     default:

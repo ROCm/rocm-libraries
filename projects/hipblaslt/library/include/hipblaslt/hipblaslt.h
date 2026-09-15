@@ -216,6 +216,12 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_EXT = 1011, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT`` with a group size of 128. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT = 1012, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with ``HIP_R_16F`` scales, for use when B is ``HIP_R_16F``. The zero-point region is unchanged: it is packed int4 regardless of the scale type. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT = 1013, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a group size of 128. */
+    /* The group size of 64 was added after the 32 and 128 modes, so these carry
+       the next four values rather than sorting in between them. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_EXT = 1014, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT`` with a group size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_ZP_EXT = 1015, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with a group size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_EXT = 1016, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT`` with a group size of 64. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT = 1017, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a group size of 64. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 

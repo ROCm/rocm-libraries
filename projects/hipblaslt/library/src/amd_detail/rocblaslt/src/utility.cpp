@@ -344,6 +344,14 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_32_F16_ZP";
     case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
         return "Block_128_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        return "Block_64_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        return "Block_64_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        return "Block_64_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        return "Block_64_F16_ZP";
     default:
         return "Invalid";
     }

@@ -1288,6 +1288,22 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_64_BF16;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_ZP_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_64_F16;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
                         matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Scalar;
                         break;
@@ -1786,6 +1802,26 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                             == RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_64_BF16)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_ZP_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_64_F16)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT;
                     }
                     else if(matmulDesc->scaleAType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)

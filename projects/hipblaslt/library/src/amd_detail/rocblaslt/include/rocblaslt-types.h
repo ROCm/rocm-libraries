@@ -510,6 +510,11 @@ struct RocblasltContractionProblem
         Block_128_F16,
         Block_32_F16_ZP,
         Block_128_F16_ZP,
+        // Group size 64, in both scale types.
+        Block_64_BF16,
+        Block_64_BF16_ZP,
+        Block_64_F16,
+        Block_64_F16_ZP,
     };
 
     hipblasOperation_t trans_a;

@@ -22,7 +22,7 @@ where `<path to logic file>` is a path to a logic file containing a solution whe
 
 # `Custom_Cijk_Alik_Bljk_I4*_SABB*` (w4a16, gfx1151)
 
-The eight `..._I4B_...` / `..._I4H_...` kernels are the w4a16 prototype: int4
+The ten `..._I4B_...` / `..._I4H_...` kernels are the w4a16 prototype: int4
 weights in A, bf16 or fp16 activations in B, and one 16-bit scale (optionally
 plus a packed int4 zero-point) per K group of a row of A. They are referenced
 from `library/.../Logic/asm_full/gfx1151/FreeSize/gfx1151_Cijk_Alik_Bljk_I4*.yaml`

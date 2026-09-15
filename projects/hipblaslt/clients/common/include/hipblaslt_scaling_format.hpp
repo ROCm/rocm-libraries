@@ -31,4 +31,8 @@ typedef enum class _hipblaslt_scaling_format
     Block_128_16F           = 1011,
     Block_32_16F_ZP         = 1012,
     Block_128_16F_ZP        = 1013,
+    Block_64_16BF           = 1014,
+    Block_64_16BF_ZP        = 1015,
+    Block_64_16F            = 1016,
+    Block_64_16F_ZP         = 1017,
 } hipblaslt_scaling_format;

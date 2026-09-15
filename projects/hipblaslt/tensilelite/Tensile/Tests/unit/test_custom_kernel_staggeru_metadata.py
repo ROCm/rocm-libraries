@@ -478,7 +478,7 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
 # by a human rather than joining the exception quietly.
 #
 # The four gfx950 entries got there by editing a staggering kernel's declaration
-# down afterwards.  The eight gfx1151 w4a16 entries did not: they were generated
+# down afterwards.  The ten gfx1151 w4a16 entries did not: they were generated
 # with StaggerU 0, and the wrap site is present only because
 # SupportCustomStaggerU emits the runtime path unconditionally.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
@@ -489,6 +489,8 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
         "Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname1_gfx950",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32B_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128B_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZP_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
@@ -502,7 +504,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 127,
+    "kernels": 129,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -510,9 +512,9 @@ EXPECTED_CENSUS = {
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
-    # 60, plus the eight gfx1151 w4a16 kernels: their solutions set StaggerU 0,
+    # 60, plus the ten gfx1151 w4a16 kernels: their solutions set StaggerU 0,
     # so they declare it rather than inheriting the default of 32.
-    "declaredZero": 68,
+    "declaredZero": 70,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 31,
 }

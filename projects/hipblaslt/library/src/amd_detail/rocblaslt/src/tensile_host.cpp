@@ -633,6 +633,11 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
             return 32;
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+            return 64;
         case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
         case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
@@ -650,8 +655,10 @@ namespace
         switch(fmt)
         {
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             return rocisa::DataType::Half;
         default:
@@ -677,8 +684,10 @@ namespace
         switch(fmt)
         {
         case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             return true;
         default:
