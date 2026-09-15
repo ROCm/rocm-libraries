@@ -37,6 +37,14 @@
 namespace rocsparse
 {
 
+    // Round sizeof(T) * size up to 256 bytes, the alignment used for arrays
+    // carved out of a user-provided buffer (see e.g. rocsparse_csrsort).
+    template <typename T>
+    inline size_t align_size(size_t size)
+    {
+        return ((sizeof(T) * size - 1) / 256 + 1) * 256;
+    }
+
 // Return the leftmost significant bit position
 #if defined(rocsparse_ILP64)
     static inline rocsparse_int clz(rocsparse_int n)
