@@ -26,8 +26,9 @@
 from __future__ import print_function
 from os import path
 
-# Hardcoded tensilelite version, also in tensilelite/Source/TensileConfigVersion.cmake
-__version__ = "5.0.0"
+# Compatibility version written to generated logic/configuration files.
+GENERATOR_VERSION = "5.0.0"
+__version__ = GENERATOR_VERSION
 
 # Compatibility-only filesystem-style root. Production code that reads bundled
 # resources should use tensilelite.resources.
@@ -36,4 +37,4 @@ ROOT_PATH: str = path.dirname(__file__)
 def PrintTensileRoot():
     print(ROOT_PATH, end='')
 
-__all__ = ["__version__", "ROOT_PATH"]
+__all__ = ["GENERATOR_VERSION", "__version__", "ROOT_PATH"]
