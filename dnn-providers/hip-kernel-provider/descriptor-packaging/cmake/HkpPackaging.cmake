@@ -862,6 +862,66 @@ function(hkp_require_ingestor_toolchain out_arches)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_production_root(<out_var>)
+#   Declares the overridable production source root and resolves it to a path or
+#   to empty. Empty is the dormant case and not an error; a value that is set but
+#   is not a directory is fatal, because that is a typo rather than a choice.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_production_root out_var)
+    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
+        "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" CACHE PATH
+        "The authored source root the production pack step compiles from, \
+defaulting to the provider's in-tree shipped descriptors. Walked recursively; child \
+folders under it scope the content (hip/, rocKE/, per-integration folders) and each \
+descriptor's authored subpath is preserved into the staged and installed trees. A root \
+holding no descriptor, like an empty value, leaves production packaging dormant.")
+
+    set(${out_var} "" PARENT_SCOPE)
+    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+        if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+            message(FATAL_ERROR
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but is "
+                "not a directory: ${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+        endif()
+        set(${out_var} "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_root_has_kdp(<out_var> <root>)
+#   TRUE when <root> holds at least one non-hidden *.kdp.json. An empty <root>
+#   is FALSE rather than an error, which is what leaves packaging dormant.
+#
+#   CONFIGURE_DEPENDS so adding the first KDP re-runs configure and wires the
+#   target. Dot-prefixed segments are dropped the way load_flat_input() skips
+#   them, so a `.git/` or an editor's dot-directory under a user-supplied root
+#   is not content.
+# ---------------------------------------------------------------------------
+function(_hkp_root_has_kdp out_var root)
+    set(${out_var} FALSE PARENT_SCOPE)
+    if(NOT root)
+        return()
+    endif()
+
+    file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
+    foreach(_kdp IN LISTS _kdps)
+        file(RELATIVE_PATH _kdp_rel "${root}" "${_kdp}")
+        string(REPLACE "/" ";" _kdp_segments "${_kdp_rel}")
+        set(_kdp_hidden FALSE)
+        foreach(_kdp_segment IN LISTS _kdp_segments)
+            if(_kdp_segment MATCHES "^\\.")
+                set(_kdp_hidden TRUE)
+                break()
+            endif()
+        endforeach()
+        if(NOT _kdp_hidden)
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root. The root names a location;
 #   producer selection is per-UKD on kernel_source.kind, so both producers are
@@ -889,22 +949,7 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_require_ingestor_toolchain(_arches)
 
-    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
-        "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" CACHE PATH
-        "The authored source root the production pack step compiles from, \
-defaulting to the provider's in-tree shipped descriptors. Walked recursively; child \
-folders under it scope the content (hip/, rocKE/, per-integration folders) and each \
-descriptor's authored subpath is preserved into the staged and installed trees. A root \
-holding no descriptor, like an empty value, leaves production packaging dormant.")
-    set(_source_root "")
-    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
-        if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-            message(FATAL_ERROR
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but is "
-                "not a directory: ${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-        endif()
-        set(_source_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-    endif()
+    _hkp_resolve_production_root(_source_root)
 
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
         "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
@@ -950,29 +995,7 @@ loaded is the one named here.")
     # UDD/KMD/UHD files, kernel sources and READMEs do not make a pack. A KDP that is
     # present but pruned on every arch stays a hard failure: this distinguishes
     # "nothing to ship" from "something to ship that did not".
-    #
-    # CONFIGURE_DEPENDS so adding the first KDP re-runs configure and wires the target.
-    # Dot-prefixed segments are dropped the way load_flat_input() skips them, so a
-    # `.git/` or an editor's dot-directory under a user-supplied root is not content.
-    set(_product_has_content FALSE)
-    if(_source_root)
-        file(GLOB_RECURSE _product_kdps CONFIGURE_DEPENDS "${_source_root}/*.kdp.json")
-        foreach(_product_kdp IN LISTS _product_kdps)
-            file(RELATIVE_PATH _product_kdp_rel "${_source_root}" "${_product_kdp}")
-            string(REPLACE "/" ";" _product_kdp_segments "${_product_kdp_rel}")
-            set(_product_kdp_hidden FALSE)
-            foreach(_product_kdp_segment IN LISTS _product_kdp_segments)
-                if(_product_kdp_segment MATCHES "^\\.")
-                    set(_product_kdp_hidden TRUE)
-                    break()
-                endif()
-            endforeach()
-            if(NOT _product_kdp_hidden)
-                set(_product_has_content TRUE)
-                break()
-            endif()
-        endforeach()
-    endif()
+    _hkp_root_has_kdp(_product_has_content "${_source_root}")
 
     # Production descriptors.
     if(_source_root AND _product_has_content)
