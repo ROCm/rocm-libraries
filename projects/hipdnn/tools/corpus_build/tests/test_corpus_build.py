@@ -501,6 +501,21 @@ def test_every_source_is_represented_even_in_a_small_corpus():
     assert all(count > 0 for count in allocation.values())
 
 
+def test_a_zero_share_excludes_its_source_rather_than_deferring_it():
+    """An engine whose kernels are compiled per exact shape wants ONLY its pack's
+    geometries; every other graph is a decline it pays a measurement for.
+
+    Redistribution used to refill the sources the caller had just switched off: asking
+    for kernel-only against a 974-geometry pack returned 974 kernel graphs and 4026
+    from `model` and `sweep`. The corpus is capped by the pack, and that is the honest
+    answer -- a short corpus of servable graphs, not a full one of declines.
+    """
+    allocation = assemble.allocate(
+        5000, {"model": 500, "kernel": 974, "sweep": 9000},
+        {"model": 0.0, "kernel": 1.0, "sweep": 0.0})
+    assert allocation == {"model": 0, "kernel": 974, "sweep": 0}
+
+
 # ------------------------------------------------------------------------------- cli
 
 

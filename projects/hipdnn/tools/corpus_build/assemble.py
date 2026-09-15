@@ -42,6 +42,13 @@ def allocate(count: int, capacity: dict, shares: dict) -> dict:
     a priority order, because handing an entire shortfall to one source is how a
     corpus that asked for a mix gets 90% of one population -- exactly the failure the
     per-regime table in RFC 0019.13 §11.2 exists to expose.
+
+    A share of exactly 0 EXCLUDES its source rather than deferring it. Redistribution
+    used to refill it: `--kernel-share 1.0 --model-share 0 --sweep-share 0` against a
+    pack with 974 eligible geometries returned 974 kernel graphs and then 4026 from the
+    two sources the caller had just switched off. For an engine whose kernels are
+    compiled per exact shape that is not a mixed corpus, it is 4026 declines -- the
+    caller asked for the pack's own geometries and got mostly the opposite.
     """
     total = sum(shares.get(source, 0.0) for source in capacity) or 1.0
     allocation = {source: min(capacity[source],
@@ -50,7 +57,8 @@ def allocate(count: int, capacity: dict, shares: dict) -> dict:
     remaining = count - sum(allocation.values())
     while remaining > 0:
         open_pools = [source for source in SOURCES
-                      if source in capacity and allocation[source] < capacity[source]]
+                      if source in capacity and allocation[source] < capacity[source]
+                      and shares.get(source, 0.0) > 0.0]
         if not open_pools:
             break
         for source in open_pools:
