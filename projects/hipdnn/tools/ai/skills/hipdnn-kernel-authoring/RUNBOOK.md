@@ -103,10 +103,12 @@ the generalization decision.
 Write HIP source inside the hipRTC envelope ([device-envelope.md](device-envelope.md)).
 Non-negotiables:
 
-- The entry point is `extern "C" __global__`. If the ABI is bound, its argument list
-  is the downstream handler's `launch` argument list verbatim, in order — **wrong
-  arity or order is diagnosed nowhere**: hipRTC compiles it, symbol lookup resolves
-  it, and the launch passes whatever it has into whatever you declared.
+- The entry point is `extern "C" __global__`. Its argument list is normally **yours to
+  choose**, because the integration writes the handler's `launch()` around it. Only when
+  the ABI is bound — a pack that already exists and already ships a handler — is the list
+  that handler's `launch` argument list verbatim, in order, and then **wrong arity or
+  order is diagnosed nowhere**: hipRTC compiles it, symbol lookup resolves it, and the
+  launch passes whatever it has into whatever you declared.
 - Index through the graph's **strides**, not an assumed contiguous layout. Layout is
   not an enum in the schema; it exists only as the stride pattern.
 - Accumulate in `float` regardless of storage dtype, and cast on store — the in-tree
@@ -151,14 +153,15 @@ entry-point signature, the compile options per architecture, the harness invocat
 the numeric results per output and shape, and the does-not-prove list from
 [SKILL.md](SKILL.md).
 
-For integration, state the four facts
-[hipdnn-ingestor-engine](../hipdnn-ingestor-engine/SKILL.md) needs at its RUNBOOK
-stage 3: the entry-point signature, the bundle's file set (sources plus every header
-they include), the compile-time macros the source requires bound and their legal
-values, and the launch geometry and workspace the kernel assumes. If those conflict
-with an existing pack's registered handler, say so — that conflict is a rebuild
-decision for the integration skill, not something to paper over by changing the
-kernel's mathematics.
+For integration, state the four handover facts
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) consumes at its
+RUNBOOK step 1: the entry-point signature, the bundle's file set (sources plus every
+header they include), the compile-time macros the source requires bound and their legal
+values, and the launch geometry and workspace the kernel assumes. Whether the kernel must
+guard its own bounds follows from that geometry and must be stated. If those conflict
+with an existing pack's registered handler, say so — that conflict is a rebuild decision
+for the integration skill, not something to paper over by changing the kernel's
+mathematics.
 
 **Gate:** the report is complete and every claim in it traces to an observation in
 stages 2-7.

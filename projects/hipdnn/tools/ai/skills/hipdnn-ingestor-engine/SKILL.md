@@ -1,13 +1,23 @@
 ---
 name: hipdnn-ingestor-engine
-description: "Create or extend a hipDNN generic-kernel-ingestor integration: graph/kernel contracts, descriptors, native hooks, packaging, host checks, exact-engine device correctness and final corpus coverage."
-argument-hint: "[create|extend] [<kernel-source-path-or-dir> | <existing-descriptor-dir>]"
+description: "Production mining and lowering for a hipDNN generic-kernel-ingestor engine: corpus and workloads, sweeps and tuning, packaging, host checks, exact-engine device correctness, final corpus coverage, and adding a hiprtc_file variant to a pack whose symbols are already installed."
+argument-hint: "[<existing-descriptor-dir> | <profile-or-config-path>]"
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 ---
 
 # hipDNN Ingestor Engine
 
-Execute [RUNBOOK.md](RUNBOOK.md), the **only ordered create/extend workflow**.
+Execute [RUNBOOK.md](RUNBOOK.md), the **only ordered workflow for production mining and
+lowering** — corpus and baseline approval, packaging, tuning and final corpus proof.
+
+**The create path is not here.**
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) owns it — it consumes
+the four handover facts (the entry-point signature, the bundle's file set, the macros the
+source requires bound with their legal values, and the launch geometry and workspace the
+kernel assumes) and lands new symbols, descriptors, registration and graphs; this skill
+owns production mining and lowering. Taking a plain HIP integration through the eight
+stages below makes it pay for corpus approval, packaging and tuning it does not owe.
+
 These pages supply contracts, not alternate procedures:
 
 | Reference | Owns |
@@ -15,11 +25,12 @@ These pages supply contracts, not alternate procedures:
 | [extend.md](extend.md) | Existing identities and addition-only splices |
 | [graph-contract.md](graph-contract.md) | Graph semantics, UID edges, fields and reference capability |
 | [rocke-mining.md](rocke-mining.md) | Applicability, specialization, layout, geometry and ABI |
-| [hiprtc-mining.md](hiprtc-mining.md) | Drop-in `hiprtc_file` kernels: scope, entry point, defines and bundles |
+| [hiprtc-mining.md](hiprtc-mining.md) | Adding a `hiprtc_file` variant to a pack whose symbols are already installed: scope, entry point, defines and bundles |
 | [native-pack.md](native-pack.md) | Native hooks, ownership, registration and census scope |
 | [workloads.md](workloads.md) | Corpus identity, coverage and runtime accounting |
 | [Sweep reference](../../../IngestorGenerator/tools/README-sweeps.md) | Python CLI, YAML, measurement and resume |
-| [hipdnn-kernel-authoring](../hipdnn-kernel-authoring/SKILL.md) | Upstream: authoring the kernel source and proving its numerics before integration |
+| [hipdnn-kernel-authoring](../hipdnn-kernel-authoring/SKILL.md) | Upstream: authoring the kernel source and proving its numerics |
+| [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) | The create path: native symbols, descriptors, registration with the testing system, tests and graphs |
 
 ## Entry contract
 
@@ -40,7 +51,10 @@ source according to workspace policy.
 rocKE is always packaged. Direct-load engines need neither a fictitious rocKE
 profile nor a compiled-specialization claim their path cannot supply. `hiprtc_file`
 adds variants to an **already-installed** pack only, reusing its registered symbols
-and its handler's launch ABI; a new native symbol is still a rebuild.
+and its handler's launch ABI. **A genuinely new native symbol is a rebuild, and it is
+create-path work** — take it to
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) rather than through
+the stages below, whichever dialect it ends up using.
 
 ## Completion and handoff
 
