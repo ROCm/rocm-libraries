@@ -313,11 +313,17 @@ void testing_csr2hyb_extra(const Arguments& arg)
 
     // M x N with the first n_dense rows fully dense (N nonzeros each) and the rest
     // empty. With rocsparse_hyb_partition_max: ell_width = N (the max row length),
-    // no COO part, and ell_nnz = (int64_t)N * M. n_dense is chosen so the average
-    // row length keeps rocsparse's max_row_nnz check (>= ell_width) satisfied while
-    // csr_nnz = n_dense * N stays below INT32_MAX.
+    // no COO part, and ell_nnz = (int64_t)N * M.
     //   ell_nnz = 40000 * 53688 = 2,147,520,000  (> 2^31)
     //   csr_nnz = 40000 * 26845 = 1,073,800,000  (< 2^31)
+    //
+    // Roughly half the rows must be dense; a single dense row does not work.
+    // csr2hyb rejects ell_width > max_row_nnz = 2 * (csr_nnz - 1) / m + 1, so
+    // ell_width * m > 2^31 forces csr_nnz > 2^30 no matter how the matrix is
+    // shaped. With n_dense = 1 the gate computes max_row_nnz = 2 against
+    // ell_width = 40000 and the conversion returns rocsparse_status_invalid_value
+    // before ever allocating the ELL part. n_dense = 26844 is the smallest value
+    // that passes the gate; 26845 leaves a little margin.
     const rocsparse_int        M       = 53688;
     const rocsparse_int        N       = 40000;
     const rocsparse_int        n_dense = 26845;
