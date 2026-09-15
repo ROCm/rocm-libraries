@@ -2,9 +2,9 @@
 
 This page covers:
 
-- `instances/common/conv_implicit_gemm.py`
-- `instances/common/conv_direct_grouped.py`
-- `instances/common/img2col.py`
+- `library/kernels/common/conv_implicit_gemm.py`
+- `library/kernels/common/conv_direct_grouped.py`
+- `library/kernels/common/img2col.py`
 - `instances/common/pooling.py`
 
 The implicit-GEMM tile/pipeline heuristic (formerly an experimental
@@ -25,7 +25,7 @@ Direct grouped:
 
 ## Implicit-GEMM Convolution
 
-Source: `instances/common/conv_implicit_gemm.py`.
+Source: `library/kernels/common/conv_implicit_gemm.py`.
 
 ### Contract
 
@@ -433,7 +433,7 @@ M-outer default for dgrad, and matches the fp32 reference for wgrad.
 
 ## Direct Grouped Convolution
 
-Source: `instances/common/conv_direct_grouped.py`.
+Source: `library/kernels/common/conv_direct_grouped.py`.
 
 These are specialized kernels for grouped direct convolution bake-off cases (`cpg=kpg in {16, 4}`), not generic implicit-GEMM conv.
 
@@ -544,7 +544,7 @@ This path avoids the implicit-GEMM LDS machinery because the channel group is ti
 
 ## Img2Col
 
-Source: `instances/common/img2col.py`.
+Source: `library/kernels/common/img2col.py`.
 
 Materializes the implicit-GEMM A matrix `[M_gemm, K_gemm]`:
 
