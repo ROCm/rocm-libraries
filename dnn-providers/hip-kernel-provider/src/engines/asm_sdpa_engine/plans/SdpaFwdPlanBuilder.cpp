@@ -230,8 +230,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
 
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
 
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET,
-                               "mma_core_mode must be unset");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.mma_core_mode() != DataType::UNSET
+                                   && attrs.mma_core_mode() != DataType::FLOAT,
+                               "mma_core_mode must be unset or float");
 
     const auto& tensorMap = opGraph.getTensorMap();
 
@@ -403,46 +404,53 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
 
-    // Extract dimensions from Q tensor: [B, H_q, S_q, D_qk]
+    // Ragged (group-mode) tensors are canonical BSHD [B, S, H, D] per RFC 0014;
+    // batch-mode tensors are BHSD [B, H, S, D]. Only the heads and seq axes swap
+    // between the layouts — batch (0) and head-dim (3) are identical in both.
+    const bool isGroupLayout = qTensor->ragged_offset_tensor_uid().has_value();
+    const unsigned int headsAxis = isGroupLayout ? 2U : 1U;
+    const unsigned int seqAxis = isGroupLayout ? 1U : 2U;
+
+    // Extract dimensions from Q tensor
     auto* qDims = qTensor->dims();
     auto batchSize = static_cast<unsigned int>(qDims->Get(0));
-    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
-    auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
+    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(headsAxis));
+    auto seqLenQ = static_cast<unsigned int>(qDims->Get(seqAxis));
     auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
 
-    // Extract dimensions from K tensor: [B, H_kv, S_kv, D_qk]
+    // Extract dimensions from K tensor
     auto* kDims = kTensor->dims();
-    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(1));
-    auto seqLenKv = static_cast<unsigned int>(kDims->Get(2));
+    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(headsAxis));
+    auto seqLenKv = static_cast<unsigned int>(kDims->Get(seqAxis));
 
     // Extract dimensions from V tensor: [B, H_kv, S_kv, D_v]
     auto* vDims = vTensor->dims();
     auto headDimV = static_cast<unsigned int>(vDims->Get(3));
 
-    // Extract strides (in elements) - Q: [B, H_q, S_q, D_qk]
+    // Extract strides (in elements) - Q
     auto* qStrides = qTensor->strides();
     auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
-    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
-    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
+    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(headsAxis));
+    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(seqAxis));
     auto qStrideRow = qStrideSeq; // Same as sequence stride
 
-    // Extract strides - K: [B, H_kv, S_kv, D_qk]
+    // Extract strides - K
     auto* kStrides = kTensor->strides();
     auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
-    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
-    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
+    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(headsAxis));
+    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(seqAxis));
 
-    // Extract strides - V: [B, H_kv, S_kv, D_v]
+    // Extract strides - V
     auto* vStrides = vTensor->strides();
     auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
-    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
-    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
+    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(headsAxis));
+    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(seqAxis));
 
-    // Extract strides - O: [B, H_q, S_q, D_v]
+    // Extract strides - O
     auto* oStrides = oTensor->strides();
     auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
-    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
-    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
+    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(headsAxis));
+    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(seqAxis));
 
     hipdnn_plugin_sdk::ScalarOperand attnScale{};
     if(sdpaAttrs.scale_tensor_uid().has_value())
@@ -512,8 +520,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.maskType = plan_utils::getMaskType(sdpaAttrs);
 
     // isApplicable ensures all of q, k, v and o tensors are ragged if any are, so we only need to check one
-    auto batchMode
-        = (qTensor->ragged_offset_tensor_uid().has_value()) ? BatchMode::GROUP : BatchMode::BATCH;
+    auto batchMode = isGroupLayout ? BatchMode::GROUP : BatchMode::BATCH;
 
     if(batchMode == BatchMode::GROUP)
     {
