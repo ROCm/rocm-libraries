@@ -21,11 +21,13 @@ nanobind_add_module(
     host-numerics-python
     NB_STATIC
     src/bindings.cpp
+    src/core_bindings.cpp
     src/comparison_bindings.cpp
     src/generation_bindings.cpp
     src/gemm_bindings.cpp
     src/mx_bindings.cpp
     src/operation_bindings.cpp
+    src/tensor_bindings.cpp
 )
 target_link_libraries(
     host-numerics-python
