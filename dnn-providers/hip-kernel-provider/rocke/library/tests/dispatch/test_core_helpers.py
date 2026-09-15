@@ -20,7 +20,15 @@ from __future__ import annotations
 import dataclasses
 from types import SimpleNamespace
 
-from rocke.dispatch.core import KernelId, make_kernel_id, selector_matches
+import pytest
+
+from rocke.dispatch.core import (
+    CandidateRegistry,
+    KernelCandidate,
+    KernelId,
+    make_kernel_id,
+    selector_matches,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -39,6 +47,27 @@ def _candidate(**over):
     )
     base.update(over)
     return SimpleNamespace(**base)
+
+
+def _registrable_candidate(**over):
+    """A real ``KernelCandidate``, for the one test that goes through the
+    registry rather than calling a helper directly."""
+    base = dict(
+        name="probe",
+        family="kda_chunkwise",
+        algorithm="chunk_scan",
+        spec_id="b4",
+        abi_version="v1",
+        priority=0,
+        _supports=lambda req: (True, "ok"),
+        select_spec=lambda req: _Spec(),
+        signature=lambda spec: (),
+        grid=lambda spec, req: (1, 1, 1),
+        block=lambda spec: (64, 1, 1),
+        sweep_space=lambda req: (),
+    )
+    base.update(over)
+    return KernelCandidate(**base)
 
 
 def _request(**over):
@@ -76,10 +105,25 @@ def test_spec_id_mismatch_is_rejected_with_reason():
     assert not ok and "spec_id" in why
 
 
+def test_a_request_without_the_pin_fields_raises():
+    """A request type that never declared algorithm/spec_id is a family wiring
+    bug. Each family's private copy read the attributes directly and raised;
+    defaulting them to "auto" here would instead make every candidate match --
+    the pin silently ignored, which is far harder to notice than a traceback."""
+    with pytest.raises(AttributeError):
+        selector_matches(SimpleNamespace(arch="gfx950"), _candidate())
+
+
 def test_pin_is_case_and_whitespace_insensitive():
+    # Both fields are normalized, and each normalization is its own line in
+    # the helper -- so each needs its own assertion or one can be deleted with
+    # the suite still green. spec_id is the likelier victim: it is a short
+    # hand-typed tag like "b4" in a config or env override.
     ok, _ = selector_matches(
         _request(algorithm="  Chunk_Scan  "), _candidate(algorithm="chunk_scan")
     )
+    assert ok
+    ok, _ = selector_matches(_request(spec_id="  B4  "), _candidate(spec_id="b4"))
     assert ok
 
 
@@ -109,31 +153,19 @@ def test_kernel_id_forwards_op_from_arg_and_identity_from_candidate():
     assert kid.arch == "gfx950" and kid.abi_version == "v1"
 
 
-# --- the invariant that makes the hoist behaviour-preserving ----------------
+# --- what actually makes the hoist behaviour-preserving ---------------------
 
 
-def test_every_registered_candidate_carries_its_own_family_constant():
+def test_registry_rejects_a_candidate_from_another_family():
     """``make_kernel_id`` reads ``candidate.family``; the private copies it
-    replaced read each family's ``_FAMILY`` constant instead.
+    replaced read each family's ``_FAMILY`` constant.
 
-    Those two agree only while every candidate is registered with its family's
-    own constant -- and ``KernelId.family`` feeds the cache key, so if they ever
-    diverged the hoist would silently re-key every cached kernel in that family.
-    Asserting it over the REAL registries is what makes the migration provably
-    identity-preserving, and keeps it that way for families added later.
+    Those agree because ``CandidateRegistry.register`` REFUSES a candidate
+    whose family differs from its registry, so a mismatched one never reaches
+    ``candidates()``. That guard is the guarantee -- enumerating registered
+    candidates and asserting the property it already enforced cannot fail, and
+    a test that cannot fail hides the day someone removes the guard.
     """
-    from dispatch.attention import attention_candidates
-    from dispatch.attention.common import FAMILY as ATTENTION_FAMILY
-    from dispatch.kda import kda_candidates
-    from dispatch.kda.common import FAMILY as KDA_FAMILY
-
-    for candidates, family in (
-        (attention_candidates(), ATTENTION_FAMILY),
-        (kda_candidates(), KDA_FAMILY),
-    ):
-        assert candidates, "registry is empty -- the check would pass vacuously"
-        for candidate in candidates:
-            assert candidate.family == family, (
-                f"candidate {candidate.name!r} registered as "
-                f"{candidate.family!r}, expected {family!r}"
-            )
+    registry = CandidateRegistry("kda_chunkwise")
+    with pytest.raises(ValueError, match="family"):
+        registry.register(_registrable_candidate(family="attention_unified"))

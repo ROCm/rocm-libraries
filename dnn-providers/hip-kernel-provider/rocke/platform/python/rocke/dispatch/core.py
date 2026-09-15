@@ -408,9 +408,15 @@ def selector_matches(
     ``"auto"`` (the default on every family request) matches any candidate; a
     set value must equal the candidate's. Shared by every operator family so the
     pin semantics cannot drift between them.
+
+    Both fields are read directly, not via ``getattr`` with a default: a
+    request type that never declared them is a family wiring bug, and it should
+    raise here as it did when each family had its own copy. Defaulting to
+    ``"auto"`` would make it match every candidate instead -- a pin silently
+    ignored, which is the worst failure this function has.
     """
-    algorithm = str(getattr(request, "algorithm", "auto")).strip().lower()
-    spec_id = str(getattr(request, "spec_id", "auto")).strip().lower()
+    algorithm = str(request.algorithm).strip().lower()
+    spec_id = str(request.spec_id).strip().lower()
     if algorithm not in ("auto", candidate.algorithm):
         return (
             False,
