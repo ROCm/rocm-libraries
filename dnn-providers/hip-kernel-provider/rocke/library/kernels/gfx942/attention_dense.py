@@ -1427,14 +1427,24 @@ def _build_attention_dense_single_buffer(
         CTA-invariant and closed over."""
         hkv = b.div(hq, b.const_i32(gqa))
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
-        _sq_n = seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)
-        _skv_n = seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)
+        # NOT hoisted into a local shared with o_base below: the IR builder is
+        # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
+        # written. Hoisting moves that node earlier and lets the second use CSE
+        # away -- semantically identical, but it renumbers every SSA value after it
+        # and moves all 5 persist golden hashes for a path this change is supposed
+        # to leave byte-identical. Emit in place on the baked branch.
         q_base = b.add(
-            b.mul(b.mul(bt, _sq_n), b.const_i32(stride_q_tok)),
+            b.mul(
+                b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
+                b.const_i32(stride_q_tok),
+            ),
             b.mul(hq, b.const_i32(D)),
         )
         k_base = b.add(
-            b.mul(b.mul(bt, _skv_n), b.const_i32(stride_k_tok)),
+            b.mul(
+                b.mul(bt, seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv)),
+                b.const_i32(stride_k_tok),
+            ),
             b.mul(hkv, b.const_i32(D)),
         )
 
@@ -1751,7 +1761,10 @@ def _build_attention_dense_single_buffer(
         # Epilogue: O[query,dim] = (P@V)/l, from the transposed C[dim,query] accum.
         rcp_l = b.rcp(l_i)
         o_base = b.add(
-            b.mul(b.mul(bt, _sq_n), b.const_i32(stride_q_tok)),
+            b.mul(
+                b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
+                b.const_i32(stride_q_tok),
+            ),
             b.mul(hq, b.const_i32(D)),
         )
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
