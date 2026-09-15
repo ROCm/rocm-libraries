@@ -365,4 +365,18 @@ namespace TensileLite
     using TypedGemm_B6B8_S_S = TypedGemm<BFloat6x32, BFloat8, float, float, float, float, BFloat6x32, BFloat8>;
 #endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP8_BF8)
 #endif // !_WIN32
+
+    // w4a16: int4 weights in A, bf16 activations in B. A's *compute input* type
+    // is bf16, not int4 -- the kernel dequantizes A with the per-K-group scale
+    // before the MAC, and the reference does the same. Int4x2 is plain storage
+    // rather than a HIP type, so this needs no platform guard.
+#ifdef TENSILE_USE_BF16
+    using TypedGemm_I4B_B_S
+        = TypedGemm<Int4x2, BFloat16, BFloat16, BFloat16, float, float, BFloat16, BFloat16>;
+    using TypedGemm_I4B_S_S
+        = TypedGemm<Int4x2, BFloat16, float, float, float, float, BFloat16, BFloat16>;
+#endif // TENSILE_USE_BF16
+    // Same, with fp16 activations.
+    using TypedGemm_I4H_H_S = TypedGemm<Int4x2, Half, Half, Half, float, float, Half, Half>;
+    using TypedGemm_I4H_S_S = TypedGemm<Int4x2, Half, float, float, float, float, Half, Half>;
 } // namespace TensileLite
