@@ -48,6 +48,17 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+TEST(internal_hostblocks_itilu0, align_size)
+{
+    // Empty slices must not wrap: sizeof(T) * 0 - 1 is SIZE_MAX as size_t.
+    EXPECT_EQ(rocsparse::align_size<int32_t>(0), 0u);
+    EXPECT_EQ(rocsparse::align_size<double>(0), 0u);
+
+    EXPECT_EQ(rocsparse::align_size<int32_t>(1), 256u);
+    EXPECT_EQ(rocsparse::align_size<int32_t>(64), 256u); // exactly 256 bytes
+    EXPECT_EQ(rocsparse::align_size<int32_t>(65), 512u);
+}
+
 TEST(internal_hostblocks_itilu0, assign_b)
 {
     std::vector<char> mem(1024);
