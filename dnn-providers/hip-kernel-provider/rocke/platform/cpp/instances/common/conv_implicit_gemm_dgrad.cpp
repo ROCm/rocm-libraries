@@ -499,18 +499,29 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
      * only) because just the B tile flips. */
     if(s->lds_k_outer)
     {
-        if(strcmp(arch, "gfx950") != 0)
+        /* Two regimes: gfx950 wave64 MFMA (ds_read_b64_tr_b16) and gfx1250
+         * wave32 WMMA (ds_load_tr16_b128). The arch and the wave must agree or
+         * the lane formula addresses a layout the hardware does not implement. */
+        const bool k_outer_950 = (strcmp(arch, "gfx950") == 0);
+        const bool k_outer_1250 = (strcmp(arch, "gfx1250") == 0);
+        if(!k_outer_950 && !k_outer_1250)
         {
             snprintf(reason,
                      reason_cap,
-                     "lds_k_outer requires gfx950 (ds_read_tr16_b64 is a CDNA4 "
-                     "transpose read); got %s",
+                     "lds_k_outer requires gfx950 or gfx1250 (the LDS transpose "
+                     "read); got %s",
                      arch);
             return false;
         }
-        if(strcmp(family, "wmma") == 0)
+        const int want_wave = k_outer_950 ? 64 : 32;
+        if(s->wave_size != want_wave)
         {
-            snprintf(reason, reason_cap, "lds_k_outer is an MFMA-family path; got wmma");
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer on %s requires wave_size=%d; got %d",
+                     arch,
+                     want_wave,
+                     s->wave_size);
             return false;
         }
         if(!(s->dtype_b && (strcmp(s->dtype_b, "bf16") == 0 || strcmp(s->dtype_b, "fp16") == 0)))
@@ -522,21 +533,27 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      s->dtype_b ? s->dtype_b : "(null)");
             return false;
         }
-        if(s->warp_tile_n != 16 && s->warp_tile_n != 32)
+        if(s->wave_size == 32)
+        {
+            /* One atom in the wave32 regime: gfx1250 WMMA 16x16x32. */
+            if(s->warp_tile_n != 16 || s->warp_tile_k != 32)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on wave32 supports only the 16x16x32 atom "
+                         "(got %dx%dx%d)",
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
+                return false;
+            }
+        }
+        else if(s->warp_tile_n != 16 && s->warp_tile_n != 32)
         {
             snprintf(reason,
                      reason_cap,
                      "lds_k_outer requires warp_tile_n in (16, 32); got %d",
                      s->warp_tile_n);
-            return false;
-        }
-        if(s->wave_size != 64)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "lds_k_outer requires wave_size=64 (ds_read_tr16_b64 is a wave64 "
-                     "instruction); got %d",
-                     s->wave_size);
             return false;
         }
         if(s->lds_layout != NULL)
@@ -547,6 +564,21 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         if(s->async_dma)
         {
             snprintf(reason, reason_cap, "lds_k_outer is not supported with async_dma on dgrad");
+            return false;
+        }
+        /* Same shape of problem as async_dma: the alternate load path does not
+         * implement the K-outer tile. build_wavelet_loaders pins the B tile to
+         * (block_n, block_k) and takes the unswapped descriptor, so it writes
+         * M-outer into a K-outer allocation -- wrong row stride for every
+         * element, and out of bounds past B_smem when tile_n > tile_k.
+         * Matches Python is_valid_dgrad_spec and validate(). */
+        if(is_wavelet)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer is not supported with pipeline='wavelet' on dgrad "
+                     "(the wavelet loader writes the B tile M-outer into a K-outer "
+                     "allocation)");
             return false;
         }
     }
@@ -2090,7 +2122,10 @@ static rocke_kernel_def_t*
      * instruction stream (immediately after the schedule prologue). */
     rocke_value_t* tr_lane_mod4 = NULL;
     rocke_value_t* tr_grp16 = NULL;
-    if(spec->lds_k_outer)
+    /* Element type for the transpose read -- see rocke_conv_tr_elem_dtype.
+     * Type selection only, emits no IR, so it is computed unconditionally. */
+    const rocke_type_t* tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
+    if(spec->lds_k_outer && spec->wave_size == 64)
     {
         /* Python: b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) -- evaluated
          * strictly left-to-right. C argument order is unspecified, so sequence
@@ -2141,6 +2176,27 @@ static rocke_kernel_def_t*
             {
                 rocke_value_t* atom_row
                     = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+                if(spec->lds_k_outer)
+                {
+                    /* B only: dgrad's A tile is genuinely still M-outer. This
+                     * branch existed in the MFMA phase but not here, so a
+                     * wave32 K-outer dgrad silently fell back to ordinary
+                     * M-outer smem loads in the C engine while Python emitted
+                     * the transpose read -- there was no gfx1250 dgrad parity
+                     * config to catch the divergence. */
+                    b_wma_cols[ni] = rocke_conv_tr_frag(b,
+                                                        lane,
+                                                        tr_lane_mod4,
+                                                        tr_grp16,
+                                                        B_src,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        spec->warp_tile_n,
+                                                        b_per_lane,
+                                                        spec->wave_size,
+                                                        tr_dtype);
+                    continue;
+                }
                 b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(
                     b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane);
             }
@@ -2471,7 +2527,8 @@ static rocke_kernel_def_t*
                                                         k_c,
                                                         spec->warp_tile_n,
                                                         b_per_lane,
-                                                        NULL);
+                                                        spec->wave_size,
+                                                        tr_dtype);
                         continue;
                     }
                     rocke_value_t* b_row = rocke_b_add(

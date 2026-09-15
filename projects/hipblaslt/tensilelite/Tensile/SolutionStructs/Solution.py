@@ -1856,15 +1856,22 @@ class Solution(collections.abc.Mapping):
       if state["InternalSupportParams"]["KernArgsVersion"] < 3:
         state["InternalSupportParams"]["KernArgsVersion"] = 3
 
+    # SupportStreamKPerTileExtraIters is a pure CAPABILITY flag (see
+    # defaultInternalSupportParams): "this kernel's asm carries BOTH Stream-K
+    # K-split mappings and honors bit 29 of MagicShiftItersPerTile as the
+    # runtime selector". It is fully derived here, overriding whatever the
+    # solution YAML said, because only the generator knows what it just emitted.
+    # Newly generated SK3 / SK5 kernels emit both mappings plus the bit-29 gate.
+    # SK4 (dynamic) and SK0 do not, and custom kernels are hand-written asm that
+    # this generator did not produce, so none of them may claim the capability.
+    isCustomKernel = bool(state["CustomKernelName"])
+    state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
+        (state["StreamK"] in (3, 5)) and not isCustomKernel
+
     if state["StreamK"] != 0:
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
-      # Newly generated SK3 / SK5 kernels emit the per-tile extra-iters asm
-      # path. SK4 (dynamic) does not. Older/custom kernels keep the default
-      # False via YAML omission / defaultInternalSupportParams.
-      if state["StreamK"] in (3, 5):
-        state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = True
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if state["ClusterDim"] != [1, 1]:
@@ -2836,12 +2843,20 @@ class Solution(collections.abc.Mapping):
         return
 
     if state["enableTDMMetadata"] and state["ProblemType"]["MetadataLayout"]:
-      # reject if NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)
+      # reject if NumWaves // 2 > metadata k-major dimension (DepthU * 0.25 // 2).
+      # Reaching this branch (enableTDMMetadata + NumWaves > 1) implies TDMInst==3
+      # (enableTDMA and enableTDMB both set; TDMInst is validated to be 0 or 3
+      # above), i.e. isTdmWaveSeparated() is true. In wave-separated mode, only
+      # even "component" waves transfer metadata (see the wCompId = WaveIdx // 2
+      # partitioning in KernelWriterAssembly.initTDMDescriptor and
+      # TensorDataMover.calculateStartAddr), so the metadata region only needs
+      # to be sized for NumWaves // 2 components, not the full NumWaves.
       metadataKMajorDimension = (state["DepthU"] * 0.25) // 2
-      if state["NumWaves"] > 1 and metadataKMajorDimension < state["NumWaves"]:
+      numComp = state["NumWaves"] // 2
+      if state["NumWaves"] > 1 and metadataKMajorDimension < numComp:
         reject(state, printRejectionReason,
-               "Metadata Layout 1 can not support NumWaves > metadata k-major dimension (DepthU * 0.25 // 2)"
-               "(DepthU=%d * 0.25 // 2)=%d < NumWaves=%d)" % (state["DepthU"], metadataKMajorDimension, state["NumWaves"]))
+               "Metadata Layout 1 can not support NumWaves // 2 > metadata k-major dimension (DepthU * 0.25 // 2)"
+               "(DepthU=%d * 0.25 // 2)=%d < NumWaves//2=%d)" % (state["DepthU"], metadataKMajorDimension, numComp))
         return
 
     if state.get("PrefetchAcrossPersistent", 0) and (state["enableTDMA"] or state["enableTDMB"]):
