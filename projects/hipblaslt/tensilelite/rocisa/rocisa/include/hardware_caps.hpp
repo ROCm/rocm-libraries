@@ -591,6 +591,12 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["VOP3ByteSel"]        = isaVersion[0] == 12;
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
+    // Bit position of DISABLE_XDL_ARB_STALL within SCHED_MODE (HWREG 26).
+    // -1 where the field does not exist; 0 would alias DEP_MODE's LSB.
+    int arbStallBit = -1;
+    if(checkInList(isaVersion, {{12, 5, 0}}))
+        arbStallBit = 2;
+    rv["WmmaArbStallBitOffset"] = arbStallBit;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
