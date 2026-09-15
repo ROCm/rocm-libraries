@@ -99,48 +99,57 @@ The runtime does not add a synthetic `q.` namespace.
 Use the names returned by candidate enumeration. Renaming columns without changing
 the engine's published bindings produces a model the engine cannot evaluate.
 
-### Constant feature columns are kept, and reported
+### Constant feature columns are dropped, and named
 
 A column with one value across the whole input cannot separate one candidate from
-another. `train` detects those before fitting, names each one and its value, and
-**keeps** them:
+another. `train` detects those before fitting, names each one with its value, and
+**drops** it:
 
 ```
-WARNING - 2 feature column(s) never vary in bench.csv: kernel.tile_m=128,
-device.cu_count=304. They cannot separate one candidate from another, so no tree will
-split on them.
-WARNING - KEEPING them in features_signature. Constancy is measured against this
-corpus, not the pack: a field the sweep failed to cover looks identical to one the
-kernels pin ...
+WARNING - Dropping 2 feature column(s) that never vary in this corpus:
+kernel.tile_m=128, device.cu_count=304. RFC 0019.13 §10.4: this prunes model inputs
+only, and leaves the engine's authored public knobs untouched.
 ```
 
-Keeping is the default because a CSV cannot tell two opposite situations apart. rocKE's
-attention kernels bake their geometry in, so the matcher pins 8 of their 14 fields
-before ranking begins and those 8 can never vary — dropping them is harmless. But a
-column that *does* vary in the world, sampled at one value because the corpus is thin,
-reads identically. Dropping there produces a model that cannot generalise on that axis,
-and makes `features_signature` — and `features_hash`, the contract the runtime checks —
-a function of which problems happened to be swept. The same engine trained on two
-corpora would ship two different contracts.
+No tree can split on such a column, so it adds nothing to the model — and it is not
+free. RFC 0019 §6.3 hashes the whole `features_signature` into `features_hash`, so a
+dead column enlarges the contract the runtime has to reproduce and bakes itself into the
+descriptor's identity. Keeping it makes a later, more correct retrain that omits it read
+as a contract break rather than as a better model.
 
-`train_manifest.json` records `requested_features`, `constant_features` (with values)
-and `dropped_constant_features`, so the provenance says what never varied whether or not
-it was dropped.
+**The test is variance in this corpus, never the column's name.** A rule of the form
+"single-arch runs must not pass `device.*`" is wrong here:
+`GenericPlanBuilder::candidateFeatures` deliberately supports merging a sweep across
+several boards of one architecture, and gfx942 spans MI300X and MI325X, whose
+`total_global_mem`, `memory_clock_rate` and `peak_memory_bandwidth` genuinely differ. The
+8 `$device.*` fields `deviceFeatureValues` publishes therefore behave differently
+depending on what was collected: a single-board corpus loses all 8, and a corpus merged
+across those two boards keeps those 3 and loses the other 5.
 
-- pass **`--drop-constant-features`** only to remove constant model inputs.
-  Training and ordinary promotion preserve the UED's authored knobs. Explicit
-  `promote --remove-knob NAME` requires a model trained against the intended
-  major-revised UED and rejects removal of a field the model still consumes;
+Every drop is named with its value because constancy is measured against the corpus that
+was collected, and a CSV cannot tell two opposite situations apart. rocKE's attention
+kernels bake their geometry in, so the matcher pins 8 of their 14 fields before ranking
+begins and those 8 can never vary. But a column that *does* vary in the world, sampled at
+one value because the corpus is thin, reads identically — and only the author can tell
+those apart. Naming the omission is what lets them: a thin sweep is fixed by collecting
+more, not by shipping a feature no tree used.
+
+`train_manifest.json` records `requested_features` and `dropped_constant_features` (each
+with its constant value), so the provenance says what was asked for and what never varied.
+
+- pruning a model input is never knob removal. Training and ordinary promotion preserve
+  the UED's authored knobs (RFC 0019.13 §10.4). Explicit `promote --remove-knob NAME`
+  requires a model trained against the intended major-revised UED and rejects removal of a
+  field the model still consumes;
 - when **two thirds or more** of the requested columns are constant, `train` warns that
   the proportion looks like a thin corpus and points at the input file. The threshold
   sits above the 8-of-14 rocKE shape (57%) on purpose: a warning that fires on every
   normal run is one people learn to ignore;
 - when **every** requested column is constant, `train` fails and names each column with
-  its value. `--drop-constant-features` does not override this — it changes the
-  signature, not the fact that nothing varies. A model over zero varying features scores
-  every candidate identically, and shipping one is worse than shipping none: the engine
-  ranks by a model that cannot discriminate instead of falling back to its declared
-  order.
+  its value. That is an error, not an empty feature set: a model over zero varying
+  features scores every candidate identically, and shipping one is worse than shipping
+  none — the engine ranks by a model that cannot discriminate instead of falling back to
+  its declared order.
 
 ### `train` arguments
 
@@ -164,7 +173,6 @@ it was dropped.
 | `--num-boost-round` | No | Max boosting rounds (default: 500) |
 | `--early-stopping` | No | Early stopping patience (default: 50) |
 | `--keep-lgbm` | No | Keep intermediate .lgbm file |
-| `--drop-constant-features` | No | Drop constant model inputs, never authored knobs (default: keep inputs) |
 | `--training-arches` | No | Architectures the model was trained on, for §9.2 OOD detection |
 | `--model-version` | No | Semantic version embedded in the model metadata |
 
@@ -503,7 +511,9 @@ categorical vocabularies are part of the feature hash; there is no separate name
 
 An explicit computed expression using a device field that never varied in the
 training corpus is rejected. Automatic feature proposals omit such expressions
-and retain the raw device field. Variation is recorded in `train_manifest.json`.
+and retain the raw device field — which training then drops on the same evidence,
+by the variance rule above, naming it with its value. `device_coverage` in
+`train_manifest.json` records the observed values of every device field either way.
 
 ### Reproducible generation
 
@@ -742,6 +752,29 @@ descriptor_tree/
 L1 and L2 may both use the default source filenames without overwriting each
 other: `<role>` keeps them in separate directories, and each is referenced from its
 own entry in the UED role map.
+
+### The artifact is content-addressed, and reproducible
+
+`train` writes `tree_data.hash` — the SHA-256 of `model.bin`, bare hex, which is the form
+`TreeDataAdapter` recomputes before parsing and refuses on mismatch (RFC 0019 §7.2). That
+answers the question `features_hash` does not: `features_hash` fingerprints the *input
+contract*, so two models over one signature and different training hash identically.
+`train_manifest.json` records both halves RFC 0019.13 §10.5 asks for, `model_sha256` and
+`uhd_sha256` over the emitted descriptor document.
+
+A content hash is only worth recording if the bytes can be rebuilt, so conversion is
+deterministic: converting one `.lgbm` twice produces identical files. Nothing stamps the
+wall clock into the buffer. `training_date` is taken from an explicit argument, or from
+`SOURCE_DATE_EPOCH` when the environment sets one, and is otherwise **omitted** rather
+than invented — an absent optional field costs a reader nothing, while a `datetime.now()`
+costs them the ability to check a shipped artifact against its source. A
+`SOURCE_DATE_EPOCH` that is not an integer count of seconds is an error, not a silently
+dropped stamp.
+
+```bash
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m uhd_gen train ...
+sha256sum model.bin   # equals tree_data.hash, and equals it again on the next conversion
+```
 
 ## Generated FlatBuffers bindings
 

@@ -234,12 +234,6 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--engine", help="UED name/UUID, or immediate engine canonical name/public ID")
     parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
     parser.add_argument(
-        "--drop-constant-features",
-        action="store_true",
-        dest="drop_constant_features",
-        help="Omit constant model inputs; never changes the engine's authored public knobs.",
-    )
-    parser.add_argument(
         "--target",
         default="tflops",
         help="Target column name (default: tflops)",
@@ -545,25 +539,37 @@ def _run_train(args: argparse.Namespace) -> int:
         if len(constants) == len(signature):
             raise ValueError("Every requested feature column is constant: " +
                              ", ".join(f"{name}={value!r}" for name, value in constants))
-        dropped = []
+        dropped = [{"column": name, "value": value} for name, value in constants]
         if constants:
-            logger.warning("%d feature column(s) never vary: %s", len(constants),
-                           ", ".join(f"{name}={value!r}" for name, value in constants))
+            # A column with one value is a column no tree can split on, so it buys the
+            # model nothing -- and it is not free. RFC 0019 §6.3 hashes the whole
+            # signature into features_hash, so the dead column enlarges the contract the
+            # runtime must reproduce and bakes itself into the descriptor's identity: a
+            # later, more correct retrain that omits it reads as a contract break rather
+            # than as a better model. The test is variance in THIS corpus, never the
+            # column's name -- GenericPlanBuilder::candidateFeatures merges a sweep
+            # across several boards of one arch, and gfx942 spans MI300X and MI325X,
+            # whose total_global_mem, memory_clock_rate and peak_memory_bandwidth
+            # genuinely differ. Every drop is named with its value, because constancy is
+            # measured against the corpus that was collected: a field the sweep failed to
+            # cover is indistinguishable here from one the kernels pin, and only the
+            # author can tell those apart.
+            logger.warning("Dropping %d feature column(s) that never vary in this corpus: %s. "
+                           "RFC 0019.13 §10.4: this prunes model inputs only, and leaves the "
+                           "engine's authored public knobs untouched.",
+                           len(constants), ", ".join(f"{name}={value!r}" for name, value in constants))
             if len(constants) / len(signature) >= CONSTANT_FEATURE_WARN_FRACTION:
                 logger.warning("High constant-feature proportion: check device and problem coverage")
-            if args.drop_constant_features:
-                dropped = [names[index] for index in constant_indices]
-                keep = [index for index in range(len(signature)) if index not in constant_indices]
-                signature = [signature[index] for index in keep]
-                names = [names[index] for index in keep]
-                matrix = matrix[:, keep]
-                remaining_refs = set(signature_references(signature))
-                categorical_encoding = {key: value for key, value in categorical_encoding.items() if key in remaining_refs}
-                # Pruning changed the signature, so the descriptor's identity changed with
-                # it (§6.3). Only the digest is restated -- the kept columns of `matrix`
-                # are already the values for the surviving entries.
-                features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
-                logger.warning("Dropping constant model inputs %s; authored knobs are unchanged", dropped)
+            keep = [index for index in range(len(signature)) if index not in constant_indices]
+            signature = [signature[index] for index in keep]
+            names = [names[index] for index in keep]
+            matrix = matrix[:, keep]
+            remaining_refs = set(signature_references(signature))
+            categorical_encoding = {key: value for key, value in categorical_encoding.items() if key in remaining_refs}
+            # Pruning changed the signature, so the descriptor's identity changed with
+            # it (§6.3). Only the digest is restated -- the kept columns of `matrix`
+            # are already the values for the surviving entries.
+            features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
         if args.objective == "max" and _looks_like_cost_metric(args.target):
             logger.warning("Target '%s' looks like a cost; use --objective min to prefer faster candidates", args.target)
         groups = args.group_by
@@ -591,8 +597,8 @@ def _run_train(args: argparse.Namespace) -> int:
     model.save_model(str(lgbm_path))
 
     fb_path = output_dir / "model.bin"
-    convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
-            training_arches=args.training_arches, model_version=args.model_version)
+    model_sha256 = convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
+                           training_arches=args.training_arches, model_version=args.model_version)
     if not args.keep_lgbm:
         lgbm_path.unlink()
     descriptor = {
@@ -600,18 +606,29 @@ def _run_train(args: argparse.Namespace) -> int:
         "features_signature": signature, "features_hash": features_hash,
         "trained_against": trained_against, "objective": args.objective,
         "score": {"units": args.score_units or args.target, "calibrated": args.calibrated, "transform": "log1p"},
-        "tree_data": {"artifact": fb_path.name},
+        # RFC 0019 §7.2: the body naming the artifact carries the digest of its bytes,
+        # which TreeDataAdapter recomputes before parsing and refuses on mismatch. It
+        # answers the question features_hash does not -- that one fingerprints the input
+        # contract, so two models with identical signatures and different training hash
+        # identically. Emitted bare-hex because that is what `sha256(buffer, size)`
+        # returns on the other side of the comparison.
+        "tree_data": {"artifact": fb_path.name, "hash": model_sha256},
     }
     if categorical_encoding:
         descriptor["categorical_encoding"] = categorical_encoding
     descriptor_path = output_dir / f"{args.descriptor_name}.uhd.json"
-    descriptor_path.write_text(json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
+    descriptor_document = json.dumps(descriptor, indent=2) + "\n"
+    descriptor_path.write_text(descriptor_document, encoding="utf-8")
     manifest = {
         "uhd_id": uhd_id, "requested_features": args.features or requested_signature,
         "features": names, "features_signature": signature, "features_hash": features_hash,
         "trained_against": trained_against, "device_coverage": coverage,
-        "constant_features": [{"column": name, "value": value} for name, value in constants],
-        "dropped_constant_features": dropped, "drop_constant_features": bool(args.drop_constant_features),
+        "dropped_constant_features": dropped,
+        # RFC 0019.13 §10.5: a content hash over the UHD document AND the model artifact.
+        # Conversion is deterministic (`lgbm_to_flatbuffer.resolve_training_date`), so
+        # these are checkable against the sources rather than merely recorded.
+        "uhd_sha256": hashlib.sha256(descriptor_document.encode("utf-8")).hexdigest(),
+        "model_sha256": model_sha256,
         "categorical_encoding": categorical_encoding, "target": args.target, "objective": args.objective,
         "score_units": args.score_units or args.target, "score_calibrated": args.calibrated,
         # RFC 0019.13 §10.5/§11.2: which measured timing the target came from. §11.2

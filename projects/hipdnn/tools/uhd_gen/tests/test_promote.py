@@ -237,7 +237,7 @@ def test_training_feature_pruning_never_removes_authored_knobs(tmp_path):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree)
     manifest = _read(model / "train_manifest.json")
-    manifest["dropped_constant_features"] = ["kernel.tile_m"]
+    manifest["dropped_constant_features"] = [{"column": "kernel.tile_m", "value": 128}]
     _write(model / "train_manifest.json", manifest)
     _apply(build_plan(model, tree))
     ued = _read(tree / "engine.ued.json")

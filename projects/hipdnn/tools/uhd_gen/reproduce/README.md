@@ -1,16 +1,28 @@
 # Reproducing the shipped SDPA heuristics
 
-Everything needed to regenerate, re-measure and independently check the L1/L2 models this
-branch installs for `hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx950AttentionDense` and
-`ASM_SDPA_ENGINE` (AITER). No measured performance numbers are recorded here — the
-procedure produces them on your own hardware, which is the only place they mean anything.
+Everything needed to regenerate, re-measure and independently check the L1/L2 models for
+`hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx950AttentionDense` and `ASM_SDPA_ENGINE`
+(AITER). No measured performance numbers are recorded here — the procedure produces them
+on your own hardware, which is the only place they mean anything.
+
+**Two branches, on purpose.** This procedure spans both, and the split is deliberate
+rather than an omission:
+
+| on `users/jscampb/uhd-heuristics-e2e` (this branch) | on `users/jascampb/uhd-integration-test-branch` |
+|---|---|
+| the productized path: `rocKE/gfx942_attention_dense`, the `ASM_SDPA_ENGINE` descriptors, `corpus_build`, and every script in this directory except the two named opposite | the experiment path: the `rocKE/gfx950_attention_dense` descriptor pack (`gfx950_attention_dense.{ued,kmd,umd,kdp,udd,uhd}.json` and its `heuristics/` tree) and the flyDSL POC — `flydsl_catalog.sbatch`, `flydsl_enable.sbatch`, the Flydsl* packs, `flydsl_poc_scratch/` |
+
+A step below that names a gfx950 rocKE descriptor or a `flydsl_*.sbatch` needs the
+integration branch checked out; everything else runs here. The rocKE *kernels* for gfx950
+are on both branches (`rocke/library/kernels/gfx950/`); it is the packaged descriptor set
+that is not, so on this branch that engine has kernels and no installed heuristic.
 
 ## What is installed, and where it came from
 
 | engine | arch | roles | binding |
 |---|---|---|---|
 | `hipkernel:Gfx942AttentionDense` | gfx942 | `sort_kernel_catalog`, `predict_engine_tflops` | UED role map, `rocKE/gfx942_attention_dense/heuristics/` |
-| `hipkernel:Gfx950AttentionDense` | gfx950 | `sort_kernel_catalog`, `predict_engine_tflops` | UED role map, `rocKE/gfx950_attention_dense/heuristics/` |
+| `hipkernel:Gfx950AttentionDense` | gfx950 | `sort_kernel_catalog`, `predict_engine_tflops` | UED role map, `rocKE/gfx950_attention_dense/heuristics/` — **integration branch only** |
 | `ASM_SDPA_ENGINE` | gfx942, gfx950 | `predict_engine_tflops` | UUID declared in `AsmSdpaEngine.hpp`; document staged from `src/engines/asm_sdpa_engine/descriptors/` |
 
 AITER owns no descriptor set, so its model is bound by the UUID the provider declares
@@ -44,7 +56,8 @@ graphs byte for byte, and `benchmark` ids are content-derived so results join ac
 cd projects/hipdnn/tools
 # gfx942: the whole declared space, 5000 graphs
 python3 -m corpus_build --out /tmp/corpus-5000 --count 5000 --seed 0
-# gfx950: drawn from that arch's own packed geometries, both head dims its engines serve
+# gfx950: drawn from that arch's own packed geometries, both head dims its engines serve.
+# --kdp-root names the integration branch's pack; from this branch the path does not exist.
 python3 -m corpus_build --out /tmp/corpus-950 --count 1000 --seed 0 \
     --kdp-root ../../../dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE/gfx950_attention_dense \
     --min-candidates 2 --head-dim 64 --head-dim 128
@@ -75,6 +88,10 @@ $SUBMIT --constraint=GFX950 --time=06:00:00 \
     --export=ALL,UHD_GRAPHS=/exchange/corpus-950,UHD_ENGINE=ASM_SDPA_ENGINE,UHD_ROLES=l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-aiter \
     generate.sbatch
 ```
+
+The first submission needs the integration branch: `hipkernel:Gfx950AttentionDense` has no
+descriptor pack here, so on this branch it registers nothing to collect against. The AITER
+submission runs on either.
 
 `UHD_ROLES` is `+`-separated: sbatch's own `--export` parser splits its value on commas.
 
@@ -121,13 +138,38 @@ that measured faster? That ratio is the number to judge L1 by — not its absolu
 
 **Every model in one bake-off must come from builds that report the same selector
 revision.** The loader refuses a model whose recorded `trained_against.selector_revision`
-is not the one the provider reports, because L1 decides which engine runs. That revision
-names the provider *release* and the engine's dispatch generation
-(`hip-kernel-provider/<version>/asm-sdpa-untuned-v1`), not the build hash — a hash would
-expire every model on every commit. `UHD_COMMIT=<sha>` pins `bakeoff.sbatch` to an older
-build when you do need to reproduce against one.
+is not the one the provider reports, because L1 decides which engine runs.
 
-## 4b. Including flyDSL
+For `ASM_SDPA_ENGINE` that revision is **derived**, not written by hand:
+`hip-kernel-provider/asm-sdpa-fwd/<16 hex>`, where the digest is computed at configure
+time over the vendored forward kernels, the CSVs codegen reads to describe them, and the
+forward dispatch sources. Read the current value off the descriptors or the build rather
+than copying one out of this document — it changes exactly when the forward surface
+changes, which is the whole point.
+
+It is derived because both hand-written alternatives fail, in opposite directions:
+
+- **too wide** — naming the build hash expires every model on every commit, and naming
+  the provider *release* is the same mistake one step smaller: `0.2.0 -> 0.2.1` for a fix
+  that cannot touch this engine expires both shipped models, and the only symptom is
+  UNAVAILABLE on every engine-selection query;
+- **too narrow** — a fixed version expires *nothing* when a vendored kernel is swapped
+  under it. That is the silent direction and the worse one: L1 is the score compared
+  across engines, so a stale estimate changes which engine runs rather than merely
+  misreporting a number.
+
+A backward-only kernel drop leaves the revision alone by construction: the digest does not
+read backward kernels, and a backward kernel cannot move a forward throughput number.
+`UHD_COMMIT=<sha>` pins `bakeoff.sbatch` to an older build when you do need to reproduce
+against one.
+
+## 4b. Including flyDSL — integration branch only
+
+`flydsl_catalog.sbatch` and `flydsl_enable.sbatch` are on
+`users/jascampb/uhd-integration-test-branch`, with the rest of the flyDSL POC; they are
+not on this branch and this section does not run here. It is kept because the procedure is
+the same one, and because the environment variables below are what a composed rocKE+flyDSL
+tree needs on either branch.
 
 flyDSL's kernels are not committed anywhere; `flydsl_catalog.sbatch` clones
 `https://github.com/ROCm/FlyDSL.git`, builds all 240 variants with the `flydsl==0.3.2` wheel,
@@ -174,17 +216,20 @@ builds the tree you meant.
 
 ## What the shipped artifacts were actually built from
 
-Exact provenance for everything committed on this branch, so a check can reproduce the same
-inputs rather than similar ones:
+Exact provenance for everything the two branches produced, so a check can reproduce the
+same inputs rather than similar ones. The `branch` column is the tree you must have
+checked out for that row to run: `e2e` is this branch, `integration` is
+`users/jascampb/uhd-integration-test-branch`, which carries the gfx950 rocKE pack and the
+flyDSL POC.
 
-| artifact | built by |
-|---|---|
-| comparison corpus (1000 graphs, gfx950) | `--count 1000 --seed 0 --kdp-root <rocKE/gfx950_attention_dense> --min-candidates 2 --head-dim 64 --head-dim 128` |
-| gfx942 corpus (5000 graphs) | `--count 5000 --seed 0` |
-| flyDSL 240-kernel catalog | `flydsl_catalog.sbatch` (waves 1/2/4 x stagger on/off x lazy on/off, setprio on) |
-| rocKE gfx950 L1+L2, flyDSL L1+L2 | `generate.sbatch`, `UHD_ROLES=l2+l1`, on the comparison corpus |
-| AITER gfx950 L1 | `--count 2500 --seed 11 --dtype bf16 --head-dim 128 --causal 0 --exclude-corpus <comparison manifest>` then `generate.sbatch UHD_ROLES=l1` |
-| the 94.2% number | `bakeoff.sbatch` over the comparison corpus, then `score_predictions.py` |
+| artifact | branch | built by |
+|---|---|---|
+| comparison corpus (1000 graphs, gfx950) | integration | `--count 1000 --seed 0 --kdp-root <rocKE/gfx950_attention_dense> --min-candidates 2 --head-dim 64 --head-dim 128` |
+| gfx942 corpus (5000 graphs) | e2e | `--count 5000 --seed 0` |
+| flyDSL 240-kernel catalog | integration | `flydsl_catalog.sbatch` (waves 1/2/4 x stagger on/off x lazy on/off, setprio on) |
+| rocKE gfx950 L1+L2, flyDSL L1+L2 | integration | `generate.sbatch`, `UHD_ROLES=l2+l1`, on the comparison corpus |
+| AITER gfx950 L1 | e2e | `--count 2500 --seed 11 --dtype bf16 --head-dim 128 --causal 0 --exclude-corpus <comparison manifest>` then `generate.sbatch UHD_ROLES=l1` |
+| the 94.2% number | integration | `bakeoff.sbatch` over the comparison corpus, then `score_predictions.py` |
 
 flyDSL additionally needs a FlyDSL checkout; `flydsl_catalog.sbatch` clones
 `https://github.com/ROCm/FlyDSL.git` itself, and the standalone builders take `FLYDSL_REPO`.
