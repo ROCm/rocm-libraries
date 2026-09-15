@@ -2817,6 +2817,24 @@ class IRBuilder:
 
         Lane ``4q + i`` reads ``data`` from lane ``4q + perm[i]``.
         ``perm`` is encoded in the low eight bits of the DPP control word.
+
+        **Wave size.** The mapping is wave-size-independent: the same
+        control word applies within every four-lane group, and four
+        divides both 32 and 64, so a lane never addresses outside its own
+        quad. Wave size changes only the *number* of quads (8 in wave32,
+        16 in wave64), never the permutation a quad performs -- unlike
+        :meth:`dpp_xor` or :meth:`ds_swizzle_xor`, whose partner lane can
+        leave the wave for a large enough mask.
+
+        That is a property of the quad, not a claim about every target:
+        the op still requires DPP-capable hardware. Base-DPP
+        ``quad_perm`` is available on CDNA, where the RDNA-only
+        ``row_xmask`` of :meth:`dpp_xor` is not.
+
+        The op carries no lane targeting -- the control word is broadcast
+        to every quad in the wave, with row and bank masks fixed at
+        ``15, 15`` (all enabled) by the lowerers. Selecting a subset of
+        quads is the caller's job.
         """
         perm = list(perm)
         if len(perm) != 4 or any(not (0 <= p <= 3) for p in perm):

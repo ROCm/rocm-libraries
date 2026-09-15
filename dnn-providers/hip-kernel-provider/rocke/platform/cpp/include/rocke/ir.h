@@ -1126,7 +1126,13 @@ rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
                                   rocke_value_t* src2,
                                   bool fi,
                                   bool bound_ctrl);
-/* quad_perm: each pN selects source lane 0..3 for destination lane N. */
+/* quad_perm: each pN selects source lane 0..3 for destination lane N.
+ * Wave-size-independent: the control word applies within every four-lane
+ * group and four divides both 32 and 64, so a lane never addresses outside
+ * its own quad; wave size changes only the number of quads. Requires
+ * DPP-capable hardware (base DPP, so CDNA as well as RDNA). No lane
+ * targeting -- the control is broadcast to every quad, row/bank masks
+ * fixed at 15, 15 by the lowerers. */
 rocke_value_t*
     rocke_b_quad_perm(rocke_ir_builder_t* b, rocke_value_t* data, int p0, int p1, int p2, int p3);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
