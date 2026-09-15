@@ -65,7 +65,7 @@ async function openViaFsApi(): Promise<OpenResult | null> {
 }
 
 function openViaInput(accept: string): Promise<OpenResult | null> {
-  const { promise, resolve } = Promise.withResolvers<OpenResult | null>();
+  const { promise, resolve, reject } = Promise.withResolvers<OpenResult | null>();
   const input = document.createElement("input");
   input.type = "file";
   input.accept = accept;
@@ -87,6 +87,11 @@ function openViaInput(accept: string): Promise<OpenResult | null> {
     }
     void file.text().then((contents) => {
       finish({ handle: { name: file.name, token: null }, contents });
+    }, (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      reject(error);
     });
   });
   // Fires when the picker is dismissed on browsers that support it.

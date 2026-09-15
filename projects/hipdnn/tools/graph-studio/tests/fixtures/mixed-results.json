@@ -1,0 +1,252 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-01T00:00:00+00:00",
+    "hostname": "fixture-host",
+    "total_graphs": 2,
+    "total_combinations": 5,
+    "pass_combinations": 2,
+    "fail_combinations": 1,
+    "skip_combinations": 1,
+    "error_combinations": 1,
+    "gpu_model": "fixture-gpu",
+    "gpu_arch": "gfx90a",
+    "rocm_version": "6.2.0",
+    "hipdnn_version": "0.1.0"
+  },
+  "graphs": [
+    {
+      "graph_name": "matmul",
+      "graph_path": "/fixtures/a.json",
+      "results": [
+        {
+          "provider": "hipblaslt",
+          "engine_id": -9123372036854000123,
+          "engine_name": "hipblaslt",
+          "engine_version": "1.4.2",
+          "started_at": "2026-01-01T00:00:01+00:00",
+          "status": "success",
+          "plugin_path": "/plugins/hipblaslt.so",
+          "producer_note": "preserve-me",
+          "cpu_build_time_ms": 0.5,
+          "gpu_kernel_stats": {
+            "mean_ms": 2,
+            "median_ms": 2,
+            "std_ms": 0,
+            "min_ms": 2,
+            "max_ms": 2,
+            "p95_ms": 2,
+            "p99_ms": 2,
+            "total_ms": 4
+          },
+          "host_stats": {
+            "mean_ms": 3,
+            "median_ms": 3,
+            "std_ms": 0,
+            "min_ms": 3,
+            "max_ms": 3,
+            "p95_ms": 3,
+            "p99_ms": 3,
+            "total_ms": 6
+          },
+          "elapsed_time_ms": 10,
+          "analytical_flops": 8000000000,
+          "derived_tflops_per_s": 4,
+          "extra_metrics": {
+            "trace": {
+              "format": "pftrace",
+              "path": "/moved/results.pftrace"
+            }
+          },
+          "oracle": {
+            "plan_name": "tuned",
+            "compiled_plan_index": 0,
+            "rank": 0,
+            "sweep_min_time_ms": 1,
+            "compiled_plans_benchmarked": 2,
+            "compiled_plans_total": 2,
+            "compiled_plans_failed": 0,
+            "tuning_available": true,
+            "knob_settings": [],
+            "exhaustive_requested": false,
+            "exhaustive_enabled": false,
+            "exhaustive_supported": false,
+            "cpu_build_time_ms": null,
+            "gpu_kernel_stats": {
+              "mean_ms": 1,
+              "median_ms": 1,
+              "std_ms": 0,
+              "min_ms": 1,
+              "max_ms": 1,
+              "p95_ms": 1,
+              "p99_ms": 1,
+              "total_ms": 2
+            },
+            "host_stats": null,
+            "warm_baseline_gpu_kernel_stats": {
+              "mean_ms": 2,
+              "median_ms": 2,
+              "std_ms": 0,
+              "min_ms": 2,
+              "max_ms": 2,
+              "p95_ms": 2,
+              "p99_ms": 2,
+              "total_ms": 4
+            },
+            "warm_baseline_host_stats": null,
+            "correctness": {
+              "passed": true,
+              "execution_success": true,
+              "tolerance_match": true,
+              "rtol": 0.01,
+              "atol": 0.001
+            }
+          },
+          "oracle_delta": {
+            "basis": "gpu_kernel",
+            "baseline_mean_ms": 2,
+            "oracle_mean_ms": 1,
+            "delta_ms": 1,
+            "speedup": 2
+          },
+          "correctness": {
+            "passed": true,
+            "execution_success": true,
+            "tolerance_match": true,
+            "rtol": 0.01,
+            "atol": 0.001
+          }
+        },
+        {
+          "provider": "pytorch",
+          "engine_id": 0,
+          "engine_name": "pytorch",
+          "engine_version": "2.3.0",
+          "started_at": "2026-01-01T00:00:02+00:00",
+          "status": "success",
+          "role": "reference",
+          "cpu_build_time_ms": null,
+          "gpu_kernel_stats": {
+            "mean_ms": 4,
+            "median_ms": 4,
+            "std_ms": 0,
+            "min_ms": 4,
+            "max_ms": 4,
+            "p95_ms": 4,
+            "p99_ms": 4,
+            "total_ms": 8
+          },
+          "host_stats": null,
+          "elapsed_time_ms": 8,
+          "correctness": {
+            "passed": false,
+            "execution_success": true,
+            "tolerance_match": null,
+            "rtol": 0.01,
+            "atol": 0.001,
+            "error_message": "Timing-only reference run; no tolerance comparison was performed against hipDNN outputs."
+          }
+        },
+        {
+          "provider": "hip-kernel",
+          "engine_id": -9123372036854000122,
+          "engine_name": "hip-kernel",
+          "engine_version": "0.9.1",
+          "started_at": "2026-01-01T00:00:03+00:00",
+          "status": "success",
+          "cpu_build_time_ms": 0.3,
+          "gpu_kernel_stats": {
+            "mean_ms": 1,
+            "median_ms": 1,
+            "std_ms": 0,
+            "min_ms": 1,
+            "max_ms": 1,
+            "p95_ms": 1,
+            "p99_ms": 1,
+            "total_ms": 2
+          },
+          "host_stats": {
+            "mean_ms": 1.5,
+            "median_ms": 1.5,
+            "std_ms": 0,
+            "min_ms": 1.5,
+            "max_ms": 1.5,
+            "p95_ms": 1.5,
+            "p99_ms": 1.5,
+            "total_ms": 3
+          },
+          "elapsed_time_ms": 5,
+          "analytical_flops": 2000000000,
+          "analytical_flops_partial": true,
+          "derived_tflops_per_s": 2,
+          "extra_metrics": {
+            "trace": {
+              "format": "pftrace",
+              "skipped": "rocprofv3 binary not found"
+            }
+          },
+          "correctness": {
+            "passed": false,
+            "execution_success": true,
+            "tolerance_match": false,
+            "rtol": 0.01,
+            "atol": 0.001,
+            "max_abs_diff": 0.05,
+            "max_rel_diff": 0.02
+          }
+        },
+        {
+          "provider": "hipblaslt",
+          "engine_id": -9123372036854000123,
+          "engine_name": "hipblaslt",
+          "engine_version": "1.4.2",
+          "started_at": "2026-01-01T00:00:04+00:00",
+          "status": "success",
+          "plugin_path": "/plugins/hipblaslt-alt.so",
+          "cpu_build_time_ms": 0.6,
+          "gpu_kernel_stats": {
+            "mean_ms": 5,
+            "median_ms": 5,
+            "std_ms": 0,
+            "min_ms": 5,
+            "max_ms": 5,
+            "p95_ms": 5,
+            "p99_ms": 5,
+            "total_ms": 10
+          },
+          "host_stats": null,
+          "elapsed_time_ms": 12,
+          "correctness": {
+            "passed": false,
+            "execution_success": true,
+            "tolerance_match": null,
+            "rtol": 0.01,
+            "atol": 0.001
+          }
+        },
+        {
+          "provider": "miopen",
+          "engine_id": 1,
+          "engine_name": "miopen",
+          "engine_version": "5.0",
+          "started_at": "2026-01-01T00:00:05+00:00",
+          "status": "skipped",
+          "skip_reason": "not supported"
+        },
+        {
+          "provider": "failed-engine",
+          "engine_id": 2,
+          "engine_name": "failed-engine",
+          "engine_version": "unavailable",
+          "started_at": "2026-01-01T00:00:06+00:00",
+          "status": "error",
+          "error_message": "build failed"
+        }
+      ]
+    },
+    {
+      "graph_name": "matmul",
+      "graph_path": "/fixtures/b.json",
+      "results": []
+    }
+  ]
+}
