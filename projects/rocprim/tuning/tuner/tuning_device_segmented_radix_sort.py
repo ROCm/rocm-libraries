@@ -80,6 +80,8 @@ class Tuner(BaseTuner):
 
         key_size = TYPE_CONFIGS[key_type].size
         TUNING_SHARED_MAX = 65536
+        MIN_SIZE = 300000
+        MAX_SIZE = 33554432
 
         def validate(params):
             bs = params['block_size_x']
@@ -89,6 +91,14 @@ class Tuner(BaseTuner):
             warp_small_ipt = params['warp_small_ipt']
             warp_medium_lws = params['warp_medium_lws']
             warp_medium_ipt = params['warp_medium_ipt']
+
+            sc = params['segment_count']
+            sl = params['segment_length']
+
+            num_elem = sc * sl
+
+            if not MIN_SIZE <= num_elem <= MAX_SIZE:
+                return False
 
             if warp_small_lws * warp_small_ipt > warp_medium_lws * warp_medium_ipt:
                 return False
