@@ -101,6 +101,8 @@ static bool isExpectedTypeMatch(FieldType fieldType, RegType expectedType, RegTy
 // can use less operands.
 static bool canUseLessOperand(const StinkyInstruction* inst) {
     if (inst->getUnifiedOpcode() == GFX::tensor_load_to_lds) return true;
+    if (inst->getUnifiedOpcode() == GFX::s_delay_alu) return true;
+    if (inst->getUnifiedOpcode() == GFX::s_wait_alu) return true;
     return false;
 }
 

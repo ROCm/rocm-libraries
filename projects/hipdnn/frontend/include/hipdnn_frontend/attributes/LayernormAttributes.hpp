@@ -220,6 +220,26 @@ public:
     }
     /// @endcond
 
+    /**
+     * @brief Custom equality hook for layer-norm-specific attributes
+     *
+     * Compares the forward phase and normalized dimension count — both of
+     * which define the semantics of the normalization rather than tensor
+     * layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const LayernormAttributes& other) const
+    {
+        return _forwardPhase == other._forwardPhase
+               && _normalizedDimCount == other._normalizedDimCount;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const LayernormAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
+
 private:
     int64_t _normalizedDimCount = 0;
     NormFwdPhase _forwardPhase = NormFwdPhase::NOT_SET;

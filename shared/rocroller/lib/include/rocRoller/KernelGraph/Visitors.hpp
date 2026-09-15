@@ -293,6 +293,7 @@ namespace rocRoller
             MAKE_EDGE_VISITOR(CoordinateGraph::Offset);
             MAKE_EDGE_VISITOR(CoordinateGraph::Stride);
             MAKE_EDGE_VISITOR(CoordinateGraph::View);
+            MAKE_EDGE_VISITOR(CoordinateGraph::TDM);
 
             MAKE_EDGE_VISITOR(CoordinateGraph::ConstructMacroTile);
             MAKE_EDGE_VISITOR(CoordinateGraph::DestructMacroTile);
@@ -319,6 +320,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(ControlGraph::LoadLinear);
             MAKE_OPERATION_VISITOR(ControlGraph::LoadSGPR);
             MAKE_OPERATION_VISITOR(ControlGraph::LoadTileDirect2LDS);
+            MAKE_OPERATION_VISITOR(ControlGraph::LoadTiledTDMToLDS);
             MAKE_OPERATION_VISITOR(ControlGraph::LoadTiled);
             MAKE_OPERATION_VISITOR(ControlGraph::LoadVGPR);
             MAKE_OPERATION_VISITOR(ControlGraph::Multiply);

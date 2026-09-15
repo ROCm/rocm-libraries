@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <ostream>

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <string>
@@ -24,5 +26,6 @@ PluginLibHandle openLibrary(const std::filesystem::path& libraryPath);
 void closeLibrary(PluginLibHandle handle);
 void* getSymbol(PluginLibHandle handle, const char* symbolName);
 std::string getSystemInfo();
+std::array<uint8_t, 16> generateUuidV4();
 
 }

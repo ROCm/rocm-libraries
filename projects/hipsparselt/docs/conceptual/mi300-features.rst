@@ -57,7 +57,7 @@ the hipSPARSELt library currently enables hardware acceleration for a subset of 
    All floating-point operations accumulate in ``float32``, while integer operations accumulate in ``int32``.
 
    For comprehensive information on the supported data types and their characteristics, see the
-   :ref:`Data type support <data-type-support>` page.
+   :ref:`Data type support <hipsparselt-data-type-support>` page.
 
 Matrix format requirements
 ==========================

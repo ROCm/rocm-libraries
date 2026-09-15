@@ -40,10 +40,20 @@ public:
     ///                         -1 is no mask to the right
     /// @param topLeftAlignment If true, diagonal is measured from top left
     ///                         If false, diagonal is measured from bottom right
-    /// @param lse              Optional log-sum-exp output [B, H, Sq] (always float type).
+    /// @param lse              Optional log-sum-exp output [B, H, Sq, 1] (always float type).
     ///                         Stores maxVal + log(sumExp) for each query position.
     ///                         Used for memory-efficient backward pass recomputation.
     ///                         Pass nullptr (default) to disable LSE output.
+    /// @param descaleQ         Optional FP8 dequantization scale for Q. Either a per-tensor
+    ///                         scalar ([1]) or per-(batch, KV-head) tensor [B, H_kv]. When set,
+    ///                         Q is multiplied by this factor before the Q·K^T product.
+    /// @param descaleK         Optional FP8 dequantization scale for K (same shapes as descaleQ),
+    ///                         applied to the Q·K^T product.
+    /// @param descaleV         Optional FP8 dequantization scale for V (same shapes as descaleQ),
+    ///                         applied to the P·V product.
+    ///                         Descales mirror AITER's fp8 forward contract: a null pointer means
+    ///                         no dequantization (neutral factor 1). Softmax/output (de)quant
+    ///                         (descale_s / scale_o) are not modeled here.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -59,7 +69,10 @@ public:
                         int64_t leftBound = -1,
                         int64_t rightBound = -1,
                         bool topLeftAlignment = true,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
+                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
     {
         if(q.dims().size() != 4)
         {
@@ -123,19 +136,27 @@ public:
         // Validate LSE tensor if provided
         if(lse != nullptr)
         {
-            if(lse->dims().size() != 3)
+            if(lse->dims().size() != 4)
             {
-                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-3 [B, H, Sq]");
+                throw std::invalid_argument("CpuFpReferenceSdpa: lse must be rank-4 [B, H, Sq, 1]");
             }
-            if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ)
+            if(lse->dims()[0] != batch || lse->dims()[1] != numHeads || lse->dims()[2] != seqQ
+               || lse->dims()[3] != 1)
             {
                 throw std::invalid_argument(
                     "CpuFpReferenceSdpa: lse shape must be [" + std::to_string(batch) + ", "
-                    + std::to_string(numHeads) + ", " + std::to_string(seqQ) + "] but got ["
+                    + std::to_string(numHeads) + ", " + std::to_string(seqQ) + ", 1] but got ["
                     + std::to_string(lse->dims()[0]) + ", " + std::to_string(lse->dims()[1]) + ", "
-                    + std::to_string(lse->dims()[2]) + "]");
+                    + std::to_string(lse->dims()[2]) + ", " + std::to_string(lse->dims()[3]) + "]");
             }
         }
+
+        // Validate FP8 descale tensor shapes on the calling thread so a bad shape
+        // surfaces as a catchable exception rather than terminating a worker thread
+        // inside the parallel region below.
+        validateDescaleShape(descaleQ, "descaleQ", batch, numHeadsK);
+        validateDescaleShape(descaleK, "descaleK", batch, numHeadsK);
+        validateDescaleShape(descaleV, "descaleV", batch, numHeadsV);
 
         const auto headsPerHeadK = numHeads / numHeadsK;
         const auto headsPerHeadV = numHeads / numHeadsV;
@@ -154,6 +175,15 @@ public:
             const auto kvHeadK = h / headsPerHeadK;
             const auto kvHeadV = h / headsPerHeadV;
 
+            // FP8 dequantization factors (1 when no descale is provided). Q and K
+            // descales fold into the pre-softmax scores; V descale scales the output.
+            // Q/K/V descales are indexed by KV head, mirroring AITER's [B, H_kv] shape.
+            const auto descaleQFactor = getDescaleFactor(descaleQ, b, kvHeadK);
+            const auto descaleKFactor = getDescaleFactor(descaleK, b, kvHeadK);
+            const auto descaleQK = static_cast<ComputeDataType>(descaleQFactor * descaleKFactor);
+            const auto descaleVFactor
+                = static_cast<ComputeDataType>(getDescaleFactor(descaleV, b, kvHeadV));
+
             // Step 1: Compute scaled dot-product scores S[skv]
             std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
             for(int64_t skv = 0; skv < seqKv; ++skv)
@@ -166,7 +196,7 @@ public:
                            * static_cast<ComputeDataType>(
                                k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                 }
-                scores[static_cast<size_t>(skv)] = dot * scale;
+                scores[static_cast<size_t>(skv)] = dot * scale * descaleQK;
             }
 
             // Step 2: Add additive attention mask (if provided)
@@ -180,29 +210,16 @@ public:
                 }
             }
 
-            // Step 3: Apply sliding-window mask.
-            // For topLeftAlignment, the diagonal is at skv == sq.
-            // For bottomRightAlignment, the diagonal is at skv == sq + (seqKv - seqQ),
-            // which is negative (i.e. nothing visible) for early query positions when seqKv < seqQ.
-            if(rightBound >= 0)
+            // Step 3: Apply sliding-window / causal mask.
+            if(leftBound >= 0 || rightBound >= 0)
             {
-                // Offset to account for bottomRightAlignment
-                const int64_t offset = (topLeftAlignment) ? 0 : seqKv - seqQ;
-                const int64_t startKv = std::max<int64_t>(sq + 1 + offset + rightBound, 0);
-                for(int64_t skv = startKv; skv < seqKv; ++skv)
+                for(int64_t skv = 0; skv < seqKv; ++skv)
                 {
-                    scores[static_cast<size_t>(skv)]
-                        = -std::numeric_limits<ComputeDataType>::infinity();
-                }
-            }
-            if(leftBound >= 0)
-            {
-                // Offset to account for bottomRightAlignment
-                const int64_t offset = (topLeftAlignment) ? 0 : seqKv - seqQ;
-                for(int64_t skv = 0; skv < sq + offset - leftBound; ++skv)
-                {
-                    scores[static_cast<size_t>(skv)]
-                        = -std::numeric_limits<ComputeDataType>::infinity();
+                    if(isMasked(sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
+                    {
+                        scores[static_cast<size_t>(skv)]
+                            = -std::numeric_limits<ComputeDataType>::infinity();
+                    }
                 }
             }
 
@@ -234,7 +251,7 @@ public:
             if(lse != nullptr)
             {
                 const auto lseVal = static_cast<float>(maxVal + std::log(sumExp));
-                lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq});
+                lse->setHostValue(lseVal, std::vector<int64_t>{b, h, sq, 0});
             }
 
             // Step 5: Weighted sum over V to produce O
@@ -247,8 +264,9 @@ public:
                            * static_cast<ComputeDataType>(
                                v.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv}));
                 }
-                o.setHostValue(hipdnn_test_sdk::detail::safeConvert<ODataType>(acc),
-                               std::vector<int64_t>{b, h, sq, dv});
+                o.setHostValue(
+                    hipdnn_test_sdk::detail::safeConvert<ODataType>(acc * descaleVFactor),
+                    std::vector<int64_t>{b, h, sq, dv});
             }
         };
 
@@ -278,10 +296,14 @@ public:
     ///                       to [B, H, Sq, Skv] (rank 1–4), with broadcasting on size-1 dims
     /// @param causalMask     When true, applies a lower-triangular causal mask so each
     ///                       query position sq can only attend to kv positions skv <= sq
-    /// @param lse            Optional log-sum-exp output [B, H, Sq] (always float type).
+    /// @param lse            Optional log-sum-exp output [B, H, Sq, 1] (always float type).
     ///                       Stores maxVal + log(sumExp) for each query position.
     ///                       Used for memory-efficient backward pass recomputation.
     ///                       Pass nullptr (default) to disable LSE output.
+    /// @param descaleQ       Optional FP8 dequantization scale for Q (see the primary
+    ///                       overload); forwarded through unchanged.
+    /// @param descaleK       Optional FP8 dequantization scale for K.
+    /// @param descaleV       Optional FP8 dequantization scale for V.
     template <class QDataType,
               class KDataType,
               class VDataType,
@@ -294,13 +316,73 @@ public:
                         std::optional<float> attnScaleValue,
                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask,
                         bool causalMask,
-                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr)
+                        hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleQ = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleK = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<float>* descaleV = nullptr)
     {
         const int64_t leftBound = -1;
         const int64_t rightBound = (causalMask) ? 0 : -1;
         const bool topLeftAlignment = true;
 
-        forward(q, k, v, o, attnScaleValue, attnMask, leftBound, rightBound, topLeftAlignment, lse);
+        forward(q,
+                k,
+                v,
+                o,
+                attnScaleValue,
+                attnMask,
+                leftBound,
+                rightBound,
+                topLeftAlignment,
+                lse,
+                descaleQ,
+                descaleK,
+                descaleV);
+    }
+
+    /// SDPA backward convenience overload: accepts a simple causalMask flag.
+    /// Maps causalMask=true to leftBound=-1, rightBound=0, topLeftAlignment=true
+    /// (TOP_LEFT_CAUSAL), matching the forward convenience overload.
+    template <class QDataType,
+              class KDataType,
+              class VDataType,
+              class ODataType,
+              class DODataType,
+              class DQDataType,
+              class DKDataType,
+              class DVDataType,
+              class ComputeDataType = float>
+    static void backward(const hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                         const hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                         const hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                         const hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                         const hipdnn_data_sdk::utilities::TensorBase<DODataType>& dO,
+                         hipdnn_data_sdk::utilities::TensorBase<DQDataType>& dQ,
+                         hipdnn_data_sdk::utilities::TensorBase<DKDataType>& dK,
+                         hipdnn_data_sdk::utilities::TensorBase<DVDataType>& dV,
+                         std::optional<float> attnScaleValue,
+                         const hipdnn_data_sdk::utilities::TensorBase<float>* lse,
+                         const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask,
+                         bool causalMask)
+    {
+        const int64_t leftBound = -1;
+        const int64_t rightBound = (causalMask) ? 0 : -1;
+        const bool topLeftAlignment = true;
+
+        backward(q,
+                 k,
+                 v,
+                 o,
+                 dO,
+                 dQ,
+                 dK,
+                 dV,
+                 attnScaleValue,
+                 lse,
+                 attnMask,
+                 leftBound,
+                 rightBound,
+                 topLeftAlignment);
     }
 
     /// SDPA backward: computes dQ, dK, dV from upstream gradient dO
@@ -310,20 +392,22 @@ public:
     /// Optionally uses LSE (log-sum-exp) from forward pass for efficient softmax
     /// recomputation.
     ///
-    /// @param q              Query tensor [B, H_q, Sq, D]
-    /// @param k              Key tensor   [B, H_k, Skv, D]
-    /// @param v              Value tensor [B, H_v, Skv, Dv]
-    /// @param o              Output from forward pass [B, H_q, Sq, Dv]
-    /// @param dO             Upstream gradient [B, H_q, Sq, Dv]
-    /// @param dQ             Output: gradient w.r.t. Q [B, H_q, Sq, D]
-    /// @param dK             Output: gradient w.r.t. K [B, H_k, Skv, D]
-    /// @param dV             Output: gradient w.r.t. V [B, H_v, Skv, Dv]
-    /// @param attnScaleValue Optional scale factor; defaults to 1/sqrt(D)
-    /// @param lse            Optional log-sum-exp from forward [B, H_q, Sq] (FP32).
-    ///                       When provided, enables efficient softmax recomputation.
-    ///                       When nullptr, recomputes softmax from scratch.
-    /// @param attnMask       Optional additive attention mask (same as forward)
-    /// @param causalMask     When true, applies causal masking (same as forward)
+    /// @param q                Query tensor [B, H_q, Sq, D]
+    /// @param k                Key tensor   [B, H_k, Skv, D]
+    /// @param v                Value tensor [B, H_v, Skv, Dv]
+    /// @param o                Output from forward pass [B, H_q, Sq, Dv]
+    /// @param dO               Upstream gradient [B, H_q, Sq, Dv]
+    /// @param dQ               Output: gradient w.r.t. Q [B, H_q, Sq, D]
+    /// @param dK               Output: gradient w.r.t. K [B, H_k, Skv, D]
+    /// @param dV               Output: gradient w.r.t. V [B, H_v, Skv, Dv]
+    /// @param attnScaleValue   Optional scale factor; defaults to 1/sqrt(D)
+    /// @param lse              Optional log-sum-exp from forward [B, H_q, Sq, 1] (FP32).
+    ///                         When provided, enables efficient softmax recomputation.
+    ///                         When nullptr, recomputes softmax from scratch.
+    /// @param attnMask         Optional additive attention mask (same as forward)
+    /// @param leftBound        Number of KV positions to the left that are unmasked (-1 = no mask)
+    /// @param rightBound       Number of KV positions to the right that are unmasked (-1 = no mask)
+    /// @param topLeftAlignment If true, diagonal at skv==sq; if false, at skv==sq+(seqKv-seqQ)
     ///
     /// Note: For GQA (H_q > H_kv), multiple query heads accumulate gradients to
     /// the same KV heads. This implementation is sequential to ensure correctness.
@@ -348,7 +432,9 @@ public:
                          const hipdnn_data_sdk::utilities::TensorBase<float>* lse = nullptr,
                          const hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask
                          = nullptr,
-                         bool causalMask = false)
+                         int64_t leftBound = -1,
+                         int64_t rightBound = -1,
+                         bool topLeftAlignment = true)
     {
         // Validate input tensor ranks
         if(q.dims().size() != 4)
@@ -464,15 +550,16 @@ public:
         // Validate LSE tensor if provided
         if(lse != nullptr)
         {
-            if(lse->dims().size() != 3)
+            if(lse->dims().size() != 4)
             {
                 throw std::invalid_argument(
-                    "CpuFpReferenceSdpa::backward: lse must be rank-3 [B, H_q, Sq]");
+                    "CpuFpReferenceSdpa::backward: lse must be rank-4 [B, H_q, Sq, 1]");
             }
-            if(lse->dims()[0] != batch || lse->dims()[1] != numHeadsQ || lse->dims()[2] != seqQ)
+            if(lse->dims()[0] != batch || lse->dims()[1] != numHeadsQ || lse->dims()[2] != seqQ
+               || lse->dims()[3] != 1)
             {
                 throw std::invalid_argument(
-                    "CpuFpReferenceSdpa::backward: lse shape must be [B, H_q, Sq]");
+                    "CpuFpReferenceSdpa::backward: lse shape must be [B, H_q, Sq, 1]");
             }
         }
 
@@ -483,10 +570,32 @@ public:
                                : (static_cast<ComputeDataType>(1.0)
                                   / std::sqrt(static_cast<ComputeDataType>(headDim)));
 
-        // Initialize output gradient tensors to zero
-        dQ.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(0.0));
-        dK.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(0.0));
-        dV.fillWithValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(0.0));
+        // Accumulate gradients in FP32 to match GPU kernel behavior.
+        // The GPU ASM kernel uses FP32 accumulators (A32 path) and only converts
+        // to the output type at the very end. Accumulating directly in the output
+        // type (e.g. BF16) truncates the running sum at every iteration, producing
+        // significantly worse precision than the GPU — especially for BF16 where
+        // the 7-bit mantissa causes large cumulative rounding error over S iterations.
+        const auto totalDqElements = static_cast<size_t>(batch * numHeadsQ * seqQ * headDim);
+        const auto totalDkElements = static_cast<size_t>(batch * numHeadsK * seqKv * headDim);
+        const auto totalDvElements = static_cast<size_t>(batch * numHeadsV * seqKv * headDimV);
+
+        std::vector<ComputeDataType> dqAccum(totalDqElements, ComputeDataType(0));
+        std::vector<ComputeDataType> dkAccum(totalDkElements, ComputeDataType(0));
+        std::vector<ComputeDataType> dvAccum(totalDvElements, ComputeDataType(0));
+
+        // Helper lambdas for contiguous indexing into accumulation buffers.
+        // Layout: [B, H, S, D] with contiguous strides.
+        auto dqIdx = [&](int64_t bIdx, int64_t hIdx, int64_t sIdx, int64_t dIdx) -> size_t {
+            return static_cast<size_t>(((bIdx * numHeadsQ + hIdx) * seqQ + sIdx) * headDim + dIdx);
+        };
+        auto dkIdx = [&](int64_t bIdx, int64_t hIdx, int64_t sIdx, int64_t dIdx) -> size_t {
+            return static_cast<size_t>(((bIdx * numHeadsK + hIdx) * seqKv + sIdx) * headDim + dIdx);
+        };
+        auto dvIdx = [&](int64_t bIdx, int64_t hIdx, int64_t sIdx, int64_t dIdx) -> size_t {
+            return static_cast<size_t>(((bIdx * numHeadsV + hIdx) * seqKv + sIdx) * headDimV
+                                       + dIdx);
+        };
 
         // Sequential loop over [B, H_q, Sq]: multiple sq positions accumulate
         // into the same dK/dV entries, and in GQA multiple Q heads also share
@@ -522,12 +631,13 @@ public:
                     if(lse != nullptr)
                     {
                         // Efficient recomputation using LSE from forward pass
-                        const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq});
+                        const float lseVal = lse->getHostValue(std::vector<int64_t>{b, hQ, sq, 0});
 
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
-                            // Apply causal mask
-                            if(causalMask && skv > sq)
+                            // Apply sliding-window / causal mask
+                            if(isMasked(
+                                   sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
                             {
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
@@ -571,8 +681,9 @@ public:
 
                         for(int64_t skv = 0; skv < seqKv; ++skv)
                         {
-                            // Apply causal mask
-                            if(causalMask && skv > sq)
+                            // Apply sliding-window / causal mask
+                            if(isMasked(
+                                   sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
                             {
                                 scores[static_cast<size_t>(skv)]
                                     = -std::numeric_limits<ComputeDataType>::infinity();
@@ -644,7 +755,7 @@ public:
                     // and accumulate gradients
                     for(int64_t skv = 0; skv < seqKv; ++skv)
                     {
-                        if(causalMask && skv > sq)
+                        if(isMasked(sq, skv, seqQ, seqKv, leftBound, rightBound, topLeftAlignment))
                         {
                             continue;
                         }
@@ -661,12 +772,7 @@ public:
                                 k.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d}));
                             const auto dqContrib = dsScaled * kVal;
 
-                            const auto currentDq
-                                = dQ.getHostValue(std::vector<int64_t>{b, hQ, sq, d});
-                            dQ.setHostValue(
-                                hipdnn_test_sdk::detail::safeConvert<DQDataType>(
-                                    static_cast<ComputeDataType>(currentDq) + dqContrib),
-                                std::vector<int64_t>{b, hQ, sq, d});
+                            dqAccum[dqIdx(b, hQ, sq, d)] += dqContrib;
                         }
 
                         // dK[b, kvHeadK, skv, d] += dS[skv] * Q[b, hQ, sq, d] * scale
@@ -677,12 +783,7 @@ public:
                                 q.getHostValue(std::vector<int64_t>{b, hQ, sq, d}));
                             const auto dkContrib = dsScaled * qVal;
 
-                            const auto currentDk
-                                = dK.getHostValue(std::vector<int64_t>{b, kvHeadK, skv, d});
-                            dK.setHostValue(
-                                hipdnn_test_sdk::detail::safeConvert<DKDataType>(
-                                    static_cast<ComputeDataType>(currentDk) + dkContrib),
-                                std::vector<int64_t>{b, kvHeadK, skv, d});
+                            dkAccum[dkIdx(b, kvHeadK, skv, d)] += dkContrib;
                         }
 
                         // dV[b, kvHeadV, skv, dv] += P[skv] * dO[b, hQ, sq, dv]
@@ -692,13 +793,56 @@ public:
                                 dO.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
                             const auto dvContrib = probs[static_cast<size_t>(skv)] * doVal;
 
-                            const auto currentDv
-                                = dV.getHostValue(std::vector<int64_t>{b, kvHeadV, skv, dv});
-                            dV.setHostValue(
-                                hipdnn_test_sdk::detail::safeConvert<DVDataType>(
-                                    static_cast<ComputeDataType>(currentDv) + dvContrib),
-                                std::vector<int64_t>{b, kvHeadV, skv, dv});
+                            dvAccum[dvIdx(b, kvHeadV, skv, dv)] += dvContrib;
                         }
+                    }
+                }
+            }
+        }
+
+        // Convert FP32 accumulators to output type — single conversion at the end,
+        // matching the GPU kernel's dq_convert behavior.
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t h = 0; h < numHeadsQ; ++h)
+            {
+                for(int64_t s = 0; s < seqQ; ++s)
+                {
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        dQ.setHostValue(hipdnn_test_sdk::detail::safeConvert<DQDataType>(
+                                            dqAccum[dqIdx(b, h, s, d)]),
+                                        std::vector<int64_t>{b, h, s, d});
+                    }
+                }
+            }
+        }
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t h = 0; h < numHeadsK; ++h)
+            {
+                for(int64_t s = 0; s < seqKv; ++s)
+                {
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        dK.setHostValue(hipdnn_test_sdk::detail::safeConvert<DKDataType>(
+                                            dkAccum[dkIdx(b, h, s, d)]),
+                                        std::vector<int64_t>{b, h, s, d});
+                    }
+                }
+            }
+        }
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t h = 0; h < numHeadsV; ++h)
+            {
+                for(int64_t s = 0; s < seqKv; ++s)
+                {
+                    for(int64_t d = 0; d < headDimV; ++d)
+                    {
+                        dV.setHostValue(hipdnn_test_sdk::detail::safeConvert<DVDataType>(
+                                            dvAccum[dvIdx(b, h, s, d)]),
+                                        std::vector<int64_t>{b, h, s, d});
                     }
                 }
             }
@@ -710,6 +854,95 @@ public:
     }
 
 private:
+    /// Returns true if position (sq, skv) should be masked given the window bounds.
+    /// leftBound = -1 means no left mask; rightBound = -1 means no right mask.
+    /// topLeftAlignment: if true, diagonal at skv==sq; if false, diagonal at
+    /// skv==sq+(seqKv-seqQ).
+    static bool isMasked(int64_t sq,
+                         int64_t skv,
+                         int64_t seqQ,
+                         int64_t seqKv,
+                         int64_t leftBound,
+                         int64_t rightBound,
+                         bool topLeftAlignment)
+    {
+        const int64_t offset = topLeftAlignment ? 0 : seqKv - seqQ;
+        if(rightBound >= 0 && skv >= sq + 1 + offset + rightBound)
+        {
+            return true;
+        }
+        if(leftBound >= 0 && skv < sq + offset - leftBound)
+        {
+            return true;
+        }
+        return false;
+    }
+
+    /// Returns true if a descale tensor is a per-tensor scalar (its shape collapses
+    /// to a single element, e.g. [1] or [1, 1]).
+    static bool isScalarDescale(const hipdnn_data_sdk::utilities::TensorBase<float>& descale)
+    {
+        int64_t numElements = 1;
+        for(const auto dim : descale.dims())
+        {
+            numElements *= dim;
+        }
+        return numElements == 1;
+    }
+
+    /// Validate an FP8 descale tensor's shape on the calling thread. A descale tensor is
+    /// either a per-tensor scalar ([1] or [1, 1, 1, 1]) or a per-(batch, KV-head) tensor.
+    /// AITER's fp8 forward contract uses a 2-D [B, H_kv] descale, but hipDNN follows an
+    /// equal-rank convention for per-channel/broadcast scale operands (e.g. batchnorm's
+    /// [1, C, 1, 1]), so the per-head descale is shaped [B, H_kv, 1, 1]. A null pointer is
+    /// a no-op. Throwing here (rather than inside the parallel region) keeps the error
+    /// catchable by the caller, and rejecting a mismatched shape prevents getDescaleFactor()
+    /// from silently reading the wrong (or out-of-bounds) element.
+    static void validateDescaleShape(const hipdnn_data_sdk::utilities::TensorBase<float>* descale,
+                                     const char* name,
+                                     int64_t batch,
+                                     int64_t numHeadsKv)
+    {
+        if(descale == nullptr)
+        {
+            return;
+        }
+        if(isScalarDescale(*descale))
+        {
+            return;
+        }
+        const auto& dims = descale->dims();
+        if(dims.size() != 4 || dims[0] != batch || dims[1] != numHeadsKv || dims[2] != 1
+           || dims[3] != 1)
+        {
+            throw std::invalid_argument(
+                std::string("CpuFpReferenceSdpa: ") + name
+                + " descale tensor must be a per-tensor scalar ([1]) or rank-4 [B, H_kv, 1, 1] = ["
+                + std::to_string(batch) + ", " + std::to_string(numHeadsKv) + ", 1, 1]");
+        }
+    }
+
+    /// Look up an FP8 descale factor for a given batch and KV head. Assumes the
+    /// tensor shape was already validated by validateDescaleShape(). A null pointer
+    /// yields a neutral factor of 1 (no dequantization), so the BF16/FP16 paths are
+    /// unaffected.
+    static float getDescaleFactor(const hipdnn_data_sdk::utilities::TensorBase<float>* descale,
+                                  int64_t batch,
+                                  int64_t kvHead)
+    {
+        if(descale == nullptr)
+        {
+            return 1.0f;
+        }
+        // Per-tensor scalar: shape collapses to a single element (e.g. [1] or [1,1]).
+        if(isScalarDescale(*descale))
+        {
+            return descale->getHostValue(std::vector<int64_t>(descale->dims().size(), 0));
+        }
+        // Per-(batch, KV-head): [B, H_kv, 1, 1].
+        return descale->getHostValue(std::vector<int64_t>{batch, kvHead, 0, 0});
+    }
+
     /// Compute broadcastable mask indices by right-aligning mask dims to [b, h, sq, skv].
     /// Dimensions of size 1 are broadcast (index clamped to 0).
     static std::vector<int64_t> computeMaskIndex(

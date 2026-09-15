@@ -191,10 +191,10 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel   = handle_.Run(kernels.front());
-            const auto& invoke_ctx  = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
-            const auto& bot_ocl_buf = invoke_ctx.in;
-            const auto& top_ocl_buf = invoke_ctx.out;
+            decltype(auto) kernel  = handle_.Run(kernels.front());
+            const auto& invoke_ctx = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
+            const auto& bot_buf    = invoke_ctx.in;
+            const auto& top_buf    = invoke_ctx.out;
             const auto& bn_invoke =
                 dynamic_cast<miopen::fusion::BatchNormBwdTrainingOpInvokeParam&>(
                     *invoke_ctx.op_args.params[0]);
@@ -206,8 +206,8 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             std::vector<OpKernelArg> kern_args;
             kern_args.push_back(bn_invoke.x);
             kern_args.push_back(activ_invoker.y);
-            kern_args.push_back(bot_ocl_buf);
-            kern_args.push_back(top_ocl_buf);
+            kern_args.push_back(bot_buf);
+            kern_args.push_back(top_buf);
             if(input_type == miopenFloat)
             {
                 kern_args.push_back(static_cast<float>(activ_beta * activ_gamma));

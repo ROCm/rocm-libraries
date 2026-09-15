@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
@@ -132,7 +133,7 @@ TEST(TestScanBundleJsonFiles, NonexistentDirectory)
 
 TEST(TestScanBundleJsonFiles, EmptyDirectory)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_empty");
+    const ScopedDirectory dir = claimScratchDirectory("scan_empty");
 
     auto results = scanBundleJsonFiles(dir.path());
     EXPECT_TRUE(results.empty());
@@ -140,7 +141,7 @@ TEST(TestScanBundleJsonFiles, EmptyDirectory)
 
 TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_recursive");
+    const ScopedDirectory dir = claimScratchDirectory("scan_recursive");
     const auto nested = dir.path() / "sub1" / "sub2";
     std::filesystem::create_directories(nested);
 
@@ -163,10 +164,11 @@ TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
 
 TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_meta");
+    const ScopedDirectory dir = claimScratchDirectory("scan_meta");
 
     touchFile(dir.path() / "bundle.json");
     touchFile(dir.path() / "meta.json");
+    touchFile(dir.path() / "bundle.meta.json"); // compound .meta.json extension
 
     auto results = scanBundleJsonFiles(dir.path());
     ASSERT_EQ(results.size(), 1u);
@@ -175,7 +177,7 @@ TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 
 TEST(TestScanBundleJsonFiles, ReturnsSortedPaths)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_sorted");
+    const ScopedDirectory dir = claimScratchDirectory("scan_sorted");
     const auto subC = dir.path() / "c_dir";
     const auto subA = dir.path() / "a_dir";
     std::filesystem::create_directory(subC);
@@ -196,14 +198,23 @@ TEST(TestLoadGraphAndTensors, Valid)
 {
     SKIP_IF_NO_DEVICES();
 
-    const std::filesystem::path filepath
-        = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+    const std::filesystem::path filepath = getCurrentExecutableDirectory()
+                                           / "../lib/integration-test-bundles/quick/"
+                                             "BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
         HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
+        GTEST_SKIP();
+    }
+
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
         GTEST_SKIP();
     }
 
@@ -239,14 +250,23 @@ TEST(TestLoadGraphAndTensors, Valid)
 
 TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
 {
-    const std::filesystem::path filepath
-        = getCurrentExecutableDirectory()
-          / "../lib/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/Small.json";
+    const std::filesystem::path filepath = getCurrentExecutableDirectory()
+                                           / "../lib/integration-test-bundles/quick/"
+                                             "BatchnormFwdInference/nchw/fp32/Small/Small.json";
 
     // TODO: Temporary fix until reference data can be properly installed
     if(!std::filesystem::exists(filepath))
     {
         HIPDNN_SDK_LOG_WARN("Could not find " << filepath.string());
+        GTEST_SKIP();
+    }
+
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
         GTEST_SKIP();
     }
 

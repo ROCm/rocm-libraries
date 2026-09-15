@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,7 @@ void rocsparse::trm_data_t::copy(const rocsparse::trm_data_t* that, hipStream_t 
         }
 
         this->copy_pivot_info_async(that, stream);
-        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     }
 }
 
@@ -83,6 +83,13 @@ rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
                                                   rocsparse_fill_mode fill_mode)
 {
     const int idx = rocsparse::trm_data_t::storage_index(operation, fill_mode);
+    return this->m_data[idx];
+}
+
+const rocsparse::trm_info_t* rocsparse::trm_data_t::get(rocsparse_operation operation,
+                                                        rocsparse_fill_mode fill_mode) const
+{
+    const auto idx = rocsparse::trm_data_t::storage_index(operation, fill_mode);
     return this->m_data[idx];
 }
 

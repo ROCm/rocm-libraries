@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,7 +61,7 @@ rocsparse_status rocsparse::csrgemm_mult_nnz_quickreturn(rocsparse_handle       
         {
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
             }
             else
             {

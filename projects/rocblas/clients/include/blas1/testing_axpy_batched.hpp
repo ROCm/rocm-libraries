@@ -122,6 +122,9 @@ void testing_axpy_batched(const Arguments& arg)
 
     T h_alpha = arg.get_alpha<T>();
 
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+
     // argument sanity check before allocating invalid memory
     if(N <= 0 || batch_count <= 0)
     {
@@ -138,15 +141,15 @@ void testing_axpy_batched(const Arguments& arg)
     HOST_MEMCHECK(host_batch_vector<T>, hy_1, (N, incy, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hy_2, (N, incy, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hy_gold, (N, incy, batch_count));
-    HOST_MEMCHECK(host_vector<T>, halpha, (1));
+    HOST_MEMCHECK(host_vector<T>, halpha, (batch_count, alpha_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_batch_vector<T>, dx, (N, incx, batch_count));
     DEVICE_MEMCHECK(device_batch_vector<T>, dy, (N, incy, batch_count));
-    DEVICE_MEMCHECK(device_vector<T>, dalpha, (1));
+    DEVICE_MEMCHECK(device_vector<T>, dalpha, (batch_count, alpha_stride));
 
-    // Assign host alpha.
-    halpha[0] = h_alpha;
+    // Assign host alpha (per-batch when alpha striding is enabled).
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
 
     // Initialize data on host memory
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, true);
@@ -164,20 +167,30 @@ void testing_axpy_batched(const Arguments& arg)
         // Transfer host to device
         CHECK_HIP_ERROR(dx.transfer_from(hx));
 
-        // Call routine with pointer mode on host.
-        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+        // Per-batch alpha (alpha striding) is only supported in device pointer mode.
+        if(!ab_striding)
+        {
+            // Call routine with pointer mode on host.
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
 
-        // Call routine.
-        CHECK_HIP_ERROR(dy.transfer_from(hy_1));
+            // Call routine.
+            CHECK_HIP_ERROR(dy.transfer_from(hy_1));
 
-        handle.pre_test(arg);
-        DAPI_CHECK(
-            rocblas_axpy_batched_fn,
-            (handle, N, halpha, dx.ptr_on_device(), incx, dy.ptr_on_device(), incy, batch_count));
-        handle.post_test(arg);
+            handle.pre_test(arg);
+            DAPI_CHECK(rocblas_axpy_batched_fn,
+                       (handle,
+                        N,
+                        halpha,
+                        dx.ptr_on_device(),
+                        incx,
+                        dy.ptr_on_device(),
+                        incy,
+                        batch_count));
+            handle.post_test(arg);
 
-        // Transfer from device to host.
-        CHECK_HIP_ERROR(hy_1.transfer_from(dy));
+            // Transfer from device to host.
+            CHECK_HIP_ERROR(hy_1.transfer_from(dy));
+        }
 
         // Pointer mode device.
         CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
@@ -214,7 +227,7 @@ void testing_axpy_batched(const Arguments& arg)
                 //Allocate device memory in new device
                 DEVICE_MEMCHECK(device_batch_vector<T>, dx_copy, (N, incx, batch_count));
                 DEVICE_MEMCHECK(device_batch_vector<T>, dy_copy, (N, incy, batch_count));
-                DEVICE_MEMCHECK(device_vector<T>, dalpha_copy, (1));
+                DEVICE_MEMCHECK(device_vector<T>, dalpha_copy, (batch_count, alpha_stride));
 
                 CHECK_HIP_ERROR(dx_copy.transfer_from(hx));
                 CHECK_HIP_ERROR(dalpha_copy.transfer_from(halpha));
@@ -244,10 +257,15 @@ void testing_axpy_batched(const Arguments& arg)
         {
             cpu_time_used = get_time_us_no_sync();
 
-            // Compute the host solution.
+            // Compute the host solution (per-batch alpha when alpha striding is enabled).
             for(int64_t batch_index = 0; batch_index < batch_count; ++batch_index)
             {
-                ref_axpy<T>(N, h_alpha, hx[batch_index], incx, hy_gold[batch_index], incy);
+                ref_axpy<T>(N,
+                            halpha[batch_index * alpha_stride],
+                            hx[batch_index],
+                            incx,
+                            hy_gold[batch_index],
+                            incy);
             }
             cpu_time_used = get_time_us_no_sync() - cpu_time_used;
         }
@@ -257,14 +275,17 @@ void testing_axpy_batched(const Arguments& arg)
         //
         if(arg.unit_check)
         {
-            unit_check_general<T>(1, N, incy, hy_gold, hy_1, batch_count);
+            if(!ab_striding)
+                unit_check_general<T>(1, N, incy, hy_gold, hy_1, batch_count);
 
             unit_check_general<T>(1, N, incy, hy_gold, hy_2, batch_count);
         }
 
         if(arg.norm_check)
         {
-            rocblas_error_1 = norm_check_general<T>('I', 1, N, incy, hy_gold, hy_1, batch_count);
+            if(!ab_striding)
+                rocblas_error_1
+                    = norm_check_general<T>('I', 1, N, incy, hy_gold, hy_1, batch_count);
             rocblas_error_2 = norm_check_general<T>('I', 1, N, incy, hy_gold, hy_2, batch_count);
         }
     }
@@ -282,6 +303,15 @@ void testing_axpy_batched(const Arguments& arg)
         // Transfer from host to device.
         CHECK_HIP_ERROR(dy.transfer_from(hy_gold));
 
+        const T* alpha = &h_alpha;
+        if(ab_striding)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(dalpha.transfer_from(halpha));
+            alpha = dalpha;
+            handle.pre_test(arg);
+        }
+
         for(int iter = 0; iter < total_calls; iter++)
         {
             if(iter == number_cold_calls)
@@ -290,7 +320,7 @@ void testing_axpy_batched(const Arguments& arg)
             DAPI_DISPATCH(rocblas_axpy_batched_fn,
                           (handle,
                            N,
-                           &h_alpha,
+                           alpha,
                            dx.ptr_on_device(),
                            incx,
                            dy.ptr_on_device(),
@@ -298,6 +328,9 @@ void testing_axpy_batched(const Arguments& arg)
                            batch_count));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(ab_striding)
+            handle.post_test(arg);
 
         ArgumentModel<e_N, e_alpha, e_incx, e_incy, e_batch_count>{}.log_args<T>(
             rocblas_cout,

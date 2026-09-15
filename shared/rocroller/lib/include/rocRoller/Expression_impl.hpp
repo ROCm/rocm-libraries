@@ -312,11 +312,12 @@ namespace rocRoller
         {
             return dt == DataType::Half || dt == DataType::Halfx2 || dt == DataType::BFloat16
                    || dt == DataType::BFloat16x2 || dt == DataType::FP8 || dt == DataType::BF8
-                   || dt == DataType::E8M0x4 || dt == DataType::FP8x4 || dt == DataType::BF8x4
-                   || dt == DataType::Float || dt == DataType::FP6x16 || dt == DataType::BF6x16
-                   || dt == DataType::FP4x8 || dt == DataType::Double || dt == DataType::Int32
-                   || dt == DataType::Int64 || dt == DataType::UInt32 || dt == DataType::UInt64
-                   || dt == DataType::Bool || dt == DataType::Bool32 || dt == DataType::Bool64;
+                   || dt == DataType::FP8x4 || dt == DataType::BF8x4 || dt == DataType::Float
+                   || dt == DataType::FP6x16 || dt == DataType::BF6x16 || dt == DataType::FP4x8
+                   || dt == DataType::Double || dt == DataType::Int32 || dt == DataType::Int64
+                   || dt == DataType::UInt32 || dt == DataType::UInt64 || dt == DataType::Bool
+                   || dt == DataType::Bool32 || dt == DataType::Bool64 || dt == DataType::E8M0x4
+                   || dt == DataType::E5M3x4 || dt == DataType::E4M3x4;
         }
 
         inline ExpressionPtr convert(DataType dt, ExpressionPtr a)
@@ -382,6 +383,18 @@ namespace rocRoller
                                                 literal(value.desc3)};
             return std::make_shared<Expression>(
                 Concatenate{{operands}, {DataType::None, PointerType::Buffer}});
+        }
+
+        inline ExpressionPtr literal(TDM value)
+        {
+            std::vector<ExpressionPtr> operands;
+
+            std::for_each(std::begin(value.parts),
+                          std::end(value.parts),
+                          [&operands](auto const& v) { operands.push_back(literal(v)); });
+
+            return std::make_shared<Expression>(
+                Concatenate{{operands}, {DataType::None, PointerType::TDM}});
         }
 
         template <CCommandArgumentValue T>

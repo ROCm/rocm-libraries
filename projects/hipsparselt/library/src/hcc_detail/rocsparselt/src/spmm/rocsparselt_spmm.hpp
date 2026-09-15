@@ -33,11 +33,7 @@
 #include "handle.h"
 #include "hipsparselt_ostream.hpp"
 #include "utility.hpp"
-#if BUILD_WITH_TENSILE
 #include "tensile_host.hpp"
-#else
-#include "kernel_launcher.hpp"
-#endif
 
 template <typename Ti, typename To = Ti, typename Tc = To>
 rocsparselt_status spmm_typecasting(const char*                     caller,

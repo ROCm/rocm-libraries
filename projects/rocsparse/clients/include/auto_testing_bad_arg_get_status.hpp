@@ -360,6 +360,30 @@ inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spilu0_stage& 
 }
 
 template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spildlt0_alg& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spildlt0_stage& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spildlt0_input& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spildlt0_output& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
 inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_spitsv_stage& p)
 {
     return rocsparse_status_invalid_value;

@@ -107,6 +107,24 @@ lengths = {
         (336, 18816),
     ],
 
+    # Large real lengths whose fused Stockham kernel needs most of the
+    # available LDS.  Exercises the LDS-aware real fusion path.
+    'real_fusion_lds_1d': [
+        4096,
+        6144,
+        8000,
+        12288,
+        16384,
+        24576,
+        32768,
+    ],
+
+    'real_fusion_lds_2d': [
+        (256, 256),
+        (256, 12288),
+        (256, 24576),
+    ],
+
     'simpleL1D': [
         6561,
         8192,
@@ -526,6 +544,24 @@ def misc3d():
     """Miscellaneous 3D sizes."""
 
     yield from default_length_params("misc3d", lengths['misc3d'], 1)
+
+
+def real_fusion_lds_1d():
+    """1D real lengths that stress the LDS-aware fusion path."""
+
+    yield from default_length_params("real_fusion_lds_1d",
+                                     lengths['real_fusion_lds_1d'],
+                                     10000,
+                                     reals=[True])
+
+
+def real_fusion_lds_2d():
+    """2D real lengths that stress the LDS-aware fusion path."""
+
+    yield from default_length_params("real_fusion_lds_2d",
+                                     lengths['real_fusion_lds_2d'],
+                                     1000,
+                                     reals=[True])
 
 
 def simpleL1D():
@@ -1063,7 +1099,15 @@ def partial_pass():
     for length in [(64, 64, 128), (64, 64, 64), (64, 64, 52), (60, 60, 60),
                    (32, 32, 128), (32, 32, 64), (64, 32, 128), (160, 72, 72),
                    (72, 72, 72), (160, 80, 72), (160, 80, 80), (96, 96, 96),
-                   (108, 108, 80), (72, 72, 52), (80, 80, 80), (84, 84, 72)]:
+                   (108, 108, 80), (72, 72, 52), (80, 80, 80), (84, 84, 72),
+                   (100, 100, 100), (192, 96, 96), (200, 96, 96),
+                   (240, 108, 108), (240, 112, 108), (240, 112, 112),
+                   (128, 128, 256), (160, 160, 168), (160, 168, 168),
+                   (160, 168, 192), (168, 168, 192), (168, 192, 192),
+                   (192, 192, 192), (192, 192, 200), (192, 200, 200),
+                   (200, 200, 200), (216, 216, 216), (240, 224, 224),
+                   (216, 104, 100), (216, 104, 104), (224, 104, 104),
+                   (224, 108, 104), (224, 108, 108), (280, 128, 128)]:
         for real in [True, False]:
             for direction in [-1, 1]:
                 for precision in ['single', 'double']:

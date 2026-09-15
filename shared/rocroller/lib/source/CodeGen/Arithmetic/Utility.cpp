@@ -19,6 +19,11 @@ namespace rocRoller
                 Throw<FatalError>("Buffer type is not valid for get2LiteralDwords.");
             }
 
+            void operator()(TDM const&) const
+            {
+                Throw<FatalError>("TDM type is not valid for get2LiteralDwords.");
+            }
+
             template <typename T>
             void operator()(T v) const
             {
@@ -64,6 +69,27 @@ namespace rocRoller
                 Throw<FatalError>("Unable to determine MI modifier: unhandled data type.",
                                   ShowValue(dtype));
             }
+        }
+
+        std::string getScaleTypeModifier(DataType dtype)
+        {
+            AssertFatal(isScaleType(dtype));
+
+            switch(dtype)
+            {
+            case DataType::E8M0:
+            case DataType::E8M0x4:
+                return "MATRIX_SCALE_FMT_E8";
+            case DataType::E5M3:
+            case DataType::E5M3x4:
+                return "MATRIX_SCALE_FMT_E5M3";
+            case DataType::E4M3:
+            case DataType::E4M3x4:
+                return "MATRIX_SCALE_FMT_E4M3";
+            default:
+                Throw<FatalError>("Unable to determine MI scale modifier: unhandled data type.",
+                                  ShowValue(dtype));
+            };
         }
 
         std::tuple<std::string, std::string> getOpselModifiers2xByte(uint lhsByte, uint rhsByte)

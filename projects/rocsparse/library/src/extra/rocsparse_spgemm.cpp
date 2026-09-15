@@ -482,7 +482,7 @@ namespace rocsparse
 
         switch(itype)
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -491,7 +491,7 @@ namespace rocsparse
             switch(jtype)
             {
             case rocsparse_indextype_i64:
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -553,7 +553,7 @@ namespace rocsparse
         {
             switch(jtype)
             {
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }

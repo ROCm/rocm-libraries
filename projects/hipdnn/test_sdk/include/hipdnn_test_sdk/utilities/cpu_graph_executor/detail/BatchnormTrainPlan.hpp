@@ -139,8 +139,9 @@ public:
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
-        const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-            _params.epsilonTensor, "Epsilon");
+        const double epsilon
+            = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+                _params.epsilonTensor, variantPack, "Epsilon");
 
         // Optional batch statistics tensors
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>> mean;
@@ -183,8 +184,8 @@ public:
         double momentumValue = 0.1;
         if(_params.momentumTensor.has_value())
         {
-            momentumValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-                _params.momentumTensor.value(), "Momentum");
+            momentumValue = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+                _params.momentumTensor.value(), variantPack, "Momentum");
         }
 
         if(_params.prevRunningMeanTensor.has_value())
@@ -332,6 +333,8 @@ public:
                                        nodeAttributes->next_running_variance_tensor_uid(),
                                        MeanVarianceDataTypeEnum);
         }
+
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         return true;
     }

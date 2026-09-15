@@ -17,6 +17,8 @@ namespace rocRoller
         std::array<unsigned int, 3> workitemCount  = {1, 1, 1};
         std::array<unsigned int, 3> workgroupSize  = {1, 1, 1};
         unsigned int                sharedMemBytes = 0;
+
+        std::optional<std::array<unsigned int, 3>> workgroupClusterSize;
     };
 
     // The executer class can load a kernel from a string of machine code and
@@ -24,7 +26,7 @@ namespace rocRoller
     class ExecutableKernel
     {
     public:
-        ExecutableKernel();
+        explicit ExecutableKernel(GPUArchitectureTarget target);
         ~ExecutableKernel() = default;
 
         /**
@@ -111,6 +113,8 @@ namespace rocRoller
         std::string              m_kernelName;
         bool                     m_kernelLoaded;
         std::shared_ptr<HIPData> m_hipData;
+
+        GPUArchitectureTarget m_target;
 
         /**
          * @brief Execute a kernel on a GPU with optional timer and stream

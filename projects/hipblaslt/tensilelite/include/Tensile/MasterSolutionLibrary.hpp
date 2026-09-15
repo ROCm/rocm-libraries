@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,9 +37,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace fs = std::filesystem;
 
@@ -114,6 +112,13 @@ namespace TensileLite
 
         bool initLibraryMapping(const std::string& tensileLibPath)
         {
+            // Invariant: tensileLibPath is the logical library name ending in a
+            // single extension (".dat" or ".yaml"), never the compressed
+            // ".dat.zlib" name. fileToMsgObject() resolves the ".zlib" variant
+            // internally by appending it as a probe suffix, so callers always
+            // pass the bare ".dat" name. extension()/stem() below rely on this:
+            // a double-extension name would yield suffix ".zlib" and an arch of
+            // "<arch>.dat", producing a wrong per-arch mapping path.
             fs::path path(tensileLibPath);
             libraryDirectory = path.parent_path().string();
             suffix           = path.extension().string();
@@ -270,7 +275,9 @@ namespace TensileLite
                                                       nop,
                                                       nop,
                                                       nop,
-                                                      nop);
+                                                      nop,
+                                                      solution->problemType.useGateResidual,
+                                                      solution->problemType.gateResidualDataTypeWhiteList);
                 solution->requiredHostWorkspaceSizePerProblem
                     = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
             }
@@ -398,4 +405,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_potrs.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -38,6 +39,7 @@ rocblas_status rocsolver_potrs_impl(rocblas_handle handle,
                                     const I lda,
                                     T* B,
                                     const I ldb)
+try
 {
     ROCSOLVER_ENTER_TOP("potrs", "--uplo", uplo, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb", ldb);
 
@@ -85,6 +87,10 @@ rocblas_status rocsolver_potrs_impl(rocblas_handle handle,
     return rocsolver_potrs_template<false, false, T>(handle, uplo, n, nrhs, A, shiftA, lda, strideA,
                                                      B, shiftB, ldb, strideB, batch_count, work1,
                                                      work2, work3, work4, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

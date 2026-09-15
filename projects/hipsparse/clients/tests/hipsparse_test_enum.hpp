@@ -23,18 +23,18 @@
 * ************************************************************************ */
 #pragma once
 #include "hipsparse_arguments.hpp"
-#include <hipsparse/hipsparse-version.h>
+#include <hipsparse/hipsparse-config.h>
 template <std::size_t N, typename T>
 static constexpr std::size_t countof2(T (&)[N])
 {
     return N;
 }
 
-#ifdef HIPSPARSE_WITH_SPMV_BSR
 #define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
-#else
-#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum)
-#endif
+
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSV(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
+
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSM(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
 
 // clang-format off
 #define HIPSPARSE_FOREACH_TEST_ENUM \
@@ -79,6 +79,8 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(csrsort) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(csrsv2) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(csru2csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(dense_to_sparse_bell) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(dense_to_sparse_bell_no_set_pointers) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(dense_to_sparse_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(dense_to_sparse_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(dense_to_sparse_csr) \
@@ -113,13 +115,16 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(roti) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(scatter) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sctr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_batched_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_coo_aos) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(sddmm_csr_reuse_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spgeam_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spgemm_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spgemmreuse_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmat_descr) \
@@ -127,9 +132,11 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_batched_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_batched_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_bell) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_bsr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_csr_reuse_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(spmv_bsr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_coo_aos) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_coo) \
@@ -137,11 +144,14 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_csr_reuse_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_sell) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_coo) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSM(spsm_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_ex_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_ex_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsv_coo) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSV(spsv_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsv_csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spsv_csr_reuse_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spvec_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spvv) \
     // clang-format on

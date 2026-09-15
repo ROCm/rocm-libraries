@@ -44,7 +44,7 @@ rocsparse_status rocsparse::gcoosort_buffer_size(rocsparse_handle    handle_,
     switch(idx_type)
     {
     // LCOV_EXCL_START
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
@@ -86,7 +86,7 @@ rocsparse_status rocsparse::gcoosort_by_row(rocsparse_handle    handle_,
     switch(idx_type)
     {
     // LCOV_EXCL_START
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
@@ -128,7 +128,7 @@ rocsparse_status rocsparse::gcoosort_by_column(rocsparse_handle    handle_,
     switch(idx_type)
     {
     // LCOV_EXCL_START
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         return rocsparse_status_success;

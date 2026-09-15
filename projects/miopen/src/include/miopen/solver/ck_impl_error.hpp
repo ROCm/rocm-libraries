@@ -193,6 +193,7 @@ inline const char* toString(ck_impl_status_t status)
     case CK_IMPL_STATUS_INVALID_VALUE: return "CK_IMPL_STATUS_INVALID_VALUE";
     case CK_IMPL_STATUS_INTERNAL_ERROR: return "CK_IMPL_STATUS_INTERNAL_ERROR";
     case CK_IMPL_STATUS_ALLOC_FAILED: return "CK_IMPL_STATUS_ALLOC_FAILED";
-    default: return "CK_IMPL_STATUS_UNKNOWN";
     }
+
+    return "CK_IMPL_STATUS_UNKNOWN";
 }

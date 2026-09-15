@@ -67,7 +67,8 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(0, allocator->useCount());
         EXPECT_EQ(allocator->currentlyFree(), 10);
 
-        auto [idx, blockSize] = allocator->findContiguousRange(0, 1, alloc0->options());
+        auto arch             = m_context->targetArchitecture();
+        auto [idx, blockSize] = allocator->findContiguousRange(0, 1, alloc0->options(), arch);
         EXPECT_EQ(0, idx);
 
         allocator->allocate(alloc0);
@@ -78,14 +79,14 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(1, allocator->useCount());
         EXPECT_EQ(allocator->currentlyFree(), 9);
 
-        auto [idx2, blockSize2] = allocator->findContiguousRange(0, 1, alloc0->options());
+        auto [idx2, blockSize2] = allocator->findContiguousRange(0, 1, alloc0->options(), arch);
         EXPECT_EQ(1, idx2);
 
         auto alloc1 = std::make_shared<Register::Allocation>(
             m_context, Register::Type::Scalar, DataType::Float, 3, allocOpts);
 
         EXPECT_EQ((std::vector{1, 2, 3}),
-                  allocator->findFree(alloc1->registerCount(), alloc1->options()));
+                  allocator->findFree(alloc1->registerCount(), alloc1->options(), arch));
         allocator->allocate(alloc1);
 
         EXPECT_EQ((std::vector{1, 2, 3}), alloc1->registerIndices());
@@ -154,7 +155,8 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(0, allocator->useCount());
         EXPECT_EQ(allocator->currentlyFree(), 10);
 
-        EXPECT_EQ(0, allocator->findContiguousRange(0, 1, alloc0->options()).first);
+        auto arch = m_context->targetArchitecture();
+        EXPECT_EQ(0, allocator->findContiguousRange(0, 1, alloc0->options(), arch).first);
 
         allocator->allocate(alloc0);
 
@@ -452,8 +454,10 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(allocator->size(), 16);
         EXPECT_EQ(allocator->currentlyFree(), 16);
 
-        EXPECT_EQ(allocator->findContiguousRange(0, 1, {.contiguousChunkWidth = 1}).first, 0);
-        EXPECT_EQ(allocator->findContiguousRange(0, 1, {.contiguousChunkWidth = 1}).second, 16);
+        auto arch = m_context->targetArchitecture();
+        EXPECT_EQ(allocator->findContiguousRange(0, 1, {.contiguousChunkWidth = 1}, arch).first, 0);
+        EXPECT_EQ(allocator->findContiguousRange(0, 1, {.contiguousChunkWidth = 1}, arch).second,
+                  16);
 
         auto alloc0 = std::make_shared<Register::Allocation>(
             m_context, Register::Type::Scalar, DataType::Float, 2);
@@ -557,10 +561,13 @@ namespace RegisterAllocatorTest
         //[OOXX,OXOX,OOXX,OOOO]
 
         {
-            EXPECT_EQ(allocator->findContiguousRange(0, 4, {.contiguousChunkWidth = 4}).first, 12);
-            EXPECT_EQ(allocator->findContiguousRange(0, 4, {.contiguousChunkWidth = 4}).second, 4);
+            auto arch = m_context->targetArchitecture();
+            EXPECT_EQ(allocator->findContiguousRange(0, 4, {.contiguousChunkWidth = 4}, arch).first,
+                      12);
+            EXPECT_EQ(
+                allocator->findContiguousRange(0, 4, {.contiguousChunkWidth = 4}, arch).second, 4);
             std::vector<int> freeReg = {12, 13, 14, 15};
-            EXPECT_EQ(allocator->findFree(4, {.contiguousChunkWidth = 4}), freeReg);
+            EXPECT_EQ(allocator->findFree(4, {.contiguousChunkWidth = 4}, arch), freeReg);
 
             auto allocContig = std::make_shared<Register::Allocation>(
                 m_context,

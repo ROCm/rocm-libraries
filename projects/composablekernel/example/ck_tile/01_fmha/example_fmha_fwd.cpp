@@ -53,7 +53,8 @@ auto create_args(int argc, char* argv[])
                 "  pt or 1, per-tensor scale\n"
                 "  bs or 2, block scale\n"
                 "  kvbs or 3, Q per-tensor, K/V per-page block scale\n"
-                "  mx or 4, microscaling (exclusively for data types like mxfp8 and mxfp4)")
+                "  mx or 4, microscaling (exclusively for data types like mxfp8 and mxfp4)\n"
+                "  ph or 5, per-head scale")
         .insert("logits_soft_cap", "0", "attention logits soft capping value.")
         .insert("iperm",
                 "1",
@@ -119,7 +120,9 @@ auto create_args(int argc, char* argv[])
                 "",
                 "Batch-mode only: per-batch effective seqlen for KV (exclude PAD).\n"
                 "Comma-separated list of length 'b'. If empty, no override.")
-        .insert("init_sink", "0", "value to init the output tensor sink value for validation");
+        .insert("init_sink", "0", "value to init the output tensor sink value for validation")
+        .insert(
+            "pack_gqa", "1", "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal)");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -163,6 +166,7 @@ auto run(const ck_tile::ArgParser& arg_parser)
     std::string init_method          = arg_parser.get_str("init");
     uint32_t seed                    = arg_parser.get_uint32("seed");
     int init_sink_value              = arg_parser.get_int("init_sink");
+    int pack_gqa                     = arg_parser.get_int("pack_gqa");
 
     ck_tile::stream_config stream_config{nullptr,
                                          true,
@@ -210,6 +214,7 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         seed,
                                         do_validation,
                                         init_sink_value,
+                                        pack_gqa,
                                         stream_config,
                                         json);
 }

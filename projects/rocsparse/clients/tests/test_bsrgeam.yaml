@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,6 @@ Definitions:
     - { alpha:   1.0, alphai:  1.0 }
 
   - &alpha_range_checkin
-    - { alpha:   0.0, alphai:  1.5 }
     - { alpha:   3.0, alphai:  1.0 }
 
   - &alpha_range_nightly
@@ -42,7 +41,6 @@ Definitions:
 
   - &beta_range_checkin
     - { beta:   2.0, betai:  1.5 }
-    - { beta:   0.0, betai:  1.5 }
 
   - &beta_range_nightly
     - { beta:   0.0, betai:  1.5 }
@@ -201,10 +199,10 @@ Tests:
 - name: bsrgeam_file
   category: pre_checkin
   function: bsrgeam
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M: 1
   N: 1
-  block_dim: [5, 8]
+  block_dim: [5]
   alpha_alphai: *alpha_range_checkin
   beta_betai: *beta_range_checkin
   baseA: [rocsparse_index_base_one]
@@ -213,8 +211,23 @@ Tests:
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [shipsec1,
-             scircuit,
-             ASIC_320k]
+             scircuit]
+
+- name: bsrgeam_file
+  category: pre_checkin
+  function: bsrgeam
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  block_dim: [8]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k]
 
 - name: bsrgeam_file
   category: pre_checkin

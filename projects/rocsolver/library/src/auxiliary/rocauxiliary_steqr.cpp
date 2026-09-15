@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_steqr.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -38,6 +39,7 @@ rocblas_status rocsolver_steqr_impl(rocblas_handle handle,
                                     T* C,
                                     const rocblas_int ldc,
                                     rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("steqr", "--evect", evect, "-n", n, "--ldc", ldc);
 
@@ -79,6 +81,10 @@ rocblas_status rocsolver_steqr_impl(rocblas_handle handle,
     // execution
     return rocsolver_steqr_template<T>(handle, evect, n, D, shiftD, strideD, E, shiftE, strideE, C,
                                        shiftC, ldc, strideC, info, batch_count, work_stack);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

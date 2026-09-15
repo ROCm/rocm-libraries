@@ -218,7 +218,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
     """
     def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
-        kernel_updates.update({"UsePLRPack": True})
+        kernel_updates.update({"UsePLRPack": 1})
         super().setup_method(method, kernel_updates=kernel_updates)
     
     validator_passes = [add_local_read_constraints, add_pack_constraints]
@@ -363,7 +363,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
     """
     def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
-        kernel_updates.update({"UsePLRPack": True, "UseF32XEmulation": True, "ForceUnrollSubIter": True, "UseDirect32XEmulation": True, "DepthU": 32})
+        kernel_updates.update({"UsePLRPack": 1, "UseF32XEmulation": True, "ForceUnrollSubIter": True, "UseDirect32XEmulation": True, "DepthU": 32})
         super().setup_method(method, kernel_updates=kernel_updates)
 
         self.q1s = 0
@@ -542,7 +542,7 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates.update(
             {
-                "UsePLRPack": True, "UseF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
+                "UsePLRPack": 1, "UseF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
                 "MIWaveTileA": 4, "MIWaveTileB": 4  # Need >= 4 for n_tiles_quarter >= 1
             }
         )
@@ -621,7 +621,7 @@ class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
     """
     def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
-        kernel_updates.update({"UsePLRPack": True, "UseF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, "MIWaveTileA": 4, "MIWaveTileB": 4})
+        kernel_updates.update({"UsePLRPack": 1, "UseF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, "MIWaveTileA": 4, "MIWaveTileB": 4})
         super().setup_method(method, kernel_updates=kernel_updates)
     
     validator_passes = [add_local_read_constraints, add_pack_constraints]
@@ -723,7 +723,7 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates.update(
             {
-                "UsePLRPack": True, "UseF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
+                "UsePLRPack": 1, "UseF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
                 "MIWaveTileA": 4, "MIWaveTileB": 2  # 4 A tiles to get 2 groups of 24 packs (48 total)
             }
         )
@@ -859,7 +859,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates.update(
             {
-                "UsePLRPack": True, "UseF32XEmulation": True, "UseMFMAF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
+                "UsePLRPack": 1, "UseF32XEmulation": True, "UseMFMAF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
                 "MIWaveTileA": 4, "MIWaveTileB": 4  # 4 A tiles, 4 B tiles, 3 MFMAs per tile = 48 vmfmas
             }
         )
@@ -1156,7 +1156,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates.update(
             {
-                "UsePLRPack": True, "UseF32XEmulation": True, "UseMFMAF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
+                "UsePLRPack": 1, "UseF32XEmulation": True, "UseMFMAF32XEmulation": True, "UseDirect32XEmulation": True, "ForceUnrollSubIter": True, "DepthU": 32, 
                 "MIWaveTileA": 4, "MIWaveTileB": 2  # 4 A tiles, 2 B tiles, 3 MFMAs per tile = 24 vmfmas
             }
         )
@@ -1325,8 +1325,8 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
         # Minimal kernel config for 128x256x32 TF32 NT validation
         kernel = {
             "UseF32XEmulation": True, "UseDirect32XEmulation": True, "UseMFMAF32XEmulation": True,
-            "ForceUnrollSubIter": True, "DirectToLds": True, "SwapGlobalReadOrder": False,
-            "UsePLRPack": True, "MIWaveTileA": 4, "MIWaveTileB": 8, "Use64bShadowLimit": 1,
+            "ForceUnrollSubIter": True, "DirectToLds": True, "SwapGlobalReadOrder": 0,
+            "UsePLRPack": 1, "MIWaveTileA": 4, "MIWaveTileB": 8, "Use64bShadowLimit": 1,
             "VectorWidthA": 1, "VectorWidthB": 1,
             "ProblemType": {"TLUA": True, "TLUB": True},
         }
@@ -1451,7 +1451,7 @@ class TestValidatePackTF32MFMA4x4x4SwapPacks(CMSValidationTestBase):
 
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
-        kernel_updates["UsePLRPack"] = True
+        kernel_updates["UsePLRPack"] = 1
         kernel_updates["UseF32XEmulation"] = True
         kernel_updates["UseMFMAF32XEmulation"] = True
         kernel_updates["UseDirect32XEmulation"] = True

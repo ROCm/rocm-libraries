@@ -24,6 +24,7 @@
 #include "stinkytofu/serialization/asm/PatternParser.hpp"
 
 #include <bit>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <sstream>

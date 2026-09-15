@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getrs_npvt.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -38,6 +39,7 @@ rocblas_status rocsolver_getrs_npvt_impl(rocblas_handle handle,
                                          const I lda,
                                          T* B,
                                          const I ldb)
+try
 {
     ROCSOLVER_ENTER_TOP("getrs_npvt", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda,
                         "--ldb", ldb);
@@ -89,6 +91,10 @@ rocblas_status rocsolver_getrs_npvt_impl(rocblas_handle handle,
     return rocsolver_getrs_npvt_template<false, false, T>(
         handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB,
         batch_count, work1, work2, work3, work4, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

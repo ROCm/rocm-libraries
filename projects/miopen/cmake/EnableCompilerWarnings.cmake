@@ -66,6 +66,8 @@ set(__clang_cxx_compile_options
     -Wlanguage-extension-token
     -Wunused-template
     -Wnrvo
+    -Wcovered-switch-default
+    -Wswitch-enum
 )
 
 if(WIN32)

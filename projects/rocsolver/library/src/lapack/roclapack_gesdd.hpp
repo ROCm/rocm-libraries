@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     April 2012
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -263,9 +263,13 @@ void rocsolver_gesdd_getMemorySize(rocblas_handle handle,
     if(m >= n)
     {
         // Requirements for Divide-and-Conquer eigensolver
-        rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
-            handle, rocblas_evect_original, rocblas_fill_upper, n, batch_count, &a1, &b1, &c1, &d1,
-            &e1, &f1, &g1, &h1, size_workArr2);
+        {
+            size_t i1 = 0, i2 = 0, i3 = 0, i4 = 0;
+            rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
+                handle, rocblas_evect_original, rocblas_fill_upper, n, batch_count, &a1, &b1, &c1,
+                &d1, &e1, &f1, &g1, &h1, size_workArr2, &i1, &i2, &i3, &i4);
+            *size_workArr2 += i1 + i2 + i3 + i4;
+        }
 
         // Requirements for QR factorization
         rocsolver_geqrf_getMemorySize<BATCHED, T>(m, n, batch_count, &a2, &b2, &c2, &d2, &f2);
@@ -281,9 +285,13 @@ void rocsolver_gesdd_getMemorySize(rocblas_handle handle,
     else
     {
         // Requirements for Divide-and-Conquer eigensolver
-        rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
-            handle, rocblas_evect_original, rocblas_fill_upper, m, batch_count, &a1, &b1, &c1, &d1,
-            &e1, &f1, &g1, &h1, size_workArr2);
+        {
+            size_t i1 = 0, i2 = 0, i3 = 0, i4 = 0;
+            rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
+                handle, rocblas_evect_original, rocblas_fill_upper, m, batch_count, &a1, &b1, &c1,
+                &d1, &e1, &f1, &g1, &h1, size_workArr2, &i1, &i2, &i3, &i4);
+            *size_workArr2 += i1 + i2 + i3 + i4;
+        }
 
         // Requirements for LQ factorization
         rocsolver_gelqf_getMemorySize<BATCHED, T>(m, n, batch_count, &a2, &b2, &c2, &d2, &f2);
@@ -376,9 +384,7 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
     }
 
     // Everything is executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     bool leftv = left_svect != rocblas_svect_none;
     bool rightv = right_svect != rocblas_svect_none;
@@ -413,10 +419,25 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
                        m, &neg_one, A, shiftA, lda, strideA, A, shiftA, lda, strideA, &zero, V_gemm,
                        0, ldv_gemm, strideV_gemm, batch_count, (T**)workArr);
 
-        rocsolver_syevd_heevd_template<false, STRIDED, T>(
-            handle, rocblas_evect_original, rocblas_fill_upper, n, V_gemm, 0, ldv_gemm,
-            strideV_gemm, S, strideS, (SS*)workArr, strideS, info, batch_count, scalars, work1,
-            work2, work3, (SS*)UVtmpZ, (rocblas_int*)splits, (T*)tmptau_W, (T*)tau, (T**)workArr2);
+        {
+            // Compute 2-stage workspace sizes and split workArr2 accordingly
+            size_t wa2_orig, i1 = 0, i2 = 0, i3 = 0, i4 = 0, dum;
+            rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
+                handle, rocblas_evect_original, rocblas_fill_upper, n, batch_count, &dum, &dum,
+                &dum, &dum, &dum, &dum, &dum, &dum, &wa2_orig, &i1, &i2, &i3, &i4);
+            // workArr2 is laid out as: [workArr portion (wa2_orig bytes)][i1][i2][i3][i4]
+            char* wa2_ptr = (char*)workArr2;
+            T** gesdd_workArr2 = (T**)wa2_ptr;
+            T* gesdd_Aband = (T*)(wa2_ptr + wa2_orig);
+            T* gesdd_he2hb_work = (T*)(wa2_ptr + wa2_orig + i1);
+            T* gesdd_V_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2);
+            T* gesdd_tau_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2 + i3);
+            rocsolver_syevd_heevd_template<false, STRIDED, T>(
+                handle, rocblas_evect_original, rocblas_fill_upper, n, V_gemm, 0, ldv_gemm,
+                strideV_gemm, S, strideS, (SS*)workArr, strideS, info, batch_count, scalars, work1,
+                work2, work3, (SS*)UVtmpZ, (rocblas_int*)splits, (T*)tmptau_W, (T*)tau,
+                gesdd_workArr2, gesdd_Aband, gesdd_he2hb_work, gesdd_V_hb2st, gesdd_tau_hb2st);
+        }
 
         // Compute AV
         T* U_gemm = (leftv ? U : (T*)UVtmpZ);
@@ -469,10 +490,24 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
                        n, &neg_one, A, shiftA, lda, strideA, A, shiftA, lda, strideA, &zero, U_gemm,
                        0, ldu_gemm, strideU_gemm, batch_count, (T**)workArr);
 
-        rocsolver_syevd_heevd_template<false, STRIDED, T>(
-            handle, rocblas_evect_original, rocblas_fill_upper, m, U_gemm, 0, ldu_gemm,
-            strideU_gemm, S, strideS, (SS*)workArr, strideS, info, batch_count, scalars, work1,
-            work2, work3, (SS*)UVtmpZ, (rocblas_int*)splits, (T*)tmptau_W, (T*)tau, (T**)workArr2);
+        {
+            // Compute 2-stage workspace sizes and split workArr2 accordingly
+            size_t wa2_orig, i1 = 0, i2 = 0, i3 = 0, i4 = 0, dum;
+            rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
+                handle, rocblas_evect_original, rocblas_fill_upper, m, batch_count, &dum, &dum,
+                &dum, &dum, &dum, &dum, &dum, &dum, &wa2_orig, &i1, &i2, &i3, &i4);
+            char* wa2_ptr = (char*)workArr2;
+            T** gesdd_workArr2 = (T**)wa2_ptr;
+            T* gesdd_Aband = (T*)(wa2_ptr + wa2_orig);
+            T* gesdd_he2hb_work = (T*)(wa2_ptr + wa2_orig + i1);
+            T* gesdd_V_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2);
+            T* gesdd_tau_hb2st = (T*)(wa2_ptr + wa2_orig + i1 + i2 + i3);
+            rocsolver_syevd_heevd_template<false, STRIDED, T>(
+                handle, rocblas_evect_original, rocblas_fill_upper, m, U_gemm, 0, ldu_gemm,
+                strideU_gemm, S, strideS, (SS*)workArr, strideS, info, batch_count, scalars, work1,
+                work2, work3, (SS*)UVtmpZ, (rocblas_int*)splits, (T*)tmptau_W, (T*)tau,
+                gesdd_workArr2, gesdd_Aband, gesdd_he2hb_work, gesdd_V_hb2st, gesdd_tau_hb2st);
+        }
 
         // Compute U^*A
         T* V_gemm = (rightv ? V : (T*)UVtmpZ);
@@ -501,7 +536,6 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
                 m, batch_count, scalars, (T*)work2, (T*)work3, (T*)work4, (T**)workArr);
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

@@ -44,7 +44,7 @@ void populateBundleFromGraph(Graph& graph, GraphTensorBundle& bundle)
             if(!tensorAttr->get_is_virtual()
                && bundle.tensors.find(tensorId) == bundle.tensors.end())
             {
-                bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                bundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
             }
         }
         for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
@@ -53,7 +53,7 @@ void populateBundleFromGraph(Graph& graph, GraphTensorBundle& bundle)
             if(!tensorAttr->get_is_virtual()
                && bundle.tensors.find(tensorId) == bundle.tensors.end())
             {
-                bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                bundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
             }
         }
     });
@@ -516,7 +516,7 @@ protected:
         }
 
         PointwiseAttributes activAttrs;
-        activAttrs.set_mode(static_cast<PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             activAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());

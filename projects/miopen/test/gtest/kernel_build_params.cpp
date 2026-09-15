@@ -36,7 +36,7 @@ TEST(CPU_kernel_build_params_NONE, check_kernel_build_params)
                << miopen::KernelBuildParameters{{"Shifted"}};
     kbp.Define("DefineDefine");
     kbp.Define("DefineDefineWithValue", 1);
-    EXPECT_EQ(kbp.GenerateFor(miopen::kbp::OpenCL{}),
+    EXPECT_EQ(kbp.GenerateFor(miopen::kbp::HIP{}),
               "-DTrivialDefine -DDefineWithValue=0 -TrivialOption -OptionWithValue 0 "
               "-DShifted -DDefineDefine "
               "-DDefineDefineWithValue=1");

@@ -22,6 +22,7 @@ The hipCUB project is located in https://github.com/ROCm/rocm-libraries/tree/dev
 
   .. grid-item-card:: Reference
 
+    * :doc:`Precision support <./api-reference/data-type-support>`
     * :doc:`API library <../doxygen/html/index>`
 
 To contribute to the documentation refer to

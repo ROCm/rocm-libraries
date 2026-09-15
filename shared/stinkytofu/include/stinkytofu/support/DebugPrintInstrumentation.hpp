@@ -23,25 +23,47 @@
 #pragma once
 
 #include <memory>
+#include <ostream>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassInstrumentation.hpp"
 
 namespace stinkytofu {
 class PassManagerDebugConfig;
+class Function;
+class StinkyAsmModule;
 
 /// Print IR before/after passes using PassManagerDebugConfig settings.
+///
+/// When a StinkyAsmModule is supplied, dumps of the module's entry Function are
+/// followed by every callee Function, so whole-module debug output includes
+/// callee bodies (the PassManager only runs passes on, and hands this observer,
+/// the entry Function). Without a module it dumps only the Function it is given.
 class STINKYTOFU_EXPORT DebugPrintInstrumentation : public PassInstrumentation {
    public:
-    explicit DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg);
+    explicit DebugPrintInstrumentation(std::unique_ptr<PassManagerDebugConfig> cfg,
+                                       const StinkyAsmModule* module = nullptr);
     ~DebugPrintInstrumentation() override;
 
     void runBegin(Function& F, PassContext& ctx) override;
     void beforePass(const std::string& passName, Function& F, PassContext& ctx) override;
     void afterPass(const std::string& passName, Function& F, PassContext& ctx) override;
 
+    void beforeModulePass(const std::string& passName, StinkyAsmModule& M,
+                          PassContext& ctx) override;
+    void afterModulePass(const std::string& passName, StinkyAsmModule& M,
+                         PassContext& ctx) override;
+
    private:
+    /// Dump F to out; if a module is set and F is its entry Function,
+    /// also dump each callee Function under a labeled header.
+    void dumpWithCallees(Function& F, std::ostream& out) const;
+
+    /// Dump every function of M (entry + callees) to out.
+    void dumpModule(StinkyAsmModule& M, std::ostream& out) const;
+
     std::unique_ptr<PassManagerDebugConfig> dbgCfg;
+    const StinkyAsmModule* module_ = nullptr;
 };
 
 }  // namespace stinkytofu

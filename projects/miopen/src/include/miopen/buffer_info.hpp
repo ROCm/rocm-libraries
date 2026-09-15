@@ -169,8 +169,6 @@ struct WinogradBufferInfo
 {
 
     const int WinoDataHW[2] = {WinoDataH, WinoDataW}, WinoFilterHW[2] = {WinoFilterH, WinoFilterW};
-    const bool direct[2] = {(WinoDataW == 1) && (WinoFilterW == 1),
-                            (WinoDataH == 1) && (WinoFilterH == 1)};
 
     struct WinoInfo
     {
@@ -245,7 +243,6 @@ struct WinogradBufferInfo
                                      element_size);
                 wino_info = wino_data;
                 break;
-            default: break;
             }
             break;
         }
@@ -272,11 +269,9 @@ struct WinogradBufferInfo
                     layout, n, k, wino_data.wino_HW[0], wino_data.wino_HW[1], element_size);
                 wino_info = wino_data;
                 break;
-            default: break;
             }
             break;
         }
-        default: break;
         }
     }
     WinogradBufferInfo(int n,

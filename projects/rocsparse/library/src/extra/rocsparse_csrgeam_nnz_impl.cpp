@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -240,20 +240,22 @@ namespace rocsparse
         {
         case rocsparse_indextype_i32:
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->nnz_C,
-                                               static_cast<int32_t*>(descr->csr_row_ptr_C) + m,
-                                               sizeof(int32_t),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemcpyAsync(&descr->nnz_C,
+                                         static_cast<int32_t*>(descr->csr_row_ptr_C) + m,
+                                         sizeof(int32_t),
+                                         hipMemcpyDeviceToHost,
+                                         handle->stream));
             break;
         }
         case rocsparse_indextype_i64:
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->nnz_C,
-                                               static_cast<int64_t*>(descr->csr_row_ptr_C) + m,
-                                               sizeof(int64_t),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemcpyAsync(&descr->nnz_C,
+                                         static_cast<int64_t*>(descr->csr_row_ptr_C) + m,
+                                         sizeof(int64_t),
+                                         hipMemcpyDeviceToHost,
+                                         handle->stream));
             break;
         }
         default:
@@ -365,7 +367,7 @@ namespace rocsparse
         if(rocprim_alloc == true)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(rocprim_buffer, handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
         }
 
         // Checks the exclusive scan for integer overflow. If overflow detected, sets the
@@ -383,9 +385,9 @@ namespace rocsparse
         if(handle->pointer_mode == rocsparse_pointer_mode_host || called_from_spgeam)
         {
             // Blocking mode
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 nnz_C, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             if(*nnz_C != -1)
             {
@@ -395,7 +397,7 @@ namespace rocsparse
         }
         else
         {
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                 nnz_C, csr_row_ptr_C + m, sizeof(I), hipMemcpyDeviceToDevice, stream));
 
             // Adjust index base of nnz_C
@@ -513,7 +515,7 @@ namespace rocsparse
             }
             else
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(nnz_C, 0, sizeof(I), handle->stream));
             }
 
             if(nnz_A == 0 && nnz_B == 0)

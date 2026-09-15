@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "2_4_8_8_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness/0",
+        "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp16",
+        "seed": 0,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_0"
+      }
+    },
+    {
+      "id": "1_16_4_4_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              4,
+              4
+            ],
+            "strides": [
+              256,
+              16,
+              4,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              4,
+              4
+            ],
+            "strides": [
+              256,
+              16,
+              4,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness/1",
+        "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp16",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_1"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness/2",
+        "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp16",
+        "seed": 2,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp16.Correctness_2"
+      }
+    },
+    {
+      "id": "2_4_8_8_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              4,
+              8,
+              8
+            ],
+            "strides": [
+              256,
+              64,
+              8,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/0",
+        "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32",
+        "seed": 0,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_0"
+      }
+    },
+    {
+      "id": "1_16_4_4_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              4,
+              4
+            ],
+            "strides": [
+              256,
+              16,
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              4,
+              4
+            ],
+            "strides": [
+              256,
+              16,
+              4,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/1",
+        "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32",
+        "seed": 1,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_1"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "capture-bundles",
+        "generator_version": "1.0.0",
+        "notes": "Captured from C++ graph test Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/2",
+        "operation": "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32",
+        "seed": 2,
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness_2"
+      }
+    }
+  ]
+}

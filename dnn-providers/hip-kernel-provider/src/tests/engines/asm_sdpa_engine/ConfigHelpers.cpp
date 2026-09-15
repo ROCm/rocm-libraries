@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "ConfigHelpers.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -14,6 +15,7 @@ namespace asm_sdpa_engine
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hip_kernel_provider_common;
+using plan_utils::MaskType;
 
 static DataType toDataType(const std::string& configDataType)
 {
@@ -30,7 +32,8 @@ static DataType toDataType(const std::string& configDataType)
     return it->second;
 }
 
-flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config)
+flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config,
+                                                       bool withStats)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
@@ -94,6 +97,21 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                      TensorValue::Float32Value,
                                      builder.CreateStruct(scaleVal).Union()));
 
+    // Optional stats (LSE) output tensor: [B, H, Sq, 1], FP32
+    flatbuffers::Optional<int64_t> statsUid = flatbuffers::nullopt;
+    flatbuffers::Optional<bool> generateStats = flatbuffers::nullopt;
+    if(withStats)
+    {
+        const std::vector<int64_t> statsDims = {batch, numHeads, seqQ, 1};
+        const std::vector<int64_t> statsStrides
+            = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+        const auto statsUidVal = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, statsUidVal, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+        statsUid = flatbuffers::Optional<int64_t>(statsUidVal);
+        generateStats = flatbuffers::Optional<bool>(true);
+    }
+
     // Handle GROUP mode - add sequence length tensors
     flatbuffers::Optional<int64_t> seqLenQUid = flatbuffers::nullopt;
     flatbuffers::Optional<int64_t> seqLenKvUid = flatbuffers::nullopt;
@@ -126,7 +144,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     bool causalMask = false;
     bool causalMaskBottomRight = false;
 
-    switch(config.mask)
+    switch(static_cast<MaskType>(config.mask))
     {
     case MaskType::NO_MASK:
         // No mask - leave all defaults
@@ -148,7 +166,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
         causalMaskBottomRight = true;
         break;
 
-    case MaskType::WINDOW_GENERIC:
+    case MaskType::SLIDING_WINDOW:
         // Sliding window mask - use arbitrary window bounds
         leftBound = flatbuffers::Optional<int64_t>(64); // Arbitrary left window bound
         rightBound = flatbuffers::Optional<int64_t>(64); // Arbitrary right window bound
@@ -184,13 +202,13 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                flatbuffers::nullopt, // descale_s_tensor_uid
                                flatbuffers::nullopt, // scale_s_tensor_uid
                                flatbuffers::nullopt, // scale_o_tensor_uid
-                               flatbuffers::nullopt, // stats_tensor_uid
+                               statsUid, // stats_tensor_uid
                                flatbuffers::nullopt, // max_tensor_uid
                                flatbuffers::nullopt, // sum_exp_tensor_uid
                                flatbuffers::nullopt, // rng_dump_tensor_uid
                                flatbuffers::nullopt, // amax_s_tensor_uid
                                flatbuffers::nullopt, // amax_o_tensor_uid
-                               flatbuffers::nullopt, // generate_stats
+                               generateStats, // generate_stats
                                false, // alibi_mask
                                false, // padding_mask
                                causalMask,
@@ -201,12 +219,15 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                rightBound,
                                flatbuffers::nullopt, // max_seq_len_kv
                                diagAlignment,
-                               DataType::FLOAT, // mma_core_mode
+                               DataType::UNSET, // mma_core_mode
                                AttentionImplementation::AUTO);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(
-        builder, "sdpa_fwd", dataType, NodeAttributes::SdpaAttributes, sdpaAttributes.Union()));
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
 
     const auto graphOffset = CreateGraphDirect(builder,
                                                "test",

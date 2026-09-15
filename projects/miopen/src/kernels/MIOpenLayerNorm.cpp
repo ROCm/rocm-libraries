@@ -581,6 +581,9 @@ __forceinline__ __device__ void layernormbwdweightbias(const T* __restrict__ dy,
 {
     const unsigned int gid = threadIdx.x + blockIdx.x * LOCAL_SIZE_X;
 
+    if(gid >= INNER_SIZE)
+        return;
+
     if(dw || db)
     {
         FLOAT_ACCUM sum_dw = CVT_FP32_2ACCUM(0.0f);

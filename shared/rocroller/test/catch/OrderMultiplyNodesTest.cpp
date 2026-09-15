@@ -96,7 +96,7 @@ namespace OrderMultiplyNodesTest
             graph = transform<UpdateWavefrontParameters>(graph, params);
             graph = transform<AssignIndexExpressions>(graph, context.get(), example.getCommand());
             graph = transform<LoadPacked>(graph, context.get());
-            graph = transform<AddConvert>(graph);
+            graph = transform<AddConvert>(graph, context.get());
             graph = transform<AddDeallocateDataFlow>(graph);
             graph = transform<InlineIncrements>(graph);
             graph = transform<Simplify>(graph);

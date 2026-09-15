@@ -69,6 +69,7 @@ void Run2dDriver(miopenDataType_t prec)
     case miopenFloat: params = GPU_WidePooling2d_FP32::GetParam(); break;
     case miopenHalf: params = GPU_WidePooling2d_FP16::GetParam(); break;
     case miopenBFloat16: params = GPU_WidePooling2d_BFP16::GetParam(); break;
+
     case miopenInt8:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -79,8 +80,6 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
                   "pooling2d_wide test";
-
-    default: params = GPU_WidePooling2d_FP32::GetParam();
     }
 
     for(const auto& test_value : params)

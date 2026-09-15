@@ -189,7 +189,6 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=HIP_PLUGIN_BN_N"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MAXN=65"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
@@ -198,10 +197,33 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VECTORIZE=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_STASH_METHOD=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NRN_OP_ID=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MEAN_VAR_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SCALE_TYPE=float"));
+}
+
+TEST(TestBatchnormBwdPlan, CompileWithUnsupportedDimensionThrows)
+{
+    const MockKernelCompiler mockCompiler;
+
+    // 3D tensor is not supported
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({12, 4, 1}, {1, 3, 4});
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormBackwardAttributes();
+
+    BatchnormBwdParams params(attr, graph.getTensorMap());
+    BatchnormBwdPlan plan(std::move(params));
+
+    auto deviceProps = createTestDeviceProps();
+
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace hip_kernel_provider::batchnorm

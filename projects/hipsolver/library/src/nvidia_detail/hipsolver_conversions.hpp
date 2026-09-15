@@ -70,6 +70,10 @@ cusolverDeterministicMode_t hip2cuda_deterministic(hipsolverDeterministicMode_t 
 hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t mode);
 #endif
 
+cusolverDirectMode_t hip2cuda_direct(hipsolverDirectMode_t direct);
+
+cusolverStorevMode_t hip2cuda_storev(hipsolverStorevMode_t storev);
+
 hipsolverStatus_t cuda2hip_status(cublasStatus_t cuStatus);
 
 hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus);

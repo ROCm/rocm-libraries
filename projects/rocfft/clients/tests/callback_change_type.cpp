@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#ifndef __SPIRV__
+
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_complex.h"
@@ -31,22 +33,19 @@
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(change_type);
 
 // callback functions to cast data from short to float
-__host__ __device__ float
-    load_callback_short(short* input, size_t offset, void* cbdata, void* sharedMem)
+static const char* load_callback_short_jit = R"(
+extern "C"
+__device__ float load_callback_short(short* input, size_t offset, void* cbdata, void* sharedMem)
 {
     return static_cast<float>(input[offset]);
 }
 
-__host__ __device__ float2 load_callback_short2(short2* input,
-                                                size_t  offset,
-                                                void*   cbdata,
-                                                void*   sharedMem)
+extern "C"
+__device__ float2 load_callback_short2(short2* input, size_t offset, void* cbdata, void* sharedMem)
 {
     return float2{static_cast<float>(input[offset].x), static_cast<float>(input[offset].y)};
 }
-
-__device__ auto load_callback_short_dev  = load_callback_short;
-__device__ auto load_callback_short2_dev = load_callback_short2;
+)";
 
 class change_type : public ::testing::TestWithParam<fft_params>
 {
@@ -70,7 +69,7 @@ std::vector<std::vector<size_t>> callback_type_sizes = {{4}, {60}, {122}, {220},
 // the input can't be any smaller than what rocFFT thinks it is,
 // because the overwrite will fail.
 const static std::vector<std::vector<size_t>> stride_range = {{1}};
-INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
+INSTANTIATE_TEST_SUITE_P(callback,
                          change_type,
                          ::testing::ValuesIn(param_generator_base(
                              test_prob,
@@ -84,20 +83,26 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                              {{0, 0}},
                              {{0, 0}},
                              {fft_placement_notinplace},
-                             false)),
+                             false,
+                             {fft_callback_type_jit})),
                          accuracy_test::TestName);
 
 // run an out-of-place transform that casts input from short to float
-TEST_P(change_type, DISABLED_short_to_float)
+TEST_P(change_type, short_to_float)
 {
     rocfft_params params(GetParam());
-    params.run_callbacks = fft_callback_type_funcptr;
-
-    ASSERT_EQ(params.create_plan(), fft_status_success);
 
     // input has 2 shorts/floats for complex data, 1 otherwise.
     // output is always complex for these tests.
     const size_t input_complex = params.transform_type != fft_transform_type_real_forward ? 2 : 1;
+
+    // get callback function so we can pass it to rocfft
+    params.load_jit_cb_state       = std::make_shared<fft_params::jit_cb_state_t>();
+    params.load_jit_cb_state->func = compile_jit_callback(load_callback_short_jit);
+    params.load_jit_cb_state->symbol
+        = input_complex == 2 ? "load_callback_short2" : "load_callback_short";
+
+    ASSERT_EQ(params.create_plan(), fft_status_success);
 
     // allocate
     gpubuf               gpu_input;
@@ -131,24 +136,6 @@ TEST_P(change_type, DISABLED_short_to_float)
         std::copy(cpu_input_short.begin(),
                   cpu_input_short.end(),
                   static_cast<float*>(cpu_input[0].data()));
-
-        // get callback function so we can pass it to rocfft
-        void* callback_host;
-        if(input_complex == 1)
-        {
-            ASSERT_EQ(hipMemcpyFromSymbol(
-                          &callback_host, HIP_SYMBOL(load_callback_short_dev), sizeof(void*)),
-                      hipSuccess);
-        }
-        else
-        {
-            ASSERT_EQ(hipMemcpyFromSymbol(
-                          &callback_host, HIP_SYMBOL(load_callback_short2_dev), sizeof(void*)),
-                      hipSuccess);
-        }
-        std::vector<void*> callback_host_vec{callback_host};
-        ASSERT_EQ(params.set_funcptr_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
-                  fft_status_success);
 
         // run rocFFT
         void* gpu_input_ptr  = gpu_input.data();
@@ -218,16 +205,7 @@ TEST_P(change_type, DISABLED_short_to_float)
 
         ASSERT_TRUE(diff.l_inf <= linf_cutoff);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
+
+#endif

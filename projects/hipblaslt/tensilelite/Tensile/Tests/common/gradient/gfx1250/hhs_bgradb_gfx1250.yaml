@@ -5,8 +5,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 500      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -28,7 +27,6 @@ GlobalParameters:
   NumWarmups: 1
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
-  MinKForGSU: 10
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True
@@ -77,18 +75,19 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [0]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [false]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -127,6 +126,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
@@ -139,18 +139,19 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [0]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [false]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -189,6 +190,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
@@ -201,18 +203,19 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [0]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [false]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -251,6 +254,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           # - [16, 16, 32, 1, 1, 2, 2, 2, 2]
           # - [16, 16, 32, 1, 1, 2, 1, 1, 2]
@@ -263,18 +267,19 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
-        - ActivationFuncCall: [0]
+        - SourceSwap: [false]
+        - ActivationFuncCall: [false]
         - StoreVectorWidth: [-1, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

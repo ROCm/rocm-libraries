@@ -55,11 +55,12 @@ struct DominanceInfo;
 ///                        fresh function that has no PHIs yet.
 ///
 /// Assumes: non-SSA form (physical registers), CFG already built.
-STINKYTOFU_EXPORT void insertPhiInstructions(Function& func, bool clearExisting);
+STINKYTOFU_EXPORT void insertPhiInstructions(Function& func, bool clearExisting,
+                                             bool includePseudo = false);
 
 /// Overload that accepts pre-computed dominance info.
 STINKYTOFU_EXPORT void insertPhiInstructions(Function& func, const DominanceInfo& domInfo,
-                                             bool clearExisting);
+                                             bool clearExisting, bool includePseudo = false);
 
 /// Creates a Pass that inserts PHI instructions via insertPhiInstructions().
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertPhiPass();

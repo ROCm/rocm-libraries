@@ -26,49 +26,94 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/pipeline/CloneSpec.hpp"
+#include "stinkytofu/pipeline/PassBuilder.hpp"
 
 /*
  * @brief Define the options for the ModuleOptions struct
  * @note This macro is used to define the options for the ModuleOptions struct
- * @note SwPrefetchScratchSgpr: -1 disables SwPrefetchInsertionPass; >=0 runs and uses that scratch.
- *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
- * constructor.
+ * @note EnableSwInstructionPrefetchRelStatic: Tensile `SwInstructionPrefetch`
+ * YAML → Gfx1250 SwInstructionPrefetchRelStaticPass (`s_prefetch_inst_pc_rel 0,
+ * null, 31`; no scratch SGPR). Mutually exclusive with
+ * EnableSwInstructionPrefetchAbs.
+ * @note EnableSwInstructionPrefetchAbs: Tensile `SwInstructionPrefetch` YAML
+ * bitmask resolving to Absolute (value 2, or Auto(-1) on gfx1250 non-Stream-K)
+ * → Gfx1250 SwInstructionPrefetchAbsStaticPass /
+ * SwInstructionPrefetchAbsDynamicPass
+ *        (`s_prefetch_inst`; requires SwInstructionPrefetchAbsBaseSgpr >= 0).
+ *        Mutually exclusive with EnableSwInstructionPrefetchRelStatic.
+ * @note SwInstructionPrefetchAbsBaseSgpr: low index of the reserved 3-SGPR
+ * abs-prefetch base (even-aligned pair s[base:base+1] + scratch s[base+2]),
+ * auto-allocated in Tensile
+ *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K /
+ * non-gfx1250).
  */
-#define MODULE_OPTIONS_LIST(X)            \
-    X(DebugLevel, int)                    \
-    X(OptLevel, int)                      \
-    X(TileA0, int)                        \
-    X(TileB0, int)                        \
-    X(TileM0, int)                        \
-    X(NumGRA, uint32_t)                   \
-    X(NumGRB, uint32_t)                   \
-    X(NumGRM, uint32_t)                   \
-    X(wavefrontSize, int)                 \
-    X(SubGroup0, int)                     \
-    X(SubGroup1, int)                     \
-    X(WaveGroup0, int)                    \
-    X(WaveGroup1, int)                    \
-    X(VectorWidthA, int)                  \
-    X(VectorWidthB, int)                  \
-    X(GlobalReadVectorWidthA, int)        \
-    X(GlobalReadVectorWidthB, int)        \
-    X(DirectToLdsA, bool)                 \
-    X(DirectToLdsB, bool)                 \
-    X(UseSgprForGRO, int)                 \
-    X(PrintBeforePass, std::string)       \
-    X(PrintAfterPass, std::string)        \
-    X(DebugPass, std::string)             \
-    X(PassOrderSnapshotJson, std::string) \
-    X(EnableRemarks, bool)                \
-    X(EnableWaitCntInsertion, bool)       \
-    X(VgprMsbMode, int)                   \
-    X(EnableSwPrefetchInsertion, bool)    \
-    X(SwPrefetchScratchSgpr, int)
+#define MODULE_OPTIONS_LIST(X)                    \
+    X(DebugLevel, int)                            \
+    X(OptLevel, int)                              \
+    X(TileA0, int)                                \
+    X(TileB0, int)                                \
+    X(TileM0, int)                                \
+    X(NumGRA, uint32_t)                           \
+    X(NumGRB, uint32_t)                           \
+    X(NumGRM, uint32_t)                           \
+    X(wavefrontSize, int)                         \
+    X(SubGroup0, int)                             \
+    X(SubGroup1, int)                             \
+    X(WaveGroup0, int)                            \
+    X(WaveGroup1, int)                            \
+    X(VectorWidthA, int)                          \
+    X(VectorWidthB, int)                          \
+    X(GlobalReadVectorWidthA, int)                \
+    X(GlobalReadVectorWidthB, int)                \
+    X(DirectToLdsA, bool)                         \
+    X(DirectToLdsB, bool)                         \
+    X(UseSgprForGRO, int)                         \
+    X(PrintBeforePass, std::string)               \
+    X(PrintAfterPass, std::string)                \
+    X(DebugPass, std::string)                     \
+    X(PassOrderSnapshotJson, std::string)         \
+    X(VerifyEach, bool)                           \
+    X(EnableRemarks, bool)                        \
+    X(EnableWaitCntInsertion, bool)               \
+    X(EnableLoopCarriedTokenDeps, bool)           \
+    X(EnableESM2, bool)                           \
+    X(EnableESM2TrackValuVsrc, bool)              \
+    X(VgprMsbMode, int)                           \
+    X(RequiresXCntForVolatileVMEM, bool)          \
+    X(EnableXnackReplay, bool)                    \
+    X(EnableSwInstructionPrefetchRelStatic, bool) \
+    X(EnableSwInstructionPrefetchAbs, bool)       \
+    X(SwInstructionPrefetchAbsBaseSgpr, int)      \
+    X(ClusterBarrier, bool)                       \
+    X(StreamKMulticast, bool)                     \
+    X(TDMLoadWaveSync, bool)                      \
+    X(PrefetchGlobalRead, int)                    \
+    X(PrefetchLocalRead, int)                     \
+    X(RemoveInstructions, std::string)            \
+    X(CloneList, std::vector<CloneSpec>)          \
+    X(DsReadQueueDepth, int)                      \
+    X(DsReadDrainLatency, int)                    \
+    X(DsReadThrottleLatency, int)                 \
+    X(DsReadPerWmma, int)                         \
+    X(TensorLoadWmmaSpace, int)                   \
+    X(GlobalReadQueueDepth, int)                  \
+    X(GlobalReadDrainLatency, int)                \
+    X(DsReadOrder, int)                           \
+    X(ArchName, std::string)
+
+// Keep transition disabled by default to preserve legacy full-throttle pacing:
+// entries=0 skips the transition range, and factor=1.0 is the full interval.
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)       \
+    X(DsReadThrottleTransitionFactor, double, 1.0) \
+    X(DsReadThrottleTransitionEntries, int, 0)     \
+    X(ClusterBarrierRule3SignalLeadCycles, int, 100)
 
 namespace stinkytofu {
 /**
@@ -80,12 +125,13 @@ namespace stinkytofu {
  * This class provides a container for assembly instructions generated by
  * lowering passes or directly created through the StinkyTofu IR builders.
  *
- * Note: This class is planned for deprecation in favor of using Function/BasicBlock
- * directly, but is currently needed for compatibility with existing Python bindings
- * and rocisa conversion utilities.
+ * Note: This class is planned for deprecation in favor of using
+ * Function/BasicBlock directly, but is currently needed for compatibility with
+ * existing Python bindings and rocisa conversion utilities.
  *
  * Architecture:
- *   LogicalModule (high-level IR) -> Lowering Passes -> StinkyAsmModule (assembly IR)
+ *   LogicalModule (high-level IR) -> Lowering Passes -> StinkyAsmModule
+ * (assembly IR)
  *
  * Example usage:
  * @code
@@ -109,6 +155,9 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 #define GEN_MEMBER_OPTION(name, type) type name{};
         MODULE_OPTIONS_LIST(GEN_MEMBER_OPTION)
 #undef GEN_MEMBER_OPTION
+#define GEN_MEMBER_OPTION_WITH_DEFAULT(name, type, value) type name = value;
+        MODULE_OPTIONS_WITH_DEFAULTS_LIST(GEN_MEMBER_OPTION_WITH_DEFAULT)
+#undef GEN_MEMBER_OPTION_WITH_DEFAULT
     };
 
     /**
@@ -140,23 +189,27 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     std::string getName() const;
 
     /**
-     * @brief Set the name used for output files (e.g. aggregated_instruction_cost.txt).
-     * When set, Backend writes <outputName>_aggregated_instruction_cost.txt so it matches
-     * the full kernel name (e.g. .o basename). When empty, getName() is used.
+     * @brief Set the name used for output files (e.g.
+     * aggregated_instruction_cost.txt). When set, Backend writes
+     * <outputName>_aggregated_instruction_cost.txt so it matches the full kernel
+     * name (e.g. .o basename). When empty, getName() is used.
      * @param name Full kernel name for output file basename
      */
     void setOutputName(const std::string& name);
 
     /**
-     * @brief Get the output file basename (cost file, etc.). Empty means use getName().
+     * @brief Get the output file basename (cost file, etc.). Empty means use
+     * getName().
      * @return Output name string, or empty to use module name
      */
     std::string getOutputName() const;
 
     /**
      * @brief Set the directory for output files (e.g. cost file).
-     * When set, Backend writes to <outputDir>/<kernel_full_name>/aggregated_instruction_cost.txt
-     * (e.g. comparison_output/1024_vgpr_gfx1250/<full_name>/). When empty, files go to cwd.
+     * When set, Backend writes to
+     * <outputDir>/<kernel_full_name>/aggregated_instruction_cost.txt (e.g.
+     * comparison_output/1024_vgpr_gfx1250/<full_name>/). When empty, files go to
+     * cwd.
      * @param dir Path such as "comparison_output/1024_vgpr_gfx1250"
      */
     void setOutputDir(const std::string& dir);
@@ -201,6 +254,32 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     Function& getFunction();
 
     const Function& getFunction() const;
+
+    /**
+     * @brief Create a named callable Function.
+     *
+     * Function names must be unique within the module. The returned Function has
+     * an entry BasicBlock already created.
+     */
+    Function& createFunction(std::string_view name, bool isCallable = true);
+
+    /**
+     * @brief Look up a Function by name. Empty name returns the entry Function.
+     */
+    Function* getFunction(std::string_view name);
+    const Function* getFunction(std::string_view name) const;
+
+    /**
+     * @brief Return all Functions in emission order: entry first, then callable
+     * functions.
+     */
+    std::vector<Function*> getFunctions();
+    std::vector<const Function*> getFunctions() const;
+
+    /**
+     * @brief Number of Functions (entry + callable functions).
+     */
+    size_t numFunctions() const;
 
     /**
      * @brief Add a group name to the module
@@ -263,6 +342,19 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * @brief Get total instruction size in bytes, or -1 if not set.
      */
     int64_t getTotalInstructionBytes() const;
+
+    // ---- Plugin data (opaque key-value store for pass plugins) ----
+
+    void setPluginDataI64(const std::string& key, int64_t value);
+    int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const;
+
+    void setPluginDataStr(const std::string& key, const std::string& value);
+    std::string getPluginDataStr(const std::string& key, const std::string& defaultVal = "") const;
+
+    // ---- Pass plugin support ----
+
+    PassBuilder& getPassBuilder();
+    const PassBuilder& getPassBuilder() const;
 
    private:
     struct Impl;

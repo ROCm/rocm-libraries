@@ -3,9 +3,11 @@
 //
 // ASM kernel path resolution utility.
 //
-// AITER provenance
+// AITER provenance (dual-snapshot — see asm_kernels/README.md for full table)
 //   Source repository: https://github.com/ROCm/aiter
-//   Commit: 9522048dc10de20ba9dcda1c0a3f640867e7a586
+//   fmha_v3_fwd snapshot: 17d4a33b6f9535e820353ebc6217769efc3766d6
+//   fmha_v3_bwd snapshot: 9522048dc10de20ba9dcda1c0a3f640867e7a586
+//   Local override: gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co (see SOURCE.md)
 //
 // At runtime, checks the HIPDNN_AITER_ASM_DIR environment variable first,
 // then falls back to the AITER_ASM_DIR compile definition (baked in at

@@ -22,9 +22,9 @@ namespace
 template <typename InputType>
 void executeConvFpropGraph(graph::Graph& graph,
                            hipdnnHandle_t handle,
-                           const std::shared_ptr<graph::Tensor_attributes>& xAttr,
-                           const std::shared_ptr<graph::Tensor_attributes>& wAttr,
-                           const std::shared_ptr<graph::Tensor_attributes>& yAttr,
+                           const std::shared_ptr<graph::TensorAttributes>& xAttr,
+                           const std::shared_ptr<graph::TensorAttributes>& wAttr,
+                           const std::shared_ptr<graph::TensorAttributes>& yAttr,
                            utilities::Tensor<InputType>& xTensor,
                            utilities::Tensor<InputType>& wTensor,
                            utilities::Tensor<InputType>& yTensor)
@@ -139,23 +139,32 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "\n=== Running serialization round-trip test " << inputType << " [" << layout
               << "] ===\n";
 
-    constexpr int64_t N = 4;
-    constexpr int64_t C = 8;
-    constexpr int64_t H = 8;
-    constexpr int64_t W = 8;
-    constexpr int64_t K = 8;
-    constexpr int64_t R = 3;
-    constexpr int64_t S = 3;
-    constexpr int64_t U = 1;
-    constexpr int64_t V = 1;
-    constexpr int64_t PAD_H = 1;
-    constexpr int64_t PAD_W = 1;
-    constexpr int64_t DIL_H = 1;
-    constexpr int64_t DIL_W = 1;
+    // Input
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 4;
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 8;
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 8;
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 8;
+
+    // Filter
+    const int64_t k = config.filter.size() > 0 ? config.filter[0] : 8;
+    const int64_t r = config.filter.size() > 1 ? config.filter[1] : 3;
+    const int64_t s = config.filter.size() > 2 ? config.filter[2] : 3;
+
+    // Stride
+    const int64_t u = config.stride.size() > 0 ? config.stride[0] : 1;
+    const int64_t v = config.stride.size() > 1 ? config.stride[1] : 1;
+
+    // Padding
+    const int64_t padH = config.padding.size() > 0 ? config.padding[0] : 1;
+    const int64_t padW = config.padding.size() > 1 ? config.padding[1] : 1;
+
+    // Dilation
+    const int64_t dilH = config.dilation.size() > 0 ? config.dilation[0] : 1;
+    const int64_t dilW = config.dilation.size() > 1 ? config.dilation[1] : 1;
 
     // Set names on tensors so we can retrieve them after deserialization
-    auto xAttrOrig = createTensor({N, C, H, W}, inputType, layout);
-    auto wAttrOrig = createTensor({K, C, R, S}, inputType, layout);
+    auto xAttrOrig = createTensor({n, c, h, w}, inputType, layout);
+    auto wAttrOrig = createTensor({k, c, r, s}, inputType, layout);
     xAttrOrig->set_name("x");
     wAttrOrig->set_name("w");
 
@@ -172,11 +181,13 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    setPreferredEngine(originalGraph, config);
+
     graph::ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop")
-        .set_padding({PAD_H, PAD_W})
-        .set_stride({U, V})
-        .set_dilation({DIL_H, DIL_W});
+        .set_padding({padH, padW})
+        .set_stride({u, v})
+        .set_dilation({dilH, dilW});
 
     auto yAttrOrig = originalGraph.conv_fprop(xAttrOrig, wAttrOrig, convAttrs);
     yAttrOrig->set_name("y");
@@ -210,6 +221,8 @@ int main(int argc, char* argv[])
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();

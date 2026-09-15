@@ -9,9 +9,12 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/TensorConstants.hpp>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -67,7 +70,7 @@ inline Error setDescriptorAttrScalar(hipdnnBackendDescriptor_t desc,
 }
 
 // Overload for std::monostate — this is unreachable when guarded by
-// get_pass_by_value(), but required for std::visit to compile.
+// a value-presence check, but required for std::visit to compile.
 inline Error setDescriptorAttrTensorValue(hipdnnBackendDescriptor_t /*desc*/,
                                           std::monostate /*value*/,
                                           const std::string& errorContext)
@@ -211,13 +214,76 @@ inline Error
                                                isVirtual,
                                                "tensor is_virtual"));
 
-    if(tensor->get_pass_by_value())
+    // Only send the byte-alignment attribute when the tensor carries a
+    // non-default alignment. Sending it unconditionally would break lowering against
+    // a pre-1.3.0 backend that doesn't recognize HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT.
+    if(tensor->get_alignment() != DEFAULT_TENSOR_ALIGNMENT)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   tensor->get_alignment(),
+                                                   "tensor byte alignment"));
+    }
+
+    // Lower the ragged-offset aux as its own tensor descriptor and link it, so the
+    // backend can resolve the aux's dims/strides/dtype rather than a bare UID.
+    // createOrFindTensorDesc dedups a shared or also-an-input aux by UID and
+    // finalizes it before it is referenced here.
+    if(tensor->has_ragged_offset())
+    {
+        const auto& raggedOffset = tensor->get_ragged_offset();
+
+        // The aux must have backing storage and must not itself be ragged.
+        // Rejecting a nested aux also breaks any offset cycle (every node in a
+        // cycle is ragged, so the first hop is rejected) before the recursion
+        // below could overflow the stack. Mirrors the backend deserialize
+        // enforcement in GraphDescriptor::relinkRaggedOffsets.
+        if(raggedOffset->get_is_virtual())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Ragged-offset aux tensor " + std::to_string(raggedOffset->get_uid())
+                        + " of tensor " + std::to_string(uid) + " must not be virtual"};
+        }
+        if(raggedOffset->has_ragged_offset())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Ragged-offset aux tensor " + std::to_string(raggedOffset->get_uid())
+                        + " of tensor " + std::to_string(uid)
+                        + " must not itself carry a ragged offset"};
+        }
+
+        HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, raggedOffset));
+        HIPDNN_CHECK_ERROR(
+            setDescriptorAttrTensorRef(desc.get(),
+                                       HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                       raggedOffset->get_uid(),
+                                       tensorDescs,
+                                       "tensor ragged offset " + std::to_string(uid)));
+    }
+
+    if(!std::holds_alternative<std::monostate>(tensor->get_value_variant()))
     {
         HIPDNN_CHECK_ERROR(std::visit(
             [&](auto&& arg) -> Error {
                 return setDescriptorAttrTensorValue(desc.get(), arg, "tensor value");
             },
             tensor->get_value_variant()));
+    }
+
+    // Only send the runtime pass-by-value extension attribute when the flag is
+    // actually set. A non-pass-by-value tensor never needs it, and sending it
+    // unconditionally would break lowering against a pre-1.2.0 backend that
+    // does not recognize HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT.
+    // This mirrors the guarded tensor-value send above: extension attributes
+    // floor the backend only for graphs that actually use them.
+    if(tensor->get_is_runtime_pass_by_value())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                                   HIPDNN_TYPE_BOOLEAN,
+                                                   true,
+                                                   "tensor is_runtime_pass_by_value"));
     }
 
     HIPDNN_CHECK_ERROR(finalizeDescriptor(desc.get(), "tensor descriptor"));

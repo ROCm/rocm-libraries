@@ -12,6 +12,18 @@ if(NOT EXPECTED_LLVM_VERSION)
     set(EXPECTED_LLVM_VERSION "20")
 endif()
 
+# Allows using any tool when the found version doesn't match expected.
+# Individual tools can still be explicitly enabled via e.g. -DALLOW_CLANG_FORMAT_VERSION_MISMATCH=ON
+# when ALLOW_TOOL_VERSION_MISMATCH is OFF.
+option(ALLOW_TOOL_VERSION_MISMATCH
+    "Allow any tool version different from its expected version (warn but continue)" OFF
+)
+if(ALLOW_TOOL_VERSION_MISMATCH)
+    set(ALLOW_CLANG_FORMAT_VERSION_MISMATCH ON)
+    set(ALLOW_CLANG_TIDY_VERSION_MISMATCH ON)
+    set(ALLOW_LLVM_VERSION_MISMATCH ON)
+endif()
+
 # Helper function to generate version-specific search paths hints by concatenating the base path
 # with a list of versioned path names.
 function(get_versioned_search_paths OUTPUT_VAR BASE_PATH VERSION)
@@ -93,10 +105,14 @@ endfunction()
 #   OUTPUT_VAR - Variable name to store the found tool path
 #   TOOL_NAME - The single name of the single tool to search for (e.g., "clang-format")
 #   EXPECTED_VERSION - Expected version to search for (typically assumed to be the tool's major version number)
-#   VERSION_REGEX - Regex to extract the relevant portion to match EXPECTED_VERSION frmo the tool's --version output
+#   VERSION_REGEX - Regex to extract the relevant portion to match EXPECTED_VERSION from the tool's --version output
 #   ERROR_LEVEL - FATAL_ERROR, WARNING, STATUS, or VERBOSE for the not found message
+# Optional keyword arguments:
+#   ALLOW_MISMATCH - If present, a version mismatch issues a warning but the tool is still
+#                   used. By default, a version mismatch disables the tool.
 # ~~~
 function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ERROR_LEVEL)
+    cmake_parse_arguments(PARSE_ARGV 5 _CHECK_TOOL_VERSION "ALLOW_MISMATCH" "" "")
     # Build version-specific paths if LLVM_TOOL_HINTS is set
     set(SEARCH_HINTS)
     if(DEFINED LLVM_TOOL_HINTS)
@@ -141,7 +157,8 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
             ${${OUTPUT_VAR}} "${TOOL_NAME}" ${EXPECTED_VERSION} "${VERSION_REGEX}"
             "Found ${TOOL_NAME} version {VERSION} at {PATH}"
         )
-        if(NOT ${TOOL_NAME}_VERSION_MATCHED)
+        # checkToolVersion() already warned on mismatch
+        if(NOT ${TOOL_NAME}_VERSION_MATCHED AND NOT _CHECK_TOOL_VERSION_ALLOW_MISMATCH)
             message(WARNING "${TOOL_NAME} disabled due to version mismatch "
                 "(expected ${EXPECTED_VERSION}). Update your environment and perform "
                 "a fresh cmake configure to set ${OUTPUT_VAR} to the needed version."
@@ -157,9 +174,13 @@ endfunction()
 
 # Finds and checks clang-format
 function(findAndCheckClangFormat)
+    set(_allow_mismatch_arg "")
+    if(ALLOW_CLANG_FORMAT_VERSION_MISMATCH)
+        set(_allow_mismatch_arg ALLOW_MISMATCH)
+    endif()
     findandchecktool(
         CLANG_FORMAT_BINARY "clang-format" ${EXPECTED_CLANG_FORMAT_VERSION}
-        "clang-format version ([0-9]+)\\." FATAL_ERROR
+        "clang-format version ([0-9]+)\\." FATAL_ERROR ${_allow_mismatch_arg}
     )
 
     # Export to parent scope
@@ -174,9 +195,13 @@ function(findAndCheckClangTidy)
         set(_not_found_log_level STATUS)
     endif()
 
+    set(_allow_mismatch_arg "")
+    if(ALLOW_CLANG_TIDY_VERSION_MISMATCH)
+        set(_allow_mismatch_arg ALLOW_MISMATCH)
+    endif()
     findandchecktool(
         CLANG_TIDY_EXE "clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "version ([0-9]+)\\."
-        ${_not_found_log_level}
+        ${_not_found_log_level} ${_allow_mismatch_arg}
     )
 
     # Export to parent scope
@@ -201,9 +226,13 @@ function(findAndCheckLlvmTools)
         string(TOUPPER ${TOOL} TOOL_UPPER)
         string(REPLACE "-" "_" TOOL_VAR ${TOOL_UPPER})
 
+        set(_allow_mismatch_arg "")
+        if(ALLOW_LLVM_VERSION_MISMATCH)
+            set(_allow_mismatch_arg ALLOW_MISMATCH)
+        endif()
         findandchecktool(
             ${TOOL_VAR}_BINARY "${TOOL}" ${EXPECTED_LLVM_VERSION} "LLVM version ([0-9]+)\\."
-            FATAL_ERROR
+            FATAL_ERROR ${_allow_mismatch_arg}
         )
 
         # Export to parent scope
@@ -213,9 +242,13 @@ endfunction()
 
 # Finds and checks llvm-symbolizer
 function(findAndCheckLlvmSymbolizer)
+    set(_allow_mismatch_arg "")
+    if(ALLOW_LLVM_VERSION_MISMATCH)
+        set(_allow_mismatch_arg ALLOW_MISMATCH)
+    endif()
     findandchecktool(
         LLVM_SYMBOLIZER_EXE "llvm-symbolizer" ${EXPECTED_LLVM_VERSION} "LLVM version ([0-9]+)\\."
-        WARNING
+        WARNING ${_allow_mismatch_arg}
     )
 
     if(LLVM_SYMBOLIZER_EXE)

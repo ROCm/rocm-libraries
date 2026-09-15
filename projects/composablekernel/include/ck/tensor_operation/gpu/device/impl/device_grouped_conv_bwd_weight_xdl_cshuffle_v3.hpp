@@ -51,7 +51,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3(
         typename GridwiseGemm::Argument karg,
@@ -151,7 +151,7 @@ template <typename GridwiseGemm,
           TailNumber TailNum       = TailNumber::Full>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif
     kernel_grouped_conv_bwd_weight_xdl_cshuffle_v3_2lds(
         typename GridwiseGemm::Argument karg,
@@ -184,8 +184,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
 
         // Pass two lds pointer is the key to tell compiler that ds_read/write
         // operate on different lds chunk at same time without order dependecy
-        __shared__ char p_shared_0[GridwiseGemm::GetSharedMemoryNumberOfByte()];
-        __shared__ char p_shared_1[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+        __shared__ char p_shared_0[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
+        __shared__ char p_shared_1[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
 
         DispatchSplitKHack_2Lds<GridwiseGemm,
                                 AGridDesc_AK0_M_K1,
@@ -823,9 +823,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         template <typename GridwiseGemm>
         float RunImp(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            const index_t GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
-            const index_t GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
-            const index_t GemmK =
+            const IndexType GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
+            const IndexType GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
+            const IndexType GemmK =
                 arg.a_grid_desc_k0_m_k1_.GetLength(I0) * arg.a_grid_desc_k0_m_k1_.GetLength(I2);
 
             const ADataType* p_a_grid = arg.p_a_grid_;
@@ -1437,10 +1437,29 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        // Memory access runtime error on gfx1250 (inconsistent across runs)
+        // TODO: need fix
+        if constexpr(LargeTensors)
+        {
+            if(is_gfx125_supported())
+            {
+                return false;
+            }
+        }
+
         if constexpr(!LargeTensors)
         {
             if(arg.stride_overflow)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout
+                        << "Unsupported! stride_overflow is set but LargeTensors is not enabled!"
+                        << " In " << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                        << std::endl;
+                }
                 return false;
+            }
         }
 
         // check device
@@ -1770,9 +1789,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         }
         else
         {
-            const bool stride_ovf = tensor_exceeds_2gb(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb(e_g_k_c_xs_lengths) ||
-                                    tensor_exceeds_2gb(a_g_n_k_wos_lengths);
+            const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
@@ -1951,9 +1970,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         }
         else
         {
-            const bool stride_ovf = tensor_exceeds_2gb(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb(e_g_k_c_xs_lengths) ||
-                                    tensor_exceeds_2gb(a_g_n_k_wos_lengths);
+            const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
@@ -2009,8 +2028,23 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
     {
         auto str = std::stringstream();
 
+        std::map<BlockGemmPipelineScheduler, std::string> BlkGemmPipelineSchedulerToString{
+            {BlockGemmPipelineScheduler::Intrawave, "Intrawave"},
+            {BlockGemmPipelineScheduler::Interwave, "Interwave"}};
+
+        std::map<BlockGemmPipelineVersion, std::string> BlkGemmPipelineVersionToString{
+            {BlockGemmPipelineVersion::v1, "v1"},
+            {BlockGemmPipelineVersion::v2, "v2"},
+            {BlockGemmPipelineVersion::v3, "v3"},
+            {BlockGemmPipelineVersion::v4, "v4"},
+            {BlockGemmPipelineVersion::v5, "v5"}};
+
         // clang-format off
         str << "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3";
+
+        if(get_warp_size() != 64) {
+            str << "_WmmaPorted";
+        }
 
         if constexpr(DirectLoad) {
             str << "_DirectLoad";
@@ -2042,6 +2076,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             << CBlockTransferScalarPerVector_NWaveNPerXdl;
             if constexpr(NumGroupsToMerge > 1) 
                 str << ", " << NumGroupsToMerge;
+            if constexpr(LargeTensors) {
+                // Should be added for all instances but due to backward compatiblity,
+                // there is a lack of this information for other instances than Large
+                // Tensors.
+                str << ", BlkGemmPipelineScheduler: "
+                << BlkGemmPipelineSchedulerToString[BlkGemmPipeSched] << ", "
+                << "BlkGemmPipelineVersion: "
+                << BlkGemmPipelineVersionToString[BlkGemmPipelineVer];
+            }
             str << ">";
         // clang-format on
 

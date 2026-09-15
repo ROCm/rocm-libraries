@@ -24,6 +24,7 @@
 #include "AllHwMappings.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <unordered_map>
 
 #include "instruction/branch.hpp"
@@ -93,7 +94,8 @@ std::vector<StinkyInstruction*> lowerRocisaWaitTensorcnt(rocisa::Instruction& in
                                                          AsmIRBuilder& irBuilder) {
     SWaitTensorCntData waitTensorCntData;
     if (rocisa::SWaitTensorcnt* waitTensorCntInst = dynamic_cast<rocisa::SWaitTensorcnt*>(&inst)) {
-        if (const int* tensorcnt = std::get_if<int>(&waitTensorCntInst->getSrcParams().front())) {
+        auto srcParams = waitTensorCntInst->getSrcParams();
+        if (const int* tensorcnt = std::get_if<int>(&srcParams.front())) {
             waitTensorCntData.tlcnt = *tensorcnt;
         }
     } else {
@@ -112,7 +114,8 @@ std::vector<StinkyInstruction*> lowerRocisaStoreWaitCnt(rocisa::Instruction& ins
                                                         AsmIRBuilder& irBuilder) {
     SWaitStoreCntData waitStoreCntData;
     if (rocisa::_SWaitStorecnt* waitStoreCntInst = dynamic_cast<rocisa::_SWaitStorecnt*>(&inst)) {
-        if (const int* storecnt = std::get_if<int>(&waitStoreCntInst->getSrcParams().front())) {
+        auto srcParams = waitStoreCntInst->getSrcParams();
+        if (const int* storecnt = std::get_if<int>(&srcParams.front())) {
             waitStoreCntData.storecnt = *storecnt;
         }
     } else {
