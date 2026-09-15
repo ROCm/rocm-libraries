@@ -97,7 +97,7 @@ void ProfilingControlDescriptor::finalize()
         // Loud, because the number below is not a measurement: the watchdog had to
         // break a deadlock caused by the timed region blocking the host on the stalled
         // stream, and the elapsed span therefore contains the whole timeout.
-        HIPDNN_BACKEND_LOG_WARN(
+        HIPDNN_BACKEND_LOG_ERROR(
             "ProfilingControlDescriptor: stall watchdog fired; the timed region blocked the "
             "host on its own stream. Elapsed time {} ms is invalid and must be discarded "
             "(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT). Stalling is now disabled for this "
