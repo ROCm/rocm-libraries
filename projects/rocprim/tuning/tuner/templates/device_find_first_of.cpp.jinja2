@@ -1,0 +1,20 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block config_constructor -%}
+    rocprim::find_first_of_config<{{ config.block_size_x }}, {{ config.ipt }}>
+{%- endblock %}
+
+{% block benchmark_type %}
+    using benchmark_type = device_find_first_of_benchmark<value_type, config>;
+{% endblock %}
+
+{% block type_definitions %}
+    using value_type = {{ value_type }};
+{% endblock %}
+
+
+{% block benchmark_queue %}
+    std::vector<size_t> keys_sizes{1, 10, 100, 1000};
+    std::vector<double> first_occurrences{0.1, 0.5, 1.0};
+    executor.queue<benchmark_type>(keys_sizes, first_occurrences);
+{% endblock %}

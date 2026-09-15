@@ -1,0 +1,21 @@
+{% extends "common/base.h.jinja2" %}
+
+
+{% block target_tparams %}
+template<class Target, class value_type, class output_type>
+{% endblock %}
+
+{% block params_type -%}transform_config_params{% endblock -%}
+
+
+{% block config_guard scoped %}
+({% if not type.value_type.is_floating %}!{% endif %}rocprim::is_floating_point<value_type>::value){% if type.value_type.size_min > 0 %} && (sizeof(value_type) > {{ type.value_type.size_min }}){% endif %} && (sizeof(value_type) <= {{ type.value_type.size }}) {% if type.output_type.size_min > 0 %} && (sizeof(output_type) > {{ type.output_type.size_min }}){% endif %} && (sizeof(output_type) <= {{ type.output_type.size }})
+{% endblock %}
+
+{% block config_constructor -%}
+transform_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }
+{%- endblock %}
+
+{% block config_base_type -%}
+binary_search_config_params_base<value_type, output_type>
+{%- endblock %}
