@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "gemm_common/vector_size_fallback_dispatch.hpp"
+
 auto calculate_rtol_atol(const ck_tile::index_t K,
                          const ck_tile::index_t kbatch,
                          const float max_accumulated_value)
@@ -172,31 +174,52 @@ int run_batched_gemm_example_with_layouts(int argc,
     c_m_n_dev_buf.SetZero();
     c_m_n_dev_result.SetZero();
 
-    float ave_time = invoke_batched_gemm<GemmConfig,
-                                         ADataType,
-                                         BDataType,
-                                         ck_tile::tuple<>,
-                                         AccDataType,
-                                         CDataType,
-                                         ALayout,
-                                         BLayout,
-                                         ck_tile::tuple<>,
-                                         CLayout>(a_m_k_dev_buf,
-                                                  b_k_n_dev_buf,
-                                                  c_m_n_dev_buf,
-                                                  M,
-                                                  N,
-                                                  K,
-                                                  stride_A,
-                                                  stride_B,
-                                                  stride_C,
-                                                  batch_stride_A,
-                                                  batch_stride_B,
-                                                  batch_stride_C,
-                                                  batch_count,
-                                                  kbatch,
-                                                  n_warmup,
-                                                  n_repeat);
+    auto invoke = [&]<typename Cfg>() {
+        return invoke_batched_gemm<Cfg,
+                                   ADataType,
+                                   BDataType,
+                                   ck_tile::tuple<>,
+                                   AccDataType,
+                                   CDataType,
+                                   ALayout,
+                                   BLayout,
+                                   ck_tile::tuple<>,
+                                   CLayout>(a_m_k_dev_buf,
+                                            b_k_n_dev_buf,
+                                            c_m_n_dev_buf,
+                                            M,
+                                            N,
+                                            K,
+                                            stride_A,
+                                            stride_B,
+                                            stride_C,
+                                            batch_stride_A,
+                                            batch_stride_B,
+                                            batch_stride_C,
+                                            batch_count,
+                                            kbatch,
+                                            n_warmup,
+                                            n_repeat);
+    };
+
+    float ave_time = ck_tile_example::dispatch_vector_size_fallback<GemmConfig,
+                                                                    ADataType,
+                                                                    BDataType,
+                                                                    CDataType,
+                                                                    ALayout,
+                                                                    BLayout,
+                                                                    CLayout>(M,
+                                                                             N,
+                                                                             K,
+                                                                             stride_A,
+                                                                             stride_B,
+                                                                             stride_C,
+                                                                             kbatch,
+                                                                             invoke,
+                                                                             batch_stride_A,
+                                                                             batch_stride_B,
+                                                                             batch_stride_C);
+
     c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 
     std::string op_name{"Batched Gemm"};

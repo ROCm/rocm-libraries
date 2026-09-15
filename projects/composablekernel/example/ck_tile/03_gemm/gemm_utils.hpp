@@ -8,9 +8,12 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/utility/json_dump.hpp"
+#include "gemm_common/vector_size_fallback_dispatch.hpp"
 
 #include <string>
 #include <variant>
+
+using ck_tile_example::GemmConfigVectorSizeFallback;
 
 struct GemmConfigBase
 {
@@ -41,6 +44,14 @@ struct GemmConfigBase
     static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB =
         ck_tile::DataCachePrefetchKind::None;
     static constexpr bool Async = false;
+
+    static constexpr bool FixedVectorSize = false;
+    // If FixedVectorSize==true: use these vector sizes for A/B loads and C store
+    static constexpr ck_tile::index_t VectorSizeA = 1;
+    static constexpr ck_tile::index_t VectorSizeB = 1;
+    static constexpr ck_tile::index_t VectorSizeC = 1;
+
+    static constexpr bool EnableSmallerVectorLoadFallback = false;
 };
 
 template <typename PrecType>
@@ -197,6 +208,8 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
 
     static constexpr int kBlockPerCu = 2;
+
+    static constexpr bool EnableSmallerVectorLoadFallback = true;
 };
 
 template <typename PrecType>
@@ -204,6 +217,9 @@ struct GemmConfigComputeV3_WMMA_ClusterLaunch : public GemmConfigComputeV3_WMMA<
 {
     static constexpr ck_tile::index_t kClusterSizeM = 2;
     static constexpr ck_tile::index_t kClusterSizeN = 2;
+
+    // KPad fallback not validated on the cluster-launch path yet, disable for now.
+    static constexpr bool EnableKPadFallback = false;
 };
 
 template <typename PrecType>
@@ -404,6 +420,15 @@ struct GemmTypeConfig<ck_tile::tf32_t, ck_tile::tf32_t, float>
     using BDataType   = ck_tile::tf32_t;
     using AccDataType = float;
     using CDataType   = float;
+};
+
+template <>
+struct GemmTypeConfig<ck_tile::fp32_t>
+{
+    using ADataType   = ck_tile::fp32_t;
+    using BDataType   = ck_tile::fp32_t;
+    using AccDataType = ck_tile::fp32_t;
+    using CDataType   = ck_tile::fp32_t;
 };
 
 template <>
