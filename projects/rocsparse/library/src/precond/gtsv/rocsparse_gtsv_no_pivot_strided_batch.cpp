@@ -527,7 +527,7 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel<BLOCKSIZE>),
-            dim3((m - 1) / BLOCKSIZE + 1, batch_count, 1),
+            dim3((m - 1) / BLOCKSIZE + 1, rocsparse::get_batch_grid_size(batch_count), 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -566,7 +566,7 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel<BLOCKSIZE>),
-            dim3((m - 1) / BLOCKSIZE + 1, batch_count, 1),
+            dim3((m - 1) / BLOCKSIZE + 1, rocsparse::get_batch_grid_size(batch_count), 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
