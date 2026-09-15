@@ -4,7 +4,7 @@
 ################################################################################
 """R6 — Activation.py remaining-coverage characterization test.
 
-Targets the following groups of uncovered lines in Tensile/Activation.py (207
+Targets the following groups of uncovered lines in tensilelite/Activation.py (207
 statements at 76% per survey — "Activation remaining (207, 76%)"):
 
   Group A — ActivationAvailable.__init__ + ActivationTypeRegister.__init__ +
@@ -57,7 +57,7 @@ import shutil
 from dataclasses import dataclass
 
 import pytest
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 from rocisa.code import Module
 
