@@ -668,3 +668,4 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
         endforeach()
     endif()
 endif()
+
