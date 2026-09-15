@@ -318,6 +318,11 @@ private:
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        // execute() only enqueues. The readback below copies on the tensor's own stream,
+        // which is not ordered against a caller-selected stream such as hipStreamPerThread,
+        // so without this the comparison can race the kernel and read a stale buffer.
+        ASSERT_EQ(hipStreamSynchronize(stream()), hipSuccess);
     }
 
     void executeCpuGraph(hipdnn_frontend::graph::Graph& graph,
