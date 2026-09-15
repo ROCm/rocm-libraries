@@ -261,6 +261,19 @@ downstream, and a `TDMPlusLdsBuf=0` StreamK kernel lost **three**
 `toPGR1`. One added barrier, three guards deleted, on a kernel with no rotating
 ring and no annotations anywhere near it.
 
+The distinction that matters is **derived vs artifact**. `sk-tdm3` survives the
+same barrier unharmed because its reads carry `mod.loopcarriedraw`, so
+`needsLiveTensorState` is true for the loop block, the queue crosses the back
+edge, and the in-loop wait is derived from the dependence. `bbs` has no
+annotation (`TDMPlusLdsBuf=0`, tags do not rotate), so the freeze is active and
+its in-loop wait was only ever a shadow of the sweep-0 snapshot. Perturb anything
+upstream and it moves.
+
+This is why preserving the StreamK barrier is gated on `TDMPlusLdsBuf == 1` — not
+because triple buffering needs it more, but because that is the case where the
+annotation has already made the block's tensor state live. Widening the gate
+means first making that true everywhere, i.e. removing the freeze.
+
 Two consequences. Any change that introduces a tensor-counter consumer needs the
 whole suite re-diffed, not just the kernel it targets; and kernels that look
 correct today may be relying on waits that exist only as an artifact of where the

@@ -11125,14 +11125,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
     insertedCount = 0
     annotatedRawCount = 0
 
-    # NOTE: the StreamK persistent-loop barrier is deleted here and never rebuilt
-    # (it carries no memtoken, and the label_PersistentLoopStart back edge is not
-    # modelled), which loses a real cross-tile LDS hazard. Preserving it was tried
-    # and reverted: a barrier is a CK_Tensor consumer, so it drains and trims the
-    # queue in solver sweep 0, and restoreTensorState then propagates that empty
-    # snapshot downstream -- a TDMPlusLdsBuf=0 StreamK kernel lost the
-    # s_wait_tensorcnt inside its own main loop as a result. Adding a wait must
-    # not remove later ones; fix the freeze before reinstating the barrier.
+    # The StreamK persistent-loop barrier guards a real cross-tile LDS hazard and
+    # pass-2 cannot rebuild it: it carries no memtoken, and the
+    # label_PersistentLoopStart back edge is not modelled at all.
+    #
+    # Preserving it is only safe where the main loop's tensor state is LIVE. A
+    # barrier is a CK_Tensor consumer, so it drains and trims the queue in solver
+    # sweep 0. Where restoreTensorState freezes that snapshot, it is what every
+    # downstream block sees for the rest of the solve, and those blocks' tensorcnt
+    # becomes an artifact of where the snapshot was taken rather than a derived
+    # fact -- adding this barrier DELETED the s_wait_tensorcnt inside a
+    # TDMPlusLdsBuf=0 StreamK kernel's own main loop.
+    #
+    # TDMPlusLdsBuf=1 is the case where the reads carry mod.loopcarriedraw, which
+    # makes needsLiveTensorState true for the loop block: the queue survives the
+    # back edge, the in-loop wait is derived, and an upstream barrier cannot
+    # delete it. Verified -- sk-tdm3 keeps every wait and gains the barrier, and
+    # every other kernel is untouched. Widen this only once the freeze is gone.
+    preserveStreamKBarrier = kernel.get("TDMPlusLdsBuf", 0) == 1
+    streamKBarrierComment = "For stream-k / persistent loop"
 
     # Pass-1: remove existing barriers first.
     modulesToScan = [rootModule]
@@ -11143,7 +11154,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]:
+        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0] \
+             and not (preserveStreamKBarrier and streamKBarrierComment in str(item)):
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
