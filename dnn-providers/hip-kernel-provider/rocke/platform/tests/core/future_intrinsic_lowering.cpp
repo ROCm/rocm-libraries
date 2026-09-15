@@ -293,6 +293,79 @@ void case_quad_perm_hip_rejects_missing_ctrl()
     rocke_ir_builder_free(&b);
 }
 
+/* Build a kernel whose quad_perm carries a raw, out-of-range `ctrl`. The
+ * builder validates selectors, so this shape can only arrive from IR that
+ * skipped it (deserialized, rewritten by a pass, hand-built) -- exactly the
+ * case masking to eight bits used to swallow: 256 became 0 ([0,0,0,0], a
+ * lane-0 broadcast) and -1 became 255 ([3,3,3,3]). Both are legal permutes,
+ * so the kernel computed wrong numbers instead of failing. */
+void build_quad_perm_raw_ctrl(rocke_ir_builder_t* b, int64_t ctrl)
+{
+    rocke_value_t* data = rocke_b_const_i32(b, 1);
+    rocke_value_t* operands[] = {data};
+    const rocke_type_t* result_types[] = {rocke_i32()};
+    rocke_attr_map_t attrs;
+    rocke_attr_map_init(&attrs);
+    rocke_attr_set_int(b, &attrs, "ctrl", ctrl);
+    rocke_b_op(b,
+               ROCKE_OP_TILE_QUAD_PERM,
+               operands,
+               1,
+               result_types,
+               1,
+               &attrs,
+               nullptr,
+               0,
+               "qperm",
+               nullptr);
+    rocke_b_ret(b);
+}
+
+void expect_quad_perm_ctrl_rejected(int64_t ctrl)
+{
+    /* HIP lowerer. */
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "qperm_bad_ctrl_hip");
+        build_quad_perm_raw_ctrl(&b, ctrl);
+
+        rocke_strbuf_t out;
+        rocke_strbuf_init(&out, 256);
+        rocke_lower_hip_opts_t opts{};
+        opts.include_prologue = false;
+        opts.include_prologue_set = true;
+        opts.arch = "gfx950";
+        const rocke_status_t st
+            = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+        if(st != ROCKE_ERR_VALUE)
+            fail("quad_perm HIP lowering must reject out-of-range ctrl", __LINE__);
+        rocke_strbuf_free(&out);
+        rocke_ir_builder_free(&b);
+    }
+    /* LLVM lowerer. */
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "qperm_bad_ctrl_ll");
+        build_quad_perm_raw_ctrl(&b, ctrl);
+
+        char* ll = nullptr;
+        char err[ROCKE_ERR_MSG_CAP];
+        err[0] = '\0';
+        const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll, err, sizeof(err));
+        if(st != ROCKE_ERR_VALUE)
+            fail("quad_perm LLVM lowering must reject out-of-range ctrl", __LINE__);
+        std::free(ll);
+        rocke_ir_builder_free(&b);
+    }
+}
+
+void case_quad_perm_rejects_out_of_range_ctrl()
+{
+    expect_quad_perm_ctrl_rejected(256);
+    expect_quad_perm_ctrl_rejected(-1);
+}
+
 /* ---- mov_dpp8 ---- */
 void case_mov_dpp8_i32()
 {
@@ -718,6 +791,7 @@ const TestCase k_cases[] = {
     {"quad_perm_hip", case_quad_perm_hip},
     {"quad_perm_rejects_invalid_input", case_quad_perm_rejects_invalid_input},
     {"quad_perm_hip_rejects_missing_ctrl", case_quad_perm_hip_rejects_missing_ctrl},
+    {"quad_perm_rejects_out_of_range_ctrl", case_quad_perm_rejects_out_of_range_ctrl},
     {"ds_swizzle_xor", case_ds_swizzle_xor},
     {"mov_dpp8_i32", case_mov_dpp8_i32},
     {"quad_perm", case_quad_perm},

@@ -3300,6 +3300,31 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         with self.assertRaises(ValueError):
             b.quad_perm(b.const_f32(1.0), [0, 1, 2, 3])
 
+    def test_quad_perm_lowering_rejects_out_of_range_ctrl(self):
+        """Malformed IR must fail loudly, not truncate into a valid permute.
+
+        The builder validates selectors, but IR that reaches a lowerer by
+        another route (deserialized, rewritten by a pass, hand-built) does
+        not pass through it. Masking ``ctrl`` to eight bits turned 256 into
+        0 (``[0,0,0,0]``, a lane-0 broadcast) and -1 into 255
+        (``[3,3,3,3]``) -- a silently different shuffle, so a wrong
+        reduction computes wrong numbers instead of failing.
+        """
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad_ctrl in (256, -1):
+            with self.subTest(ctrl=bad_ctrl):
+                b = self._builder(f"qperm_ctrl_{bad_ctrl}")
+                value = b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+                value.op.attrs["ctrl"] = bad_ctrl
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(
+                        ValueError, r"ctrl must be in 0\.\.255"
+                    ):
+                        lower(b.kernel)
+
     def test_warp_shuffle_xor_quad_maps_masks(self):
         ll = self._lower(
             "qperm_xor",

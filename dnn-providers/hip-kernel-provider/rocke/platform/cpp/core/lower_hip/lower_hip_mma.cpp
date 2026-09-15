@@ -294,12 +294,19 @@ static rocke_status_t rocke_h_op_tile_quad_perm(rocke_h_lowerer_t* lw, const roc
     int64_t ctrl = 0;
     if(!rocke_attr_get_int(&op->attrs, "ctrl", &ctrl))
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.quad_perm: missing 'ctrl'");
+    /* 0..255 is the whole legal range: ctrl packs four two-bit lane
+     * selectors. Reject instead of masking (see lower_llvm/crosslane.cpp). */
+    if(ctrl < 0 || ctrl > 255)
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_VALUE,
+                            "tile.quad_perm: ctrl must be in 0..255, got %lld",
+                            (long long)ctrl);
     rocke_h_emitf(lw,
                   "int %s = __builtin_amdgcn_update_dpp(%s, %s, %lld, 15, 15, 1);",
                   rocke_h_name(lw, r),
                   rocke_h_name(lw, data),
                   rocke_h_name(lw, data),
-                  (long long)(ctrl & 0xFF));
+                  (long long)ctrl);
     return lw->status;
 }
 

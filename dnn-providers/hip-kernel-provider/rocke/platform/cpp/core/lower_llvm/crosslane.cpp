@@ -331,6 +331,14 @@ static void _op_tile_quad_perm(rocke_lower_t* L, const rocke_op_t* op)
     int64_t ctrl = 0;
     if(!rocke_attr_get_int(&op->attrs, "ctrl", &ctrl))
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.quad_perm: missing 'ctrl'");
+    /* ctrl packs four two-bit lane selectors (p0 | p1<<2 | p2<<4 | p3<<6),
+     * so 0..255 is the whole legal range. Reject instead of masking: a
+     * truncated control is a different, silently valid permutation. */
+    if(ctrl < 0 || ctrl > 255)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "tile.quad_perm: ctrl must be in 0..255, got %lld",
+                      (long long)ctrl);
     rocke_ll_need(L, "update.dpp.i32");
     rocke_ll_emitf(L,
                    "  %s = call i32 @llvm.amdgcn.update.dpp.i32("
@@ -338,7 +346,7 @@ static void _op_tile_quad_perm(rocke_lower_t* L, const rocke_op_t* op)
                    ll_result_name(op),
                    rocke_ll_operand(L, data),
                    rocke_ll_operand(L, data),
-                   (long long)(ctrl & 0xFF));
+                   (long long)ctrl);
 }
 
 static void _op_tile_wave_reduce(rocke_lower_t* L, const rocke_op_t* op)
