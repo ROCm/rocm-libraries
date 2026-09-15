@@ -75,6 +75,7 @@ description = "A code generation library for high-performance GEMM and tensor co
 license = "MIT"
 
 [project.scripts]
+tensilelite = "tensilelite.cli:main"
 Tensile = "tensilelite.tensilelite:main"
 TensileCreateLibrary = "tensilelite.tensilelite_create_library:run"
 TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
