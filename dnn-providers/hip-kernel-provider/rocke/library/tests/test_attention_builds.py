@@ -2837,9 +2837,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             base.runtime_shape,
             "test setup error: the base gfx942 spec is not on the runtime-shape path",
         )
-        self.assertEqual(
-            base.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv")
-        )
+        self.assertEqual(base.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
 
         keys, irs, names = {}, {}, {}
         for shape in self._SHAPES:
@@ -2897,9 +2895,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         # num_persistent must not exceed the work space nqb*Hq*B of the SMALLEST
         # shape under test, or spec construction rejects it.
-        base = self._spec(
-            **self._BASE_KWARGS, persistent=True, num_persistent=64
-        )
+        base = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
         self.assertFalse(
             base.runtime_shape,
             "test setup error: persistent no longer leaves the runtime path",
@@ -3042,9 +3038,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         for f in ("batch", "seqlen_q", "seqlen_kv"):
             self.assertEqual(by_name[f]["type"], "i32", f"{f} is not i32")
 
-        baked = self._spec(
-            **self._BASE_KWARGS, persistent=True, num_persistent=64
-        )
+        baked = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
         self.assertFalse(baked.runtime_shape)
         self.assertEqual(
             [a["name"] for a in attention_dense_signature(baked)],
