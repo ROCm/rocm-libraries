@@ -28,6 +28,24 @@
 // dK[seqlen_k, hdim_q] = dS'^T[seqlen_k, seqlen_q] @ Q^T[hdim_q, seqlen_q] * Scale[1]
 // dQ[seqlen_q, hdim_q] = dS'[seqlen_q, seqlen_k] @ K^T[hdim_q, seqlen_k] * Scale[1]
 
+// Hand the dQ_acc descriptor the compile-time head dim instead of the runtime
+// kargs.hdim_q, so the atomic row walk folds into MUBUF immediate offsets.
+//
+// On its own this LOSES (+1.1% nomask, +4.9% causal): it removes the address
+// VALU that was covering the TDM transfer, so `s_wait_tensorcnt` stall nearly
+// doubles (7,914 -> 13,974 in ATT) even though `s_wait_xcnt` drops
+// (6,574 -> 4,953) because fewer address registers rotate. Paired with
+// CK_TILE_FMHA_BWD_QDO_SLOTS=3, which restores the TDM cover from the other
+// side, the xcnt saving survives and the pair is a net win. Measured together;
+// do not enable one without the other.
+//
+// Gated to unmasked instances at the use site -- masked instances keep
+// QDO_SLOTS_MASKED=2 (deepening their ring is +34%), so for them this is pure
+// loss of cover.
+#ifndef CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE
+#define CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE 1
+#endif
+
 namespace ck_tile {
 
 // Per-CU state for group-mode deterministic persistent scheduling.
@@ -1697,9 +1715,25 @@ struct FmhaBwdDQDKDVKernel
             // Non-deterministic paths also use 'atomic_add' (kUseKSplit=false).
             constexpr auto DstInMemOp = conditional_expr<(kUseKSplit && !kUsePersistent)>(
                 memory_operation_enum::set, memory_operation_enum::atomic_add);
-            const index_t stride_dq_acc = [&]() {
+            // The dQ atomics walk rows by this stride. As a runtime index_t it
+            // forces every atomic to materialize its own address, which at high
+            // register pressure degenerates into a serial recurrence through one
+            // register and costs the s_clause grouping. With !kPadHeadDimQ,
+            // hdim_q is exactly kQKHeaddim, so handing the descriptor the
+            // compile-time value lets the walk fold into MUBUF immediate offsets.
+            const auto stride_dq_acc = [&]() {
                 if constexpr(kUseQrQtrDorPipeline)
                     return kargs.stride_dq;
+#if CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE
+                // Unmasked instances only. Folding the stride away removes the
+                // address VALU that was covering the TDM transfer, which only
+                // pays if the Q/dO ring is deepened to cover it instead
+                // (QDO_SLOTS=3). Masked instances keep QDO_SLOTS_MASKED=2 --
+                // deepening their ring is +34% -- so there the fold is a pure
+                // loss of TDM cover: +4.9% causal measured 2026-09-15.
+                else if constexpr(!kPadHeadDimQ && !kHasMask)
+                    return number<FmhaPipeline::kQKHeaddim>{};
+#endif
                 else
                     return kargs.hdim_q;
             }();
