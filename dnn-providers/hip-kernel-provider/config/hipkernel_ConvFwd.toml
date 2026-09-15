@@ -1,0 +1,40 @@
+# Integration test configuration for hipkernel:ConvFwd
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# No entry of either kind, and that is a statement rather than an omission.
+#
+# This engine's pack is a naive direct convolution that admits packed NCHW/KCRS,
+# unit stride and dilation, zero padding, wC == xC, r <= h, FLOAT/HALF -- 6 of
+# the suite's 1218 ConvolutionFwd cases. The other 1212 need no skip entry:
+# `--test-engine` pins the run to this engine, so a case its `graph_match`
+# refuses SKIPs on its own rather than falling through to another loaded engine.
+# A filter here would duplicate the matcher and rot against it.
+#
+# The arch restriction is likewise already expressed, in the descriptor's own
+# `arch` list (gfx942): the loader filters the kernel out elsewhere and every
+# case skips, so an `archs` entry would restate it in a second place.
+#
+# Tolerances: the six served cases pass at the suite's defaults against its GPU
+# reference executor. An override belongs here only with a measured failure
+# behind it.
