@@ -4,6 +4,9 @@
 #pragma once
 #include "gemm_common/vector_size_fallback_dispatch.hpp"
 
+#include <string>
+#include <variant>
+
 auto calculate_rtol_atol(const ck_tile::index_t K,
                          const ck_tile::index_t kbatch,
                          const float max_accumulated_value)
@@ -340,35 +343,34 @@ int run_batched_gemm_example_with_layouts(int argc,
 template <typename GemmConfig>
 int run_batched_gemm_example(int argc, char* argv[])
 {
+    using Row = ck_tile::tensor_layout::gemm::RowMajor;
+    using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
+
     auto [result, arg_parser] = create_args(argc, argv);
     if(!result)
         return -1;
 
-    using Row = ck_tile::tensor_layout::gemm::RowMajor;
-    using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
-
     std::string a_layout = arg_parser.get_str("a_layout");
     std::string b_layout = arg_parser.get_str("b_layout");
 
-    // if(a_layout == "R" && b_layout == "R")
-    // {
-    //     return run_batched_gemm_example_with_layouts(argc, argv, Row{}, Row{}, Row{});
-    // }
-    if(a_layout == "R" && b_layout == "C")
-    {
-        return run_batched_gemm_example_with_layouts<GemmConfig>(argc, argv, Row{}, Col{}, Row{});
-    }
-    // TODO: Fixme: with latest changes to GemmPipelineAGmemBGmemCRegV1DefaultPolicy below do not
-    // work else if(a_layout == "C" && b_layout == "C")
-    // {
-    //     return run_batched_gemm_example_with_layouts(argc, argv, Col{}, Col{}, Row{});
-    // }
-    // else if(a_layout == "C" && b_layout == "R")
-    // {
-    //     return run_batched_gemm_example_with_layouts(argc, argv, Col{}, Row{}, Row{});
-    // }
-    else
-    {
-        throw std::runtime_error("Unsupported data layout configuration for A,B and C tensors!");
-    }
+    using LayoutVariant = std::variant<Row, Col>;
+
+    auto string_to_layout = [](const std::string& layout) -> LayoutVariant {
+        if(layout == "R")
+            return Row{};
+        if(layout == "C")
+            return Col{};
+        throw std::runtime_error("Unsupported layout: " + layout);
+    };
+
+    auto a_layout_variant = string_to_layout(a_layout);
+    auto b_layout_variant = string_to_layout(b_layout);
+
+    return std::visit(
+        [&](auto a_layout_type, auto b_layout_type) -> int {
+            return run_batched_gemm_example_with_layouts<GemmConfig>(
+                argc, argv, a_layout_type, b_layout_type, Row{});
+        },
+        a_layout_variant,
+        b_layout_variant);
 }
