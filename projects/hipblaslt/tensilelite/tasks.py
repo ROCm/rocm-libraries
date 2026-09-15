@@ -17,7 +17,7 @@ _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 if str(_TASKS_DIR) not in sys.path:
     sys.path.insert(0, str(_TASKS_DIR))
 
-from tensilelite.RocisaStatus import _rocisa_install_status
+from Tensile.RocisaStatus import _rocisa_install_status
 
 # gfx1250 v0/v1 ASIC-revision detection lives in the packaged Tensile tree
 # (invoke-free) so CI test artifacts can exercise it directly; these @task
