@@ -3432,9 +3432,23 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         int32_t             hotIterations      = ClientArguments.GetHotIterationsValue();
         int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
 
+        auto&      tuner        = rocblaslt::OnlineTuner::getInstance();
+        const bool onlineTuning = tuner.enabled();
+
+        // Taken here because getSolutions() keys on the same hash of the same
+        // problem at this point in its lifecycle; anything later in this
+        // function sees a problem the solve has already touched.
+        const size_t problemKey
+            = onlineTuning ? std::hash<TensileLite::ContractionProblemGemm>{}(data->problem) : 0;
+
         int* solutionIndex = (int*)algo->data;
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
+
+        // Reads back the pair recorded on an earlier call for this problem. That
+        // launch has long since retired, so nothing here waits on the GPU.
+        if(onlineTuning)
+            tuner.harvestPending(problemKey);
 
         // A Stream-K solution reads these flags as one int per workgroup, and
         // needs a region nobody else is touching; everything else reads them as
@@ -3603,8 +3617,19 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
-            status = hip2RocStatus(
-                adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
+
+            // Left null unless the tuner wants this dispatch sampled, which
+            // keeps the launch below identical to an untuned one. launchKernels
+            // records start before the first kernel and stop after the last, so
+            // a multi-kernel solution is bracketed as a whole.
+            hipEvent_t measureStart = nullptr;
+            hipEvent_t measureStop  = nullptr;
+            if(onlineTuning)
+                static_cast<void>(tuner.beginMeasurement(
+                    problemKey, data->algoIndex, measureStart, measureStop));
+
+            status = hip2RocStatus(adapter->launchKernels(
+                kernels, prob.stream, measureStart, measureStop, isPreloaded));
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
