@@ -34,7 +34,6 @@
     defined(__gfx1103__) || defined(__gfx115__) || defined(__gfx11_generic__)
 #define __gfx11__
 #endif
-#endif
 #if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx12_generic__)
 #define __gfx120__
 #endif
