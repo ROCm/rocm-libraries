@@ -24,8 +24,8 @@
 
 from copy import deepcopy
 
-from Tensile.Common import INDEX_CHARS
-from Tensile.Common.DataType import DataType
+from .Common import INDEX_CHARS
+from .Common.DataType import DataType
 from .KernelWriterBase import KernelWriterBase
 
 class KernelWriterBetaOnly(KernelWriterBase):

@@ -27,11 +27,11 @@ from typing import Dict, Optional
 
 import rocisa
 
-from Tensile.Common import IsaVersion, IsaInfo, print2, elineno, effectiveMatrixInstMN
-from Tensile.Common.Architectures import SUPPORTED_ISA
-from Tensile.Common.DataType import DataType
-from Tensile.Common.MatrixInstructionNaming import backendCapsLoaded, matrixInstructionMnemonic
-from Tensile.Common.ValidParameters import makeValidMatrixInstructions, makeValidMFMA, makeValidSMFMA, makeValidWMMA, makeValidSWMMAC
+from ...Common import IsaVersion, IsaInfo, print2, elineno, effectiveMatrixInstMN
+from ...Common.Architectures import SUPPORTED_ISA
+from ...Common.DataType import DataType
+from ...Common.MatrixInstructionNaming import backendCapsLoaded, matrixInstructionMnemonic
+from ...Common.ValidParameters import makeValidMatrixInstructions, makeValidMFMA, makeValidSMFMA, makeValidWMMA, makeValidSWMMAC
 
 from ..Utilities import reject
 

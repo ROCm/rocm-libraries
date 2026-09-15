@@ -31,7 +31,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from Tensile.CustomYamlLoader import (
+from ..CustomYamlLoader import (
     load_logic_cu_count,
     load_logic_device_names,
     load_logic_gfx_arch,
@@ -375,7 +375,7 @@ def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:
     from-source build re-checking the whole architecture registry on every
     invocation would add no additional safety over running it once in CI's
     unit-test job."""
-    from Tensile.Common.Architectures import supportsChipIdPredicate
+    from ..Common.Architectures import supportsChipIdPredicate
 
     violations: List[str] = []
     seen_archs = set()

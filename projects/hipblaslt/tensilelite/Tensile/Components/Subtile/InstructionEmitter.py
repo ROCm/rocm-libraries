@@ -9,14 +9,14 @@ instructions by dispatching each opType to its emit method.
 
 from __future__ import annotations
 
-from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
-from Tensile.Components.Subtile.SubtileGREmit import (
+from .Kernel import emitMfmaInstruction
+from .SubtileGREmit import (
     emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
 )
-from Tensile.Components.Subtile.SubtileLREmit import (
+from .SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
 )
-from Tensile.Components.Subtile.SubtileScaleEmit import (
+from .SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
 from rocisa.code import Module
