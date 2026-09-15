@@ -1,7 +1,7 @@
 // Preload: the ONLY code with access to both Node and the renderer. It exposes
-// three frozen, minimal APIs over contextBridge that exactly match the shapes
-// the renderer's platform/index.ts, engine/index.ts and command/index.ts
-// detect. Everything else in the renderer stays sandboxed.
+// four frozen, minimal APIs over contextBridge that exactly match the shapes
+// the renderer's platform/index.ts, engine/index.ts, command/index.ts and
+// flow/index.ts detect. Everything else in the renderer stays sandboxed.
 
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -35,5 +35,22 @@ contextBridge.exposeInMainWorld("hipdnnCommand", {
     const handler = (_event, chunk) => listener(chunk);
     ipcRenderer.on("command:output", handler);
     return () => ipcRenderer.removeListener("command:output", handler);
+  },
+});
+
+contextBridge.exposeInMainWorld("hipdnnFlow", {
+  available: () => ipcRenderer.invoke("flow:available"),
+  list: () => ipcRenderer.invoke("flow:list"),
+  inputs: (flow) => ipcRenderer.invoke("flow:inputs", { flow }),
+  validate: (request) => ipcRenderer.invoke("flow:validate", request),
+  launch: (request) => ipcRenderer.invoke("flow:launch", request),
+  cancel: (runId) => ipcRenderer.invoke("flow:cancel", { runId }),
+  status: (runId, logTail) => ipcRenderer.invoke("flow:status", { runId, logTail }),
+  artifact: (uri) => ipcRenderer.invoke("flow:artifact", { uri }),
+  revealArtifact: (uri) => ipcRenderer.invoke("flow:revealArtifact", { uri }),
+  onEvent: (listener) => {
+    const handler = (_event, flowEvent) => listener(flowEvent);
+    ipcRenderer.on("flow:event", handler);
+    return () => ipcRenderer.removeListener("flow:event", handler);
   },
 });
