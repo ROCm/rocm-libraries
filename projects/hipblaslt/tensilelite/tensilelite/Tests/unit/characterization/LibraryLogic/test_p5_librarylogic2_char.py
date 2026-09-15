@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Characterization test for Tensile/LibraryLogic.py (p5 round).
+"""Characterization test for tensilelite/LibraryLogic.py (p5 round).
 
 Targets uncovered arms NOT reached by test_p4_librarylogic_char.py:
 

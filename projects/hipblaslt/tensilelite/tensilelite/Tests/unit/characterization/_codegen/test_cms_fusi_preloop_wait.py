@@ -19,7 +19,7 @@ _CONFIG = os.path.join(
     "cms_fusi_preloop_wait.yaml",
 )
 _PREPACK_CONFIG = (
-    "Tensile/Tests/common/gemm/gfx950/custom_mainloop_scheduling_tf32.yaml"
+    "tensilelite/Tests/common/gemm/gfx950/custom_mainloop_scheduling_tf32.yaml"
 )
 
 

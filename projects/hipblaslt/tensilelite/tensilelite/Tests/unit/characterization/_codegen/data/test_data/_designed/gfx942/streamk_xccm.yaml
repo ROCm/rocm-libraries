@@ -5,7 +5,7 @@
 # R3 designed StreamK-XCCMapping config for gfx942 codegen characterization.
 #
 # Goal: exercise the non-power-of-2 branch in XCCMappingOn.__call__
-# (methodology-A missing range: lines 78-79 of Tensile/Components/StreamK.py).
+# (methodology-A missing range: lines 78-79 of tensilelite/Components/StreamK.py).
 #
 # Coverage targets:
 #   Lines 78-79:  XCCMappingOn non-power-of-2 branch
