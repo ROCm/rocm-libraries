@@ -174,7 +174,7 @@ namespace rocsparse
         }
 
     protected:
-        buffer_layout_crtp_t() {};
+        buffer_layout_crtp_t(){};
         void*  m_buffer;
         size_t m_buffer_size;
     };
@@ -299,7 +299,7 @@ namespace rocsparse
             m_tpointers[parent_t::buffer] = buffer_;
             m_tsizes[parent_t::buffer]    = buffer_size_;
         }
-        buffer_layout_contiguous_t() {};
+        buffer_layout_contiguous_t(){};
 
     private:
         size_t m_isizes[7]{};
