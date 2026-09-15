@@ -104,7 +104,7 @@
   ],
   "features_hash": "sha256:8a1c2da529eb92cf",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/0.2.0/asm-sdpa-untuned-v1"
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/b162a5ffd743c21d"
   },
   "objective": "max",
   "score": {

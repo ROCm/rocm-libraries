@@ -37,6 +37,14 @@ public:
         return hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME;
     }
 
+    /// What this build's forward dispatch is, as every shipped L1 model records it.
+    ///
+    /// Public because it is a contract value, not an implementation detail: a model whose
+    /// `trained_against.selector_revision` differs from this is refused at load, so the
+    /// string decides whether a shipped model is usable at all. Exposed so that rule can
+    /// be asserted rather than discovered when an engine reports UNAVAILABLE.
+    static const char* selectorRevision();
+
     int64_t id() const override;
 
     bool isApplicable(

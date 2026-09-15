@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <set>
 #include <string>
 
@@ -17,6 +18,7 @@
 
 #include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
+#include "version.h"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 
 namespace asm_sdpa_engine
@@ -129,6 +131,34 @@ TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
         EXPECT_TRUE(seenArch.insert(std::string(arch)).second) << arch;
         EXPECT_TRUE(seenId.insert(std::string(id)).second) << "two architectures declare " << id;
     }
+}
+
+/// The expiry rule every shipped L1 model is judged against.
+///
+/// A model records this string and the loader refuses one that does not match, so what the
+/// revision NAMES decides which changes expire a model. It used to name the provider
+/// release, which is wrong in both directions: `0.2.0 -> 0.2.1` for a change that cannot
+/// touch this engine expired both shipped models, and a vendored kernel swap under a fixed
+/// version expired nothing -- the silent direction, since a stale L1 estimate changes which
+/// ENGINE is selected. It is now a digest over the forward kernels, the CSVs that describe
+/// them and the forward dispatch sources.
+TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndNotTheRelease)
+{
+    const std::string revision = AsmSdpaEngine::selectorRevision();
+    const std::string prefix = "hip-kernel-provider/asm-sdpa-fwd/";
+    ASSERT_EQ(revision.rfind(prefix, 0), 0u) << revision;
+
+    // A build that did not compute the digest reports "undetermined", which no shipped
+    // model can match -- deliberately, but it means the CMake wiring has been dropped.
+    const std::string digest = revision.substr(prefix.size());
+    EXPECT_EQ(digest.size(), 16u) << revision;
+    EXPECT_TRUE(std::all_of(digest.begin(), digest.end(), [](unsigned char character) {
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
+    })) << revision;
+
+    // The regression itself: no provider version component, in any form.
+    EXPECT_EQ(revision.find(HIP_KERNEL_PROVIDER_VERSION_STRING), std::string::npos) << revision;
+    EXPECT_EQ(revision.find("0.2."), std::string::npos) << revision;
 }
 
 } // namespace

@@ -31,30 +31,33 @@ namespace
 
 /// What this build of the engine was, for a model that claims to have measured it.
 ///
-/// `<provider>/<provider release>/<selector>`. There is no separate library version to
-/// name: the ASM kernels are vendored inside this provider rather than linked from an
-/// independently versioned library, so the provider version IS the kernel-snapshot
-/// version. Bump the trailing selector segment when what this engine does with those
-/// kernels changes without the provider version moving -- a different dispatch choice
-/// invalidates a trained estimate just as a different kernel would.
+/// `<provider>/asm-sdpa-fwd/<digest>`, where the digest is computed at configure time over
+/// the vendored FORWARD kernels, the CSVs codegen reads to describe them, and this
+/// engine's forward dispatch sources (CMakeLists.txt, HKP_ASM_SDPA_FWD_REVISION).
 ///
-/// The RELEASE version, deliberately, and not HIP_KERNEL_PROVIDER_VERSION_STRING, which
-/// appends the build's git hash. A deployed L1 model records this exact string as RFC 0019
-/// §4.1's `trained_against.selector_revision` and the loader refuses one that does not
-/// match -- so naming the hash would expire every model on every commit to the repository,
-/// including commits that cannot touch this engine, and no model could ever be shipped
-/// alongside the source that produced it. What changes these measurements is the vendored
-/// kernel snapshot and this engine's dispatch, and both move the version or the selector
-/// segment; a hash names the build, which is not the same claim.
+/// A deployed L1 model records this exact string as RFC 0019 §4.1's
+/// `trained_against.selector_revision`, and the loader refuses a model whose recorded
+/// value is not the one the provider reports. The string is therefore an expiry rule, and
+/// it has to name what actually moves the measurements it is protecting.
 ///
-/// The refusal itself stays: L1 is the score compared across engines, so a stale estimate
-/// changes which engine is selected rather than merely misreporting a number.
-#define HKP_STRINGIFY_INNER(value) #value
-#define HKP_STRINGIFY(value) HKP_STRINGIFY_INNER(value)
+/// It used to name the provider release. That is too wide in one direction and too narrow
+/// in the other: `0.2.0 -> 0.2.1` for a change that cannot touch this engine expired both
+/// shipped models -- symptom: UNAVAILABLE on every engine-selection query -- while a
+/// vendored kernel swap under a fixed version expired nothing, which is the silent
+/// direction, because L1 is the score compared ACROSS engines and a stale estimate changes
+/// which engine is selected rather than merely misreporting a number. The git hash was
+/// already rejected for the first reason; the release version is the same mistake, one
+/// step smaller.
+///
+/// A backward-only kernel drop leaves this alone by construction: a backward kernel cannot
+/// move a forward throughput number, and the digest does not read one.
+#ifndef HKP_ASM_SDPA_FWD_REVISION
+// A build that did not compute the digest must not silently mint a revision that outlives
+// a kernel change; it reports one no shipped model can match instead.
+#define HKP_ASM_SDPA_FWD_REVISION "undetermined"
+#endif
 constexpr const char* SELECTOR_REVISION
-    = "hip-kernel-provider/" HKP_STRINGIFY(HIP_KERNEL_PROVIDER_VERSION_MAJOR) "." HKP_STRINGIFY(
-        HIP_KERNEL_PROVIDER_VERSION_MINOR) "." HKP_STRINGIFY(HIP_KERNEL_PROVIDER_VERSION_PATCH)
-      "/asm-sdpa-untuned-v1";
+    = "hip-kernel-provider/asm-sdpa-fwd/" HKP_ASM_SDPA_FWD_REVISION;
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Resolves AsmSdpaEngine::L1_MODEL_IDS through the descriptor catalog the provider has
@@ -115,6 +118,11 @@ void AsmSdpaEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
 int64_t AsmSdpaEngine::id() const
 {
     return staticId();
+}
+
+const char* AsmSdpaEngine::selectorRevision()
+{
+    return SELECTOR_REVISION;
 }
 
 int64_t AsmSdpaEngine::staticId()
