@@ -153,6 +153,43 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
         PACK_NAMES unit unit_shared
     )
+
+    # One census entry per architecture the `unit` pack was wired for, each running this
+    # binary against that pack's own shard. Declared here because a census entry names one
+    # shard and the listener requires every case in the suite to pass without skipping, so
+    # only a suite confined to a single pack qualifies: every TestPointwisePacks case reads
+    # loadedSet("hipkernel:Pointwise") and nothing else, which the `unit` root holds.
+    # Suites that read a second shard -- TestConvFwdPack, which reaches across unit and
+    # unit_shared -- would fail by construction and are censused nowhere.
+    #
+    # EXPECTED_CASES pins the suite's case-name set. The listener's execution guard
+    # builds its obligations from the suite itself, so it proves only that everything
+    # registered ran -- a case commented out, or a source file dropped from
+    # target_sources, takes its own obligation with it and the census still reports
+    # complete. The pin is the half that notices. It is maintained by hand for this
+    # hand-written suite: adding or removing a TEST() below without editing this list is
+    # a red census, which is the point.
+    #
+    # Each entry arrives with its controls, registered by the same call: one running the
+    # suite with every case filtered out, one pointed at a root that does not exist, one
+    # whose pin names a case the suite does not register. Each is matched against the
+    # diagnostic it must provoke, so a control cannot pass on an unrelated failure. They
+    # are what make the census observable as a gate rather than as a suite that happens
+    # to be green.
+    hkp_register_census_tests(
+        TARGET hip_kernel_provider_tests
+        PACK_NAME unit
+        SUITES TestPointwisePacks
+        EXPECTED_CASES
+            EachPackShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes
+            EveryKernelNamesItsPacksEmbeddedSource
+            EveryEmbeddedSourceKeyResolvesInTheCompiledInTable
+            EveryPackNamesTheArchitectureItWasPackedFor
+            EveryPackSharesTheEngineDispatchAndAllButOneMatcher
+            ExposesBlockSizeAsAKnobAndDtypeAsInternal
+            MatchersCoverBothScopes
+            SubtractsInTheRightDirection
+    )
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

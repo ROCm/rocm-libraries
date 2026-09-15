@@ -176,6 +176,12 @@ jobs:
 
       - name: Configure superbuild
         run: |
+          # Production packaging is left dormant on this lane. Every shipped production
+          # descriptor declares gfx942 and this lane builds gfx1151, and a wired root
+          # whose KDPs all prune is a hard packer error ("produced nothing"), not a clean
+          # skip. The root must therefore be empty here rather than merely unmatched.
+          # Passed explicitly because the default root is the provider's in-tree
+          # descriptors, which are gfx942. The Linux lane builds gfx942 and packs them.
           cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
@@ -186,6 +192,7 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
+            -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="" \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
@@ -197,7 +204,14 @@ jobs:
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
-      # would otherwise pass CI while producing no archives.
+      # would otherwise pass CI while producing no archives. Only the ASM SDPA
+      # producer is asserted here: its arch list is hardcoded in its own
+      # CMakeLists, so it packs on every lane.
+      #
+      # Nothing is lost: the production root is empty on this lane (see Configure),
+      # so production packaging is dormant and emits no archive either way. The
+      # Linux job asserts the product tree, because there the arch matches and
+      # an empty tree really is a defect.
       - name: Verify kpack archives were produced
         shell: bash
         run: |
@@ -402,7 +416,6 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
-            -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
@@ -415,14 +428,32 @@ jobs:
         run: cmake --build build
 
       # Packing is skipped with a STATUS message, so a resolution regression
-      # would otherwise pass CI while producing no archives.
+      # would otherwise pass CI while producing no archives. Both producers are
+      # checked: the ASM SDPA engine, whose arch list is hardcoded in its own
+      # CMakeLists and so cannot regress with GPU_TARGETS, and the hkp product
+      # tree, which can and did -- a family name in GPU_TARGETS selected no
+      # arch and packed zero descriptors while this step still passed.
       - name: Verify kpack archives were produced
         run: |
           set -euo pipefail
           shopt -s nullglob
-          kpacks=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
-          test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
-          printf '%s\n' "${kpacks[@]}"
+          asm=(build/dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/.kpack/*.kpack)
+          test "${#asm[@]}" -gt 0 || { echo "no ASM SDPA .kpack archives produced" >&2; exit 1; }
+          printf '%s\n' "${asm[@]}"
+
+          # The product pack's OUT_ROOT is HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR, i.e.
+          # <binary-dir>/<plugin-engine-reldir>/arch_content/hip-kernel-provider, and the
+          # packer lays each shard out as <arch>/kpack/<group>_<arch>.kpack. Matched by
+          # tail rather than by full path: the leading segments come from the superbuild's
+          # binary dir, but the arch_content/... tail is what the pack step actually owns.
+          product_tail="arch_content/hip-kernel-provider/$GPU_TARGET/kpack"
+          mapfile -t product < <(find build -path "*/$product_tail/*.kpack" -print)
+          test "${#product[@]}" -gt 0 || {
+            echo "no hkp product .kpack under */$product_tail" >&2
+            echo "the production descriptor root packed nothing for $GPU_TARGET" >&2
+            exit 1
+          }
+          printf '%s\n' "${product[@]}"
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure

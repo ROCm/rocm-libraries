@@ -1,0 +1,26 @@
+## Splice point 4b: .../kernel_ingestor_engine/IngestorPacks.cpp
+## Add this row to the s_packs table. Both this edit AND the IngestorPacks.hpp
+## declaration edit (ingestor_packs.hpp.txt) are required -- see that fragment's
+## header for why.
+##
+## The struct is (label, registerSymbols, ownsModuleCache, resetModuleCache).
+## ownsModuleCache and resetModuleCache must agree -- TestIngestorPacksModuleCacheOwnership
+## asserts `ownsModuleCache == (resetModuleCache != nullptr)` for every pack. That test
+## passes for BOTH shapes, so it cannot tell you which one you needed:
+##   * packaged/kpack kernels  -> true, &reset<Name>ModuleCache (declare it in the .hpp
+##                                 too, and define it OUTSIDE the pack's anonymous
+##                                 namespace)
+##   * embedded_source kernels -> false, nullptr (no archive, nothing to drop)
+## A packaged engine left at `false, nullptr` therefore ships green and never drops its
+## module cache. The dialect is known at generation time, so this fragment emits the
+## matching pair rather than a default the reader must remember to correct.
+## Check the IngestorPack struct before splicing: this row must match it field for field.
+{% if config.is_packaged -%}
+## Packaged dialect: this engine owns a kpack module cache, so it must drop it. Define
+## reset{{ config.engine.pascal_name }}ModuleCache outside the pack's anonymous namespace
+## and declare it in IngestorPacks.hpp beside the register function.
+        {"{{ config.engine.name }}", &{{ config.register_symbols_fn }}, true, &reset{{ config.engine.pascal_name }}ModuleCache},
+{% else -%}
+## direct_load/embedded_source: no archive is held, so there is nothing to drop.
+        {"{{ config.engine.name }}", &{{ config.register_symbols_fn }}, false, nullptr},
+{% endif -%}

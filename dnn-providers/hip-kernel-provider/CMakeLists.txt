@@ -328,6 +328,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/test_descriptors")
 
+    # The shipped descriptors, and the default of the overridable
+    # HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT cache entry that descriptor-packaging
+    # declares. Declared beside the test root so the two authored descriptor roots are
+    # read together rather than one of them being buried in the packaging module.
+    set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
+
     # The name of each authored set, which is also the name it stages under. Named here
     # only because the test subdirectories compile these same segments into their binaries
     # as a relative offset; the packing rules in HkpPackaging.cmake join them to the two

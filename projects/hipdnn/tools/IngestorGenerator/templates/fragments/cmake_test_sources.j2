@@ -1,0 +1,81 @@
+## Splice point 5: .../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt:4-11
+## Append these lines to the existing target_sources(hip_kernel_provider_tests PRIVATE
+## ...) block. Do not replace the block -- append inside it. This tool's own output
+## tree places both files under tests/ (see fragments header); the provider's test
+## tree convention nests pack-scoped test files under packs/ instead (see
+## TestConvFwdPack.cpp/TestPointwisePacks.cpp) -- move both files there when splicing.
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Packs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Matchers.cpp
+
+{% if emitted.source_kind == 'kpack' %}
+{#
+   The pinned case list is READ OUT OF the suite template this same run renders, rather
+   than restated here. test_packs.cpp.j2 gates cases on has_heuristic, is_multi_pack and
+   behavior_notes; a second copy of those conditionals would be a second authority on the
+   suite's shape, and the two would disagree the moment either grew a case. Rendering the
+   sibling with this run's context and reading its TEST_F lines back means the pin is
+   derived from the very text that defines the suite, so it cannot say anything else.
+
+   A case the extraction misses -- one whose TEST_F were wrapped across lines -- is
+   omitted from the pin, and the census then reports it as registered-but-not-expected.
+   The failure mode is red, not a silently narrowed pin.
+-#}
+{% set packs_source %}{% include 'test_packs.cpp.j2' %}{% endset %}
+{% set case_marker = 'TEST_F(Test' ~ config.engine.pascal_name ~ 'Packs, ' %}
+{% set expected_cases = [] %}
+{% for line in packs_source.split('\n') if line.startswith(case_marker) %}
+{% set _ = expected_cases.append(line.split(case_marker)[1].split(')')[0] | trim) %}
+{% endfor %}
+## Splice point 5b: P/src/tests/CMakeLists.txt, beside the other per-pack-target
+## census calls that follow hkp_verify_embedded_sources(). Add this call:
+hkp_register_census_tests(TARGET hip_kernel_provider_tests
+                          PACK_NAME product
+                          SUITES Test{{ config.engine.pascal_name }}Packs
+                          EXPECTED_CASES
+{% for case in expected_cases %}
+                              {{ case }}
+{% endfor %}
+                          )
+##
+## `PACK_NAME product` resolves because the shipped root is non-empty on this branch.
+## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing
+## this call, or the registered census will run against a shard that does not contain
+## your descriptors.
+##
+## The call registers one CTest entry per arch the `product` pack target was wired
+## with: hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs.
+## It runs hip_kernel_provider_tests --gtest_filter=Test{{ config.engine.pascal_name }}Packs.*
+## with HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs,
+## HIPDNN_TEST_EXPECTED_ARCH=<arch> and HIPDNN_DESCRIPTOR_DIR set to that pack
+## target's own out-root shard for <arch>, under the labels
+## unit_test;hip-kernel-provider;host. A suite name may be declared at one pack
+## target only -- the CTest name carries no pack component, so a second declaration
+## is a configure error rather than a rename.
+## Every registered case must execute and pass without skipping in every iteration.
+## Missing suites, filtered/disabled/sharded-out cases and zero iterations fail.
+##
+## EXPECTED_CASES arrives as HIPDNN_TEST_CENSUS_EXPECTED_CASES, comma-separated, and
+## pins this suite's case-name set. Execution alone cannot catch a suite that SHRINKS:
+## the obligation set is built from the registered cases, so a case that stops being
+## compiled takes its own obligation with it and the census still reports complete. The
+## pin is compared by name in both directions -- expected-but-unregistered and
+## registered-but-unexpected each fail, because a count lets the two cancel. Regenerate
+## and re-splice this call whenever the bundle's shape changes: has_heuristic,
+## is_multi_pack and behavior_notes each add or remove a case, and the list above is
+## read straight out of the suite this run rendered, so it already reflects them.
+## The call also registers a control per arch whose pin names a case that does not exist
+## and which must emit the lost-a-case diagnostic to pass, which is what proves the
+## comparison is still live.
+{% else %}
+## Splice point 5b: nothing is registered for this direct-load engine by default.
+##
+## A direct-load engine's suite is censused, if at all, by a hand-added
+## `hkp_register_census_tests(TARGET hip_kernel_provider_tests PACK_NAME <set>
+## SUITES Test{{ config.engine.pascal_name }}Packs)` call in
+## `P/src/tests/CMakeLists.txt`, where `<set>` is the pack target for the authored
+## set this bundle writes into (`unit`, `integration`, `shared` or
+## `archive_fixture`). Census requires every case in the suite to execute without
+## skipping, so only declare a suite that reads this bundle's shard and no other.
+##
+## This bundle writes into: {{ config.authored_subpath }}
+{% endif %}

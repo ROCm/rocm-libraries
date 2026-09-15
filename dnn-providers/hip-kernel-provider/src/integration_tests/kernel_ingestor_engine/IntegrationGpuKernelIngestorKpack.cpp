@@ -64,6 +64,11 @@ constexpr const char* PACKED_ENGINE_NAME = "hipkernel:pointwise_packed";
 /// ...SurvivesABrokenArchive requires to still serve.
 constexpr const char* SHIPPED_POINTWISE_ENGINE_NAME = "hipkernel:Pointwise";
 
+/// In epsilons of the fixture's element type. Elementwise ops accumulate nothing, so
+/// one epsilon is the whole budget, and the same number is right for a FLOAT fixture
+/// and a HALF one.
+constexpr float POINTWISE_TOLERANCE_EPSILONS = 1.0f;
+
 /// Header-length garbage: long enough that the file exists and is readable, short enough
 /// that no table of contents can be parsed out of it.
 constexpr size_t CORRUPTION_BYTE_COUNT = 64;
@@ -356,6 +361,26 @@ protected:
         IntegrationGraphVerificationHarness<float, int>::TearDown();
     }
 
+    /// Offsets the seed by UID to distinguish this fixture's binary operands.
+    ///
+    /// `a + b` and `a + a` agree elementwise when both operands carry the same data, so a
+    /// pointwise comparison cannot tell an add that reads both inputs from one that reads
+    /// one twice. The base seeds every tensor alike, which is right for suites whose
+    /// reference is insensitive to it; this engine's whole catalog is elementwise binary
+    /// ops, so it is not right here.
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            bundle.randomizeTensor(tensorPair.first,
+                                   DEFAULT_MIN,
+                                   DEFAULT_MAX,
+                                   seed + static_cast<unsigned int>(tensorPair.first));
+        }
+    }
+
     static int64_t packedEngineId()
     {
         return hipdnn_data_sdk::utilities::engineNameToId(PACKED_ENGINE_NAME);
@@ -404,7 +429,7 @@ protected:
     void executePackagedKernel(hipStream_t selectedStream)
     {
         // Keep setup and arch discovery on the owned concrete stream. _stream is also
-        // the stream executeAndVerify synchronizes; TearDown restores its ownership.
+        // the stream verifyBuiltGraph synchronizes; TearDown restores its ownership.
         _ownedStream = _stream;
         _stream = selectedStream;
         ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
@@ -419,7 +444,12 @@ protected:
         ASSERT_GE(workspaceSize, 0);
         const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
-        executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+        // Inside the helper, so every stream variant that routes through it inherits
+        // identical verification semantics rather than one case verifying more than
+        // the other three.
+        GraphVerificationContext context(*graph);
+        registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+        verifyBuiltGraph(context, /*seed=*/0);
     }
 
     std::vector<std::filesystem::path> _archives;
@@ -638,7 +668,9 @@ TEST_F(IntegrationGpuKernelIngestorKpackBroken, SurvivesABrokenArchive)
     ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
     ASSERT_GE(workspaceSize, 0);
     const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, /*seed=*/0);
 }
 
 // ---------------------------------------------------------------------------

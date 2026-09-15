@@ -97,8 +97,9 @@ protected:
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for " << cfg.name << ": " << validationResult.get_message();
 
-        this->registerValidator(O, tolerance);
-        this->verifyGraph(*graph, 42U);
+        GraphVerificationContext context(*graph);
+        this->registerValidator(context, O, tolerance);
+        this->verifyGraph(context, 42U);
     }
 };
 

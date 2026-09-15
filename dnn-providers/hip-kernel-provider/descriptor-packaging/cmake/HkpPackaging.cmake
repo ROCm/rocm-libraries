@@ -158,9 +158,10 @@ endfunction()
 #   multiply. 1 selects the packer's serial path.
 #
 #   NAME is also the source label the packer writes into every descriptor's
-#   provenance. The function records NAME and the absolute SOURCE_ROOT in a
-#   global registry, which hkp_verify_embedded_sources() reads to resolve a
-#   descriptor's authored location.
+#   provenance. The function records NAME, the absolute SOURCE_ROOT, OUT_ROOT and
+#   ARCHES in a global registry, which hkp_verify_embedded_sources() reads to
+#   resolve a descriptor's authored location and hkp_register_census_tests() reads
+#   to address one pack's own per-arch shards.
 # ---------------------------------------------------------------------------
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
@@ -314,6 +315,14 @@ function(hkp_wire_pack_target)
     # the two spellings agree and the verify step compares them exactly.
     get_filename_component(_abs_source_root "${ARG_SOURCE_ROOT}" ABSOLUTE)
     set_property(GLOBAL PROPERTY HKP_PACK_SOURCE_ROOT_${ARG_NAME} "${_abs_source_root}")
+
+    # Where this root's shards land and which arches it was wired for.
+    # hkp_register_census_tests() reads both to hand a census entry that root's OWN
+    # shard, so a suite is censused against the tree its pack target writes and never
+    # against a parent that another pack also fills.
+    set_property(GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_NAME} "${ARG_OUT_ROOT}")
+    set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_NAME} "${ARG_ARCHES}")
+
     set_property(GLOBAL APPEND PROPERTY HKP_PACK_LABELS "${ARG_NAME}")
 endfunction()
 
@@ -853,6 +862,66 @@ function(hkp_require_ingestor_toolchain out_arches)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_production_root(<out_var>)
+#   Declares the overridable production source root and resolves it to a path or
+#   to empty. Empty is the dormant case and not an error; a value that is set but
+#   is not a directory is fatal, because that is a typo rather than a choice.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_production_root out_var)
+    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
+        "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" CACHE PATH
+        "The authored source root the production pack step compiles from, \
+defaulting to the provider's in-tree shipped descriptors. Walked recursively; child \
+folders under it scope the content (hip/, rocKE/, per-integration folders) and each \
+descriptor's authored subpath is preserved into the staged and installed trees. A root \
+holding no descriptor, like an empty value, leaves production packaging dormant.")
+
+    set(${out_var} "" PARENT_SCOPE)
+    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+        if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+            message(FATAL_ERROR
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but is "
+                "not a directory: ${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
+        endif()
+        set(${out_var} "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_root_has_kdp(<out_var> <root>)
+#   TRUE when <root> holds at least one non-hidden *.kdp.json. An empty <root>
+#   is FALSE rather than an error, which is what leaves packaging dormant.
+#
+#   CONFIGURE_DEPENDS so adding the first KDP re-runs configure and wires the
+#   target. Dot-prefixed segments are dropped the way load_flat_input() skips
+#   them, so a `.git/` or an editor's dot-directory under a user-supplied root
+#   is not content.
+# ---------------------------------------------------------------------------
+function(_hkp_root_has_kdp out_var root)
+    set(${out_var} FALSE PARENT_SCOPE)
+    if(NOT root)
+        return()
+    endif()
+
+    file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
+    foreach(_kdp IN LISTS _kdps)
+        file(RELATIVE_PATH _kdp_rel "${root}" "${_kdp}")
+        string(REPLACE "/" ";" _kdp_segments "${_kdp_rel}")
+        set(_kdp_hidden FALSE)
+        foreach(_kdp_segment IN LISTS _kdp_segments)
+            if(_kdp_segment MATCHES "^\\.")
+                set(_kdp_hidden TRUE)
+                break()
+            endif()
+        endforeach()
+        if(NOT _kdp_hidden)
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root. The root names a location;
 #   producer selection is per-UKD on kernel_source.kind, so both producers are
@@ -870,8 +939,9 @@ endfunction()
 #   covered by nothing: production is dormant by default, and the pytest suite
 #   imports rocke from the source tree instead.
 #
-#   Root empty = production packaging dormant. Root set but not a directory =
-#   fatal. The tests are wired regardless.
+#   The root defaults to the provider's in-tree shipped descriptors and is
+#   overridable. Root empty, or holding no descriptor = production packaging
+#   dormant. Root set but not a directory = fatal. The tests are wired regardless.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -879,20 +949,7 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_require_ingestor_toolchain(_arches)
 
-    set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT "" CACHE PATH
-        "The authored source root the production pack step compiles from. \
-Walked recursively; child folders under it scope the content (hip/, rocKE/, \
-per-integration folders) and each descriptor's authored subpath is preserved \
-into the staged and installed trees. Empty leaves production packaging dormant.")
-    set(_source_root "")
-    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
-        if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-            message(FATAL_ERROR
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is set but is "
-                "not a directory: ${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-        endif()
-        set(_source_root "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
-    endif()
+    _hkp_resolve_production_root(_source_root)
 
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
         "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
@@ -933,8 +990,15 @@ loaded is the one named here.")
         list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
     endif()
 
+    # A KDP is what arch pruning consumes, so a root holding none has nothing to ship
+    # and packing it fails rather than shipping an empty tree. Standalone UKD/UMD/UED/
+    # UDD/KMD/UHD files, kernel sources and READMEs do not make a pack. A KDP that is
+    # present but pruned on every arch stays a hard failure: this distinguishes
+    # "nothing to ship" from "something to ship that did not".
+    _hkp_root_has_kdp(_product_has_content "${_source_root}")
+
     # Production descriptors.
-    if(_source_root)
+    if(_source_root AND _product_has_content)
         hkp_wire_pack_target(
             NAME product
             SOURCE_ROOT "${_source_root}"
@@ -942,7 +1006,8 @@ loaded is the one named here.")
             HIPCC "${HKP_HIPCC}"
             ROCM_KPACK_DIR "${_rocm_kpack_dir}"
             OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
-            ${_rocke_args})
+            ${_rocke_args}
+            PACK_JOBS 2)
     else()
         # A tree left over from an earlier configuration that did pack keeps
         # being loaded: the engine selects the plugin-relative directory on
@@ -952,9 +1017,9 @@ loaded is the one named here.")
             file(REMOVE_RECURSE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
         endif()
         message(STATUS
-            "hkp: no production source root set "
-            "(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT empty); production "
-            "packaging dormant (tests still run against the fixtures).")
+            "hkp: no *.kdp.json under "
+            "'${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}'; production packaging "
+            "dormant (tests still run against the fixtures).")
     endif()
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
@@ -1087,4 +1152,315 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
        AND COMMAND apply_ctest_category_labels)
         apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
     endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_join_census_cases(<out-var> [<case>...])
+#
+# Packs an EXPECTED_CASES list into the single comma-separated string the binary
+# reads, and empties to "" when nothing was pinned. Comma rather than the semicolon
+# CMake lists use: the ENVIRONMENT test property is itself a semicolon-separated list
+# of VAR=VALUE, so one embedded separator would split the variable into fragments.
+# A GTest case name cannot contain a comma -- it is a macro argument -- so a name that
+# carries one is a typo, and is rejected here rather than silently read as two names.
+# ---------------------------------------------------------------------------
+function(_hkp_join_census_cases _outvar)
+    set(_cases "${ARGN}")
+    foreach(_case IN LISTS _cases)
+        if(_case MATCHES ",")
+            message(FATAL_ERROR
+                "hkp: expected census case '${_case}' contains a comma, which is "
+                "the separator the pin is delivered with, so the binary would read "
+                "it as two names. A GTest case name cannot hold one; this is a typo.")
+        endif()
+    endforeach()
+    list(JOIN _cases "," _joined)
+    set(${_outvar} "${_joined}" PARENT_SCOPE)
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_add_census_test(<name> <target> <gtest-filter> <environment> <pass-regex>)
+#
+# One CTest entry of a census family. An entry and its controls run the same binary
+# under the same labels and differ only in the filter, the environment and what
+# counts as passing, so all of them are registered through here rather than restated:
+# a command or a label that drifted on one of them would leave a control no longer
+# controlling the entry it is paired with.
+#
+# <pass-regex> empty is the census entry itself: the verdict is the exit status and
+# the run is expected to succeed. Nonempty is a control, and names the diagnostic the
+# census prints when it refuses -- which is the whole reason a control is evidence.
+# An exit-status control asserts only "exited nonzero", and a binary that fails to
+# launch, aborts on a missing DLL, or dies for any reason unrelated to the census
+# satisfies that too: the family would go green while measuring nothing. Matching the
+# line the census prints pins each control to the detection it exists to witness.
+#
+# PASS_REGULAR_EXPRESSION REPLACES the exit-status check rather than adding to it --
+# with it set, CTest ignores the exit code and the test passes exactly when the regex
+# matches -- so a control carries it ALONE. WILL_FAIL inverts whatever verdict was
+# reached, so pairing the two would report a correctly-refusing census as FAILED; no
+# entry registered here sets it. CTest still fails a test that times out or dies on a
+# signal even when the regex matched, so a crash cannot pass through the match.
+#
+# The census entry instead carries FAIL_REGULAR_EXPRESSION on the diagnostic prefix,
+# which the exit status cannot cover: a run that prints a refusal yet exits zero has
+# stopped propagating its own verdict, and would otherwise read as a clean census. A
+# healthy run prints no such line, so the guard costs it nothing. Controls are exempt
+# by construction rather than by exception -- each exists to provoke a diagnostic, and
+# says so by carrying a pass regex.
+# ---------------------------------------------------------------------------
+function(_hkp_add_census_test _name _target _filter _environment _pass_regex)
+    add_test(
+        NAME "${_name}"
+        COMMAND "$<TARGET_FILE:${_target}>"
+                "--gtest_filter=${_filter}")
+    set_tests_properties("${_name}" PROPERTIES
+        ENVIRONMENT "${_environment}"
+        LABELS "unit_test;hip-kernel-provider;host")
+    if(_pass_regex)
+        set_tests_properties("${_name}" PROPERTIES
+            PASS_REGULAR_EXPRESSION "${_pass_regex}")
+    else()
+        set_tests_properties("${_name}" PROPERTIES
+            FAIL_REGULAR_EXPRESSION "Census: ")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_add_census_entry(<target> <suite> <arch> <shard> <joined-cases>)
+#
+# One suite's census at one architecture, together with the controls that make it
+# observable as a gate. Each control passes only on the census diagnostic it is built
+# to provoke, so the three of them fail for three distinct reasons and none of them
+# can be satisfied by the binary merely dying. <joined-cases> is the output of
+# _hkp_join_census_cases(); empty means the caller pinned no case-name set, which
+# suppresses both the pin and the control that watches it.
+# ---------------------------------------------------------------------------
+function(_hkp_add_census_entry _target _suite _arch _shard _cases)
+    set(_name "hip-kernel-provider-hkp-census-${_arch}-${_suite}")
+    set(_common "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_arch}")
+    set(_pin "")
+    if(_cases)
+        set(_pin ";HIPDNN_TEST_CENSUS_EXPECTED_CASES=${_cases}")
+    endif()
+
+    _hkp_add_census_test("${_name}" "${_target}" "${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}" "")
+
+    # Control: every case in the suite goes unvisited. The filter's negative half
+    # cancels its positive half, so the suite's registered inventory is intact and
+    # none of it runs -- GTest has nothing to report and the process would exit 0
+    # on its own. Only the listener's per-iteration completion check turns this
+    # red, so it is the one thing this entry can be measuring.
+    #
+    # Written without naming a case, because a filter that names one would keep
+    # failing after that case was renamed, for the weaker reason that it matched
+    # nothing at all. The regex is matched for the same reason: it holds the
+    # completion check's wording and not the suite or case names it interpolates,
+    # so a renamed case leaves the control measuring what it always measured.
+    _hkp_add_census_test("${_name}-control-unvisited" "${_target}"
+                         "${_suite}.*-${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}"
+                         "did not complete .* successfully")
+
+    # Control: the explicit root does not exist. The shard name is one no arch
+    # carries and no packing rule writes, so the directory cannot come into being
+    # and start passing. The census preflight rejects it before a single case
+    # runs, which is also what keeps a census from falling back to the binary's
+    # compiled-in root: that one holds every arch's descriptors and would let the
+    # entry pass while the shard it was registered for was missing.
+    #
+    # The regex is the preflight's own refusal, so this control stays red for the
+    # missing root specifically and cannot be satisfied by a later failure further
+    # in -- the preflight returns before a case runs, and nothing else prints it.
+    _hkp_add_census_test("${_name}-control-absent-root" "${_target}" "${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}-hkp-census-control-absent${_pin}"
+                         "Census requires a nonempty HIPDNN_TEST_EXPECTED_ARCH and an existing explicit HIPDNN_DESCRIPTOR_DIR")
+
+    # Control: the pin expects a case the suite does not register. Same binary,
+    # same shard, same filter as the entry itself -- the one difference is a
+    # single extra name in HIPDNN_TEST_CENSUS_EXPECTED_CASES. Every real case
+    # still runs and still passes, so the execution guard is satisfied and the
+    # name comparison is the only thing left that can turn this red. That makes
+    # it the direct control for the shrink the pin exists to catch: a suite
+    # losing a case looks, to the listener, exactly like this.
+    #
+    # Registered only where a pin exists, because without one there is no check
+    # to control and the entry would be red for the wrong reason. The sentinel
+    # name is not a plausible case name, so no future case can adopt it and
+    # quietly make this control pass.
+    #
+    # The regex holds the name comparison's own wording, which separates this
+    # control from -control-unvisited above: both would exit nonzero, but only the
+    # name check prints this line, so the two cannot stand in for each other.
+    if(_cases)
+        _hkp_add_census_test("${_name}-control-unregistered-case" "${_target}"
+                             "${_suite}.*"
+                             "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard};HIPDNN_TEST_CENSUS_EXPECTED_CASES=${_cases},HkpCensusControlCaseThatIsNeverRegistered"
+                             "is expected but not registered, so the suite has lost a case")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# The emitted-bundle census. Each generated engine ships a GTest suite that
+# reads what actually loaded through discoverDescriptorSets() -- the provider's
+# real typed registration followed by loadValidatedDescriptorSets<Handle>() --
+# and compares the loaded pack/kernel identities, the runtime source kind and the
+# SDK version against the inventory its generation actually emitted. That is the
+# native-implementation check: a pack whose symbols do not register drops its
+# descriptors at load and the census sees them missing.
+#
+# The architecture is supplied EXPLICITLY, from the registry rather than from a
+# probe: HKP_PACK_ARCHES_<name> is the list that pack was wired with (GPU_TARGETS/
+# AMDGPU_TARGETS, normalized by hkp_selected_arches) and the same list its pack step
+# lowered for, so each suite gets an entry per selected arch against that arch's own
+# shard under HKP_PACK_OUT_ROOT_<name>. Nothing here probes a device and nothing reads
+# the descriptors to decide what to expect: a bundle cannot be its own expectation,
+# and a host census must not depend on which card is in the machine.
+#
+# SUITES are literal GTest suite names, one per generated packaged-engine census
+# spliced into the test binary. The native execution guard requires every registered
+# case in that suite to pass without skipping in every completed iteration. A suite is
+# declarable only where it reads exactly one pack's shard, because an entry hands the
+# binary exactly one directory. Direct-load engines use ordinary host tests.
+#
+# hkp_register_census_tests(TARGET <t> PACK_NAME <name> SUITES <suite>...
+#                           [EXPECTED_CASES <case>...])
+#   ONE call per packed target, made where <t> is defined and after it exists, beside
+#   hkp_verify_embedded_sources(): the same attachment point, reading the same registry
+#   hkp_wire_pack_target() fills. PACK_NAME selects the pack whose OUT_ROOT and ARCHES
+#   the entries address, so each entry reads that target's own shard.
+#
+#   Declaring a suite requires a wired PACK_NAME, an existing TARGET and a nonempty
+#   recorded arch list; each missing prerequisite is fatal rather than a silent drop,
+#   because a census that registers nothing is indistinguishable from one that passed.
+#
+#   EXPECTED_CASES pins the suite's case-name set. The execution guard above proves that
+#   everything REGISTERED ran and passed; it cannot prove that everything EXPECTED was
+#   registered, so a suite that loses cases -- a file dropped from target_sources, a
+#   block compiled out, a generation that stopped emitting a case -- shrinks silently and
+#   still certifies green. The pinned set closes that: the listener compares these names
+#   against the suite's registered ones and fails on either difference. Names, never a
+#   count: a case added and a case lost cancel in a count.
+#
+#   Delivered to the binary as HIPDNN_TEST_CENSUS_EXPECTED_CASES, a COMMA-separated list,
+#   alongside the suite and arch on the same environment channel. See
+#   _hkp_join_census_cases() above for why the separator is a comma and what it rejects.
+#
+#   OPTIONAL, and omitting it leaves an entry behaving exactly as it did before the pin
+#   existed: the name check is skipped and only the execution guard runs. Optional so the
+#   pin can be adopted per suite, and because a suite whose case set is genuinely dynamic
+#   has no honest set to pin. Supplying the keyword with no names is fatal, because an
+#   empty pin is indistinguishable from no pin and would disable the check it looks like
+#   it is performing. Every generated packaged-engine census supplies it: the generator's
+#   own census fragment derives the list from the suite template it emits.
+#
+# Each census entry is registered alongside positive controls: entries that run the
+# same binary with the same environment, differ only in the one input that is supposed
+# to make the census refuse, and pass only when the census prints the diagnostic for
+# that specific refusal. A gate nobody can watch fail is indistinguishable from no
+# gate, and the controls are what make a weakened guard -- a dropped check, a
+# comparison that stops being made -- show up as red rather than as a suite that
+# quietly certifies nothing. Each control names its own diagnostic rather than merely
+# expecting failure, so a control cannot be satisfied by an unrelated failure, by a
+# binary that never started, or by another control's defect. _hkp_add_census_entry()
+# above registers them with the entry, under the same conditions, so a census can
+# never exist without them.
+# ---------------------------------------------------------------------------
+function(hkp_register_census_tests)
+    if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
+        return()
+    endif()
+
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;PACK_NAME" "SUITES;EXPECTED_CASES")
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "hkp_register_census_tests: unrecognised argument(s): "
+            "${ARG_UNPARSED_ARGUMENTS}")
+    endif()
+    if(NOT ARG_SUITES)
+        return()
+    endif()
+    if("EXPECTED_CASES" IN_LIST ARG_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) with an EXPECTED_CASES "
+            "keyword that names no case. An empty pin admits every case set, which "
+            "reads as a pinned suite while checking nothing. List the suite's cases, "
+            "or drop the keyword.")
+    endif()
+
+    if(NOT ARG_TARGET)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) without a TARGET, so "
+            "no binary could run them.")
+    endif()
+    if(NOT ARG_PACK_NAME)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) without a PACK_NAME, "
+            "so no shard could be named.")
+    endif()
+    if(NOT TARGET ${ARG_TARGET})
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) but the target "
+            "${ARG_TARGET} does not exist, so no census could be registered. This "
+            "call must run after that target is created.")
+    endif()
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT ARG_PACK_NAME IN_LIST _labels)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) at pack target "
+            "'${ARG_PACK_NAME}', which no hkp_wire_pack_target() call wired, so "
+            "there is no shard to census. Wired roots: ${_labels}.")
+    endif()
+
+    get_property(_out_root GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_PACK_NAME})
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_PACK_NAME})
+    if(NOT _arches)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) at pack target "
+            "'${ARG_PACK_NAME}', which was wired with an empty architecture list, "
+            "so no shard exists to census. Set GPU_TARGETS/AMDGPU_TARGETS.")
+    endif()
+
+    # A pin names ONE suite's cases. Spread over several suites it would demand that
+    # each of them register the same set, which no two distinct suites do -- so the
+    # first entry would fail and the mistake would read as a broken suite rather than
+    # as a misplaced argument.
+    list(LENGTH ARG_SUITES _suite_count)
+    if(ARG_EXPECTED_CASES AND NOT _suite_count EQUAL 1)
+        message(FATAL_ERROR
+            "hkp: EXPECTED_CASES pins one suite's case-name set, but this call "
+            "declares ${_suite_count} suites (${ARG_SUITES}). Split the call so each "
+            "pinned suite carries its own list.")
+    endif()
+
+    # Empty when the caller pinned nothing, which is what leaves each entry behaving
+    # as it did before the pin existed.
+    _hkp_join_census_cases(_census_expected_cases ${ARG_EXPECTED_CASES})
+
+    foreach(_suite IN LISTS ARG_SUITES)
+        # The entry name carries the arch and the suite and nothing of the pack, so the
+        # same suite declared at a second pack target would ask CTest for one name twice
+        # -- and the second registration would silently take the first one's shard.
+        get_property(_owner GLOBAL PROPERTY HKP_CENSUS_SUITE_OWNER_${_suite})
+        if(_owner)
+            message(FATAL_ERROR
+                "hkp: census suite '${_suite}' is declared at two pack targets, "
+                "'${_owner}' and '${ARG_PACK_NAME}'. A census entry is named for its "
+                "suite and arch alone, so the two collide. Declare the suite at the "
+                "one pack whose shard it reads.")
+        endif()
+        set_property(GLOBAL PROPERTY HKP_CENSUS_SUITE_OWNER_${_suite} "${ARG_PACK_NAME}")
+
+        foreach(_census_arch IN LISTS _arches)
+            _hkp_add_census_entry("${ARG_TARGET}" "${_suite}" "${_census_arch}"
+                                  "${_out_root}/${_census_arch}"
+                                  "${_census_expected_cases}")
+        endforeach()
+    endforeach()
 endfunction()
