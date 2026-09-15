@@ -437,11 +437,21 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
                 a_blockwise_copy.RunWrite(a_block_desc, a_block_buf);
                 b_blockwise_copy.RunWrite(b_block_desc, b_block_buf);
 
-                a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
-                b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
+                // T1-04 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): a wide tile (MRepeat > 1) has
+                // enough independent WMMA issue slots in the burst below to fully absorb the
+                // next-tile prefetch's front-end issue cost if issued now, before any of this
+                // K-step's WMMA; a narrow tile (MRepeat == 1) has only one WMMA group per K-step,
+                // so issuing the prefetch here would put its issue cost on the critical path
+                // instead of the WMMA's own latency. For MRepeat == 1 the issue is deferred to
+                // just after the first K-step's WMMA group (inside the static_ford below).
+                if constexpr(MRepeat > 1)
+                {
+                    a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
+                    b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
 
-                a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
-                b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+                    a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                    b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
+                }
 
                 b_scale_struct.template GlobalLoad<0>((i + 2) % num_loop_per_scale == 0);
 
@@ -513,6 +523,17 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
                         __builtin_amdgcn_sched_barrier(0);
                         __builtin_amdgcn_s_setprio(0);
                         __builtin_amdgcn_sched_barrier(0);
+                    }
+                    // T1-04: narrow tile (MRepeat == 1) deferred prefetch issue -- see the
+                    // matching MRepeat > 1 branch before this static_ford.
+                    if constexpr(MRepeat == 1 && k0 == 0 && n0 == NRepeat - 1 &&
+                                 k_inner == KInner - 1)
+                    {
+                        a_blockwise_copy.RunRead(a_grid_desc, a_grid_buf);
+                        b_blockwise_copy.RunRead(b_grid_desc, b_grid_buf);
+
+                        a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
+                        b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
                     }
                 });
 
