@@ -13,22 +13,12 @@
 #include <string>
 #include <type_traits>
 
+#include "test_support.hpp"
+
 namespace {
 using namespace roc::host_numerics;
-
-void require(bool condition, const std::string& message) {
-    if (!condition) throw std::runtime_error(message);
-}
-
-template <typename Exception, typename Function>
-void requireThrows(Function&& function, const std::string& message) {
-    try {
-        function();
-    } catch (const Exception&) {
-        return;
-    }
-    throw std::runtime_error(message);
-}
+using roc::host_numerics::test::require;
+using roc::host_numerics::test::requireThrows;
 
 bool hasEqualStorage(const Tensor& first, const Tensor& second) {
     return first.type() == second.type() && first.layout() == second.layout() &&

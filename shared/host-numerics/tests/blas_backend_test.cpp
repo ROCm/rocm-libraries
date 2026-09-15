@@ -12,11 +12,10 @@
 #include <vector>
 
 #include "gemm_test_adapter.hpp"
+#include "test_support.hpp"
 
 namespace {
-void require(bool condition, const char* message) {
-    if (!condition) throw std::runtime_error(message);
-}
+using roc::host_numerics::test::require;
 
 template <typename T>
 void testTransformingBlockScaleFallsBack(roc::host_numerics::ScalarType accumulatorType) {
