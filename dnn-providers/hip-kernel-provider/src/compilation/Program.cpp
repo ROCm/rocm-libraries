@@ -37,9 +37,9 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
     compileAndLoad(kernelSrc.data(), headersData, includeNames, options);
 }
 
-Program::Program(std::string sourceText,
+Program::Program(const std::string& sourceText,
                  std::string programName,
-                 std::vector<std::pair<std::string, std::string>> headers,
+                 const std::vector<std::pair<std::string, std::string>>& headers,
                  const std::vector<std::string>& options)
     : _programName(std::move(programName))
 {

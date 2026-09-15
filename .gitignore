@@ -3,6 +3,7 @@ __pycache__
 # Build directories
 _build/
 build/
+/.venv/
 
 # User-specific CMake presets
 CMakeUserPresets.json
