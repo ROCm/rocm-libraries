@@ -24,6 +24,10 @@
 
 #include <miopen/miopen.h>
 
+// Reached by relative path because src/private is deliberately off the test include path.
+#include "../../src/private/routing.hpp"
+
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -35,6 +39,9 @@ const std::vector<int> pads{1, 1};
 const std::vector<int> strides{1, 1};
 const std::vector<int> dilations{1, 1};
 constexpr std::size_t group_count = 1;
+
+constexpr float kOne  = 1.0f;
+constexpr float kZero = 0.0f;
 
 // Small enough to stay cheap in a doubled replay, large enough that a wrong kernel cannot
 // coincidentally match the reference.
@@ -50,6 +57,14 @@ tensor<float> MakeWeights()
     tensor<float> w{4, 4, 3, 3};
     w.generate(tensor_elem_gen_integer{17});
     return w;
+}
+
+// One value per output channel, in the {1, C, 1, 1} shape the fused entry point expects.
+tensor<float> MakeBias()
+{
+    tensor<float> b{1, 4, 1, 1};
+    b.generate(tensor_elem_gen_integer{5});
+    return b;
 }
 
 // Releases the handle on scope exit, so an ASSERT_* that stops a test early does not leak
@@ -72,6 +87,8 @@ struct Owned
 using OwnedConvDescriptor =
     Owned<miopenConvolutionDescriptor_t, miopenDestroyConvolutionDescriptor>;
 using OwnedProblem = Owned<miopenProblem_t, miopenDestroyProblem>;
+using OwnedActivationDescriptor =
+    Owned<miopenActivationDescriptor_t, miopenDestroyActivationDescriptor>;
 
 // Every solution the find call handed back, released together on scope exit. Two things keep
 // this safe and both are easy to break by reordering: the guard has to be declared after the
@@ -98,7 +115,7 @@ struct OwnedSolutions
 // would be handed a null descriptor, burying the real failure under a cascade of secondary
 // ones. A fatal failure only returns from this function, so callers wrap the call in
 // ASSERT_NO_FATAL_FAILURE to actually stop.
-void InitConvDescriptor(OwnedConvDescriptor& conv)
+void InitConvDescriptor(OwnedConvDescriptor& conv, miopenConvolutionMode_t mode = miopenConvolution)
 {
     ASSERT_EQ(miopenCreateConvolutionDescriptor(&conv.handle), miopenStatusSuccess);
     ASSERT_EQ(miopenInitConvolutionNdDescriptor(conv.handle,
@@ -106,7 +123,7 @@ void InitConvDescriptor(OwnedConvDescriptor& conv)
                                                 pads.data(),
                                                 strides.data(),
                                                 dilations.data(),
-                                                miopenConvolution),
+                                                mode),
               miopenStatusSuccess);
 }
 
@@ -127,19 +144,82 @@ OutputLengths(miopenConvolutionDescriptor_t conv_desc, tensor<float>& x, tensor<
     return std::vector<std::size_t>(out_dims.begin(), out_dims.end());
 }
 
+// Cross-implementation comparison, not bit-reproducibility: same tolerance used by
+// ConvFwdSolverTestBase::ThresholdChecks() for FP32.
+void ExpectWithinTolerance(const tensor<float>& reference,
+                           const tensor<float>& got,
+                           const char* what)
+{
+    const double tolerance = std::numeric_limits<float>::epsilon() * 80;
+    const double error     = miopen::rms_range(reference, got);
+    EXPECT_TRUE(std::isfinite(error)) << what;
+    EXPECT_LT(error, tolerance) << what << " beyond cross-implementation tolerance";
+}
+
 // Scaffolding, not code under test, so internal helpers are fine here; what matters is that
 // the reference is not another MIOpen solver.
 void ExpectMatchesCpuReference(const tensor<float>& x, const tensor<float>& w, tensor<float>& y)
 {
     tensor<float> ref_y{y.desc.GetLengths()};
     cpu_convolution_forward(pads.size(), x, w, ref_y, pads, strides, dilations, group_count);
+    ExpectWithinTolerance(ref_y, y, "convolution result");
+}
 
-    // Cross-implementation comparison, not bit-reproducibility: same tolerance used by
-    // ConvFwdSolverTestBase::ThresholdChecks() for FP32.
-    const double tolerance = std::numeric_limits<float>::epsilon() * 80;
-    const double error     = miopen::rms_range(ref_y, y);
-    EXPECT_TRUE(std::isfinite(error));
-    EXPECT_LT(error, tolerance) << "convolution result beyond cross-implementation tolerance";
+void ExpectMatchesCpuBackwardData(const tensor<float>& dx,
+                                  const tensor<float>& w,
+                                  const tensor<float>& dy)
+{
+    tensor<float> ref_dx{dx.desc.GetLengths()};
+    cpu_convolution_backward_data(
+        pads.size(), ref_dx, w, dy, pads, strides, dilations, group_count);
+    ExpectWithinTolerance(ref_dx, dx, "backward-data result");
+}
+
+void ExpectMatchesCpuBackwardWeights(const tensor<float>& x,
+                                     const tensor<float>& dw,
+                                     const tensor<float>& dy)
+{
+    tensor<float> ref_dw{dw.desc.GetLengths()};
+    cpu_convolution_backward_weight(
+        pads.size(), x, ref_dw, dy, pads, strides, dilations, group_count);
+    ExpectWithinTolerance(ref_dw, dw, "backward-weights result");
+}
+
+// The fused path is convolution, then a per-output-channel bias, then ReLU. Composed here
+// from the same CPU convolution the unfused tests use, so a fused kernel that silently drops
+// either of the trailing two steps shows up.
+void ExpectMatchesCpuBiasActivation(const tensor<float>& x,
+                                    const tensor<float>& w,
+                                    const tensor<float>& bias,
+                                    const tensor<float>& y)
+{
+    tensor<float> ref_y{y.desc.GetLengths()};
+    cpu_convolution_forward(pads.size(), x, w, ref_y, pads, strides, dilations, group_count);
+
+    const auto lengths      = ref_y.desc.GetLengths();
+    const std::size_t plane = lengths[2] * lengths[3];
+    for(std::size_t n = 0; n < lengths[0]; ++n)
+    {
+        for(std::size_t c = 0; c < lengths[1]; ++c)
+        {
+            const std::size_t base = (n * lengths[1] + c) * plane;
+            for(std::size_t i = 0; i < plane; ++i)
+            {
+                float& value = ref_y.data[base + i];
+                value        = std::max(0.0f, value + bias.data[c]);
+            }
+        }
+    }
+
+    ExpectWithinTolerance(ref_y, y, "fused bias+activation result");
+}
+
+// The decline rules live on the hipDNN side, so there is nothing to assert when the run is
+// serving these calls from MIOpen. The mode is fixed for the life of the process, which is
+// why it is read rather than set.
+bool ForwardingEnabled()
+{
+    return miopen::wrapper::GetForwardingMode() == miopen::wrapper::ForwardingMode::Enabled;
 }
 
 } // namespace
@@ -270,6 +350,300 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
     y.data = handle_deref.Read<float>(y_dev, y.data.size());
 
     ExpectMatchesCpuReference(x, w, y);
+}
+
+TEST(GPU_HipdnnShimConvBwdDataApi_FP32, BackwardDataMatchesCpuReference)
+{
+    auto& handle_deref    = get_handle();
+    miopenHandle_t handle = &handle_deref;
+
+    auto x = MakeInput();
+    auto w = MakeWeights();
+    OwnedConvDescriptor conv;
+    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
+    const auto out_lengths = OutputLengths(conv.handle, x, w);
+
+    tensor<float> dy{out_lengths};
+    dy.generate(tensor_elem_gen_integer{17});
+    tensor<float> dx{x.desc.GetLengths()};
+
+    auto dy_dev = handle_deref.Write(dy.data);
+    auto w_dev  = handle_deref.Write(w.data);
+    auto dx_dev = handle_deref.Write(dx.data);
+
+    std::size_t workspace_size = 0;
+    ASSERT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSize(
+                  handle, &dy.desc, &w.desc, conv.handle, &dx.desc, &workspace_size),
+              miopenStatusSuccess);
+    Workspace wspace{workspace_size};
+
+    int returned_algo_count = 0;
+    miopenConvAlgoPerf_t perf{};
+    ASSERT_EQ(miopenFindConvolutionBackwardDataAlgorithm(handle,
+                                                         &dy.desc,
+                                                         dy_dev.get(),
+                                                         &w.desc,
+                                                         w_dev.get(),
+                                                         conv.handle,
+                                                         &dx.desc,
+                                                         dx_dev.get(),
+                                                         1,
+                                                         &returned_algo_count,
+                                                         &perf,
+                                                         wspace.ptr(),
+                                                         wspace.size(),
+                                                         false),
+              miopenStatusSuccess);
+    ASSERT_GT(returned_algo_count, 0);
+
+    const float alpha = 1.0f;
+    const float beta  = 0.0f;
+    ASSERT_EQ(miopenConvolutionBackwardData(handle,
+                                            &alpha,
+                                            &dy.desc,
+                                            dy_dev.get(),
+                                            &w.desc,
+                                            w_dev.get(),
+                                            conv.handle,
+                                            perf.bwd_data_algo,
+                                            &beta,
+                                            &dx.desc,
+                                            dx_dev.get(),
+                                            wspace.ptr(),
+                                            wspace.size()),
+              miopenStatusSuccess);
+
+    dx.data = handle_deref.Read<float>(dx_dev, dx.data.size());
+
+    ExpectMatchesCpuBackwardData(dx, w, dy);
+}
+
+TEST(GPU_HipdnnShimConvBwdWeightsApi_FP32, BackwardWeightsMatchesCpuReference)
+{
+    auto& handle_deref    = get_handle();
+    miopenHandle_t handle = &handle_deref;
+
+    auto x = MakeInput();
+    auto w = MakeWeights();
+    OwnedConvDescriptor conv;
+    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
+    const auto out_lengths = OutputLengths(conv.handle, x, w);
+
+    tensor<float> dy{out_lengths};
+    dy.generate(tensor_elem_gen_integer{17});
+    tensor<float> dw{w.desc.GetLengths()};
+
+    auto dy_dev = handle_deref.Write(dy.data);
+    auto x_dev  = handle_deref.Write(x.data);
+    auto dw_dev = handle_deref.Write(dw.data);
+
+    std::size_t workspace_size = 0;
+    ASSERT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
+                  handle, &dy.desc, &x.desc, conv.handle, &dw.desc, &workspace_size),
+              miopenStatusSuccess);
+    Workspace wspace{workspace_size};
+
+    int returned_algo_count = 0;
+    miopenConvAlgoPerf_t perf{};
+    ASSERT_EQ(miopenFindConvolutionBackwardWeightsAlgorithm(handle,
+                                                            &dy.desc,
+                                                            dy_dev.get(),
+                                                            &x.desc,
+                                                            x_dev.get(),
+                                                            conv.handle,
+                                                            &dw.desc,
+                                                            dw_dev.get(),
+                                                            1,
+                                                            &returned_algo_count,
+                                                            &perf,
+                                                            wspace.ptr(),
+                                                            wspace.size(),
+                                                            false),
+              miopenStatusSuccess);
+    ASSERT_GT(returned_algo_count, 0);
+
+    const float alpha = 1.0f;
+    const float beta  = 0.0f;
+    ASSERT_EQ(miopenConvolutionBackwardWeights(handle,
+                                               &alpha,
+                                               &dy.desc,
+                                               dy_dev.get(),
+                                               &x.desc,
+                                               x_dev.get(),
+                                               conv.handle,
+                                               perf.bwd_weights_algo,
+                                               &beta,
+                                               &dw.desc,
+                                               dw_dev.get(),
+                                               wspace.ptr(),
+                                               wspace.size()),
+              miopenStatusSuccess);
+
+    dw.data = handle_deref.Read<float>(dw_dev, dw.data.size());
+
+    ExpectMatchesCpuBackwardWeights(x, dw, dy);
+}
+
+TEST(GPU_HipdnnShimConvBiasActivApi_FP32, FusedForwardMatchesCpuReference)
+{
+    auto& handle_deref    = get_handle();
+    miopenHandle_t handle = &handle_deref;
+
+    auto x    = MakeInput();
+    auto w    = MakeWeights();
+    auto bias = MakeBias();
+    OwnedConvDescriptor conv;
+    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
+    const auto out_lengths = OutputLengths(conv.handle, x, w);
+    tensor<float> y{out_lengths};
+
+    OwnedActivationDescriptor activation;
+    ASSERT_EQ(miopenCreateActivationDescriptor(&activation.handle), miopenStatusSuccess);
+    ASSERT_EQ(miopenSetActivationDescriptor(activation.handle, miopenActivationRELU, 0.0, 0.0, 0.0),
+              miopenStatusSuccess);
+
+    auto x_dev    = handle_deref.Write(x.data);
+    auto w_dev    = handle_deref.Write(w.data);
+    auto bias_dev = handle_deref.Write(bias.data);
+    auto y_dev    = handle_deref.Write(y.data);
+
+    std::size_t workspace_size = 0;
+    ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
+                  handle, &w.desc, &x.desc, conv.handle, &y.desc, &workspace_size),
+              miopenStatusSuccess);
+    Workspace wspace{workspace_size};
+
+    // alpha2 is zero, so z contributes nothing; y stands in for it because the entry point
+    // still needs a valid descriptor and buffer there.
+    const float alpha1 = 1.0f;
+    const float alpha2 = 0.0f;
+    const auto status  = miopenConvolutionBiasActivationForward(handle,
+                                                               &alpha1,
+                                                               &x.desc,
+                                                               x_dev.get(),
+                                                               &w.desc,
+                                                               w_dev.get(),
+                                                               conv.handle,
+                                                               miopenConvolutionFwdAlgoGEMM,
+                                                               wspace.ptr(),
+                                                               wspace.size(),
+                                                               &alpha2,
+                                                               &y.desc,
+                                                               y_dev.get(),
+                                                               &bias.desc,
+                                                               bias_dev.get(),
+                                                               activation.handle,
+                                                               &y.desc,
+                                                               y_dev.get());
+
+    // Fused conv+bias+activation has no implementation on every device: MIOpen has no fusion
+    // solver for this layout and data type on some of them, and the hipDNN plugin that would
+    // otherwise serve it declines on the same devices. Both modes report that the same way,
+    // so a decline here says nothing about the forwarding path and is not a failure.
+    if(status == miopenStatusUnsupportedOp)
+    {
+        GTEST_SKIP() << "fused conv+bias+activation is unimplemented on this device: "
+                     << miopenGetErrorString(status);
+    }
+    ASSERT_EQ(status, miopenStatusSuccess);
+
+    y.data = handle_deref.Read<float>(y_dev, y.data.size());
+
+    ExpectMatchesCpuBiasActivation(x, w, bias, y);
+}
+
+// Every problem here is one MIOpen itself accepts. What is being checked is that the hipDNN
+// path recognises it cannot express them and says so, instead of quietly producing a result
+// that is wrong in a way no tolerance would catch.
+TEST(GPU_HipdnnShimConvDeclined_FP32, UnexpressibleProblemsReturnUnsupported)
+{
+    if(!ForwardingEnabled())
+        return;
+
+    auto& handle_deref    = get_handle();
+    miopenHandle_t handle = &handle_deref;
+
+    auto x = MakeInput();
+    auto w = MakeWeights();
+    OwnedConvDescriptor conv;
+    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
+    const auto out_lengths = OutputLengths(conv.handle, x, w);
+    tensor<float> y{out_lengths};
+
+    auto x_dev = handle_deref.Write(x.data);
+    auto w_dev = handle_deref.Write(w.data);
+    auto y_dev = handle_deref.Write(y.data);
+
+    // The declines happen before any hipDNN object is built, so no workspace is needed to
+    // reach them.
+    auto forward = [&](const float alpha, const float beta, miopenConvolutionDescriptor_t c) {
+        return miopenConvolutionForward(handle,
+                                        &alpha,
+                                        &x.desc,
+                                        x_dev.get(),
+                                        &w.desc,
+                                        w_dev.get(),
+                                        c,
+                                        miopenConvolutionFwdAlgoGEMM,
+                                        &beta,
+                                        &y.desc,
+                                        y_dev.get(),
+                                        nullptr,
+                                        0);
+    };
+
+    EXPECT_EQ(forward(2.0f, 0.0f, conv.handle), miopenStatusUnsupportedOp) << "alpha != 1";
+    EXPECT_EQ(forward(1.0f, 1.0f, conv.handle), miopenStatusUnsupportedOp) << "beta != 0";
+
+    {
+        OwnedConvDescriptor grouped;
+        ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(grouped));
+        ASSERT_EQ(miopenSetConvolutionGroupCount(grouped.handle, 2), miopenStatusSuccess);
+
+        tensor<float> grouped_w{4, 2, 3, 3};
+        grouped_w.generate(tensor_elem_gen_integer{17});
+        auto grouped_w_dev = handle_deref.Write(grouped_w.data);
+
+        EXPECT_EQ(miopenConvolutionForward(handle,
+                                           &kOne,
+                                           &x.desc,
+                                           x_dev.get(),
+                                           &grouped_w.desc,
+                                           grouped_w_dev.get(),
+                                           grouped.handle,
+                                           miopenConvolutionFwdAlgoGEMM,
+                                           &kZero,
+                                           &y.desc,
+                                           y_dev.get(),
+                                           nullptr,
+                                           0),
+                  miopenStatusUnsupportedOp)
+            << "group count != 1";
+    }
+
+    {
+        OwnedConvDescriptor transposed;
+        ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(transposed, miopenTranspose));
+        const auto transposed_lengths = OutputLengths(transposed.handle, x, w);
+        tensor<float> transposed_y{transposed_lengths};
+        auto transposed_y_dev = handle_deref.Write(transposed_y.data);
+
+        EXPECT_EQ(miopenConvolutionForward(handle,
+                                           &kOne,
+                                           &x.desc,
+                                           x_dev.get(),
+                                           &w.desc,
+                                           w_dev.get(),
+                                           transposed.handle,
+                                           miopenConvolutionFwdAlgoGEMM,
+                                           &kZero,
+                                           &transposed_y.desc,
+                                           transposed_y_dev.get(),
+                                           nullptr,
+                                           0),
+                  miopenStatusUnsupportedOp)
+            << "transposed convolution";
+    }
 }
 
 #endif // MIOPEN_ENABLE_HIPDNN_WRAPPER

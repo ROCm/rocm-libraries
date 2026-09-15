@@ -318,6 +318,7 @@ function(add_gtest TEST_NAME TEST_CPP)
           --lib-dir $<TARGET_FILE_DIR:MIOpen>
           --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
           --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
+          --needed-baseline ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
       # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are
@@ -372,8 +373,19 @@ target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOp
 # No include directory is needed: routing.cpp includes its own header by relative
 # path, and adding src/private here would expose miopen_private_rename.h to every
 # test-common source.
+#
+# hipdnn_forward.cpp comes along because routing.cpp asks it whether hipDNN is
+# available before reporting a route. The test binary's copy only ever answers
+# that question -- the forwarding the shim tests exercise happens inside
+# libMIOpen.so, against its own copy.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+  if(NOT TARGET hipdnn_frontend_dynamic)
+    find_package(hipdnn_frontend REQUIRED)
+  endif()
+  target_sources(miopen_gtest_common PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/private/routing.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_forward.cpp)
+  target_link_libraries(miopen_gtest_common PRIVATE hipdnn_frontend_dynamic)
 endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
@@ -540,6 +552,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
+          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )
