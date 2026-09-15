@@ -47,10 +47,12 @@ inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 {
     // The sizing call counts the terminator, the fetching call does not, so a fetch that
     // fits always reports less than it was given -- including zero for a variable that is
-    // set to an empty value, which is a successful read and not an absent one. Any process
-    // can replace the value between the two calls; when the new value no longer fits, the
-    // fetch writes nothing and returns the size it now requires, terminator included, so
-    // retry with that size until the fetch reports a length that fits.
+    // set to an empty value, which is a successful read and not an absent one. The
+    // environment block is private to this process, so no other process can reach in
+    // between the two calls, but another thread in this process can replace the value; when
+    // the new value no longer fits, the fetch writes nothing and returns the size it now
+    // requires, terminator included, so retry with that size until the fetch reports a
+    // length that fits.
     DWORD size = GetEnvironmentVariableA(var, nullptr, 0);
     while(size != 0)
     {
@@ -71,8 +73,9 @@ inline std::string getEnv(const char* var, const char* defaultValue = nullptr)
 /// Use for native Windows paths.
 inline std::wstring getEnvW(const wchar_t* var, const wchar_t* defaultValue = nullptr)
 {
-    // Sized and retried exactly as getEnv() above; see that comment for the growth race
-    // and for why a zero-length fetch is an empty value rather than an absent one.
+    // Sized and retried exactly as getEnv() above; see that comment for the same-process
+    // growth race and for why a zero-length fetch is an empty value rather than an absent
+    // one.
     DWORD size = GetEnvironmentVariableW(var, nullptr, 0);
     while(size != 0)
     {
