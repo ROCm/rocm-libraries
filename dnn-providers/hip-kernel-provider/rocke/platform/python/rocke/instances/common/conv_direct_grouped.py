@@ -2562,6 +2562,15 @@ def is_valid_depthwise_spec(
     return True, "ok"
 
 
+# Shared unroll threshold for both depthwise builders.  When the static cost
+# (loop iterations × filter taps) exceeds this, a runtime scf.for_iter loop
+# is emitted instead of fully unrolling; see _use_unroll below.  Note that
+# build_direct_depthwise multiplies by BLOCK_W (each thread covers multiple
+# output W positions) while build_direct_depthwise_spatial does not (each
+# thread owns exactly one W position).
+_DW_UNROLL_THRESH = 20_000
+
+
 def build_direct_depthwise(
     spec: "DirectDepthwiseSpec", arch: str = "gfx950"
 ) -> KernelDef:
@@ -2696,14 +2705,13 @@ def build_direct_depthwise(
     acc: List[List[Value]] = [[zero_f32] * p.KH for _ in range(BLOCK_W)]
 
     # ---- H-streaming loop ----
-    # Below _UNROLL_THRESH the loop is Python-unrolled (best codegen).
+    # Below _DW_UNROLL_THRESH the loop is Python-unrolled (best codegen).
     # Above it a runtime grouped-period scf.for is used: the outer loop
     # runs n_groups = ceil(n_iters/KH) times; the inner KH steps are
     # Python-unrolled with STATIC slot indices so preloaded weights are
     # referenced directly (no scatter, no runtime weight loads).
-    _UNROLL_THRESH = 20_000
     n_iters = p.H + p.KH - 1
-    _use_unroll = n_iters * BLOCK_W * p.KH * p.KW <= _UNROLL_THRESH
+    _use_unroll = n_iters * BLOCK_W * p.KH * p.KW <= _DW_UNROLL_THRESH
 
     if _use_unroll:
         for y in range(n_iters):
@@ -2950,7 +2958,7 @@ def build_direct_depthwise_spatial(
     c_stride_dw = p.stride
 
     n_iters = p.H + p.KH - 1
-    _use_unroll = n_iters * p.KH * p.KW <= 20_000
+    _use_unroll = n_iters * p.KH * p.KW <= _DW_UNROLL_THRESH
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS

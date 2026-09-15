@@ -425,7 +425,10 @@ def _run_depthwise_sweep(
 
     p = problem
     # Use spatial kernel when groups fit in one wave (better thread utilisation).
-    _use_spatial = p.groups <= 64
+    # Derive wave_size from the spec default so this stays correct on wave32 targets
+    # (groups == wave_size would leave zero W-positions per wave — not valid).
+    _wave_size = DirectDepthwiseSpatialSpec(problem=p).wave_size
+    _use_spatial = p.groups < _wave_size
 
     torch.manual_seed(42)
     A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
@@ -960,7 +963,7 @@ def main() -> int:
                 continue
             try:
                 prob, dt, forw = parse_miopen_cmd_direct(line)
-                if forw & 1:
+                if forw == 0 or (forw & 1):
                     cases.append((prob, dt))
                 else:
                     print(
@@ -979,7 +982,7 @@ def main() -> int:
         except ValueError as e:
             print(f"error: --miopen-cmd: {e}", file=sys.stderr)
             return 2
-        if not (forw & 1):
+        if forw != 0 and not (forw & 1):
             print(
                 f"error: --miopen-cmd: -F={forw} is not forward (fwd); "
                 f"wgrad/dgrad are not supported",
