@@ -70,12 +70,11 @@ def test_wheel_excludes_source_only_tests(tmp_path):
     project_root = _PACKAGE_ROOT.parent
     build_source = tmp_path / "wheel-source"
     build_source.mkdir()
-    for package in ("tensilelite", "Tensile"):
-        shutil.copytree(
-            project_root / package,
-            build_source / package,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
+    shutil.copytree(
+        project_root / "tensilelite",
+        build_source / "tensilelite",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     for filename in ("pyproject.toml", "MANIFEST.in", "requirements.txt"):
         shutil.copyfile(project_root / filename, build_source / filename)
     result = subprocess.run(
@@ -88,6 +87,5 @@ def test_wheel_excludes_source_only_tests(tmp_path):
     wheel = next((build_source / "dist").glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
-    assert "Tensile/__init__.py" in names
     assert "tensilelite/resources.py" in names
     assert not any(name.startswith("tensilelite/Tests/unit/source_only/") for name in names)
