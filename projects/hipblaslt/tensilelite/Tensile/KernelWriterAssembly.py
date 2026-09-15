@@ -8791,6 +8791,20 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("SrdSync", 4, 4)
       module.add(RegSet("s", "sgprSrdSync", self.sgprs["SrdSync"]))
 
+    # Dedicated CLS SGPRs (do not reuse WorkGroup2 / ArgType; they are still live).
+    # CLSm0Base = M0 src offset; CLSLoopCounter = countdown. Allocated here, with the
+    # other post-loop SGPRs, rather than in globalWriteElementBatch: defineSgpr re-pins
+    # every freeSgprVarPool entry, which fails once the store phase has handed those
+    # slots out as temps.
+    if kernel["CompactLoopStore"]:
+      self.defineSgpr("CLSm0Base", 1)
+      module.add(RegSet("s", "sgprCLSm0Base", self.sgprs["CLSm0Base"]))
+      self.defineSgpr("CLSLoopCounter", 1)
+      module.add(RegSet("s", "sgprCLSLoopCounter", self.sgprs["CLSLoopCounter"]))
+      if self.states.useGateResidual:
+        module.add(self.defineSgpr("CLSGateRowInc", 1))
+        module.add(RegSet("s", "sgprCLSGateRowInc", self.sgprs["CLSGateRowInc"]))
+
     # Load kernel args end
     ########################################
 
@@ -16622,14 +16636,6 @@ class KernelWriterAssembly(KernelWriter):
     factorDim = factorDims[fdIdx]
     edgeModule.add(writeLabel)
 
-    # Dedicated CLS SGPRs (do not reuse WorkGroup2 / ArgType; they are still live).
-    # CLSm0Base = M0 src offset; CLSLoopCounter = countdown.
-    if kernel["CompactLoopStore"]:
-      edgeModule.add(self.defineSgpr("CLSm0Base", 1))
-      edgeModule.add(self.defineSgpr("CLSLoopCounter", 1))
-      if self.states.useGateResidual:
-        edgeModule.add(self.defineSgpr("CLSGateRowInc", 1))
-
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
 
@@ -16906,13 +16912,6 @@ class KernelWriterAssembly(KernelWriter):
     # Add actLoopEndLabel if needed
     if len(actLoopLabelModules) > 1:
       edgeModule.add(actLoopEndLabel)
-
-    # Free dedicated CLS SGPRs after all batches / activation branches.
-    if kernel["CompactLoopStore"]:
-      if self.states.useGateResidual:
-        edgeModule.add(self.undefineSgpr("CLSGateRowInc"))
-      edgeModule.add(self.undefineSgpr("CLSLoopCounter"))
-      edgeModule.add(self.undefineSgpr("CLSm0Base"))
 
     if len(factorDims) == 1:
       isDeferredReturn = "Deferred" in endLabel.getLabelName()
