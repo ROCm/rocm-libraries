@@ -3380,12 +3380,22 @@ def _rocmShimReporting(tmp_path, arch):
     PATH and answer from the machine running the test. The tools are shimmed
     through ROCM_PATH rather than PATH because both resolvers look under the
     ROCm install first; everything else the script needs is still found on PATH.
+
+    rocminfo is shimmed for the same reason, and is the one tool here that is
+    asked in its own format: it is consulted to put back a stepping the other
+    two truncate, and it is read for indented ``Name:`` lines rather than bare
+    ones. Left out, it would report this machine's stepping onto whatever
+    architecture the caller asked for.
     """
     root = tmp_path / "rocm"
-    for relative in ("bin/rocm_agent_enumerator", "lib/llvm/bin/amdgpu-arch"):
+    for relative, body in (
+        ("bin/rocm_agent_enumerator", f"echo {arch}"),
+        ("lib/llvm/bin/amdgpu-arch", f"echo {arch}"),
+        ("bin/rocminfo", f'echo "  Name:                    {arch}"'),
+    ):
         tool = root / relative
         tool.parent.mkdir(parents=True, exist_ok=True)
-        tool.write_text(f"#!/bin/sh\necho {arch}\n")
+        tool.write_text(f"#!/bin/sh\n{body}\n")
         tool.chmod(tool.stat().st_mode | stat.S_IEXEC)
     return root
 

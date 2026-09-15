@@ -100,33 +100,113 @@ def _real_archs(names):
     return [name for name in names if name and name != _PLACEHOLDER_ARCH]
 
 
+def _base_arch(name):
+    """``name`` without its stepping suffix or its target features.
+
+    A stepping is hyphenated onto the base name (``gfx1250-strict``) while
+    features are colon-delimited and may carry hyphens of their own
+    (``gfx950:sramecc+:xnack-``), so the base ends at whichever comes first.
+    """
+    return name.partition(":")[0].split("-", 1)[0]
+
+
+def _rocminfo_archs(rocminfo):
+    """The agent names rocminfo reports, or ``[]`` if it is absent or fails.
+
+    rocminfo needs read-write /dev/kfd, so a caller outside the render group
+    gets the empty list rather than an error -- which is why it supplements
+    amdgpu-arch here instead of replacing it.
+    """
+    if not rocminfo:
+        return []
+    output = _run([rocminfo])
+    if not output:
+        return []
+    return _real_archs(_ROCMINFO_AGENT_RE.findall(output))
+
+
+def _restore_steppings(archs, rocminfo_archs):
+    """``archs``, with any stepping suffix only rocminfo reports put back.
+
+    amdgpu-arch stopped being able to report a stepping in ROCm 10.2: it is now
+    a trampoline that execs offload-arch, which names an agent from the KFD
+    node's ``gfx_target_version`` alone and loads neither ROCr nor HIP. Both
+    gfx1250 steppings publish 120500 there -- the revision lives in the node's
+    ``capability`` bits 25:22, which offload-arch never reads -- so an A0 part
+    comes back as a bare "gfx1250". ROCr does apply that rule, and rocminfo
+    reports through ROCr, so it still answers "gfx1250-strict".
+
+    Letting rocminfo only ever *lengthen* a name keeps each tool doing what it
+    is good for: amdgpu-arch still enumerates, and rocminfo contributes a suffix
+    only for a base the two already agree on. A base rocminfo reports under more
+    than one spelling is left alone rather than guessed at, since a box holding
+    both steppings has no single right answer to substitute.
+
+    A base ``archs`` itself already spells with a stepping is left alone for the
+    same reason from the other direction: that answer came from a tool that can
+    tell the two apart on this box, so there is nothing to restore, and the
+    device rocminfo happens not to be reporting would otherwise be renamed to
+    its neighbour's stepping.
+    """
+    by_base = {}
+    for name in rocminfo_archs:
+        by_base.setdefault(_base_arch(name), set()).add(name.partition(":")[0])
+
+    told_apart = {
+        _base_arch(name) for name in archs if _base_arch(name) != name.partition(":")[0]
+    }
+
+    restored = []
+    for arch in archs:
+        head, separator, features = arch.partition(":")
+        unrestorable = head != _base_arch(head) or head in told_apart
+        candidates = set() if unrestorable else by_base.get(head, set())
+        if len(candidates) == 1:
+            (only,) = candidates
+            if only.startswith(head + "-"):
+                head = only
+        restored.append(head + separator + features)
+    return restored
+
+
+def restore_steppings(archs):
+    """``archs``, with any stepping suffix only rocminfo reports put back.
+
+    For callers holding an enumeration this module did not produce. Tensile's
+    build path is one: it asks a device enumerator first so that a ``target.lst``
+    or ``HSA_OVERRIDE_GFX_VERSION`` pin still wins, and every enumerator it can
+    be pointed at truncates a stepping the same way amdgpu-arch does, so the
+    answer needs the same cross-check before it names a compiler target.
+    """
+    return _restore_steppings(archs, _rocminfo_archs(_tool(_ROCMINFO_RELPATHS)))
+
+
 def _probe():
     """``(archs, any_tool_found)`` from the first tool that answers.
 
     Deliberately does not use rocm_agent_enumerator: it parses rocminfo with a
     capture group that ends at ``gfx\\d+``, so it truncates a suffix and answers
     "gfx1250" for an agent rocminfo names "gfx1250-strict" -- which would build
-    the wrong stepping's kernels without a word. amdgpu-arch and rocminfo both
-    report the full name.
+    the wrong stepping's kernels without a word. amdgpu-arch truncates the same
+    way as of ROCm 10.2, so its answer is cross-checked against rocminfo, the
+    one local source that applies the revision rule; see ``_restore_steppings``.
 
     The second element separates "no ROCm here" from "ROCm is here but reported
     nothing usable", which the callers report differently.
     """
     amdgpu_arch = _tool(_AMDGPU_ARCH_RELPATHS)
+    rocminfo = _tool(_ROCMINFO_RELPATHS)
+
     if amdgpu_arch:
         output = _run([amdgpu_arch])
         if output:
             archs = _real_archs(_ARCH_LINE_RE.findall(output))
             if archs:
-                return archs, True
+                return _restore_steppings(archs, _rocminfo_archs(rocminfo)), True
 
-    rocminfo = _tool(_ROCMINFO_RELPATHS)
-    if rocminfo:
-        output = _run([rocminfo])
-        if output:
-            archs = _real_archs(_ROCMINFO_AGENT_RE.findall(output))
-            if archs:
-                return archs, True
+    archs = _rocminfo_archs(rocminfo)
+    if archs:
+        return archs, True
 
     return [], bool(amdgpu_arch or rocminfo)
 
