@@ -15,7 +15,7 @@
 name: TheRock Multi-Arch CI
 
 # TheRock ref: POC TEST -- temporarily pointed at ROCm/TheRock branch
-# users/SreecharanGundaboluAMD/miopen-subshard-poc (commit 6e19786bc1c4b58fb7b42836d4213c985526fb19),
+# users/SreecharanGundaboluAMD/miopen-subshard-poc (commit 021f88dee1f6ea8f2248131ee27ea1d48e791577),
 # which is pinned baseline df3d451a3c054e14705ddf94e58498e1208df8d5 + a single commit that lets
 # the miopen linux test job run concurrent gtest sub-shards per GPU runner. Revert to the plain
 # pinned SHA (or a real reviewed bump) once the POC run is evaluated.
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+          ref: 021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -155,7 +155,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     with:
       build_variant: "release"
       # POC (ALMIOPEN sharding investigation): scoped to gfx94X only so this
@@ -163,14 +163,26 @@ jobs:
       # (Windows) are irrelevant to the miopen sub-shard change under test.
       # Revert to the normal defaults ('gfx94X,gfx950,gfx125X' / 'gfx110X')
       # before merging.
+      # POC: linux_amdgpu_families/windows_amdgpu_families are IGNORED by
+      # TheRock's configure_multi_arch_ci.py::select_targets() for
+      # pull_request-triggered runs -- that code path hardcodes the full
+      # "presubmit" family set (gfx94X, gfx110X-all, gfx1151, gfx125X-dcgpu,
+      # gfx120X-all) regardless of these inputs; they only take effect for
+      # workflow_dispatch/schedule triggers. Confirmed via TheRock source
+      # (select_targets()'s `elif ci_inputs.is_pull_request:` branch). To
+      # actually restrict Linux to gfx94X only, trigger this workflow via
+      # workflow_dispatch instead of a PR push. The sub-sharding change
+      # itself is unaffected either way -- it's gated on AMDGPU_FAMILIES
+      # containing "gfx94X" inside fetch_test_configurations.py, not on
+      # these inputs, so building other families never exercises it.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || '' }}
-      # POC: escalate test depth to "full" (the largest tier -- test_categories.yaml's
-      # quick < standard < comprehensive < full) via the test_filter: mechanism
+      # POC: escalate test depth to "exhaustive" (the largest tier -- test_categories.yaml's
+      # quick < standard < comprehensive < exhaustive) via the test_filter: mechanism
       # documented in TheRock's configure_multi_arch_ci.py, and scope the actual test
       # matrix to miopen only via the test:miopen label -- both purely through this
       # workflow input, no GitHub PR label needed. Revert to '' before merging.
-      linux_test_labels: ${{ inputs.linux_test_labels || 'test_filter:full,test:miopen' }}
+      linux_test_labels: ${{ inputs.linux_test_labels || 'test_filter:exhaustive,test:miopen' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # Copy all stages except math-libs and ml-libs from TheRock baseline
       # rocm-libraries only affects math-libs and ml-libs source sets
@@ -189,7 +201,7 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      ref: 6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+      ref: 021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -215,7 +227,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -229,7 +241,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+      ref: 021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     permissions:
       contents: read
       id-token: write
@@ -237,13 +249,21 @@ jobs:
   windows_build_and_test:
     name: Windows::${{ fromJSON(needs.setup.outputs.windows_build_config || '{}').build_variant_label || 'skip' }}
     needs: [configure, setup]
-    if: >-
-      ${{
-        needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
-      }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+    # POC (ALMIOPEN sharding investigation): hard-disabled. Setting
+    # windows_amdgpu_families to '' was NOT sufficient to prevent Windows
+    # from building/testing (observed a full Windows test matrix run --
+    # hipfft, rocalution, hipdnn, rocsparse, hipblaslt, etc., including an
+    # unrelated hipkernelprovider failure -- despite the empty family list),
+    # so this job is force-skipped outright until evaluated. Restore the
+    # original condition below before merging:
+    #   if: >-
+    #     ${{
+    #       needs.setup.outputs.windows_build_config != '' &&
+    #       needs.setup.outputs.enable_build_jobs == 'true' &&
+    #       needs.configure.outputs.skip_tests != 'true'
+    #     }}
+    if: false
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -255,7 +275,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+      ref: 021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     permissions:
       contents: read
       id-token: write
@@ -302,7 +322,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 6e19786bc1c4b58fb7b42836d4213c985526fb19 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+          ref: 021f88dee1f6ea8f2248131ee27ea1d48e791577 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

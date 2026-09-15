@@ -290,7 +290,7 @@ test_categories:
       - "comprehensive"
       - "nightly"
 
-  full:
+  exhaustive:
     description: >-
       Complete test suite - Jenkins CI parity (POC: matches the full miopen_gtest
       population run by projects/miopen/Jenkinsfile's Full Tests stage --
@@ -301,7 +301,8 @@ test_categories:
       binary (see ALMIOPEN sharding investigation). exclude below is Jenkins'
       own MIOPEN_GTEST_FILTER negative list byte-for-byte (test/CMakeLists.txt
       add_gtest_negative_filter calls + Jenkinsfile), not the old standard/full
-      curated exclusions.
+      curated exclusions. Named "exhaustive" (not "full") to avoid confusion
+      with the pre-existing curated "full" tier used elsewhere.
     test_patterns:
       - "*"
 
@@ -312,19 +313,20 @@ test_categories:
 
     exclude:
       # Exactly Jenkins' MIOPEN_GTEST_FILTER negative list (gfx942 Full Tests
-      # stage), minus HipGraphExist: DBSync/DeepBench/MIOpenTestConv are off
-      # by default there too, LstmMSRnn/1095 is a known-flaky gfx94X
-      # exclusion, LargeStride OOMs when shards share a GPU. Jenkins also
-      # excludes HipGraphExist from its parallel shards (LLVM JIT OOM under
-      # concurrent GPU pressure on its node) and reruns it as a separate
-      # RUN_SERIAL entry instead; left un-excluded here as an experiment --
-      # if our 16-way (4-per-GPU) sharding hits the same contention, re-add
-      # "*HipGraphExist*" and give it a dedicated serial step instead.
+      # stage): DBSync/DeepBench/MIOpenTestConv are off by default there too,
+      # LstmMSRnn/1095 is a known-flaky gfx94X exclusion, LargeStride OOMs when
+      # shards share a GPU. HipGraphExist is excluded here too, matching
+      # Jenkins' own exclusion of it from the concurrent-shard pool (LLVM JIT
+      # OOM under GPU memory pressure); it instead runs via the dedicated
+      # "exhaustive_hipgraph_serial" category below, invoked as its own
+      # serial (non-concurrent) step on exactly one runner -- see
+      # test_component.yml's "Test" step.
       - "*DBSync*"
       - "*DeepBench*"
       - "*MIOpenTestConv*"
       - "Full/GPU_LstmMSRnn_FP32.TestFloat/1095"
       - "*UnitTestConvSolver*LargeStride*"
+      - "*HipGraphExist*"
       # Datatype parity: Jenkins' 4 gfx942 gtest jobs only cover BFP16, FP16,
       # FP32, TF32 (+ NONE, which always runs). "*" positively selects every
       # suite, so without these, this category also picks up I8/I16/I32/I64/
@@ -346,9 +348,23 @@ test_categories:
       - "*DISABLED*"
 
     labels:
-      - "full"
+      - "exhaustive"
       - "weekly"
       - "all"
+
+  # POC (ALMIOPEN sharding investigation): HipGraphExist runs identically to
+  # Jenkins' own separate RUN_SERIAL rerun of it -- excluded from the main
+  # "exhaustive" concurrent-shard pool above, invoked here as its own ctest
+  # category on exactly one runner, sequentially (no other sub-shard running
+  # at the same time), matching the contention profile Jenkins avoids.
+  exhaustive_hipgraph_serial:
+    description: "HipGraphExist, run serially -- Jenkins CI parity companion to 'exhaustive'"
+    test_patterns:
+      - "*HipGraphExist*"
+
+    labels:
+      - "exhaustive_hipgraph_serial"
+
 
   ffm-quick:
     description: "FFM Quick Tests - Quick tests for NPI PRs"
@@ -538,6 +554,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
@@ -551,6 +568,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx110X"
 
   exclude_gpu_gfx115X:
@@ -562,6 +580,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx115X"
 
   exclude_gpu_gfx950:
@@ -572,6 +591,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "exhaustive"
       - "ex_gpu_gfx950"
 
 execution_settings:
@@ -583,4 +603,5 @@ execution_settings:
     comprehensive: 7200 # 2 hours
     ffm-quick:  7200    # 2 hours
     ffm-full:  7200     # 2 hours
-    full: 14400         # 4 hours
+    exhaustive: 14400   # 4 hours
+    exhaustive_hipgraph_serial: 300  # 5 minutes
