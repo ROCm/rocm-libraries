@@ -1156,6 +1156,156 @@ endfunction()
 
 
 # ---------------------------------------------------------------------------
+# _hkp_join_census_cases(<out-var> [<case>...])
+#
+# Packs an EXPECTED_CASES list into the single comma-separated string the binary
+# reads, and empties to "" when nothing was pinned. Comma rather than the semicolon
+# CMake lists use: the ENVIRONMENT test property is itself a semicolon-separated list
+# of VAR=VALUE, so one embedded separator would split the variable into fragments.
+# A GTest case name cannot contain a comma -- it is a macro argument -- so a name that
+# carries one is a typo, and is rejected here rather than silently read as two names.
+# ---------------------------------------------------------------------------
+function(_hkp_join_census_cases _outvar)
+    set(_cases "${ARGN}")
+    foreach(_case IN LISTS _cases)
+        if(_case MATCHES ",")
+            message(FATAL_ERROR
+                "hkp: expected census case '${_case}' contains a comma, which is "
+                "the separator the pin is delivered with, so the binary would read "
+                "it as two names. A GTest case name cannot hold one; this is a typo.")
+        endif()
+    endforeach()
+    list(JOIN _cases "," _joined)
+    set(${_outvar} "${_joined}" PARENT_SCOPE)
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_add_census_test(<name> <target> <gtest-filter> <environment> <pass-regex>)
+#
+# One CTest entry of a census family. An entry and its controls run the same binary
+# under the same labels and differ only in the filter, the environment and what
+# counts as passing, so all of them are registered through here rather than restated:
+# a command or a label that drifted on one of them would leave a control no longer
+# controlling the entry it is paired with.
+#
+# <pass-regex> empty is the census entry itself: the verdict is the exit status and
+# the run is expected to succeed. Nonempty is a control, and names the diagnostic the
+# census prints when it refuses -- which is the whole reason a control is evidence.
+# An exit-status control asserts only "exited nonzero", and a binary that fails to
+# launch, aborts on a missing DLL, or dies for any reason unrelated to the census
+# satisfies that too: the family would go green while measuring nothing. Matching the
+# line the census prints pins each control to the detection it exists to witness.
+#
+# PASS_REGULAR_EXPRESSION REPLACES the exit-status check rather than adding to it --
+# with it set, CTest ignores the exit code and the test passes exactly when the regex
+# matches -- so a control carries it ALONE. WILL_FAIL inverts whatever verdict was
+# reached, so pairing the two would report a correctly-refusing census as FAILED; no
+# entry registered here sets it. CTest still fails a test that times out or dies on a
+# signal even when the regex matched, so a crash cannot pass through the match.
+#
+# The census entry instead carries FAIL_REGULAR_EXPRESSION on the diagnostic prefix,
+# which the exit status cannot cover: a run that prints a refusal yet exits zero has
+# stopped propagating its own verdict, and would otherwise read as a clean census. A
+# healthy run prints no such line, so the guard costs it nothing. Controls are exempt
+# by construction rather than by exception -- each exists to provoke a diagnostic, and
+# says so by carrying a pass regex.
+# ---------------------------------------------------------------------------
+function(_hkp_add_census_test _name _target _filter _environment _pass_regex)
+    add_test(
+        NAME "${_name}"
+        COMMAND "$<TARGET_FILE:${_target}>"
+                "--gtest_filter=${_filter}")
+    set_tests_properties("${_name}" PROPERTIES
+        ENVIRONMENT "${_environment}"
+        LABELS "unit_test;hip-kernel-provider;host")
+    if(_pass_regex)
+        set_tests_properties("${_name}" PROPERTIES
+            PASS_REGULAR_EXPRESSION "${_pass_regex}")
+    else()
+        set_tests_properties("${_name}" PROPERTIES
+            FAIL_REGULAR_EXPRESSION "Census: ")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_add_census_entry(<target> <suite> <arch> <shard> <joined-cases>)
+#
+# One suite's census at one architecture, together with the controls that make it
+# observable as a gate. Each control passes only on the census diagnostic it is built
+# to provoke, so the three of them fail for three distinct reasons and none of them
+# can be satisfied by the binary merely dying. <joined-cases> is the output of
+# _hkp_join_census_cases(); empty means the caller pinned no case-name set, which
+# suppresses both the pin and the control that watches it.
+# ---------------------------------------------------------------------------
+function(_hkp_add_census_entry _target _suite _arch _shard _cases)
+    set(_name "hip-kernel-provider-hkp-census-${_arch}-${_suite}")
+    set(_common "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_arch}")
+    set(_pin "")
+    if(_cases)
+        set(_pin ";HIPDNN_TEST_CENSUS_EXPECTED_CASES=${_cases}")
+    endif()
+
+    _hkp_add_census_test("${_name}" "${_target}" "${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}" "")
+
+    # Control: every case in the suite goes unvisited. The filter's negative half
+    # cancels its positive half, so the suite's registered inventory is intact and
+    # none of it runs -- GTest has nothing to report and the process would exit 0
+    # on its own. Only the listener's per-iteration completion check turns this
+    # red, so it is the one thing this entry can be measuring.
+    #
+    # Written without naming a case, because a filter that names one would keep
+    # failing after that case was renamed, for the weaker reason that it matched
+    # nothing at all. The regex is matched for the same reason: it holds the
+    # completion check's wording and not the suite or case names it interpolates,
+    # so a renamed case leaves the control measuring what it always measured.
+    _hkp_add_census_test("${_name}-control-unvisited" "${_target}"
+                         "${_suite}.*-${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}${_pin}"
+                         "did not complete .* successfully")
+
+    # Control: the explicit root does not exist. The shard name is one no arch
+    # carries and no packing rule writes, so the directory cannot come into being
+    # and start passing. The census preflight rejects it before a single case
+    # runs, which is also what keeps a census from falling back to the binary's
+    # compiled-in root: that one holds every arch's descriptors and would let the
+    # entry pass while the shard it was registered for was missing.
+    #
+    # The regex is the preflight's own refusal, so this control stays red for the
+    # missing root specifically and cannot be satisfied by a later failure further
+    # in -- the preflight returns before a case runs, and nothing else prints it.
+    _hkp_add_census_test("${_name}-control-absent-root" "${_target}" "${_suite}.*"
+                         "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard}-hkp-census-control-absent${_pin}"
+                         "Census requires a nonempty HIPDNN_TEST_EXPECTED_ARCH and an existing explicit HIPDNN_DESCRIPTOR_DIR")
+
+    # Control: the pin expects a case the suite does not register. Same binary,
+    # same shard, same filter as the entry itself -- the one difference is a
+    # single extra name in HIPDNN_TEST_CENSUS_EXPECTED_CASES. Every real case
+    # still runs and still passes, so the execution guard is satisfied and the
+    # name comparison is the only thing left that can turn this red. That makes
+    # it the direct control for the shrink the pin exists to catch: a suite
+    # losing a case looks, to the listener, exactly like this.
+    #
+    # Registered only where a pin exists, because without one there is no check
+    # to control and the entry would be red for the wrong reason. The sentinel
+    # name is not a plausible case name, so no future case can adopt it and
+    # quietly make this control pass.
+    #
+    # The regex holds the name comparison's own wording, which separates this
+    # control from -control-unvisited above: both would exit nonzero, but only the
+    # name check prints this line, so the two cannot stand in for each other.
+    if(_cases)
+        _hkp_add_census_test("${_name}-control-unregistered-case" "${_target}"
+                             "${_suite}.*"
+                             "${_common};HIPDNN_DESCRIPTOR_DIR=${_shard};HIPDNN_TEST_CENSUS_EXPECTED_CASES=${_cases},HkpCensusControlCaseThatIsNeverRegistered"
+                             "is expected but not registered, so the suite has lost a case")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
 # The emitted-bundle census. Each generated engine ships a GTest suite that
 # reads what actually loaded through discoverDescriptorSets() -- the provider's
 # real typed registration followed by loadValidatedDescriptorSets<Handle>() --
@@ -1178,7 +1328,8 @@ endfunction()
 # declarable only where it reads exactly one pack's shard, because an entry hands the
 # binary exactly one directory. Direct-load engines use ordinary host tests.
 #
-# hkp_register_census_tests(TARGET <t> PACK_NAME <name> SUITES <suite>...)
+# hkp_register_census_tests(TARGET <t> PACK_NAME <name> SUITES <suite>...
+#                           [EXPECTED_CASES <case>...])
 #   ONE call per packed target, made where <t> is defined and after it exists, beside
 #   hkp_verify_embedded_sources(): the same attachment point, reading the same registry
 #   hkp_wire_pack_target() fills. PACK_NAME selects the pack whose OUT_ROOT and ARCHES
@@ -1187,13 +1338,45 @@ endfunction()
 #   Declaring a suite requires a wired PACK_NAME, an existing TARGET and a nonempty
 #   recorded arch list; each missing prerequisite is fatal rather than a silent drop,
 #   because a census that registers nothing is indistinguishable from one that passed.
+#
+#   EXPECTED_CASES pins the suite's case-name set. The execution guard above proves that
+#   everything REGISTERED ran and passed; it cannot prove that everything EXPECTED was
+#   registered, so a suite that loses cases -- a file dropped from target_sources, a
+#   block compiled out, a generation that stopped emitting a case -- shrinks silently and
+#   still certifies green. The pinned set closes that: the listener compares these names
+#   against the suite's registered ones and fails on either difference. Names, never a
+#   count: a case added and a case lost cancel in a count.
+#
+#   Delivered to the binary as HIPDNN_TEST_CENSUS_EXPECTED_CASES, a COMMA-separated list,
+#   alongside the suite and arch on the same environment channel. See
+#   _hkp_join_census_cases() above for why the separator is a comma and what it rejects.
+#
+#   OPTIONAL, and omitting it leaves an entry behaving exactly as it did before the pin
+#   existed: the name check is skipped and only the execution guard runs. Optional so the
+#   pin can be adopted per suite, and because a suite whose case set is genuinely dynamic
+#   has no honest set to pin. Supplying the keyword with no names is fatal, because an
+#   empty pin is indistinguishable from no pin and would disable the check it looks like
+#   it is performing. Every generated packaged-engine census supplies it: the generator's
+#   own census fragment derives the list from the suite template it emits.
+#
+# Each census entry is registered alongside positive controls: entries that run the
+# same binary with the same environment, differ only in the one input that is supposed
+# to make the census refuse, and pass only when the census prints the diagnostic for
+# that specific refusal. A gate nobody can watch fail is indistinguishable from no
+# gate, and the controls are what make a weakened guard -- a dropped check, a
+# comparison that stops being made -- show up as red rather than as a suite that
+# quietly certifies nothing. Each control names its own diagnostic rather than merely
+# expecting failure, so a control cannot be satisfied by an unrelated failure, by a
+# binary that never started, or by another control's defect. _hkp_add_census_entry()
+# above registers them with the entry, under the same conditions, so a census can
+# never exist without them.
 # ---------------------------------------------------------------------------
 function(hkp_register_census_tests)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
 
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;PACK_NAME" "SUITES")
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "TARGET;PACK_NAME" "SUITES;EXPECTED_CASES")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
             "hkp_register_census_tests: unrecognised argument(s): "
@@ -1201,6 +1384,13 @@ function(hkp_register_census_tests)
     endif()
     if(NOT ARG_SUITES)
         return()
+    endif()
+    if("EXPECTED_CASES" IN_LIST ARG_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${ARG_SUITES}) with an EXPECTED_CASES "
+            "keyword that names no case. An empty pin admits every case set, which "
+            "reads as a pinned suite while checking nothing. List the suite's cases, "
+            "or drop the keyword.")
     endif()
 
     if(NOT ARG_TARGET)
@@ -1237,6 +1427,22 @@ function(hkp_register_census_tests)
             "so no shard exists to census. Set GPU_TARGETS/AMDGPU_TARGETS.")
     endif()
 
+    # A pin names ONE suite's cases. Spread over several suites it would demand that
+    # each of them register the same set, which no two distinct suites do -- so the
+    # first entry would fail and the mistake would read as a broken suite rather than
+    # as a misplaced argument.
+    list(LENGTH ARG_SUITES _suite_count)
+    if(ARG_EXPECTED_CASES AND NOT _suite_count EQUAL 1)
+        message(FATAL_ERROR
+            "hkp: EXPECTED_CASES pins one suite's case-name set, but this call "
+            "declares ${_suite_count} suites (${ARG_SUITES}). Split the call so each "
+            "pinned suite carries its own list.")
+    endif()
+
+    # Empty when the caller pinned nothing, which is what leaves each entry behaving
+    # as it did before the pin existed.
+    _hkp_join_census_cases(_census_expected_cases ${ARG_EXPECTED_CASES})
+
     foreach(_suite IN LISTS ARG_SUITES)
         # The entry name carries the arch and the suite and nothing of the pack, so the
         # same suite declared at a second pack target would ask CTest for one name twice
@@ -1252,15 +1458,9 @@ function(hkp_register_census_tests)
         set_property(GLOBAL PROPERTY HKP_CENSUS_SUITE_OWNER_${_suite} "${ARG_PACK_NAME}")
 
         foreach(_census_arch IN LISTS _arches)
-            set(_census_name "hip-kernel-provider-hkp-census-${_census_arch}-${_suite}")
-            add_test(
-                NAME "${_census_name}"
-                COMMAND "$<TARGET_FILE:${ARG_TARGET}>"
-                        "--gtest_filter=${_suite}.*")
-            set_tests_properties("${_census_name}" PROPERTIES
-                ENVIRONMENT
-                    "HIPDNN_TEST_CENSUS_SUITE=${_suite};HIPDNN_TEST_EXPECTED_ARCH=${_census_arch};HIPDNN_DESCRIPTOR_DIR=${_out_root}/${_census_arch}"
-                LABELS "unit_test;hip-kernel-provider;host")
+            _hkp_add_census_entry("${ARG_TARGET}" "${_suite}" "${_census_arch}"
+                                  "${_out_root}/${_census_arch}"
+                                  "${_census_expected_cases}")
         endforeach()
     endforeach()
 endfunction()

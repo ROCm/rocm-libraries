@@ -6,6 +6,7 @@ SPDX-License-Identifier: MIT
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -22,17 +23,78 @@ SPDX-License-Identifier: MIT
 namespace
 {
 
+// Comma-separated, because the value arrives through the CTest ENVIRONMENT property,
+// which is itself a semicolon-separated list of VAR=VALUE. Empty entries are dropped so
+// a trailing separator is not read as a case named "".
+std::set<std::string> splitCaseNames(const std::string& packed)
+{
+    std::set<std::string> names;
+    for(std::string::size_type begin = 0; begin <= packed.size();)
+    {
+        const auto end = packed.find(',', begin);
+        const auto stop = end == std::string::npos ? packed.size() : end;
+        if(stop > begin)
+        {
+            names.insert(packed.substr(begin, stop - begin));
+        }
+        if(end == std::string::npos)
+        {
+            break;
+        }
+        begin = end + 1;
+    }
+    return names;
+}
+
 // The inventory includes disabled, filtered and sharded-out cases. Only callbacks
 // from a complete passing iteration can satisfy a declared census obligation.
+//
+// That proves everything REGISTERED ran and passed. It cannot prove that everything
+// EXPECTED was registered: the obligation set is built from the suite itself, so a suite
+// that loses cases loses obligations with them and still reports a complete census. The
+// pinned set closes that hole. It is compared by NAME and in both directions -- a lost
+// case and a new one cancel in a count, and the two call for opposite remedies.
+//
+// The pin is optional. Absent, this is exactly the execution guard it has always been.
 class CensusExecutionListener : public testing::EmptyTestEventListener
 {
 public:
-    explicit CensusExecutionListener(const testing::TestSuite& suite)
+    CensusExecutionListener(const testing::TestSuite& suite, const std::string& expectedCases)
         : _suite(suite)
     {
+        std::set<std::string> registered;
         for(int i = 0; i < suite.total_test_count(); ++i)
         {
-            _completed.emplace(suite.GetTestInfo(i), false);
+            const auto* test = suite.GetTestInfo(i);
+            _completed.emplace(test, false);
+            registered.insert(test->name());
+        }
+
+        if(expectedCases.empty())
+        {
+            return;
+        }
+
+        const auto expected = splitCaseNames(expectedCases);
+        for(const auto& name : expected)
+        {
+            if(registered.count(name) == 0)
+            {
+                _valid = false;
+                std::cerr << "Census: " << _suite.name() << "." << name
+                          << " is expected but not registered, so the suite has lost a "
+                             "case. Restore it, or drop it from EXPECTED_CASES.\n";
+            }
+        }
+        for(const auto& name : registered)
+        {
+            if(expected.count(name) == 0)
+            {
+                _valid = false;
+                std::cerr << "Census: " << _suite.name() << "." << name
+                          << " is registered but not expected, so the suite has gained a "
+                             "case the pin does not cover. Add it to EXPECTED_CASES.\n";
+            }
         }
     }
 
@@ -129,7 +191,13 @@ int main(int argc, char** argv)
             std::cerr << "Census suite '" << censusSuite << "' is absent or empty.\n";
             return 1;
         }
-        census = std::make_unique<CensusExecutionListener>(*suite);
+        // Optional, and unset means the pre-pin behaviour: the execution guard alone.
+        // The registration comparison happens here, before RUN_ALL_TESTS, because it
+        // reads the static registration rather than any result -- and because a suite
+        // that shrank should say so even if the surviving cases all pass.
+        const auto expectedCases
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_CENSUS_EXPECTED_CASES");
+        census = std::make_unique<CensusExecutionListener>(*suite, expectedCases);
     }
 
     // Keep the ingestor's winner cache out of the developer's ~/.cache/hipdnn: the

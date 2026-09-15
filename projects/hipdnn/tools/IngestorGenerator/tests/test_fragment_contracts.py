@@ -23,6 +23,13 @@ from pathlib import Path
 import pytest
 
 from codegen.generator import PLACEHOLDER_MARKER, mint_ids
+from tests.helpers import make_engine, make_kernel, make_minimal_config, make_pack
+
+# Imported rather than re-written: one reader of the generated suites, so a case
+# is the same thing here as it is where the suites' own shape is asserted. A
+# second extractor would be a second opinion about what counts as a case, and the
+# pin checked below is exactly a claim about that set.
+from tests.test_generator import emitted_cases
 
 
 class TestFragmentsAgreeWithEachOther:
@@ -163,6 +170,214 @@ class TestFragmentsAgreeWithEachOther:
                 f"fragment names '{name}', which this run never wrote under tests/ "
                 f"(wrote: {sorted(written_basenames)})"
             )
+
+
+@pytest.fixture
+def packaged_opposite_shape_config():
+    """A packaged engine taking the OTHER arm of all three suite conditionals.
+
+    ``configs/gfx950_attention_dense.yaml`` is the only packaged config that
+    ships, and it ranks through a heuristic, holds one pack and declares no
+    behavior notes -- so it renders one fixed arm of each gate in
+    ``test_packs.cpp.j2``. Against that shape alone a transcribed case list is
+    indistinguishable from a derived one, because there is nothing for a derived
+    one to do differently.
+    """
+    return make_minimal_config(
+        dialect="packaged",
+        kernel_source_kind="rocke",
+        engine=make_engine(heuristic="none", behavior_notes=["runtime_compilation"]),
+        packs=[
+            make_pack(
+                name="left",
+                discriminator="left",
+                arch=["gfx950"],
+                kernels=[make_kernel(name="left.f32_block64")],
+            ),
+            make_pack(
+                name="right",
+                discriminator="right",
+                arch=["gfx950"],
+                kernels=[
+                    make_kernel(
+                        name="right.f32_block128",
+                        metadata={"block_size": 128, "dtype": "FLOAT"},
+                    )
+                ],
+            ),
+        ],
+    )
+
+
+class TestCensusCasePinIsDerivedFromTheSuite:
+    """``EXPECTED_CASES`` is READ OUT OF the suite template, never restated.
+
+    The pin is what lets the census see a suite that SHRINKS. The execution guard
+    builds its obligations from the cases that registered, so a case which stops
+    being compiled takes its own obligation with it and the run still certifies
+    complete; the pin is the only thing comparing against a set that does not
+    shrink with the suite.
+
+    A transcribed pin re-opens that hole from the other side. It goes stale in
+    whichever direction nobody is watching -- failing the census for a case
+    somebody deliberately removed, or, once corrected by hand to whatever the
+    suite currently registers, passing the next suite that quietly loses one.
+    Deriving it from the very text that defines the suite is what makes it unable
+    to say anything else, and that derivation is what these assert.
+    """
+
+    @staticmethod
+    def _census_call(fragment: str) -> list[str]:
+        """The emitted ``hkp_register_census_tests(...)`` call, line by line.
+
+        Sliced out of the fragment rather than matched across it. The fragment is
+        mostly prose explaining the call, and every keyword the call uses appears
+        in that prose too, so a check run over the whole text can be satisfied by
+        the documentation of the rule instead of by the call implementing it.
+        """
+        lines = fragment.splitlines()
+        opens = [
+            index
+            for index, line in enumerate(lines)
+            if line.startswith("hkp_register_census_tests(")
+        ]
+        assert len(opens) == 1, f"expected exactly one census call:\n{fragment}"
+        closes = [
+            index
+            for index, line in enumerate(lines[opens[0] :], opens[0])
+            if line.strip() == ")"
+        ]
+        assert closes, f"the census call is never closed:\n{fragment}"
+        return lines[opens[0] : closes[0] + 1]
+
+    @classmethod
+    def _pinned_case_lines(cls, fragment: str) -> list[str]:
+        """The raw argument lines the ``EXPECTED_CASES`` keyword carries."""
+        lines = cls._census_call(fragment)
+        keywords = [
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == "EXPECTED_CASES"
+        ]
+        assert len(keywords) == 1, f"expected one EXPECTED_CASES keyword:\n{lines}"
+        return lines[keywords[0] + 1 : -1]
+
+    @classmethod
+    def _pin_and_suite(cls, generator, config) -> tuple[list[str], dict]:
+        """The pin and the suite's own case names, from ONE render context.
+
+        Both rendered against the same ``ids``, so what is compared is the pair a
+        single run emits rather than two runs that happen to agree.
+        """
+        ids = mint_ids(config)
+        fragment = generator._render_template(
+            "fragments/cmake_test_sources.j2", config, ids=ids
+        )
+        suite = generator._render_template("test_packs.cpp.j2", config, ids=ids)
+        pin = [line.strip() for line in cls._pinned_case_lines(fragment)]
+        cases = emitted_cases(suite, "TEST_F", f"Test{config.engine.pascal_name}Packs")
+        return pin, cases
+
+    def test_the_pin_is_exactly_the_case_set_the_suite_renders(
+        self, generator, gfx950_attention_dense_config
+    ):
+        """Set equality against the rendered suite, never against a list here.
+
+        A list written in this test would be a third authority on the suite's
+        shape, and it would drift on precisely the change the pin exists to catch
+        -- so it is the rendered suite that says what the pin must contain.
+        """
+        config = gfx950_attention_dense_config
+        assert config.is_packaged, "fixture is no longer the packaged-dialect one"
+        pin, cases = self._pin_and_suite(generator, config)
+        assert cases, "the suite template rendered no cases at all"
+        assert set(pin) == set(cases), (
+            f"the pin and the suite disagree: pinned-but-unregistered "
+            f"{sorted(set(pin) - set(cases))}, registered-but-unpinned "
+            f"{sorted(set(cases) - set(pin))}. Either way the census fails for a "
+            "reason that is about this fragment rather than about the bundle"
+        )
+        assert len(pin) == len(set(pin)), f"the pin names a case twice: {pin}"
+
+    def test_the_pin_follows_the_suites_conditional_arms(
+        self, generator, packaged_opposite_shape_config
+    ):
+        """Genuinely derived, not incidentally correct for one bundle shape.
+
+        ``test_packs.cpp.j2`` gates three cases on ``has_heuristic``,
+        ``is_multi_pack`` and ``behavior_notes``. This config takes the opposite
+        arm of all three, so a pin that agrees with it cannot also be the shipped
+        fixture's list, and the gated names are stated here because set equality
+        alone is satisfied by a pin that derived an empty list from an empty scrape.
+        """
+        config = packaged_opposite_shape_config
+        assert not config.engine.has_heuristic
+        assert config.is_multi_pack
+        assert config.engine.behavior_notes
+        pin, cases = self._pin_and_suite(generator, config)
+        assert set(pin) == set(cases), (
+            f"pinned-but-unregistered {sorted(set(pin) - set(cases))}, "
+            f"registered-but-unpinned {sorted(set(cases) - set(pin))}"
+        )
+        assert "ShipsNoHeuristicAndRegistersNoScoreSymbol" in pin, pin
+        assert "RanksThroughItsRegisteredScoreSymbol" not in pin, pin
+        assert "CarriesOneGraphScopedMatcherPerPack" in pin, pin
+        assert "CarriesNoGraphScopedMatcher" not in pin, pin
+        assert "DeclaresItsConfiguredBehaviorNotes" in pin, pin
+
+    def test_every_pinned_case_survives_the_wire_to_the_binary(
+        self, generator, gfx950_attention_dense_config
+    ):
+        """The pin crosses three separators, and may contain none of them.
+
+        It leaves the fragment as CMake arguments, is joined into ONE
+        comma-separated value, and travels inside the ENVIRONMENT test property,
+        which is itself a semicolon-separated list of VAR=VALUE. So a comma is
+        rejected outright by ``_hkp_join_census_cases``; a semicolon would tear
+        HIPDNN_TEST_CENSUS_EXPECTED_CASES off into a fragment of that list; and
+        whitespace inside a name makes it two CMake arguments, pinning two cases
+        neither of which any suite registers. Each turns the census red for a
+        reason that has nothing to do with the bundle under test.
+        """
+        config = gfx950_attention_dense_config
+        fragment = generator._render_template("fragments/cmake_test_sources.j2", config)
+        lines = self._pinned_case_lines(fragment)
+        assert lines, (
+            "the call supplies the EXPECTED_CASES keyword with no names, which "
+            "hkp_register_census_tests rejects: an empty pin admits every case "
+            "set while reading as a pinned suite"
+        )
+        for raw in lines:
+            assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", raw.strip()), (
+                f"pinned case {raw!r} is not the bare identifier a GTest case name "
+                "is -- a separator or a space in it is a name no suite can register"
+            )
+
+    def test_a_direct_load_bundle_pins_nothing_because_it_registers_nothing(
+        self, generator, scale_add_config
+    ):
+        """The control: the call is not emitted unconditionally.
+
+        A direct-load engine's suite is censused only by a hand-added call at the
+        pack target for its authored set, so a fragment emitting EXPECTED_CASES
+        here would hand the author a pin for a call they are not making. The
+        branch describes that hand-added call in prose, which is why this reads
+        the payload lines rather than the fragment.
+        """
+        assert not scale_add_config.is_packaged
+        fragment = generator._render_template(
+            "fragments/cmake_test_sources.j2", scale_add_config
+        )
+        payload = [
+            line
+            for line in fragment.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert payload, "the fragment splices nothing at all"
+        assert not [
+            line for line in payload if "hkp_register_census_tests" in line
+        ], payload
+        assert not [line for line in payload if "EXPECTED_CASES" in line], payload
 
 
 class TestPlaceholderScanSeesEveryEmittedFile:
