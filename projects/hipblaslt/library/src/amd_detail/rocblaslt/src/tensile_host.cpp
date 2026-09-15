@@ -45,7 +45,7 @@
 #include "rocroller_host.hpp"
 #endif
 
-#include <Tensile/ContractionProblem_Detail.hpp>
+#include <Tensile/Comparison.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
@@ -3197,6 +3197,35 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
+// The problem identity Origami online tuning keys on, shared by the selection
+// hook in getSolutions() and the measurement hook in runContractionProblem().
+//
+// std::hash<ContractionProblemGemm> cannot serve: it covers workspaceSize,
+// which is the preference's ceiling while the heuristic ranks solutions and the
+// caller's own allocation by the time the dispatch runs, so the two hooks would
+// hash one problem to two values and never meet. The fields below are the
+// geometry and types the offline tuning override already keys on, all of them
+// rewritten from the caller's problem description by every
+// updateTensileProblem(), so they survive that window. The cost is that
+// problems differing only in epilogue, bias or strides share a key.
+inline size_t onlineTuningProblemKey(const TensileLite::ContractionProblemGemm& problem)
+{
+    const rocisa::DataType computeType = problem.f32XdlMathOp() == rocisa::DataType::XFloat32
+                                             ? rocisa::DataType::XFloat32
+                                             : problem.computeType();
+
+    return TensileLite::hash_combine(problem.transA(),
+                                     problem.transB(),
+                                     problem.a().dataType(),
+                                     problem.b().dataType(),
+                                     computeType,
+                                     problem.c().dataType(),
+                                     problem.freeSizeA(0),
+                                     problem.freeSizeB(0),
+                                     problem.boundSize(0),
+                                     problem.batchSize(0));
+}
+
 // Apply the GemmPreference-supplied StreamK tile scheduling mode onto every
 // contraction problem currently carried by gemmData. Called from
 // rocblaslt_algo_get_heuristic_cpp before solution ranking so the SK5
@@ -3435,11 +3464,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         auto&      tuner        = rocblaslt::OnlineTuner::getInstance();
         const bool onlineTuning = tuner.enabled();
 
-        // Taken here because getSolutions() keys on the same hash of the same
-        // problem at this point in its lifecycle; anything later in this
-        // function sees a problem the solve has already touched.
-        const size_t problemKey
-            = onlineTuning ? std::hash<TensileLite::ContractionProblemGemm>{}(data->problem) : 0;
+        const size_t problemKey = onlineTuning ? onlineTuningProblemKey(data->problem) : 0;
 
         int* solutionIndex = (int*)algo->data;
         data->algoIndex    = *solutionIndex;
@@ -4624,8 +4649,8 @@ inline void promoteOnlineTuningCandidate(
         rankedPositions.push_back(i);
     }
 
-    // The measurement hook keys on this same hash, taken from the same problem.
-    const size_t problemKey = std::hash<TensileLite::ContractionProblemGemm>{}(tensile_prob);
+    // The measurement hook keys on this same identity.
+    const size_t problemKey = onlineTuningProblemKey(tensile_prob);
 
     const int promote
         = rocblaslt::OnlineTuner::getInstance().selectCandidate(problemKey, rankedSolutionIndices);
