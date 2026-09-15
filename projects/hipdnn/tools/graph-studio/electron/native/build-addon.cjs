@@ -21,7 +21,7 @@ fs.mkdirSync(gypDir, { recursive: true });
 
 const config = {
   variables: {
-    hipdnn_native_src_dir: resolved.nativeSrcDir,
+    hipdnn_native_src_dir: path.relative(gypDir, resolved.nativeSrcDir).replace(/\\/g, "/"),
     hipdnn_napi_include_dir: paths.napiIncludeDir(),
     hipdnn_include_dirs: resolved.includeDirs,
     hipdnn_defines: resolved.defines,

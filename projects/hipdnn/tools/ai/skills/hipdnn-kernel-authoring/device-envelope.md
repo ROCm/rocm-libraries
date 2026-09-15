@@ -33,13 +33,15 @@ a load error, not a shadow.
 | `<hip/hip_runtime.h>` from device source | no in-tree kernel includes it |
 | Host STL (`<vector>`, `<string>`, `<iostream>`, …) | appears only in host-side files, never in a compiled kernel source |
 
-**MFMA builtins (`__builtin_amdgcn_mfma_*`) have no precedent in this provider tree.**
+**MFMA builtins (`__builtin_amdgcn_mfma_*`) have no hipRTC precedent in this provider tree.**
 Neither their availability nor their unavailability under this hipRTC path is
 established. If the algorithm needs them, prove a minimal compile on the target
 architecture first, and report that proof — do not assume either way. The matrix-core
 kernels that do exist in tree (`hip_flash2_engine`, `asm_sdpa_engine`) are compiled
 ahead of time with `hipcc` into code objects and are **not** hipRTC precedents; their
-flags (`-O3`, `--cuda-device-only`, rocWMMA includes) do not transfer.
+flags (`-O3`, `--cuda-device-only`, rocWMMA includes) do not transfer. rocKE emits
+these builtins too (`rocke/platform/python/rocke/core/lower_hip.py:527-545`) and is in
+the same category: its lowering targets `hipcc`/`--genco`, not hipRTC.
 
 ## Compile options
 
@@ -51,11 +53,21 @@ production set, in order:
    `gfx942:sramecc+:xnack-`
 3. `-D` pairs only.
 
-The defines always present: `HIP_PLUGIN_USE_FP32` / `FP16` / `BFP16` (exactly one
-set per tensor dtype), `HIP_PLUGIN_USE_RNE_BFLOAT16=1`, `HIP_PLUGIN_USE_FPMIX=0`,
-`HIP_PLUGIN_USE_BFPMIX=0`, `HIP_PLUGIN_LAYOUT_NHWC`, `HIP_PLUGIN_USE_AMDGCN=0`, and
-the `HIP_PLUGIN_GFX103X` / `110X` / `115X` / `120X` prefix flags. Callers add their
+The defines always present — **every one of them is emitted unconditionally, with a
+value of `1` or `0`**, by `KernelCompileOptions::addDataTypeAndLayoutOptions`:
+`HIP_PLUGIN_USE_FP32` / `FP16` / `BFP16` (`:73`, `:75`, `:77` — all three are always
+defined; exactly one is set to `1` for the tensor dtype and the other two to `0`),
+`HIP_PLUGIN_USE_RNE_BFLOAT16=1`, `HIP_PLUGIN_USE_FPMIX=0`, `HIP_PLUGIN_USE_BFPMIX=0`,
+`HIP_PLUGIN_LAYOUT_NHWC` (`:82`), `HIP_PLUGIN_USE_AMDGCN=0`, and the
+`HIP_PLUGIN_GFX103X` / `110X` / `115X` / `120X` prefix flags (`:89`). Callers add their
 own with `.add(name, value)`.
+
+**Select on these with `#if`, never `#ifdef`.** Because the name is always defined,
+`#ifdef HIP_PLUGIN_USE_FP16` is **always true** and will compile the wrong dtype path
+with no diagnostic from hipRTC, the loader or the harness. Write
+`#if HIP_PLUGIN_USE_FP16` / `#elif HIP_PLUGIN_USE_BFP16` / `#else`. The same applies to
+`HIP_PLUGIN_LAYOUT_NHWC` and every prefix flag: `add(name, bool)`
+(`KernelCompileOptions.hpp:39`) renders a bool as `1`/`0`, not as presence/absence.
 
 **No optimization level, no fast-math and no warning flags are added by the
 production path.** `-O3` appears only in ad hoc test fixtures and in the AOT `hipcc`

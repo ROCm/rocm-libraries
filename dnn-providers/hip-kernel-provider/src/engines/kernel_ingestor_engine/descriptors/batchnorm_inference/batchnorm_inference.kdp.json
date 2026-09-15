@@ -1,0 +1,178 @@
+{
+  "version": "1.0",
+  "id": "79c6c2f9-1014-4840-b256-c59804c9629f",
+  "name": "hipkernel:batchnorm_inference",
+  "matchers": [
+    "a5b1c90f-d852-4d42-a8e1-2954eaf8a95f"
+  ],
+  "engine": "1f01bd0c-a36c-425c-83aa-2c5a056b2178",
+  "dispatch": "75d17456-fa34-4411-9792-d9371127ba34",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "1f01bd0c-a36c-425c-83aa-2c5a056b2178",
+          "kmd_id": "20c56e06-9fa5-43a3-a537-35b2226eac46",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "block_size",
+            "io_dtype",
+            "param_dtype"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "785d1e84-bd72-4d3f-b671-e1d7926f5f83",
+      "name": "batchnorm_inference.f32_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 64,
+        "io_dtype": "FLOAT",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f7b2fb18-b9ed-4677-8ec5-c7ea1e9501ae",
+      "name": "batchnorm_inference.f32_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 256,
+        "io_dtype": "FLOAT",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "118d5d05-399a-42bf-adc8-58af61cf6d59",
+      "name": "batchnorm_inference.f32_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 1024,
+        "io_dtype": "FLOAT",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "346078cf-56d7-4c88-8ea6-bc9047a37a99",
+      "name": "batchnorm_inference.f16_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 64,
+        "io_dtype": "HALF",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "84681e68-34f3-4499-bf99-7ea544925c6b",
+      "name": "batchnorm_inference.f16_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 256,
+        "io_dtype": "HALF",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4b68582a-d9f3-4858-880e-ba5aa4ba020b",
+      "name": "batchnorm_inference.f16_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 1024,
+        "io_dtype": "HALF",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "844fb8fe-5463-42c2-a06d-f3fe0e807bdb",
+      "name": "batchnorm_inference.bf16_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 64,
+        "io_dtype": "BFLOAT16",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "feb368d5-9964-48b3-9c7e-19d52453abc8",
+      "name": "batchnorm_inference.bf16_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 256,
+        "io_dtype": "BFLOAT16",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b6af17aa-0251-4102-b3e4-c39bbafb4a20",
+      "name": "batchnorm_inference.bf16_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "BatchnormInference.cpp",
+        "entry_point": "BatchnormInference"
+      },
+      "metadata": {
+        "block_size": 1024,
+        "io_dtype": "BFLOAT16",
+        "param_dtype": "FLOAT"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx1151"
+  ]
+}

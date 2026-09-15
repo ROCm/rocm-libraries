@@ -11,4 +11,10 @@
 #
 # Resolved against this file's own directory, so an includer's location does not matter.
 set(HIPDNN_INGESTOR_PACK_KERNEL_DIR "${CMAKE_CURRENT_LIST_DIR}/kernels")
-set(HIPDNN_INGESTOR_PACK_KERNELS PointwiseAdd PointwiseMul PointwiseSub ConvFwd)
+set(HIPDNN_INGESTOR_PACK_KERNELS PointwiseAdd PointwiseMul PointwiseSub ConvFwd BatchnormInference)
+
+# Headers those kernels include, embedded by the same mechanism: KernelEmbedding.cmake
+# routes a .h/.hpp into the provider's virtual-header list instead of its kernel-source
+# map, which is what hipRTC resolves an #include against. Named by full filename rather
+# than by stem, since the extension is the routing decision.
+set(HIPDNN_INGESTOR_PACK_KERNEL_HEADERS BatchnormInferenceTypes.h)

@@ -79,6 +79,20 @@ Completion requires:
   required by [workloads.md](workloads.md); missing/ambiguous/error outcomes block
   runtime acceptance. Without that join, reconciliation is offline only.
 
+**A zero exit status means a tool completed, not that it checked anything.** Commands
+that select no work, skip every case, or report their checks as not-run exit zero
+routinely, which is why every requirement above is stated as a count rather than as an
+outcome. Every reported result carries the count of what actually executed, and a
+result whose denominator is zero is absence of evidence — it blocks the gate it was
+offered for instead of passing it. The in-tree form of this discipline is
+`IngestorGenerator/tools/coverage_gate.py`: it runs the static and loader rungs, then
+prints the device rung as `NOT RUN`, stated rather than inferred from the two that
+passed (`IngestorGenerator/tools/coverage_gate.py:32-34`,
+`IngestorGenerator/tools/coverage_gate.py:236-239`), and its structural mode reports
+compiled agreement as `NOT CHECKED` rather than printing a stronger claim than it
+made. Report the same way. Summarising a `NOT RUN` or `NOT VERIFIED HERE` line into a
+pass is the failure this rule exists to prevent.
+
 State what each observation proves and does not prove, including device, reference,
 graph and architecture limits. Generation, enumeration, proposed commands and queued
 jobs cannot be reported as completed integration.

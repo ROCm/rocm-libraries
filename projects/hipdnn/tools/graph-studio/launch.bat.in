@@ -1,0 +1,6 @@
+@echo off
+setlocal
+set "prefix=%~dp0@_studio_bin_to_prefix@"
+set "ELECTRON_RUN_AS_NODE=1"
+"%prefix%/@_studio_electron_dir@/electron.exe" "%prefix%/@_studio_appdir@/electron/launch.cjs" @_studio_launch_mode@ %*
+exit /b %errorlevel%
