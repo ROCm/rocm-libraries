@@ -66,7 +66,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     ctx->BLOCK_GROUPS = spec->block_groups;
     ctx->WAVE = spec->wave_size;
     ctx->THREADS = rocke_direct_conv_16c_threads_per_block(spec);
-    ctx->LDS_W = ctx->BLOCK_Q + ctx->p.KW - 1;
+    ctx->LDS_W = (ctx->BLOCK_Q - 1) * ctx->p.stride + ctx->p.KW;
     ctx->LDS_ROW_FP16 = ctx->LDS_W * ctx->BLOCK_GROUPS * ctx->p.cpg;
     ctx->LOAD_VEC = 4;
     ctx->NUM_VEC4 = ctx->LDS_ROW_FP16 / ctx->LOAD_VEC;

@@ -61,44 +61,47 @@ def _run_script(
     print(f"Running: {script.name} {' '.join(extra_args)}", flush=True)
     print(f"{'='*72}", flush=True)
 
-    try:
-        proc = subprocess.run(
-            cmd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        elapsed = timeout
-        print(
-            f"\n[timeout] {script.name} exceeded {elapsed:.0f}s limit — killed.",
-            file=sys.stderr,
-            flush=True,
-        )
-        stdout = exc.stdout or b""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode(errors="replace")
-        stderr = exc.stderr or b""
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode(errors="replace")
-        if stderr:
-            print(stderr, end="", file=sys.stderr, flush=True)
-        print(stdout, end="", flush=True)
-        m = _BEST_RE.search(stdout)
-        if m:
-            return float(m.group(1)), m.group(2).strip(), stdout
-        return None, "", stdout
+    import os
+    import signal
+
+    with subprocess.Popen(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    ) as popen:
+        try:
+            raw_out, raw_err = popen.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(popen.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raw_out, raw_err = popen.communicate()
+            elapsed = timeout
+            print(
+                f"\n[timeout] {script.name} exceeded {elapsed:.0f}s limit — killed.",
+                file=sys.stderr,
+                flush=True,
+            )
+            if raw_err:
+                print(raw_err, end="", file=sys.stderr, flush=True)
+            print(raw_out, end="", flush=True)
+            m = _BEST_RE.search(raw_out)
+            if m:
+                return float(m.group(1)), m.group(2).strip(), raw_out
+            return None, "", raw_out
 
     # Echo output to the terminal so the user can see the sweep progress.
-    print(proc.stdout, end="", flush=True)
-    if proc.stderr:
-        print(proc.stderr, end="", file=sys.stderr, flush=True)
+    print(raw_out, end="", flush=True)
+    if raw_err:
+        print(raw_err, end="", file=sys.stderr, flush=True)
 
-    m = _BEST_RE.search(proc.stdout)
+    m = _BEST_RE.search(raw_out)
     if m:
-        return float(m.group(1)), m.group(2).strip(), proc.stdout
-    return None, "", proc.stdout
+        return float(m.group(1)), m.group(2).strip(), raw_out
+    return None, "", raw_out
 
 
 def _cpg_valid_for_direct(C: int, K: int, groups: int) -> tuple[bool, str]:

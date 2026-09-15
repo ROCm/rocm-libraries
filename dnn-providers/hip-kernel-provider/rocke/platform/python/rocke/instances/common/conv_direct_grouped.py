@@ -2735,6 +2735,8 @@ def build_direct_depthwise(
             P_FLUSH = p_flush_val % p.KH
             if 0 <= p_flush_val < p.H and p_flush_val % c_stride_dw == 0:
                 ho_row = p_flush_val // c_stride_dw
+                if ho_row >= Ho:
+                    continue
                 for w_out in range(BLOCK_W):
                     out_q = b.add(q_tile_start, b.const_i32(w_out))
                     out_q_ok = b.land(b.cmp_lt(out_q, c_W), ch_in_range)
@@ -3046,9 +3048,14 @@ def build_direct_depthwise_spatial(
             P_FLUSH = p_flush_val % p.KH
             if 0 <= p_flush_val < p.H and p_flush_val % c_stride_dw == 0:
                 ho_row = p_flush_val // c_stride_dw
-                d_off, _ = d_desc.offset(b, n=n, h=b.const_i32(ho_row), w=q_out, k=ch)
-                safe_d = b.select(q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[P_FLUSH]))
+                if ho_row < Ho:
+                    d_off, _ = d_desc.offset(
+                        b, n=n, h=b.const_i32(ho_row), w=q_out, k=ch
+                    )
+                    safe_d = b.select(q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+                    b.buffer_store_f16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[P_FLUSH])
+                    )
             acc[P_FLUSH] = zero_f32
 
     else:
