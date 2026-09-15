@@ -240,6 +240,10 @@ def evaluate(state):
     # Auto takes only the no-trade-off tight branch; the LDS-growing aligned branch needs 1.
     mode = state.get("LDSSegmentInterleave", -1)
     if mode == 0:                                              return _no("parameter off")
+    # Swizzled tensors (gfx1250 TDM SwizzleTensor{A,B}) use a fixed off-order contiguous LDS layout.
+    # The per-component segment jump (wtid0*(fA+fB)) is not threaded through the swizzle TDM write/read
+    # paths, so an interleaved layout makes waveN>0 read B from the wrong segment (garbage). Incompatible.
+    if pt.get("SwizzleTensorA") or pt.get("SwizzleTensorB"):   return _no("swizzled tensor: fixed off-order LDS layout")
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
     if not (state.get("enableTDMA") and state.get("enableTDMB") and state["NumWaves"] > 1):
         return _no("not wave-separated TDM")
