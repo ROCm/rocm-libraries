@@ -115,7 +115,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["tensilelite*", "Tensile"]
+include = ["tensilelite*"]
 
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
