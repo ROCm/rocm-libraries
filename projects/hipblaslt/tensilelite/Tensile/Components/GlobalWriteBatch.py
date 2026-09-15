@@ -2463,6 +2463,20 @@ class GlobalWriteBatchWriter:
                                                       labelPrefix="subtile_skip_store")
                 if skipLabel is not None:
                   storeCodeModule.add(skipLabel)
+                # PLSIN weave: register this DEFERRED pair's (P-1) capture gap at its NATURAL
+                # position here -- the store itself moves forward to the fold, but keeping the
+                # gap at the un-folded site preserves the gap SPACING, so terminal MFMAs whose
+                # accvgpr_read consumers are only reachable from an earlier gap (the ones the
+                # fold's own compressed gaps are too late for) still get woven.  Placed AFTER
+                # the OOB skip label so the woven MFMAs always execute (never branched over).
+                if self._weaveMode and _weavePairIdx is not None:
+                  cap = self._weaveCapturePair(_weavePairIdx)
+                  if cap is not None:
+                    flatItems = list(storeCodeModule.flatitems())
+                    gap = Module(f"PlsinFoldGapDeferred_pair{_weavePairIdx}")
+                    cap["gap"] = gap
+                    cap["gapAnchor"] = flatItems[-1] if flatItems else None
+                    storeCodeModule.add(gap)
                 self.storesIssued += 1
 
               elif isFoldSecond:
@@ -2492,8 +2506,17 @@ class GlobalWriteBatchWriter:
                   self._emitGuardedPairedNoRepack(storeCodeModule, partnerElementIdx, elementIdx, prefixOffset, blockIdxN)
                   storeCodeModule.add(afterL)
                 else:
+                  # Fused full-tile path: register only pair P (batchB) gap B, between the two
+                  # coalesced stores.  Pair P-1 (batchA)'s gap is registered at its natural
+                  # earlier site in the isFoldFirst branch above (so the two gaps stay SPREAD
+                  # like the un-folded weave, not compressed into the fold).  weavePairA=None
+                  # here to avoid overwriting pair P-1's already-registered deferred gap.
+                  wpB = None
+                  if self._weaveMode and _weavePairIdx is not None:
+                    wpB = _weavePairIdx      # batchB = pair P (gap B between the coalesced stores)
                   storeCodeModule.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
-                                        bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN))
+                                        bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
+                                        weavePairA=None, weavePairB=wpB))
                 if skipLabel is not None:
                   storeCodeModule.add(skipLabel)
                 self.storesIssued += 1
@@ -3578,7 +3601,8 @@ class GlobalWriteBatchWriter:
 
   def _emit16bitSubtilePairedStoreRepack(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int,
                                          partnerSumIdx0: int, partnerSumIdx1: int, partnerAddrCalc,
-                                         tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
+                                         tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0,
+                                         weavePairA=None, weavePairB=None) -> Module:
     """DPP store-repack (SubtileStoreCachelineFill) on the Phase1/Phase2 PLSIN path.
 
     Folds this paired store (batchA = sumIdx0/1 at addrCalc, m-rows 0-31) with the
@@ -3604,6 +3628,17 @@ class GlobalWriteBatchWriter:
     Valid only on 256-aligned full macrotiles (no partial-tile masking emitted here);
     the caller gates it on the all-4-M-blocks-valid path.  Requires the 18-VGPR cvt
     allocation (isSubtileFold), i.e. cvtVgprStruct.vgprStoreData >= 0.
+
+    PLSIN weave (weavePairA/B): the fold replaces the two un-folded paired stores of
+    weave pairs P-1 (batchA) and P (batchB).  Each un-folded woven store registers an
+    empty gap Module (via _weaveCapturePair) that _planCapturedTerminalMfmas later fills
+    with future pairs' terminal MFMAs whose accvgpr_read consumers sit far enough after
+    the gap anchor.  When weavePairA/B are given (weave-capture active, fused path), do
+    the same here: register a gap before store 1 (pair P-1) and between stores 1 and 2
+    (pair P), so PLSIN1's MFMA latency-hiding survives the fold.  The reads for both
+    pairs are already registered by the caller's _popSubtileAccVgprReads; only the gaps
+    were missing.  The moved MFMAs are future pairs' -> disjoint from every register live
+    here (cvt scratch + batchA's reused ValuC slots).
     """
     module = Module("16bitSubtilePairedStoreRepack")
     isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
@@ -3747,8 +3782,28 @@ class GlobalWriteBatchWriter:
                  comment=f"{tag}: all-lanes coalesced store (8 full 128B lines)"))
       module.add(SNop(waitState=0, comment="WAR: latch store src before next repack store"))
 
+    # PLSIN weave: register an empty gap Module (via _weaveCapturePair) for each pair the
+    # fold replaces -- gap A before store 1 (pair P-1 / batchA), gap B between stores 1 and
+    # 2 (pair P / batchB).  _planCapturedTerminalMfmas later moves future pairs' terminal
+    # MFMAs into these gaps (their accvgpr_read consumers come after the fold), reproducing
+    # the un-folded woven store's latency hiding.  The gapAnchor is the last instruction
+    # before the gap, so the planner can measure the anchor->consumer cycle distance.
+    def _captureFoldGap(weavePair, tag):
+      if weavePair is None:
+        return
+      capture = self._weaveCapturePair(weavePair)
+      if capture is None:
+        return
+      flat = list(module.flatitems())
+      gap = Module(f"PlsinFoldGap_pair{weavePair}_{tag}")
+      capture["gap"] = gap
+      capture["gapAnchor"] = flat[-1] if flat else None
+      module.add(gap)
+
+    _captureFoldGap(weavePairA, "A")
     module.addComment1("DPP repack store 1: even n-columns (quad_perm [0,0,2,2])")
     emitCoalescedStore(evenPerm=None,      oddPerm=[0,0,2,2], tag=f"even-cols tt0={tt0}")
+    _captureFoldGap(weavePairB, "B")
     module.addComment1("DPP repack store 2: odd n-columns (quad_perm [1,1,3,3])")
     emitCoalescedStore(evenPerm=[1,1,3,3], oddPerm=[1,1,3,3], tag=f"odd-cols tt0={tt0}")
 
