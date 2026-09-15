@@ -909,6 +909,13 @@ struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3
             constexpr index_t minimum_occupancy =
                 BlkGemmPipeSched == BlockGemmPipelineScheduler::Intrawave ? 1 : 2;
 
+            // T2-02 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): the roadmap asked to branch the
+            // output-store path on split-K presence (fast Set-store when KBatch == 1, falling
+            // back to a predicated/atomic store only when KBatch > 1 genuinely requires it).
+            // Already true here and below: KBatch > 1 dispatches to a kernel instantiated with
+            // InMemoryDataOperationEnum::AtomicAdd, KBatch == 1 to one instantiated with ::Set --
+            // two distinct compile-time kernel template instantiations selected by a runtime
+            // branch, not a single generically-predicated path. No code change needed.
             if(has_main_k_block_loop)
             {
                 // Tail number always full
