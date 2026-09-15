@@ -457,6 +457,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # removal under every generator. One list feeds staging, install, and the dependency
     # edge below, so the three cannot disagree about what a descriptor tree contains.
     set(HIPDNN_DESCRIPTOR_FILES
+        batchnorm_inference/batchnorm_inference.kdp.json
+        batchnorm_inference/batchnorm_inference.kmd.json
+        batchnorm_inference/batchnorm_inference.udd.json
+        batchnorm_inference/batchnorm_inference.ued.json
+        batchnorm_inference/batchnorm_inference.uhd.json
+        batchnorm_inference/kernel_dtype_matches_graph.umd.json
         conv_fwd/conv_fwd.kdp.json
         conv_fwd/conv_fwd.kmd.json
         conv_fwd/conv_fwd.udd.json
