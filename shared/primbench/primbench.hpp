@@ -22,7 +22,9 @@
 
 #ifdef _WIN32
     // Disables the min() and max() macros from windows.h
-    #define NOMINMAX
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
 
     #include <io.h>
     #include <windows.h>
@@ -2025,6 +2027,8 @@ public:
 
     /// Empirically measures the GPU wall-clock tick rate in kHz
     /// by sampling the on-device clock one second apart
+
+#ifdef __HIP__
     long long measure_wall_clk_rate_khz()
     {
         long long* d_tick;
@@ -2059,6 +2063,7 @@ public:
 
         return std::llround(tot_ticks / (1000 * elapsed_time_s));
     }
+#endif
 
     /// Destructor that unregisters host memory.
     ~stream_blocker()
@@ -2583,6 +2588,11 @@ public:
             std::cerr << "Error: Can't call run() before calling set_items()\n";
             exit(EXIT_FAILURE);
         }
+        if(m_has_run)
+        {
+            std::cerr << "Error: Can't call run() twice\n";
+            exit(EXIT_FAILURE);
+        }
         m_has_run = true;
 
         std::string name            = m_meta.serialize_name();
@@ -2711,8 +2721,9 @@ private:
 
         elapsed_gpu_secs += batch_gpu_secs;
 
-        double bytes_per_batch = m_read_write_bytes * m_kernels_per_batch;
-        double bytes_per_sec   = bytes_per_batch / batch_gpu_secs;
+        double bytes_per_batch  = m_read_write_bytes * m_kernels_per_batch;
+        double bytes_per_sec    = bytes_per_batch / batch_gpu_secs;
+        m_last_bytes_per_second = bytes_per_sec;
 
         double items_per_batch = m_items * m_kernels_per_batch;
         double items_per_sec   = items_per_batch / batch_gpu_secs;

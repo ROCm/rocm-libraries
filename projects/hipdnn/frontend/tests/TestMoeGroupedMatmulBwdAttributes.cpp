@@ -172,3 +172,58 @@ TEST(TestMoeGroupedMatmulBwdAttributes, SetTensorsConstRef)
     EXPECT_NE(firstTokenOffsetTensor, nullptr);
     EXPECT_NE(dweightTensor, nullptr);
 }
+
+TEST(TestMoeGroupedMatmulBwdAttributes, LogicalAndStrictEquality)
+{
+    MoeGroupedMatmulBwdAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto doutput1 = std::make_shared<TensorAttributes>();
+    doutput1->set_uid(1).set_name("Doutput").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_doutput(doutput1);
+
+    auto token1 = std::make_shared<TensorAttributes>();
+    token1->set_uid(2).set_name("Token").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_token(token1);
+
+    MoeGroupedMatmulBwdAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto doutput2 = std::make_shared<TensorAttributes>();
+    doutput2->set_uid(1).set_name("Doutput").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_doutput(doutput2);
+
+    auto token2 = std::make_shared<TensorAttributes>();
+    token2->set_uid(2).set_name("Token").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_token(token2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchDoutput = std::make_shared<TensorAttributes>();
+    structuralMismatchDoutput->set_uid(99).set_name("MismatchedDoutput");
+    attr2.set_doutput(structuralMismatchDoutput);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_doutput(doutput2); // Revert
+
+    // No extra scalar/enum fields on this class: logical/strict equality is
+    // driven entirely by the base class's tensor/metadata comparison.
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchDoutput = std::make_shared<TensorAttributes>();
+    logicalMatchDoutput
+        ->set_uid(555) // Diverges from attr1's doutput1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's doutput1 ("Doutput")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_doutput(logicalMatchDoutput);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}

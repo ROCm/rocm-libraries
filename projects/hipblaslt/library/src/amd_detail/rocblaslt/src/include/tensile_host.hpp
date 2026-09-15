@@ -306,3 +306,10 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode);
+
+// Likewise for the uniform-summation-order request. ORs into any value
+// already on the problem so a default-false preference cannot clear a
+// desc- or handle-level enable.
+void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
+                                rocblaslt::RocGemmType gemmType,
+                                bool                   value);

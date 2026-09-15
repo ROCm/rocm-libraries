@@ -197,7 +197,7 @@ class STINKYTOFU_EXPORT AnalysisManager {
 
     /// Get or compute an analysis result (lazy, cached).
     template <typename AnalysisT>
-    const typename AnalysisT::Result& getResult(Function& F) {
+    typename AnalysisT::Result& getResult(Function& F) {
         auto* key = AnalysisT::ID();
         auto it = results_.find(key);
         if (it == results_.end()) {

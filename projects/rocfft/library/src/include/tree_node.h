@@ -37,7 +37,6 @@
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
-#include "callback_map.h"
 #include "compute_scheme.h"
 #include "data_layout.h"
 #include "enum_printer.h"
@@ -668,9 +667,6 @@ public:
     size_t           chirp_size            = 0;
     gpubuf_t<size_t> devKernArg;
 
-    // callback parameters
-    UserCallbacks callbacks;
-
     hipDeviceProp_t deviceProp = {};
     function_pool   pool;
 
@@ -950,7 +946,7 @@ public:
     // Assuming callbacks need to run on this node, return the
     // specific CallbackType for this node - takes into account
     // whether the node is treating real data as complex
-    CallbackType GetCallbackType(bool enable_callbacks) const;
+    CallbackType GetCallbackType() const;
 
 protected:
     virtual void BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) = 0;
@@ -1039,6 +1035,22 @@ public:
     bool         CreateDeviceResources() override;
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
+
+    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
+    virtual size_t GetU32KernelIndexLimit() const
+    {
+
+        return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
+                                                         : static_cast<size_t>(UINT32_MAX);
+    }
+    // Return the index type for this node's kernel.
+    // Overridden by nodes that use narrower index types
+    virtual IndexType GetKernelIndexType() const
+    {
+        return IndexType::U64;
+    }
+    // Max element index the kernel would compute for a given I/O side.
+    size_t       MaxKernelIndex(io_data_label io) const;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };
@@ -1062,6 +1074,8 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
+    IndexType GetKernelIndexType() const override;
+
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override
@@ -1094,12 +1108,11 @@ struct MultiPlanItem
     // object's event is allocated and recorded on the stream when
     // the last piece of work is queued, so callers can wait on that
     // event to know when the work is complete.
-    virtual void ExecuteAsync(const rocfft_plan                       plan,
-                              void*                                   in_buffer[],
-                              void*                                   out_buffer[],
-                              const rocfft_execution_info_internal&   info,
-                              size_t                                  multiPlanIdx,
-                              const std::map<int, device_callback_t>& callbacks)
+    virtual void ExecuteAsync(const rocfft_plan                     plan,
+                              void*                                 in_buffer[],
+                              void*                                 out_buffer[],
+                              const rocfft_execution_info_internal& info,
+                              size_t                                multiPlanIdx)
         = 0;
 
     // wait for async operations to finish
@@ -1189,8 +1202,7 @@ struct CommPointToPoint : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1234,24 +1246,20 @@ private:
 // RCCL-based all-to-all communication for multi-GPU transpose.
 struct CommRCCLAllToAll : public MultiPlanItem
 {
-    // per-rank state for one participant in the all-to-all.  caller
-    // fills sendBuffer / recvBuffer; the stream and completion event
-    // are allocated in-place by the constructor.  bundling these
-    // together guarantees they can never go out of sync.  the event
-    // is recorded on stream once ncclGroupEnd has enqueued the
-    // collective; Wait() synchronizes on the event to align with
-    // every other MultiPlanItem (see CommPointToPoint / CommScatter /
-    // CommGather), instead of on the stream directly.
+    // per-rank state for one all-to-all participant. Caller fills
+    // sendBuffer/recvBuffer; the constructor allocates the completion
+    // event. The collective runs on the comm-owned stream; the event is
+    // recorded on it after ncclGroupEnd so Wait() can sync on events like
+    // every other MultiPlanItem.
     struct agent_t
     {
-        BufferPtr           sendBuffer;
-        BufferPtr           recvBuffer;
-        hipStream_wrapper_t stream;
-        hipEvent_wrapper_t  event;
+        BufferPtr          sendBuffer;
+        BufferPtr          recvBuffer;
+        hipEvent_wrapper_t event;
     };
 
-    // _agents must be indexed by RCCL rank.  rocfft_rccl_comm_t assigns
-    // ranks in sorted device-id order (this holds even for non-contiguous
+    // _agents must be indexed by RCCL rank. The rocfft_rccl_comm_t type
+    // assigns ranks in sorted device-id order (this holds even for non-contiguous
     // device sets such as {1, 3, 6}), so building the vector in the same
     // order as _rccl.get_devices(), or equivalently in ascending device-id
     // order, satisfies the contract.
@@ -1278,15 +1286,12 @@ struct CommRCCLAllToAll : public MultiPlanItem
                 "CommRCCLAllToAll: agents.size() (" + std::to_string(agents.size())
                 + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
 
-        // allocate one stream and one completion event per
-        // participating device, in RCCL rank order.  event and
-        // stream are bound to the same device by the scoped_device
-        // so hipEventRecord(event, stream) at execute time is valid.
+        // one completion event per device, on that device, so recording
+        // it on the comm stream is valid. The stream is comm-owned.
         const auto devices = rccl.get_devices();
         for(size_t r = 0; r < devices.size(); ++r)
         {
             rocfft_scoped_device scoped(devices[r]);
-            agents[r].stream.alloc();
             agents[r].event.alloc();
         }
     }
@@ -1295,8 +1300,7 @@ struct CommRCCLAllToAll : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1336,7 +1340,7 @@ private:
     const rocfft_array_type arrayType;
     const size_t            count_per_rank; // elements per rank (uniform)
 
-    // per-rank send/recv buffers and stream, indexed by RCCL rank to
+    // per-rank send/recv buffers, indexed by RCCL rank to
     // match the ordering returned by rccl.get_devices().
     std::vector<agent_t> agents;
 };
@@ -1379,14 +1383,11 @@ struct CommRCCLGrouped : public MultiPlanItem
         t.count          = count;
         t.op             = transfer_kind;
 
-        // allocate stream + completion event on the correct device
-        // when the local endpoint lives on this process.  event and
-        // stream are bound to the same device by scoped_device so
-        // hipEventRecord(event, stream) at execute time is valid.
+        // completion event on the local device (only when the local
+        // endpoint is on this process); the launch stream is comm-owned.
         if(local_location.comm_rank == comm_rank)
         {
             rocfft_scoped_device dev(local_location.device);
-            t.stream.alloc();
             t.event.alloc();
         }
         transfers.push_back(std::move(t));
@@ -1401,8 +1402,7 @@ struct CommRCCLGrouped : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1451,14 +1451,10 @@ private:
         size_t            offset;
         size_t            count;
         rccl_op           op;
-        // each transfer has its own stream and completion event;
-        // both are only allocated for transfers whose local endpoint
-        // lives on this process.  the event is recorded after
-        // ncclGroupEnd has enqueued the send/recv on the stream so
-        // Wait() can synchronize on events (matching every other
-        // MultiPlanItem) instead of on streams directly.
-        hipStream_wrapper_t stream;
-        hipEvent_wrapper_t  event;
+        // per-transfer completion event (only for local endpoints). The
+        // send/recv runs on the comm-owned stream; the event is recorded
+        // on it after ncclGroupEnd so Wait() can sync on events.
+        hipEvent_wrapper_t event;
     };
 
     const rocfft_rccl_comm_t& rccl;
@@ -1530,8 +1526,7 @@ struct CommScatter : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1640,8 +1635,7 @@ struct CommGather : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1750,8 +1744,7 @@ struct CommAllToAll : public MultiPlanItem
                       void*                                 in_buffer[],
                       void*                                 out_buffer[],
                       const rocfft_execution_info_internal& info,
-                      size_t                                multiPlanIdx,
-                      const std::map<int, device_callback_t>&) override;
+                      size_t                                multiPlanIdx) override;
 
     void Wait() override;
 
@@ -1831,12 +1824,11 @@ struct ExecPlan : public MultiPlanItem
     BufferPtr outputPtr;
     BufferPtr workPtr;
 
-    void ExecuteAsync(const rocfft_plan                       plan,
-                      void*                                   in_buffer[],
-                      void*                                   out_buffer[],
-                      const rocfft_execution_info_internal&   info,
-                      size_t                                  multiPlanIdx,
-                      const std::map<int, device_callback_t>& callbacks) override;
+    void ExecuteAsync(const rocfft_plan                     plan,
+                      void*                                 in_buffer[],
+                      void*                                 out_buffer[],
+                      const rocfft_execution_info_internal& info,
+                      size_t                                multiPlanIdx) override;
 
     void Wait() override;
 

@@ -223,7 +223,8 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override{};
 
 public:
-    bool UseOutputLengthForPadding() override
+    IndexType GetKernelIndexType() const override;
+    bool      UseOutputLengthForPadding() override
     {
         return true;
     }
@@ -276,6 +277,7 @@ protected:
     void   SetupGridParam_internal(GridParam& gp) override{};
 
 public:
+    IndexType           GetKernelIndexType() const override;
     std::vector<size_t> CollapsibleDims() override;
     bool                UseOutputLengthForPadding() override
     {

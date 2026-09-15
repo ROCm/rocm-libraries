@@ -423,11 +423,11 @@ try
             "                           ")
 
         // other options
-        // ("direct",
-        //  value<char>()->default_value('F'),
-        //     "F = forward, B = backward.\n"
-        //     "                           The order in which a series of transformations are applied.\n"
-        //     "                           ")
+        ("direct",
+         value<char>()->default_value('F'),
+            "F = forward, B = backward.\n"
+            "                           The order in which a series of transformations are applied.\n"
+            "                           ")
 
         // ("fast_alg",
         //  value<char>()->default_value('O'),
@@ -458,11 +458,11 @@ try
             "                           The side from which a matrix should be multiplied.\n"
             "                           ")
 
-        // ("storev",
-        //  value<char>(),
-        //     "C = column-wise, R = row-wise.\n"
-        //     "                           Indicates whether data is stored column-wise or row-wise.\n"
-        //     "                           ")
+        ("storev",
+         value<char>(),
+            "C = column-wise, R = row-wise.\n"
+            "                           Indicates whether data is stored column-wise or row-wise.\n"
+            "                           ")
 
         ("trans",
          value<char>()->default_value('N'),
@@ -504,8 +504,8 @@ try
     argus.validate_operation("trans");
     argus.validate_side("side");
     argus.validate_fill("uplo");
-    // argus.validate_direct("direct");
-    // argus.validate_storev("storev");
+    argus.validate_direct("direct");
+    argus.validate_storev("storev");
     argus.validate_svect("jobu");
     argus.validate_svect("jobv");
     // argus.validate_workmode("fast_alg");

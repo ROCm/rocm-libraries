@@ -17,3 +17,7 @@ sed -i "s/${OLD_HIPSOLVER_SOVERSION}/${NEW_HIPSOLVER_SOVERSION}/g" library/CMake
 OLD_MINIMUM_ROCSOLVER_VERSION="3\.37\.0"
 NEW_MINIMUM_ROCSOLVER_VERSION="3.38.0"
 sed -i "s/${OLD_MINIMUM_ROCSOLVER_VERSION}/${NEW_MINIMUM_ROCSOLVER_VERSION}/g" CMakeLists.txt
+
+# NOTE: build-time dependency fetches are pinned to immutable commits outside this script
+# (cmake/get-rocm-cmake.cmake, deps/external-gtest.cmake, deps/external-lapack.cmake).
+# If a release needs a newer pinned dep, grep "pinned-dep" and bump the commit by hand.

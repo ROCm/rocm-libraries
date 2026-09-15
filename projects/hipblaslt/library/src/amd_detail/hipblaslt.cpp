@@ -158,17 +158,34 @@ try
     int             deviceId;
     hipError_t      err;
     hipblasStatus_t retval = HIPBLAS_STATUS_SUCCESS;
-    // TODO: Synchronizer size pass into predicate SynchronizerSizeCheck
-    // 1K just for small size now, need to cal corner case if support all situations
-    void* d_Synchronizer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, 16 * 409600 * sizeof(int)));
-    CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, sizeof(int) * 16 * 409600));
+    // Two flag regions with different shapes: GSU reduction keeps the large
+    // per-problem buffer it has always had, Stream-K gets a small one that can
+    // afford a private region per stream. Both are allocated here so that no
+    // matmul path allocates device memory, which would break hipGraph capture.
+    void*            d_Synchronizer = nullptr;
+    void*            d_StreamKFlags = nullptr;
+    constexpr size_t gsuBytes = _rocblaslt_handle::c_syncGsuTotalElements * sizeof(int);
+    constexpr size_t skBytes  = _rocblaslt_handle::c_syncSkTotalElements * sizeof(int);
+    CHECK_HIP_ERROR(hipMalloc(&d_Synchronizer, gsuBytes));
+    CHECK_HIP_ERROR(hipMemset(d_Synchronizer, 0, gsuBytes));
+    if(hipError_t e = hipMalloc(&d_StreamKFlags, skBytes); e != hipSuccess)
+    {
+        static_cast<void>(hipFree(d_Synchronizer));
+        CHECK_HIP_ERROR(e);
+    }
+    if(hipError_t e = hipMemset(d_StreamKFlags, 0, skBytes); e != hipSuccess)
+    {
+        static_cast<void>(hipFree(d_StreamKFlags));
+        static_cast<void>(hipFree(d_Synchronizer));
+        CHECK_HIP_ERROR(e);
+    }
 
     err = hipGetDevice(&deviceId);
     if(err == hipSuccess)
     {
         retval = RocBlasLtStatusToHIPStatus(rocblaslt_create((rocblaslt_handle*)handle));
         (*(rocblaslt_handle*)handle)->Synchronizer = d_Synchronizer;
+        (*(rocblaslt_handle*)handle)->StreamKFlags = d_StreamKFlags;
     }
     rocblaslt::Debug::Instance().markerStop();
     return retval;
@@ -185,6 +202,10 @@ try
     if(handle != nullptr and (*(rocblaslt_handle)handle).Synchronizer != nullptr)
     {
         CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).Synchronizer));
+    }
+    if(handle != nullptr and (*(rocblaslt_handle)handle).StreamKFlags != nullptr)
+    {
+        CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).StreamKFlags));
     }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_destroy((const rocblaslt_handle)handle));
@@ -216,6 +237,36 @@ try
     rocblaslt::Debug::Instance().markerStart("hipblasLtGetSmCountTarget");
     auto status = RocBlasLtStatusToHIPStatus(
         rocblaslt_get_sm_count_target((rocblaslt_handle)handle, smCountTarget));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtSetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t           uniformSummationOrder)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtSetUniformSummationOrder");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_set_uniform_summation_order((rocblaslt_handle)handle, uniformSummationOrder));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtGetUniformSummationOrder(hipblasLtHandle_t handle,
+                                                  int32_t*          uniformSummationOrder)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtGetUniformSummationOrder");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_get_uniform_summation_order((rocblaslt_handle)handle, uniformSummationOrder));
     rocblaslt::Debug::Instance().markerStop();
     return status;
 }

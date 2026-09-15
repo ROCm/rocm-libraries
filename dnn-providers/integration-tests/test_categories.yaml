@@ -75,11 +75,25 @@ test_categories:
   #     - "full"
   #     - "slow"
 
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Standard*"
+      - "Comprehensive*"
+      - "Full*"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 execution_settings:
   default_timeout: 600
   timeout_multiplier: 1
   category_timeouts:
     quick: 600            # 10 minutes (was add_tiered_test_target SMOKE_TIMEOUT default)
     standard: 1800        # 30 minutes
+    ffm-quick: 7200       # 2 hours
     # comprehensive: 3600   # 60 minutes (disabled: see header comment)
     # full: 7200            # 120 minutes (disabled: see header comment)

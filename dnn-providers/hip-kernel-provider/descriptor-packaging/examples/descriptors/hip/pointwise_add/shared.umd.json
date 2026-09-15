@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "a9a415b2-7f6d-52c4-a0cc-0ab3e9920d1f",
+  "name": "example: kernel dtype matches graph (hip half)",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.pointwise.kernel_match"
+}

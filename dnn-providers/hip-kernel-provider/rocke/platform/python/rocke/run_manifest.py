@@ -19,6 +19,7 @@ compatibility target, but this module is the maintained runtime path.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,6 +91,31 @@ def register_manifest_runner(kind: str, builder: ProblemBuilder) -> None:
 def registered_manifest_kinds() -> Tuple[str, ...]:
     """Every manifest kind this process can run, for error messages and CI."""
     return tuple(sorted(_RUNNERS))
+
+
+def resolve_manifest_runner(manifest: dict) -> ProblemBuilder:
+    """Return the problem builder for ``manifest['kind']``.
+
+    Built-in kinds are registered when this module is imported. A family
+    whose pack/check lives outside this package (library builders, an
+    out-of-tree adapter) sets ``manifest['runner_module']`` to an import
+    path; that module is imported here so it can call
+    :func:`register_manifest_runner`. The import is skipped when the kind
+    is already registered, so a GEMM manifest is unaffected.
+    """
+    kind = str(manifest["kind"])
+    module_name = manifest.get("runner_module")
+    if kind not in _RUNNERS and module_name:
+        importlib.import_module(str(module_name))
+    try:
+        return _RUNNERS[kind]
+    except KeyError:
+        raise ValueError(
+            f"unsupported manifest kind {kind!r}; registered kinds are "
+            f"{list(registered_manifest_kinds())}. A kind whose adapter lives "
+            "outside this package must import that module first, or set "
+            "manifest 'runner_module' to that import path."
+        ) from None
 
 
 def _register_builtin_runners() -> None:
@@ -183,15 +209,7 @@ def run_manifest(
     manifest, blob, _resolved = _load(manifest_path, hsaco_path)
     # Resolve the adapter before touching the device: an unrunnable kind is a
     # property of the manifest, and saying so should not require a GPU.
-    kind = str(manifest["kind"])
-    try:
-        builder = _RUNNERS[kind]
-    except KeyError:
-        raise ValueError(
-            f"unsupported manifest kind {kind!r}; registered kinds are "
-            f"{list(registered_manifest_kinds())}. A kind whose adapter lives "
-            "outside this package must import that module first."
-        ) from None
+    builder = resolve_manifest_runner(manifest)
 
     rt = Runtime()
     module = rt.load_module(blob)
