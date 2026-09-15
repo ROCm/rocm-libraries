@@ -91,6 +91,16 @@ export interface BuildResult {
   readonly captured?: readonly LogEntry[];
 }
 
+/** Result of translating a Studio graph into hipDNN's canonical JSON. */
+export interface SerializeGraphResult {
+  readonly ok: boolean;
+  readonly error?: EngineError;
+  /** hipDNN JSON accepted by deserialize()/buildHipdnnJson(). */
+  readonly serializedGraph?: string;
+  readonly log: readonly string[];
+  readonly captured?: readonly LogEntry[];
+}
+
 /** A build result plus the token execute()/release() take when it succeeded. */
 export interface BuildPlanResult extends BuildResult {
   readonly handle?: BuildHandle;
@@ -127,6 +137,12 @@ export interface EngineBridge {
 
   /** Compile a graph given in hipDNN's own canonical JSON (see serializedGraph). */
   buildHipdnnJson(hipdnnJson: string, options?: BuildOptions): Promise<BuildPlanResult>;
+
+  /**
+   * hipDNN's canonical JSON for a Studio graph without compiling a plan — the
+   * form other hipDNN tools deserialize.
+   */
+  serializeGraph(graphJson: string): Promise<SerializeGraphResult>;
 
   /** Heuristic-ranked engines applicable to a graph, without compiling a plan. */
   listEngines(graphJson: string): Promise<ListEnginesResult>;

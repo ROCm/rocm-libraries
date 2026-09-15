@@ -4,6 +4,7 @@ import type {
   EngineInfo,
   ExecuteResult,
   ListEnginesResult,
+  SerializeGraphResult,
 } from "./types";
 
 /**
@@ -27,6 +28,9 @@ export const webEngine: EngineBridge = {
     return { ok: false, error: UNAVAILABLE, log: [UNAVAILABLE.message] };
   },
   async buildHipdnnJson(): Promise<BuildPlanResult> {
+    return { ok: false, error: UNAVAILABLE, log: [UNAVAILABLE.message] };
+  },
+  async serializeGraph(): Promise<SerializeGraphResult> {
     return { ok: false, error: UNAVAILABLE, log: [UNAVAILABLE.message] };
   },
   async listEngines(): Promise<ListEnginesResult> {

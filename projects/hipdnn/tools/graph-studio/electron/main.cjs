@@ -4,6 +4,7 @@
 
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const fs = require("node:fs/promises");
+const { spawn } = require("node:child_process");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
 
@@ -158,6 +159,11 @@ ipcMain.handle("engine:buildHipdnnJson", async (_event, hipdnnJson, options) => 
   return nativeEngine.buildHipdnnJson(hipdnnJson, options ?? {});
 });
 
+ipcMain.handle("engine:serializeGraph", async (_event, graphJson) => {
+  if (!nativeEngine) return engineUnavailable("Native hipDNN addon is not loaded.");
+  return nativeEngine.serializeGraph(graphJson);
+});
+
 ipcMain.handle("engine:listEngines", async (_event, graphJson) => {
   if (!nativeEngine) {
     return { ...engineUnavailable("Native hipDNN addon is not loaded."), engines: [] };
@@ -176,6 +182,112 @@ ipcMain.handle("engine:release", async (_event, handle) => {
 
 ipcMain.handle("engine:setLogLevel", async (_event, level) => {
   if (nativeEngine) nativeEngine.setLogLevel(level);
+});
+
+// ── External commands (command bridge) ─────────────────────────────────
+// Each run writes the graph out as hipDNN JSON under the OS temp directory,
+// substitutes that path for ${current_graph}, and streams the child's output
+// back to the renderer as it arrives.
+
+const GRAPH_PLACEHOLDER = "${current_graph}";
+
+/** Running children by request id, so the renderer can cancel them. */
+const runningCommands = new Map();
+
+const errorText = (err) => (err instanceof Error ? err.message : String(err));
+
+const sanitizeName = (name) =>
+  String(name ?? "").replace(/[^\w.-]+/g, "_").replace(/^[._]+|[._]+$/g, "") || "graph";
+
+// The path is quoted unless the placeholder already sits between quotes, so a
+// temp directory containing spaces survives the shell either way.
+function substituteGraphPath(command, graphPath) {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const at = command.indexOf(GRAPH_PLACEHOLDER, from);
+    if (at < 0) return out + command.slice(from);
+    const preQuoted =
+      command[at - 1] === '"' && command[at + GRAPH_PLACEHOLDER.length] === '"';
+    out += command.slice(from, at) + (preQuoted ? graphPath : `"${graphPath}"`);
+    from = at + GRAPH_PLACEHOLDER.length;
+  }
+}
+
+async function writeGraphFile(scope, graphName, graphJson) {
+  const dir = path.join(app.getPath("temp"), "hipdnn-graph-studio", sanitizeName(scope));
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${sanitizeName(graphName)}.hipdnn.json`);
+  await fs.writeFile(file, graphJson ?? "", "utf8");
+  return file;
+}
+
+ipcMain.handle("command:execute", async (event, request) => {
+  const { id, command, graphJson, graphName, scope } = request ?? {};
+  if (typeof command !== "string" || command.trim() === "") {
+    return { ok: false, error: "Command is empty." };
+  }
+  if (runningCommands.has(id)) {
+    return { ok: false, error: "A command is already running in this tab." };
+  }
+
+  let graphPath;
+  try {
+    graphPath = await writeGraphFile(scope, graphName, graphJson);
+  } catch (err) {
+    return { ok: false, error: `Failed to write the graph: ${errorText(err)}` };
+  }
+
+  const resolvedCommand = substituteGraphPath(command, graphPath);
+  const send = (stream, text) => {
+    if (!event.sender.isDestroyed()) event.sender.send("command:output", { id, stream, text });
+  };
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      runningCommands.delete(id);
+      resolve({ ...result, resolvedCommand, graphPath });
+    };
+
+    let child;
+    try {
+      child = spawn(resolvedCommand, { shell: true, windowsHide: true });
+    } catch (err) {
+      finish({ ok: false, error: errorText(err) });
+      return;
+    }
+    runningCommands.set(id, child);
+
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (text) => send("stdout", text));
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (text) => send("stderr", text));
+    child.on("error", (err) => finish({ ok: false, error: errorText(err) }));
+    child.on("close", (code, signal) => finish({ ok: code === 0, exitCode: code, signal }));
+  });
+});
+
+// shell:true means the child is cmd.exe/sh, so the tool itself is a grandchild:
+// kill the tree rather than just the shell.
+function killCommand(child) {
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
+  } else {
+    child.kill("SIGTERM");
+  }
+}
+
+ipcMain.handle("command:cancel", async (_event, id) => {
+  const child = runningCommands.get(id);
+  if (child) killCommand(child);
+});
+
+app.on("before-quit", () => {
+  for (const child of runningCommands.values()) killCommand(child);
+  runningCommands.clear();
 });
 
 app.whenReady().then(() => {
