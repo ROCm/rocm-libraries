@@ -485,6 +485,9 @@ enum class sink_kind
     streamllm
 };
 
+// Full causal (left=-1) makes y == y_total, so x_start is 0 and the sink phase collapses.
+// This row checks that the has_sink instantiation matches the sinkless answer; the live
+// sink phase is carried by the local-window tuples below instead.
 constexpr auto kStreamLlmMask = "b:-1,0,2";
 
 class QuantScale : public TestWithParam<
@@ -509,9 +512,13 @@ INSTANTIATE_TEST_SUITE_P(
                    std::tuple{2, 1, -1, 99, 256, "1"},    // causal
                    std::tuple{1, 2, 1, 1024, 256, "2"},   // GQA, causal bottom-right
                    std::tuple{1, 4, 2, 256, 256, "0"}, // Pack-GQA: ratio 2, no mask, s%128==0
-                   // Local window + sink prefix, the only non-empty sink phase here: causal
-                   // masks collapse it, and only then does the descale index leave k_origin.
-                   std::tuple{1, 2, 1, 1024, 1024, "t:128,30,128"})));
+                   // The two local-window tuples below are the only non-empty sink phases
+                   // here; causal masks collapse it, and only then does the descale index
+                   // leave k_origin. sink=128 == kN0 is the prologue jump.
+                   std::tuple{1, 2, 1, 1024, 1024, "t:128,30,128"},
+                   // sink=512 gives num_sink_loop 4, reaching the mainloop jump that
+                   // sink <= kN0 never does; GQA ratio 2 crosses it with the descale stride.
+                   std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512"})));
 
 // init=3 fills Q/K/V up to the fp8 maximum, which only stands for a real tensor when a
 // descale maps that maximum back to qkv_max. Without a descale the values stay at the fp8
