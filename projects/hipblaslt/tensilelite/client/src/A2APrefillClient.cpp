@@ -28,6 +28,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include "A2ABoundaryBarrier.hpp"
 #include "FusedA2ACounterSentinel.hpp"
 #include "ProgramOptions.hpp"
 #include "SolutionIterator.hpp"
@@ -375,6 +376,10 @@ namespace TensileLite
             // launch. Outside the value set a2aPrefillValue draws from.
             constexpr int A2A_LOOPBACK_POISON = 0xC7;
 
+            // Barrier rounds the multigpu arm enqueues back to back, with no
+            // host sync between them, before the first launch.
+            constexpr int A2A_BARRIER_SELFTEST_ROUNDS = 64;
+
             // First gathered segment differing from its host-side source, or -1.
             // want[r] is the source for segment r.
             int a2aFirstBadSegment(BFloat16 const*                     got,
@@ -691,6 +696,17 @@ namespace TensileLite
                     }
                 }
 
+                // Allocated after P2P enable. Zeroed only here, never per launch.
+                std::vector<DeviceBuffer> devArrival(W);
+                A2AArrivalPeers           arrivals;
+                for(int d = 0; d < W; d++)
+                {
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    HIP_CHECK_EXC(devArrival[d].allocateFineGrained(FUSED_A2A_ARRIVAL_BYTES));
+                    HIP_CHECK_EXC(hipMemset(devArrival[d].ptr, 0, FUSED_A2A_ARRIVAL_BYTES));
+                    arrivals.p[d] = (uint32_t*)devArrival[d].ptr;
+                }
+
                 // Created after P2P enable. The self entry (j == d) is never
                 // enqueued.
                 std::vector<std::vector<std::unique_ptr<SdmaQueue>>> queues(W);
@@ -771,6 +787,24 @@ namespace TensileLite
                         = solution->solve(problem, inputs[d], *hardware, nullptr, 0, streams[d]);
                 }
 
+                // Rounds overlap here and nowhere else in this arm.
+                for(int d = 0; d < W; d++)
+                {
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    for(int r = 0; r < A2A_BARRIER_SELFTEST_ROUNDS; r++)
+                        hipLaunchKernelGGL(
+                            a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
+                    HIP_CHECK_EXC(hipGetLastError());
+                }
+                for(int d = 0; d < W; d++)
+                {
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    HIP_CHECK_EXC(hipStreamSynchronize(streams[d]));
+                }
+                std::cout << "[a2a-multigpu] barrier self-test: "
+                          << A2A_BARRIER_SELFTEST_ROUNDS << " overlapping rounds passed"
+                          << std::endl;
+
                 // Rank d's gathered segment j carries rank (d+j) mod W's x, rows
                 // [d*nToken, +nToken).
                 std::vector<std::vector<BFloat16 const*>> wantSeg(
@@ -804,11 +838,12 @@ namespace TensileLite
                                                      streams[d]));
                     }
 
-                    // Stands in for the boundary barrier.
                     for(int d = 0; d < W; d++)
                     {
                         HIP_CHECK_EXC(hipSetDevice(d));
-                        HIP_CHECK_EXC(hipDeviceSynchronize());
+                        hipLaunchKernelGGL(
+                            a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
+                        HIP_CHECK_EXC(hipGetLastError());
                     }
 
                     for(int d = 0; d < W; d++)
