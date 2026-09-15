@@ -1391,6 +1391,8 @@ namespace TensileLite
             size_t       mxsbI,
             size_t       mxBlockA,
             size_t       mxBlockB,
+            size_t       mxBlockFreeA,
+            size_t       mxBlockFreeB,
             size_t       strideMxsaM,
             size_t       strideMxsaBlk,
             size_t       strideMxsbN,
@@ -1402,9 +1404,12 @@ namespace TensileLite
                 if(global_m >= sizeM)
                     continue;
 
+                // mxBlockFreeA consecutive rows share a scale; 1 (the 1xmxBlockA
+                // layout) makes this divide the identity.
                 AccumT sa = (mxBlockA > 0 && mxsaBatch)
                     ? static_cast<AccumT>(static_cast<float>(
-                          mxsaBatch[global_m * strideMxsaM + mxsaI * strideMxsaBlk]))
+                          mxsaBatch[(global_m / mxBlockFreeA) * strideMxsaM
+                                    + mxsaI * strideMxsaBlk]))
                     : AccumT(1);
 
                 for(size_t nn = 0; nn < BLOCK_N; ++nn)
@@ -1415,7 +1420,8 @@ namespace TensileLite
 
                     AccumT sb = (mxBlockB > 0 && mxsbBatch)
                         ? static_cast<AccumT>(static_cast<float>(
-                              mxsbBatch[global_n * strideMxsbN + mxsbI * strideMxsbBlk]))
+                              mxsbBatch[(global_n / mxBlockFreeB) * strideMxsbN
+                                        + mxsbI * strideMxsbBlk]))
                         : AccumT(1);
 
                     cReg[mm * BLOCK_N + nn]
@@ -1547,6 +1553,10 @@ namespace TensileLite
             // MX block-scaling metadata (FP4 with MX)
             size_t         mxBlockA    = problem.mxBlockA();
             size_t         mxBlockB    = problem.mxBlockB();
+            // Free-dimension extent of one scaling tile. Never 0 (setMXScaleA/B
+            // clamp), but guard anyway since these are divisors.
+            size_t         mxBlockFreeA = std::max<size_t>(1, problem.mxBlockFreeA());
+            size_t         mxBlockFreeB = std::max<size_t>(1, problem.mxBlockFreeB());
             bool           hasMX       = (mxBlockA > 0) || (mxBlockB > 0);
             const E8* mxsaPtr
                 = (mxBlockA > 0) ? static_cast<const E8*>(inputs.mxsa) : nullptr;
@@ -1654,6 +1664,8 @@ namespace TensileLite
                                                                          mxsbI,
                                                                          mxBlockA,
                                                                          mxBlockB,
+                                                                         mxBlockFreeA,
+                                                                         mxBlockFreeB,
                                                                          strideMxsaM,
                                                                          strideMxsaBlk,
                                                                          strideMxsbN,
@@ -1968,17 +1980,23 @@ namespace TensileLite
 
                     cCoord[idx.c] = coord;
 
+                    // setMXScaleA/B divide the scale tensor's free dimension by the
+                    // tile extent, so divide the free coordinate to match (identity
+                    // at 1). The bound coordinate is divided further down; batch
+                    // coordinates are copied verbatim.
                     if(idx.isA)
                     {
                         aCoord[idx.i] = coord;
                         if(mxsaCoord.size())
-                            mxsaCoord[idx.i] = coord;
+                            mxsaCoord[idx.i]
+                                = coord / std::max<size_t>(1, problem.mxBlockFreeA());
                     }
                     else
                     {
                         bCoord[idx.i] = coord;
                         if(mxsbCoord.size())
-                            mxsbCoord[idx.i] = coord;
+                            mxsbCoord[idx.i]
+                                = coord / std::max<size_t>(1, problem.mxBlockFreeB());
                     }
                 }
 

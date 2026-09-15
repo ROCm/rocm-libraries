@@ -160,6 +160,10 @@ namespace TensileLite
                                         rhs.mxBlockA(),
                                         lhs.mxBlockB(),
                                         rhs.mxBlockB(),
+                                        lhs.mxBlockFreeA(),
+                                        rhs.mxBlockFreeA(),
+                                        lhs.mxBlockFreeB(),
+                                        rhs.mxBlockFreeB(),
                                         lhs.mxTypeA(),
                                         rhs.mxTypeA(),
                                         lhs.mxTypeB(),
@@ -217,6 +221,8 @@ namespace std
                                              problem.fusedA2AWorld(),
                                              problem.mxBlockA(),
                                              problem.mxBlockB(),
+                                             problem.mxBlockFreeA(),
+                                             problem.mxBlockFreeB(),
                                              problem.mxTypeA(),
                                              problem.mxTypeB(),
                                              problem.getParams().smCountTarget(),
@@ -270,6 +276,8 @@ namespace std
                                                   problem.fusedA2AWorld(),
                                                   problem.mxBlockA(),
                                                   problem.mxBlockB(),
+                                                  problem.mxBlockFreeA(),
+                                                  problem.mxBlockFreeB(),
                                                   problem.mxTypeA(),
                                                   problem.mxTypeB());
             }
