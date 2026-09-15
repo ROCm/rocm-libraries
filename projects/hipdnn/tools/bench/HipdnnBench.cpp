@@ -1095,7 +1095,16 @@ int runBench(const std::vector<std::string>& args)
     if(options.json)
     {
         auto output = pageJson(catalog);
-        output.erase("candidates");
+        // The enumerated catalog stays in a --sweep response. It was erased here, so a
+        // caller that wanted both the candidate set and its timings ran `enumerate` in a
+        // second process -- paying plugin load, graph build and enumeration twice for one
+        // graph, which is the cost --sweep exists to remove. A single-configuration --json
+        // run still drops it: there the caller named the tuple, so the page tells it
+        // nothing it did not already have.
+        if(!options.sweep)
+        {
+            output.erase("candidates");
+        }
         output["problem"] = problemId;
         output["results"] = nlohmann::json::array();
         for(size_t index = 0; index < results.size(); ++index)
