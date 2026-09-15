@@ -87,10 +87,10 @@ _MIOPEN_DTYPE_MAP = {
 def parse_miopen_cmd_direct(cmd: str):
     """Parse a MIOpenDriver command string into a ``DirectConvProblem``.
 
-    Only 2-D NHWC forward convolutions are supported (no 3-D, no dgrad/wgrad).
+    Supports 2-D NHWC forward (F=1), dgrad (F=2), and wgrad (F=4) convolutions.
     Raises ``ValueError`` for unsupported cases.
-    Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``, or
-    ``"fp32"``.
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``, ``"bf16"``, or
+    ``"fp32"`` and ``forw`` is the raw MIOpen ``-F`` value.
 
     Note: ``DirectConvProblem`` requires ``cpg == kpg`` and cpg must be either
     1 (depthwise) or a positive multiple of 4 (grouped).
@@ -163,13 +163,12 @@ def parse_miopen_cmd_direct(cmd: str):
 
     cpg = C // groups
     kpg = K // groups
-    if cpg != kpg:
+    # For fprop the grouped direct kernels require cpg == kpg.
+    # For dgrad/wgrad cpg and kpg may differ; the spec validators enforce the
+    # kernel-specific constraints, so we skip the symmetric check here.
+    if cpg != 1 and cpg != kpg and (cpg % 4 != 0 or cpg < 4):
         raise ValueError(
-            f"cpg={cpg} != kpg={kpg}; DirectConvProblem requires C/groups == K/groups"
-        )
-    if cpg != 1 and (cpg % 4 != 0 or cpg < 4):
-        raise ValueError(
-            f"cpg={cpg} must be 1 (depthwise) or a positive multiple of 4 (grouped)"
+            f"cpg={cpg} (C/groups) must be 1 (depthwise) or a positive multiple of 4"
         )
 
     sH = miopen_args.sH
@@ -325,6 +324,49 @@ def _conv_reference_grouped(A_t, B_t, p) -> "torch.Tensor":
     B_kcrs = B_t.permute(0, 3, 1, 2).float()
     out_nchw = F.conv2d(A_nchw, B_kcrs, padding=p.PAD, stride=p.stride, groups=p.groups)
     return out_nchw.permute(0, 2, 3, 1).contiguous().cuda()
+
+
+def _dgrad_reference(dY_t, W_t, p) -> "torch.Tensor":
+    """Dgrad reference: dX = conv_transpose2d(dY, W).  Output NHWC fp32 on CUDA.
+
+    conv_transpose2d computes the transposed convolution.  For stride > 1 the
+    default output size is ``(Ho-1)*stride - 2*PAD + KH``, which may be smaller
+    than the original input size H when H % stride != (KH - 2*PAD) % stride.
+    We pass ``output_padding`` to recover the exact input dimensions.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    dY_nchw = dY_t.permute(0, 3, 1, 2).float()
+    W_kcrs = W_t.permute(0, 3, 1, 2).float()  # [K, cpg, KH, KW]
+
+    # output_padding recovers the exact input H, W from the forward conv.
+    h_base = (p.Ho - 1) * p.stride - 2 * p.PAD + p.KH
+    w_base = (p.Wo - 1) * p.stride - 2 * p.PAD + p.KW
+    output_padding_h = p.H - h_base
+    output_padding_w = p.W - w_base
+
+    dX_nchw = F.conv_transpose2d(
+        dY_nchw, W_kcrs,
+        padding=p.PAD,
+        stride=p.stride,
+        groups=p.groups,
+        output_padding=(output_padding_h, output_padding_w),
+    )
+    return dX_nchw.permute(0, 2, 3, 1).contiguous().cuda()
+
+
+def _wgrad_reference(X_t, dY_t, p) -> "torch.Tensor":
+    """Wgrad reference via autograd.  Output [K, KH, KW, cpg] fp32 on CPU."""
+    import torch
+    import torch.nn.functional as F
+
+    X_nchw = X_t.float().cuda().permute(0, 3, 1, 2)
+    W_ref = torch.zeros(p.total_k, p.cpg, p.KH, p.KW, dtype=torch.float32, device="cuda",
+                        requires_grad=True)
+    out = F.conv2d(X_nchw, W_ref, padding=p.PAD, stride=p.stride, groups=p.groups)
+    out.backward(dY_t.float().cuda().permute(0, 3, 1, 2))
+    return W_ref.grad.permute(0, 2, 3, 1).contiguous()  # [K, KH, KW, cpg]
 
 
 def _print_results(
@@ -819,6 +861,569 @@ def _run_sweep(
 
 
 # ---------------------------------------------------------------------------
+# Dgrad sweep
+# ---------------------------------------------------------------------------
+
+
+def _run_dgrad_sweep(
+    *,
+    args,
+    problem,
+    arch: str,
+    compile_kernel,
+    jobs: int,
+    synchronize_and_release,
+    time_launches,
+    Runtime,
+    KernelLauncher,
+    LaunchConfig,
+    u8,
+) -> "tuple[int, list]":
+    """Benchmark the direct dgrad kernel.
+
+    Dispatches to the depthwise dgrad kernel for cpg=1 (any stride) and to
+    the MFMA grouped dgrad kernel for cpg>=4 (stride=1 only).
+    """
+    import math
+
+    import torch
+
+    from rocke.helpers.manifest import conv_args_signature
+    from rocke.instances.common.conv_direct_grouped import (
+        DirectConvDgradSpec,
+        DirectDepthwiseDgradSpec,
+        build_direct_conv_dgrad,
+        build_direct_depthwise_dgrad,
+        is_valid_dgrad_spec,
+        is_valid_depthwise_dgrad_spec,
+    )
+    from rocke.runtime.hip_module import HipError
+
+    p = problem
+
+    torch.manual_seed(42)
+    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16).uniform_(-1.0, 1.0)
+    W_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float16).uniform_(-1.0, 1.0)
+    dX_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16)
+
+    bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
+    flop = float(p.flops)
+    sig = conv_args_signature("fp16")
+
+    is_depthwise = p.cpg == 1
+
+    if is_depthwise:
+        # Depthwise dgrad: use ho-streaming kernel (better DRAM efficiency).
+        from rocke.instances.common.conv_direct_grouped import (
+            DirectDepthwiseDgradStreamSpec,
+            build_direct_depthwise_dgrad_streaming,
+            is_valid_depthwise_dgrad_stream_spec,
+        )
+        combos_dw = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
+        print(
+            f"Sweeping {len(combos_dw)} depthwise dgrad combinations for {arch} fp16 "
+            f"{p.short()} (stride={p.stride}) ...",
+            flush=True,
+        )
+        n_skipped = 0
+        pending = []
+        for block_w, block_waves in combos_dw:
+            spec = DirectDepthwiseDgradStreamSpec(
+                problem=p, name="rocke_bench_dw_dgrad",
+                block_w=block_w, block_waves=block_waves,
+            )
+            ok, _ = is_valid_depthwise_dgrad_stream_spec(spec, arch=arch)
+            if not ok:
+                n_skipped += 1
+                continue
+            try:
+                kernel = build_direct_depthwise_dgrad_streaming(spec, arch=arch)
+            except ValueError:
+                n_skipped += 1
+                continue
+            pending.append(((block_w, block_waves), spec, kernel))
+    else:
+        # Grouped dgrad: use the 2-kernel MFMA pipeline (transpose + fprop) for
+        # stride=1, fall back to scalar FMA for stride > 1.
+        from rocke.instances.common.conv_direct_grouped import (
+            make_dgrad_fprop_spec,
+            build_direct_transpose_weights_dgrad,
+            build_direct_mfma_dgrad,
+            direct_dgrad_workspace_bytes,
+            is_valid_spec as is_valid_fprop_spec,
+            build_direct_conv,
+        )
+
+        use_mfma = p.stride == 1
+
+        if use_mfma:
+            valid_bgs = [bg for bg in _BLOCK_GROUPS if p.groups % bg == 0]
+            combos = list(itertools.product(_BLOCK_Q, valid_bgs))
+            print(
+                f"Sweeping {len(combos)} MFMA dgrad combinations for {arch} fp16 {p.short()} "
+                f"(cpg={p.cpg}, kpg={p.kpg}) ...",
+                flush=True,
+            )
+            n_skipped = 0
+            pending = []
+            for block_q, block_groups in combos:
+                fprop_spec = make_dgrad_fprop_spec(
+                    p, block_q=block_q, block_groups=block_groups
+                )
+                ok, _ = is_valid_fprop_spec(fprop_spec, arch=arch)
+                if not ok:
+                    n_skipped += 1
+                    continue
+                try:
+                    kt = build_direct_transpose_weights_dgrad(p, arch=arch)
+                    kf = build_direct_conv(fprop_spec, arch=arch)
+                except ValueError:
+                    n_skipped += 1
+                    continue
+                pending.append(((block_q, block_groups), fprop_spec, (kt, kf)))
+        else:
+            valid_bgs = [bg for bg in _BLOCK_GROUPS if p.groups % bg == 0]
+            _DGRAD_BLOCK_Q = (4, 8, 16, 32)
+            combos = list(itertools.product(_DGRAD_BLOCK_Q, valid_bgs))
+            print(
+                f"Sweeping {len(combos)} scalar-FMA dgrad combinations for {arch} fp16 {p.short()} "
+                f"(cpg={p.cpg}, kpg={p.kpg}, stride={p.stride}) ...",
+                flush=True,
+            )
+            n_skipped = 0
+            pending = []
+            for block_q, block_groups in combos:
+                spec = DirectConvDgradSpec(
+                    problem=p, name="rocke_bench_direct_dgrad",
+                    block_q=block_q, block_groups=block_groups,
+                )
+                ok, _ = is_valid_dgrad_spec(spec, arch=arch)
+                if not ok:
+                    n_skipped += 1
+                    continue
+                try:
+                    kernel = build_direct_conv_dgrad(spec, arch=arch)
+                except ValueError:
+                    n_skipped += 1
+                    continue
+                pending.append(((block_q, block_groups), spec, kernel))
+
+    # Compile all kernels (flatten tuples for MFMA pipeline).
+    all_kernels = []
+    for _, _, kernel_or_pair in pending:
+        if isinstance(kernel_or_pair, tuple):
+            all_kernels.extend(kernel_or_pair)
+        else:
+            all_kernels.append(kernel_or_pair)
+    artifact_map = _compile_kernels_parallel(all_kernels, compile_kernel, arch, jobs)
+    n_built = sum(1 for _, _, k in pending if (k if not isinstance(k, tuple) else k[1]).name in artifact_map)
+
+    rt = Runtime()
+    results = []
+
+    dY_dev = rt.alloc(dY_t.nbytes)
+    W_dev = rt.alloc(W_t.nbytes)
+    dX_dev = rt.alloc(dX_t.nbytes)
+    rt.memcpy_h2d(dY_dev, u8(dY_t), dY_t.nbytes)
+    rt.memcpy_h2d(W_dev, u8(W_t), W_t.nbytes)
+    rt.memset(dX_dev, 0, dX_t.nbytes)
+
+    # Workspace for transposed weights (MFMA dgrad only).
+    wt_dev = None
+    if not is_depthwise and use_mfma:
+        from rocke.instances.common.conv_direct_grouped import direct_dgrad_workspace_bytes
+        wt_bytes = direct_dgrad_workspace_bytes(p)
+        wt_dev = rt.alloc(wt_bytes)
+
+    ref_out = None
+    if args.verify or args.dump_fail:
+        ref_out = _dgrad_reference(dY_t, W_t, p)
+        print(
+            f"Reference dgrad computed via torch ({tuple(ref_out.shape)}, {ref_out.dtype}).",
+            flush=True,
+        )
+
+    n_run = 0
+    for combo, spec, kernel_or_pair in pending:
+        is_mfma_pair = isinstance(kernel_or_pair, tuple)
+
+        if is_depthwise:
+            block_w, block_waves = combo
+            q_tiles = math.ceil(p.W / block_w)
+            g_tiles = math.ceil(p.groups / spec.block_ch)
+            grid = (q_tiles, g_tiles, p.N)
+            label = f"bw={block_w:3d} waves={block_waves}"
+            block_dim = (spec.threads_per_block, 1, 1)
+            kernel = kernel_or_pair
+        elif is_mfma_pair:
+            # 2-kernel MFMA pipeline.
+            kt, kf = kernel_or_pair
+            block_q, block_groups = combo
+            # Transpose kernel grid: (groups*KH*KW, ceil(kpg/64), cpg)
+            t_grid = (p.groups * p.KH * p.KW, math.ceil(p.kpg / 64), p.cpg)
+            # Fprop kernel grid: (ceil(Wo/bq), groups/bg, N) — dY as input
+            q_tiles = (spec.problem.Wo + block_q - 1) // block_q
+            g_tiles = p.groups // block_groups
+            f_grid = (q_tiles, g_tiles, p.N)
+            label = f"bq={block_q:3d} bg={block_groups:3d} MFMA"
+            block_dim = (spec.threads_per_block, 1, 1)
+            kernel = kf
+        else:
+            block_q, block_groups = combo
+            block_ch = spec.block_groups * spec.wave_size
+            q_tiles = math.ceil(p.W / block_q)
+            c_tiles = math.ceil(p.total_c / block_ch)
+            grid = (q_tiles, c_tiles, p.N * p.H)
+            label = f"bq={block_q:3d} bg={block_groups:3d} scFMA"
+            block_dim = (spec.threads_per_block, 1, 1)
+            kernel = kernel_or_pair
+
+        artifact = artifact_map.get(kernel.name)
+        if artifact is None:
+            n_skipped += 1
+            continue
+
+        try:
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=sig,
+            )
+        except HipError as e:
+            n_skipped += 1
+            print(f"[skip] {artifact.kernel_name}: {e}", file=sys.stderr, flush=True)
+            continue
+
+        # For MFMA pipeline, also load the transpose kernel launcher.
+        t_launcher = None
+        if is_mfma_pair:
+            kt_art = artifact_map.get(kt.name)
+            if kt_art is None:
+                n_skipped += 1
+                continue
+            _transpose_sig = [
+                {"name": "A", "type": "ptr<f16, global>", "size_bytes": 8},
+                {"name": "D", "type": "ptr<f16, global>", "size_bytes": 8},
+                {"name": "A_bytes", "type": "i32", "size_bytes": 4},
+                {"name": "D_bytes", "type": "i32", "size_bytes": 4},
+            ]
+            try:
+                t_launcher = KernelLauncher(
+                    hsaco=kt_art.hsaco,
+                    kernel_name=kt_art.kernel_name,
+                    signature=_transpose_sig,
+                )
+            except HipError as e:
+                n_skipped += 1
+                print(f"[skip] transpose {kt_art.kernel_name}: {e}", file=sys.stderr, flush=True)
+                continue
+
+        if is_mfma_pair:
+            wt_nbytes = direct_dgrad_workspace_bytes(p)
+            t_values = {"A": W_dev, "D": wt_dev, "A_bytes": W_t.nbytes, "D_bytes": wt_nbytes}
+            f_values = {
+                "A": dY_dev, "B": wt_dev, "D": dX_dev,
+                "A_bytes": dY_t.nbytes, "B_bytes": wt_nbytes, "D_bytes": dX_t.nbytes,
+            }
+
+            def run_mfma_dgrad():
+                t_launcher(t_values, config=LaunchConfig(grid=t_grid, block=(64, 1, 1)))
+                launcher(f_values, config=LaunchConfig(grid=f_grid, block=block_dim))
+
+            values = None
+        else:
+            values = {
+                "A": dY_dev, "B": W_dev, "D": dX_dev,
+                "A_bytes": dY_t.nbytes, "B_bytes": W_t.nbytes, "D_bytes": dX_t.nbytes,
+            }
+
+        kernel_passed = None
+        if args.verify or args.dump_fail:
+            if is_mfma_pair:
+                # Verify: run both kernels then compare dX to reference.
+                import torch
+                rt.memset(dX_dev, 0, dX_t.nbytes)
+                run_mfma_dgrad()
+                synchronize_and_release(0)
+                dX_cpu = torch.empty_like(dX_t)
+                rt.memcpy_d2h(u8(dX_cpu), dX_dev, dX_t.nbytes)
+                if ref_out is not None:
+                    out_f32 = dX_cpu.float()
+                    ref_f32 = ref_out.float().cpu()
+                    abs_diff = (out_f32 - ref_f32).abs()
+                    rel_err = float(abs_diff.max() / ref_f32.abs().max().clamp(min=1.0))
+                    tol = 5e-2
+                    kernel_passed = rel_err < tol
+                    status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
+                    print(f"  verify {artifact.kernel_name}: {status}", flush=True)
+                rt.memset(dX_dev, 0, dX_t.nbytes)
+            else:
+                stopped, kernel_passed = _verify_kernel(
+                    rt=rt,
+                    launcher=launcher,
+                    values=values,
+                    grid=grid,
+                    block=block_dim,
+                    out_dev=dX_dev,
+                    out_t=dX_t,
+                    ref_out=ref_out,
+                    kernel_name=artifact.kernel_name,
+                    dump_fail=args.dump_fail,
+                    u8=u8,
+                )
+                if stopped:
+                    rt.free(dY_dev); rt.free(W_dev); rt.free(dX_dev)
+                    if wt_dev:
+                        rt.free(wt_dev)
+                    return 1, []
+                rt.memset(dX_dev, 0, dX_t.nbytes)
+
+        if is_mfma_pair:
+            ms = time_launches(
+                run_mfma_dgrad,
+                warmup=args.warmup,
+                iters=args.iters,
+                stream=0,
+            )
+        else:
+            cfg = LaunchConfig(grid=grid, block=block_dim)
+            ms = time_launches(
+                lambda: launcher(values, config=cfg),
+                warmup=args.warmup,
+                iters=args.iters,
+                stream=0,
+            )
+        synchronize_and_release(0)
+        tflops = flop / ms / 1e9
+        gbps = bytes_xfer / ms / 1e6
+        passed_str = f"  {'PASS' if kernel_passed else 'FAIL'}" if kernel_passed is not None else ""
+        results.append({"label": label, "ms": ms, "tflops": tflops, "gbps": gbps,
+                        "passed": kernel_passed})
+        n_run += 1
+        print(f"[{n_run:4d}] {label}  {tflops:6.1f} TFLOPS  {ms:.3f} ms{passed_str}",
+              flush=True)
+
+    rt.free(dY_dev); rt.free(W_dev); rt.free(dX_dev)
+    if wt_dev:
+        rt.free(wt_dev)
+    print(f"\nDgrad sweep done: {n_built} compiled, {n_skipped} skipped.", flush=True)
+
+    if not results:
+        print("No valid dgrad configurations found.", file=sys.stderr)
+        return 1, []
+
+    results.sort(key=lambda r: r["tflops"], reverse=True)
+    best = results[0]
+    passed_str = f"  {'PASS' if best['passed'] else 'FAIL'}" if best["passed"] is not None else ""
+    print(f"\nBest dgrad: {best['label']}  {best['tflops']:.1f} TFLOPS  {best['ms']:.3f} ms{passed_str}",
+          flush=True)
+    return 0, results
+
+
+# ---------------------------------------------------------------------------
+# Wgrad sweep
+# ---------------------------------------------------------------------------
+
+
+def _run_wgrad_sweep(
+    *,
+    args,
+    problem,
+    arch: str,
+    compile_kernel,
+    jobs: int,
+    synchronize_and_release,
+    time_launches,
+    Runtime,
+    KernelLauncher,
+    LaunchConfig,
+    u8,
+) -> "tuple[int, list]":
+    """Benchmark the direct wgrad kernel."""
+    import torch
+
+    from rocke.instances.common.conv_direct_grouped import (
+        DirectConvWgradSpec,
+        build_direct_conv_wgrad,
+        is_valid_wgrad_spec,
+    )
+    from rocke.runtime.hip_module import HipError
+
+    p = problem
+
+    torch.manual_seed(42)
+    X_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
+    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16).uniform_(-1.0, 1.0)
+    dW_t = torch.zeros(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float32)
+
+    bytes_xfer = float(X_t.nbytes + dY_t.nbytes + dW_t.nbytes)
+    flop = float(p.flops)
+
+    # Wgrad uses fp32 output — separate ctypes signature
+    import ctypes as _ct
+    sig_wg = {
+        "A": _ct.c_void_p, "B": _ct.c_void_p, "D": _ct.c_void_p,
+        "A_bytes": _ct.c_int, "B_bytes": _ct.c_int, "D_bytes": _ct.c_int,
+    }
+
+    _WAVES = [(1, 1), (2, 1), (1, 2), (2, 2)]
+    combos = [(wk, wc) for wk, wc in _WAVES if wk * wc <= 16]
+
+    spec_default = DirectConvWgradSpec(problem=p)
+    ok_default, _ = is_valid_wgrad_spec(spec_default, arch=arch)
+
+    print(
+        f"Sweeping wgrad configurations for {arch} fp16→fp32 {p.short()} ...",
+        flush=True,
+    )
+
+    n_skipped = 0
+    pending = []
+    for waves_k, waves_c in combos:
+        spec = DirectConvWgradSpec(
+            problem=p,
+            name="rocke_bench_direct_wgrad",
+            waves_k=waves_k,
+            waves_c=waves_c,
+        )
+        ok, _ = is_valid_wgrad_spec(spec, arch=arch)
+        if not ok:
+            n_skipped += 1
+            continue
+        try:
+            kernel = build_direct_conv_wgrad(spec, arch=arch)
+        except ValueError:
+            n_skipped += 1
+            continue
+        pending.append(((waves_k, waves_c), spec, kernel))
+
+    artifact_map = _compile_kernels_parallel(
+        [k for _, _, k in pending], compile_kernel, arch, jobs
+    )
+    n_built = len(artifact_map)
+
+    rt = Runtime()
+    results = []
+
+    X_dev = rt.alloc(X_t.nbytes)
+    dY_dev = rt.alloc(dY_t.nbytes)
+    dW_dev = rt.alloc(dW_t.nbytes)
+    rt.memcpy_h2d(X_dev, u8(X_t), X_t.nbytes)
+    rt.memcpy_h2d(dY_dev, u8(dY_t), dY_t.nbytes)
+    rt.memset(dW_dev, 0, dW_t.nbytes)
+
+    ref_out_wg = None
+    if args.verify or args.dump_fail:
+        ref_out_wg = _wgrad_reference(X_t, dY_t, p)
+        print(
+            f"Reference wgrad computed via torch ({tuple(ref_out_wg.shape)}, {ref_out_wg.dtype}).",
+            flush=True,
+        )
+
+    n_run = 0
+    for combo, spec, kernel in pending:
+        waves_k, waves_c = combo
+        artifact = artifact_map[kernel.name]
+
+        try:
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=sig_wg,
+            )
+        except HipError as e:
+            n_skipped += 1
+            print(f"[skip] {artifact.kernel_name}: {e}", file=sys.stderr, flush=True)
+            continue
+
+        grid = (p.groups * p.KH * p.KW, p.kpg // spec.block_k, p.cpg // spec.block_c)
+        block_dim = (spec.threads_per_block, 1, 1)
+        values = {
+            "A": dY_dev, "B": X_dev, "D": dW_dev,
+            "A_bytes": dY_t.nbytes, "B_bytes": X_t.nbytes, "D_bytes": dW_t.nbytes,
+        }
+
+        kernel_passed = None
+        if (args.verify or args.dump_fail) and ref_out_wg is not None:
+            # Wgrad outputs fp32 — convert ref to a float16-shaped tensor for _verify_kernel.
+            # We keep everything in fp32 and just reuse the verify infrastructure.
+            import torch
+            dW_ref_t = ref_out_wg.cpu()
+            rt.memset(dW_dev, 0, dW_t.nbytes)
+            launcher(values, config=LaunchConfig(grid=grid, block=block_dim, fence=True))
+            dW_cpu = torch.empty_like(dW_t)
+            rt.memcpy_d2h(u8(dW_cpu), dW_dev, dW_t.nbytes)
+            abs_diff = (dW_cpu.float() - dW_ref_t.float()).abs()
+            ref_scale = dW_ref_t.float().abs().max().clamp(min=1.0)
+            rel_err = float(abs_diff.max() / ref_scale)
+            tol = 5e-2
+            kernel_passed = rel_err < tol
+            status = "PASS" if kernel_passed else f"FAIL(rel_err={rel_err:.2e})"
+            print(f"  verify {artifact.kernel_name}: {status}", flush=True)
+            rt.memset(dW_dev, 0, dW_t.nbytes)
+
+        cfg_wg = LaunchConfig(grid=grid, block=block_dim)
+        ms = time_launches(
+            lambda: launcher(values, config=cfg_wg),
+            warmup=args.warmup,
+            iters=args.iters,
+            stream=0,
+        )
+        synchronize_and_release(0)
+        tflops = flop / ms / 1e9
+        gbps = bytes_xfer / ms / 1e6
+        passed_str = f"  {'PASS' if kernel_passed else 'FAIL'}" if kernel_passed is not None else ""
+        results.append({"wk": waves_k, "wc": waves_c, "ms": ms, "tflops": tflops,
+                        "gbps": gbps, "passed": kernel_passed})
+        n_run += 1
+        print(
+            f"[{n_run:4d}] waves_k={waves_k} waves_c={waves_c}  "
+            f"{tflops:6.1f} TFLOPS  {ms:.3f} ms{passed_str}",
+            flush=True,
+        )
+
+    rt.free(X_dev); rt.free(dY_dev); rt.free(dW_dev)
+    print(f"\nWgrad sweep done: {n_built} compiled, {n_skipped} skipped.", flush=True)
+
+    if not results:
+        print("No valid wgrad configurations found.", file=sys.stderr)
+        return 1, []
+
+    results.sort(key=lambda r: r["tflops"], reverse=True)
+    best = results[0]
+    passed_str = f"  {'PASS' if best['passed'] else 'FAIL'}" if best["passed"] is not None else ""
+    print(
+        f"\nBest wgrad: waves_k={best['wk']} waves_c={best['wc']}  "
+        f"{best['tflops']:.1f} TFLOPS  {best['ms']:.3f} ms{passed_str}",
+        flush=True,
+    )
+    return 0, results
+
+
+# ---------------------------------------------------------------------------
+# MIOpen -F flag → direction string
+# ---------------------------------------------------------------------------
+
+# MIOpen -F bitmask: 1=fwd, 2=dgrad, 4=wgrad.
+# When multiple bits are set the benchmark picks the highest-priority supported
+# direction (fwd > dgrad > wgrad) so a single command maps to one sweep.
+_FORW_TO_DIR = {
+    1: "fwd",
+    2: "dgrad",
+    4: "wgrad",
+    3: "dgrad",  # fwd+dgrad → dgrad
+    5: "wgrad",  # fwd+wgrad → wgrad
+    6: "wgrad",  # dgrad+wgrad → wgrad
+    7: "wgrad",  # all → wgrad
+}
+
+
+def _miopen_forw_to_direction(forw: int) -> "str | None":
+    """Map MIOpen -F value to a direction string, or None if unsupported."""
+    return _FORW_TO_DIR.get(forw & 7)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -834,6 +1439,12 @@ def main() -> int:
         "--arch",
         default="gfx950",
         help="gfx target (gfx942, gfx950, ...) (default: gfx950)",
+    )
+    parser.add_argument(
+        "--direction",
+        default="fwd",
+        choices=["fwd", "dgrad", "wgrad"],
+        help="convolution direction to benchmark: fwd (default), dgrad, wgrad",
     )
     parser.add_argument(
         "--top",
@@ -954,14 +1565,14 @@ def main() -> int:
                 continue
             try:
                 prob, dt, forw = parse_miopen_cmd_direct(line)
-                if forw & 1:
-                    cases.append((prob, dt))
-                else:
+                direction = _miopen_forw_to_direction(forw)
+                if direction is None:
                     print(
-                        f"[skip] {path}:{lineno}: -F={forw} is not forward (fwd); "
-                        f"wgrad/dgrad are not supported — skipping",
+                        f"[skip] {path}:{lineno}: -F={forw} maps to no supported direction",
                         file=sys.stderr,
                     )
+                else:
+                    cases.append((prob, dt, direction))
             except ValueError as e:
                 print(f"[warn] {path}:{lineno}: skipping — {e}", file=sys.stderr)
         if not cases:
@@ -973,14 +1584,15 @@ def main() -> int:
         except ValueError as e:
             print(f"error: --miopen-cmd: {e}", file=sys.stderr)
             return 2
-        if not (forw & 1):
+        direction = _miopen_forw_to_direction(forw)
+        if direction is None:
             print(
-                f"error: --miopen-cmd: -F={forw} is not forward (fwd); "
-                f"wgrad/dgrad are not supported",
+                f"error: --miopen-cmd: -F={forw} maps to no supported direction "
+                f"(use 1=fwd, 2=dgrad, 4=wgrad)",
                 file=sys.stderr,
             )
             return 2
-        cases = [(prob, dt)]
+        cases = [(prob, dt, direction)]
     else:
         if args.C % args.groups != 0:
             print(
@@ -998,9 +1610,10 @@ def main() -> int:
         cpg = args.C // args.groups
         kpg = args.K // args.groups
 
-        if cpg != kpg:
+        # For fwd direction, cpg == kpg is required. For dgrad/wgrad it need not hold.
+        if args.direction == "fwd" and cpg != kpg:
             print(
-                f"error: cpg={cpg} != kpg={kpg}; direct grouped conv requires C/groups == K/groups",
+                f"error: cpg={cpg} != kpg={kpg}; forward direct grouped conv requires C/groups == K/groups",
                 file=sys.stderr,
             )
             return 2
@@ -1036,7 +1649,7 @@ def main() -> int:
             PAD=args.pH,
             stride=args.sH,
         )
-        cases = [(problem, "fp16")]
+        cases = [(problem, "fp16", args.direction)]
 
     _common = dict(
         args=args,
@@ -1052,17 +1665,21 @@ def main() -> int:
     )
 
     all_rc = 0
-    for case_idx, (problem, dtype) in enumerate(cases):
+    for case_idx, (problem, dtype, direction) in enumerate(cases):
         if len(cases) > 1:
             print(f"\n{'#'*72}", flush=True)
             print(
-                f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} dtype={dtype}",
+                f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} dtype={dtype} dir={direction}",
                 flush=True,
             )
             print(f"{'#'*72}", flush=True)
 
         cpg = problem.cpg
-        if cpg == 1:
+        if direction == "dgrad":
+            rc, _ = _run_dgrad_sweep(problem=problem, **_common)
+        elif direction == "wgrad":
+            rc, _ = _run_wgrad_sweep(problem=problem, **_common)
+        elif cpg == 1:
             rc, _ = _run_depthwise_sweep(problem=problem, **_common)
         else:
             rc, _ = _run_sweep(problem=problem, **_common)
