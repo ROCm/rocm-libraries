@@ -164,6 +164,121 @@ This flow writes into the checkout, not into the run directory -- a kernel that 
 in the tree cannot be built. Run it in a worktree you are willing to have edited, and
 expect `git status` to show changes under `test_engine/` afterwards.
 
+### `ingestor-engine-kernel`
+
+Hand it a graph and a name for a new engine. It produces a hipRTC kernel that computes
+the graph, lands that kernel as a **new generic-kernel-ingestor pack** -- native symbols,
+descriptors, registration with the shared test suite, bundle graphs -- and proves the
+result from the installed tree with a complete corpus accounting. Three agents, each
+running one skill from `projects/hipdnn/tools/ai/skills`, in order:
+
+```
+preflight   profile, identity, configure, cache_check, build, comgr, venv, install, hash
+loop author_cycle      (max 4, until mismatched_outputs == 0)
+  author         hipdnn-kernel-authoring    -> authoring.json
+  author_scope   nothing in the product tree changed
+  author_contract  the contract describes the files it points at
+  rtc_compile    hipRTC compiles it here, resolves every entry point, proves every guard
+  numerics       the orchestrator runs the agent's harness and reads its report
+loop integration_cycle (max 5, until gate.meets_target == 1)
+  integrate      hipdnn-kernel-integration  -> integration.json
+  scope, placeholders, integration_contract, build, install
+  validate_descriptors, census, suite, absent_control, ctest_listing, gate
+loop ingestor_cycle    (max 3, until corpus.meets_target == 1)
+  ingest         hipdnn-ingestor-engine     -> ingestor.json
+  ingest_contract, device_probe, final_validate, final_suite, corpus
+```
+
+```bash
+$P orchestrate.py run configs/flows/ingestor-engine-kernel.yaml \
+    --input graph=test-graphs/conv_fwd_pointwise_fp32_nchw.json \
+    --input engine_name=hipkernel:ConvPointwiseRtc \
+    --input corpus_dir=test-graphs --tee
+```
+
+It configures its own build tree (`build-ingestor`) and install prefix
+(`install-ingestor`) with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and
+`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, both of which are OFF by default and neither of
+which any preset sets. It writes into the checkout from stage two onwards.
+
+#### The three contracts are the handover
+
+`authoring.json`, `integration.json` and `ingestor.json` are the only things that pass
+between the agents. No agent reads another's prose, and each is handed the previous
+contract file by path. `scripts/contract_check.py` then checks that the contract
+describes the checkout it claims to -- every path opened, every symbol looked for in the
+source that should define it.
+
+#### Five gates worth copying
+
+**The orchestrator compiles the kernel itself.** `scripts/rtc_compile.py` loads hipRTC
+through `ctypes`, compiles every source the contract lists for the named architecture,
+and asks the code object whether each declared entry point is in it -- by the *literal*
+name, because the descriptor stores a plain string and `getKernel()` looks that string
+up. A kernel that forgot `extern "C"` compiles, resolves under its mangled name, and is
+unreachable; measured on a deliberately-mangled kernel, the gate reports it as an
+unresolved symbol rather than as a pass.
+
+**Every `-D` macro is proved to be guarded by a negative compile.** For each entry of
+`required_defines` the source is compiled again with that one macro dropped, and the
+compile is required to *fail*. A macro whose absence still compiles is not a
+specialization axis: it is a token that silently means whatever it happens to mean, and
+the failure shows up only in the numbers.
+
+**The launch ABI is compared across the seam.** The authoring agent chose the kernel's
+parameter list and the integration agent wrote `launch()`; nothing in the toolchain
+compares them. hipRTC compiles the kernel, `getKernel()` resolves it, and
+`hipModuleLaunchKernel` reads one pointer per parameter the kernel declared, so a short
+argument list reads whatever is next in memory and two same-typed pointers swapped is a
+wrong answer with no diagnostic. `contract_check.py` compares `launch_arg_order` against
+the kernel's parameter names element by element, and the integration contract must echo
+the sha256 of the authoring contract it consumed -- an ABI taken from a previous round's
+kernel fails on the digest.
+
+**The absent-engine control.** Because an unservable case *skips*, a `--test-engine` run
+in which the engine was never loaded at all is indistinguishable from one in which it
+served everything: both exit 0. So the same suite is run a second time naming an engine
+that does not exist, and is required to fail with `Error: Engine '<name>' is not loaded.`
+and exit 1. If that control does not fail, the positive run proved nothing, and
+`integration_gate.py` says so in those words.
+
+**The feature flags are read back out of the cache.** `HIPDNN_ENABLE_KERNEL_INGESTOR=OFF`
+compiles `discoverDescriptorSets()` out entirely, so the engine does not exist, every
+case skips and the suite exits 0 -- identical, at the exit code, to a matcher that
+declined everything. `scripts/cache_check.py` asserts both flags in the configured cache
+before any agent launches, and `validator_present` then confirms the build actually
+produced `hipdnn_validate_descriptors`, which exists only under that flag. Two
+independent witnesses, because a configure that exits 0 is not one.
+
+#### Append-only is a third scope category
+
+`guard_scope.py` classified `added` as a violation alongside `modified` and `removed`.
+That is right for the measurement harness and wrong for the bundle tree, which this flow
+*requires* its agent to add cases to -- `import_graph.py` either creates a new
+template+sweep directory or appends a case to an existing topology's `sweep.json`. Not
+watching the bundle tree instead leaves the obvious cheat open: edit an existing case's
+shapes, or widen a tolerance, until the pack that cannot serve them passes.
+
+So `--allow-added GLOB` and `--allow-grow GLOB` add the category between "must not
+change" and "unwatched". A file under `--allow-grow` is forgiven only when its baseline
+JSON is a structural *prefix* of its current content: lists may gain elements at the end
+and dicts may gain keys, and every element that was already there must be deep-equal.
+Baseline mode records those files' text, not just their hash, because proving growth
+needs the old content; a baseline written before the flag simply has no record, and the
+file stays a violation. Measured against this checkout, appending a case to
+`quick/Pointwise/Nchw/sweep.json` reports `grown 1, outside 0`, and editing the case that
+was already in it reports `outside 1` with its own distinct feedback paragraph.
+
+#### What it does not prove
+
+The stage-one numerics gate runs a harness the *agent* built. `run_report.py` deletes the
+report before launching, records the harness's digest and refuses an interpreter or a
+shell as `harness_command[0]`, which makes a stale or trivially fabricated report visible
+-- but the harness is still the agent's code. The correctness claim this flow actually
+stands on is stage two's: the shared integration suite, against the same reference
+executor and the same bundle corpus every other provider is held to, from the install,
+pinned to the engine by name, with the absent-engine control beside it.
+
 ## Running it
 
 ```bash
