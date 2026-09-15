@@ -90,9 +90,9 @@ namespace TensileLite
                         ContractionProblem*                                            problem,
                         int                                                            runIdx);
 
-        // Single-GPU A2A-GEMM shard-loop bring-up entry point. Defined in
-        // A2APrefillClient.cpp. Dispatched per problem when the a2a-prefill
-        // option is set; returns a process exit code.
+        // A2A-GEMM shard-loop bring-up entry point. Defined in
+        // A2APrefillClient.cpp. Dispatched per problem when a2a-prefill or
+        // a2a-multigpu is set; returns a process exit code.
         int runA2APrefill(po::variables_map const&                                       args,
                           std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                           std::shared_ptr<Hardware>                                      hardware,
@@ -305,7 +305,8 @@ namespace TensileLite
                 ("a2a-prefill",              po::value<bool>()->default_value(false), "Run the single-GPU A2A-GEMM shard-loop bring-up arm: the host lays the W gathered shards out in B (ldb = K/W), launches the FusedA2AMode=1 kernel, and compares every output element against a shard-aware CPU reference. Skips the generic single-GPU path below.")
                 ("a2a-prefill-worlds",       po::value<std::vector<int>>()->default_value(std::vector<int>()), "World sizes to sweep in the a2a-prefill arm, one value per occurrence. Defaults to 1 and 4. Each must divide K.")
                 ("a2a-loopback",             po::value<bool>()->default_value(false), "Also run the loopback arm at each swept world size: the host fills gathered segment 0 and points every peer group at this device; the kernel's own SDMA packets deliver segments 1..W-1. Compares gathered byte-for-byte against the host layout on top of the output comparison. Needs a client built with -DTENSILELITE_ENABLE_SDMA=ON, and W <= 8.")
-                ("a2a-loopback-launches",    po::value<int>()->default_value(2), "Launches per world size in the a2a-loopback arm. Values below 2 leave the per-launch flag reset and the counter wrap untested.")
+                ("a2a-loopback-launches",    po::value<int>()->default_value(2), "Launches per world size in the a2a-loopback and a2a-multigpu arms. Values below 2 leave the per-launch flag reset and the counter wrap untested.")
+                ("a2a-multigpu",             po::value<bool>()->default_value(false), "Run the multi-GPU A2A-GEMM arm: one process drives W devices, rank d on device d, each with its own x, gathered buffer, SDMA queue set and counter. The boundary barrier is stood in for by a host-side device sync. Needs a client built with -DTENSILELITE_ENABLE_SDMA=ON, W <= 8, and at least W visible devices.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -1282,9 +1283,9 @@ int main(int argc, const char* argv[])
                     continue;
                 }
 
-                // Self-contained allocate+prefill+launch+compare on one device;
-                // skips the single-GPU path below.
-                if(args["a2a-prefill"].as<bool>())
+                // Self-contained allocate+prefill+launch+compare; skips the
+                // single-GPU path below.
+                if(args["a2a-prefill"].as<bool>() || args["a2a-multigpu"].as<bool>())
                 {
                     int rc = runA2APrefill(args, library, hardware, adapter, problem);
                     if(rc != 0)
