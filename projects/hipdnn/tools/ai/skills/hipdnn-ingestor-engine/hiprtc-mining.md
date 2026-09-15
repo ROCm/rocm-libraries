@@ -120,7 +120,7 @@ not by load order. Three traps:
 - `elementTypeFor` knows only `FLOAT` and `HALF`. A `BFLOAT16` variant **matches**, then
   throws at `prepare()`.
 - Bound defines are added after the handler's and `add` overwrites
-  (`KernelCompileOptions.hpp:80-83`, `IngestorKernelCode.hpp:284-297`), so a `defines` key
+  (`KernelCompileOptions.hpp:80-83`, `IngestorKernelCode.hpp:323-336`), so a `defines` key
   naming `HIP_PLUGIN_POINTWISE_TYPE` wins over the handler's. Deliberate — the more
   specific statement wins — and a loaded gun.
 - `$kernel.dtype` renders `FLOAT`, not `float`. Mapping a tag to a device type is
@@ -141,7 +141,7 @@ not by load order. Three traps:
 `float` has no single spelling: `std::to_chars(1.0)` gives `1`, Python's `repr(1.0)` gives
 `1.0`, and `-DALPHA=1` and `-DALPHA=1.0` are different types in device code. That is not
 tidiness. The compile cache is keyed `(resolved source path, options)`
-(`IngestorKernelCode.hpp:303-307`), so **two variants differing only in a bound field whose
+(`IngestorKernelCode.hpp:346-350`), so **two variants differing only in a bound field whose
 rendering is unpinned compile once and silently become one kernel.** A float or a list a
 kernel genuinely needs goes through the dispatch handler.
 
@@ -149,7 +149,7 @@ kernel genuinely needs goes through the dispatch handler.
 
 A bundle is a **directory**, not an archive. `bundle` resolves against the descriptor's own
 directory and must stay inside the walked `treeRoot`; `source_file` is containment-checked
-separately, being authored too (`IngestorKernelCode.hpp:243-277`).
+separately, being authored too (`IngestorKernelCode.hpp:287-316`).
 
 ```
 $HIPDNN_DESCRIPTOR_RUNTIME_DIR/pointwise_add_dropin/
@@ -159,7 +159,7 @@ $HIPDNN_DESCRIPTOR_RUNTIME_DIR/pointwise_add_dropin/
 ```
 
 Headers are the provider's embedded list first (`getKernelIncList`), then bundle siblings —
-`.h`, `.hpp`, `.cuh` only, one level deep, sorted by name (`IngestorKernelCode.hpp:119-176`)
+`.h`, `.hpp`, `.cuh` only, one level deep, sorted by name (`IngestorKernelCode.hpp:115-212`)
 — handed to `hiprtcCreateProgram` as virtual headers (`Program.cpp:40-59`, `:68-73`). A
 bundle header whose name collides with an embedded one is a **load error, not a shadow**
 (`:160-172`): hipRTC resolves the first match, so either outcome would be invisible. A

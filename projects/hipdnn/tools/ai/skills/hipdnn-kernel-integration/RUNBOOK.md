@@ -96,7 +96,7 @@ kernel it prepares needs, built by hand next to the compile call — conv adds
 `HIP_PLUGIN_CONV_TYPE` and `HIP_PLUGIN_CONV_BLOCK_SIZE` (`ConvNative.cpp:498-499`) on top
 of `KernelCompileOptions`' arch/dtype/layout base set. Descriptor-bound defines are
 appended **after** the handler's and overwrite them by key
-(`IngestorKernelCode.hpp:283-295`). Decide deliberately which macro belongs to which
+(`IngestorKernelCode.hpp:323-336`). Decide deliberately which macro belongs to which
 side: anything derived, conditional or computed is the handler's, because the
 descriptor's substituter does literal replacement and nothing else. Do not grow the
 substituter to avoid a handler change.
@@ -112,14 +112,14 @@ raising an error.
 
 **Header rules, if you ship a bundle.** A bundle is a directory, not an archive. Headers
 are the provider's embedded list first, then bundle siblings: `.h`, `.hpp` and `.cuh`
-only, one level deep, sorted by name (`IngestorKernelCode.hpp:118-155`). A second `.hip`
+only, one level deep, sorted by name (`IngestorKernelCode.hpp:115-212`). A second `.hip`
 is not a header and cannot be included. A bundle header whose name collides with an
 embedded one is a **load error, not a shadow**, deliberately. The bundle and the
 `source_file` are each canonicalized and refused if they resolve outside the descriptor
-tree (`IngestorKernelCode.hpp:251-277`).
+tree (`IngestorKernelCode.hpp:287-316`).
 
 **The compile-cache key is `(resolved source path, options)`**
-(`IngestorKernelCode.hpp:301-305`) — the resolved path, not the bare `source_file`, so
+(`IngestorKernelCode.hpp:346-350`) — the resolved path, not the bare `source_file`, so
 two bundles each holding `attention.hip` do not share one entry. The source text is not
 in the key, which is correct and has one consequence: an edited bundle source needs a
 process restart, because the cache is process-lifetime.
@@ -214,7 +214,7 @@ Add the pack's source and test files to the engine's `target_sources` in the sam
 
 Use `buildIngestorKernelCode` in `prepare()` rather than calling the compiler directly:
 it is the one place source loading and path containment are handled for every
-`kernel_source.kind` (`IngestorKernelCode.hpp:195-208`). A handler that calls
+`kernel_source.kind` (`IngestorKernelCode.hpp:235-248`). A handler that calls
 `_kernelCompiler.compile(kernel.source.sourceFile, options)` itself serves
 `embedded_source` only — `ConvNative.cpp:501-502` is exactly that, and it is why a
 `hiprtc_file` descriptor under the conv pack throws at plan-build time no matter how
