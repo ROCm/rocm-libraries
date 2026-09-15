@@ -2822,9 +2822,9 @@ class IRBuilder:
         control word applies within every four-lane group, and four
         divides both 32 and 64, so a lane never addresses outside its own
         quad. Wave size changes only the *number* of quads (8 in wave32,
-        16 in wave64), never the permutation a quad performs -- unlike
-        :meth:`dpp_xor` or :meth:`ds_swizzle_xor`, whose partner lane can
-        leave the wave for a large enough mask.
+        16 in wave64), never the permutation a quad performs. Contrast
+        :meth:`warp_shuffle_xor`, whose ``lane_xor = 32`` partner is a
+        real lane in wave64 and does not exist in wave32.
 
         That is a property of the quad, not a claim about every target:
         the op still requires DPP-capable hardware. Base-DPP
