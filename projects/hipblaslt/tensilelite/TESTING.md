@@ -211,7 +211,7 @@ fixture or pinning current behavior. In spirit this is closer to
 validate tuning data rather than code, and where each one lives follows from that.
 
 One of these checks, sibling-`DeviceNames` consistency, is implemented in
-`Tensile.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
+`tensilelite.TensileLogic.ValidCorpusConsistency` and runs unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks it regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy also lives in
