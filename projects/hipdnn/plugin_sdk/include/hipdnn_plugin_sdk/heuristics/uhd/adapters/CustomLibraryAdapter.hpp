@@ -152,8 +152,9 @@ inline bool artifactHashMatches(const std::string& path, const std::string& expe
     if(actual != expectedHash)
     {
         HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: model hash mismatch for "
-                             << path << " - computed='" << actual << "' expected='" << expectedHash
-                             << "'");
+                             << path << " - expected='" << expectedHash << "' actual='" << actual
+                             << "'; the model is not used -- ranking degrades to static_order "
+                                "and an engine estimate is reported as 0");
         return false;
     }
     return true;

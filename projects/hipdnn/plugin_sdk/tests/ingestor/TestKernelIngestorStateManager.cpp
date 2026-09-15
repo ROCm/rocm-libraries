@@ -661,12 +661,15 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
 }
 
-/// Models what a real ranker does when one candidate is unscorable: RFC 0019 §5 step 8
-/// degrades the WHOLE ranking to static order rather than the candidate that failed
-/// ("the fallback ... switches the whole ranking rather than one entry"). That is what
-/// makes WHICH candidate set the decision was taken over observable at all -- with a
-/// strictly per-candidate scorer, ranking a subset and restricting the full order agree
-/// trivially and nothing can be asserted.
+/// Models what a real ranker does when one candidate is unscorable: the scorer throws on
+/// that candidate and RFC 0019 §5 step 8 degrades the WHOLE ranking to static order rather
+/// than the candidate that failed ("the fallback ... switches the whole ranking rather than
+/// one entry"). That is what makes WHICH candidate set the decision was taken over
+/// observable at all -- with a strictly per-candidate scorer, ranking a subset and
+/// restricting the full order agree trivially and nothing can be asserted.
+///
+/// The degrade itself is rankScored's, not this class's: the fallback under test is the
+/// production one, so a test cannot assert a shape the shipped path does not produce.
 class DegradesOnAnUnscorableCandidate : public IKernelHeuristic
 {
 public:
@@ -679,7 +682,12 @@ public:
                  const BoundTokens& /*bound*/,
                  const KernelDefinition& kernel) const override
     {
-        return static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
+        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        if(blockSize == UNSCORABLE_BLOCK_SIZE)
+        {
+            throw std::runtime_error("no feature for block size 999");
+        }
+        return static_cast<double>(blockSize);
     }
 
     std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
@@ -687,16 +695,6 @@ public:
                                                 std::string& modelId) const override
     {
         modelId = "test-calibrated-model";
-        const auto unscorable
-            = std::find_if(catalog.entries.begin(),
-                           catalog.entries.end(),
-                           [](const KernelDefinition& kernel) {
-                               return kernel.getIntMetadata(BLOCK_SIZE) == UNSCORABLE_BLOCK_SIZE;
-                           });
-        if(unscorable != catalog.entries.end())
-        {
-            return detail::asScored(detail::declaredOrder(catalog.entries));
-        }
         return rankScored(catalog, context);
     }
 };
@@ -782,27 +780,60 @@ TEST(TestKernelIngestorStateManager, ANarrowedCalibratedRankingRestrictsTheCache
         << "the scores are the full catalog's too; a fresh subset ranking would score 128";
 }
 
-/// The other half of the rule: restricting is only cheaper than re-ranking once the full
-/// order has been paid for, so a cold cache ranks exactly what it was asked about rather
-/// than ranking a catalog nobody requested in order to throw most of it away.
-TEST(TestKernelIngestorStateManager, AColdCalibratedRankingRanksTheSubsetItWasAskedAbout)
+/// The cold path has to commute too, and that is the half that did not. RFC 0019 §5 step 8
+/// fixes the basis on the canonical candidate set, "every kernel the matchers admitted for
+/// this graph, before any knob filter narrows it", and a cold pinned request ranked its own
+/// subset instead. The scorer throws only on `unscorable`, so a pin that removed it scored
+/// normally while the unpinned request degraded to static order -- step 8's named failure,
+/// "the two paths would disagree on the winner from the same inputs", reached from the same
+/// graph.
+///
+/// One manager each, so neither request can read the other's memo: both take the cold path,
+/// which is the only place the two can still diverge.
+///
+/// Falsifying mutation: rank `filtered` on a cache miss, and the pinned request answers
+/// `fastest` at 512 while the unpinned one answers `preferred` at 0.
+TEST(TestKernelIngestorStateManager, AColdPinnedCalibratedRankingAgreesWithAnUnpinnedOne)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const auto manager = makeCalibratedStateManager();
+    const auto pinnedOnly = makeCalibratedStateManager();
+    const auto unpinnedOnly = makeCalibratedStateManager();
     const TestGraph graph(makeGraphId(0x7B));
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
-    const auto catalog = manager->unsortedCatalog(context);
+    const auto catalog = pinnedOnly->unsortedCatalog(context);
+    ASSERT_EQ(catalog.entries.size(), 3U);
 
-    // No wide request first: nothing has memoized the full catalog's order.
     std::string modelId;
-    const auto narrowed = manager->calibratedRanking(
+    const auto pinned = pinnedOnly->calibratedRanking(
         catalog, withoutKernel(catalog.entries, UNSCORABLE_ID), context, modelId);
+    const auto unpinned
+        = unpinnedOnly->calibratedRanking(catalog, catalog.entries, context, modelId);
 
-    ASSERT_EQ(narrowed.size(), 2U);
-    EXPECT_EQ(narrowed.front().kernelId, FASTEST_ID)
-        << "with nothing cached the subset is ranked on its own merits, as before";
-    EXPECT_DOUBLE_EQ(narrowed.front().score, 512.0);
+    ASSERT_EQ(pinned.size(), 2U);
+    ASSERT_EQ(unpinned.size(), 3U);
+
+    std::vector<std::string> pinnedOrder;
+    for(const auto& scored : pinned)
+    {
+        pinnedOrder.push_back(toString(scored.kernelId));
+    }
+    std::vector<std::string> survivingOrder;
+    for(const auto& scored : unpinned)
+    {
+        if(scored.kernelId != UNSCORABLE_ID)
+        {
+            survivingOrder.push_back(toString(scored.kernelId));
+        }
+    }
+
+    EXPECT_EQ(pinnedOrder, survivingOrder)
+        << "a pin may remove candidates; it may not reorder the ones that survive";
+    EXPECT_EQ(pinned.front().kernelId, PREFERRED_ID)
+        << "the candidate the scorer throws on is part of the basis either way, so both "
+           "rankings are static order";
+    EXPECT_DOUBLE_EQ(pinned.front().score, 0.0)
+        << "a subset ranking of its own would have scored `fastest` at 512";
 }
 
 // A pack whose kernel matchers reject everything contributes nothing, so it must read

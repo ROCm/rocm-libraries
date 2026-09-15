@@ -231,12 +231,14 @@ public:
     /// for everything, while a knob pin that happened to exclude that candidate would score
     /// normally, and the two paths would disagree on the winner from the same inputs."
     ///
-    /// Only a WARM cache restricts. Ranking the full catalog on a cold one would do strictly
-    /// MORE work than the caller asked for, and §9.2's justification for restricting -- it is
-    /// less work than re-ranking -- only holds once the full ranking has already been paid
-    /// for. A cold pinned request therefore ranks its subset, as before, and memoizes
-    /// nothing; an unpinned request ranks the full catalog and memoizes it, which is what
-    /// makes every later pinned request commute with it.
+    /// A cold cache ranks the full catalog too, and restricts the result exactly as a warm
+    /// one does. Ranking @p filtered directly -- which this did -- makes the basis depend on
+    /// whether this particular request happened to pin, and step 8's failure reappears on the
+    /// cold path: a scorer that throws on a candidate the pin excludes degrades the unpinned
+    /// request to static order while the pinned one ranks by model, from the same inputs. The
+    /// cost of getting that right is one ranking of the kernels the pin removed, paid once
+    /// per graph, because the full order is memoized whether or not this request was pinned.
+    /// That memo is what makes every later request -- pinned or not -- commute with this one.
     std::vector<ScoredKernel> calibratedRanking(const Catalog& full,
                                                 const std::vector<KernelDefinition>& filtered,
                                                 const MatchContext& context,
@@ -252,16 +254,9 @@ public:
             }
         }
 
-        // `filtered` is a subsequence of `full.entries` (applyConstraints only removes), so
-        // equal sizes mean equal contents -- no element-wise comparison needed to recognize
-        // the unpinned request whose ranking IS the full catalog's.
-        const bool ranksTheFullCatalog = filtered.size() == full.entries.size();
+        auto ranking = _heuristic->calibratedRanking(full, context, modelId);
 
-        Catalog candidates = full;
-        candidates.entries = filtered;
-        auto ranking = _heuristic->calibratedRanking(candidates, context, modelId);
-
-        if(ranksTheFullCatalog && key.has_value() && !ranking.empty())
+        if(key.has_value() && !ranking.empty())
         {
             // Not memoized when empty: an empty ranking is "this heuristic cannot calibrate"
             // (IKernelHeuristic::calibratedRanking's default), a property of the heuristic
@@ -269,7 +264,7 @@ public:
             // a hit indistinguishable.
             _calibratedCache.put(*key, CalibratedRanking{ranking, modelId});
         }
-        return ranking;
+        return restrictRanking(ranking, filtered);
     }
 
     /// Every kernel that applies to the graph and device @p context names, unordered.
@@ -1267,8 +1262,9 @@ private:
     GraphMatchFn _graphMatchFn = nullptr;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
     /// The full applicable catalog's calibrated ranking, memoized so that a knob-pinned
-    /// request restricts it instead of ranking its own subset (RFC 0019 §9.2). See
-    /// calibratedRanking() for why only an unpinned request fills it.
+    /// request restricts it instead of ranking its own subset (RFC 0019 §9.2). Every
+    /// request fills it, pinned or not: the ranking is always taken over the full catalog,
+    /// so what lands here does not depend on which request arrived first.
     mutable LruCache<CatalogKey, CalibratedRanking, CatalogKeyHash> _calibratedCache;
 
     /// The engine's identity: its scoped name and revision plus its UHD's id and content
