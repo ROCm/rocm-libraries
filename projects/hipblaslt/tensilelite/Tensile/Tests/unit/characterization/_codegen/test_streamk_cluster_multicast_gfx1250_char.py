@@ -18,9 +18,9 @@ The cluster shapes:
 
 Both shapes take the same code path: one work-group per output tile, the HW
 work-group coords folded into the linear tile index, padded boundary peers
-exiting before the cluster barrier, and the broadcast masks bound onto the TDM
-descriptors. Ck is a spatial N-tiling axis, never a K-split, so a K-slice decode
-must be absent.
+signal+wait the prologue ``-3`` then ``s_endpgm`` on an idle barrier, and the
+broadcast masks bound onto the TDM descriptors. Ck is a spatial N-tiling axis,
+never a K-split, so a K-slice decode must be absent.
 
 The PrefetchGlobalRead variants:
 
@@ -45,7 +45,9 @@ from config_harness import (
     assert_assembles,
     assert_cluster_barrier_balanced,
     assert_real_gfx1250_kernels,
+    assert_skip_pgr2_skip_path_handshake,
     assert_split_multicast_masks,
+    assert_zero_iter_prefetch_handshake_preserves_scc,
     emit_kernels_from_config,
     golden_digest,
 )
@@ -80,6 +82,27 @@ def _emit(pgr, cluster_dim):
     # and the filter finds nothing.
     return emit_kernels_from_config(_CONFIGS[pgr], limit=16, arch=_ARCH,
                                     cluster_dim=cluster_dim)
+
+
+def _pad_exits_after_cluster_handshake(src):
+    """Return True iff pads ``s_endpgm`` only after signal+wait ``-3``.
+
+    Immediate ``s_endpgm`` before the prologue arrive is handshake-unsafe
+    (WAVEDONE while signal_count != 0). The pad path must elect-signal, wait,
+    then endpgm.
+    """
+    lines = src.splitlines()
+    for i, ln in enumerate(lines):
+        if "s_endpgm" not in ln:
+            continue
+        if "padded work-group: -3 signal+wait done" not in ln:
+            continue
+        pre = lines[max(0, i - 24) : i]
+        sigs = [j for j, p in enumerate(pre) if "s_barrier_signal -3" in p]
+        waits = [j for j, p in enumerate(pre) if "s_barrier_wait -3" in p]
+        if sigs and waits and sigs[-1] < waits[-1]:
+            return True
+    return False
 
 
 def _skip_prefetch_handshake_brackets_load(src):
@@ -122,11 +145,14 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
         assert "DP fold: StreamKIdx = batch*(nWG0*nWG1) + N*nWG0 + M" in src, (
             f"Kernel {base!r} missing the linear tile-index fold"
         )
-        # The grid is rounded up to the cluster, so padded peers must exit before
-        # the first cluster barrier or their peers wait on an arrive that never
-        # comes.
-        assert "padded work-group: exit before any cluster barrier/load" in src, (
-            f"Kernel {base!r} missing the padded boundary-peer early exit"
+        # Padded peers must signal+wait -3 with every launched member, then
+        # s_endpgm on an idle barrier. Immediate endpgm before the arrive is
+        # handshake-unsafe (WAVEDONE while signal_count != 0).
+        assert "padded work-group: -3 signal+wait done; s_endpgm with barrier idle" in src, (
+            f"Kernel {base!r} missing the padded-peer post-handshake exit"
+        )
+        assert _pad_exits_after_cluster_handshake(src), (
+            f"Kernel {base!r} pad s_endpgm is not preceded by -3 signal+wait"
         )
         # Both masks are bound: B broadcasts along Cs, A along Ck (self-only when
         # Ck == 1).
@@ -151,7 +177,7 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
         )
         # Ck is a spatial N-tiling axis: no K-split decode or maskB shift.
         assert "k = StreamKIdx & (Ck-1)" not in src, (
-            f"Kernel {base!r} wrongly emitted a K-slice reduction decode"
+            f"Kernel {base!r} wrongly emitted a K-slice decode"
         )
         if pgr >= 2:
             # The PGR>=2 prologue double-buffer prefetch region exists for K>DepthU.
@@ -164,6 +190,11 @@ def test_streamk_cluster_multicast_gfx1250_emits_assembly(pgr, cluster_dim):
                 f"Kernel {base!r} PGR2 prologue prefetch load is NOT bracketed by "
                 f"a cluster-scope -3 handshake"
             )
+            # ForceDPOnly=0 [Cs,Ck] SK peers can disagree on LoopCounterL; the
+            # LC==1 fall-through must complete the same -3 as the load path.
+            # ForceDPOnly=1 is lockstep, so this extra round stays balanced.
+            assert_skip_pgr2_skip_path_handshake(src, base)
+            assert_zero_iter_prefetch_handshake_preserves_scc(src, base)
 
 
 @pytest.mark.parametrize("pgr, cluster_dim", _ARMS, ids=_ARM_IDS)

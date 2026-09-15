@@ -71,10 +71,10 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         WaitDataflow df(func, domInfo, rpo);
         df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 
-        // Tensor counter drains only at barriers or when there is a single wave.
+        // Tensor drains at WG barriers (not cluster -3) or when there is a single wave.
         const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
         df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
-            return isBarrier(i) || numWaves == 1;
+            return (isBarrier(i) && !isClusterSplitBarrier(i)) || numWaves == 1;
         });
 
         df.solve();

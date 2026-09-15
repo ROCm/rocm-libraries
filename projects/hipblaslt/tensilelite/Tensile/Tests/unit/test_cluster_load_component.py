@@ -87,10 +87,9 @@ class _StubWriter:
 
 def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
             numWaves=4, useSubtile=False, sparse=0, tdmMeta=False, tdmInst=3,
-            pap=False, streamKMulticast=False):
-    # The component derives the StreamK cluster multicast from StreamK == 3 +
-    # ClusterDim[0] > 1 + StreamKForceDPOnly, so drive it by setting those (every
-    # streamKMulticast=True case below uses a ClusterDim with Cs > 1).
+            pap=False, streamKMulticast=False, forceDPOnly=0):
+    # Multicast is StreamK==3 and ClusterDim not [1, 1]. ForceDPOnly is
+    # independent (default 0). Tests that need DP-only pass forceDPOnly=1.
     return {
         "Multicast": multicast,
         "ClusterDim": list(clusterDim),
@@ -103,7 +102,7 @@ def _kernel(*, multicast=True, clusterDim=(2, 2), tdmA=True, tdmB=True,
         "ProblemType": {"Sparse": sparse},
         "PrefetchAcrossPersistent": pap,
         "StreamK": 3 if streamKMulticast else 0,
-        "StreamKForceDPOnly": 1 if streamKMulticast else 0,
+        "StreamKForceDPOnly": forceDPOnly,
     }
 
 
@@ -214,7 +213,7 @@ class TestDeclareUndeclare:
         # kernel stays within the 106-SGPR budget (at 107 SGPRs the kernel is
         # replaced by an s_endpgm stub and the output is left unwritten).
         w = _StubWriter()
-        _c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 1)))
+        _c().undeclareSgprs(w, _kernel(streamKMulticast=True, forceDPOnly=1, pap=True, clusterDim=(2, 1)))
         assert w.undefined == ["MulticastMaskA"]
 
     def test_undeclare_keeps_both_live_under_pap_2d_cluster(self):
@@ -226,12 +225,38 @@ class TestDeclareUndeclare:
             w, _kernel(streamKMulticast=True, pap=True, clusterDim=(2, 2)))
         assert w.undefined == []
 
+    def test_undeclare_keeps_maskA_live_frees_selfonly_maskB_under_pap(self):
+        # Symmetric to Ck==1 dropping MaskA: Cs==1 makes B self-only, so PAP
+        # ForceDPOnly=1 frees MaskB and keeps MaskA (real A-multicast along Ck).
+        w = _StubWriter()
+        _c().undeclareSgprs(
+            w, _kernel(streamKMulticast=True, forceDPOnly=1, pap=True, clusterDim=(1, 2)))
+        assert w.undefined == ["MulticastMaskB"]
+
     def test_undeclare_frees_both_without_pap(self):
-        # Same StreamK multicast kernel but PAP off: no persistent refresh, so both
+        # ForceDPOnly=1 [Cs,1] PAP off: no SK-tail skipPGR2 compare, so both
         # masks are freed in the prologue.
         w = _StubWriter()
-        _c().undeclareSgprs(w, _kernel(streamKMulticast=True, pap=False, clusterDim=(2, 1)))
+        _c().undeclareSgprs(w, _kernel(streamKMulticast=True, forceDPOnly=1, pap=False, clusterDim=(2, 1)))
         assert w.undefined == ["MulticastMaskA", "MulticastMaskB"]
+
+    def test_undeclare_keeps_both_live_for_persist_sk_without_pap(self):
+        # ForceDPOnly=0 [Cs,Ck] skipPGR2 / ZeroIter compare maskA==maskB after
+        # undeclareSgprs in the instruction stream. Keep both live (PAP off).
+        w = _StubWriter()
+        _c().undeclareSgprs(
+            w, _kernel(streamKMulticast=True, forceDPOnly=0, pap=False, clusterDim=(2, 2)))
+        assert w.undefined == []
+
+    def test_persist_sk_keeps_masks(self):
+        assert _c().persistSkKeepsMasks(
+            _kernel(streamKMulticast=True, forceDPOnly=0, clusterDim=(2, 2)))
+        assert not _c().persistSkKeepsMasks(
+            _kernel(streamKMulticast=True, forceDPOnly=1, clusterDim=(2, 2)))
+        assert _c().persistSkKeepsMasks(
+            _kernel(streamKMulticast=True, forceDPOnly=0, clusterDim=(2, 1)))  # Cs>1, Ck==1
+        assert _c().persistSkKeepsMasks(
+            _kernel(streamKMulticast=True, forceDPOnly=0, clusterDim=(1, 2)))  # Cs==1, Ck>1
 
 
 # --- computeMasks emitted asm ----------------------------------------------
@@ -262,6 +287,16 @@ class TestComputeMasks:
         assert "s_lshl_b32 s[sgprMulticastMaskB], 0x3, s62" in src
         # Split path has no wave-parity election.
         assert "setMulticastMask_OddWave" not in src
+
+    def test_split_ck_only_masks(self):
+        # ClusterDim=[1,2] -> maskA = 1|(1<<1) = 3 (0x3); maskB = (1<<1)-1 = 1.
+        mod = _c().computeMasks(
+            _StubWriter(),
+            _kernel(streamKMulticast=True, clusterDim=(1, 2)),
+            sgprWgX=61, sgprWgY=62, sgprNWgX=63, sTmp=60)
+        src = str(mod)
+        assert "s_lshl_b32 s[sgprMulticastMaskA], 0x3, s61" in src
+        assert "s_lshl_b32 s[sgprMulticastMaskB], 0x1, s62" in src
 
     def test_noop_when_multicast_off(self):
         mod = _c().computeMasks(_StubWriter(), _kernel(multicast=False),
@@ -310,7 +345,12 @@ class TestApplyToDescriptor:
         # empty when cluster disabled
         ({"clusterDim": (1, 1)}, "tdmAGroup1", "A", {}, None),
         # PAP+StreamK: self-only A mask is freed -> emit nothing for A
-        ({"streamKMulticast": True, "pap": True, "clusterDim": (2, 1)}, "tdmAGroup1", "A", {}, None),
+        ({"streamKMulticast": True, "forceDPOnly": 1, "pap": True, "clusterDim": (2, 1)}, "tdmAGroup1", "A", {}, None),
+        # PAP+StreamK: self-only B mask is freed -> emit nothing for B
+        ({"streamKMulticast": True, "forceDPOnly": 1, "pap": True, "clusterDim": (1, 2)}, "tdmBGroup1", "B", {}, None),
+        # PAP+StreamK [1,2]: A is a real multicast and still applied
+        ({"streamKMulticast": True, "forceDPOnly": 1, "pap": True, "clusterDim": (1, 2)}, "tdmAGroup1", "A", {},
+         "s_or_b32 s[sgprtdmAGroup1], s[sgprtdmAGroup1], s[sgprMulticastMaskA]"),
         # PAP+StreamK: B broadcast mask still applied (stays live)
         ({"streamKMulticast": True, "pap": True, "clusterDim": (2, 1)}, "tdmBGroup1", "B", {},
          "s_or_b32 s[sgprtdmBGroup1], s[sgprtdmBGroup1], s[sgprMulticastMaskB]"),
