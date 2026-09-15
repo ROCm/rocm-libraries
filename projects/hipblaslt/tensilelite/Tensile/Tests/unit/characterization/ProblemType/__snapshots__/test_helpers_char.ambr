@@ -16,7 +16,6 @@
     'DataTypeE',
     'DataTypeMXSA',
     'DataTypeMXSB',
-    'DataTypeScaleA',
     'DestDataType',
     'F32XdlMathOp',
     'FusedGemmA2A',
@@ -115,9 +114,6 @@
     ]),
     'DataTypeMXSB': list([
       'str',
-    ]),
-    'DataTypeScaleA': list([
-      'int',
     ]),
     'DestDataType': list([
       'int',

@@ -85,8 +85,4 @@ int const HIP_R_6F_E2M3_EXT = 31;
 int const HIP_R_6F_E3M2_EXT = 32;
 int const HIP_R_4F_E2M1_EXT = 33;
 int const HIP_R_8F_E5M3_EXT = 34;
-/// Signed 4-bit integer, two elements per byte with element 2n in the low
-/// nibble of byte n. Only valid as the A type of a w4a16 matmul, paired with a
-/// block (per-K-group) A scale; see HIPBLASLT_MATMUL_MATRIX_SCALE_VEC*_16BF_EXT.
-int const HIP_R_4I_EXT      = 35;
 #endif /* _HIPBLASLT_TYPES_H_ */

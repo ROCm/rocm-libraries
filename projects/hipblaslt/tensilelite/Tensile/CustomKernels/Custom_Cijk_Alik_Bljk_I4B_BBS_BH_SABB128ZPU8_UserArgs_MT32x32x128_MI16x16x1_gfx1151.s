@@ -4,13 +4,13 @@
 /******************************************/
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
-.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
-.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
 .p2align 8
-.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151,@function
+.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151,@function
 .section .rodata,#alloc
 .p2align 6
-.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 256 // vgprs
   .amdhsa_next_free_sgpr 86 // sgprs
@@ -45,15 +45,13 @@
 custom.config:
   InternalSupportParams:
     KernArgsVersion: 3
-  LocalReadVectorWidthA: -1
-  LocalReadVectorWidthB: -1
   StaggerU: 0
 amdhsa.version:
   - 1
   - 1
 amdhsa.kernels:
-  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
-    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151.kd'
+  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151.kd'
     .language:                   OpenCL C
     .language_version:
       - 2
@@ -223,7 +221,7 @@ amdhsa.kernels:
     .wavefront_size:             32
 ...
 .end_amdgpu_metadata
-Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151:
+Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151:
 label_ASM_Start:  /// Main body of the asm kernel
 
 /******************************************/
@@ -1823,14 +1821,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+0], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1844,11 +1841,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1862,11 +1858,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1880,11 +1875,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1906,14 +1900,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+1], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1927,11 +1920,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1945,11 +1937,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1963,11 +1954,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -1989,14 +1979,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+2], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2010,11 +1999,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2028,11 +2016,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2046,11 +2033,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2072,14 +2058,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+3], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2093,11 +2078,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2111,11 +2095,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2129,11 +2112,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2413,14 +2395,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+0], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2434,11 +2415,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2452,11 +2432,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2470,11 +2449,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2496,14 +2474,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+1], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2517,11 +2494,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2535,11 +2511,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2553,11 +2528,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2579,14 +2553,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+2], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2600,11 +2573,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2618,11 +2590,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2636,11 +2607,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2662,14 +2632,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+3], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2683,11 +2652,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2701,11 +2669,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -2719,11 +2686,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3028,14 +2994,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+0], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3049,11 +3014,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3067,11 +3031,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3085,11 +3048,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3111,14 +3073,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+1], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3132,11 +3093,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3150,11 +3110,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3168,11 +3127,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3194,14 +3152,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+2], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3215,11 +3172,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3233,11 +3189,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3251,11 +3206,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3277,14 +3231,13 @@ v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 fro
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+3], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
-v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
+v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3298,11 +3251,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
+v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3316,11 +3268,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
+v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
@@ -3334,11 +3285,10 @@ v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding 
 v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
 v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
 v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 bf16
-v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
-v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
-v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
+v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
+v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
+v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
+v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
 v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
