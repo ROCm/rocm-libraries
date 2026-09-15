@@ -1,0 +1,40 @@
+# Integration test configuration for hipkernel:Pointwise
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# No entry of either kind, and that is a statement rather than an omission.
+#
+# This engine's packs are reference scaffolds: one thread under
+# `if(blockIdx.x == 0 && threadIdx.x == 0)` writing `c[0]`, grid 1x1x1, over
+# single-element binary ADD/MUL/SUB graphs. Every other graph the suite holds is
+# refused by `pointwiseGraphMatches`, and `--test-engine` makes such a case SKIP
+# rather than fall through to another loaded engine -- so the narrowness needs no
+# skip entry, and a filter here would duplicate the matcher and rot against it.
+#
+# The arch restriction is likewise already expressed, in the descriptor's own
+# `arch` list (gfx942): the loader filters the kernel out elsewhere and every
+# case skips, so an `archs` entry would restate it in a second place.
+#
+# Tolerances: a single-element add at FLOAT and HALF is exact against the suite's
+# GPU reference executor. An override belongs here only with a measured failure
+# behind it.
