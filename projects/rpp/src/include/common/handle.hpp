@@ -99,6 +99,7 @@ struct Handle : rppHandle {
     std::size_t GetMaxComputeUnits();
     std::size_t m_MaxMemoryAllocSizeCached = 0;
     std::size_t GetMaxMemoryAllocSize();
+    RppStatus EnsureAudioScratchBuffer(size_t requiredFloats);
 
     // Other
     std::string GetDeviceName();

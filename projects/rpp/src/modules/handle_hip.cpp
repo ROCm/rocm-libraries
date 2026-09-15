@@ -26,6 +26,10 @@ SOFTWARE.
 #include <unistd.h>
 #endif
 
+#include <rocfft/rocfft.h>
+
+#include <cstdint>
+#include <map>
 #include <thread>
 
 #include "device_name.hpp"
@@ -95,6 +99,13 @@ struct HandleImpl {
     RppBackend backend = RppBackend::RPP_HIP_BACKEND;
     InitHandle* initHandle = nullptr;
 
+    // rocFFT plan cache: key = (nfft << 32 | batchCount), value = (plan, description)
+    std::map<int64_t, std::pair<rocfft_plan, rocfft_plan_description>> rocfft_plan_cache;
+
+    // Audio scratch buffer (lazily allocated on first audio function call)
+    Rpp32f* audioScratchBufferHip = nullptr;
+    size_t audioScratchBufferSize = 0;
+
     HandleImpl() : ctx(get_ctx()) {}
 
     static StreamPtr reference_stream(hipStream_t s) {
@@ -129,38 +140,38 @@ struct HandleImpl {
     void PreInitializeBuffer() {
         this->PreInitializeBufferCPU();
 
-#ifdef AUDIO_SUPPORT
-        // If AUDIO_SUPPORT is enabled, 'scratchBufferHip' needed to run RNNT training successfully
-        // are larger. Current max allocation size = sizeof(Rpp32f) * 372877312, which is based on
-        // Spectrogram requirements
-        // 1. Spectrogram requirements:
-        //      - 372877312 = (512 * 3754 * 192) + (512 * 3754 * 2)
-        //      - Above is the maximum scratch memory required for Spectrogram HIP kernel used in
-        //      RNNT training (uses a batchsize 192)
-        //      - (512 * 3754 * 192) is the maximum size that will be required for window output
-        //      based on Librispeech dataset in RNNT training
-        //      - (512 * 3754 * 2) is the size required for storing sin and cos coefficients
-        //      required for FFT computation in Spectrogram HIP kernel in RNNT training
-        // 2. Non Silent Region Detection requirements:
-        //      - 115293120 = (600000 + 293 + 192) * 192
-        //      - Above is the maximum scratch memory required for Non Silent Region Detection HIP
-        //      kernel used in RNNT training (uses a batchsize 192)
-        //      - 600000 is the maximum size that will be required for MMS buffer based on
-        //      Librispeech dataset
-        //      - 293 is the size required for storing reduction outputs for 600000 size sample
-        //      - 192 is the size required for storing cutOffDB values for batch size 192
-        auto status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
-                                sizeof(Rpp32f) * 372877312);
-#else
+        // Default scratch buffer sized for image processing (4K resolution: 3840 x 2160)
+        // Audio functions will reallocate to larger size when needed via EnsureAudioScratchBuffer()
         auto status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
                                 sizeof(Rpp32f) * 8294400);  // 3840 x 2160
-#endif
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipMalloc failed for scratchBufferHip");
+        this->audioScratchBufferSize = 8294400;
         status = hipHostMalloc(&(this->initHandle->mem.mgpu.scratchBufferPinned.floatmem),
                                sizeof(Rpp32f) * 8294400);  // 3840 x 2160
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipHostMalloc failed for scratchBufferPinned");
+    }
+
+    // Ensure scratch buffer is large enough for audio operations.
+    // Called lazily by audio functions when they need more scratch memory.
+    // Returns RPP_SUCCESS if buffer is sufficient or was successfully reallocated.
+    RppStatus EnsureAudioScratchBuffer(size_t requiredFloats) {
+        if (requiredFloats <= this->audioScratchBufferSize) return RPP_SUCCESS;
+
+        // Free existing buffer and allocate larger one
+        auto status = hipFree(this->initHandle->mem.mgpu.scratchBufferHip.floatmem);
+        if (status != hipSuccess) return RPP_ERROR_HIP_RUNTIME;
+
+        status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
+                           sizeof(Rpp32f) * requiredFloats);
+        if (status != hipSuccess) {
+            this->initHandle->mem.mgpu.scratchBufferHip.floatmem = nullptr;
+            this->audioScratchBufferSize = 0;
+            return RPP_ERROR_NOT_ENOUGH_MEMORY;
+        }
+        this->audioScratchBufferSize = requiredFloats;
+        return RPP_SUCCESS;
     }
 };
 
@@ -176,7 +187,20 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
         this->impl->stream = HandleImpl::reference_stream(stream);
 
     this->SetAllocator(nullptr, nullptr, nullptr);
-    impl->PreInitializeBuffer();
+
+    // Initialize rocFFT library once per handle (before PreInitializeBuffer to avoid leaks on
+    // failure). rocFFT increments its global usage count before some setup failures, so balance
+    // it with rocfft_cleanup() before throwing to keep a later handle from skipping init.
+    if (rocfft_setup() != rocfft_status_success) {
+        rocfft_cleanup();
+        RPP_THROW("rocFFT library initialization failed");
+    }
+    try {
+        impl->PreInitializeBuffer();
+    } catch (...) {
+        rocfft_cleanup();
+        throw;
+    }
 }
 
 Handle::Handle(size_t batchSize, Rpp32u numThreads) : impl(new HandleImpl()) {
@@ -197,6 +221,17 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 
 void Handle::rpp_destroy_object_gpu() {
     this->rpp_destroy_object_host();
+
+    // Destroy all cached rocFFT plans
+    for (auto& cache_entry : this->impl->rocfft_plan_cache) {
+        rocfft_plan_destroy(cache_entry.second.first);
+        rocfft_plan_description_destroy(cache_entry.second.second);
+    }
+    this->impl->rocfft_plan_cache.clear();
+
+    // Cleanup rocFFT library once per handle (best-effort, don't throw to allow destruction to
+    // proceed)
+    rocfft_cleanup();
 
     auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
@@ -288,6 +323,63 @@ std::size_t Handle::GetMaxComputeUnits() {
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status);
 
     return result;
+}
+
+RppStatus Handle::EnsureAudioScratchBuffer(size_t requiredFloats) {
+    return this->impl->EnsureAudioScratchBuffer(requiredFloats);
+}
+
+// Get or create a cached rocFFT plan for the given nfft size and batch count
+// Cache key combines nfft and batchCount to handle different workload sizes
+RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
+                          rocfft_plan_description* desc) {
+    auto& cache = handle.impl->rocfft_plan_cache;
+
+    // Create composite key: upper 32 bits = nfft, lower 32 bits = batchCount
+    int64_t cacheKey =
+        (static_cast<int64_t>(nfft) << 32) | (static_cast<int64_t>(batchCount) & 0xFFFFFFFF);
+
+    // Check if plan already exists in cache
+    auto it = cache.find(cacheKey);
+    if (it != cache.end()) {
+        *plan = it->second.first;
+        *desc = it->second.second;
+        return RPP_SUCCESS;
+    }
+
+    // Create new plan
+    rocfft_plan_description new_desc = nullptr;
+    if (rocfft_plan_description_create(&new_desc) != rocfft_status_success)
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+
+    size_t lengths[1] = {static_cast<size_t>(nfft)};
+    size_t inStride[1] = {1};
+    size_t outStride[1] = {1};
+    int numBins = (nfft / 2 + 1);
+
+    if (rocfft_plan_description_set_data_layout(
+            new_desc, rocfft_array_type_real, rocfft_array_type_hermitian_interleaved, nullptr,
+            nullptr, 1, inStride, static_cast<size_t>(nfft), 1, outStride,
+            static_cast<size_t>(numBins)) != rocfft_status_success) {
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR_INVALID_ARGUMENTS;
+    }
+
+    rocfft_plan new_plan = nullptr;
+    // Create plan with the actual batch count for efficient batch FFT execution
+    if (rocfft_plan_create(&new_plan, rocfft_placement_notinplace,
+                           rocfft_transform_type_real_forward, rocfft_precision_single, 1, lengths,
+                           static_cast<size_t>(batchCount), new_desc) != rocfft_status_success) {
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Cache the plan
+    cache[cacheKey] = std::make_pair(new_plan, new_desc);
+    *plan = new_plan;
+    *desc = new_desc;
+
+    return RPP_SUCCESS;
 }
 
 }  // namespace rpp

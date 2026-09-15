@@ -25,8 +25,6 @@ SOFTWARE.
 #ifndef RPPT_TENSOR_AUDIO_AUGMENTATIONS_H
 #define RPPT_TENSOR_AUDIO_AUGMENTATIONS_H
 
-#ifdef AUDIO_SUPPORT
-
 #include "rpp.h"
 #include "rppdefs.h"
 #ifdef __cplusplus
@@ -257,7 +255,5 @@ RppStatus rppt_audio_tensor_mul_scalar(RppPtr_t srcPtr, Rpp32f scalarValue, Rppt
 #ifdef __cplusplus
 }
 #endif
-
-#endif  // AUDIO_SUPPORT
 
 #endif  // RPPT_TENSOR_AUDIO_AUGMENTATIONS_H

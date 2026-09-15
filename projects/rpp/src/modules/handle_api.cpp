@@ -45,11 +45,7 @@ extern "C" rppStatus_t rppCreate(rppHandle_t* handle, size_t nBatchSize, Rpp32u 
 
 extern "C" rppStatus_t rppDestroy(rppHandle_t handle, RppBackend backend) {
     if (backend == RppBackend::RPP_HOST_BACKEND) {
-#if GPU_SUPPORT
-        auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_gpu(); });
-#else
         auto status = rpp::try_([&] { rpp::deref(handle).rpp_destroy_object_host(); });
-#endif
         if (status == rppStatusSuccess) delete handle;
         return status;
     }

@@ -92,8 +92,6 @@ RppStatus tensor_binary_arithmetic_op_dispatch_gpu_tensor(
 /**************************************** AUDIO AUGMENTATIONS
  * ****************************************/
 
-#ifdef AUDIO_SUPPORT
-
 // -------------------- down_mixing --------------------
 
 RppStatus hip_exec_down_mixing_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -131,6 +129,13 @@ RppStatus hip_exec_resample_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
 
 // -------------------- spectrogram --------------------
 
+#include <rocfft/rocfft.h>
+namespace rpp {
+// Helper function to get or create cached rocFFT plan (keyed by nfft + batchCount)
+RppStatus get_rocfft_plan(Handle& handle, int nfft, int batchCount, rocfft_plan* plan,
+                          rocfft_plan_description* desc);
+}  // namespace rpp
+
 RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
                                       RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
                                       bool centerWindows, bool reflectPadding,
@@ -156,8 +161,6 @@ RppStatus hip_exec_audio_tensor_mul_scalar(Rpp32f* srcPtr, Rpp32f scalarValue,
                                            RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
                                            RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
                                            rpp::Handle& handle);
-
-#endif  // AUDIO_SUPPORT
 
 /**************************************** BITWISE OPERATIONS
  * ****************************************/

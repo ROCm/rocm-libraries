@@ -120,7 +120,7 @@ if(NOT TARGET rpp)
 else()
     message("-- ${White}${PROJECT_NAME}: rpp found with target rpp (in-tree build)${ColourReset}")
     message("-- ${Yellow}${PROJECT_NAME}: Please install RPP before running CTests${ColourReset}")
-    set(rpp_AUDIO_AUGMENTATIONS_SUPPORT ${RPP_AUDIO_SUPPORT})
+    set(rpp_AUDIO_AUGMENTATIONS_SUPPORT ${RPP_AUDIO_AUGMENTATIONS_SUPPORT})
     set(rpp_BACKEND_TYPE ${BACKEND})
 endif()
 

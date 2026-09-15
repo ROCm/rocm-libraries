@@ -300,8 +300,12 @@ RppStatus hip_exec_non_silent_region_detection_tensor(
     Rpp32s* detectionLengthTensor, Rpp32f cutOffDB, Rpp32s windowLength, Rpp32f referencePower,
     Rpp32s resetInterval, rpp::Handle& handle) {
     // check if scratch memory size required for moving mean square is within the limits
-    if ((srcDescPtr->n * srcDescPtr->strides.nStride) > MMS_MAX_SCRATCH_MEMORY)
-        return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
+    size_t requiredScratch = static_cast<size_t>(srcDescPtr->n) * srcDescPtr->strides.nStride;
+    if (requiredScratch > MMS_MAX_SCRATCH_MEMORY) return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
+
+    // Ensure scratch buffer is large enough for audio workload (lazily reallocated if needed)
+    RppStatus scratchStatus = handle.EnsureAudioScratchBuffer(requiredScratch);
+    if (scratchStatus != RPP_SUCCESS) return scratchStatus;
 
     Rpp32f* mmsArr = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
     Rpp32s maxSharedMemoryInBytes = handle.GetLocalMemorySize();
