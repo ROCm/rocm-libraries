@@ -381,6 +381,8 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
 STINKYTOFU_EXPORT const HwInstDesc* getMCIDByUOp(GFX unifiedOpcode, GfxArchID arch);
 STINKYTOFU_EXPORT const HwInstDesc* getMCIDByIsaOp(IsaOpcode isaOpcode, GfxArchID arch);
 STINKYTOFU_EXPORT uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch);
+// True if *mnemonic* is supported on *arch* (gfx125 sparse matrix ops require IF_WMMA_XDL).
+STINKYTOFU_EXPORT bool isMnemonicSupportedOnArch(const std::string& mnemonic, GfxArchID arch);
 
 // Processing StinkyTofu IR.
 class StinkyInstPass : public Pass {};

@@ -220,6 +220,24 @@ uint16_t getMnemonicToIsaOpcode(const std::string& mnemonic, GfxArchID arch) {
     return get(archInfo->getMnemonicToIsaOpcodeMap(), mnemonic);
 }
 
+bool isMnemonicSupportedOnArch(const std::string& mnemonic, GfxArchID arch) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(arch);
+    if (!archInfo) return false;
+
+    const auto& map = archInfo->getMnemonicToIsaOpcodeMap();
+    const auto it = map.find(mnemonic);
+    if (it == map.end()) return false;
+
+    // Gfx1250Instructions.def mixes gfx1250-native and gfx12-only entries in one map.
+    // Flat lookup cannot distinguish them; on gfx125, sparse SWMMA/SMFMA must carry
+    // IF_WMMA_XDL (gfx1250-specific matrix ops). Other kinds keep the lookup above.
+    const HwInstDesc* desc = getMCIDByIsaOp(static_cast<IsaOpcode>(it->second), arch);
+    if (isGfx125(arch) && (desc->has(IF_SWMMA) || desc->has(IF_SMFMA))) {
+        return desc->has(IF_WMMA_XDL);
+    }
+    return true;
+}
+
 //----------------------------------------------------------------------
 // StinkyInstruction utilities
 //----------------------------------------------------------------------
