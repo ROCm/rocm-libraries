@@ -141,8 +141,19 @@ add_dependencies(hipdnn_graph_studio hipdnn_backend)
 # remains external to this per-host installation.
 set(_studio_appdir "${CMAKE_INSTALL_DATADIR}/hipdnn/graph-studio")
 set(_studio_electron_dir "${CMAKE_INSTALL_LIBEXECDIR}/hipdnn-graph-studio")
-file(RELATIVE_PATH _studio_prefix_rel "/${_studio_appdir}" "/")
-file(RELATIVE_PATH _studio_bin_to_prefix "/${CMAKE_INSTALL_BINDIR}" "/")
+# Walk back from an installed subdirectory to the install prefix. Both results keep
+# file(RELATIVE_PATH)'s trailing separator, which the paths below concatenate onto
+# directly.
+#
+# Anchored on an existing directory rather than "/": a lone slash is an absolute path
+# on POSIX but not a full path on Windows, where file(RELATIVE_PATH) rejects it and
+# fails configuration outright. Any real full path serves -- only the number of
+# segments in the subdirectory affects the result -- and using the same CMake call
+# keeps the convention identical on every platform.
+file(RELATIVE_PATH _studio_prefix_rel "${CMAKE_CURRENT_BINARY_DIR}/${_studio_appdir}"
+     "${CMAKE_CURRENT_BINARY_DIR}")
+file(RELATIVE_PATH _studio_bin_to_prefix "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+     "${CMAKE_CURRENT_BINARY_DIR}")
 if(WIN32)
     set(_studio_runtime_libdir "${CMAKE_INSTALL_BINDIR}")
     set(_studio_electron_name "electron.exe")
