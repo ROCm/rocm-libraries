@@ -24,8 +24,6 @@ from typing import Optional, OrderedDict, Callable
 import sys
 import os
 
-from pytest import param
-
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS, BASE_DIR
@@ -44,6 +42,9 @@ WARP_PARTITION = [5, 64, 3000]
 WARP_MEDIUM_LWS = [16, 32]
 WARP_MEDIUM_IPT = list(range(1, 18)) 
 WARP_MEDIUM_BS = [128, 256]
+
+SEGMENT_COUNT = [10, 100, 1000, 2500, 5000, 7500, 10000, 100000]
+SEGMENT_LENGTH = [30, 256, 3000, 300000]
 
 class Tuner(BaseTuner):
     @classmethod
@@ -66,6 +67,10 @@ class Tuner(BaseTuner):
         params['warp_medium_ipt'] = WARP_MEDIUM_IPT
         params['warp_medium_bs'] = WARP_MEDIUM_BS
         params['warp_partitioning_allowed'] = [1]
+
+        # Not a tunable param, but is useful for seperating runs
+        params['segment_count'] = SEGMENT_COUNT
+        params['segment_length'] = SEGMENT_LENGTH 
 
         return params
 

@@ -44,8 +44,5 @@
 {% endblock %}
 
 {% block benchmark_queue %}
-    const std::vector<size_t> segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
-    const std::vector<size_t> segment_lengths{30, 256, 3000, 300000};
-    executor.queue<benchmark_type>(segment_counts, segment_lengths);
+    executor.queue<benchmark_type>({{ config.segment_count }}, {{ config.segment_length }});
 {% endblock %}
-
