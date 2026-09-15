@@ -116,6 +116,16 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "2_3_1_bfp16_ncl_cd34ad"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
       }
     ]
   },
