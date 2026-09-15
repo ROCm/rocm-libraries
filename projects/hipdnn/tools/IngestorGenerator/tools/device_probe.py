@@ -20,11 +20,27 @@ from pathlib import Path
 ARCH_TOKEN = r"gfx[0-9a-f]{3,}"
 
 
+class ProbeUnavailable(Exception):
+    """The inspection utility could not be run, so nothing was observed.
+
+    Distinct from a negative observation on purpose. `rocminfo` missing from PATH
+    -- a packaging or platform difference, not a statement about the host's GPUs --
+    used to surface as FileNotFoundError, an OSError, and was caught beside the
+    ValueError that means "rocminfo ran and this arch is not here". Both exited 1,
+    so a healthy host without the utility reported device-absent and halted an
+    unattended run at its first gate. A tool that cannot run has not reported a
+    negative.
+    """
+
+
 def device_info(arch: str, *, cwd=None, env=None) -> str:
     """Return successful rocminfo evidence containing the exact requested arch."""
-    result = subprocess.run(
-        ["rocminfo"], cwd=cwd, env=env, capture_output=True, text=True
-    )
+    try:
+        result = subprocess.run(
+            ["rocminfo"], cwd=cwd, env=env, capture_output=True, text=True
+        )
+    except OSError as exc:
+        raise ProbeUnavailable(f"cannot run rocminfo: {exc}") from exc
     if result.returncode:
         raise ValueError(
             f"rocminfo exited {result.returncode}: {result.stderr.strip()}"
@@ -61,9 +77,12 @@ def main(argv=None) -> int:
         parser.error("installed mode requires --install")
     print(f"host: {socket.gethostname()}")
     failures = []
+    unobserved = []
     try:
         device_info(args.arch)
         print(f"OK device {args.arch} present")
+    except ProbeUnavailable as exc:
+        unobserved.append(str(exc))
     except (OSError, ValueError) as exc:
         failures.append(str(exc))
     if args.install is not None:
@@ -82,8 +101,17 @@ def main(argv=None) -> int:
         failures.append(str(exc))
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)
+    for note in unobserved:
+        print(f"UNOBSERVED {note}", file=sys.stderr)
     if failures:
         return 1
+    if unobserved:
+        print(
+            "UNOBSERVED a required condition was not observed; this is not a negative "
+            "result. Establish it by other means and record the substitution.",
+            file=sys.stderr,
+        )
+        return 3
     print(
         f"{args.mode} feasibility satisfied; no plugin loading or numerical correctness claim"
     )
