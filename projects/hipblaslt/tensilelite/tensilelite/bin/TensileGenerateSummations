@@ -25,14 +25,14 @@
 ################################################################################
 
 try:
-    from Tensile.GenerateSummations import GenerateSummations
+    from tensilelite.GenerateSummations import GenerateSummations
 except ImportError:
     import os.path
     import sys
     parentdir = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."))
     sys.path.append(parentdir)
 
-    from Tensile.GenerateSummations import GenerateSummations
+    from tensilelite.GenerateSummations import GenerateSummations
 
 ################################################################################
 # Main
