@@ -707,7 +707,7 @@ endif()
 
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
-#   share/hipblaslt/tensilelite/tensilelite/ — Tensile Python package
+#   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
 #   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
@@ -715,7 +715,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 
-    # Tensile Python package
+    # TensileLite Python package
     install(
         DIRECTORY "${_tensilelite_src}/tensilelite/"
         DESTINATION "${_tensilelite_install_dest}/tensilelite"

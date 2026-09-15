@@ -304,7 +304,7 @@ class TestTextBlockOutputNoComment(unittest.TestCase):
         self.assertEqual(str(m), "")
 
     def test_outputNoComment_round_trip_via_setOutputOptions(self):
-        # rocIsa.setOutputOptions(opts) is how Tensile ships the flag to
+        # rocIsa.setOutputOptions(opts) is how TensileLite ships the flag to
         # ParallelMap2 workers; verify the helper picks the new value up.
         from rocisa_stinkytofu_adaptor import rocIsa, OutputOptions  # noqa: WPS433
         rocIsa.getInstance().setOutputOptions(OutputOptions(outputNoComment=True))
