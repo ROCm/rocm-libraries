@@ -799,7 +799,34 @@ class Engine:
         temporary.write_text(
             json.dumps(payload, indent=2, default=str), encoding="utf-8"
         )
-        os.replace(temporary, self.run_dir / "run.json")
+        _replace_with_retry(temporary, self.run_dir / "run.json")
+
+
+def _replace_with_retry(
+    temporary: Path, destination: Path, attempts: int = 40, pause_s: float = 0.025
+) -> None:
+    """Replace `destination` with `temporary`, tolerating a concurrent reader.
+
+    `os.replace` is atomic, which is what lets anyone read `run.json` while a run
+    is still going. On Windows it is also refused outright while another process
+    holds the destination open: the manifest is rewritten after every step
+    transition, so a status reader polling it turns a checkpoint into
+    `PermissionError` and kills the run mid-flight -- with the half-written
+    `run.json.tmp` left behind as the only evidence.
+
+    Retrying closes that window. A reader opens, reads and closes in
+    microseconds, so the contention is real but brief, and one second of
+    retries is far longer than any honest reader holds the file. A replace
+    still failing after that is not contention and is raised.
+    """
+    for remaining in range(attempts - 1, -1, -1):
+        try:
+            os.replace(temporary, destination)
+            return
+        except PermissionError:
+            if not remaining:
+                raise
+            time.sleep(pause_s)
 
 
 def _recorded(values: dict[str, Any]) -> dict[str, Any]:

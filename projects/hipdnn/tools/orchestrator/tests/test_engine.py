@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
 
+import runner.engine as engine_module
 from runner.engine import Engine
 from runner.errors import ConfigError
 from runner.flow import Flow, bind_inputs, validate_refs
@@ -823,3 +826,60 @@ steps:
     assert [record["tool"] for record in manifest["steps"]] == ["agent"]
     assert Path(manifest["feedback_path"]).is_file()
     assert Path(manifest["feedback_path"]) == engine.feedback_path
+
+
+def test_checkpoint_survives_a_reader_holding_the_manifest(tmp_path):
+    """A status reader must not be able to kill a run.
+
+    `run.json` is replaced after every step transition, and the manifest is
+    advertised as readable while a run is still going. On Windows `os.replace`
+    is refused outright while another handle holds the destination, so without
+    a retry the reader turns the next checkpoint into `PermissionError` and the
+    run dies mid-flight with `run.json.tmp` left behind.
+    """
+    destination = tmp_path / "run.json"
+    destination.write_text("old", encoding="utf-8")
+    temporary = tmp_path / "run.json.tmp"
+    temporary.write_text("new", encoding="utf-8")
+
+    released = threading.Event()
+    holding = threading.Event()
+
+    def hold() -> None:
+        with open(destination, "rb") as handle:
+            handle.read()
+            holding.set()
+            released.wait(timeout=5)
+
+    reader = threading.Thread(target=hold)
+    reader.start()
+    holding.wait(timeout=5)
+    releaser = threading.Timer(0.15, released.set)
+    releaser.start()
+    try:
+        engine_module._replace_with_retry(temporary, destination)
+    finally:
+        released.set()
+        releaser.cancel()
+        reader.join(timeout=5)
+
+    assert destination.read_text(encoding="utf-8") == "new"
+    assert not temporary.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="POSIX replaces over an open handle")
+def test_checkpoint_gives_up_on_a_reader_that_never_lets_go(tmp_path):
+    """Retrying is for contention, not for a wedged handle. A reader that never
+    closes is not a race to wait out, and swallowing it would hide the manifest
+    silently going stale."""
+    destination = tmp_path / "run.json"
+    destination.write_text("old", encoding="utf-8")
+    temporary = tmp_path / "run.json.tmp"
+    temporary.write_text("new", encoding="utf-8")
+
+    with open(destination, "rb") as handle:
+        handle.read()
+        with pytest.raises(PermissionError):
+            engine_module._replace_with_retry(
+                temporary, destination, attempts=3, pause_s=0.01
+            )

@@ -34,6 +34,7 @@ from typing import Any
 
 import mcp.types as types
 from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
@@ -187,7 +188,7 @@ def build_server(supervisor: Supervisor) -> Server:
         return [TEMPLATE]
 
     @server.read_resource()
-    async def read_resource(uri: types.AnyUrl) -> list[types.ReadResourceContents]:
+    async def read_resource(uri: types.AnyUrl) -> list[ReadResourceContents]:
         remember()
         try:
             content = supervisor.read_resource(str(uri))
@@ -200,9 +201,7 @@ def build_server(supervisor: Supervisor) -> Server:
                 types.ErrorData(code=types.INVALID_PARAMS, message=str(failure))
             ) from None
         return [
-            types.ReadResourceContents(
-                content=content["text"], mime_type=content["mimeType"]
-            )
+            ReadResourceContents(content=content["text"], mime_type=content["mimeType"])
         ]
 
     @server.subscribe_resource()
@@ -299,15 +298,24 @@ async def serve(args: argparse.Namespace) -> None:
     supervisor.start()
     server = build_server(supervisor)
     server.flowmcp_state["loop"] = asyncio.get_running_loop()  # type: ignore[attr-defined]
+    capabilities = server.get_capabilities(
+        notification_options=NotificationOptions(
+            resources_changed=True, tools_changed=False
+        ),
+        experimental_capabilities={},
+    )
+    #: The SDK derives capabilities from registered handlers but hardcodes
+    #: `subscribe=False`, so a server that implements subscription advertises
+    #: that it does not. Run state travels as `resources/updated` on the run
+    #: manifest, and a client that believes the advertisement never subscribes
+    #: and never hears about a run again -- so the one channel that matters
+    #: would be silently dead.
+    if capabilities.resources is not None:
+        capabilities.resources.subscribe = True
     options = InitializationOptions(
         server_name=SERVER_NAME,
         server_version=SERVER_VERSION,
-        capabilities=server.get_capabilities(
-            notification_options=NotificationOptions(
-                resources_changed=True, tools_changed=False
-            ),
-            experimental_capabilities={},
-        ),
+        capabilities=capabilities,
         instructions=INSTRUCTIONS,
     )
     try:
