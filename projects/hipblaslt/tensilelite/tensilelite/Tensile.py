@@ -86,7 +86,7 @@ def executeStepsInConfig(
         solutionPoolFiles: list = None,
         archNames: Optional[List[str]] = None,
    ):
-    """Conducts the steps in the provided ``config`` according to the Tensile workflow.
+    """Conducts the steps in the provided ``config`` according to the TensileLite workflow.
 
     The top-level steps are:
     1. BenchmarkProblems: Runs the benchmarking steps and generates the directories
@@ -199,7 +199,7 @@ def addCommonArguments(argParser):
     """
     Add a common set of arguments to `argParser`.
 
-    Currently used by the main Tensile script and the unit tests but could also be used for TensileCreateLibrary.
+    Currently used by the main TensileLite script and the unit tests but could also be used for TensileCreateLibrary.
     """
 
     def splitExtraParameters(par):
@@ -497,7 +497,7 @@ def restore_prob_sol_map(logfile):
 
 
 ################################################################################
-# Tensile
+# TensileLite
 # - below entry points call here
 ################################################################################
 def Tensile(userArgs):
@@ -506,7 +506,7 @@ def Tensile(userArgs):
     print1("")
     print1(HR)
     print1("#")
-    print1("#  Tensile v%s" % (__version__))
+    print1("#  TensileLite v%s" % (__version__))
 
     argParser = argparse.ArgumentParser()
     argParser.add_argument("ConfigFile", type=os.path.realpath, nargs="+",
