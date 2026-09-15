@@ -534,6 +534,24 @@ def shipped_ukd(**overrides):
     return doc, record.consumers
 
 
+def observations_of(doc):
+    """The compiler's own readouts, which the descriptor digest excludes."""
+    return doc["provenance"]["effective_spec"]["observations"]
+
+
+def restamp_authored_spec(doc):
+    """Change the authored spec and re-stamp the descriptor digest over it.
+
+    `provenance.spec` sits inside the digested document, so the descriptor
+    binding refuses a bare edit of it before the authored-input binding is ever
+    consulted. Re-stamping is what someone holding the descriptor would do, and
+    it is what leaves the authored-input check as the one that speaks.
+    """
+    doc["provenance"]["spec"] = {"head_size": 128}
+    evidence = doc["provenance"]["effective_spec"]
+    evidence["descriptor_digest"] = agreement.descriptor_binding(doc)
+
+
 class TestProducerEvidenceReservation:
     """Only the compiler writes the record, and nothing overwrites it."""
 
@@ -568,32 +586,82 @@ class TestPackedVerification:
         agreement.verify(doc, records, PAYLOAD)
 
     @pytest.mark.parametrize(
-        "mutate,reason",
+        "mutate,diagnostic",
         [
-            (lambda d: d["metadata"].__setitem__("head_size", 128), "descriptor"),
-            (lambda d: d["kernel_source"].__setitem__("symbol", "other"), "descriptor"),
-            (
-                lambda d: d["kernel_source"].__setitem__("toc_key", "other"),
-                "descriptor",
+            pytest.param(
+                lambda d: d["metadata"].__setitem__("head_size", 128),
+                "descriptor binding mismatch",
+                id="metadata",
             ),
-            (lambda d: d.__setitem__("arch", ["gfx950"]), "descriptor"),
-            (
+            pytest.param(
+                lambda d: d["kernel_source"].__setitem__("symbol", "other"),
+                "descriptor binding mismatch",
+                id="authored-symbol",
+            ),
+            pytest.param(
+                lambda d: d["kernel_source"].__setitem__("toc_key", "other"),
+                "descriptor binding mismatch",
+                id="authored-toc-key",
+            ),
+            pytest.param(
+                lambda d: d.__setitem__("arch", ["gfx950"]),
+                "descriptor binding mismatch",
+                id="authored-arch",
+            ),
+            # `shipped_ukd` hands back the very list the evidence stores, so an
+            # edit here moves both sides of the consumer-binding comparison
+            # together; what refuses it is the observation the edited
+            # declaration no longer names. The consumer binding itself is
+            # exercised by the records-side mutations below.
+            pytest.param(
                 lambda d: d["provenance"]["effective_spec"]["consumers"][0][
                     "declaration"
                 ].__setitem__("vocabulary", {}),
-                "declaration",
+                "lacks this consumer's observation",
+                id="declaration",
             ),
-            (
-                lambda d: d["provenance"].__setitem__("spec", {"head_size": 128}),
-                "authored",
+            pytest.param(
+                restamp_authored_spec,
+                "authored-input binding mismatch",
+                id="authored-spec",
+            ),
+            pytest.param(
+                lambda d: observations_of(d).__setitem__(
+                    "code_object_sha256", hashlib.sha256(b"other object").hexdigest()
+                ),
+                "code-object binding mismatch",
+                id="observed-code-object",
+            ),
+            pytest.param(
+                lambda d: observations_of(d).__setitem__("symbol", "other"),
+                "symbol binding mismatch",
+                id="observed-symbol",
+            ),
+            pytest.param(
+                lambda d: observations_of(d).__setitem__("arch", "gfx950"),
+                "architecture binding mismatch",
+                id="observed-arch",
             ),
         ],
     )
-    def test_a_changed_descriptor_fails_its_binding(self, mutate, reason):
-        """Each mutation is one field of the binding, and each fails on its own."""
+    def test_a_changed_descriptor_fails_its_binding(self, mutate, diagnostic):
+        """Each mutation is one field of the binding, and each fails on its own.
+
+        The expected diagnostic travels with the mutation because `verify` raises
+        one exception class from nine sites: a bare `raises` passes on whichever
+        check happens to fire first, which would leave the binding a case is
+        named for unexercised and a break in it green.
+
+        The layering is why the first four cases share one message. The
+        descriptor digest covers the whole authored document, so an edit to the
+        symbol, the toc key or the arch there is refused before the evidence's
+        own copy of that same value is ever compared -- and reaching those
+        comparisons is what the three `observed-` cases do, by moving the
+        evidence rather than the document it binds.
+        """
         doc, records = shipped_ukd()
         mutate(doc)
-        with pytest.raises(HkpPackError):
+        with pytest.raises(HkpPackError, match=diagnostic):
             agreement.verify(doc, records, PAYLOAD)
 
     def test_changed_payload_bytes_fail(self):
