@@ -78,6 +78,7 @@ endif()
 # registers exactly the tests it did before that work.
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
+        hipdnn_availability.cpp
         hipdnn_shim_conv.cpp
         version_api.cpp
     )
@@ -347,8 +348,19 @@ target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOp
 # No include directory is needed: routing.cpp includes its own header by relative
 # path, and adding src/private here would expose miopen_private_rename.h to every
 # test-common source.
+#
+# hipdnn_forward.cpp comes along because routing.cpp asks it whether hipDNN is
+# available before reporting a route. The test binary's copy only ever answers
+# that question -- the forwarding the shim tests exercise happens inside
+# libMIOpen.so, against its own copy.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+  if(NOT TARGET hipdnn_frontend_dynamic)
+    find_package(hipdnn_frontend REQUIRED)
+  endif()
+  target_sources(miopen_gtest_common PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/private/routing.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_forward.cpp)
+  target_link_libraries(miopen_gtest_common PRIVATE hipdnn_frontend_dynamic)
 endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
@@ -368,6 +380,7 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
         --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
         --output-dir ${PROJECT_BINARY_DIR}/test_results
         --lib-dir $<TARGET_FILE_DIR:MIOpen>
+        --known-divergences ${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt
       WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
     )
     # RUN_SERIAL: unlike the shard entries, nothing else keeps this one off a busy GPU.
@@ -378,9 +391,9 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
       ENVIRONMENT "${PARITY_ENVIRONMENT}"
     )
   elseif(MODE STREQUAL "INSTALL")
-    # No --output-dir or --lib-dir: the script's defaults fit the installed layout. python3
-    # because the configure machine's interpreter path need not exist where the package is
-    # tested.
+    # No --output-dir, --lib-dir or --known-divergences: the script's defaults fit the
+    # installed layout. python3 because the configure machine's interpreter path need not
+    # exist where the package is tested.
     file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(${ENTRY_NAME} python3 \"../run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
 set_tests_properties(${ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT} LABELS \"${LABELS}\" ENVIRONMENT \"${PARITY_ENVIRONMENT}\")
@@ -445,6 +458,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
       --lib-dir $<TARGET_FILE_DIR:MIOpen>
       --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
       --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
+      --needed-baseline ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline
       --public-header ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h
   )
   set_tests_properties(wrapper_abi_check PROPERTIES
@@ -531,7 +545,7 @@ endif()
 # files, which the build-tree entry already covers.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(wrapper_abi_check python3 \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\")
+"add_test(wrapper_abi_check python3 \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\" \"--needed-baseline\" \"../wrapper_needed.baseline\")
 set_tests_properties(wrapper_abi_check PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\")
 
 ")
@@ -563,6 +577,8 @@ if( NOT ENABLE_ASAN_PACKAGING )
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
+          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline"
+          "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )

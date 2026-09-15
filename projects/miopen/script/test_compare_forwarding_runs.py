@@ -10,6 +10,11 @@ crashed replay left half-written, a pair of reports left over from an earlier
 build, and two runs that skipped everything. Comparing two well-formed, agreeing
 files only ever exercises the passing path.
 
+The known-divergence list is covered from the same angle: that it tolerates only
+the divergence it names, that a line which has stopped applying fails rather than
+lingering, and that tolerating one is said out loud instead of reported as a
+clean pass.
+
 Written against the standard library's unittest rather than pytest: this runs as
 a ctest entry in a wrapper-enabled build, and nothing provisions pytest for a
 machine that builds MIOpen.
@@ -40,27 +45,43 @@ def suite(*cases):
 
     "skipped" is a DISABLED_ test, which gtest never starts. "gtest_skipped" is a
     test that started and called GTEST_SKIP(), which gtest records as run.
+
+    A case may carry a third element, a dict of recorded properties, written the
+    way gtest writes them: a properties element inside the testcase.
     """
     body = []
-    for name, status in cases:
-        if status == "failed":
-            body.append(
-                '<testcase name="{}" classname="Shim"><failure message="x"/></testcase>'.format(
-                    name
+    for case in cases:
+        name, status = case[0], case[1]
+        inner = ""
+        if len(case) > 2:
+            inner = "<properties>{}</properties>".format(
+                "".join(
+                    '<property name="{}" value="{}"/>'.format(key, value)
+                    for key, value in sorted(case[2].items())
                 )
             )
+        attrs = ""
+        if status == "failed":
+            inner += '<failure message="x"/>'
         elif status == "skipped":
-            body.append(
-                '<testcase name="{}" classname="Shim" status="notrun"/>'.format(name)
-            )
+            attrs = ' status="notrun"'
         elif status == "gtest_skipped":
-            body.append(
-                '<testcase name="{}" classname="Shim" status="run" result="skipped">'
-                '<skipped message="x"/></testcase>'.format(name)
+            attrs = ' status="run" result="skipped"'
+            inner += '<skipped message="x"/>'
+        body.append(
+            '<testcase name="{}" classname="Shim"{}>{}</testcase>'.format(
+                name, attrs, inner
             )
-        else:
-            body.append('<testcase name="{}" classname="Shim"/>'.format(name))
+        )
     return '<?xml version="1.0"?><testsuites>{}</testsuites>'.format("".join(body))
+
+
+SERVED = ("A", "passed", {"parity_served_case": "true"})
+DECLINED = ("A", "passed", {"parity_served_case": "false"})
+KNOWN_LINE = (
+    "Shim.A | passed[parity_served_case=true] | passed[parity_served_case=false] "
+    "| the forwarded path cannot express this problem"
+)
 
 
 def aged(path, seconds):
@@ -81,7 +102,7 @@ class ComparatorTest(unittest.TestCase):
         path.write_text(text)
         return str(path)
 
-    def compare(self, disabled_xml, enabled_xml, newer_than=None):
+    def compare(self, disabled_xml, enabled_xml, newer_than=None, known=None):
         """Run the comparator on two fixtures, returning (exit code, stdout, stderr)."""
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -89,6 +110,7 @@ class ComparatorTest(unittest.TestCase):
                 self.write("disabled.xml", disabled_xml),
                 self.write("enabled.xml", enabled_xml),
                 newer_than,
+                self.write("known.txt", known) if known is not None else None,
             )
         return rc, out.getvalue(), err.getvalue()
 
@@ -215,6 +237,87 @@ class ComparatorTest(unittest.TestCase):
             )
         self.assertEqual(rc, 1)
         self.assertIn("left over from an earlier build", err.getvalue())
+
+    def test_serving_a_case_and_declining_it_is_a_divergence(self):
+        # Both runs pass. The difference is that one computed a result and the other was
+        # told the problem could not be expressed, which is what the recorded property
+        # carries and what the bare verdicts throw away.
+        rc, _, err = self.compare(suite(SERVED), suite(DECLINED))
+        self.assertEqual(rc, 1)
+        self.assertIn("parity_served_case=true", err)
+        self.assertIn("parity_served_case=false", err)
+
+    def test_a_property_written_as_an_attribute_is_also_read(self):
+        # Older gtest releases write recorded properties as attributes on the testcase
+        # rather than as children of it. Reading only one shape would mean a gtest
+        # update silently dropping the distinction the property carries.
+        as_attribute = (
+            '<?xml version="1.0"?><testsuites><testcase name="A" classname="Shim" '
+            'parity_served_case="{}"/></testsuites>'
+        )
+        rc, _, err = self.compare(
+            as_attribute.format("true"), as_attribute.format("false")
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("parity_served_case=false", err)
+
+    def test_a_listed_divergence_is_tolerated_and_announced(self):
+        rc, out, _ = self.compare(suite(SERVED), suite(DECLINED), known=KNOWN_LINE)
+        self.assertEqual(rc, 0)
+        self.assertIn("1 known divergence tolerated", out)
+        self.assertIn("Shim.A", out)
+        self.assertIn("cannot express this problem", out)
+        # The ordinary success line would read as two modes that agreed.
+        self.assertNotIn("tests identical under both modes", out)
+
+    def test_a_listed_divergence_that_stopped_happening_fails(self):
+        rc, _, err = self.compare(suite(SERVED), suite(SERVED), known=KNOWN_LINE)
+        self.assertEqual(rc, 1)
+        self.assertIn("no longer diverges", err)
+        self.assertIn("remove its line", err)
+
+    def test_a_listed_test_absent_from_the_run_is_not_stale(self):
+        # The discrete build registers the harness against several binaries, and only
+        # one of them holds any given test. Absence is not a line that has gone stale.
+        xml = suite(("B", "passed"))
+        rc, _, _ = self.compare(xml, xml, known=KNOWN_LINE)
+        self.assertEqual(rc, 0)
+
+    def test_the_list_does_not_suppress_a_divergence_it_does_not_name_exactly(self):
+        # Same test, different divergence. A line keyed on the name alone would
+        # swallow it.
+        rc, _, err = self.compare(
+            suite(SERVED), suite(("A", "failed")), known=KNOWN_LINE
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("disabled=passed[parity_served_case=true] enabled=failed", err)
+
+    def test_a_malformed_list_line_is_not_skipped_over(self):
+        rc, _, err = self.compare(
+            suite(SERVED), suite(DECLINED), known="Shim.A | passed | failed"
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("line 1", err)
+        self.assertIn("why it is accepted", err)
+
+    def test_comments_and_blank_lines_in_the_list_are_ignored(self):
+        listing = "# a comment\n\n{}\n".format(KNOWN_LINE)
+        rc, _, _ = self.compare(suite(SERVED), suite(DECLINED), known=listing)
+        self.assertEqual(rc, 0)
+
+    def test_a_missing_list_is_not_treated_as_an_empty_one(self):
+        # Otherwise an installed tree that shipped the scripts without the list would
+        # quietly enforce a stricter check than the one it was configured with.
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = cmp.main(
+                self.write("disabled.xml", suite(SERVED)),
+                self.write("enabled.xml", suite(SERVED)),
+                None,
+                str(self.tmp_path / "no_such_list.txt"),
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("could not be read", err.getvalue())
 
     def test_a_missing_newer_than_target_is_rejected(self):
         # Nothing to date the reports against means their freshness is unknown, which

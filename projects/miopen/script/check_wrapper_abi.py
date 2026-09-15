@@ -37,6 +37,9 @@ def main():
         "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
     )
     parser.add_argument(
+        "--needed-baseline", default=SCRIPT_DIR / "wrapper_needed.baseline"
+    )
+    parser.add_argument(
         "--public-header",
         help="path to include/miopen/miopen.h; only meaningful from a build tree, "
         "since an installed tree has no include directory. Enables the check that "
@@ -66,6 +69,8 @@ def main():
         args.baseline,
         "--excluded",
         args.excluded,
+        "--needed-baseline",
+        args.needed_baseline,
         "--private-lib",
         private_lib,
     ]

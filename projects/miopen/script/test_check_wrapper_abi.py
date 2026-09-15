@@ -127,6 +127,15 @@ class WrapperAbiCheckTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--baseline") + 1], str(baseline))
         self.assertEqual(argv[argv.index("--excluded") + 1], str(excluded))
 
+    def test_needed_baseline_is_forwarded_to_the_abi_check(self):
+        """It is what keeps a direct link on the hipDNN backend out of the wrapper."""
+        needed = self.tree / "needed.txt"
+        needed.touch()
+        result = self.run_harness(self.tree, "--needed-baseline", str(needed))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        argv = (self.tree / "fake_abi_check.argv").read_text().splitlines()
+        self.assertEqual(argv[argv.index("--needed-baseline") + 1], str(needed))
+
     def test_public_header_is_forwarded_to_the_abi_check_when_given(self):
         """Only a build-tree caller has a source tree to point this at."""
         result = self.run_harness(
