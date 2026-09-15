@@ -210,6 +210,7 @@ struct Arguments
     bool    use_user_args;
     int32_t rotating;
     bool    use_gpu_timer;
+    bool    null_algo;
     float   skip_slow_solution_ratio;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -333,6 +334,7 @@ struct Arguments
     OPER(use_user_args) SEP          \
     OPER(rotating) SEP               \
     OPER(use_gpu_timer) SEP          \
+    OPER(null_algo) SEP              \
     OPER(skip_slow_solution_ratio) SEP\
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
