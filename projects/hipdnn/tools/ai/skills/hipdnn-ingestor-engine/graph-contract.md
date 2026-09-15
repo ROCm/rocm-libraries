@@ -38,6 +38,27 @@ engine-wide rejection belongs in `graph_match`. A capacity may require inequalit
 a performance knob needs no fictitious graph field. Use [rocke-mining.md](rocke-mining.md)
 for specialization bindings, not an independently copied compiler policy.
 
+**Declare the admitted envelope as data.** The envelope the engine's matcher enforces
+is a contract, not an implementation detail of its control flow. Declare, at minimum:
+node type and count; admitted ranks; admitted dtypes per operand role; required operand
+shape relations; stride admissibility; virtual and pass-by-value disposition; aliasing
+rules; and every node-level field the matcher gates on. The declaration is the input to
+coverage computation, to RUNBOOK §2's scope rules and to its matcher-versus-reference
+parity check. Drift runs in both directions: a matcher enforcing a condition the
+declaration omits is drift, and so is a declaration claiming a condition the matcher
+does not enforce.
+
+*No config schema carries this today.* The generator config's engine-level graph-match
+block is layout and discrimination documentation only
+(`IngestorGenerator/codegen/models.py:324-336`). Until a schema carries the envelope,
+reconstruct it by reading the `graph_match` and kernel-matcher bodies, record it in the
+run's evidence as data with the source lines each item came from, and treat it as valid
+only as of the revision you read. The drift rule applies to the reconstruction
+unchanged, and the reconstruction is a recorded escalation under
+[RUNBOOK](RUNBOOK.md#tools-this-skill-assumes-and-what-to-do-without-them)'s tools
+section — never a discharged fact, because nothing recomputes it when the matcher
+changes.
+
 ## Corpus and numerical reference
 
 Compare real in-tree and external graphs: per-operand dims/strides, optional-field

@@ -1,7 +1,7 @@
 # Runbook: production mining and lowering for an ingestor engine
 
 This is the **only ordered workflow for production mining and lowering** — corpus and
-baseline approval, packaging, tuning and final corpus proof. It is **not** the create
+scope, packaging, tuning and final corpus proof. It is **not** the create
 path: a plain HIP integration belongs to
 [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md), whose RUNBOOK owns
 the six-step sequence from a kernel to descriptors, native hooks, registration and
@@ -279,7 +279,7 @@ and the artifact you owe for it, and the gate does not pass until every one has 
 A missing dependency blocks its gate; host-only research may continue while a device
 allocation is pending, but cannot discharge device proof.
 
-## 2. Contracts, corpus and baseline approval
+## 2. Contracts, corpus and scope
 
 Record [graph-contract.md](graph-contract.md)'s topology/UID edges and field
 dispositions, then [rocke-mining.md](rocke-mining.md)'s applicability, specialization,
@@ -326,13 +326,84 @@ The second command is **offline applicability**, not runtime coverage or numeric
 Scope reference candidates to the kernel family/algorithm and required opt-in
 selector. API failures are operational errors, never unsupported-shape evidence.
 
-Present the feature/shape boundary, per-source coverage and exclusions, architecture,
-engine identity, knobs and provisional baseline for approval. A legal cross-product
-is not a measured shipping set; a genuinely single-candidate engine needs no extra
-variants.
+### Deciding scope
 
-**Gate:** approved baseline and scope, with no unresolved semantic loss or reference
-assumption.
+Record the feature/shape boundary, per-source coverage and exclusions, architecture,
+engine identity, knobs and provisional baseline. Scope is then *derived* from the rules
+below and from the record of which rule fired on which inputs. There is no approval
+step: the record is the decision.
+
+For every axis that excludes in-scope inputs, classify it:
+
+| Class | Test | Disposition |
+|---|---|---|
+| A | Descriptor/matcher only — no kernel change, the authored source already compiles the value, and a capable independent reference covers it | **Widen** |
+| B | Requires a kernel or source change | Out of scope here; emit an upstream handoff naming the axis and the coverage it would unlock, then continue with what is admitted |
+| C | No capable independent numerical reference covers it | Out of scope, recorded as reference-blocked |
+
+**Prefer coverage — and pay for it in the same breath.** Widen every class-A axis that
+admits additional in-scope inputs; a widened axis is a **candidate** axis, not a served
+one, and every value it admits owes reference-verified numerics at §5 and measurement
+at §6 before it may ship. **Widening adds candidates, never claims.** These two are one
+rule and are not separable: widening without the debt it incurs ships unproven numerics
+under the engine's identity, which is the failure the second half exists to prevent.
+
+A legal cross-product is still not a measured shipping set, and pruning an axis that
+was never measured is the same error inverted. An axis with two or more candidates and
+no timing evidence sends **every** candidate into §6; prune only against measurements.
+An axis with exactly one candidate is genuinely single-candidate and owes no
+comparison.
+
+Include every corpus source with at least one servable input. Exclude the rest,
+recording for each exclusion both the reason and the specific axis that would admit it
+— that axis is itself a class A/B/C input above, so exclusions feed the widening
+decision rather than merely documenting a gap.
+
+**Coverage computation does not exist, so this is how the classification is made.** No
+command in this tree computes per-source servable/excluded counts, and nothing declares
+the envelope they would be computed against; entries 1 and 2 of
+[Tools this skill assumes, and what to do without them](#tools-this-skill-assumes-and-what-to-do-without-them)
+state the substitution and its standing, and are not restated here. Classify by reading
+the engine's `graph_match` and kernel-matcher bodies against `mine_shapes.py`'s
+per-source totals, distinct count and provenance split, recording for every judgement
+the source lines it rests on. What you produce is a hand-derived table carrying the
+engine revision it was computed against, and it carries that section's outcome: a
+recorded escalation, not a discharged fact. An axis you cannot classify at all is an
+escalation — never a silent widening, and never a silent exclusion.
+
+### Matcher-versus-reference parity
+
+Diff the declared envelope — or, until a declaration exists, the reconstruction
+[graph-contract.md](graph-contract.md)'s §Field dispositions and kernel mapping
+requires — against the predicates the chosen numerical reference enforces for the same
+operation. **Any predicate the reference enforces that the engine's matcher does not is
+a finding**: the engine admits inputs its own oracle refuses, so those inputs are
+validated by nothing, and the absence of an in-tree case exercising them is what hides
+the hole rather than evidence there is none. This check needs no tool — both sides are
+source you are already reading — and it is required, not advisory. Resolve every
+finding before the gate: either enforce the condition in the matcher, or record why it
+cannot arise.
+
+**Gate:** recorded scope derived from the rules above, complete per-source denominators
+with provenance, every excluded axis classified, every parity finding resolved, and no
+escalation condition met.
+
+### When to escalate
+
+Escalate to the requester **only** when:
+
+- no corpus source has a servable input and no class-A widening exists;
+- the included corpus leaves a declared-envelope axis with **no measurable input** — a
+  corpus that cannot exercise an axis cannot distinguish candidates along it. This
+  condition is envelope-relative on purpose and is deliberately not a key count:
+  sufficiency depends on the operation, the declared envelope and what the kernel
+  admits, so there is no global floor to compare against;
+- no capable independent numerical reference covers the admitted features;
+- two rules select conflicting scopes, or a rule's inputs cannot be computed and the
+  hand substitution above does not supply them either.
+
+Anything else: decide, record which rule fired and the inputs it consumed, and continue.
+A recorded rule application is the audit trail approval used to provide.
 
 ## 3. Generate, implement and splice
 
