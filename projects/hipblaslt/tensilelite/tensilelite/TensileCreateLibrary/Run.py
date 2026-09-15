@@ -1094,7 +1094,7 @@ def run():
     start = timer()
     print1("")
     print1(HR)
-    print1("# Tensile Create Library")
+    print1("# TensileLite Create Library")
     print2(HR)
     print2("")
 
@@ -1361,7 +1361,7 @@ def run():
         else:
             printWarning(f"Cannot remove build_tmp")
 
-    print("# Tensile Library Writer DONE")
+    print("# TensileLite Library Writer DONE")
     print(HR)
     print("")
 
