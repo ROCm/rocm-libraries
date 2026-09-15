@@ -43,6 +43,7 @@ from .models import (
     KERNEL_SOURCE_KINDS,
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
+    NATIVE_SYMBOL_NAMESPACE_PATTERN,
     WORKSPACE_POLICIES,
     EngineSpec,
     GraphMatchSpec,
@@ -94,6 +95,8 @@ def load_config(path: Path) -> IngestorConfig:
         behavior_notes=list(engine_raw.get("behavior_notes", [])),
         knobs=list(engine_raw.get("knobs", [])),
         heuristic=engine_raw.get("heuristic", "native"),
+        native_symbol_namespace=engine_raw.get("native_symbol_namespace", "") or "",
+        pack_discriminates=bool(engine_raw.get("pack_discriminates", False)),
     )
 
     kmd_fields = []
@@ -840,6 +843,8 @@ _KNOWN_ENGINE = frozenset(
         "behavior_notes",
         "knobs",
         "heuristic",
+        "native_symbol_namespace",
+        "pack_discriminates",
     }
 )
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
@@ -993,6 +998,17 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"engine.heuristic '{config.engine.heuristic}' must be 'native' "
             f"(emit a UHD) or 'none' (omit it -- legal; the engine falls back "
             f"to priority-then-id ranking)."
+        )
+    override = config.engine.native_symbol_namespace
+    if override and not NATIVE_SYMBOL_NAMESPACE_PATTERN.match(override):
+        raise ConfigError(
+            f"engine.native_symbol_namespace '{override}' must be a dotted "
+            f"symbol prefix of at least two identifier components (e.g. "
+            f"'hipkernel.conv_fwd'). Every native symbol this bundle names is "
+            f"that prefix plus '.graph_match', '.dispatch', '.score' or "
+            f"'.kernel_match', and the loader pre-flights all of them: a "
+            f"prefix no provider registered drops the whole engine at load "
+            f"with one log line."
         )
 
 
@@ -1535,8 +1551,22 @@ def _check_workspace_policy(config: IngestorConfig) -> None:
 def _check_pack_discriminators(config: IngestorConfig) -> None:
     """A multi-pack engine needs a discriminator per pack to name its
     operation-scoped matcher symbol; a single-pack engine must not declare
-    one (there is nothing to discriminate -- see the UMD policy)."""
+    one (there is nothing to discriminate -- see the UMD policy).
+
+    ``engine.pack_discriminates`` is the single-pack counterpart and is
+    rejected here on a multi-pack engine for the mirror-image reason: a
+    multi-pack engine states in descriptors what the key would state in prose.
+    """
     if config.is_multi_pack:
+        if config.engine.pack_discriminates:
+            raise ConfigError(
+                f"engine.pack_discriminates is set, but this engine has "
+                f"{len(config.packs)} packs. The key answers a question only a "
+                f"single-pack engine has: whether its one graph_match admits "
+                f"the operation as well as validating it. A multi-pack engine "
+                f"emits an operation-scoped matcher per pack and discriminates "
+                f"in the descriptors, where it is visible. Remove the key."
+            )
         missing = [p.name for p in config.packs if not p.discriminator]
         if missing:
             raise ConfigError(
@@ -1581,6 +1611,38 @@ def _check_pack_discriminators(config: IngestorConfig) -> None:
             raise ConfigError(f"pack '{pack.name}' declares no kernels.")
 
 
+def _check_dropin_kdp_stems(config: IngestorConfig) -> None:
+    """A drop-in emits one KDP per kernel, so two kernels may not reduce to
+    one filename stem.
+
+    Kernel names are NOT unique by construction -- the generator indexes ids
+    by position precisely because they can repeat -- and the stem collapses
+    every non-identifier character, so ``a.b`` and ``a_b`` collide too. Both
+    would write the same ``<stem>.kdp.json``: the second file overwrites the
+    first, and a variant vanishes with no error anywhere. That is the drop-in
+    failure mode in miniature, so it is caught here rather than on the machine
+    that received the tree.
+    """
+    if not config.is_dropin:
+        return
+    by_stem: dict[str, list[str]] = {}
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            by_stem.setdefault(config.dropin_kdp_stem(kernel), []).append(kernel.name)
+    collisions = {stem: names for stem, names in by_stem.items() if len(names) > 1}
+    if collisions:
+        shown = "; ".join(
+            f"'{stem}.kdp.json' <- {names}"
+            for stem, names in sorted(collisions.items())
+        )
+        raise ConfigError(
+            f"this config emits one KDP per kernel (every kernel is "
+            f"'hiprtc_file'), but these kernel names reduce to the same output "
+            f"file: {shown}. The stem keeps [A-Za-z0-9_] and collapses the "
+            f"rest, so rename the kernels to differ in those characters."
+        )
+
+
 def _validate_config(config: IngestorConfig) -> list[str]:
     """Run every pre-mint check, in the order the design lists them.
 
@@ -1610,6 +1672,9 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     _check_specialization_declaration(config)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
+    # After the kind checks, which are what decide whether this config is a
+    # drop-in and therefore emits one KDP per kernel at all.
+    _check_dropin_kdp_stems(config)
 
     for note in config.engine.behavior_notes:
         from .models import BEHAVIOR_NOTES
