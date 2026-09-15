@@ -119,9 +119,9 @@ typedef enum {
  */
 typedef enum {
   HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD          = 0, /**<Add a residual tensor to the GEMM result. Requires a residual pointer attribute.*/
-  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM               = 1, /**<Full per-row RMSNorm (``x * rsqrt(mean(x^2) + eps) * gamma``), realized internally as a producer plus a reduce-and-apply kernel. Requires gamma and eps attributes.*/
-  HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS = 2, /**<Decomposed flow (GEMM1 producer): emits the tile-local ``h1 * gamma`` value plus per-row RMSNorm statistics into an RMSNorm handoff descriptor. Requires gamma, eps, and stats attributes.*/
-  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY   = 3, /**<Decomposed flow (GEMM2 consumer): applies the deferred per-row RMSNorm scale carried in the handoff descriptor. Requires the stats attribute.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM               = 1, /**<Full per-row RMSNorm (``x * rsqrt(mean(x^2) + eps) * gamma``), realized internally as a producer plus a reduce-and-apply kernel. D.M is the feature dimension and D.N is the row dimension. Requires gamma and eps attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS = 2, /**<Decomposed flow (GEMM1 producer): emits the tile-local ``h1 * gamma`` value plus per-row RMSNorm statistics into an RMSNorm handoff descriptor. D.M is the feature dimension and D.N is the row dimension. Requires gamma, eps, and stats attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY   = 3, /**<Decomposed flow (GEMM2 consumer): applies the deferred per-row RMSNorm scale along D.N. Requires the stats attribute.*/
   HIPBLASLT_FUSEABLE_EPILOGUE_AMAX                  = 4, /**<Capture the result AMax (maximum absolute value) as a side output.*/
   HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT               = 5, /**<Requantize the result to a narrow output type (chosen by D's data type, e.g. FP8). In a decomposed producer chain after partial RMSNorm stats, this writes the dynamic-quantized producer output while the RMSNorm handoff carries the composed consumer scale. Configured by the requant scale, amax, compute-mode, and granularity attributes.*/
   HIPBLASLT_FUSEABLE_EPILOGUE_SWIGLU                = 6, /**<Reserved epilogue family: SwiGLU gated linear unit.*/
@@ -159,7 +159,7 @@ typedef enum {
  *  \brief Attributes settable on a fused epilogue descriptor.
  */
 typedef enum {
-  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA = 0, /**<Non-null device pointer to the RMSNorm gamma (per-channel scale) vector of length N. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``void*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA = 0, /**<Non-null device pointer to the RMSNorm gamma (per-channel scale) vector of length ``D.M``. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``void*``.*/
   HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS   = 1, /**<Epsilon added inside the RMSNorm reciprocal square root. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``float``.*/
   HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_POINTER = 2, /**<Non-null device pointer to the residual input tensor. The tensor has the same logical shape, layout, and data type as D. Data type: ``void*``.*/
   HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER = 3, /**<Optional device pointer that receives the updated residual stream after the residual add. If NULL or unset, the residual input tensor is updated in place. Data type: ``void*``.*/
@@ -185,8 +185,8 @@ typedef struct hipblasLtFusedEpilogueDescriptor* hipblasLtFusedEpilogueDescripto
  *  \details
  *  Used only by the decomposed flow: the producer stage
  *  (``HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS``) writes the finalized consumer scale,
- *  and the consumer stage (``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY``) reads it in the
- *  GEMM2 epilogue. The caller creates one descriptor, supplies its device buffer with
+ *  and the consumer stage (``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY``) reads it along
+ *  D.N in the GEMM2 epilogue. The caller creates one descriptor, supplies its device buffer with
  *  ``hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer``, sets the same handle on both
  *  fused-epilogue chains through ``HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS``, and destroys the
  *  descriptor after both calls. The caller owns the device buffer. The full
@@ -971,12 +971,11 @@ hipblasStatus_t
  *  \brief Set the caller-owned device buffer used by an RMSNorm handoff descriptor.
  *
  *  \details
- *  The decomposed producer writes one FP32 value per output row and batch. Therefore, the
- *  required buffer size is ``M * batchCount * sizeof(float)``, where ``M`` and ``batchCount``
- *  come from the producer D matrix layout. The consumer reads the same layout, so its D matrix
- *  must have a matching row and batch count. The buffer must remain valid and unmodified from
- *  the producer call until all work submitted by the consumer call has completed. The descriptor
- *  does not take ownership of the buffer.
+ *  The producer writes one FP32 value per D.N row and batch, and the consumer applies one value
+ *  per D.N position. The required size is therefore ``D.N * batchCount * sizeof(float)`` bytes
+ *  for either stage, and both calls must use the same D.N. The buffer must remain valid and
+ *  unmodified from the producer call until all work submitted by the consumer call has completed.
+ *  The descriptor does not take ownership of the buffer.
  *
  *  @param[in]
  *  desc  An RMSNorm handoff descriptor.
