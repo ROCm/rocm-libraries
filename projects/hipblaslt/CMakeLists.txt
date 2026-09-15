@@ -964,13 +964,17 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         LIBRARY DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
         RUNTIME DESTINATION "${_tensilelite_install_dest}/rocisa" COMPONENT tests
     )
-    if(TARGET stinkytofu::stinkytofu AND NOT WIN32)
-        install(FILES
-            "$<TARGET_FILE:stinkytofu::stinkytofu>"
-            "$<TARGET_SONAME_FILE:stinkytofu::stinkytofu>"
-            DESTINATION "${_tensilelite_install_dest}/rocisa"
-            COMPONENT tests
-        )
+    if(TARGET stinkytofu::stinkytofu)
+        get_target_property(_hipblaslt_stinkytofu_type stinkytofu::stinkytofu TYPE)
+        # Static StinkyTofu is already linked into _rocisa and has no SONAME to stage.
+        if(_hipblaslt_stinkytofu_type STREQUAL "SHARED_LIBRARY")
+            install(FILES
+                "$<TARGET_FILE:stinkytofu::stinkytofu>"
+                "$<TARGET_SONAME_FILE:stinkytofu::stinkytofu>"
+                DESTINATION "${_tensilelite_install_dest}/rocisa"
+                COMPONENT tests
+            )
+        endif()
     endif()
     # FFM runs with PYTHONPATH=share/hipblaslt/tensilelite. The lib/hipblaslt
     # install in rocisa/CMakeLists.txt is a different root, and TheRock's lib
