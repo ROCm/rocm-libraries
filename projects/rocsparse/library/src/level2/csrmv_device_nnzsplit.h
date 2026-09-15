@@ -37,12 +37,8 @@ namespace rocsparse
                                                         const I* __restrict__ csr_row_ptr_begin,
                                                         rocsparse_index_base idx_base)
     {
-        return rocsparse::dichotomic_search<I, J>(left,
-                                                  right,
-                                                  offset + static_cast<I>(local_nnz_index)
-                                                      + idx_base,
-                                                  nnz + idx_base,
-                                                  csr_row_ptr_begin);
+        return rocsparse::dichotomic_search<I, J>(
+            left, right, offset + local_nnz_index + idx_base, nnz + idx_base, csr_row_ptr_begin);
     }
 
     template <uint32_t BLOCKSIZE,
