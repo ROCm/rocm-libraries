@@ -101,35 +101,36 @@ bool rocke_dconv_dw_prologue(rocke_dconv_dw_ctx_t* ctx)
         ctx->D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), &none);
     }
 
+    /* Constants emitted in Python source order (lines 2617-2623):
+     * c0, c_wave, c_W (= Wo output width), c_groups, c_half_bytes, oob_sentinel, zero_f32. */
     ctx->c0 = rocke_b_const_i32(b, 0);
     ctx->c_wave = rocke_b_const_i32(b, ctx->WAVE);
-    ctx->c_W = rocke_b_const_i32(b, ctx->p.W);
+    ctx->c_W = rocke_b_const_i32(b, ctx->Wo);
+    ctx->c_groups = rocke_b_const_i32(b, ctx->p.groups);
     ctx->c_half_bytes = rocke_b_const_i32(b, 2);
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
     ctx->zero_f32 = rocke_b_const_f32(b, 0.0);
 
-    /* ---- thread / wave / lane decode (Python lines 2597-2608) ---- */
+    /* ---- thread / wave / lane decode (Python lines 2625-2627) ---- */
     ctx->tid = rocke_b_thread_id_x(b);
     ctx->wave_id = rocke_b_div(b, ctx->tid, ctx->c_wave);
     ctx->lane = rocke_b_mod(b, ctx->tid, ctx->c_wave);
 
-    /* Grid: bx=W-tile, by=channel-tile, bz=batch. */
+    /* Grid: bx=W-tile, by=channel-tile, bz=batch (Python lines 2630-2633). */
     ctx->bx = rocke_b_block_id_x(b);
     ctx->by = rocke_b_block_id_y(b);
     ctx->n = rocke_b_block_id_z(b);
     ctx->q_tile_start = rocke_b_mul(b, ctx->bx, rocke_b_const_i32(b, ctx->BLOCK_W));
 
-    /* ch = by*BLOCK_CH + wave_id*WAVE + lane
-     * Python: b.add(b.mul(by, b.const_i32(BLOCK_CH)),
-     *               b.add(b.mul(wave_id, c_wave), lane))
-     * Force Python left-to-right SSA. */
+    /* ch = by*BLOCK_CH + wave_id*WAVE + lane (Python lines 2635-2638). */
     {
         rocke_value_t* mul_by = rocke_b_mul(b, ctx->by, rocke_b_const_i32(b, ctx->BLOCK_CH));
         rocke_value_t* mul_wave = rocke_b_mul(b, ctx->wave_id, ctx->c_wave);
         rocke_value_t* inner = rocke_b_add(b, mul_wave, ctx->lane);
         ctx->ch = rocke_b_add(b, mul_by, inner);
     }
-    ctx->ch_in_range = rocke_b_cmp_lt(b, ctx->ch, rocke_b_const_i32(b, ctx->p.groups));
+    /* ch_in_range = ch < groups (Python line 2640). */
+    ctx->ch_in_range = rocke_b_cmp_lt(b, ctx->ch, ctx->c_groups);
 
     ctx->a_rsrc = rocke_b_buffer_rsrc(b, ctx->A, ctx->A_bytes);
     ctx->b_rsrc = rocke_b_buffer_rsrc(b, ctx->Bp, ctx->B_bytes);
@@ -243,9 +244,15 @@ void rocke_dconv_dw_load_weights(rocke_dconv_dw_ctx_t* ctx)
             in_values[3] = ctx->c0;
             rocke_transforms_descriptor_offset(
                 b, ctx->b_desc, in_names, in_values, 4, &w_off, &valid);
-            w_h = rocke_b_buffer_load_f16(
-                b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0);
-            ctx->weights_f32[r_const][s_const] = rocke_b_cast_to_f32(b, w_h);
+            {
+                rocke_value_t* safe_w = rocke_b_select(b,
+                                                       ctx->ch_in_range,
+                                                       rocke_b_mul(b, w_off, ctx->c_half_bytes),
+                                                       ctx->oob_sentinel);
+                w_h = rocke_b_buffer_load_f16(b, ctx->b_rsrc, safe_w, ctx->c0);
+                ctx->weights_f32[r_const][s_const] = rocke_b_select(
+                    b, ctx->ch_in_range, rocke_b_cast_to_f32(b, w_h), ctx->zero_f32);
+            }
         }
     }
 }
@@ -445,41 +452,44 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx)
             rocke_value_t* should_flush;
             rocke_value_t* ho_row_j;
 
-            y_j = rocke_b_add(b, rocke_b_mul(b, group_loop.iv, c_KH), rocke_b_const_i32(b, j));
+            /* y_j = grp_iv*c_KH + j  -- emit mul first, then const(j), matching Python. */
+            {
+                rocke_value_t* mul_gk = rocke_b_mul(b, group_loop.iv, c_KH);
+                rocke_value_t* cj = rocke_b_const_i32(b, j);
+                y_j = rocke_b_add(b, mul_gk, cj);
+            }
             j_valid = rocke_b_cmp_lt(b, y_j, rocke_b_const_i32(b, n_iters));
 
-            for(s_const = 0; s_const < KW; ++s_const)
+            /* Python order: outer w_out, inner s_const, innermost r_const. */
+            for(w_out = 0; w_out < BLOCK_W; ++w_out)
             {
-                rocke_value_t* a_off = NULL;
-                rocke_value_t* valid = NULL;
-                rocke_value_t* ok;
-                rocke_value_t* safe_off;
-                rocke_value_t* a_h;
-                rocke_value_t* a_f32;
-                const char* off_names[5];
-                rocke_value_t* off_vals[5];
-
-                off_names[0] = "n";
-                off_vals[0] = ctx->n;
-                off_names[1] = "y_iter";
-                off_vals[1] = y_j;
-                off_names[2] = "wo";
-                off_vals[2] = ctx->q_tile_start; /* single w tile */
-                off_names[3] = "s_off";
-                off_vals[3] = rocke_b_const_i32(b, s_const);
-                off_names[4] = "c";
-                off_vals[4] = ctx->ch;
-
-                /* NOTE: wo is the tile start here; the depthwise non-spatial uses BLOCK_W
-                 * independent w positions iterated outside. We mirror the Python scf_for_iter
-                 * path from the task description which has an inner w_out loop. */
-                for(w_out = 0; w_out < BLOCK_W; ++w_out)
+                rocke_value_t* w_pos;
                 {
-                    rocke_value_t* w_pos
-                        = rocke_b_add(b, ctx->q_tile_start, rocke_b_const_i32(b, w_out));
+                    rocke_value_t* cwo = rocke_b_const_i32(b, w_out);
+                    w_pos = rocke_b_add(b, ctx->q_tile_start, cwo);
+                }
 
+                for(s_const = 0; s_const < KW; ++s_const)
+                {
+                    rocke_value_t* a_off = NULL;
+                    rocke_value_t* valid = NULL;
+                    rocke_value_t* ok;
+                    rocke_value_t* safe_off;
+                    rocke_value_t* a_h;
+                    rocke_value_t* a_f32;
+                    const char* off_names[5];
+                    rocke_value_t* off_vals[5];
+
+                    off_names[0] = "n";
+                    off_vals[0] = ctx->n;
+                    off_names[1] = "y_iter";
+                    off_vals[1] = y_j;
                     off_names[2] = "wo";
                     off_vals[2] = w_pos;
+                    off_names[3] = "s_off";
+                    off_vals[3] = rocke_b_const_i32(b, s_const);
+                    off_names[4] = "c";
+                    off_vals[4] = ctx->ch;
                     rocke_transforms_descriptor_offset(
                         b, ctx->a_desc, off_names, off_vals, 5, &a_off, &valid);
 

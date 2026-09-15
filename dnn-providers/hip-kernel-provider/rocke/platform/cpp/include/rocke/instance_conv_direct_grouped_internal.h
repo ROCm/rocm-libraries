@@ -120,6 +120,7 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* c_cpg; /* const_i32(cpg)                       */
     rocke_value_t* c_kpg; /* const_i32(kpg)                       */
     rocke_value_t* c_W; /* const_i32(W)                         */
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg; /* const_i32(BLOCK_GROUPS * cpg)        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                         */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                 */
@@ -413,6 +414,7 @@ typedef struct rocke_dconv_8c_ctx
     rocke_value_t* c_cpg;
     rocke_value_t* c_kpg;
     rocke_value_t* c_W;
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
@@ -512,6 +514,7 @@ typedef struct rocke_dconv_32c_ctx
     rocke_value_t* c_cpg;
     rocke_value_t* c_kpg;
     rocke_value_t* c_W;
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
@@ -600,7 +603,8 @@ typedef struct rocke_dconv_dw_ctx
 
     rocke_value_t* c0;
     rocke_value_t* c_wave;
-    rocke_value_t* c_W;
+    rocke_value_t* c_W; /* const_i32(Wo) — output width          */
+    rocke_value_t* c_groups; /* const_i32(groups)                     */
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
     rocke_value_t* zero_f32;

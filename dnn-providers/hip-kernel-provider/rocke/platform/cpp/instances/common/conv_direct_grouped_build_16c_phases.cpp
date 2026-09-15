@@ -406,11 +406,13 @@ void rocke_dconv16c_build_descriptors(rocke_dconv_16c_ctx_t* ctx)
             xforms[0]
                 = rocke_embed_bounded(b, h_upper, 1, "h", h_strides, -ctx->p.PAD, 0, ctx->p.H);
         }
-        /* embed(upper=("q_pos","W_lds_pos"), into="w", strides=(1,1),
+        /* embed(upper=("q_pos","W_lds_pos"), into="w", strides=(stride,1),
          *       offset=-PAD, lo=0, hi=W) */
         {
             static const char* const w_upper[2] = {"q_pos", "W_lds_pos"};
-            int w_strides[2] = {1, 1};
+            int w_strides[2];
+            w_strides[0] = ctx->p.stride;
+            w_strides[1] = 1;
             xforms[1]
                 = rocke_embed_bounded(b, w_upper, 2, "w", w_strides, -ctx->p.PAD, 0, ctx->p.W);
         }

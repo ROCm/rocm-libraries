@@ -179,12 +179,12 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
 
     ok, reason = is_valid_spec(spec, arch=arch)
     if not ok:
-        return False, f"invalid spec (shapes should be pre-validated): {reason}"
+        return False, f"skip {reason}"
 
     try:
         kernel = build_direct_conv(spec, arch=arch)
     except ValueError as e:
-        return False, f"build failed (shapes should be pre-validated): {e}"
+        return False, f"skip build failed: {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)

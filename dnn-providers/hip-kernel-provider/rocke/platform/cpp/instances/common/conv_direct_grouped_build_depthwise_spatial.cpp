@@ -136,6 +136,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     p = &spec->problem;
     WAVE = spec->wave_size;
     BLOCK_WAVES = spec->block_waves;
+    (void)BLOCK_WAVES;
     THREADS = rocke_direct_depthwise_spatial_threads_per_block(spec);
     n_w = rocke_direct_depthwise_spatial_n_w_per_wave(spec);
     BLOCK_W = rocke_direct_depthwise_spatial_block_w(spec);
@@ -196,11 +197,16 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     bx = rocke_b_block_id_x(bld);
     n = rocke_b_block_id_z(bld);
 
-    /* q_out = bx*BLOCK_W + wave_id*n_w + w_in_wave */
-    q_out = rocke_b_add(
-        bld,
-        rocke_b_mul(bld, bx, rocke_b_const_i32(bld, BLOCK_W)),
-        rocke_b_add(bld, rocke_b_mul(bld, wave_id, rocke_b_const_i32(bld, n_w)), w_in_wave));
+    /* q_out = bx*BLOCK_W + wave_id*n_w + w_in_wave
+     * Force Python left-to-right: const(BLOCK_W), mul, const(n_w), mul, add, add. */
+    {
+        rocke_value_t* c_bw = rocke_b_const_i32(bld, BLOCK_W);
+        rocke_value_t* mul_bx = rocke_b_mul(bld, bx, c_bw);
+        rocke_value_t* c_nw = rocke_b_const_i32(bld, n_w);
+        rocke_value_t* mul_wv = rocke_b_mul(bld, wave_id, c_nw);
+        rocke_value_t* inner = rocke_b_add(bld, mul_wv, w_in_wave);
+        q_out = rocke_b_add(bld, mul_bx, inner);
+    }
 
     /* Guard: wasted threads when groups * n_w < wave_size */
     w_valid = rocke_b_cmp_lt(bld, w_in_wave, rocke_b_const_i32(bld, n_w));
@@ -397,7 +403,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         int j;
 
         {
-            char(*name_store)[16] = (char(*)[16])alloca((size_t)num_iargs * 16 * sizeof(char));
+            char(*name_store)[32] = (char(*)[32])alloca((size_t)num_iargs * 32 * sizeof(char));
             int kh;
 
             iargs = (rocke_iter_arg_t*)alloca((size_t)num_iargs * sizeof(rocke_iter_arg_t));
@@ -405,7 +411,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             for(kh = 0; kh < KH; ++kh)
             {
-                snprintf(name_store[kh], 16, "sp_acc_%d", kh);
+                snprintf(name_store[kh], 32, "sp_acc_%d", kh);
                 iargs[kh].name = name_store[kh];
                 iargs[kh].init = zero_f32;
             }
