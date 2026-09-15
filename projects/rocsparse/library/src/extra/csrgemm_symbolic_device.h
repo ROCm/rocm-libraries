@@ -331,7 +331,10 @@ namespace rocsparse
                                              J* __restrict__ group_size,
                                              uint32_t shared_mem_optin)
     {
-        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        // The induction variable must stay 64-bit: the increment that exits the loop
+        // below overshoots m by up to hipGridDim_x * BLOCKSIZE, which can be outside
+        // the range of J even when m itself is not.
+        int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Shared memory for block reduction
         __shared__ J sdata[BLOCKSIZE * GROUPS];
@@ -385,7 +388,10 @@ namespace rocsparse
                                              int* __restrict__ workspace,
                                              uint32_t shared_mem_optin)
     {
-        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+        // The induction variable must stay 64-bit: the increment that exits the loop
+        // below overshoots m by up to hipGridDim_x * BLOCKSIZE, which can be outside
+        // the range of J even when m itself is not.
+        int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Shared memory for block reduction
         __shared__ J sdata[BLOCKSIZE * GROUPS];
@@ -465,7 +471,11 @@ namespace rocsparse
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
-        J row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+
+        // The induction variable must stay 64-bit: the increment that exits the loop
+        // below overshoots m by up to hipGridDim_x * BLOCKSIZE, which can be outside
+        // the range of J even when m itself is not.
+        int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         // Initialize local maximum
         J local_max = 0;
