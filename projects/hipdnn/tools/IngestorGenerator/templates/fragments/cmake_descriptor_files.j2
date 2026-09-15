@@ -42,8 +42,10 @@
     {{ slug }}/{{ slug }}.uhd.json
 {% endif %}
     {{ slug }}/kernel_dtype_matches_graph.umd.json
+{% for stem in emitted.kdp_stems %}
+    {{ slug }}/{{ stem }}.kdp.json
+{% endfor %}
 {% for pack in config.packs %}
-    {{ slug }}/{{ config.kdp_stem(pack) }}.kdp.json
 {% if config.is_multi_pack %}
     {{ slug }}/operation_is_{{ pack.discriminator }}.umd.json
 {% endif %}

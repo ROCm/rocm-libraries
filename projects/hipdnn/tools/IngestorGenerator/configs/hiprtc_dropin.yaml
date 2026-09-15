@@ -60,6 +60,13 @@ packs:
       # bool as 1/0, int as decimal, string verbatim; float and int_list are
       # refused because neither has one right spelling.
       #
+      # `metadata.dtype` carries the FLATBUFFERS ENUM spelling -- FLOAT, HALF --
+      # and not the C++ type spelling. A kernel-scoped dtype matcher compares this
+      # value to `EnumNameDataType(<the graph's dtype>)`, so `float` or `_Float16`
+      # matches nothing: the kernel is filtered out of every graph, silently,
+      # with no error at generation, at load or at plan time. Copy the spellings
+      # your own pack's matcher compares against, not these names' C++ cousins.
+      #
       # Both kernels restate `defines` in full: a kernel's own `kernel_source`
       # keys replace the pack's `kernel_defaults`, key for key, rather than
       # merging into them.
@@ -74,7 +81,7 @@ packs:
             SCALE_ADD_BLOCK_SIZE: "$kernel.block_size"
         metadata:
           block_size: 64
-          dtype: float
+          dtype: FLOAT
         priority: 0
       - name: scale_add_hiprtc.f16_block256
         kernel_source:
@@ -87,22 +94,12 @@ packs:
             SCALE_ADD_BLOCK_SIZE: "$kernel.block_size"
         metadata:
           block_size: 256
-          dtype: _Float16
+          dtype: HALF
         priority: 0
 
-# As in scale_add.yaml, every field is matcher-only and `metadata_fields` is
-# empty -- and here that needs saying out loud, because `dtype` and `block_size`
-# DO reach the compiler through `defines`.
-#
-# `metadata_fields` does not mean "reached the compiler". It means "can be read
-# back off the hydrated builder object a downstream agreement check calls", and
-# each entry owes a `bindings` accessor naming that attribute or method. The
-# hipRTC path hydrates no builder: the specialization is a -D flag on a compile
-# command, and the descriptor already states it verbatim in `defines`, where a
-# reader sees it without importing a producer. So there is nothing to bind, and
-# the honest declaration is the empty one.
-specialization:
-  metadata_fields: []
-  matcher_only_fields: [block_size, dtype]
-  bindings: {}
-  vocabulary: {}
+# No `specialization` block: a drop-in emits no `provenance`, so there is nothing
+# for one to declare. The block exists for the packaged and rocKE paths, where a
+# receiving machine has only the shipped contract to check a binary's
+# specialization against. A hipRTC kernel is specialized by the `-D` flags the
+# descriptor already states verbatim in `defines`, where a reader sees them
+# without importing a producer.
