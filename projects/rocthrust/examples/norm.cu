@@ -59,7 +59,7 @@ int main()
 
   // setup arguments
   square<float> unary_op;
-  thrust::plus<float> binary_op;
+  _THRUST_STD::plus<float> binary_op;
   float init = 0;
 
   // compute norm

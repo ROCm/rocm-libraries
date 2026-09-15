@@ -36,6 +36,10 @@
 #  include <type_traits>
 #endif
 
+#if THRUST_HAS_INCLUDE(<cuda/std/__new/device_new.h>)
+#  include <cuda/std/__new/device_new.h>
+#endif
+
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -54,7 +58,6 @@ struct uninitialized_copy_functor
   {
     const InputType& in = thrust::get<0>(t);
     OutputType& out     = thrust::get<1>(t);
-
     ::new (static_cast<void*>(&out)) OutputType(in);
   } // end operator()()
 }; // end uninitialized_copy_functor
@@ -72,12 +75,12 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy(
   using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator begin = thrust::make_zip_iterator(thrust::make_tuple(first, result));
+  ZipIterator begin = thrust::make_zip_iterator(first, result);
   ZipIterator end   = begin;
 
   // get a zip_iterator pointing to the end
-  const thrust::detail::it_difference_t<InputIterator> n = thrust::distance(first, last);
-  thrust::advance(end, n);
+  const thrust::detail::it_difference_t<InputIterator> n = _THRUST_STD::distance(first, last);
+  _THRUST_STD::advance(end, n);
 
   // create a functor
   using InputType  = thrust::detail::it_value_t<InputIterator>;
@@ -117,7 +120,7 @@ THRUST_HOST_DEVICE ForwardIterator uninitialized_copy_n(
   using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
   using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
-  ZipIterator zipped_first = thrust::make_zip_iterator(thrust::make_tuple(first, result));
+  ZipIterator zipped_first = thrust::make_zip_iterator(first, result);
 
   // create a functor
   using InputType  = thrust::detail::it_value_t<InputIterator>;

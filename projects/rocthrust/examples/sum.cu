@@ -45,7 +45,7 @@ int main(void)
   int init = 0;
 
   // binary operation used to reduce values
-  thrust::plus<int> binary_op;
+  _THRUST_STD::plus<int> binary_op;
 
   // compute sum on the device
   int sum = thrust::reduce(d_vec.begin(), d_vec.end(), init, binary_op);

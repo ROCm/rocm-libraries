@@ -28,7 +28,7 @@
 
 #include <thrust/detail/type_traits.h>
 
-#include <utility> // for std::declval
+#include _THRUST_STD_INCLUDE(utility) // for std::declval
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif

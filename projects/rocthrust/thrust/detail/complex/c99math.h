@@ -21,7 +21,7 @@
 
 #include <thrust/detail/complex/math_private.h>
 
-#include <cmath>
+#include _THRUST_STD_INCLUDE(cmath)
 
 #include <math.h>
 
@@ -72,12 +72,12 @@ inline THRUST_HOST_DEVICE double infinity<double>()
 #if defined _MSC_VER
 THRUST_HOST_DEVICE inline int isinf(float x)
 {
-  return std::abs(x) == infinity<float>();
+  return _THRUST_STD::abs(x) == infinity<float>();
 }
 
 THRUST_HOST_DEVICE inline int isinf(double x)
 {
-  return std::abs(x) == infinity<double>();
+  return _THRUST_STD::abs(x) == infinity<double>();
 }
 
 THRUST_HOST_DEVICE inline int isnan(float x)
@@ -210,7 +210,7 @@ log1pf(float x)
 
 inline float hypotf(float x, float y)
 {
-  return abs(std::complex<float>(x, y));
+  return abs(::std::complex<float>(x, y));
 }
 
 inline double hypot(double x, double y)

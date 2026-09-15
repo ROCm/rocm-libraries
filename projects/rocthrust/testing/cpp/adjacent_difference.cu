@@ -24,6 +24,12 @@
 
 struct detect_wrong_difference
 {
+  using difference_type   = void;
+  using value_type        = long long;
+  using pointer           = void;
+  using reference         = detect_wrong_difference;
+  using iterator_category = _THRUST_STD::output_iterator_tag;
+
   bool* flag;
 
   THRUST_HOST_DEVICE detect_wrong_difference operator++() const
@@ -58,7 +64,7 @@ void TestAdjacentDifferenceWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> all_differences_correct = thrust::device_malloc<bool>(1);
   *all_differences_correct                         = true;

@@ -132,10 +132,10 @@ int main(void)
 
   ////
   // combine transform_iterator with another transform_iterator
-  using NegatedClampedCountingIterator = thrust::transform_iterator<thrust::negate<int>, ClampedCountingIterator>;
+  using NegatedClampedCountingIterator = thrust::transform_iterator<_THRUST_STD::negate<int>, ClampedCountingIterator>;
 
-  NegatedClampedCountingIterator ncs_begin = thrust::make_transform_iterator(cs_begin, thrust::negate<int>());
-  NegatedClampedCountingIterator ncs_end   = thrust::make_transform_iterator(cs_end, thrust::negate<int>());
+  NegatedClampedCountingIterator ncs_begin = thrust::make_transform_iterator(cs_begin, _THRUST_STD::negate<int>());
+  NegatedClampedCountingIterator ncs_end   = thrust::make_transform_iterator(cs_end, _THRUST_STD::negate<int>());
 
   print_range("negated sequence ", ncs_begin, ncs_end);
 

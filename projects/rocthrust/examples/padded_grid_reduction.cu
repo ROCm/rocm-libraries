@@ -30,8 +30,9 @@
 #include <cmath>
 #include <iomanip>
 
-#include "include/host_device.h"
 #include <float.h>
+
+#include "include/host_device.h"
 
 // This example computes the minimum and maximum values
 // over a padded grid.  The padded values are not considered
@@ -131,7 +132,7 @@ int main(void)
   reduce_tuple<int, float> binary_op; // reduction operator
 
   result_type result = thrust::transform_reduce(
-    thrust::make_zip_iterator(thrust::make_tuple(thrust::counting_iterator<int>(0), data.begin())),
+    thrust::make_zip_iterator(thrust::counting_iterator<int>(0), data.begin()),
     thrust::make_zip_iterator(thrust::make_tuple(thrust::counting_iterator<int>(0), data.begin())) + data.size(),
     unary_op,
     init,

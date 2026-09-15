@@ -26,6 +26,7 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
@@ -54,19 +55,16 @@ __THRUST_DEFINE_HAS_NESTED_TYPE(is_wrapped_reference, wrapped_reference_hint)
 // wrapped reference-like things which aren't strictly wrapped references
 // (e.g. tuples of wrapped references) are considered unwrappable
 template <typename T>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool can_unwrap = is_wrapped_reference<T>::value;
 
 // specialize is_unwrappable
 // a tuple is_unwrappable if any of its elements is_unwrappable
 template <typename... Ts>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool can_unwrap<tuple<Ts...>> = (can_unwrap<Ts> || ...);
 
 // specialize is_unwrappable
 // a tuple_of_iterator_references is_unwrappable if any of its elements is_unwrappable
 template <typename... Ts>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool can_unwrap<tuple_of_iterator_references<Ts...>> = (can_unwrap<Ts> || ...);
 
 namespace raw_reference_detail
@@ -82,7 +80,7 @@ struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_wrapped_reference<_THRU
 {};
 
 template <typename T>
-struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_proxy_reference<_THRUST_STD::remove_cv_t<T>>::value>>
+struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_proxy_reference_v<_THRUST_STD::remove_cv_t<T>>>>
 {
   using type = T;
 };
@@ -110,7 +108,8 @@ namespace raw_reference_detail
 
 // wrapped references are unwrapped using raw_reference, otherwise, return T
 template <typename T>
-struct raw_reference_tuple_helper : eval_if<can_unwrap<_THRUST_STD::remove_cv_t<T>>, raw_reference<T>, identity_<T>>
+struct raw_reference_tuple_helper
+    : eval_if<can_unwrap<_THRUST_STD::remove_cv_t<T>>, raw_reference<T>, ::internal::type_identity<T>>
 {};
 
 // recurse on tuples
@@ -166,7 +165,7 @@ THRUST_HOST_DEVICE typename detail::raw_reference<const T>::type raw_reference_c
   return *thrust::raw_pointer_cast(&ref);
 }
 
-template <typename T, _THRUST_STD::enable_if_t<detail::is_proxy_reference<_THRUST_STD::remove_cv_t<T>>::value, int> = 0>
+template <typename T, _THRUST_STD::enable_if_t<detail::is_proxy_reference_v<_THRUST_STD::remove_cv_t<T>>, int> = 0>
 THRUST_HOST_DEVICE typename detail::raw_reference<T>::type raw_reference_cast(T&& t)
 {
   return t;

@@ -32,6 +32,7 @@
 #endif // no system header
 
 #include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/memory_wrapper.h> // for ::new
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/static_assert.h>
@@ -44,6 +45,24 @@
 #  include <type_traits>
 #endif
 
+// guarded by THRUST_HAS_INCLUDE rather than _THRUST_HAS_DEVICE_SYSTEM_STD: this is a CUDA-only libcu++ header with
+// no confirmed libhipcxx counterpart (see thrust/iterator/iterator_traits.h for the same guard rationale)
+#if THRUST_HAS_INCLUDE(<cuda/__iterator/discard_iterator.h>)
+#  include <cuda/__iterator/discard_iterator.h>
+#endif
+
+#if THRUST_HAS_INCLUDE(<cuda/__iterator/tabulate_output_iterator.h>)
+#  include <cuda/__iterator/tabulate_output_iterator.h>
+#endif
+
+#if THRUST_HAS_INCLUDE(<cuda/__iterator/transform_output_iterator.h>)
+#  include <cuda/__iterator/transform_output_iterator.h>
+#endif
+
+#if THRUST_HAS_INCLUDE(<cuda/std/__new/device_new.h>)
+#  include <cuda/std/__new/device_new.h>
+#endif
+
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
@@ -53,10 +72,6 @@ template <typename Predicate, typename IntegralType>
 struct predicate_to_integral
 {
   Predicate pred;
-
-  THRUST_HOST_DEVICE explicit predicate_to_integral(const Predicate& pred)
-      : pred(pred)
-  {}
 
   template <typename T>
   THRUST_HOST_DEVICE IntegralType operator()(const T& x)
@@ -71,6 +86,8 @@ struct equal_to_value
 {
   T2 rhs;
 
+  // need this ctor for nvcc 12.0 + clang14 to make copy ctor of not_fn_t<equal_to_value> work. Check test:
+  // thrust.cpp.cuda.cpp20.test.remove.
   THRUST_HOST_DEVICE equal_to_value(const T2& rhs)
       : rhs(rhs)
   {}
@@ -85,78 +102,57 @@ struct equal_to_value
 template <typename Predicate>
 struct tuple_binary_predicate
 {
-  using result_type = bool;
-
-  THRUST_HOST_DEVICE tuple_binary_predicate(const Predicate& p)
-      : pred(p)
-  {}
-
   template <typename Tuple>
   THRUST_HOST_DEVICE bool operator()(const Tuple& t) const
   {
-    return pred(thrust::get<0>(t), thrust::get<1>(t));
+    return pred(_THRUST_STD::get<0>(t), _THRUST_STD::get<1>(t));
   }
 
   mutable Predicate pred;
 };
 
-template <typename Predicate>
-struct tuple_not_binary_predicate
-{
-  using result_type = bool;
+// We need to mark proxy iterators as such
+#if THRUST_HAS_INCLUDE(<cuda/__iterator/discard_iterator.h>)
+template <>
+inline constexpr bool is_proxy_reference_v<::cuda::discard_iterator::__discard_proxy> = true;
+#endif // THRUST_HAS_INCLUDE(<cuda/__iterator/discard_iterator.h>)
 
-  THRUST_HOST_DEVICE tuple_not_binary_predicate(const Predicate& p)
-      : pred(p)
-  {}
+#if THRUST_HAS_INCLUDE(<cuda/__iterator/tabulate_output_iterator.h>)
+template <class Fn, class Index>
+inline constexpr bool is_proxy_reference_v<::cuda::__tabulate_proxy<Fn, Index>> = true;
+#endif // THRUST_HAS_INCLUDE(<cuda/__iterator/tabulate_output_iterator.h>)
 
-  template <typename Tuple>
-  THRUST_HOST_DEVICE bool operator()(const Tuple& t) const
-  {
-    return !pred(thrust::get<0>(t), thrust::get<1>(t));
-  }
-
-  mutable Predicate pred;
-};
+#if THRUST_HAS_INCLUDE(<cuda/__iterator/transform_output_iterator.h>)
+template <class Iter, class Fn>
+inline constexpr bool is_proxy_reference_v<::cuda::__transform_output_proxy<Iter, Fn>> = true;
+#endif // THRUST_HAS_INCLUDE(<cuda/__iterator/transform_output_iterator.h>)
 
 template <typename T>
-struct is_non_const_reference
-    : ::internal::_And<thrust::detail::not_<_THRUST_STD::is_const<T>>,
-                       _THRUST_STD::disjunction<_THRUST_STD::is_reference<T>, thrust::detail::is_proxy_reference<T>>>
-{};
+inline constexpr bool is_non_const_reference_v =
+  !_THRUST_STD::is_const_v<T> && (_THRUST_STD::is_reference_v<T> || detail::is_proxy_reference_v<T>);
 
 template <typename T>
-struct is_tuple_of_iterator_references : thrust::detail::false_type
-{};
+inline constexpr bool is_tuple_of_iterator_references_v = false;
 
 template <typename... Ts>
-struct is_tuple_of_iterator_references<thrust::detail::tuple_of_iterator_references<Ts...>> : thrust::detail::true_type
-{};
+inline constexpr bool is_tuple_of_iterator_references_v<tuple_of_iterator_references<Ts...>> = true;
 
 // use this enable_if to avoid assigning to temporaries in the transform functors below
 // XXX revisit this problem with c++11 perfect forwarding
 template <typename T>
-struct enable_if_non_const_reference_or_tuple_of_iterator_references
-    : _THRUST_STD::enable_if<is_non_const_reference<T>::value || is_tuple_of_iterator_references<T>::value>
-{};
+using enable_if_assignable_ref =
+  _THRUST_STD::enable_if_t<is_non_const_reference_v<T> || is_tuple_of_iterator_references_v<T>, int>;
 
 template <typename UnaryFunction>
 struct unary_transform_functor
 {
-  using result_type = void;
-
   UnaryFunction f;
 
-  THRUST_HOST_DEVICE unary_transform_functor(UnaryFunction f)
-      : f(f)
-  {}
-
   THRUST_EXEC_CHECK_DISABLE
-  template <typename Tuple>
-  inline THRUST_HOST_DEVICE typename enable_if_non_const_reference_or_tuple_of_iterator_references<
-    typename thrust::tuple_element<1, Tuple>::type>::type
-  operator()(Tuple t)
+  template <typename Tuple, enable_if_assignable_ref<_THRUST_STD::tuple_element_t<1, Tuple>> = 0>
+  THRUST_HOST_DEVICE void operator()(Tuple t)
   {
-    thrust::get<1>(t) = f(thrust::get<0>(t));
+    _THRUST_STD::get<1>(t) = f(_THRUST_STD::get<0>(t));
   }
 };
 
@@ -165,17 +161,11 @@ struct binary_transform_functor
 {
   BinaryFunction f;
 
-  THRUST_HOST_DEVICE binary_transform_functor(BinaryFunction f)
-      : f(f)
-  {}
-
   THRUST_EXEC_CHECK_DISABLE
-  template <typename Tuple>
-  inline THRUST_HOST_DEVICE typename enable_if_non_const_reference_or_tuple_of_iterator_references<
-    typename thrust::tuple_element<2, Tuple>::type>::type
-  operator()(Tuple t)
+  template <typename Tuple, enable_if_assignable_ref<_THRUST_STD::tuple_element_t<2, Tuple>> = 0>
+  THRUST_HOST_DEVICE void operator()(Tuple t)
   {
-    thrust::get<2>(t) = f(thrust::get<0>(t), thrust::get<1>(t));
+    _THRUST_STD::get<2>(t) = f(_THRUST_STD::get<0>(t), _THRUST_STD::get<1>(t));
   }
 };
 
@@ -185,20 +175,13 @@ struct unary_transform_if_functor
   UnaryFunction unary_op;
   Predicate pred;
 
-  THRUST_HOST_DEVICE unary_transform_if_functor(UnaryFunction unary_op, Predicate pred)
-      : unary_op(unary_op)
-      , pred(pred)
-  {}
-
   THRUST_EXEC_CHECK_DISABLE
-  template <typename Tuple>
-  inline THRUST_HOST_DEVICE typename enable_if_non_const_reference_or_tuple_of_iterator_references<
-    typename thrust::tuple_element<1, Tuple>::type>::type
-  operator()(Tuple t)
+  template <typename Tuple, enable_if_assignable_ref<_THRUST_STD::tuple_element_t<1, Tuple>> = 0>
+  THRUST_HOST_DEVICE void operator()(Tuple t)
   {
-    if (pred(thrust::get<0>(t)))
+    if (pred(_THRUST_STD::get<0>(t)))
     {
-      thrust::get<1>(t) = unary_op(thrust::get<0>(t));
+      _THRUST_STD::get<1>(t) = unary_op(_THRUST_STD::get<0>(t));
     }
   }
 }; // end unary_transform_if_functor
@@ -209,20 +192,13 @@ struct unary_transform_if_with_stencil_functor
   UnaryFunction unary_op;
   Predicate pred;
 
-  THRUST_HOST_DEVICE unary_transform_if_with_stencil_functor(UnaryFunction unary_op, Predicate pred)
-      : unary_op(unary_op)
-      , pred(pred)
-  {}
-
   THRUST_EXEC_CHECK_DISABLE
-  template <typename Tuple>
-  inline THRUST_HOST_DEVICE typename enable_if_non_const_reference_or_tuple_of_iterator_references<
-    typename thrust::tuple_element<2, Tuple>::type>::type
-  operator()(Tuple t)
+  template <typename Tuple, enable_if_assignable_ref<_THRUST_STD::tuple_element_t<2, Tuple>> = 0>
+  THRUST_HOST_DEVICE void operator()(Tuple t)
   {
-    if (pred(thrust::get<1>(t)))
+    if (pred(_THRUST_STD::get<1>(t)))
     {
-      thrust::get<2>(t) = unary_op(thrust::get<0>(t));
+      _THRUST_STD::get<2>(t) = unary_op(_THRUST_STD::get<0>(t));
     }
   }
 }; // end unary_transform_if_with_stencil_functor
@@ -233,20 +209,13 @@ struct binary_transform_if_functor
   BinaryFunction binary_op;
   Predicate pred;
 
-  THRUST_HOST_DEVICE binary_transform_if_functor(BinaryFunction binary_op, Predicate pred)
-      : binary_op(binary_op)
-      , pred(pred)
-  {}
-
   THRUST_EXEC_CHECK_DISABLE
-  template <typename Tuple>
-  inline THRUST_HOST_DEVICE typename enable_if_non_const_reference_or_tuple_of_iterator_references<
-    typename thrust::tuple_element<3, Tuple>::type>::type
-  operator()(Tuple t)
+  template <typename Tuple, enable_if_assignable_ref<_THRUST_STD::tuple_element_t<3, Tuple>> = 0>
+  THRUST_HOST_DEVICE void operator()(Tuple t)
   {
-    if (pred(thrust::get<2>(t)))
+    if (pred(_THRUST_STD::get<2>(t)))
     {
-      thrust::get<3>(t) = binary_op(thrust::get<0>(t), thrust::get<1>(t));
+      _THRUST_STD::get<3>(t) = binary_op(_THRUST_STD::get<0>(t), _THRUST_STD::get<1>(t));
     }
   }
 }; // end binary_transform_if_functor
@@ -273,8 +242,8 @@ struct device_destroy_functor
 template <typename System, typename T>
 struct destroy_functor
     : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
-                              thrust::detail::identity_<host_destroy_functor<T>>,
-                              thrust::detail::identity_<device_destroy_functor<T>>>
+                              ::internal::type_identity<host_destroy_functor<T>>,
+                              ::internal::type_identity<device_destroy_functor<T>>>
 {};
 
 template <typename T>
@@ -282,21 +251,22 @@ struct fill_functor
 {
   T exemplar;
 
+  // explicit declaration is needed to avoid an exec check warning
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE fill_functor(const T& _exemplar)
       : exemplar(_exemplar)
   {}
 
+  // explicit declaration is needed to avoid an exec check warning
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE fill_functor(const fill_functor& other)
-      : exemplar(other.exemplar)
-  {}
+  fill_functor(const fill_functor& other) = default;
+
+  // explicit declaration is needed to avoid an exec check warning
+  THRUST_EXEC_CHECK_DISABLE
+  ~fill_functor() = default;
 
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE ~fill_functor() {}
-
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE T operator()(void) const
+  THRUST_HOST_DEVICE T operator()() const
   {
     return exemplar;
   }
@@ -307,18 +277,19 @@ struct uninitialized_fill_functor
 {
   T exemplar;
 
+  // explicit declaration is needed to avoid an exec check warning
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE uninitialized_fill_functor(const T& x)
       : exemplar(x)
   {}
 
+  // explicit declaration is needed to avoid an exec check warning
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE uninitialized_fill_functor(const uninitialized_fill_functor& other)
-      : exemplar(other.exemplar)
-  {}
+  uninitialized_fill_functor(const uninitialized_fill_functor& other) = default;
 
+  // explicit declaration is needed to avoid an exec check warning
   THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE ~uninitialized_fill_functor() {}
+  ~uninitialized_fill_functor() = default;
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE void operator()(T& x)
@@ -327,40 +298,15 @@ struct uninitialized_fill_functor
   } // end operator()()
 }; // end uninitialized_fill_functor
 
-// this predicate tests two two-element tuples
-// we first use a Compare for the first element
-// if the first elements are equivalent, we use
-// < for the second elements
-template <typename Compare>
-struct compare_first_less_second
-{
-  compare_first_less_second(Compare c)
-      : comp(c)
-  {}
-
-  template <typename T1, typename T2>
-  THRUST_HOST_DEVICE bool operator()(T1 lhs, T2 rhs)
-  {
-    return comp(thrust::get<0>(lhs), thrust::get<0>(rhs))
-        || (!comp(thrust::get<0>(rhs), thrust::get<0>(lhs)) && thrust::get<1>(lhs) < thrust::get<1>(rhs));
-  }
-
-  Compare comp;
-}; // end compare_first_less_second
-
 template <typename Compare>
 struct compare_first
 {
   Compare comp;
 
-  THRUST_HOST_DEVICE compare_first(Compare comp)
-      : comp(comp)
-  {}
-
   template <typename Tuple1, typename Tuple2>
   THRUST_HOST_DEVICE bool operator()(const Tuple1& x, const Tuple2& y)
   {
-    return comp(thrust::raw_reference_cast(thrust::get<0>(x)), thrust::raw_reference_cast(thrust::get<0>(y)));
+    return comp(thrust::raw_reference_cast(_THRUST_STD::get<0>(x)), thrust::raw_reference_cast(_THRUST_STD::get<0>(y)));
   }
 }; // end compare_first
 

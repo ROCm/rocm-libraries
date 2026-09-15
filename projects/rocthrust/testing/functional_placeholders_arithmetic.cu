@@ -65,11 +65,11 @@ THRUST_DIAG_SUPPRESS_MSVC(4244) // warning C4244: '=': conversion from 'int' to 
   VectorUnitTest<TestFunctionalPlaceholders##name, type_list, thrust::host_vector, std::allocator>                \
     TestFunctionalPlaceholders##name##HostInstance;
 
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Plus, +, thrust::plus, ThirtyTwoBitTypes);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Minus, -, thrust::minus, ThirtyTwoBitTypes);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Multiplies, *, thrust::multiplies, ThirtyTwoBitTypes);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Divides, /, thrust::divides, ThirtyTwoBitTypes);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Modulus, %, thrust::modulus, SmallIntegralTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Plus, +, _THRUST_STD::plus, ThirtyTwoBitTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Minus, -, _THRUST_STD::minus, ThirtyTwoBitTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Multiplies, *, _THRUST_STD::multiplies, ThirtyTwoBitTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Divides, /, _THRUST_STD::divides, ThirtyTwoBitTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Modulus, %, _THRUST_STD::modulus, SmallIntegralTypes);
 
 #define UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(name, reference_operator, functor)             \
   template <typename Vector>                                                              \
@@ -100,6 +100,6 @@ struct unary_plus_reference
 };
 
 UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(UnaryPlus, +, unary_plus_reference);
-UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(Negate, -, thrust::negate);
+UNARY_FUNCTIONAL_PLACEHOLDERS_TEST(Negate, -, _THRUST_STD::negate);
 
 THRUST_DIAG_POP

@@ -34,7 +34,7 @@
 #include <thrust/detail/reference.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-#include <type_traits>
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -88,7 +88,7 @@ using pointer = thrust::pointer<T, thrust::hip_rocprim::tag, thrust::tagged_refe
  *  \see raw_pointer_cast
  */
 template <typename T>
-using universal_pointer = thrust::pointer<T, thrust::hip_rocprim::tag, typename std::add_lvalue_reference<T>::type>;
+using universal_pointer = thrust::pointer<T, thrust::hip_rocprim::tag, _THRUST_STD::add_lvalue_reference_t<T>>;
 
 /*! \p hip::reference is a wrapped reference to an object stored in memory
  *  accessible by the \p hip system. \p hip::reference is the type of the

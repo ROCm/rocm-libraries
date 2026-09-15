@@ -91,9 +91,9 @@ struct rebind_vector<thrust::universal_vector<T, Allocator>, U>
 THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244) // warning C4244: '=': conversion from 'int' to '_Ty', possible loss of data
 
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitAnd, &, thrust::bit_and, SmallIntegralTypes);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitOr, |, thrust::bit_or, SmallIntegralTypes);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitXor, ^, thrust::bit_xor, SmallIntegralTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitAnd, &, _THRUST_STD::bit_and, SmallIntegralTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitOr, |, _THRUST_STD::bit_or, SmallIntegralTypes);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(BitXor, ^, _THRUST_STD::bit_xor, SmallIntegralTypes);
 
 template <typename T>
 struct bit_negate_reference

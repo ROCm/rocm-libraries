@@ -68,8 +68,8 @@ struct TestPairScan
     ASSERT_EQUAL_QUIET(h_output, d_output);
 
     // scan with maximum (thrust issue #69)
-    thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), thrust::maximum<P>());
-    thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), thrust::maximum<P>());
+    thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), ::internal::maximum<P>());
+    thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), ::internal::maximum<P>());
     ASSERT_EQUAL_QUIET(h_output, d_output);
 
     // scan with plus
@@ -78,8 +78,8 @@ struct TestPairScan
     ASSERT_EQUAL_QUIET(h_output, d_output);
 
     // scan with maximum (thrust issue #69)
-    thrust::exclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), init, thrust::maximum<P>());
-    thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, thrust::maximum<P>());
+    thrust::exclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), init, ::internal::maximum<P>());
+    thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, ::internal::maximum<P>());
     ASSERT_EQUAL_QUIET(h_output, d_output);
   }
 };

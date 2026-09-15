@@ -15,9 +15,9 @@
  *  limitations under the License.
  */
 
-#include <cuda_runtime_api.h>
-
 #include <thrust/detail/util/align.h>
+
+#include <cuda_runtime_api.h>
 
 #include <unittest/unittest.h>
 

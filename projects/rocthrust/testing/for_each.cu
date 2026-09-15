@@ -360,7 +360,7 @@ void TestForEachWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<unsigned long long> begin(0);
   thrust::counting_iterator<unsigned long long> end = begin + (1ull << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
   thrust::device_ptr<bool> has_executed = thrust::device_malloc<bool>(1);
   *has_executed                         = false;

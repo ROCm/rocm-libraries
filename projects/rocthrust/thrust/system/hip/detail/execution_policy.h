@@ -63,7 +63,7 @@ struct execution_policy<tag> : thrust::execution_policy<tag>
 
 struct tag
     : execution_policy<tag>
-    , detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
+    , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
 {};
 
 template <class Derived>

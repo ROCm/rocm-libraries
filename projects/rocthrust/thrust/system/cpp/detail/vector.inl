@@ -27,7 +27,7 @@
 #endif // no system header
 #include <thrust/system/cpp/vector.h>
 
-#include <utility>
+#include _THRUST_STD_INCLUDE(utility)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -57,7 +57,7 @@ vector<T, Allocator>::vector(const vector& x)
 
 template <typename T, typename Allocator>
 vector<T, Allocator>::vector(vector&& x)
-    : super_t(std::move(x))
+    : super_t(_THRUST_STD::move(x))
 {}
 
 template <typename T, typename Allocator>
@@ -88,22 +88,22 @@ vector<T, Allocator>& vector<T, Allocator>::operator=(const vector& x)
 template <typename T, typename Allocator>
 vector<T, Allocator>& vector<T, Allocator>::operator=(vector&& x)
 {
-  super_t::operator=(std::move(x));
+  super_t::operator=(_THRUST_STD::move(x));
   return *this;
 }
 
 template <typename T, typename Allocator>
-vector<T, Allocator>::vector(std::initializer_list<T> il)
+vector<T, Allocator>::vector(_THRUST_STD::initializer_list<T> il)
     : super_t(il)
 {}
 
 template <typename T, typename Allocator>
-vector<T, Allocator>::vector(std::initializer_list<T> il, const Allocator& alloc)
+vector<T, Allocator>::vector(_THRUST_STD::initializer_list<T> il, const Allocator& alloc)
     : super_t(il, alloc)
 {}
 
 template <typename T, typename Allocator>
-vector<T, Allocator>& vector<T, Allocator>::operator=(std::initializer_list<T> il)
+vector<T, Allocator>& vector<T, Allocator>::operator=(_THRUST_STD::initializer_list<T> il)
 {
   super_t::operator=(il);
   return *this;

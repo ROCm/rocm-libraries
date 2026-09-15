@@ -41,10 +41,10 @@ void TestIsSortedSimple()
   ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 3), true);
   ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 4), false);
 
-  ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 3, thrust::less<T>()), true);
+  ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 3, _THRUST_STD::less<T>()), true);
 
-  ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 1, thrust::greater<T>()), true);
-  ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 4, thrust::greater<T>()), false);
+  ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 1, _THRUST_STD::greater<T>()), true);
+  ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.begin() + 4, _THRUST_STD::greater<T>()), false);
 
   ASSERT_EQUAL(thrust::is_sorted(v.begin(), v.end()), false);
 }

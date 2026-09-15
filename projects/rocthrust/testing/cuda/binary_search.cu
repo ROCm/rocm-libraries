@@ -34,7 +34,7 @@ void TestEqualRangeOnStream()
   cudaStream_t stream = 0;
   result_t result     = thrust::equal_range(thrust::cuda::par.on(stream), input.begin(), input.end(), 5);
 
-  ASSERT_EQUAL(5, thrust::distance(input.begin(), result.first));
-  ASSERT_EQUAL(6, thrust::distance(input.begin(), result.second));
+  ASSERT_EQUAL(5, _THRUST_STD::distance(input.begin(), result.first));
+  ASSERT_EQUAL(6, _THRUST_STD::distance(input.begin(), result.second));
 }
 DECLARE_UNITTEST(TestEqualRangeOnStream);

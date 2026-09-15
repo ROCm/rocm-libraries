@@ -15,11 +15,11 @@
  *  limitations under the License.
  */
 
-#include <cuda_runtime.h>
-
 #include <thrust/system/cuda/memory.h>
 
 #include <numeric>
+
+#include <cuda_runtime.h>
 
 #include <unittest/cuda/testframework.h>
 #include <unittest/testframework.h>

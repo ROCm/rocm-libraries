@@ -30,7 +30,9 @@
 #  pragma system_header
 #endif // no system header
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(iterator)
+#else
 #  include <iterator>
 #endif
 
@@ -39,6 +41,36 @@ THRUST_NAMESPACE_BEGIN
 /*! \addtogroup iterators
  *  \{
  */
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+
+//! deprecated [since 3.1]
+template <typename InputIterator, typename Distance>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::advance instead")
+inline THRUST_HOST_DEVICE constexpr void advance(InputIterator& i, Distance n)
+{
+  _THRUST_STD::advance(i, n);
+}
+
+//! deprecated [since 3.1]
+template <typename InputIterator>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::next instead")
+inline THRUST_HOST_DEVICE constexpr InputIterator
+  next(InputIterator i, typename _THRUST_STD::iterator_traits<InputIterator>::difference_type n = 1)
+{
+  return _THRUST_STD::next(i, n);
+}
+
+//! deprecated [since 3.1]
+template <typename InputIterator>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::prev instead")
+inline THRUST_HOST_DEVICE constexpr InputIterator
+  prev(InputIterator i, typename _THRUST_STD::iterator_traits<InputIterator>::difference_type n = 1)
+{
+  return _THRUST_STD::prev(i, n);
+}
+
+#else
 
 /*! \p advance(i, n) increments the iterator \p i by the distance \p n.
  *  If <tt>n > 0</tt> it is equivalent to executing <tt>++i</tt> \p n
@@ -143,9 +175,13 @@ BidirectionalIterator prev(
 );
 #endif
 
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
+
 /*! \} // end iterators
  */
 
 THRUST_NAMESPACE_END
 
-#include <thrust/detail/advance.inl>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <thrust/detail/advance.inl>
+#endif

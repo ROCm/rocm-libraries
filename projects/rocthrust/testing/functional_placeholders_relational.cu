@@ -66,9 +66,9 @@ struct rebind_vector<thrust::universal_vector<T, Allocator>, U>
   }                                                                                                   \
   DECLARE_VECTOR_UNITTEST(TestFunctionalPlaceholdersBinary##name);
 
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(EqualTo, ==, thrust::equal_to);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(NotEqualTo, !=, thrust::not_equal_to);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Greater, >, thrust::greater);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Less, <, thrust::less);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(GreaterEqual, >=, thrust::greater_equal);
-BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(LessEqual, <=, thrust::less_equal);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(EqualTo, ==, _THRUST_STD::equal_to);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(NotEqualTo, !=, _THRUST_STD::not_equal_to);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Greater, >, _THRUST_STD::greater);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(Less, <, _THRUST_STD::less);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(GreaterEqual, >=, _THRUST_STD::greater_equal);
+BINARY_FUNCTIONAL_PLACEHOLDERS_TEST(LessEqual, <=, _THRUST_STD::less_equal);

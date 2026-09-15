@@ -45,6 +45,7 @@ THRUST_NAMESPACE_END
 #include <thrust/detail/allocator/no_throw_allocator.h>
 #include <thrust/detail/allocator/temporary_allocator.h>
 #include <thrust/detail/contiguous_storage.h>
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/iterator/detail/tagged_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -131,8 +132,8 @@ private:
 template <typename Iterator, typename FromSystem, typename ToSystem>
 struct move_to_system_base
     : public eval_if<_THRUST_STD::is_convertible<FromSystem, ToSystem>::value,
-                     identity_<tagged_iterator_range<Iterator, ToSystem>>,
-                     identity_<temporary_array<thrust::detail::it_value_t<Iterator>, ToSystem>>>
+                     ::internal::type_identity<tagged_iterator_range<Iterator, ToSystem>>,
+                     ::internal::type_identity<temporary_array<thrust::detail::it_value_t<Iterator>, ToSystem>>>
 {};
 
 template <typename Iterator, typename FromSystem, typename ToSystem>

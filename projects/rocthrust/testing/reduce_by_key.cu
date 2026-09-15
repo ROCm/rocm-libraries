@@ -106,8 +106,8 @@ void TestReduceByKeySimple()
     values.begin(),
     output_keys.begin(),
     output_values.begin(),
-    thrust::equal_to<T>(),
-    thrust::plus<T>());
+    _THRUST_STD::equal_to<T>(),
+    _THRUST_STD::plus<T>());
 
   ASSERT_EQUAL(new_last.first - output_keys.begin(), 5);
   output_keys.resize(new_last.first - output_keys.begin());

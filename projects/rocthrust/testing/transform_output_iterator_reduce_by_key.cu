@@ -48,7 +48,7 @@ struct TestTransformOutputIteratorReduceByKey
       thrust::host,
       h_keys.begin(),
       h_keys.end(),
-      thrust::make_transform_iterator(h_values.begin(), thrust::negate<T>()),
+      thrust::make_transform_iterator(h_values.begin(), _THRUST_STD::negate<T>()),
       thrust::discard_iterator<T>{},
       h_result.begin());
     // run on device
@@ -58,7 +58,7 @@ struct TestTransformOutputIteratorReduceByKey
       d_keys.end(),
       d_values.begin(),
       thrust::discard_iterator<T>{},
-      thrust::make_transform_output_iterator(d_result.begin(), thrust::negate<T>()));
+      thrust::make_transform_output_iterator(d_result.begin(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQUAL(h_result, d_result);
   }

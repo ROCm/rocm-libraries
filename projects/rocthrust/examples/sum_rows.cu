@@ -70,8 +70,8 @@ int main(void)
     array.begin(),
     row_indices.begin(),
     row_sums.begin(),
-    thrust::equal_to<int>(),
-    thrust::plus<int>());
+    _THRUST_STD::equal_to<int>(),
+    _THRUST_STD::plus<int>());
 
   // print data
   for (int i = 0; i < R; i++)

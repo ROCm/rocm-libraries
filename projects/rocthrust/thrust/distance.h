@@ -29,13 +29,31 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/iterator/iterator_traits.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(iterator)
+#else
+#  include <thrust/iterator/iterator_traits.h>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup iterators
  *  \{
  */
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+
+//! deprecated [since 3.1]
+template <class InputIter>
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::distance instead")
+THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr typename _THRUST_STD::iterator_traits<InputIter>::difference_type
+  distance(InputIter first, InputIter last)
+{
+  return _THRUST_STD::distance(first, last);
+}
+
+#else
 
 /*! \p distance finds the distance between \p first and \p last, i.e. the
  *  number of times that \p first must be incremented until it is equal to
@@ -73,9 +91,13 @@ template <typename InputIterator>
 inline THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
 distance(InputIterator first, InputIterator last);
 
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
+
 /*! \} // end iterators
  */
 
 THRUST_NAMESPACE_END
 
-#include <thrust/detail/distance.inl>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <thrust/detail/distance.inl>
+#endif

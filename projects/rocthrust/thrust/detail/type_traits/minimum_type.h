@@ -140,6 +140,67 @@ struct minimum_type
                                           lazy_minimum_type<minimum_type<T13, T14>, minimum_type<T15, T16>>>>
 {};
 
+namespace minimum_type_t_detail
+{
+
+struct no_minimum_type_marker
+{};
+
+// Returns the minimum type, or `no_minimum_type_marker` if T1 and T2 are unrelated.
+template <typename T1,
+          typename T2,
+          bool GreaterEqual = _THRUST_STD::is_convertible_v<T1, T2>,
+          bool LessEqual    = _THRUST_STD::is_convertible_v<T2, T1>>
+struct smaller_type
+{
+  using type = T1;
+};
+
+// T1 >= T2
+template <typename T1, typename T2>
+struct smaller_type<T1, T2, true, false>
+{
+  using type = T2;
+};
+
+// unordered
+template <typename T1, typename T2>
+struct smaller_type<T1, T2, false, false>
+{
+  using type = no_minimum_type_marker;
+};
+
+template <typename Head, typename... Tail>
+struct minimum_type_t_impl : smaller_type<Head, typename minimum_type_t_impl<Tail...>::type>
+{};
+
+template <typename T>
+struct minimum_type_t_impl<T>
+{
+  using type = T;
+};
+
+// Has no nested ::type to produce a SFINAE-friendly error, in case the minimum type is `no_minimum_type_marker`
+template <typename SFINAE, typename... Ts>
+struct minimum_type_t_check_marker
+{};
+
+template <typename... Ts>
+struct minimum_type_t_check_marker<
+  _THRUST_STD::enable_if_t<!_THRUST_STD::is_same_v<typename minimum_type_t_impl<Ts...>::type, no_minimum_type_marker>>,
+  Ts...> : minimum_type_t_impl<Ts...>
+{};
+
+} // namespace minimum_type_t_detail
+
+// Alias to the minimum type of the given pack: the type to which all other types are convertible.
+// Unlike minimum_type above, this has no arity cap and requires no nested ::type at call sites; a
+// SFINAE-friendly compile-time error is generated if no such common type exists. Kept alongside the
+// older minimum_type because the !_THRUST_HAS_DEVICE_SYSTEM_STD fallback path in zip_iterator.h still
+// relies on minimum_type's struct-with-nested-::type semantics.
+template <typename... Ts>
+using minimum_type_t = typename minimum_type_t_detail::minimum_type_t_check_marker<void, Ts...>::type;
+
 } // namespace detail
 
 THRUST_NAMESPACE_END

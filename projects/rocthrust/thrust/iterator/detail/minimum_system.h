@@ -33,16 +33,24 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 template <typename... Ts>
 struct unrelated_systems
 {};
+
+template <typename System>
+inline constexpr bool is_unrelated_systems = false;
+
+template <typename... Ts>
+inline constexpr bool is_unrelated_systems<unrelated_systems<Ts...>> = true;
 
 // if a minimum system exists for these arguments, return it
 // otherwise, collect the arguments and report them as unrelated
 template <typename... Ts>
 using minimum_system = ::internal::
   If<is_metafunction_defined<minimum_type<Ts...>>::value, minimum_type<Ts...>, identity_<unrelated_systems<Ts...>>>;
+
+template <typename... Ts>
+using minimum_system_t = typename minimum_system<Ts...>::type;
 
 } // namespace detail
 THRUST_NAMESPACE_END
