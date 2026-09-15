@@ -157,6 +157,7 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
     # It should be removed once geev is implemented in rocSOLVER
     option(HIPSOLVER_INTERNAL_LAPACK_BUILD "Link to a locally built, static, OpenBLAS library -- required to support geev, will be removed once geev is implemented in rocSOLVER" ON)
     if(HIPSOLVER_INTERNAL_LAPACK_BUILD)
+        enable_language(C)
         set(LAPACK_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-src)
         set(LAPACK_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-bin)
 
@@ -224,9 +225,20 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
         endif()
 
-        # Downgrade incompatible-pointer-types errors to warnings when using Clang
+        # Silence warnings from third-party OpenBLAS/LAPACK sources without
+        # changing hipSOLVER's own warning settings.
+        set(LAPACK_C_FLAGS "")
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+            set(LAPACK_C_FLAGS "-w")
+        elseif(MSVC)
+            set(LAPACK_C_FLAGS "/w")
+        endif()
+        # Downgrade incompatible-pointer-types errors to warnings when using Clang.
         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types)
+            string(APPEND LAPACK_C_FLAGS " -Wno-error=incompatible-pointer-types")
+        endif()
+        if(LAPACK_C_FLAGS)
+            list(APPEND LAPACK_CMAKE_ARGS "-DCMAKE_C_FLAGS=${LAPACK_C_FLAGS}")
         endif()
 
         include(ExternalProject)
