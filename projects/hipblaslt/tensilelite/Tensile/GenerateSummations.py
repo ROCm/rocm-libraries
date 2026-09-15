@@ -37,10 +37,10 @@ from . import LibraryIO
 
 from . import ClientWriter
 from .TensileCreateLibrary import tensileLibraryFile
-from Tensile.Common import ensurePath, printExit
-from Tensile.Common.Architectures import gfxToSwCodename, detectGlobalCurrentArch, gfxToIsa
-from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters
+from .Common import ensurePath, printExit
+from .Common.Architectures import gfxToSwCodename, detectGlobalCurrentArch, gfxToIsa
+from .Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
+from .Common.GlobalParameters import assignGlobalParameters
 from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import ToolchainDefaults, validateToolchain
 
