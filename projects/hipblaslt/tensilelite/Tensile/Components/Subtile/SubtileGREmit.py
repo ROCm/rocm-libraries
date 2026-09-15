@@ -1104,13 +1104,15 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
 def _graTileAssignment_tlu(writer, kernel, tileInfo):
   """GR per-lane offset for TLU=1 (NT / free-dim contiguous) subtile tiles.
 
-  The free dim is contiguous, so one 128-bit buffer_load covers a full free-dim
-  strip at one K row and the per-lane byte offset is a pure K ramp::
+  The free dim is contiguous, so when one 128-bit buffer_load covers a whole
+  free-dim strip at one K row the per-lane byte offset is a pure K ramp::
 
       offset(lane, i) = (laneId + i * wavesize) * strideK * bpe
 
-  One VGPR per GR load into sharedVgprGROffset[].  The M/N position lives inside
-  the load width, so the base case needs no free-dim term and no bank swizzle.
+  One VGPR per GR load into sharedVgprGROffset[].  The M/N position then lives
+  inside the load width, needing no free-dim term and no bank swizzle.  A taller
+  fp4 stack makes a load cover only part of a K row; the M-tiling and swizzle
+  paths below handle that.
   """
   module = Module()
   tc = tileInfo.tc
