@@ -380,6 +380,24 @@ namespace TensileLite
             // host sync between them, before the first launch.
             constexpr int A2A_BARRIER_SELFTEST_ROUNDS = 64;
 
+            // Launch i rewrites x with variant i % A2A_X_VARIANTS.
+            constexpr int A2A_X_VARIANTS = 8;
+
+            void a2aFillX(int variant, size_t n, std::vector<BFloat16>& hostX)
+            {
+                const uint64_t base = 0x5A2Aull + (uint64_t)variant * 0x1000003ull;
+#pragma omp parallel for
+                for(size_t i = 0; i < n; i++)
+                    hostX[i] = BFloat16(a2aPrefillValue(base + i));
+            }
+
+            __global__ void a2aSkewKernel(uint64_t ticks)
+            {
+                const uint64_t t0 = __builtin_amdgcn_s_memrealtime();
+                while(__builtin_amdgcn_s_memrealtime() - t0 < ticks)
+                    ;
+            }
+
             // First gathered segment differing from its host-side source, or -1.
             // want[r] is the source for segment r.
             int a2aFirstBadSegment(BFloat16 const*                     got,
@@ -597,6 +615,10 @@ namespace TensileLite
                 const size_t kLoc  = K / (size_t)W;
                 const auto   dtype = base.a().dataType();
 
+                const int batch = std::max(1, args["a2a-multigpu-batch"].as<int>());
+                const int skewXUs    = std::max(0, args["a2a-multigpu-skew-x-us"].as<int>());
+                const int skewGemmUs = std::max(0, args["a2a-multigpu-skew-gemm-us"].as<int>());
+
                 int deviceCount = 0;
                 HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
                 if(deviceCount < W)
@@ -606,8 +628,19 @@ namespace TensileLite
                     return 1;
                 }
 
+                uint64_t wallTicksPerUs = 0;
+                if(skewXUs != 0 || skewGemmUs != 0)
+                {
+                    int kHz = 0;
+                    HIP_CHECK_EXC(
+                        hipDeviceGetAttribute(&kHz, hipDeviceAttributeWallClockRate, 0));
+                    wallTicksPerUs = (uint64_t)kHz / 1000ull;
+                }
+
                 std::cout << "[a2a-multigpu] W=" << W << " M=" << M << " N=" << N << " K=" << K
-                          << " k_local=" << kLoc << " launches=" << launches << std::endl;
+                          << " k_local=" << kLoc << " launches=" << launches << " batch=" << batch
+                          << " skew-x-us=" << skewXUs << " skew-gemm-us=" << skewGemmUs
+                          << std::endl;
 
                 ContractionProblemGemm problem = base;
                 problem.resetTensor(ContractionProblemGemm::TENSOR::B,
@@ -643,36 +676,46 @@ namespace TensileLite
                 const size_t cdElems  = M * N;
                 const size_t segBytes = segElems * sizeof(BFloat16);
                 const size_t xBytes   = xElems * sizeof(BFloat16);
+                const size_t cdBytes  = cdElems * sizeof(BFloat16);
 
                 // All W ranks' x laid out back to back; a2aCheckD walks them with
                 // segStride = xElems.
                 std::vector<BFloat16> hostA(aElems), hostX((size_t)W * xElems);
                 std::vector<BFloat16> hostD(cdElems), gotB(xElems);
                 a2aFillA(M, K, lda, hostA);
-#pragma omp parallel for
-                for(size_t i = 0; i < (size_t)W * xElems; i++)
-                    hostX[i] = BFloat16(a2aPrefillValue(0x5A2Aull + i));
 
+                // devB and devD carry one slice per launch in a batch; devXSrc
+                // holds this rank's share of every x variant.
                 std::vector<DeviceBuffer> devA(W), devB(W), devC(W), devD(W), devX(W),
-                    devCounter(W);
+                    devXSrc(W), devCounter(W);
                 for(int d = 0; d < W; d++)
                 {
                     HIP_CHECK_EXC(hipSetDevice(d));
                     HIP_CHECK_EXC(devA[d].allocate(aElems * sizeof(BFloat16)));
-                    HIP_CHECK_EXC(devB[d].allocateFineGrained(xBytes));
-                    HIP_CHECK_EXC(devC[d].allocate(cdElems * sizeof(BFloat16)));
-                    HIP_CHECK_EXC(devD[d].allocate(cdElems * sizeof(BFloat16)));
+                    HIP_CHECK_EXC(devB[d].allocateFineGrained((size_t)batch * xBytes));
+                    HIP_CHECK_EXC(devC[d].allocate(cdBytes));
+                    HIP_CHECK_EXC(devD[d].allocate((size_t)batch * cdBytes));
                     // Read by remote SDMA engines.
                     HIP_CHECK_EXC(devX[d].allocateFineGrained(xBytes));
+                    HIP_CHECK_EXC(devXSrc[d].allocate((size_t)A2A_X_VARIANTS * xBytes));
                     HIP_CHECK_EXC(hipMemcpy(devA[d].ptr,
                                             hostA.data(),
                                             aElems * sizeof(BFloat16),
                                             hipMemcpyHostToDevice));
-                    HIP_CHECK_EXC(hipMemcpy(devX[d].ptr,
-                                            hostX.data() + (size_t)d * xElems,
-                                            xBytes,
-                                            hipMemcpyHostToDevice));
-                    HIP_CHECK_EXC(hipMemset(devC[d].ptr, 0, cdElems * sizeof(BFloat16)));
+                    HIP_CHECK_EXC(hipMemset(devC[d].ptr, 0, cdBytes));
+                }
+
+                for(int v = 0; v < A2A_X_VARIANTS; v++)
+                {
+                    a2aFillX(v, (size_t)W * xElems, hostX);
+                    for(int d = 0; d < W; d++)
+                    {
+                        HIP_CHECK_EXC(hipSetDevice(d));
+                        HIP_CHECK_EXC(hipMemcpy((char*)devXSrc[d].ptr + (size_t)v * xBytes,
+                                                hostX.data() + (size_t)d * xElems,
+                                                xBytes,
+                                                hipMemcpyHostToDevice));
+                    }
                 }
 
                 for(int s = 0; s < W; s++)
@@ -779,12 +822,19 @@ namespace TensileLite
                     inputs[d].fusedA2ACounter = devCounter[d].ptr;
                 }
 
-                std::vector<std::vector<KernelInvocation>> perDeviceKernels(W);
+                // solve bakes b and d into the kernarg.
+                std::vector<std::vector<std::vector<KernelInvocation>>> perDeviceKernels(W);
                 for(int d = 0; d < W; d++)
                 {
                     HIP_CHECK_EXC(hipSetDevice(d));
-                    perDeviceKernels[d]
-                        = solution->solve(problem, inputs[d], *hardware, nullptr, 0, streams[d]);
+                    for(int r = 0; r < batch; r++)
+                    {
+                        ContractionInputs slice = inputs[d];
+                        slice.b                 = (char*)devB[d].ptr + (size_t)r * xBytes;
+                        slice.d                 = (char*)devD[d].ptr + (size_t)r * cdBytes;
+                        perDeviceKernels[d].push_back(
+                            solution->solve(problem, slice, *hardware, nullptr, 0, streams[d]));
+                    }
                 }
 
                 // Rounds overlap here and nowhere else in this arm.
@@ -815,105 +865,150 @@ namespace TensileLite
                                         + (size_t)d * segElems;
 
                 int rc = 0;
-                for(int it = 0; it < launches; it++)
+                for(int it0 = 0; it0 < launches; it0 += batch)
                 {
-                    for(int d = 0; d < W; d++)
+                    const int n = std::min(batch, launches - it0);
+
+                    for(int r = 0; r < n; r++)
                     {
-                        HIP_CHECK_EXC(hipSetDevice(d));
-                        HIP_CHECK_EXC(hipMemsetAsync(
-                            devD[d].ptr, 0, cdElems * sizeof(BFloat16), streams[d]));
-                        HIP_CHECK_EXC(hipMemcpyAsync(devB[d].ptr,
-                                                     (char*)devX[d].ptr + (size_t)d * segBytes,
-                                                     segBytes,
-                                                     hipMemcpyDeviceToDevice,
-                                                     streams[d]));
-                        HIP_CHECK_EXC(hipMemsetAsync((char*)devB[d].ptr + segBytes,
-                                                     A2A_LOOPBACK_POISON,
-                                                     xBytes - segBytes,
-                                                     streams[d]));
-                        HIP_CHECK_EXC(hipMemsetAsync((char*)devCounter[d].ptr
-                                                         + FUSED_A2A_MODE1_FLAG_OFFSET,
-                                                     0,
-                                                     layout.flagBytes,
-                                                     streams[d]));
+                        const size_t vOff = (size_t)((it0 + r) % A2A_X_VARIANTS) * xBytes;
+                        for(int d = 0; d < W; d++)
+                        {
+                            char* const gathered = (char*)devB[d].ptr + (size_t)r * xBytes;
+
+                            HIP_CHECK_EXC(hipSetDevice(d));
+                            HIP_CHECK_EXC(hipMemsetAsync((char*)devD[d].ptr + (size_t)r * cdBytes,
+                                                         0,
+                                                         cdBytes,
+                                                         streams[d]));
+
+                            // WAR barrier: gates the x rewrite below.
+                            hipLaunchKernelGGL(
+                                a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
+                            HIP_CHECK_EXC(hipGetLastError());
+
+                            if(skewXUs != 0 && d == W - 1)
+                            {
+                                hipLaunchKernelGGL(a2aSkewKernel,
+                                                   1,
+                                                   1,
+                                                   0,
+                                                   streams[d],
+                                                   (uint64_t)skewXUs * wallTicksPerUs);
+                                HIP_CHECK_EXC(hipGetLastError());
+                            }
+
+                            HIP_CHECK_EXC(hipMemcpyAsync(devX[d].ptr,
+                                                         (char*)devXSrc[d].ptr + vOff,
+                                                         xBytes,
+                                                         hipMemcpyDeviceToDevice,
+                                                         streams[d]));
+                            HIP_CHECK_EXC(hipMemcpyAsync(gathered,
+                                                         (char*)devX[d].ptr + (size_t)d * segBytes,
+                                                         segBytes,
+                                                         hipMemcpyDeviceToDevice,
+                                                         streams[d]));
+                            HIP_CHECK_EXC(hipMemsetAsync(gathered + segBytes,
+                                                         A2A_LOOPBACK_POISON,
+                                                         xBytes - segBytes,
+                                                         streams[d]));
+                            HIP_CHECK_EXC(hipMemsetAsync((char*)devCounter[d].ptr
+                                                             + FUSED_A2A_MODE1_FLAG_OFFSET,
+                                                         0,
+                                                         layout.flagBytes,
+                                                         streams[d]));
+
+                            // RAW barrier: gates the GEMM below.
+                            hipLaunchKernelGGL(
+                                a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
+                            HIP_CHECK_EXC(hipGetLastError());
+
+                            if(skewGemmUs != 0 && d == W - 1)
+                            {
+                                hipLaunchKernelGGL(a2aSkewKernel,
+                                                   1,
+                                                   1,
+                                                   0,
+                                                   streams[d],
+                                                   (uint64_t)skewGemmUs * wallTicksPerUs);
+                                HIP_CHECK_EXC(hipGetLastError());
+                            }
+
+                            HIP_CHECK_EXC(adapters[d]->launchKernels(
+                                perDeviceKernels[d][r], streams[d], nullptr, nullptr));
+                        }
                     }
 
-                    for(int d = 0; d < W; d++)
-                    {
-                        HIP_CHECK_EXC(hipSetDevice(d));
-                        hipLaunchKernelGGL(
-                            a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
-                        HIP_CHECK_EXC(hipGetLastError());
-                    }
-
-                    for(int d = 0; d < W; d++)
-                    {
-                        HIP_CHECK_EXC(hipSetDevice(d));
-                        HIP_CHECK_EXC(adapters[d]->launchKernels(
-                            perDeviceKernels[d], streams[d], nullptr, nullptr));
-                    }
                     for(int d = 0; d < W; d++)
                     {
                         HIP_CHECK_EXC(hipSetDevice(d));
                         HIP_CHECK_EXC(hipStreamSynchronize(streams[d]));
                     }
 
-                    for(int d = 0; d < W; d++)
+                    for(int r = 0; r < n; r++)
                     {
-                        HIP_CHECK_EXC(hipSetDevice(d));
-                        HIP_CHECK_EXC(
-                            hipMemcpy(gotB.data(), devB[d].ptr, xBytes, hipMemcpyDeviceToHost));
-                        HIP_CHECK_EXC(hipMemcpy(hostD.data(),
-                                                devD[d].ptr,
-                                                cdElems * sizeof(BFloat16),
-                                                hipMemcpyDeviceToHost));
-
-                        size_t    badIdx = 0;
-                        const int badSeg
-                            = a2aFirstBadSegment(gotB.data(), wantSeg[d], segElems, badIdx);
-
-                        double       worstRel  = 0.0;
-                        const size_t mismatches = a2aCheckD(M,
-                                                            N,
-                                                            lda,
-                                                            ldd,
-                                                            kLoc,
-                                                            W,
-                                                            xElems,
-                                                            (size_t)d * N,
-                                                            hostA,
-                                                            hostX,
-                                                            hostD,
-                                                            worstRel);
-
-                        std::vector<uint32_t> gotGuard(FUSED_A2A_COUNTER_SENTINEL_WORDS);
-                        HIP_CHECK_EXC(hipMemcpy(gotGuard.data(),
-                                                (const char*)devCounter[d].ptr
-                                                    + layout.payloadBytes,
-                                                FUSED_A2A_COUNTER_SENTINEL_BYTES,
-                                                hipMemcpyDeviceToHost));
-                        const int badGuard = fusedA2ACounterSentinelFirstBad(gotGuard.data());
-
-                        std::cout << "[a2a-multigpu] W=" << W << " launch=" << it << " dev=" << d
-                                  << " gathered=" << (badSeg < 0 ? "exact" : "DIFFERS")
-                                  << " mismatches=" << mismatches << " worst-rel=" << worstRel
-                                  << " guard=" << (badGuard < 0 ? "intact" : "CORRUPT")
-                                  << std::endl;
-                        if(badSeg >= 0)
+                        a2aFillX((it0 + r) % A2A_X_VARIANTS, (size_t)W * xElems, hostX);
+                        for(int d = 0; d < W; d++)
                         {
-                            std::cerr << "[a2a-multigpu] ERROR: device " << d
-                                      << " gathered segment " << badSeg
-                                      << " first differs at element " << badIdx << std::endl;
-                        }
-                        if(badGuard >= 0)
-                        {
-                            std::cerr << "[a2a-multigpu] ERROR: device " << d
-                                      << " counter guard word " << badGuard << " overwritten; "
-                                      << "counter[iB] ran past " << layout.payloadBytes << " bytes"
+                            HIP_CHECK_EXC(hipSetDevice(d));
+                            HIP_CHECK_EXC(hipMemcpy(gotB.data(),
+                                                    (char*)devB[d].ptr + (size_t)r * xBytes,
+                                                    xBytes,
+                                                    hipMemcpyDeviceToHost));
+                            HIP_CHECK_EXC(hipMemcpy(hostD.data(),
+                                                    (char*)devD[d].ptr + (size_t)r * cdBytes,
+                                                    cdBytes,
+                                                    hipMemcpyDeviceToHost));
+
+                            size_t    badIdx = 0;
+                            const int badSeg
+                                = a2aFirstBadSegment(gotB.data(), wantSeg[d], segElems, badIdx);
+
+                            double       worstRel  = 0.0;
+                            const size_t mismatches = a2aCheckD(M,
+                                                                N,
+                                                                lda,
+                                                                ldd,
+                                                                kLoc,
+                                                                W,
+                                                                xElems,
+                                                                (size_t)d * N,
+                                                                hostA,
+                                                                hostX,
+                                                                hostD,
+                                                                worstRel);
+
+                            std::vector<uint32_t> gotGuard(FUSED_A2A_COUNTER_SENTINEL_WORDS);
+                            HIP_CHECK_EXC(hipMemcpy(gotGuard.data(),
+                                                    (const char*)devCounter[d].ptr
+                                                        + layout.payloadBytes,
+                                                    FUSED_A2A_COUNTER_SENTINEL_BYTES,
+                                                    hipMemcpyDeviceToHost));
+                            const int badGuard
+                                = fusedA2ACounterSentinelFirstBad(gotGuard.data());
+
+                            std::cout << "[a2a-multigpu] W=" << W << " launch=" << (it0 + r)
+                                      << " dev=" << d << " gathered="
+                                      << (badSeg < 0 ? "exact" : "DIFFERS")
+                                      << " mismatches=" << mismatches << " worst-rel=" << worstRel
+                                      << " guard=" << (badGuard < 0 ? "intact" : "CORRUPT")
                                       << std::endl;
+                            if(badSeg >= 0)
+                            {
+                                std::cerr << "[a2a-multigpu] ERROR: device " << d
+                                          << " gathered segment " << badSeg
+                                          << " first differs at element " << badIdx << std::endl;
+                            }
+                            if(badGuard >= 0)
+                            {
+                                std::cerr << "[a2a-multigpu] ERROR: device " << d
+                                          << " counter guard word " << badGuard << " overwritten; "
+                                          << "counter[iB] ran past " << layout.payloadBytes
+                                          << " bytes" << std::endl;
+                            }
+                            if(badSeg >= 0 || mismatches != 0 || badGuard >= 0)
+                                rc = 1;
                         }
-                        if(badSeg >= 0 || mismatches != 0 || badGuard >= 0)
-                            rc = 1;
                     }
                 }
 
