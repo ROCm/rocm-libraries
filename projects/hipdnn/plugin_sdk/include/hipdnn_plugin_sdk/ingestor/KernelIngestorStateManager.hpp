@@ -315,6 +315,15 @@ public:
     /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
+        // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
+        // device ordinal, not arch, so without this an unresolved-arch context would
+        // cache an empty catalog under the SAME key a later, resolved call for this
+        // device reuses -- permanently hiding that device's real catalog.
+        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
+        {
+            return catalogFor(context);
+        }
+
         Catalog catalog = catalogFor(context);
 
         // A measured order is final; a heuristic one is provisional, so this lookup runs
@@ -414,6 +423,19 @@ public:
     size_t winnerCacheSize() const
     {
         return _winnerCache.size();
+    }
+
+    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
+    /// holds anything, or this arch's shard has not been attempted yet. Probes the
+    /// stripped arch, matching how `loadShardIfAbsent()` latches.
+    bool mightHaveWinnerFor(const std::string& gcnArchName) const
+    {
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        // size(), not empty(): LruCache exposes no empty(), and this predicate now runs
+        // against the bounded cache rather than the unbounded map it was written for.
+        return _winnerCache.size() != 0
+               || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
+                      == _loadedWinnerShards.end();
     }
 
     /// Resolves how to size and launch @p kernel.
@@ -748,9 +770,12 @@ private:
         // Pack pruning and matchers both read the device, so nothing below can be
         // answered without one. Checked here rather than in every provider's matchers,
         // where an omission is invisible.
-        if(context.deviceId == NO_DEVICE)
+        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
         {
-            HIPDNN_PLUGIN_LOG_INFO("ingestor: no device resolved; no kernel applies");
+            const auto* reason = context.deviceId == NO_DEVICE
+                                     ? "no device resolved"
+                                     : "resolved device reports no gcnArchName";
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: " << reason << "; no kernel applies");
             return Catalog{};
         }
 
@@ -978,16 +1003,6 @@ private:
         return ordered;
     }
 
-    /// Is it worth building a WinnerKey for @p gcnArchName? True if the in-memory cache
-    /// holds anything, or this arch's shard has not been attempted yet. Probes the
-    /// stripped arch, matching how `loadShardIfAbsent()` latches.
-    bool mightHaveWinnerFor(const std::string& gcnArchName) const
-    {
-        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-        return _winnerCache.size() != 0
-               || _loadedWinnerShards.find(std::string(stripArchFeatures(gcnArchName)))
-                      == _loadedWinnerShards.end();
-    }
 
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
     /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow
