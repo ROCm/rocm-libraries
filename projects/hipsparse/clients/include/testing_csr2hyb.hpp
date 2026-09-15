@@ -257,7 +257,7 @@ void testing_csr2hyb(Arguments argus)
             ell_width = user_ell_width;
         }
 
-        ell_nnz = ell_width * m;
+        ell_nnz = static_cast<int64_t>(ell_width) * m;
 
         // Determine COO nnz
         for(int i = 0; i < m; ++i)
@@ -277,7 +277,7 @@ void testing_csr2hyb(Arguments argus)
             int row_nnz = hcsr_row_ptr[i + 1] - hcsr_row_ptr[i];
             ell_width   = (row_nnz > ell_width) ? row_nnz : ell_width;
         }
-        ell_nnz = ell_width * m;
+        ell_nnz = static_cast<int64_t>(ell_width) * m;
     }
 
     // Allocate host memory
