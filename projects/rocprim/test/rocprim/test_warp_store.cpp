@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include "../../common/utils_device_ptr.hpp"
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #include <rocprim/config.hpp>
 #include <rocprim/types.hpp>
@@ -229,7 +230,19 @@ std::vector<T> stripe_vector(const std::vector<T>& v,
     return striped;
 }
 
-TYPED_TEST_SUITE(WarpStoreTest, WarpStoreTestParams);
+struct WarpStoreTestNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::type>() + "_i"
+               + std::to_string(Params::items_per_thread) + "_w"
+               + std::to_string(Params::warp_size) + "_m"
+               + std::to_string(static_cast<int>(Params::method));
+    }
+};
+
+TYPED_TEST_SUITE(WarpStoreTest, WarpStoreTestParams, WarpStoreTestNameGenerator);
 
 TYPED_TEST(WarpStoreTest, WarpLoad)
 {

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,18 @@ using RocprimConstantIteratorTestsParams
                        RocprimConstantIteratorParams<unsigned long>,
                        RocprimConstantIteratorParams<float>>;
 
-TYPED_TEST_SUITE(RocprimConstantIteratorTests, RocprimConstantIteratorTestsParams);
+struct RocprimConstantIteratorTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        return type_tag<typename Params::input_type>();
+    }
+};
+
+TYPED_TEST_SUITE(RocprimConstantIteratorTests,
+                 RocprimConstantIteratorTestsParams,
+                 RocprimConstantIteratorTestsNameGenerator);
 
 TYPED_TEST(RocprimConstantIteratorTests, Basic)
 {

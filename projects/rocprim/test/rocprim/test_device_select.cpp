@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_memory_check.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -104,11 +105,32 @@ struct RocprimDeviceSelectTestsNameGenerator
     template<class Params>
     static std::string GetName(int index)
     {
-        if constexpr(std::is_same<typename Params::input_type,
-                                   common::custom_huge_type<1024, int>>::value)
-        {
+        using in  = typename Params::input_type;
+        using out = typename Params::output_type;
+        if constexpr(std::is_same<in, common::custom_huge_type<1024, int>>::value)
             return "CustomHugeType1024Int";
-        }
+        else if constexpr(Params::use_graphs)
+            return "Int_Int_Graphs";
+        else if constexpr(std::is_same<in, common::custom_type<double, double, true>>::value)
+            return "CustomDouble2_Iterator";
+        else if constexpr(std::is_same<in, double>::value)
+            return "Double_Double_Iterator";
+        else if constexpr(std::is_same<in, unsigned char>::value && Params::use_identity_iterator)
+            return "Uint8_Float_Iterator";
+        else if constexpr(std::is_same<in, short>::value)
+            return "Short_Char_Int128";
+        else if constexpr(std::is_same<in, int>::value && std::is_same<out, long>::value)
+            return "Int_Long";
+        else if constexpr(std::is_same<in, int8_t>::value)
+            return "Int8_Int8";
+        else if constexpr(std::is_same<in, uint8_t>::value)
+            return "Uint8_Uint8";
+        else if constexpr(std::is_same<in, rocprim::half>::value)
+            return "Half_Half";
+        else if constexpr(std::is_same<in, rocprim::bfloat16>::value)
+            return "Bfloat16_Bfloat16";
+        else if constexpr(std::is_same<in, float>::value)
+            return "Float_Float";
         return std::to_string(index);
     }
 };
@@ -896,7 +918,21 @@ using RocprimDeviceUniqueByKeyTestParams
                        DeviceUniqueByKeyParams<int, int, int, int, false, true>,
                        DeviceUniqueByKeyParams<common::custom_huge_type<1024, int>, uint8_t>>;
 
-TYPED_TEST_SUITE(RocprimDeviceUniqueByKeyTests, RocprimDeviceUniqueByKeyTestParams);
+struct RocprimDeviceUniqueByKeyTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag<typename Params::key_type>() + "_"
+                        + type_tag<typename Params::value_type>();
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        return n;
+    }
+};
+TYPED_TEST_SUITE(RocprimDeviceUniqueByKeyTests,
+                 RocprimDeviceUniqueByKeyTestParams,
+                 RocprimDeviceUniqueByKeyTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
 {
