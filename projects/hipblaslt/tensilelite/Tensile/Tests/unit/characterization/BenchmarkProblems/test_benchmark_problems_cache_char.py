@@ -36,6 +36,7 @@ def _step(**over):
 
 def _cache_dict(step, codeObjects=("k.co",), libraryFile="lib.dat"):
     d = {f: getattr(step, attr) for f, attr in M._CACHE_FIELDS.items()}
+    d["KernelNamingVersion"] = M._KERNEL_NAMING_VERSION
     d["CodeObjectFiles"] = list(codeObjects)
     d["LibraryFile"] = libraryFile
     return d
@@ -53,6 +54,14 @@ def test_cache_data_matches_false():
     step = _step()
     other = _cache_dict(_step(forkParams={"b": 999}))
     assert M._cacheDataMatches(other, step) is False
+
+
+def test_cache_data_rejects_older_kernel_naming():
+    step = _step()
+    cache = _cache_dict(step)
+    del cache["KernelNamingVersion"]
+
+    assert M._cacheDataMatches(cache, step) is False
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +113,14 @@ def test_read_cache_unreadable_returns_none(tmp_path, monkeypatch, capsys):
 def test_read_cache_missing_field_returns_none(tmp_path, monkeypatch, capsys):
     path = tmp_path / "cache.yaml"
     path.write_text("x")
-    monkeypatch.setattr(M.LibraryIO, "read", lambda p: {"CodeObjectFiles": []})  # missing fields
+    monkeypatch.setattr(
+        M.LibraryIO,
+        "read",
+        lambda p: {
+            "KernelNamingVersion": M._KERNEL_NAMING_VERSION,
+            "CodeObjectFiles": [],
+        },
+    )  # missing fields
     assert M._readCacheIfValid(str(path), _step(), "m") is None
     assert "incompatible cache" in capsys.readouterr().out
 

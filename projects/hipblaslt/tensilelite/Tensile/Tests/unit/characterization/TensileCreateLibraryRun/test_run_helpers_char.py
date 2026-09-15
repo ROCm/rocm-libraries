@@ -113,7 +113,7 @@ class _Sol:
 
 
 def test_check_invalid_solutions(monkeypatch):
-    monkeypatch.setattr(M, "getKeyNoInternalArgs", lambda k, split: k["name"])
+    monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
     sols = [_Sol([{"name": "k0"}]), _Sol([{"name": "kBAD"}])]
     out = M._checkInvalidSolutions(False, {"kBAD"}, sols)
     # one True appended for the matching solution, plus a trailing False per loop
@@ -124,7 +124,7 @@ def test_check_invalid_solutions(monkeypatch):
 # removeInvalidSolutionsAndKernels (ParallelMap2 + Naming stubbed)
 # ---------------------------------------------------------------------------
 def test_remove_invalid_solutions_and_kernels(monkeypatch):
-    monkeypatch.setattr(M, "getKeyNoInternalArgs", lambda k, split: k["name"])
+    monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
     monkeypatch.setattr(
         M, "ParallelMap2",
         lambda fn, iterable, desc, return_as=None: [fn(*x) for x in iterable],
@@ -146,7 +146,7 @@ def test_remove_invalid_solutions_and_kernels(monkeypatch):
 # passPostKernelInfoToSolution
 # ---------------------------------------------------------------------------
 def test_pass_post_kernel_info_to_solution(monkeypatch):
-    monkeypatch.setattr(M, "getKernelNameMin", lambda k, split: k["name"])
+    monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
     results = [SimpleNamespace(cuoccupancy=11, pgr=22, mathclk=33)]
     kernels = [{"name": "k0"}]
     sol = _Sol([{"name": "k0"}], state={})

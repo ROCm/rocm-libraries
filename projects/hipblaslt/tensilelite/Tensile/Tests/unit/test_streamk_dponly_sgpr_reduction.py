@@ -519,7 +519,6 @@ def _emit_sk3_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     ri.setKernel(isa, kernel["WavefrontSize"])
 
     kwa = KernelWriterAssembly(assembler, DebugConfig())
-    kernel.duplicate = False
     kernel["BaseName"] = getKernelFileBase(False, kernel)
     res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
     src = res.src
