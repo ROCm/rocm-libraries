@@ -63,7 +63,10 @@ def _run_script(
 
     try:
         proc = subprocess.run(
-            cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -73,7 +76,7 @@ def _run_script(
             file=sys.stderr,
             flush=True,
         )
-        stdout = (exc.stdout or b"")
+        stdout = exc.stdout or b""
         if isinstance(stdout, bytes):
             stdout = stdout.decode(errors="replace")
         stderr = exc.stderr or b""

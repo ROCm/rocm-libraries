@@ -96,10 +96,10 @@ _SHAPES: List[_Shape] = [
     _Shape("dw_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
     # 1×1 pointwise for cpg=16 (PAD=0, KH=KW=1)
     _Shape("16c_1x1_N2H16W16_g8", N=2, H=16, W=16, groups=8, cpg=16, KH=1, KW=1, PAD=0),
-    _Shape("16c_1x1_N2H16W16_g2", N=2, H=16, W=16, groups=2, cpg=16, KH=1, KW=1, PAD=0),
     # stride=2 cases — output H=6, W=6 for H=W=14, PAD=1, KH=KW=3
+    # groups=8 satisfies DirectConv16cSpec/DirectConvSpec default block_groups=8
     _Shape("4c_N2H14W14_g8_s2", N=2, H=14, W=14, groups=8, cpg=4, stride=2),
-    _Shape("16c_N2H14W14_g2_s2", N=2, H=14, W=14, groups=2, cpg=16, stride=2),
+    _Shape("16c_N2H14W14_g8_s2", N=2, H=14, W=14, groups=8, cpg=16, stride=2),
 ]
 
 

@@ -89,8 +89,9 @@ def parse_miopen_cmd_direct(cmd: str):
 
     Only 2-D NHWC forward convolutions are supported (no 3-D, no dgrad/wgrad).
     Raises ``ValueError`` for unsupported cases.
-    Returns ``(problem, dtype)`` where ``dtype`` is ``"fp16"``, ``"bf16"``, or
-    ``"fp32"``.
+    Returns ``(problem, dtype, forw)`` where ``dtype`` is ``"fp16"``,
+    ``"bf16"``, or ``"fp32"`` and ``forw`` is the integer ``-F`` flag
+    (bit 0 = forward pass).
 
     Note: ``DirectConvProblem`` requires ``cpg == kpg`` and cpg must be either
     1 (depthwise) or a positive multiple of 4 (grouped).
@@ -435,7 +436,12 @@ def _run_depthwise_sweep(
     flop = float(p.flops)
     sig = conv_args_signature("fp16")
 
-    combos = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
+    # For the spatial layout block_w is derived from block_waves internally,
+    # so sweeping block_w would produce duplicate kernels; use a dummy value.
+    if _use_spatial:
+        combos = [(None, bw) for bw in _DW_BLOCK_WAVES]
+    else:
+        combos = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
 
     if args.sample is not None:
         total = len(combos)

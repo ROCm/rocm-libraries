@@ -127,8 +127,8 @@ class DirectConvProblem:
         return (
             2
             * self.N
-            * self.H
-            * self.W
+            * self.Ho
+            * self.Wo
             * self.groups
             * self.kpg
             * self.KH
@@ -1452,7 +1452,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         LDS offset: ``(q_in_lane + q_subtile*16) * stride + s_lane``.
         """
         W_lds_idx = b.add(
-            b.mul(b.add(q_in_lane, b.const_i32(q_subtile * 16)), b.const_i32(c_stride_8c)),
+            b.mul(
+                b.add(q_in_lane, b.const_i32(q_subtile * 16)), b.const_i32(c_stride_8c)
+            ),
             s_lane,
         )
         ch_block_idx = b.div(ch_lane, b.const_i32(4))
@@ -1472,7 +1474,9 @@ def build_direct_conv_8c(spec: DirectConv8cSpec, arch: str = "gfx950") -> Kernel
         Valid only for c4 ∈ {0,1}; upper K half is zeroed.
         """
         W_lds_idx = b.add(
-            b.mul(b.add(q_in_lane, b.const_i32(q_subtile * 16)), b.const_i32(c_stride_8c)),
+            b.mul(
+                b.add(q_in_lane, b.const_i32(q_subtile * 16)), b.const_i32(c_stride_8c)
+            ),
             b.const_i32(2),
         )
         ch_block_idx = b.div(ch_lane, b.const_i32(4))
@@ -1882,7 +1886,9 @@ def build_direct_conv_32c(spec: DirectConv32cSpec, arch: str = "gfx950") -> Kern
         """
         ch_start = atom_idx * 8
         W_lds_idx = b.add(
-            b.mul(b.add(q_in_lane, b.const_i32(q_subtile * 32)), b.const_i32(c_stride_32c)),
+            b.mul(
+                b.add(q_in_lane, b.const_i32(q_subtile * 32)), b.const_i32(c_stride_32c)
+            ),
             b.const_i32(s_const),
         )
         ch_off = b.add(b.const_i32(ch_start), b.mul(k_blk, b.const_i32(4)))
@@ -2706,11 +2712,19 @@ def build_direct_depthwise(
                 w_pos = b.add(q_tile_start, b.const_i32(w_out))
                 for s_const in range(p.KW):
                     a_off, valid = a_desc.offset(
-                        b, n=n, y_iter=y_i, wo=w_pos, s_off=b.const_i32(s_const), c=ch,
+                        b,
+                        n=n,
+                        y_iter=y_i,
+                        wo=w_pos,
+                        s_off=b.const_i32(s_const),
+                        c=ch,
                     )
-                    safe_off = b.select(valid, b.mul(a_off, c_half_bytes), oob_sentinel)
+                    load_ok = b.land(valid, ch_in_range)
+                    safe_off = b.select(
+                        load_ok, b.mul(a_off, c_half_bytes), oob_sentinel
+                    )
                     a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
-                    a_f32 = b.select(valid, b.cast_to_f32(a_h), zero_f32)
+                    a_f32 = b.select(load_ok, b.cast_to_f32(a_h), zero_f32)
                     for r_const in range(p.KH):
                         p_idx = (y - r_const + p.KH) % p.KH
                         acc[w_out][p_idx] = b.fma(
@@ -2724,9 +2738,15 @@ def build_direct_depthwise(
                 for w_out in range(BLOCK_W):
                     out_q = b.add(q_tile_start, b.const_i32(w_out))
                     out_q_ok = b.land(b.cmp_lt(out_q, c_W), ch_in_range)
-                    d_off, _ = d_desc.offset(b, n=n, h=b.const_i32(ho_row), w=out_q, k=ch)
-                    safe_d = b.select(out_q_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
-                    b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[w_out][P_FLUSH]))
+                    d_off, _ = d_desc.offset(
+                        b, n=n, h=b.const_i32(ho_row), w=out_q, k=ch
+                    )
+                    safe_d = b.select(
+                        out_q_ok, b.mul(d_off, c_half_bytes), oob_sentinel
+                    )
+                    b.buffer_store_f16(
+                        d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc[w_out][P_FLUSH])
+                    )
             for w_out in range(BLOCK_W):
                 acc[w_out][P_FLUSH] = zero_f32
 
@@ -2742,7 +2762,10 @@ def build_direct_depthwise(
             for w in range(BLOCK_W)
         ]
         group_loop = b.scf_for_iter(
-            c0, b.const_i32(n_groups), c1, dw_iter_args,
+            c0,
+            b.const_i32(n_groups),
+            c1,
+            dw_iter_args,
             iv_name="dw_grp",
             elide_trailing_barrier=False,
         )
@@ -2757,10 +2780,17 @@ def build_direct_depthwise(
                     w_pos = b.add(q_tile_start, b.const_i32(w_out))
                     for s_const in range(p.KW):
                         a_off, valid = a_desc.offset(
-                            b, n=n, y_iter=y_j, wo=w_pos, s_off=b.const_i32(s_const), c=ch,
+                            b,
+                            n=n,
+                            y_iter=y_j,
+                            wo=w_pos,
+                            s_off=b.const_i32(s_const),
+                            c=ch,
                         )
-                        ok = b.land(valid, j_valid)
-                        safe_off = b.select(ok, b.mul(a_off, c_half_bytes), oob_sentinel)
+                        ok = b.land(b.land(valid, j_valid), ch_in_range)
+                        safe_off = b.select(
+                            ok, b.mul(a_off, c_half_bytes), oob_sentinel
+                        )
                         a_h = b.buffer_load_f16(a_rsrc, safe_off, c0)
                         a_f32 = b.select(ok, b.cast_to_f32(a_h), zero_f32)
                         for r_const in range(p.KH):
@@ -2792,7 +2822,9 @@ def build_direct_depthwise(
                     store_ok = b.land(out_q_ok, should_flush)
                     acc_val = new_accs[P_FLUSH_j * BLOCK_W + w_out]  # STATIC index
                     d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=out_q, k=ch)
-                    safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
+                    safe_d = b.select(
+                        store_ok, b.mul(d_off, c_half_bytes), oob_sentinel
+                    )
                     b.buffer_store_f16(d_rsrc, safe_d, c0, b.trunc_f32_to_f16(acc_val))
 
                 for w_out in range(BLOCK_W):
@@ -2964,7 +2996,14 @@ def build_direct_depthwise_spatial(
         coord_names=("n", "h", "w", "c"),
     ).transform(
         embed(upper=("y_iter",), into="h", strides=(1,), offset=-p.PAD, lo=0, hi=p.H),
-        embed(upper=("wo", "s_off"), into="w", strides=(p.stride, 1), offset=-p.PAD, lo=0, hi=p.W),
+        embed(
+            upper=("wo", "s_off"),
+            into="w",
+            strides=(p.stride, 1),
+            offset=-p.PAD,
+            lo=0,
+            hi=p.W,
+        ),
     )
     b_desc = TensorDescriptor.naive(
         "B", lengths=[p.total_k, p.KH, p.KW, 1], coord_names=("k", "r", "s", "c")
@@ -3020,7 +3059,10 @@ def build_direct_depthwise_spatial(
 
         iter_args = [(f"sp_acc_{kh}", zero_f32) for kh in range(p.KH)]
         group_loop = b.scf_for_iter(
-            c0, b.const_i32(n_groups), c1, iter_args,
+            c0,
+            b.const_i32(n_groups),
+            c1,
+            iter_args,
             iv_name="sp_grp",
             elide_trailing_barrier=False,
         )

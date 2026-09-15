@@ -544,9 +544,10 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         # The WMMA K-loop is fully unrolled: each iteration emits
         #   mfmas_per_warp_m × mfmas_per_warp_n WMMA calls,
         # and the loop runs K_iters = ceil(K_gemm / tile_k) times.
-        # Empirically, cost > 4096 causes comgr_relocatable to take > 30 s
-        # (e.g. t512x512x32 w1x1 with cost=36864 never completes in practice).
-        # The cut-off is conservative enough that all practical tile shapes pass.
+        # Empirically, cost > 512 causes comgr_relocatable to take excessively
+        # long (e.g. t512x512x32 w1x1 with cost=36864 never completes in
+        # practice).  The cut-off is conservative so all practical tile shapes
+        # pass.
         _mfmas_m = spec.tile_m // (spec.warp_m * spec.warp_tile_m)
         _mfmas_n = spec.tile_n // (spec.warp_n * spec.warp_tile_n)
         _k_iters = (spec.problem.K_gemm + spec.tile_k - 1) // spec.tile_k
