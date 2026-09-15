@@ -158,6 +158,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csr2ell_strided_batched_kernel(J                    m,
+                                        int64_t              batch_count,
                                         const T*             csr_val,
                                         int64_t              csr_val_stride,
                                         const I*             csr_row_ptr,
@@ -169,16 +170,23 @@ namespace rocsparse
                                         int64_t              ell_val_stride,
                                         rocsparse_index_base ell_idx_base)
     {
-        const T* batch_csr_val = csr_val + csr_val_stride * blockIdx.y;
-        T*       batch_ell_val = ell_val + ell_val_stride * blockIdx.y;
-        csr2ell_device<BLOCKSIZE, T, I, J>(m,
-                                           batch_csr_val,
-                                           csr_row_ptr,
-                                           csr_col_ind,
-                                           csr_idx_base,
-                                           ell_width,
-                                           ell_col_ind,
-                                           batch_ell_val,
-                                           ell_idx_base);
+        // Grid-stride over the batch axis so batch_count is not limited by the
+        // 65,535 grid.y hardware cap. The trip count depends only on hipBlockIdx_y,
+        // hipGridDim_y and batch_count, so it is uniform across the block.
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            const T* batch_csr_val = csr_val + csr_val_stride * batch_index;
+            T*       batch_ell_val = ell_val + ell_val_stride * batch_index;
+            csr2ell_device<BLOCKSIZE, T, I, J>(m,
+                                               batch_csr_val,
+                                               csr_row_ptr,
+                                               csr_col_ind,
+                                               csr_idx_base,
+                                               ell_width,
+                                               ell_col_ind,
+                                               batch_ell_val,
+                                               ell_idx_base);
+        }
     }
 }
