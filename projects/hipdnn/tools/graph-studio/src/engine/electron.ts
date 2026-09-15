@@ -8,6 +8,7 @@ import type {
   ExecuteResult,
   ListEnginesResult,
   LogLevel,
+  SerializeGraphResult,
 } from "./types";
 
 /**
@@ -22,6 +23,7 @@ export interface ElectronEngineApi {
   info(): Promise<EngineInfo>;
   build(graphJson: string, options?: BuildOptions): Promise<BuildPlanResult>;
   buildHipdnnJson(hipdnnJson: string, options?: BuildOptions): Promise<BuildPlanResult>;
+  serializeGraph(graphJson: string): Promise<SerializeGraphResult>;
   listEngines(graphJson: string): Promise<ListEnginesResult>;
   execute(handle: BuildHandle, options: ExecuteOptions): Promise<ExecuteResult>;
   release(handle: BuildHandle): Promise<void>;

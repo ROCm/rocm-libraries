@@ -1,0 +1,18 @@
+interface:
+  display_name: "hipDNN Kernel Authoring"
+  short_description: "Turn a hipDNN graph into a hipRTC kernel proven against the reference"
+  default_prompt: >-
+    Use hipdnn-kernel-authoring to take a hipDNN graph to a hipRTC-compilable HIP
+    kernel with correctness evidence. Read SKILL.md for entry/completion
+    requirements, then execute RUNBOOK.md as the only ordered workflow. Consult its
+    linked pages for contracts; do not invent a second sequence, and do not perform
+    descriptor, native-symbol, registration or dispatch work — that belongs to
+    hipdnn-kernel-integration. State the four handover facts it consumes: the
+    entry-point signature, the bundle's file set, the macros the source requires
+    bound with their legal values, and the launch geometry and workspace the kernel
+    assumes. "Unbound" is the normal answer for the ABI, since the integration
+    writes the handler.
+    Report the operation specification, decomposition, compile options, and
+    reference-vs-kernel numerics on named shapes and devices, with an explicit
+    does-not-prove list. Never report a successful compile, a skipped reference, a
+    generated source file or an unmeasured performance claim as a working kernel.

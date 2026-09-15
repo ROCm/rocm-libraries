@@ -1,4 +1,4 @@
-import { catalogEntry } from "../graph/catalog";
+import { catalogEntry, visibleParams } from "../graph/catalog";
 import type { OpNode } from "../graph/flow";
 import type { ParamSpec, ParamValue } from "../graph/model";
 
@@ -26,6 +26,7 @@ export function Inspector({ node, onRename, onParamChange, onDelete }: Inspector
   }
 
   const entry = catalogEntry(node.data.opType);
+  const params = entry ? visibleParams(entry, node.data.params) : [];
 
   return (
     <aside className="panel inspector">
@@ -44,9 +45,9 @@ export function Inspector({ node, onRename, onParamChange, onDelete }: Inspector
           <div className="inspector__optype">{node.data.opType}</div>
         </div>
 
-        {entry && entry.params.length > 0 && <div className="inspector__divider" />}
+        {params.length > 0 && <div className="inspector__divider" />}
 
-        {entry?.params.map((spec) => (
+        {params.map((spec) => (
           <ParamField
             key={spec.key}
             spec={spec}

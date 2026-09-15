@@ -82,6 +82,21 @@ else()
     )
 endif()
 
+# node-gyp's make generator takes its compiler from CC/CXX (gyp's make.py:
+# CXX.target falls back to $(CXX), and LINK falls back to $(CXX.target)), so on
+# Linux the add-on can be built with the same clang as the rest of the tree.
+#
+# The Windows generator emits MSBuild projects whose only non-MSVC toolset is
+# Visual Studio's bundled ClangCL -- an arbitrary compiler path is not
+# selectable -- so there the add-on stays on MSVC. That is sound rather than
+# merely tolerated: it meets hipDNN at the backend's extern "C" ABI.
+set(_studio_native_env "HIPDNN_BUILD_CONFIG=${_studio_config}")
+if(NOT WIN32)
+    list(APPEND _studio_native_env "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}"
+         "LINK=${CMAKE_CXX_COMPILER}"
+    )
+endif()
+
 # The web bundle and the node-gyp tree both land under ${_studio_out}; the
 # add-on's node-gyp tree is a directory this target never declares as an output,
 # so the target is always out of date.
@@ -92,7 +107,7 @@ add_custom_target(hipdnn_graph_studio ALL
     # fire before that and fail.
     COMMAND "${CMAKE_COMMAND}" -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/electron/native"
             "${HIPDNN_GRAPH_STUDIO_BUN}" install --ignore-scripts
-    COMMAND "${CMAKE_COMMAND}" -E env "HIPDNN_BUILD_CONFIG=${_studio_config}"
+    COMMAND "${CMAKE_COMMAND}" -E env ${_studio_native_env}
             "${HIPDNN_GRAPH_STUDIO_BUN}" run build:native
     COMMAND "${CMAKE_COMMAND}" -E env "HIPDNN_BUILD_CONFIG=${_studio_config}"
             "${HIPDNN_GRAPH_STUDIO_BUN}" run build

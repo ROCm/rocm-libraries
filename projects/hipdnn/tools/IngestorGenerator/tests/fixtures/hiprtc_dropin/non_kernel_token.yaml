@@ -1,0 +1,43 @@
+engine:
+  name: hipkernel:Fixture
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  knobs: [block_size]
+  heuristic: native
+
+kmd_fields:
+  - name: block_size
+    type: int
+    default_value: 64
+  - name: dtype
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hiprtc_file
+workspace_policy: none
+
+packs:
+  - name: fixture
+    arch: [gfx942]
+    kernels:
+      - name: fixture.f32
+        kernel_source:
+          kind: hiprtc_file
+          bundle: sources
+          source_file: Fixture.hip
+          entry_point: FixtureKernel
+          defines:
+            FIXTURE_BATCH: "$graph.batch"
+        metadata:
+          block_size: 64
+          dtype: float
+        priority: 0
+
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [block_size, dtype]
+  bindings: {}
+  vocabulary: {}

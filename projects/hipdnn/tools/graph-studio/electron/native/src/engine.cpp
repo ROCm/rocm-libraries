@@ -433,6 +433,36 @@ Napi::Value BuildHipdnnJson(const Napi::CallbackInfo& info)
     return compileAndReport(env, result, log, std::move(built));
 }
 
+// ── serializeGraph(graphJson) ──────────────────────────────────────────
+// hipDNN's canonical JSON for a Studio graph, without compiling a plan:
+// Graph::serialize() lowers to a backend descriptor on demand. The output is
+// what deserialize()/buildHipdnnJson() accept.
+Napi::Value SerializeGraph(const Napi::CallbackInfo& info)
+{
+    Napi::Env env = info.Env();
+    Napi::Object result = Napi::Object::New(env);
+    std::vector<std::string> log;
+    CaptureScope capture(env, result);
+
+    std::unique_ptr<BuiltGraph> built = prepareGraph(env, info, result, log);
+    if(!built)
+        return result;
+
+    std::string canonicalJson;
+    const Error err = built->graph.serialize(canonicalJson);
+    if(err.is_bad())
+    {
+        setFailure(env, result, errorCodeName(err.get_code()), err.get_message(), log);
+        return result;
+    }
+    log.push_back("Serialized graph to hipDNN JSON.");
+
+    result.Set("ok", true);
+    result.Set("serializedGraph", canonicalJson);
+    result.Set("log", logArray(env, log));
+    return result;
+}
+
 // ── listEngines(graphJson) ─────────────────────────────────────────────
 // Heuristic-ranked engines applicable to this graph, without compiling a plan.
 Napi::Value ListEngines(const Napi::CallbackInfo& info)
@@ -621,6 +651,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports.Set("info", Napi::Function::New(env, Info));
     exports.Set("build", Napi::Function::New(env, Build));
     exports.Set("buildHipdnnJson", Napi::Function::New(env, BuildHipdnnJson));
+    exports.Set("serializeGraph", Napi::Function::New(env, SerializeGraph));
     exports.Set("listEngines", Napi::Function::New(env, ListEngines));
     exports.Set("execute", Napi::Function::New(env, Execute));
     exports.Set("release", Napi::Function::New(env, Release));
