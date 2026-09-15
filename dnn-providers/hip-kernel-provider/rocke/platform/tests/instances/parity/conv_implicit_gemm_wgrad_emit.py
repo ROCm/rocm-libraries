@@ -23,8 +23,11 @@
 #   10 -- chiplet swizzle enabled, gfx950
 #   11 -- K-outer LDS + ds_read_b64_tr_b16 transpose reads, gfx950
 #   12 -- K-outer + async_dma (direct global->LDS load), gfx950
+#   13 -- K-outer with the 16x16x16 atom (4 operand elements per lane), gfx950
+#   14 -- pipeline="basic" unrolled global-read/compute overlap, gfx950
 #   15 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx950
 #   16 -- split-K=4, two_stage=True (workspace-store epilogue), fp16, gfx942
+#   17 -- gfx1250 wave32 WMMA 16x16x32 K-outer (ds_load_tr16_b128 transpose reads)
 #   (async_dma omitted: C++ async load path does not yet honour the wgrad A-descriptor
 #    override, so it would produce different IR and break the byte-identity gate)
 #
@@ -33,7 +36,7 @@
 #   102 -- split_k > 1 on RDNA gfx1151 (must raise ValueError)
 #   103 -- two_stage=True with split_k=1 (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-10, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-17, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from rocke.instances.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -425,6 +428,34 @@ def _spec(idx: int):
                 two_stage=True,
             ),
             "gfx942",
+        )
+
+    if idx == 17:
+        # gfx1250 wave32 WMMA 16x16x32 K-outer: the transpose read lowers to
+        # ds_load_tr16_b128 (8 per lane), so a 16-element fragment is two reads.
+        # dtype_d=fp32 because WMMA wgrad supports only the 'default' epilogue,
+        # which rejects 16-bit dW.
+        from rocke.instances.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            WgradConvSpec(
+                problem=p,
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_outer=True,
+            ),
+            "gfx1250",
         )
 
     # ----------------------------------------------------------------
