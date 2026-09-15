@@ -328,6 +328,22 @@ const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::Scal
         return "Block_32_UE5M3";
     case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
         return "Block_16_UE5M3";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        return "Block_32_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        return "Block_128_BF16";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        return "Block_32_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        return "Block_128_BF16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        return "Block_32_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        return "Block_128_F16";
+    case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        return "Block_32_F16_ZP";
+    case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+        return "Block_128_F16_ZP";
     default:
         return "Invalid";
     }

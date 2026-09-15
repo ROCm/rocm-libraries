@@ -928,8 +928,8 @@ def createLibraryLogic(
         problemTypeState["GateResidualDataTypeList"] = [
             b.value for b in problemTypeState["GateResidualDataTypeList"]
         ]
-    for opt in ("DataTypeMetadata", "DataTypeMXSA", "DataTypeMXSB"):
-        if opt in problemTypeState:
+    for opt in ("DataTypeMetadata", "DataTypeMXSA", "DataTypeMXSB", "DataTypeScaleA"):
+        if opt in problemTypeState and not isinstance(problemTypeState[opt], int):
             problemTypeState[opt] = problemTypeState[opt].value
 
     def _removeDefaultVals(params: Dict[str, Any]) -> None:

@@ -136,7 +136,11 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
-                     Base::template Pair<Predicates::Contraction::DataTypeMXSB>()});
+                     Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
+                     Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
+                     Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
+                     Base::template Pair<Predicates::Contraction::DataTypeScaleA>(),
+                     Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -337,6 +341,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::OperationIdentifierEqual, IO>
             : public AutoMappingTraits<Predicates::Contraction::OperationIdentifierEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::Int4EncodingA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::Int4EncodingA, IO>
         {
         };
 
@@ -606,6 +616,21 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::MXBlockB, IO>
             : public AutoMappingTraits<Predicates::Contraction::MXBlockB, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::ScaleBlockSizeA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::ScaleBlockSizeA, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::ScaleZeroPointA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::ScaleZeroPointA, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DataTypeScaleA, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DataTypeScaleA, IO>
         {
         };
         template <typename IO>

@@ -456,6 +456,12 @@ namespace
 
     rocisa::DataType hip2TensileType(hipDataType type)
     {
+        // w4a16 weights. HIP_R_4I_EXT is a hipBLASLt extension value, not a
+        // hipDataType enumerator, so it is tested before the switch rather than
+        // written as a (out-of-enum, -Wswitch-warning) case label.
+        if(static_cast<int>(type) == HIP_R_4I_EXT)
+            return rocisa::DataType::Int4;
+
         switch(type)
         {
         case HIP_R_32F:
@@ -528,6 +534,8 @@ namespace
             return static_cast<hipDataType>(HIP_R_6F_E3M2);
         case rocisa::DataType::Float4:
             return static_cast<hipDataType>(HIP_R_4F_E2M1);
+        case rocisa::DataType::Int4:
+            return static_cast<hipDataType>(HIP_R_4I_EXT);
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -615,6 +623,112 @@ namespace
         return rocisa::DataType::None;
     }
 
+    /// K-group size implied by a w4a16 block scaling format (0 when it is not one).
+    inline int blockScaleAGroupSize(RocblasltContractionProblem::ScalingFormat fmt)
+    {
+        switch(fmt)
+        {
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+            return 32;
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            return 128;
+        default:
+            return 0;
+        }
+    }
+
+    /// Element type of the w4a16 group scale tensor: it always matches B's
+    /// type, so the mode name carries it.
+    inline rocisa::DataType blockScaleAType(RocblasltContractionProblem::ScalingFormat fmt)
+    {
+        switch(fmt)
+        {
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            return rocisa::DataType::Half;
+        default:
+            return rocisa::DataType::BFloat16;
+        }
+    }
+
+    /// Byte offset of the packed int4 zero-point region inside the single
+    /// allocation the user passes as scaleA: the bf16 scales come first, then
+    /// the zero-points at the next 128-byte boundary. Mirrors the layout
+    /// documented on HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT.
+    inline size_t blockScaleAZeroPointOffset(int64_t m, int64_t k, int groupSize)
+    {
+        const size_t scaleBytes
+            = static_cast<size_t>(m) * TensileLite::CeilDivide<size_t>(k, groupSize) * 2;
+        return TensileLite::RoundUpToMultiple<size_t>(scaleBytes, 128);
+    }
+
+    /// True for the asymmetric w4a16 modes, i.e. those whose scale allocation
+    /// carries a packed int4 zero-point region after the scales.
+    inline bool isBlockScaleAZeroPoint(RocblasltContractionProblem::ScalingFormat fmt)
+    {
+        switch(fmt)
+        {
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    /// True for every w4a16 group-scale mode, symmetric or asymmetric.
+    inline bool isBlockScaleA(RocblasltContractionProblem::ScalingFormat fmt)
+    {
+        return blockScaleAGroupSize(fmt) != 0;
+    }
+
+    /// Select the Tensile scale mode for A/B. Shared by ConstructTensileProblem
+    /// and updateTensileProblem so the two cannot drift: an incomplete copy here
+    /// silently falls back to Signed / bf16 rather than failing.
+    inline void setTensileScaleAB(const RocblasltContractionProblem&   prob,
+                                  TensileLite::ContractionProblemGemm& tensileProblem)
+    {
+        // w4a16 group scaling: A carries a dense [M][ceil(K/G)] fp16/bf16 scale
+        // tensor, consumed in the main loop rather than the epilogue.
+        if(isBlockScaleA(prob.scaleAType))
+        {
+            const int gs = blockScaleAGroupSize(prob.scaleAType);
+            tensileProblem.setUseScaleAB("Block");
+            // Dense [M][ceil(K/G)], group dimension innermost. setScaleA later
+            // is a no-op once "Block" is set, so ordering is safe.
+            tensileProblem.setScaleBlockSizeA(gs,
+                                              blockScaleAType(prob.scaleAType),
+                                              static_cast<size_t>(prob.m),
+                                              TensileLite::CeilDivide<size_t>(prob.k, gs),
+                                              isBlockScaleAZeroPoint(prob.scaleAType));
+            // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Orthogonal to the
+            // scale mode: it describes the weight nibbles, not the scales.
+            tensileProblem.setInt4EncodingA(
+                static_cast<TensileLite::ContractionProblemGemm::Int4Encoding>(
+                    prob.int4EncodingA));
+        }
+        else if(prob.scaleA == nullptr && prob.scaleB == nullptr)
+            tensileProblem.setUseScaleAB("");
+        else if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector
+                || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Vector)
+            tensileProblem.setUseScaleAB("Vector");
+        else if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar
+                || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar)
+            tensileProblem.setUseScaleAB("Scalar");
+        else
+            tensileProblem.setUseScaleAB("");
+    }
+
     inline const rocisa::DataType
         roc2TensileComputeInputTypeA(const rocisa::DataType&       typeA,
                                      const rocisa::DataType&       typeB,
@@ -643,6 +757,14 @@ namespace
         case rocblaslt_compute_f32_fast_bf8f8:
             return rocisa::DataType::BFloat8;
         default:;
+        }
+
+        // w4a16: A is int4 in memory only. The kernel dequantizes it into B's
+        // type before the MAC, so the compute input type for both operands is
+        // B's type.
+        if(typeA == rocisa::DataType::Int4)
+        {
+            return typeB;
         }
 
         if(typeA == rocisa::DataType::Float8_fnuz && typeB == rocisa::DataType::BFloat8_fnuz)
@@ -718,6 +840,12 @@ namespace
         else if(typeA == rocisa::DataType::BFloat8 && typeB == rocisa::DataType::Float8)
         {
             return rocisa::DataType::Float8;
+        }
+
+        // w4a16: A being int4 must not drag B's compute input type down.
+        if(typeA == rocisa::DataType::Int4)
+        {
+            return typeB;
         }
 
         if(typeB == rocisa::DataType::Float8 || typeB == rocisa::DataType::BFloat8 || typeB == rocisa::DataType::Float8_fnuz || typeB == rocisa::DataType::BFloat8_fnuz ||typeB == rocisa::DataType::Float6 || typeB == rocisa::DataType::BFloat6 || typeB == rocisa::DataType::Float4) return typeB;
@@ -1991,6 +2119,10 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::None:
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
+        // w4a16 block scales are not MX scales: they travel as the ordinary
+        // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2019,6 +2151,10 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::None:
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
+        // w4a16 block scales are not MX scales: they travel as the ordinary
+        // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2042,16 +2178,7 @@ namespace
             break;
         }
 
-        if (prob.scaleA == nullptr && prob.scaleB == nullptr)
-            tensileProblem.setUseScaleAB("");
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector
-                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Vector)
-            tensileProblem.setUseScaleAB("Vector");
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar
-                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar)
-            tensileProblem.setUseScaleAB("Scalar");
-        else
-            tensileProblem.setUseScaleAB("");
+        setTensileScaleAB(prob, tensileProblem);
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
@@ -2259,6 +2386,10 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::None:
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
+        // w4a16 block scales are not MX scales: they travel as the ordinary
+        // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2286,6 +2417,10 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::None:
         case RocblasltContractionProblem::ScalingFormat::Scalar:
         case RocblasltContractionProblem::ScalingFormat::Vector:
+        // w4a16 block scales are not MX scales: they travel as the ordinary
+        // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2308,16 +2443,7 @@ namespace
             break;
         }
 
-        if (prob.scaleA == nullptr && prob.scaleB == nullptr)
-            tensileProblem.setUseScaleAB("");
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Vector
-                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Vector)
-            tensileProblem.setUseScaleAB("Vector");
-        else if (prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar
-                 || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar)
-            tensileProblem.setUseScaleAB("Scalar");
-        else
-            tensileProblem.setUseScaleAB("");
+        setTensileScaleAB(prob, tensileProblem);
 
         tensileProblem.setUseScaleCD(prob.scaleC != nullptr || prob.scaleD != nullptr);
         tensileProblem.setUseScaleAlphaVec(prob.scaleAlphaVec != nullptr);
@@ -2480,6 +2606,18 @@ namespace
             inputs.scaleA = reinterpret_cast<const void*>(prob.scaleA);
             inputs.mxsa   = nullptr;
         }
+
+        // w4a16 asymmetric: the zero-points live in a second region of the same
+        // allocation, so the public API keeps a single scaleA pointer.
+        if(isBlockScaleAZeroPoint(prob.scaleAType))
+        {
+            inputs.scaleZeroA = reinterpret_cast<const void*>(
+                static_cast<const uint8_t*>(prob.scaleA)
+                + blockScaleAZeroPointOffset(
+                    prob.m, prob.k, blockScaleAGroupSize(prob.scaleAType)));
+        }
+        else
+            inputs.scaleZeroA = nullptr;
 
         if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
             || prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT

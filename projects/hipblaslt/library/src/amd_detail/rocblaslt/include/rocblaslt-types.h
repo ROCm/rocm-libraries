@@ -398,6 +398,7 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
     ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT    = 105,
+    ROCBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT            = 106,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -498,6 +499,17 @@ struct RocblasltContractionProblem
         Block_32_UE5M3,
         Block_16_UE5M3,
         Block_32_UE8M0_32_8_EXT,
+        // w4a16 group scaling: dense [M][ceil(K/G)] bf16 scales, one per G
+        // consecutive K elements of a row. Symmetric (no zero-point).
+        Block_32_BF16,
+        Block_128_BF16,
+        Block_32_BF16_ZP,
+        Block_128_BF16_ZP,
+        // Same, with fp16 scales; the scale element type follows B's type.
+        Block_32_F16,
+        Block_128_F16,
+        Block_32_F16_ZP,
+        Block_128_F16_ZP,
     };
 
     hipblasOperation_t trans_a;
@@ -592,6 +604,10 @@ struct RocblasltContractionProblem
     // constructor parameter: the object API builds the problem before it knows
     // its stream, so this is assigned once the stream is available rather than
     // threaded through a 60-argument constructor that every caller spells out.
+    // Mirrors HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT; see
+    // hipblasLtInt4Encoding_t. Assigned after construction like streamKFlags,
+    // so it stays out of the positional aggregate initializers.
+    int32_t     int4EncodingA = 0;
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
