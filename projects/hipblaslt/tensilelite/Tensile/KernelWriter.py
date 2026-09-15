@@ -10896,7 +10896,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
-    if kernel["PartialRMS"]:
+    if kernel["RMSEpilogue"]:
       # RMSNormGamma: 64-bit ptr (2 SGPRs), PartialBuf: 64-bit ptr (2 SGPRs).
       # NTilesN is a kernarg u32 but is NOT put in the named SGPR block; instead the
       # epilogue computes it from SizesFree[1] and the compile-time MT1 constant.
@@ -10907,24 +10907,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numStoreSgprNames.append("PartialBuf")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       storeSgprLoad += self.states.rpga * 2
-      if kernel["PartialRMSResidualAdd"]:
-        # ResidualBuf: 64-bit ptr (2 SGPRs) for the bf16 row-major residual tensor.
-        self.states.numStoreSgprNames.append("ResidualBuf")
-        self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
-        storeSgprLoad += self.states.rpga
-      if kernel["PartialRMSStoreBf16D"]:
-        # AddressResidualOut: 64-bit ptr (2 SGPRs) for the bf16 pre-quant output.
-        # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
-        self.states.numStoreSgprNames.append("AddressResidualOut")
-        self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
-        storeSgprLoad += self.states.rpga
-    if kernel["DQuantType"] == "Tile":
-      # QuantScale: 64-bit pointer (2 SGPRs) for per-tile amax/448 output buffer.
-      # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
-      self.states.numStoreSgprNames.append("QuantScale")
+      # ResidualBuf: 64-bit ptr (2 SGPRs) for the bf16 row-major residual tensor.
+      # Always present under RMSEpilogue (residual-add is unconditional).
+      self.states.numStoreSgprNames.append("ResidualBuf")
       self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
       storeSgprLoad += self.states.rpga
-    if kernel["DQuantType"] == "MXFP8":
+      # AddressResidualOut: 64-bit ptr (2 SGPRs) for the bf16 pre-quant output.
+      # Always present under RMSEpilogue (bf16 residual-out store is unconditional).
+      # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
+      self.states.numStoreSgprNames.append("AddressResidualOut")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+      storeSgprLoad += self.states.rpga
+    if kernel["RMSEpilogue"] and kernel["ProblemType"]["DestDataType"].isFloat8():
       # MXScale: 64-bit pointer (2 SGPRs) for the e8m0 side buffer.
       # Alignment is handled by offset arithmetic in the loader, no pad SGPR.
       self.states.numStoreSgprNames.append("MXScale")

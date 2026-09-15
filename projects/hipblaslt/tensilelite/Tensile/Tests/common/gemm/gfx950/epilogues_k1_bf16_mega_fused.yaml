@@ -1,31 +1,31 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# No-epilogue baseline matching the winning tile of epilogues_bf16_k1_winner.yaml.
-# Same GEMM main loop (bf16 TN, MT 384x256x64, MI 16x16x32, MIWaveTile [12,8],
-# MIWaveGroup [2,2], WorkGroup [32,8,1], PrefetchGlobalRead=2, DepthU=64,
-# StreamK=3), but a plain GEMM store: bf16 D = A*B with NO fused epilogue
-# (no PartialRMS sum-of-squares, no MXFP8 dynamic quant, no residual add,
-# no second bf16 ResidualOut store, no subtile store path).
-#
-# This isolates the epilogue overhead: any GFlops/ASM delta vs the winner is
-# attributable to the fused epilogue, since the accumulation loop is identical.
+# RMSEpilogue, bf16-output (no MXFP8) mode: a single SubtileMegaFusedEmitter
+# runs PartialRMS + ResidualAdd + bf16 ResidualOut and writes the gamma-scaled
+# result straight back for the standard bf16 D store. This exercises the fused
+# path with DQuantType unset, so the MXFP8 block (blkAmax, stream context,
+# MXScale SRD, _mxFusedTail) is gated off at codegen. Numerics must match the
+# flag-off chain covered by benchmark.yaml.
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
-  NumElementsToValidate: 0
+  NumElementsToValidate: -1
   ExitOnFails: 0
-  PrintSolutionRejectionReason: True
+  PrintLevel: 3
   KernelTime: True
-  KeepBuildTmp: True
+  PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
 
+  ########################################
+  # RMSEpilogue: bf16 in, bf16 out — PartialRMS + ResidualAdd, no MXFP8 quant.
+  ########################################
   -
-    - # ProblemType — plain bf16 GEMM, f32 compute, bf16 out (no epilogue)
+    - # ProblemType — bf16 in/out, f32 compute, residual add, bf16 ResidualOut.
       OperationType: GEMM
       DataType: b
       DestDataType: b
@@ -43,25 +43,28 @@ BenchmarkProblems:
       UseScaleAlphaVec: 0
       UseScaleD: False
       Sparse: 0
+      UseRMSEpilogue: True
 
     - InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-            - [16, 16, 32, 1,  1, 12, 8, 2, 2]  # MT 384x256 (matches winner)
+            # WG 1x1 (WG0=1, WG1=1)
+            - [16, 16, 32, 1, 1,  8,  8, 1, 1]  # MT0=128  MT1=128
+            # WG 2x1 (WG0=2, WG1=1)
+            - [16, 16, 32, 1, 1,  4,  8, 2, 1]  # MT0=128  MT1=128
+            # WG 2x2 (WG0=2, WG1=2)
+            - [16, 16, 32, 1, 1,  4,  4, 2, 2]  # MT0=128  MT1=128
+        - RMSEpilogue: [True]
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
         - StreamKAtomic: [0]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [3]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchAcrossPersistent: [0]
         - DirectToLds: [1]
-        # Keep the compact subtile store path so the main loop and LDS layout match
-        # the winner exactly; the ONLY difference is the absent RMS/quant/residual
-        # epilogue math. The standard (non-subtile) store needs ~8KB more LDS and
-        # overflows the gfx950 163840 B limit at MT384x256 DU64 PGR2.
         - UseSubtileImpl: [True]
         - StaggerU: [0]
         - DepthU: [64]
@@ -75,10 +78,5 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [8192,  8192, 1, 8192]
-
-LibraryLogic:
-  ScheduleName: "baseline_bf16_winner_k1"
-  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
-  ArchitectureName: "gfx950"
-  LibraryType: "Prediction"
+            - Exact: [768, 768, 1, 768]
+            - Exact: [513, 513, 1, 544]

@@ -473,18 +473,7 @@ namespace TensileLite
             }
         };
 
-        template <typename IO>
-        struct EnumTraits<DQuantType, IO>
-        {
-            using iot = IOTraits<IO>;
 
-            static void enumeration(IO& io, DQuantType& value)
-            {
-                iot::enumCase(io, value, "None",  DQuantType::None);
-                iot::enumCase(io, value, "Tile",  DQuantType::Tile);
-                iot::enumCase(io, value, "MXFP8", DQuantType::MXFP8);
-            }
-        };
     } // namespace Serialization
 } // namespace TensileLite
 

@@ -172,12 +172,7 @@ namespace TensileLite
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
-                iot::mapOptional(io, "PartialRMS",            s.partialRMS);
-                iot::mapOptional(io, "PartialRMSResidualAdd", s.partialRMSResidualAdd);
-                iot::mapOptional(io, "PartialRMSStoreBf16D",  s.partialRMSStoreBf16D);
-                iot::mapOptional(io, "dquantType",            s.dquantType);
-                iot::mapOptional(io, "dquantSize0",           s.dquantSize0);
-                iot::mapOptional(io, "dquantSize1",           s.dquantSize1);
+                iot::mapOptional(io, "RMSEpilogue", s.rmsEpilogue);
                 iot::mapOptional(io, "useDeepseekScaleA",     s.deepseekScaleA);
                 iot::mapOptional(io, "useDeepseekScaleB",     s.deepseekScaleB);
                 iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
@@ -274,11 +269,7 @@ namespace TensileLite
                 // mxScaleFormat is mapped as optional so logic files that omit it
                 // (e.g. non-MX problems) deserialize cleanly with the default 0 = NoSwizzle.
                 iot::mapOptional(io, "mxScaleFormat", s.mxScaleFormat);
-                iot::mapOptional(io, "usePartialRMS", s.usePartialRMS);
-                iot::mapOptional(io, "partialRMSResidualAdd", s.partialRMSResidualAdd);
-                iot::mapOptional(io, "partialRMSQuant", s.partialRMSQuant);
-                iot::mapOptional(io, "partialRMSStoreBf16D", s.partialRMSStoreBf16D);
-                iot::mapOptional(io, "dquantType", s.dquantType);
+                iot::mapOptional(io, "useRMSEpilogue", s.useRMSEpilogue);
                 iot::mapOptional(io, "useDeepseekScaleA", s.useDeepseekScaleA);
                 iot::mapOptional(io, "useDeepseekScaleB", s.useDeepseekScaleB);
                 iot::mapOptional(io, "deepseekScaleAq0", s.deepseekScaleAq0);

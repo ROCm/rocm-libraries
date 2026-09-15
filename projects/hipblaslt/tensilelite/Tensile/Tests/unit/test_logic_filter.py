@@ -32,10 +32,7 @@ def _makeArgs(**kwargs):
         input_type_a=None,
         input_type_b=None,
         dest_type=None,
-        dquant_type=None,
-        partial_rms=False,
-        residual_add=False,
-        residual_out=False,
+        rms_epilogue=False,
         arch=None,
         schedule_name=None,
         field=None,
@@ -71,7 +68,6 @@ def test_dictFormParse(tmp_path):
             "DataTypeA": 7,
             "DataTypeB": 7,
             "DestDataType": 7,
-            "DQuantType": "None",
         },
         "Solutions": [{"UseSubtileImpl": True}],
     }
@@ -103,7 +99,6 @@ def test_listFormParse(tmp_path):
   DataTypeA: 7
   DataTypeB: 7
   DestDataType: 7
-  DQuantType: None
 - []
 """
     f = tmp_path / "list.yaml"
@@ -195,69 +190,32 @@ def test_inputTypeAPred():
 
 
 # ---------------------------------------------------------------------------
-# 6. --dquant-type predicate
+# 6. --rms-epilogue predicate
 # ---------------------------------------------------------------------------
 
-def test_dquantTypePredMatch():
-    """--dquant-type MXFP8 matches DQuantType: MXFP8 (case-insensitive)."""
-    record = _makeRecord(problemType={"DQuantType": "MXFP8"})
-    preds = buildPredicates(_makeArgs(dquant_type="MXFP8"))
+def test_rmsEpilogueMatch():
+    """--rms-epilogue matches when useRMSEpilogue is true."""
+    record = _makeRecord(problemType={"useRMSEpilogue": True})
+    preds = buildPredicates(_makeArgs(rms_epilogue=True))
     assert all(p(record) for p in preds)
 
 
-def test_dquantTypePredNoMatch():
-    """--dquant-type MXFP8 does not match DQuantType: None."""
-    record = _makeRecord(problemType={"DQuantType": "None"})
-    preds = buildPredicates(_makeArgs(dquant_type="MXFP8"))
+def test_rmsEpilogueNoMatch():
+    """--rms-epilogue does not match when useRMSEpilogue is false."""
+    record = _makeRecord(problemType={"useRMSEpilogue": False})
+    preds = buildPredicates(_makeArgs(rms_epilogue=True))
     assert not all(p(record) for p in preds)
 
 
-def test_dquantTypeCaseInsensitive():
-    """--dquant-type matching is case-insensitive."""
-    record = _makeRecord(problemType={"DQuantType": "MXFP8"})
-    preds = buildPredicates(_makeArgs(dquant_type="mxfp8"))
-    assert all(p(record) for p in preds)
-
-
-# ---------------------------------------------------------------------------
-# 7. --partial-rms predicate
-# ---------------------------------------------------------------------------
-
-def test_partialRmsMatchResidualAdd():
-    """--partial-rms matches when PartialRMSResidualAdd is true."""
-    record = _makeRecord(problemType={
-        "PartialRMSResidualAdd": True,
-        "PartialRMSQuant": False,
-        "PartialRMSStoreBf16D": False,
-    })
-    preds = buildPredicates(_makeArgs(partial_rms=True))
-    assert all(p(record) for p in preds)
-
-
-def test_partialRmsMatchQuant():
-    """--partial-rms matches when PartialRMSQuant is true."""
-    record = _makeRecord(problemType={
-        "PartialRMSResidualAdd": False,
-        "PartialRMSQuant": True,
-        "PartialRMSStoreBf16D": False,
-    })
-    preds = buildPredicates(_makeArgs(partial_rms=True))
-    assert all(p(record) for p in preds)
-
-
-def test_partialRmsNoMatch():
-    """--partial-rms does not match when all three PartialRMS fields are false."""
-    record = _makeRecord(problemType={
-        "PartialRMSResidualAdd": False,
-        "PartialRMSQuant": False,
-        "PartialRMSStoreBf16D": False,
-    })
-    preds = buildPredicates(_makeArgs(partial_rms=True))
+def test_rmsEpilogueNoMatchMissing():
+    """--rms-epilogue does not match when useRMSEpilogue is absent."""
+    record = _makeRecord(problemType={"DestDataType": 15})
+    preds = buildPredicates(_makeArgs(rms_epilogue=True))
     assert not all(p(record) for p in preds)
 
 
 # ---------------------------------------------------------------------------
-# 8. --field generic coercion
+# 7. --field generic coercion
 # ---------------------------------------------------------------------------
 
 def test_fieldBoolCoercion():
@@ -287,7 +245,7 @@ def test_fieldIntCoercion():
 
 def test_fieldStringCoercion():
     """--field correctly matches string values."""
-    record = _makeRecord(problemType={"OperationType": "GEMM", "DQuantType": "None"})
+    record = _makeRecord(problemType={"OperationType": "GEMM"})
 
     preds = buildPredicates(_makeArgs(field=["OperationType=GEMM"]))
     assert all(p(record) for p in preds)
@@ -304,7 +262,7 @@ def test_fieldMissingKey():
 
 
 # ---------------------------------------------------------------------------
-# 9. AND combination
+# 8. AND combination
 # ---------------------------------------------------------------------------
 
 def test_andCombination():
@@ -312,20 +270,21 @@ def test_andCombination():
     record = _makeRecord(problemType={
         "DataTypeA": 7,
         "DataTypeB": 7,
-        "DQuantType": "MXFP8",
+        "useRMSEpilogue": True,
     })
 
-    args_both_match = _makeArgs(input_type="bf16", dquant_type="MXFP8")
+    args_both_match = _makeArgs(input_type="bf16", rms_epilogue=True)
     preds = buildPredicates(args_both_match)
     assert all(p(record) for p in preds)
 
-    args_one_fails = _makeArgs(input_type="bf16", dquant_type="Tile")
+    args_one_fails = _makeArgs(input_type="bf16", rms_epilogue=False)
     preds2 = buildPredicates(args_one_fails)
-    assert not all(p(record) for p in preds2)
+    # rms_epilogue=False means no rms_epilogue predicate is added, so should still match.
+    assert all(p(record) for p in preds2)
 
 
 # ---------------------------------------------------------------------------
-# 10. Malformed file skip
+# 9. Malformed file skip
 # ---------------------------------------------------------------------------
 
 def test_malformedFileReturnsNone(tmp_path):
@@ -344,7 +303,7 @@ def test_nonYamlTextReturnsNone(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 11. Exit codes
+# 10. Exit codes
 # ---------------------------------------------------------------------------
 
 def test_exitCodeNoMatch(monkeypatch, tmp_path):

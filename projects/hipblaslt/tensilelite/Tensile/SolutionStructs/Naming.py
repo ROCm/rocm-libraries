@@ -229,27 +229,17 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if state.get("LDSSegmentInterleave") == 1:
     requiredParametersTemp.add("LDSSegmentInterleave")
 
-  # DQuantSize0/1 are only meaningful when a quant epilogue is active; exclude
-  # them from non-quant kernel names to avoid spurious -1 tags on every other kernel.
-  if state.get("DQuantType", "None") == "None":
-    requiredParametersTemp.discard("DQuantSize0")
-    requiredParametersTemp.discard("DQuantSize1")
-
-  # PartialRMS side-input types only matter when the epilogue (and residual) are
-  # active. Also omit the tag when the type equals the bf16 default so pre-existing
-  # bf16 PartialRMS kernels keep their original, tag-free names.
-  if not state.get("PartialRMS", False):
-    requiredParametersTemp.discard("PartialRMSGammaType")
-    requiredParametersTemp.discard("PartialRMSResidualType")
-    requiredParametersTemp.discard("PartialRMSStoreBf16D")
+  # RMSEpilogue side-input types only matter when the epilogue is active.
+  # Omit the tag when the type equals the bf16 default to keep names compact.
+  if not state.get("RMSEpilogue", False):
+    requiredParametersTemp.discard("RMSEpilogueGammaType")
+    requiredParametersTemp.discard("RMSEpilogueResidualType")
   else:
-    if not state.get("PartialRMSStoreBf16D", False):
-      requiredParametersTemp.discard("PartialRMSStoreBf16D")
-    if str(state.get("PartialRMSGammaType") or "b").lower() == "b":
-      requiredParametersTemp.discard("PartialRMSGammaType")
-    residualIsDefault = str(state.get("PartialRMSResidualType") or "b").lower() == "b"
-    if not state.get("PartialRMSResidualAdd", False) or residualIsDefault:
-      requiredParametersTemp.discard("PartialRMSResidualType")
+    if str(state.get("RMSEpilogueGammaType") or "b").lower() == "b":
+      requiredParametersTemp.discard("RMSEpilogueGammaType")
+    residualIsDefault = str(state.get("RMSEpilogueResidualType") or "b").lower() == "b"
+    if residualIsDefault:
+      requiredParametersTemp.discard("RMSEpilogueResidualType")
 
   # DeepseekScale parameters are only meaningful when at least one scale flag is active.
   use_scale_a = state.get("UseDeepseekScaleA", False)

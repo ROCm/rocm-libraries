@@ -3,12 +3,12 @@
 
 # PartialRMS + ResidualAdd + MXFP8 DynQuant 32x1 + bf16 ResidualOut store (K1),
 # MX-scaled fp8 input path. Combines MX-scaled fp8 A/B (MXBlockA=32, MXBlockB=32)
-# with the two-pass PartialRMSStoreBf16D epilogue: the RMS pass writes the
-# pre-quantization H+residual value as bf16 to ResidualOut, the quant pass writes
-# OCP fp8 e4m3 to D. Constraints (combined PartialRMS + MXFP8 mode): DestDataType=F8,
-# UseBeta=False, MXFP8Quant owns quantization (PartialRMSQuant=False),
+# with the two-pass RMSEpilogue: the RMS pass writes the pre-quantization
+# H+residual value as bf16 to ResidualOut, the quant pass writes OCP fp8 e4m3 to D.
+# MXFP8 quant is derived from DestDataType=F8 + UseRMSEpilogue (block shape always 32x1).
+# Constraints: DestDataType=F8, UseBeta=False,
 # MT1 a multiple of 64 (MT1==128 for group 1; MT1==256 for group 2),
-# MT0%64==0, WG0<=2, DQuantSize0(=32) <= MT0/WG0. Realistic LLM-inference shapes.
+# MT0%64==0, WG0<=2. Realistic LLM-inference shapes.
 #
 # Two BenchmarkProblemSizeGroups under one ProblemType (ClientWriter enforces
 # uniform MT1 per benchmark pass; sibling groups get distinct idx so results files
@@ -77,11 +77,7 @@ BenchmarkProblems:
       UseScaleAlphaVec: 0
       UseScaleD: False
       Sparse: 0
-      UsePartialRMS: True
-      PartialRMSResidualAdd: True
-      PartialRMSStoreBf16D: True
-      PartialRMSQuant: False
-      DQuantType: MXFP8
+      UseRMSEpilogue: True
 
     ########################################
     # Size group 1 (idx 00): MT1=128 wave-group tile sweep.
@@ -120,13 +116,8 @@ BenchmarkProblems:
             - [16, 16, 128, 1, 1, 10,  4, 2, 2]  # MT0=320  MT1=128
             # WG 2x4 (WG0=2, WG1=4) REMOVED: 8-wave partialBuf sum-of-squares
             # miscompute under full CPU validation (PARTIALRMS_WG2X4_KNOWN_ISSUE.md).
-        - PartialRMS: [True]
-        - PartialRMSResidualAdd: [True]
-        - PartialRMSQuant: [False]
-        - PartialRMSStoreBf16D: [True]
-        - DQuantType: [MXFP8]
-        - DQuantSize0: [32]
-        - DQuantSize1: [1]
+        - RMSEpilogue: [True]
+
         - StreamK: [3]
         - StreamKForceDPOnly: [0, 1]
         - StreamKAtomic: [0]
@@ -169,13 +160,8 @@ BenchmarkProblems:
             - [16, 16, 128, 1, 1, 16,  4, 1, 4]  # MT0=256  MT1=256
             # WG 2x2, MT0=320, MT1=256 — added coverage
             - [16, 16, 128, 1, 1, 10,  8, 2, 2]  # MT0=320  MT1=256
-        - PartialRMS: [True]
-        - PartialRMSResidualAdd: [True]
-        - PartialRMSQuant: [False]
-        - PartialRMSStoreBf16D: [True]
-        - DQuantType: [MXFP8]
-        - DQuantSize0: [32]
-        - DQuantSize1: [1]
+        - RMSEpilogue: [True]
+
         - StreamK: [3]
         - StreamKForceDPOnly: [0, 1]
         - StreamKAtomic: [0]
