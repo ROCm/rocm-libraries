@@ -96,9 +96,10 @@ code with the family above.
 | File | Spec | Doc |
 |-----------------------------------|-------------------------------------------------------------------|------------------------------|
 | `gfx942/kda_chunkwise.py` | `KdaChunkFusedSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaTileSpec` | `instances/kda.md` |
+| `gfx950/kda_chunkwise.py` | `KdaChunkFusedSpec`, `KdaChunkPrepSpec`, `KdaChunkScanSpec`, `KdaTileSpec` | `instances/kda.md` |
 
 Three kernels: a fused prefill, and a two-phase split path (per-chunk tile
-builder, then state scan). gfx942 / bf16 only; prefill only, no varlen.
+builder, then state scan). gfx942 and gfx950 are bf16-only; prefill only, no varlen.
 Dispatch is `library/dispatch/kda/` (`dispatch_kda`), which defaults to the
 fused kernel and keeps the split halves opt-in.
 

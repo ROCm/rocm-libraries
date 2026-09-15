@@ -34,6 +34,7 @@ from Tensile.Common.Utilities import (
     ClientExecutionLock,
     ProgressBar,
     ceilDivide,
+    clusterEnabled,
     choose_multiplier,
     elineno,
     ensurePath,
@@ -156,6 +157,23 @@ class TestCeilDivide:
 
     def test_divide_by_zero_returns_zero(self):
         assert ceilDivide(5, 0) == 0
+
+
+class TestClusterEnabled:
+    @pytest.mark.parametrize(
+        "cluster_dim,expected",
+        [
+            ([1, 1], False),
+            ([2, 1], True),
+            ([1, 2], True),
+            ([2, 2], True),
+        ],
+        ids=["unit", "x-only", "y-only", "two-dimensional"],
+    )
+    def test_nonunit_dimension_enables_cluster(self, cluster_dim, expected):
+        # Asymmetric cases prove both dimensions participate; [2, 2]
+        # distinguishes the product from division.
+        assert clusterEnabled(cluster_dim) is expected
 
 
 class TestRoundUpToNearestMultiple:

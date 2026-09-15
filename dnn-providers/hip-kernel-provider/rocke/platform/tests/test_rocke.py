@@ -667,6 +667,59 @@ class TestHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             LdsLayout(logical_cols=64, swizzle="xor").validate_for_async()
 
+    def test_wgrad_async_rejects_non_packed_lds_layout(self):
+        """An explicit lds_layout must reach validate_for_async() for wgrad too.
+
+        The scalar ``lds_k_pad`` guard cannot stand in for this: an explicit
+        ``lds_layout`` object beats the scalar in ``effective_lds_layout()``, and
+        the xor swizzle has no scalar analogue at all. Without the call these
+        specs build and only fail deep inside the emitter, which the sweep
+        drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
+        """
+        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
+        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
+        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+            WgradConvSpec,
+            is_valid_wgrad_spec,
+        )
+
+        def _spec(**over):
+            return WgradConvSpec(
+                problem=ConvProblem(N=1, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
+                name="wgrad_async_guard",
+                data=ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16"),
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                warp_m=2,
+                warp_n=2,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+                wave_size=64,
+                pipeline="mem",
+                epilogue="cshuffle",
+                split_k=1,
+                lds_k_outer=True,
+                async_dma=True,
+                **over,
+            )
+
+        # The packed layout the async intrinsic actually writes is accepted.
+        _spec(lds_layout=LdsLayout.packed_async(64)).validate()
+
+        for bad in (
+            LdsLayout.padded_k(64, 8),
+            LdsLayout(logical_cols=64, swizzle="xor"),
+        ):
+            spec = _spec(lds_layout=bad)
+            with self.assertRaises(ValueError):
+                spec.validate()
+            # And the soft validator reports it rather than skipping silently.
+            ok, why = is_valid_wgrad_spec(spec, "gfx950")
+            self.assertFalse(ok)
+            self.assertTrue(why)
+
     def test_schedule_policy_emits_expected_hints(self):
         b = IRBuilder("sched_smoke")
         policy = SchedulePolicy.for_pipeline("compv4")
@@ -6441,6 +6494,100 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             result = _torch_bundled_lib("amdhip64")
             self.assertIsNone(result)
             self.assertNotIn("torch", sys.modules)
+
+    def test_rocm_version_parsed_from_versioned_libdir(self):
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        self.assertEqual(_rocm_version_from_libdir("/opt/rocm-7.2.3/lib"), (7, 2))
+        # core-7.13 is a *component* version living under release 7.2.0. The
+        # result is compared against torch.version.hip, which reports the
+        # release, so the component number must not win: reading (7, 13) here
+        # would make a torch on ROCm 7.10 look older than a 7.2 install.
+        self.assertEqual(
+            _rocm_version_from_libdir("/opt/rocm-7.2.0/core-7.13/lib"), (7, 2)
+        )
+
+    def test_rocm_version_resolves_unversioned_symlink(self):
+        import os
+        import tempfile
+
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        # The distro default is ROCM_PATH=/opt/rocm, an unversioned symlink to
+        # /opt/rocm-X.Y.Z. Parsing only the literal path finds no digits in
+        # "rocm" and reports the version unknown, which silently disables the
+        # stale-comgr demotion on the exact layout it exists for.
+        with tempfile.TemporaryDirectory() as tmp:
+            real_root = os.path.join(tmp, "rocm-7.2.3")
+            os.makedirs(os.path.join(real_root, "lib"))
+            link_root = os.path.join(tmp, "rocm")
+            os.symlink(real_root, link_root)
+
+            self.assertEqual(
+                os.path.basename(link_root),
+                "rocm",
+                "the link name must be unversioned for this test to mean anything",
+            )
+            self.assertEqual(
+                _rocm_version_from_libdir(os.path.join(link_root, "lib")), (7, 2)
+            )
+
+    def test_rocm_version_unknown_when_nothing_is_versioned(self):
+        import os
+        import tempfile
+
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        # Unknown must stay unknown: _torch_comgr_is_stale keeps the historical
+        # resolution order rather than guessing when either side is unreadable.
+        # Built under a tmpdir because a literal /opt/rocm is a symlink to a
+        # versioned root on a real ROCm box -- which would make this pass for
+        # the wrong reason there and fail everywhere else.
+        with tempfile.TemporaryDirectory() as tmp:
+            libdir = os.path.join(tmp, "rocm", "lib")
+            os.makedirs(libdir)
+            self.assertIsNone(_rocm_version_from_libdir(libdir))
+
+    def test_component_version_never_outranks_the_release(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # torch on ROCm 7.10 beside a packaged release 7.2.0 whose runtime
+        # lives in core-7.13. torch is NEWER, so nothing may be demoted --
+        # comparing against the component version would invert that.
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            with mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
+            ):
+                self.assertEqual(rc._torch_rocm_version(), (7, 10))
+                self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
+                self.assertFalse(rc._torch_comgr_is_stale())
+
+    def test_stale_comgr_demotion_fires_through_a_symlinked_root(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            with mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
+            ):
+                with mock.patch.object(
+                    rc.os.path, "realpath", return_value="/opt/rocm-7.2.3/lib"
+                ):
+                    self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
+                    self.assertTrue(rc._torch_comgr_is_stale())
 
 
 # ---------------------------------------------------------------------

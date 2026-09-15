@@ -261,7 +261,7 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
         setMergedBarrierComment(barrier, mergedTokens);
     }
     transferLayer2OverlapPairs(overlaps, g1, g2);
-    for (StinkyInstruction* barrier : g2.barriers) bb.removeIR(barrier);
+    for (StinkyInstruction* barrier : g2.barriers) barrier->erase();
 
     return true;
 }
