@@ -92,20 +92,6 @@ struct heuristic_defaults_t {
 };
 
 /**
- * @brief StreamK=5 hybrid-mode (SK3 static vs SK4 dynamic) selection thresholds.
- *
- * Fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X (gfx950); see
- * origami::streamk::select_hybrid_mode() for what each threshold gates and
- * why. Other architectures keep the static (SK3) sub-path until they are
- * tuned in a follow-up PR.
- */
-struct streamk_hybrid_defaults_t {
-  static constexpr size_t MIN_TILES_FOR_DYNAMIC                  = 480;
-  static constexpr int    MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC = 3;
-  static constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY   = 8.41;
-};
-
-/**
  * @brief Structure containing all trainable heuristic parameters.
  *
  * This structure consolidates all empirical constants and weights used in
