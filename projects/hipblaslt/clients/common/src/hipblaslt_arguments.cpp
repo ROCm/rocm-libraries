@@ -145,6 +145,7 @@ void Arguments::init()
     use_user_args            = false;
     rotating                 = 0;
     use_gpu_timer            = false;
+    null_algo                = false;
     skip_slow_solution_ratio = 0.0;
 
     // tuning

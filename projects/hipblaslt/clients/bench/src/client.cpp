@@ -96,6 +96,18 @@ int run_bench_test(Arguments&         arg,
             return 0;
     }
 
+    // Reject misuse rather than silently ignore: null-algo dispatch is only wired
+    // into the C-API strided GEMM timing path, so any other mode would report
+    // numbers that did not use the requested dispatch.
+    if(arg.null_algo
+       && (arg.algo_method != 0 || arg.use_ext || arg.grouped_gemm != 0 || arg.batch_mode != 0))
+    {
+        hipblaslt_cerr << "error: --null_algo requires --algo_method heuristic, --api_method c, "
+                          "--batch_mode 0 and no grouped gemm"
+                       << std::endl;
+        return EXIT_FAILURE;
+    }
+
     // adjust dimension for GEMM routines
     size_t gemmNum = arg.grouped_gemm == 0 ? 1 : arg.grouped_gemm;
     for(size_t i = 0; i < gemmNum; i++)
@@ -674,6 +686,14 @@ try
         ("use_gpu_timer",
          value<bool>(&arg.use_gpu_timer)->default_value(false),
          "Use hipEventElapsedTime to profile elapsed time.")
+
+        ("null_algo",
+         value<bool>(&arg.null_algo)->default_value(false),
+         "Pass a null algo to hipblasLtMatmul so the library re-runs its own heuristic "
+         "query on every cold and timed call instead of reusing the algo the client "
+         "queried once up front. Requires --algo_method heuristic, --api_method c, "
+         "--batch_mode 0 and no grouped gemm. Note that --print_kernel_info still reports "
+         "the client-side heuristic candidate, not the kernel the library actually ran.")
 
         ("skip_slow_solution_ratio",
           value<float>(&arg.skip_slow_solution_ratio)->default_value(0.0),

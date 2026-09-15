@@ -82,6 +82,7 @@ cd hipBLASLt; cd build/release
 --print_kernel_info        Print solution, kernel name and solution index.
 --rotating <value>         Use rotating memory blocks for each iteration, size in MB.                           (Default value is: 0)
 --use_gpu_timer            Use hipEventElapsedTime to profile elapsed time.                                    (Default value is: false)
+--null_algo                Pass a null algo to hipblasLtMatmul so the library re-runs its own heuristic query on every cold and timed call instead of reusing the algo the client queried once up front. Requires --algo_method heuristic, --api_method c, --batch_mode 0 and no grouped gemm. Note that --print_kernel_info still reports the client-side heuristic candidate, not the kernel the library actually ran.
 --splitk <value>           [Tuning parameter] Set split K for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
 --wgm <value>              [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
 --flush                    Flush icache

@@ -680,6 +680,7 @@ Arguments:
   - use_user_args: c_bool
   - rotating: c_int32
   - use_gpu_timer: c_bool
+  - null_algo: c_bool
   - skip_slow_solution_ratio: c_float
   - gsu_vector: c_int32*32
   - wgm_vector: c_int32*32
@@ -808,6 +809,7 @@ Defaults:
   use_user_args: false
   rotating: 0
   use_gpu_timer: false
+  null_algo: false
   skip_slow_solution_ratio: 0.0
   gsu_vector: 0
   wgm_vector: 0

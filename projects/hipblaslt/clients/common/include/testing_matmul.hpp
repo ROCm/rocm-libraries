@@ -5781,6 +5781,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
+                    // A null algo makes hipblasLtMatmul run an implicit heuristics query,
+                    // so the library re-selects a solution on every call.
+                    const hipblasLtMatmulAlgo_t* algo_ptr
+                        = arg.null_algo ? nullptr : &heuristicResult[sol].algo;
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -5810,7 +5814,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 (*dDp)[0].as<char>()
                                     + (i % block_count) * size_D[0] * realDataTypeSize(To),
                                 matD[0],
-                                &heuristicResult[sol].algo,
+                                algo_ptr,
                                 *dWorkspace,
                                 workspace_size,
                                 stream),
@@ -5861,7 +5865,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                     matC[0],
                                     (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
                                     matD[0],
-                                    &heuristicResult[sol].algo,
+                                    algo_ptr,
                                     *dWorkspace,
                                     workspace_size,
                                     stream),
