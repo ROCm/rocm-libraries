@@ -3383,7 +3383,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
             inst.add_src(_to_stinky_register(self.srcs[1]))
         # rocisa (mem.hpp MUBUFReadInstruction::getArgStr) renders a soffset
         # whose operand string is "0" as ``null`` when HasMUBUFConst is false
-        # (true for gfx12+). Tensile passes literal 0 for "no scalar offset",
+        # (true for gfx12+). TensileLite passes literal 0 for "no scalar offset",
         # which otherwise assembles to the invalid operand ``0``.
         _soffset = self.srcs[2]
         if _soffset is not None and _input_to_str(_soffset) != "0":
@@ -3441,7 +3441,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, b
             comment=self.comment)
         # rocisa (mem.hpp MUBUFReadInstruction::getArgStr) renders a soffset
         # whose operand string is "0" as ``null`` when HasMUBUFConst is false
-        # (true for gfx12+). Tensile passes literal 0 for "no scalar offset",
+        # (true for gfx12+). TensileLite passes literal 0 for "no scalar offset",
         # which otherwise assembles to the invalid operand ``0``.
         _soffset = self.srcs[2]
         if _soffset is not None and _input_to_str(_soffset) != "0":
@@ -5348,4 +5348,3 @@ def VCvtBF16toFP32(dst: Any, src: Any, vgprMask: Any, vi: int,
         dst=dst, src=src, sdwa=SDWAModifiers(src0_sel=src0_sel),
         comment="cvt bf16 to fp32. " + comment,
     )
-

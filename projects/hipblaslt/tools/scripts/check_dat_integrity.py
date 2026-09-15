@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Post-build integrity checks for installed hipBLASLt Tensile .dat/.dat.zlib files."""
+"""Post-build integrity checks for installed hipBLASLt TensileLite .dat/.dat.zlib files."""
 
 from __future__ import annotations
 
@@ -146,7 +146,7 @@ def validate(libDir: Path) -> List[str]:
     if not libDir.is_dir():
         return [f"library dir does not exist or is not a directory: {libDir}"]
     if msgpack is None:
-        return ["msgpack is required to read Tensile .dat files but is not installed"]
+        return ["msgpack is required to read TensileLite .dat files but is not installed"]
 
     subtrees = _scanSubtrees(libDir)
     if not any(masters & mappings for masters, mappings in subtrees.values()):
