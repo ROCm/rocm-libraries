@@ -179,6 +179,17 @@ struct BlockwiseGemmWmmaops_pipeline_v3<BlockGemmPipelineScheduler::Intrawave,
         }
     }
 
+    // T1-03 (GFX1250_CONV_OPTIMIZATION_ROADMAP.md): the roadmap asked to add a compile-time
+    // toggle to disable this function's sched_group_barrier-based A/B split schedule for gfx1250
+    // specifically, to test whether it costs performance there (per MISA/rocKE/FlyDSL's converging
+    // finding that hand-scheduled instruction interleaving tends not to beat the compiler's default
+    // on gfx1250 WMMA). That toggle is unnecessary: the entire body below is already wrapped in a
+    // block comment (still true on this line count as of this investigation) and is therefore
+    // already a hard no-op for every architecture, not just gfx1250 - there is nothing live to
+    // toggle. Confirmed by direct read, not merely by this comment: HotLoopScheduler() is called
+    // unconditionally from four hot-loop sites in this file but its body never emits a single
+    // sched_group_barrier. Closing this item with no functional change; record this as the
+    // requested "on vs off" confirmation (off, unconditionally, today).
     __device__ static constexpr auto HotLoopScheduler()
     {
         // TODO: Calculation of the number of instructions may require changes for WMMA
