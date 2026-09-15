@@ -62,7 +62,7 @@ show_contexts = true
 
 [tool.pytest.ini_options]
 # You can also move pytest config here if desired
-testpaths = ["Tensile/Tests", "rocisa/test"]
+testpaths = ["tensilelite/Tests", "rocisa/test"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -92,12 +92,12 @@ dependencies = [
 ]
 
 [project.scripts]
-Tensile = "Tensile.Tensile:main"
-TensileCreateLibrary = "Tensile.TensileCreateLibrary:run"
-TensileVerifyStinkyElfText = "Tensile.verify_stinky_comment_vs_elf_text:main"
-TensileGetPath = "Tensile:PrintTensileRoot"
-TensileBenchmarkCluster = "Tensile.TensileBenchmarkCluster:main"
-TensileRetuneLibrary = "Tensile.TensileRetuneLibrary:main"
+Tensile = "tensilelite.Tensile:main"
+TensileCreateLibrary = "tensilelite.TensileCreateLibrary:run"
+TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
+TensileGetPath = "tensilelite:PrintTensileRoot"
+TensileBenchmarkCluster = "tensilelite.TensileBenchmarkCluster:main"
+TensileRetuneLibrary = "tensilelite.TensileRetuneLibrary:main"
 
 [dependency-groups]
 dev = [
@@ -116,10 +116,10 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["Tensile*"]
+include = ["tensilelite*"]
 
 [tool.setuptools.package-data]
-Tensile = ["cmake/*"]
+tensilelite = ["cmake/*"]
 
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
@@ -139,41 +139,41 @@ members = ["rocisa"]
 # See projects/hipblaslt/skills/tensilelite-mutation-rerun/SKILL.md for the
 # optional workflow.
 # mutmut 3.x copies `source_paths` into a `mutants/` dir and runs the selected
-# tests there, so the WHOLE Tensile package is copied (for imports to resolve)
+# tests there, so the WHOLE TensileLite package is copied (for imports to resolve)
 # while `only_mutate` restricts which files are actually mutated to the slice.
 # `also_copy` must include pytest.ini (markers + config) and characterization
 # fixtures. mutmut caches the initial non-Python source copy, so snapshots must
 # be refreshed explicitly for the copied test tree to match the source suite.
 [tool.mutmut]
-source_paths = ["Tensile"]
+source_paths = ["tensilelite"]
 only_mutate = [
-    "Tensile/Common/DataType.py",
-    "Tensile/Common/Utilities.py",
-    "Tensile/Common/Types.py",
-    "Tensile/Common/ValidParameters.py",
-    "Tensile/SolutionStructs/Naming.py",
-    "Tensile/SolutionStructs/Utilities.py",
-    "Tensile/TensileLogic/ValidChipId.py",
-    "Tensile/TensileLogic/ValidMatrixInstruction.py",
-    "Tensile/TensileLogic/ValidWorkGroup.py",
-    "Tensile/TensileLogic/ValidWorkGroupMappingXCC.py",
+    "tensilelite/Common/DataType.py",
+    "tensilelite/Common/Utilities.py",
+    "tensilelite/Common/Types.py",
+    "tensilelite/Common/ValidParameters.py",
+    "tensilelite/SolutionStructs/Naming.py",
+    "tensilelite/SolutionStructs/Utilities.py",
+    "tensilelite/TensileLogic/ValidChipId.py",
+    "tensilelite/TensileLogic/ValidMatrixInstruction.py",
+    "tensilelite/TensileLogic/ValidWorkGroup.py",
+    "tensilelite/TensileLogic/ValidWorkGroupMappingXCC.py",
 ]
 do_not_mutate = [
-    "Tensile/Tests/*",
+    "tensilelite/Tests/*",
     "*/Tests/*",
     "*/test_*.py",
     "*/conftest.py",
 ]
 pytest_add_cli_args_test_selection = [
-    "Tensile/Tests/unit/characterization/CommonTypes",
-    "Tensile/Tests/unit/characterization/CommonUtilities",
-    "Tensile/Tests/unit/characterization/DataType",
-    "Tensile/Tests/unit/characterization/Naming",
-    "Tensile/Tests/unit/characterization/SolutionStructsUtils",
-    "Tensile/Tests/unit/characterization/TensileLogic",
-    "Tensile/Tests/unit/characterization/ValidParameters"
+    "tensilelite/Tests/unit/characterization/CommonTypes",
+    "tensilelite/Tests/unit/characterization/CommonUtilities",
+    "tensilelite/Tests/unit/characterization/DataType",
+    "tensilelite/Tests/unit/characterization/Naming",
+    "tensilelite/Tests/unit/characterization/SolutionStructsUtils",
+    "tensilelite/Tests/unit/characterization/TensileLogic",
+    "tensilelite/Tests/unit/characterization/ValidParameters"
 ]
-also_copy = ["pytest.ini", "Tensile/Tests/unit/characterization"]
+also_copy = ["pytest.ini", "tensilelite/Tests/unit/characterization"]
 # mutate_only_covered_lines MUST stay false here: when true, mutmut runs an
 # in-process coverage gather whose _unload_modules_not_in() pops `rocisa` from
 # sys.modules; the later "Running stats" phase re-imports rocisa in the SAME

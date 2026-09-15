@@ -6,9 +6,9 @@ from __future__ import annotations
 """
 Library operations module.
 
-This module provides tools to manage and manipulate Tensile solution libraries including
+This module provides tools to manage and manipulate TensileLite solution libraries including
 loading, merging, and creating optimized GEMM solution libraries. It handles YAML
-manipulation, solution library operations, and integration with the Tensile framework.
+manipulation, solution library operations, and integration with the TensileLite framework.
 
 The operations module enables the final step of the optimization workflow by merging
 individual optimized solutions into hipBLASLt libraries.
@@ -25,7 +25,7 @@ Functions:
     merge(hipblaslt_path, orig_dir, inc_dir, output_dir) -> None
         Merge incremental library into original using TensileMergeLibrary.
     create(hipblaslt_path, input_dir, output_dir) -> None
-        Create a Tensile library from YAML library logic files using TensileCreateLibrary.
+        Create a TensileLite library from YAML library logic files using TensileCreateLibrary.
     from_dataframe(df, lib_dir) -> LibraryCollection
         Create filtered libraries from a DataFrame of selected solutions.
     prune_library(hipblaslt_path, base_lib) -> Library
@@ -303,7 +303,7 @@ def merge(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
-        orig_dir (str | Path): Directory containing original Tensile library.
+        orig_dir (str | Path): Directory containing original TensileLite library.
         inc_dir (str | Path): Directory containing incremental/tuned library.
         output_dir (str | Path): Output directory for merged library.
         eff (bool, optional): Whether to set efficiency calculations.
@@ -319,7 +319,7 @@ def merge(
         raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
 
     logger.info(f"Calling TensileMergeLibrary on '{inc_dir}'")
-    cmd = [str(hipblaslt_path / "tensilelite/Tensile/bin/TensileMergeLibrary")]
+    cmd = [str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileMergeLibrary")]
     if not eff:
         cmd += ["--no_eff"]
     cmd += ["--force_merge", str(force), orig_dir, inc_dir, output_dir]
@@ -327,7 +327,7 @@ def merge(
 
 
 def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str | Path, version: str = "5") -> None:
-    """Create a Tensile library from YAML library logic files using TensileCreateLibrary.
+    """Create a TensileLite library from YAML library logic files using TensileCreateLibrary.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -353,7 +353,7 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     logger.info(f"Calling TensileCreateLibrary on '{library_dir}'")
     run_silent_command(
         [
-            str(hipblaslt_path / "tensilelite/Tensile/bin/TensileCreateLibrary"),
+            str(hipblaslt_path / "tensilelite/tensilelite/bin/TensileCreateLibrary"),
             "--code-object-version",
             version,
             "--library-format",
@@ -367,13 +367,13 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     )
 
 def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path: ( str | Path) | None = None) -> None:
-    """Normalize a Tensile library using TensileNormalizeLibrary.
+    """Normalize a TensileLite library using TensileNormalizeLibrary.
 
     Args:
         library_path (str | Path): Path to the input library.
         output_path (str | Path): Path to the output normalized library.
         hipblaslt_path (str | Path, optional): Path to hipBLASLt installation. 
-            If set, will append the path to sys.path to find Tensile.
+            If set, will append the path to sys.path to find tensilelite.
 
     Raises:
         FileNotFoundError: If library path does not exist.
@@ -390,11 +390,11 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         sys.path.append(str(hipblaslt_path / "tensilelite"))
 
     try:
-        from Tensile import LibraryIO
-        from Tensile.CustomYamlLoader import load_yaml_stream
-        from Tensile.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite import LibraryIO
+        from tensilelite.CustomYamlLoader import load_yaml_stream
+        from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
-        raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+        raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     
     data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):

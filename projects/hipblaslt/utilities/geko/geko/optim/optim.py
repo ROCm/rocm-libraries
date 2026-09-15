@@ -119,7 +119,6 @@ def _log_work(tuning_dir: Path, name: str):
         f.write(content)
 
 
-
 def configure(
     hipblaslt_path: str | Path,
     gemm_configs: Union[GemmConfig, Sequence[GemmConfig]],
@@ -210,7 +209,7 @@ def run(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the Tensile binary and to add tensilelite to PYTHONPATH.
+            for the TensileLite binary and to add tensilelite to PYTHONPATH.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
@@ -307,7 +306,7 @@ def run(
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
-                        hipblaslt_path / "tensilelite/Tensile/bin/Tensile",
+                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
                         self.config,
                         self.build_dir,
                         "--prebuilt-client",
