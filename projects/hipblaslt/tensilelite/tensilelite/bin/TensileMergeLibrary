@@ -27,7 +27,7 @@
 # This script only gets called by CMake
 
 try:
-    from tensilelite import TensileMergeLibrary
+    from Tensile import TensileMergeLibrary
 except ImportError:
     import os.path
     import sys
@@ -35,7 +35,7 @@ except ImportError:
     print(parentdir)
     sys.path.append(parentdir)
 
-    from tensilelite import TensileMergeLibrary
+    from Tensile import TensileMergeLibrary
 
 ################################################################################
 # Main
