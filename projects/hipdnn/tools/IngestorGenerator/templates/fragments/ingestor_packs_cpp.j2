@@ -15,9 +15,12 @@
 ##   * handler routes through buildIngestorKernelCode -> true, &reset<Name>ModuleCache
 ##     (declare it in the .hpp too, and define it OUTSIDE the pack's anonymous namespace)
 ##   * handler does not route                         -> false, nullptr
-## hipkernel:Pointwise is the worked example of the first: it ships
-## `true, &resetPointwiseModuleCache` (IngestorPacks.cpp:16) even though its kernels are
+## hipkernel:Pointwise is the worked example of the first: it ships `true` with a
+## resetPointwiseModuleCache pointer (IngestorPacks.cpp:16) even though its kernels are
 ## embedded_source. hipkernel:ConvFwd does not route and ships `false, nullptr` (:19).
+## (Both named without a leading '&' on purpose: test_the_packaged_reset_symbol_is_
+## actually_defined_somewhere greps this rendered fragment for the FIRST
+## `&reset\w+ModuleCache` and would otherwise find a comment instead of the emitted row.)
 ##
 ## This fragment can see the dialect but not whether you routed, so it emits the
 ## dialect-based answer as a starting point. hipdnn-kernel-integration's RUNBOOK step 3
