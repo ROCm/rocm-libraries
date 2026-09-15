@@ -631,7 +631,21 @@ void translateGraph(const json& root,
     {
         if(n.at("type").get<std::string>() != "Output")
             continue;
-        resolveInput(n.at("id").get<std::string>(), "in")->set_output(true).set_uid(++g_nextUid);
+        const std::string id = n.at("id").get<std::string>();
+        const json params = n.value("params", json::object());
+        TensorPtr t = resolveInput(id, "in");
+        t->set_output(true).set_uid(++g_nextUid);
+        if(!boolParam(params, "use_defaults", true))
+        {
+            const std::vector<int64_t> dims = parseShape(stringParam(params, "shape", ""));
+            if(dims.empty())
+            {
+                throw BuildInputError{"INVALID_VALUE",
+                                      "Output '" + n.value("title", std::string("Output"))
+                                          + "' has 'Use defaults' off but no valid shape."};
+            }
+            t->set_dim(dims).set_stride(rowMajorStrides(dims));
+        }
         sawOutput = true;
     }
     for(const auto& kv : outputByPort)

@@ -1,7 +1,7 @@
 // Preload: the ONLY code with access to both Node and the renderer. It exposes
-// two frozen, minimal APIs over contextBridge that exactly match the shapes the
-// renderer's platform/index.ts and engine/index.ts detect. Everything else in
-// the renderer stays sandboxed.
+// three frozen, minimal APIs over contextBridge that exactly match the shapes
+// the renderer's platform/index.ts, engine/index.ts and command/index.ts
+// detect. Everything else in the renderer stays sandboxed.
 
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -21,8 +21,19 @@ contextBridge.exposeInMainWorld("hipdnnEngine", {
   build: (graphJson, options) => ipcRenderer.invoke("engine:build", graphJson, options),
   buildHipdnnJson: (hipdnnJson, options) =>
     ipcRenderer.invoke("engine:buildHipdnnJson", hipdnnJson, options),
+  serializeGraph: (graphJson) => ipcRenderer.invoke("engine:serializeGraph", graphJson),
   listEngines: (graphJson) => ipcRenderer.invoke("engine:listEngines", graphJson),
   execute: (handle, options) => ipcRenderer.invoke("engine:execute", handle, options),
   release: (handle) => ipcRenderer.invoke("engine:release", handle),
   setLogLevel: (level) => ipcRenderer.invoke("engine:setLogLevel", level),
+});
+
+contextBridge.exposeInMainWorld("hipdnnCommand", {
+  execute: (request) => ipcRenderer.invoke("command:execute", request),
+  cancel: (id) => ipcRenderer.invoke("command:cancel", id),
+  onOutput: (listener) => {
+    const handler = (_event, chunk) => listener(chunk);
+    ipcRenderer.on("command:output", handler);
+    return () => ipcRenderer.removeListener("command:output", handler);
+  },
 });

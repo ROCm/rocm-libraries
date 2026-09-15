@@ -16,11 +16,14 @@ graph out without writing any code.
   reductions, pooling and resampling, block-scale quantize/dequantize, plus
   input and output tensors.
 - Edit each node's shape, data type, and settings in the inspector.
+- Let hipDNN infer output shapes, or clear **Use defaults** on an Output node to
+  pin its dimensions yourself.
 - Save and load graphs as JSON. Your work is also auto-saved between sessions.
 - Pick which hipDNN engine to use, or let hipDNN choose the best one.
 - Run the graph with randomly filled tensors and see how long it took.
 - Import and export hipDNN's own JSON format, so graphs can be shared with
   other hipDNN tools.
+- Open benchmark reports to compare engines, inspect correctness, and view optional profiling traces.
 
 ## Requirements
 
@@ -65,6 +68,40 @@ bun run dev
 
 Saving to a file works best in Chrome or Edge; other browsers fall back to a
 normal download.
+
+## Viewing benchmark results
+
+Open **Results…** in the engine panel, or visit `/results.html` on the development
+or preview server. The standalone page needs no GPU, Python, native add-on, or
+backend service.
+
+Use **Open report…** or the dedicated drop target to import dnn-benchmarking suite
+JSON or raw timing JSON. Imports stay separate and in memory. Closing the Studio
+dialog keeps them; reloading the page discards them. Reports do not enter graph
+autosave or command settings.
+
+Select a graph and engine to inspect GPU and host timings, correctness, analytical
+metrics, and oracle results. Graph executions/s is derived from GPU mean time.
+Unchecked and reference rows are not correctness passes. Reported suite counters
+remain separate from the viewer's row counts. Use a current browser to retain
+large integer engine IDs without rounding.
+
+The comparison appears first. Select a bar or **Inspect** to open grouped engine
+details; **Back to comparison** returns to the chart. Expand **Environment &
+report counts** for metadata and producer counters, or **Engine coverage across
+graphs** for the report-wide engine summary. Timing statistics, oracle tuning,
+profiling artifacts, and original JSON have separate expandable sections.
+
+Native **Execute** publishes the latest built-plan snapshot. Its single wall time
+is not a repeated benchmark or correctness comparison. Later canvas edits are not
+included. New, Open, and a new build clear native results without removing reports.
+Use **Export hipDNN JSON**, not ordinary Save, for the existing benchmarking handoff.
+
+For an available profiling trace, select the `.pftrace` file explicitly. A report
+path does not grant access to that file. Trace bytes go to a sandboxed
+`https://ui.perfetto.dev/` iframe, not an upload endpoint. Perfetto requires network
+access; report viewing does not. Confirm **Open trace?** inside the frame if asked.
+The parent reports byte handoff only; Perfetto owns parsing and trace diagnostics.
 
 ## Turning on the GPU engine
 
@@ -127,6 +164,7 @@ src/            The editor: canvas, palette, inspector, engine panel
 src/graph/      Operator catalog and the saved graph format
 src/engine/     Talks to the GPU engine, with a no-op version for the browser
 src/platform/   File dialogs and settings storage, per platform
+src/results/    Shared benchmark reader, comparison viewer, and optional trace iframe
 electron/       Desktop shell (window, file dialogs, engine bridge)
 electron/native/  C++ add-on that calls hipDNN
 electron/paths.cjs  Finds hipDNN and the build-output locations
@@ -141,6 +179,8 @@ CMakeLists.txt  Superbuild hook (the hipdnn-graph-studio component)
 | `bun run dev` | Web version with live reload |
 | `bun run build` | Type-check and bundle the web assets |
 | `bun run typecheck` | Type-check only |
+| `bun run preview` | Serve the built editor and `/results.html` |
+| `bun test tests/results.test.ts` | Check result parsing and metric boundaries |
 | `bun run electron:dev` | Desktop app with live reload |
 | `bun run electron:start` | Build, then open the desktop app |
 | `bun run electron:pack` | Package the desktop app for distribution |

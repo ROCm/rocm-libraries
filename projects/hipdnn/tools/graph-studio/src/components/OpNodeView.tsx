@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { catalogEntry } from "../graph/catalog";
+import { catalogEntry, visibleParams } from "../graph/catalog";
 import type { OpNode } from "../graph/flow";
 
 /**
@@ -13,7 +13,7 @@ export function OpNodeView({ data, selected }: NodeProps<OpNode>) {
   const accent = entry?.accent ?? "#64748b";
   const inputs = entry?.inputs ?? [];
   const outputs = entry?.outputs ?? [];
-  const params = entry?.params ?? [];
+  const params = entry ? visibleParams(entry, data.params) : [];
 
   return (
     <div className="op-node" data-selected={selected ? "true" : "false"} style={{ borderColor: accent }}>
