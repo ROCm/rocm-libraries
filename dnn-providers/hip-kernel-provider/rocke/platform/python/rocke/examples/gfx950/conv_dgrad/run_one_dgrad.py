@@ -3,11 +3,12 @@
 
 """Build, launch and time ONE dgrad implicit-GEMM config.
 
-Both LDS-layout case studies end their capture command with
-``-- python3 <single-config driver>``; this is that driver. The sweep driver
-(``rocke.benchmark.benchmark_implicit_gemm_conv``) is the wrong tool for a trace:
-it compiles thousands of kernels and rocprofv3 would have to decode every
+The dgrad LDS-layout case study's capture command runs this driver. The sweep
+driver (``rocke.benchmark.benchmark_implicit_gemm_conv``) is the wrong tool for a
+trace: it compiles thousands of kernels and rocprofv3 would have to decode every
 dispatch. Here exactly one kernel runs, so ``--kernel-regex`` matches one thing.
+Dgrad only -- it builds ``DgradConvSpec`` and nothing else, so it does not serve
+the wgrad case study.
 
 Deliberately does NO numeric verification. torch's HIP runtime and rocke's fight
 over the process HIP context, and timings come out multiples wrong when a verify
@@ -46,8 +47,9 @@ def _parse_args(argv=None):
     ap.add_argument(
         "--miopen-cmd",
         default=_DEFAULT_CMD,
-        help="MIOpenDriver command string. -F 2 is backward-data (-F 4 is "
-        "backward-weight); there are no per-dimension flags.",
+        help="MIOpenDriver command string; there are no per-dimension flags. "
+        "Only the shape is read -- the -F direction field is ignored and this "
+        "driver always builds backward-data.",
     )
     ap.add_argument(
         "--stride",
@@ -66,15 +68,23 @@ def _parse_args(argv=None):
     ap.add_argument("--warp-tile-mn", type=int, default=32)
     ap.add_argument("--pipeline", default="mem")
     ap.add_argument("--epilogue", default="cshuffle")
-    ap.add_argument("--split-k", type=int, default=1)
+    ap.add_argument(
+        "--split-k",
+        type=int,
+        default=1,
+        help="fixed split-K degree; 1 disables it. -1 (auto) is rejected: the "
+        "shipped dgrad candidate pins split_k=1 and the CK auto formula keys "
+        "on wgrad's lopsided reduction shape, so there is no dgrad auto "
+        "dispatch for a single-config trace to reproduce.",
+    )
     ap.add_argument(
         "--kouter",
         choices=("on", "off"),
         default="on",
         help="force the K-outer B tile. The dispatch policy deduces this via "
-        "DgradConvSpec.default_lds_k_outer, which answers the same way for "
-        "every combo of a given shape -- so forcing it is the only way to A/B "
-        "the two layouts.",
+        "DgradConvSpec.default_lds_k_outer, which returns one fixed answer for "
+        "any single config -- so forcing it is the only way to A/B the two "
+        "layouts.",
     )
     ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--iters", type=int, default=200)
@@ -89,6 +99,20 @@ def _parse_args(argv=None):
 
 def main(argv=None) -> int:
     a = _parse_args(argv)
+
+    # build_implicit_gemm_conv_dgrad resolves -1 onto an internal
+    # dataclasses.replace copy and hands back only a KernelDef, so a spec left
+    # at -1 here would pack sub-GEMM records with split_k=1 K-padding while the
+    # kernel divides the record's gemm_k_padded by the resolved degree, report
+    # needs_atomic False for what is really an atomic kernel (dX never
+    # re-zeroed between iterations), and launch with grid z == -1.
+    if a.split_k < 1:
+        print(
+            f"--split-k must be >= 1; auto (-1) is not supported by this "
+            f"driver (got {a.split_k})",
+            file=sys.stderr,
+        )
+        return 2
 
     import torch
     from rocke import compile_kernel

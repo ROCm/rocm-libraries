@@ -143,8 +143,8 @@ is the default and reproduces the deduced behaviour. Pair the two runs by config
 identity rather than by rank. Keep `--csv` output outside the git work tree.
 
 Single-config run, for a trace or a focused A/B —
-[`run_one_dgrad.py`](run_one_dgrad.py) is the `<single-config driver>` both this
-study and the wgrad one refer to:
+[`run_one_dgrad.py`](run_one_dgrad.py) builds and launches exactly one
+`DgradConvSpec`. It is dgrad-only, so it does not serve the wgrad study:
 
 ```bash
 python3 python/rocke/examples/gfx950/conv_dgrad/run_one_dgrad.py \

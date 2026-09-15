@@ -830,8 +830,12 @@ def main() -> int:
             "shipped dispatch policy, and the default), "
             "on/off = force the flag for every combo. "
             "Forcing exists so the two layouts can be A/B'd on identical "
-            "configs; under 'auto' the deducer answers the same way for every "
-            "combo of a given shape, so a single sweep measures only one layout."
+            "configs. 'auto' answers per combo: on gfx950 it answers the same "
+            "way for every buildable combo of a shape (wavelet, the one "
+            "pipeline the predicate excludes, does not build on MFMA), so a "
+            "single sweep measures one layout and silently has no baseline; on "
+            "gfx1250 wavelet does build and the predicate returns False for "
+            "it, so an auto sweep there can already contain both layouts."
         ),
     )
 
@@ -1648,9 +1652,11 @@ def _build_dgrad_one(args_tuple):
         # Deduced per combo by default, not a run-level flag: warp_tile_mn is
         # itself a sweep axis, and the predicate keys on it. Mirrors the wgrad
         # caller. --lds-k-outer on/off forces it instead, so the two layouts can
-        # be compared on identical configs -- under "auto" the predicate is
-        # constant across a sweep of one shape, so a sweep measures one layout
-        # and silently has no baseline to compare against.
+        # be compared on identical configs -- on gfx950 the predicate is
+        # constant across a sweep of one shape (wavelet, the pipeline it
+        # excludes, does not build on MFMA), so a sweep measures one layout and
+        # silently has no baseline; on gfx1250 wavelet does build, so an auto
+        # sweep there can already contain both layouts.
         lds_k_outer=(
             DgradConvSpec.default_lds_k_outer(
                 arch=arch,
