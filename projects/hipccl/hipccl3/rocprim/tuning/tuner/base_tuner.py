@@ -309,6 +309,16 @@ class BaseTuner(ABC):
             k: [v] for k, v in config.items() if k not in set(types.keys())
         }
 
+        # The existing config is only applicable if it provides a value for each
+        # tunable parameter of the current tuner. If it does not (e.g. a config
+        # from an older tuner missing new parameters), do not run the default config.
+        required_keys = self._get_tune_params(types).keys()
+        if any(required_key not in default_tune_params for required_key in required_keys):
+            warnings.warn(
+                "Existing default configuration does not match tunable parameters."
+            )
+            return
+
         tune_kernel_args = self._get_base_tune_kernel_args(types).copy()
         tune_kernel_args.update(
             {
