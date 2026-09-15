@@ -90,6 +90,13 @@ PLSIN_STORE_PERMLANE16 = _plsinStoreGate("PLSIN_STORE_PERMLANE16", default=True)
 # Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
 #   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
 PLSIN_STORE_DIRECT_EPILOGUE = _plsinStoreGate("PLSIN_STORE_DIRECT_EPILOGUE")
+# DPP-fold convert-interleave: on the permlane16 fold path, split the coalesced store
+#   into Phase1(converts) / convert-gap / Phase2(assembly + coalesced stores) so the
+#   un-folded woven store's convert-into-MFMA-shadow interleave (LogicalScheduler
+#   _interleaveStoreConvertIntoGapMfmas) ALSO applies to the fold.  OFF -> the fold is
+#   emitted monolithically, byte-identical to before.  ds_bpermute tiles always emit
+#   monolithically (the bpermute consumes the converts in place, no separable gap).
+PLSIN_FOLD_CVT_INTERLEAVE = _plsinStoreGate("PLSIN_FOLD_CVT_INTERLEAVE", default=True)
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
@@ -3093,7 +3100,10 @@ class GlobalWriteBatchWriter:
       return None
     pairs = capture["pairs"]
     while len(pairs) <= pairIdx:
-      pairs.append({"reads": [], "gap": None, "gapAnchor": None})
+      # Legacy single-gap slot ("gap"/"gapAnchor") is used by the un-folded woven
+      # store. The fold registers MULTIPLE gaps for one pair (a convert-gap + gap B)
+      # via the "gaps" list; the planner reads "gaps" when present, else the legacy slot.
+      pairs.append({"reads": [], "gap": None, "gapAnchor": None, "gaps": []})
     return pairs[pairIdx]
 
   def _popSubtileAccVgprReads(self, elementIdx: int) -> Module:
@@ -3663,15 +3673,30 @@ class GlobalWriteBatchWriter:
 
     permlane16 = getattr(self, "_permlane16Active", False)
 
+    # Fold convert-interleave: on the permlane16 path the cross-lane assembly can be
+    # deferred past a gap, so emit Phase1(converts) -> convert-gap -> Phase2(assembly +
+    # coalesced stores).  The planner seeds the convert-gap with a bounded quota of
+    # terminal MFMAs and LogicalScheduler._interleaveStoreConvertIntoGapMfmas spreads the
+    # 8 converts into their issue shadows.  Otherwise (ds_bpermute, or feature off)
+    # phase1Mod == phase2Mod == module, so the store is emitted monolithically in the SAME
+    # order as before -- byte-identical.  (An empty convert-gap is likewise byte-identical:
+    # phase1[converts] + <empty gap> + phase2[assembly...] flattens to the monolithic order.)
+    foldCvtInterleave = (permlane16 and weavePairB is not None and PLSIN_FOLD_CVT_INTERLEAVE)
+    if foldCvtInterleave:
+      phase1Mod = Module("16bitSubtileRepackPhase1")
+      phase2Mod = Module("16bitSubtileRepackPhase2")
+    else:
+      phase1Mod = phase2Mod = module
+
     def vc(sumIdx, vi):
       idx = sumIdx + vi - prefixOffset
       return vgpr("ValuC+" + str(idx))
 
     def packPair(dst, src0, src1, comment):
-      module.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
+      phase1Mod.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
 
     partnerTt0 = tt0 + 2
-    module.addComment1(f"DPP repack tt0={tt0}+{partnerTt0}: pack batchA -> v[{vPack}:{vPack+3}], batchB -> v[{vPack2}:{vPack2+3}]")
+    phase1Mod.addComment1(f"DPP repack tt0={tt0}+{partnerTt0}: pack batchA -> v[{vPack}:{vPack+3}], batchB -> v[{vPack2}:{vPack2+3}]")
     packPair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"batchA sba=0 tt0={tt0}[0:1]")
     packPair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"batchA sba=0 tt0={tt0}[2:3]")
     packPair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"batchA sba=1 tt0={tt0}[0:1]")
@@ -3682,23 +3707,25 @@ class GlobalWriteBatchWriter:
     packPair(vPack2+3, vc(partnerSumIdx1, 2), vc(partnerSumIdx1, 3), f"batchB sba=1 tt0={partnerTt0}[2:3]")
 
     # Cross-lane assembly — identical to the un-folded paired store, for BOTH batches.
+    # In the convert-interleave path this lands in Phase2 (after the convert-gap), so the
+    # converts complete in the gap before the permlane reads vPack/vPack2.
     if permlane16:
-      module.addComment1("v_permlane16_swap_b32: assemble batchA + batchB (no ds_bpermute)")
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack+0),  src=vgpr(vPack+2),  comment="A swap dwords 0<->2"))
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack+1),  src=vgpr(vPack+3),  comment="A swap dwords 1<->3"))
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack2+0), src=vgpr(vPack2+2), comment="B swap dwords 0<->2"))
-      module.add(VPermlane16SwapB32(dst=vgpr(vPack2+1), src=vgpr(vPack2+3), comment="B swap dwords 1<->3"))
+      phase2Mod.addComment1("v_permlane16_swap_b32: assemble batchA + batchB (no ds_bpermute)")
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack+0),  src=vgpr(vPack+2),  comment="A swap dwords 0<->2"))
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack+1),  src=vgpr(vPack+3),  comment="A swap dwords 1<->3"))
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack2+0), src=vgpr(vPack2+2), comment="B swap dwords 0<->2"))
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack2+1), src=vgpr(vPack2+3), comment="B swap dwords 1<->3"))
     else:
-      module.addComment1("ds_bpermute + v_permlane32_swap_b32: assemble batchA + batchB")
+      phase2Mod.addComment1("ds_bpermute + v_permlane32_swap_b32: assemble batchA + batchB")
       for k in range(4):
-        module.add(DSBPermuteB32(dst=vgpr(vPack+k),  src0=vgpr(vPermAddr), src1=vgpr(vPack+k),  comment=f"A perm dword {k}"))
+        phase2Mod.add(DSBPermuteB32(dst=vgpr(vPack+k),  src0=vgpr(vPermAddr), src1=vgpr(vPack+k),  comment=f"A perm dword {k}"))
       for k in range(4):
-        module.add(DSBPermuteB32(dst=vgpr(vPack2+k), src0=vgpr(vPermAddr), src1=vgpr(vPack2+k), comment=f"B perm dword {k}"))
-      module.add(SWaitCnt(dscnt=0, comment="wait for batchA+batchB ds_bpermute (lgkmcnt=0)"))
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack+0),  src=vgpr(vPack+2),  comment="A swap dwords 0<->2"))
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack+1),  src=vgpr(vPack+3),  comment="A swap dwords 1<->3"))
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack2+0), src=vgpr(vPack2+2), comment="B swap dwords 0<->2"))
-      module.add(VPermlane32SwapB32(dst=vgpr(vPack2+1), src=vgpr(vPack2+3), comment="B swap dwords 1<->3"))
+        phase2Mod.add(DSBPermuteB32(dst=vgpr(vPack2+k), src0=vgpr(vPermAddr), src1=vgpr(vPack2+k), comment=f"B perm dword {k}"))
+      phase2Mod.add(SWaitCnt(dscnt=0, comment="wait for batchA+batchB ds_bpermute (lgkmcnt=0)"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack+0),  src=vgpr(vPack+2),  comment="A swap dwords 0<->2"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack+1),  src=vgpr(vPack+3),  comment="A swap dwords 1<->3"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack2+0), src=vgpr(vPack2+2), comment="B swap dwords 0<->2"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack2+1), src=vgpr(vPack2+3), comment="B swap dwords 1<->3"))
 
     # batchA per-lane store address into vAddrScratch (same compute as Phase1).
     bpeCurr = self.parentWriter.states.bpeCexternal
@@ -3707,12 +3734,12 @@ class GlobalWriteBatchWriter:
     vRowDelta = vPermAddr if permlane16 else vLGDelta
     deltaStr  = "(lane_group&1)*12rows" if permlane16 else "lane_group*8"
     if addrScaleShift:
-      module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
+      phase2Mod.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
                                  src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
-      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vRowDelta),
+      phase2Mod.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vRowDelta),
                          comment=f"adjusted D addr = scaled addrDVgpr + {deltaStr}"))
     else:
-      module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vRowDelta),
+      phase2Mod.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vRowDelta),
                          comment=f"adjusted D addr = addrDVgpr + {deltaStr}"))
     # This recompute clobbers any hoisted-addr reuse; force the next store to recompute.
     self._subtileHoistedAddrDVgpr = -1
@@ -3724,75 +3751,94 @@ class GlobalWriteBatchWriter:
 
     # Odd-lane mask (0xAAAA...) for every v_cndmask blend — set once, never overwritten.
     oddMask = self.tmpS23
-    module.add(SMovB32(dst=sgpr(oddMask),   src=hex(0xAAAAAAAA), comment="odd-lane mask lo32"))
-    module.add(SMovB32(dst=sgpr(oddMask+1), src=hex(0xAAAAAAAA), comment="odd-lane mask hi32"))
+    phase2Mod.add(SMovB32(dst=sgpr(oddMask),   src=hex(0xAAAAAAAA), comment="odd-lane mask lo32"))
+    phase2Mod.add(SMovB32(dst=sgpr(oddMask+1), src=hex(0xAAAAAAAA), comment="odd-lane mask hi32"))
 
     def emitCoalescedStore(evenPerm, oddPerm, tag):
       # Data blend (cndmask): even <- evenPerm(batchA), odd <- oddPerm(batchB).
       # EVERY DPP read is under FULL exec; vBlend is the odd-data temp.
-      module.addComment1(f"{tag} data blend: even<-batchA odd<-batchB (cndmask, full-exec DPP)")
+      phase2Mod.addComment1(f"{tag} data blend: even<-batchA odd<-batchB (cndmask, full-exec DPP)")
       for k in range(4):
         if evenPerm is None:
-          module.add(VMovB32(dst=vgpr(vSD+k), src=vgpr(vPack+k),
+          phase2Mod.add(VMovB32(dst=vgpr(vSD+k), src=vgpr(vPack+k),
                              comment=f"{tag} d{k}: vSD<-batchA"))
         else:
-          module.add(VMovB32(dst=vgpr(vSD+k), src=vgpr(vPack+k),
+          phase2Mod.add(VMovB32(dst=vgpr(vSD+k), src=vgpr(vPack+k),
                              dpp=DPPModifiers(quad_perm=evenPerm),
                              comment=f"{tag} d{k}: vSD<-batchA perm {evenPerm}"))
-        module.add(VMovB32(dst=vgpr(vBlend), src=vgpr(vPack2+k),
+        phase2Mod.add(VMovB32(dst=vgpr(vBlend), src=vgpr(vPack2+k),
                            dpp=DPPModifiers(quad_perm=oddPerm),
                            comment=f"{tag} d{k}: vBlend<-batchB perm {oddPerm} (full exec)"))
-        module.add(VCndMaskB32(dst=vgpr(vSD+k), src0=vgpr(vSD+k), src1=vgpr(vBlend),
+        phase2Mod.add(VCndMaskB32(dst=vgpr(vSD+k), src0=vgpr(vSD+k), src1=vgpr(vBlend),
                                src2=sgpr(oddMask, self.laneSGPRC),
                                comment=f"{tag} d{k}: odd lanes <- batchB"))
       # Voffset blend (cndmask): odd <- oddPerm(addr)+halfLine; even <- base addr
       # (store 1) or evenPerm(addr) via vBlend (store 2).  All DPP reads full exec.
-      module.addComment1(f"{tag} voffset blend (cndmask)")
-      module.add(VMovB32(dst=vgpr(vVoff), src=vgpr(vAddrScratch),
+      phase2Mod.addComment1(f"{tag} voffset blend (cndmask)")
+      phase2Mod.add(VMovB32(dst=vgpr(vVoff), src=vgpr(vAddrScratch),
                          dpp=DPPModifiers(quad_perm=oddPerm),
                          comment=f"{tag} vVoff <- addr perm {oddPerm} (full exec)"))
-      module.add(VAddU32(dst=vgpr(vVoff), src0=vgpr(vVoff), src1=hex(halfLine),
+      phase2Mod.add(VAddU32(dst=vgpr(vVoff), src0=vgpr(vVoff), src1=hex(halfLine),
                          comment=f"{tag} vVoff += {halfLine}B"))
       if evenPerm is None:
         evenVoffSrc = vAddrScratch
       else:
-        module.add(VMovB32(dst=vgpr(vBlend), src=vgpr(vAddrScratch),
+        phase2Mod.add(VMovB32(dst=vgpr(vBlend), src=vgpr(vAddrScratch),
                            dpp=DPPModifiers(quad_perm=evenPerm),
                            comment=f"{tag} vBlend <- addr perm {evenPerm} (full exec)"))
         evenVoffSrc = vBlend
-      module.add(VCndMaskB32(dst=vgpr(vVoff), src0=vgpr(evenVoffSrc), src1=vgpr(vVoff),
+      phase2Mod.add(VCndMaskB32(dst=vgpr(vVoff), src0=vgpr(evenVoffSrc), src1=vgpr(vVoff),
                              src2=sgpr(oddMask, self.laneSGPRC),
                              comment=f"{tag} even<-base/perm addr, odd<-perm+half"))
       # One all-lanes coalesced store (even -> batchA half, odd -> batchB half).
-      module.add(BufferStoreB128(src=vgpr(vSD, 4), vaddr=vgpr(vVoff), saddr=sgpr("SrdD", 4), soffset=0,
+      phase2Mod.add(BufferStoreB128(src=vgpr(vSD, 4), vaddr=vgpr(vVoff), saddr=sgpr("SrdD", 4), soffset=0,
                  mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
                  comment=f"{tag}: all-lanes coalesced store (8 full 128B lines)"))
-      module.add(SNop(waitState=0, comment="WAR: latch store src before next repack store"))
+      phase2Mod.add(SNop(waitState=0, comment="WAR: latch store src before next repack store"))
 
-    # PLSIN weave: register an empty gap Module (via _weaveCapturePair) for each pair the
-    # fold replaces -- gap A before store 1 (pair P-1 / batchA), gap B between stores 1 and
-    # 2 (pair P / batchB).  _planCapturedTerminalMfmas later moves future pairs' terminal
-    # MFMAs into these gaps (their accvgpr_read consumers come after the fold), reproducing
-    # the un-folded woven store's latency hiding.  The gapAnchor is the last instruction
-    # before the gap, so the planner can measure the anchor->consumer cycle distance.
-    def _captureFoldGap(weavePair, tag):
+    # PLSIN weave gap B (role="store"): between the two coalesced stores, it hides store-1's
+    # ~460-cycle memory latency behind terminal MFMAs (the un-folded woven store has no
+    # analogue).  Registered on capture["gaps"]; _planCapturedTerminalMfmas seeds it per its
+    # role.  The convert-gap (role="cvt") is registered separately below in the interleave
+    # path.  gapAnchor = the last instruction before the gap, so the planner can measure the
+    # anchor->consumer cycle distance.
+    def _captureFoldGap(weavePair, tag, targetMod, role="store"):
       if weavePair is None:
         return
       capture = self._weaveCapturePair(weavePair)
       if capture is None:
         return
-      flat = list(module.flatitems())
+      flat = list(targetMod.flatitems())
       gap = Module(f"PlsinFoldGap_pair{weavePair}_{tag}")
-      capture["gap"] = gap
-      capture["gapAnchor"] = flat[-1] if flat else None
-      module.add(gap)
+      capture.setdefault("gaps", []).append(
+        {"gap": gap, "gapAnchor": flat[-1] if flat else None, "role": role})
+      targetMod.add(gap)
 
-    _captureFoldGap(weavePairA, "A")
-    module.addComment1("DPP repack store 1: even n-columns (quad_perm [0,0,2,2])")
+    _captureFoldGap(weavePairA, "A", phase2Mod)
+    phase2Mod.addComment1("DPP repack store 1: even n-columns (quad_perm [0,0,2,2])")
     emitCoalescedStore(evenPerm=None,      oddPerm=[0,0,2,2], tag=f"even-cols tt0={tt0}")
-    _captureFoldGap(weavePairB, "B")
-    module.addComment1("DPP repack store 2: odd n-columns (quad_perm [1,1,3,3])")
+    _captureFoldGap(weavePairB, "B", phase2Mod)
+    phase2Mod.addComment1("DPP repack store 2: odd n-columns (quad_perm [1,1,3,3])")
     emitCoalescedStore(evenPerm=[1,1,3,3], oddPerm=[1,1,3,3], tag=f"odd-cols tt0={tt0}")
+
+    if foldCvtInterleave:
+      # Assemble Phase1(converts) -> convert-gap -> Phase2(assembly + coalesced stores)
+      # under the outer module.  The convert-gap is a top-level "PlsinGap_" module (matched
+      # by _interleaveStoreConvertIntoGapMfmas); gap B stays nested inside Phase2 with the
+      # "PlsinFoldGap_" prefix (NOT matched by the convert interleaver).  Anchor the
+      # convert-gap at the last convert so the planner measures anchor->consumer cycles.
+      module.add(phase1Mod)
+      capture = self._weaveCapturePair(weavePairB)
+      if capture is not None:
+        p1flat = list(phase1Mod.flatitems())
+        cvtGap = Module(f"PlsinGap_foldcvt_pair{weavePairB}")
+        capture.setdefault("gaps", []).append(
+          {"gap": cvtGap, "gapAnchor": p1flat[-1] if p1flat else None, "role": "cvt"})
+        module.add(cvtGap)
+      module.add(phase2Mod)
+      for sub in (phase1Mod, phase2Mod):
+        assert not any(isinstance(i, SBarrier) for i in sub.flatitems()), \
+          "DPP repack phase must be barrier-free (no s_barrier in the MFMA-interleaved store)"
 
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "DPP repack must be barrier-free (no s_barrier in the MFMA-interleaved store)"
