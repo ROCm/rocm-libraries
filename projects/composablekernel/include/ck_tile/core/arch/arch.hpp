@@ -47,7 +47,14 @@
 // get rerouted to the UnificationDispatcher. The latter is necessary because some pipelines bypass
 // the WarpGemmDispatcher in favor of directly using named WarpGemms.
 #ifndef USE_NEW_UNIFIED_FRAMEWORK
+#ifdef CK_CMAKE_GPU_TARGET_IDS
 #define USE_NEW_UNIFIED_FRAMEWORK 1
+#else
+// Third-party consumers may compile CK headers directly without using CK's CMake configuration.
+// Keep the legacy path for those builds because the unified dispatcher requires a host-visible
+// target ID. Consumers can still opt in by defining both macros explicitly.
+#define USE_NEW_UNIFIED_FRAMEWORK 0
+#endif
 #endif
 
 namespace ck_tile {
