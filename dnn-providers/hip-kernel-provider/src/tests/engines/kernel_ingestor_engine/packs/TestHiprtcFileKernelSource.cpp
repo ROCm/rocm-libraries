@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -114,6 +115,17 @@ public:
     std::filesystem::path sourcePath() const
     {
         return _directory.path() / BUNDLE_NAME / SOURCE_FILE;
+    }
+
+    std::filesystem::path bundlePath() const
+    {
+        return _directory.path() / BUNDLE_NAME;
+    }
+
+    /// Adds a file to the bundle, so a case can pin which of them become headers.
+    void writeIntoBundle(const std::filesystem::path& relative, const std::string& text) const
+    {
+        writeFile(bundlePath() / relative, text);
     }
 
 private:
@@ -423,6 +435,150 @@ TEST(TestHiprtcFileKernelSource, KeysTwoBundlesSharingASourceFileNameApart)
                   first.sourceText, first.programName, first.headers, first.options),
               HipMlopsSourceModuleCache::makeKey(
                   second.sourceText, second.programName, second.headers, second.options));
+}
+
+// ---------------------------------------------------------------------------
+// (f) A bundle header that resolves outside the tree is refused
+// ---------------------------------------------------------------------------
+
+/// The containment rule governs every file the adapter reads, not only the two the
+/// descriptor names. is_regular_file follows a symlink, so without this a link dropped
+/// into an otherwise contained bundle is read whole and handed to hipRTC as a virtual
+/// header -- and the author controls the `.hip` that #includes it, so the contents come
+/// back in the compile log.
+TEST(TestHiprtcFileKernelSource, RefusesABundleHeaderThatResolvesOutsideTheDescriptorTree)
+{
+    const BundleTree tree("header_escape");
+    const hipdnn_test_sdk::utilities::ScopedDirectory outside(uniqueDirectory("header_outside"));
+    const auto secret = outside.path() / "secret.txt";
+    writeFile(secret, "// not the author's to read\n");
+
+    // A symlink INSIDE the bundle, pointing out of the tree: the shape a blanket
+    // is_symlink() refusal would catch and a lexical check would miss.
+    std::filesystem::create_symlink(secret, tree.bundlePath() / "helper.h");
+
+    const GraphFixture fixture(buildPointwiseGraph());
+    auto options = makeOptions(fixture);
+
+    MockKernelCompiler compiler;
+    EXPECT_CALL(compiler, compileSource(_, _, _, _)).Times(0);
+
+    const auto kernel = makeHiprtcKernel(tree.root(), BUNDLE_NAME, "bfloat16", {}, 0x70);
+
+    try
+    {
+        buildIngestorKernelCode(compiler, unusedKpackLoader(), fixture.context(), kernel, options);
+        FAIL() << "a bundle header outside the descriptor tree must not be compiled against";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        // The offending header is named, and the refusal reads the same as the `bundle`
+        // one: one rule, one message shape, whichever file crossed the boundary.
+        EXPECT_THAT(error.what(), HasSubstr("bundle header 'helper.h'"));
+        EXPECT_THAT(error.what(), HasSubstr("outside the descriptor tree"));
+        EXPECT_THAT(error.what(), HasSubstr(tree.root().string()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// (g) The bundle's header list: which files, and in what order
+// ---------------------------------------------------------------------------
+
+/// The whole virtual-header contract in one assertion. A header in a subdirectory or
+/// under an unlisted extension is silently absent from the list and surfaces only as a
+/// hipRTC "file not found" inside someone else's source; ordering is asserted because the
+/// list is part of the compile cache key, so a directory-order-dependent list would make
+/// the same kernel key differently between runs.
+TEST(TestHiprtcFileKernelSource, CollectsOnlyTopLevelHeadersByExtensionInNameOrder)
+{
+    const BundleTree tree("headers");
+    tree.writeIntoBundle("b.h", "// b.h\n");
+    tree.writeIntoBundle("a.hpp", "// a.hpp\n");
+    tree.writeIntoBundle("z.txt", "// z.txt\n");
+    tree.writeIntoBundle("helper.hip", "// helper.hip\n");
+    tree.writeIntoBundle(std::filesystem::path("nested") / "c.h", "// nested/c.h\n");
+
+    const GraphFixture fixture(buildPointwiseGraph());
+    auto options = makeOptions(fixture);
+
+    MockKernelCompiler compiler;
+    CapturedCompile captured;
+    expectOneCompile(compiler, captured);
+
+    const auto kernel = makeHiprtcKernel(tree.root(), BUNDLE_NAME, "bfloat16", {}, 0x80);
+    buildIngestorKernelCode(compiler, unusedKpackLoader(), fixture.context(), kernel, options);
+
+    // Exactly these, in this order: the extension filter kept `.txt` and `.hip` out, the
+    // one-level rule kept `nested/c.h` out, and the name sort put `a.hpp` before `b.h`
+    // though the directory holds them the other way round. This binary embeds no headers
+    // of its own, so the embedded prefix is empty and the bundle's list is the whole list.
+    const std::vector<compilation::KernelHeader> expected{{"a.hpp", "// a.hpp\n"},
+                                                          {"b.h", "// b.h\n"}};
+    EXPECT_EQ(captured.headers, expected);
+}
+
+// ---------------------------------------------------------------------------
+// (h) A bundle header shadowing an embedded one is refused
+// ---------------------------------------------------------------------------
+
+/// hipRTC resolves the first match, so a collision would be broken invisibly and the
+/// author's mental model -- "my file wins" or "theirs does" -- would be right only by
+/// luck. Reached by calling the collector with an injected embedded list: this binary
+/// embeds no headers, which is precisely why the parameter exists.
+TEST(TestHiprtcFileKernelSource, RefusesABundleHeaderNamedLikeAnEmbeddedHeader)
+{
+    const BundleTree tree("collision");
+    tree.writeIntoBundle("helper.h", "// the bundle's helper\n");
+
+    const auto kernel = makeHiprtcKernel(tree.root(), BUNDLE_NAME, "bfloat16", {}, 0x90);
+    const std::vector<const char*> embeddedNames{"helper.h"};
+    const std::vector<std::string_view> embeddedTexts{"// the provider's helper\n"};
+
+    try
+    {
+        detail::collectKernelHeaders(
+            kernel, tree.bundlePath(), "kernel 'attention_dropin'", embeddedNames, embeddedTexts);
+        FAIL() << "a bundle header shadowing an embedded one must not be assembled";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_THAT(error.what(), HasSubstr("bundle header 'helper.h'"));
+        EXPECT_THAT(error.what(), HasSubstr("embedded headers"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// (i) A source_file escaping from inside a contained bundle is refused
+// ---------------------------------------------------------------------------
+
+/// `source_file` is authored too, so containment is checked on it separately rather than
+/// inherited from the bundle: `../../escape.hip` inside a bundle that is itself perfectly
+/// contained would otherwise be compiled as device code.
+TEST(TestHiprtcFileKernelSource, RefusesASourceFileThatEscapesFromInsideAContainedBundle)
+{
+    const BundleTree tree("source_escape");
+    const GraphFixture fixture(buildPointwiseGraph());
+    auto options = makeOptions(fixture);
+
+    MockKernelCompiler compiler;
+    EXPECT_CALL(compiler, compileSource(_, _, _, _)).Times(0);
+
+    auto kernel = makeHiprtcKernel(tree.root(), BUNDLE_NAME, "bfloat16", {}, 0xA0);
+    const std::string escaping = "../../escape.hip";
+    kernel.source.sourceFile = escaping;
+
+    try
+    {
+        buildIngestorKernelCode(compiler, unusedKpackLoader(), fixture.context(), kernel, options);
+        FAIL() << "a source_file outside the descriptor tree must not be compiled";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        // The bundle is contained, so naming the field is the only way the author learns
+        // which half of the pair is wrong.
+        EXPECT_THAT(error.what(), HasSubstr("source_file '" + escaping + "'"));
+        EXPECT_THAT(error.what(), HasSubstr("outside the descriptor tree"));
+    }
 }
 
 } // namespace

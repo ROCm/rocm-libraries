@@ -232,6 +232,37 @@ TEST(TestKernelDefineSubstitution, ValidationAcceptsEveryRenderableDeclaredField
     EXPECT_TRUE(validateKernelDefineTemplate("", schema, error)) << error;
 }
 
+TEST(TestKernelDefineSubstitution, TokenFollowedByAnIdentifierCharacterIsRejected)
+{
+    // The identifier scan is greedy and a token has no terminator, so `$kernel.dtype_t`
+    // names the field `dtype_t` -- it does not render `dtype` and append `_t`. There is no
+    // brace form to escape it, so the rejection naming the whole swallowed name is the
+    // author's only signal; a field named after a type suffix would otherwise have to be
+    // spelled in the pack's dispatch handler with no diagnostic at all.
+    expectRejectedByBoth("$kernel.dtype_t", "dtype_t");
+}
+
+TEST(TestKernelDefineSubstitution, OperatorBearingStringMetadataRendersVerbatim)
+{
+    // The operator refusal is a lint over AUTHORED template text, and this template
+    // carries no operator: the operators arrive in the metadata value, which is rendered
+    // verbatim per the string row of the rendering table and never rescanned. So `2 + 1`
+    // reaches the flag text as `2 + 1` and device code sees the expression, not `3`. That
+    // is the boundary of what the refusal covers, pinned here so nobody reads it as
+    // closing the case it is justified with.
+    MetadataValues metadata = completedMetadata();
+    metadata["dtype"] = MetadataValue{std::string("2 + 1")};
+    std::string out;
+    std::string error;
+
+    ASSERT_TRUE(substituteKernelDefine("$kernel.dtype", metadata, out, error)) << error;
+    EXPECT_EQ(out, "2 + 1");
+
+    // And the template itself passes load-time validation, which is what makes the
+    // consequence reachable: nothing inspects the value at either end.
+    EXPECT_TRUE(validateKernelDefineTemplate("$kernel.dtype", testSchema(), error)) << error;
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

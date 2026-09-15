@@ -123,13 +123,25 @@ inline std::string readDescriptorFile(const std::filesystem::path& path,
 ///
 /// The bundle is read one level deep and sorted by name, so the list a kernel compiles
 /// against does not depend on directory-iteration order.
+///
+/// Every bundle header goes through resolveInsideDescriptorTree before it is read, by the
+/// same rule and with the same message shape as `bundle` and `source_file`: is_regular_file
+/// follows a symlink, so a link out of an otherwise contained bundle would otherwise be
+/// read whole and handed to hipRTC as a virtual header. Canonical comparison rather than a
+/// blanket symlink refusal, so a bundle legitimately assembled by symlink INSIDE the tree
+/// still loads and only an escape is refused.
+///
+/// @param embeddedNames Names of the provider's embedded includes, parallel to
+///                      @p embeddedTexts. Passed in rather than read from
+///                      hip_plugin::getKernelIncList here so the collision branch is
+///                      reachable from a test binary, which embeds no headers of its own.
 inline std::vector<compilation::KernelHeader>
-    collectKernelHeaders(const std::filesystem::path& bundleDirectory, const std::string& label)
+    collectKernelHeaders(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                         const std::filesystem::path& bundleDirectory,
+                         const std::string& label,
+                         const std::vector<const char*>& embeddedNames,
+                         const std::vector<std::string_view>& embeddedTexts)
 {
-    std::vector<std::string_view> embeddedTexts;
-    std::vector<const char*> embeddedNames;
-    hip_plugin::getKernelIncList(embeddedTexts, embeddedNames);
-
     std::vector<compilation::KernelHeader> headers;
     headers.reserve(embeddedTexts.size());
     for(size_t index = 0; index < embeddedNames.size(); ++index)
@@ -137,9 +149,21 @@ inline std::vector<compilation::KernelHeader>
         headers.emplace_back(embeddedNames[index], std::string(embeddedTexts[index]));
     }
 
-    std::map<std::string, std::filesystem::path> bundleHeaders;
+    // Checked rather than ignored: an unreadable or non-directory bundle would otherwise
+    // degrade to an empty header list and surface as a hipRTC "file not found" inside the
+    // kernel's own source, naming neither the bundle nor the real cause.
     std::error_code walkError;
-    for(const auto& entry : std::filesystem::directory_iterator(bundleDirectory, walkError))
+    const std::filesystem::directory_iterator walk(bundleDirectory, walkError);
+    if(walkError)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "hiprtc_file kernel source for " + label + ": cannot read bundle directory '"
+                + bundleDirectory.string() + "': " + walkError.message());
+    }
+
+    std::map<std::string, std::filesystem::path> bundleHeaders;
+    for(const auto& entry : walk)
     {
         if(!entry.is_regular_file())
         {
@@ -150,7 +174,20 @@ inline std::vector<compilation::KernelHeader>
         {
             continue;
         }
-        bundleHeaders.emplace(entry.path().filename().string(), entry.path());
+
+        const std::string name = entry.path().filename().string();
+        std::filesystem::path resolved;
+        std::filesystem::path boundary;
+        if(!resolveInsideDescriptorTree(
+               kernel, std::filesystem::path(kernel.source.bundle) / name, resolved, boundary))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "hiprtc_file kernel source for " + label + ": bundle header '" + name
+                    + "' resolves to '" + resolved.string()
+                    + "', which is outside the descriptor tree '" + boundary.string() + "'");
+        }
+        bundleHeaders.emplace(name, resolved);
     }
 
     for(const auto& bundleHeader : bundleHeaders)
@@ -191,7 +228,10 @@ inline std::vector<compilation::KernelHeader>
 ///                   defines to them, which is the whole point of that kind; the
 ///                   handler's own defines are already in place by then and a bound one
 ///                   naming the same macro deliberately wins, since it is the more
-///                   specific statement.
+///                   specific statement. `const&` plus an internal copy is not merely
+///                   unattractive, it is unavailable: KernelCompileOptions' copy
+///                   constructor is deleted (KernelCompileOptions.hpp:52-53), so a
+///                   mutable reference is the only shape this can take.
 inline IngestorKernelCode
     buildIngestorKernelCode(const compilation::IKernelCompiler& compiler,
                             const compilation::KpackKernelLoader& kpackLoader,
@@ -296,7 +336,12 @@ inline IngestorKernelCode
         }
 
         const std::string sourceText = detail::readDescriptorFile(resolved, "source_file", label);
-        const auto headers = detail::collectKernelHeaders(bundleDirectory, label);
+
+        std::vector<std::string_view> embeddedTexts;
+        std::vector<const char*> embeddedNames;
+        hip_plugin::getKernelIncList(embeddedTexts, embeddedNames);
+        const auto headers = detail::collectKernelHeaders(
+            kernel, bundleDirectory, label, embeddedNames, embeddedTexts);
 
         // The RESOLVED path, not the bare source_file: it is the compile cache's key
         // alongside the options, and two bundles each holding `attention.hip` with
