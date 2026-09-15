@@ -131,7 +131,7 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--request-file",
         type=Path,
-        help="One ConvGroupedRequest JSON object; requires forced mode and tile-k.",
+        help="One ConvGroupedRequest JSON object; auto/reuse need both packaged tiles.",
     )
     parser.add_argument(
         "--dtype",
@@ -161,8 +161,6 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(
             "--mode forced requires --tile-k; auto/reuse require it to be omitted"
         )
-    if args.request_file is not None and args.mode != "forced":
-        parser.error("--request-file requires forced mode and --tile-k")
     if args.request_file is not None and args.request_file.resolve() in {
         args.log_file.resolve(),
         args.output.resolve(),
@@ -611,6 +609,11 @@ def build_graph(
             choices == {64, 128},
             "Catalog does not expose exactly the two packaged tile_k choices",
         )
+    elif tile_k is None:
+        require(
+            choices == {64, 128},
+            f"Auto/reuse need both packaged tile_k variants; this request offers {sorted(choices)}",
+        )
     else:
         require(
             tile_k in choices, f"Requested tile_k={tile_k} is not offered: {choices}"
@@ -817,7 +820,8 @@ def run(args: argparse.Namespace, report: dict) -> dict:
         }
     )
     smoke = args.request_file is None
-    tiles = (64, 128) if smoke else (args.tile_k,)
+    # A forced request builds only its own spec; auto/reuse rank every packaged variant.
+    tiles = (64, 128) if (smoke or args.tile_k is None) else (args.tile_k,)
     specs = {
         tile: gfx950_conv_fwd_spec_for_request(request, tile_k=tile) for tile in tiles
     }
