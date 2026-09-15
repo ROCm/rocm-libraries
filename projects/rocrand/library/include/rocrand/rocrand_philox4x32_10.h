@@ -265,7 +265,11 @@ protected:
     {
         unsigned int lo = static_cast<unsigned int>(subsequence);
         unsigned int hi = static_cast<unsigned int>(subsequence >> 32);
-
+/*
+        unsigned int temp = m_state.counter.z;
+        m_state.counter.z += lo;
+        m_state.counter.w += hi + (m_state.counter.z < temp ? 1 : 0);
+*/
         unsigned int temp = m_state.counter_z;
         m_state.counter_z += lo;
         m_state.counter_w += hi + (m_state.counter_z < temp ? 1 : 0);
@@ -279,6 +283,12 @@ protected:
         unsigned int hi = static_cast<unsigned int>(offset >> 32);
 
         uint4 temp = m_state.counter;
+/*
+        m_state.counter.x += lo;
+        m_state.counter.y += hi + (m_state.counter.x < temp.x ? 1 : 0);
+        m_state.counter.z += (m_state.counter.y < temp.y ? 1 : 0);
+        m_state.counter.w += (m_state.counter.z < temp.z ? 1 : 0);
+*/
         m_state.counter_x += lo;
         m_state.counter_y += hi + (m_state.counter_x < temp.x ? 1 : 0);
         m_state.counter_z += (m_state.counter_y < temp.y ? 1 : 0);
