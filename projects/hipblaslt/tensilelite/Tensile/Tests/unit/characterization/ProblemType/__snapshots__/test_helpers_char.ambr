@@ -16,6 +16,7 @@
     'DataTypeE',
     'DataTypeMXSA',
     'DataTypeMXSB',
+    'DataTypeScaleA',
     'DestDataType',
     'F32XdlMathOp',
     'FusedGemmA2A',
@@ -25,6 +26,7 @@
     'IndexAssignmentsA',
     'IndexAssignmentsB',
     'IndexAssignmentsLD',
+    'Int4EncodingA',
     'MXBlockA',
     'MXBlockB',
     'MacDataTypeA',
@@ -39,6 +41,8 @@
     'NumIndicesLD',
     'OperationType',
     'OutputAmaxD',
+    'ScaleBlockSizeA',
+    'ScaleZeroPointA',
     'SetConstStrideA',
     'SetConstStrideB',
     'SetConstStrideBias',
@@ -112,6 +116,9 @@
     'DataTypeMXSB': list([
       'str',
     ]),
+    'DataTypeScaleA': list([
+      'int',
+    ]),
     'DestDataType': list([
       'int',
     ]),
@@ -138,6 +145,9 @@
     ]),
     'IndexAssignmentsLD': list([
       'list',
+    ]),
+    'Int4EncodingA': list([
+      'str',
     ]),
     'MXBlockA': list([
       'int',
@@ -179,6 +189,12 @@
       'str',
     ]),
     'OutputAmaxD': list([
+      'bool',
+    ]),
+    'ScaleBlockSizeA': list([
+      'int',
+    ]),
+    'ScaleZeroPointA': list([
       'bool',
     ]),
     'SetConstStrideA': list([

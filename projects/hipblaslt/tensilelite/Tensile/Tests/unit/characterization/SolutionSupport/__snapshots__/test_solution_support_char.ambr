@@ -213,6 +213,7 @@
     'DataTypeE',
     'DataTypeMXSA',
     'DataTypeMXSB',
+    'DataTypeScaleA',
     'DestDataType',
     'F32XdlMathOp',
     'ISA',

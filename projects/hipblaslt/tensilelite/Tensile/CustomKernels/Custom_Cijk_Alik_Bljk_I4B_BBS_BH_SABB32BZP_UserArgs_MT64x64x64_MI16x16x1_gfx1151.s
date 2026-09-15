@@ -47,6 +47,7 @@ custom.config:
     KernArgsVersion: 3
   LocalReadVectorWidthA: -1
   LocalReadVectorWidthB: -1
+  StaggerU: 0
 amdhsa.version:
   - 1
   - 1
