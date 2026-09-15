@@ -76,6 +76,7 @@ license = "MIT"
 
 [project.scripts]
 tensilelite = "tensilelite.cli:main"
+tensilelite-configure-client = "tensilelite_configure_client:main"
 Tensile = "tensilelite.tensilelite:main"
 TensileCreateLibrary = "tensilelite.tensilelite_create_library:run"
 TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
@@ -102,6 +103,8 @@ dev = [
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+py-modules = ["_tensilelite_client_binding", "tensilelite_configure_client"]
 [tool.setuptools.packages.find]
 include = ["tensilelite*"]
 exclude = ["tensilelite.Tests*", "tensilelite.Utilities.archive*"]
