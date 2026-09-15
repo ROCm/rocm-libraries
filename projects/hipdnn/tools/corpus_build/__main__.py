@@ -69,6 +69,9 @@ def parse_args(argv=None) -> argparse.Namespace:
                         help="keep only shapes with this mask setting (repeatable; default "
                              "both). AITER's gfx950 forward table has no causal kernel, so a "
                              "corpus built to train it asks for `--causal 0`")
+    parser.add_argument("--exclude-corpus", type=Path, default=None, dest="exclude",
+                        help="manifest.json of a corpus whose shapes must NOT appear here -- "
+                             "use it to hold out the graphs a model will be judged on")
     for source, share in assemble.DEFAULT_SHARES.items():
         parser.add_argument(f"--{source}-share", type=float, default=share,
                             dest=f"{source}_share",
@@ -110,12 +113,15 @@ def main(argv=None) -> int:
         kdps=args.kdp, catalog=args.model_catalog, shape_dirs=args.shape_dirs,
         arch=args.arch, batches=tuple(args.model_batches),
         declaration=args.declaration, min_candidates=args.min_candidates,
-        max_bytes=args.max_bytes,
+        max_bytes=args.max_bytes, exclude=args.exclude,
         keep=Filter(dtypes=tuple(args.dtypes), head_dims=tuple(args.head_dims),
                     causal=tuple(bool(value) for value in args.causal)),
         shares={source: getattr(args, f"{source}_share")
                 for source in assemble.DEFAULT_SHARES})
     report(manifest)
+    held = manifest["reports"].get("held_out") or {}
+    if held.get("corpus"):
+        print(f"held out                {held['shapes_removed']} shapes already in {held['corpus']}")
     print(f"written                 {args.out}")
     if manifest["emitted"] < manifest["requested"]:
         # Short is a real outcome, not a failure: the packs carry what they carry and

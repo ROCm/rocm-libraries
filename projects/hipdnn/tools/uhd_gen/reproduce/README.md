@@ -17,6 +17,24 @@ AITER owns no descriptor set, so its model is bound by the UUID the provider dec
 (RFC 0019 §4.1, Open Question 7) rather than by a role map. The document's `id` IS the
 binding: change it and the engine silently reports no model.
 
+## 0. What every job needs
+
+The sbatch files here take their inputs through `/exchange`, which is the container's view
+of your home directory. Every submission therefore carries the same container flags; leaving
+them off runs the script on the bare node, where `/exchange` does not exist and apt refuses
+to install (measured: run 67932435).
+
+```bash
+SUBMIT="sbatch --cpus-per-task=16 --mem=96G --gres=gpu:1 \
+  --container-image=docker://rocm/dev-ubuntu-24.04:7.14.0-full \
+  --container-writable --container-remap-root \
+  --container-mounts=$HOME:/exchange"
+```
+
+Stage corpora and artifacts in `$HOME` on the login node; they appear under `/exchange`
+inside the job. `UHD_BUNDLE` (see the last section) is how a job builds the tree you pushed
+rather than whatever its site mirror happens to serve.
+
 ## 1. Build the corpus (offline, no GPU)
 
 Deterministic from the seed and the in-tree inputs — the same command reproduces the same
@@ -50,10 +68,10 @@ by L1 — in that order, because an immediate run executes whatever the installe
 ranker picked, so L1's labels describe the selector that ships.
 
 ```bash
-sbatch --constraint=GFX950 --gres=gpu:1 --time=08:00:00 \
+$SUBMIT --constraint=GFX950 --time=08:00:00 \
     --export=ALL,UHD_GRAPHS=/exchange/corpus-950,UHD_ENGINE=hipkernel:Gfx950AttentionDense,UHD_ROLES=l2+l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-dense \
     generate.sbatch
-sbatch --constraint=GFX950 --gres=gpu:1 --time=06:00:00 \
+$SUBMIT --constraint=GFX950 --time=06:00:00 \
     --export=ALL,UHD_GRAPHS=/exchange/corpus-950,UHD_ENGINE=ASM_SDPA_ENGINE,UHD_ROLES=l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-aiter \
     generate.sbatch
 ```
@@ -82,9 +100,19 @@ mostly solving different problems.
 predict every graph — the cross-engine question L1 exists for.
 
 ```bash
-sbatch --constraint=GFX950 --gres=gpu:1 \
+$SUBMIT --constraint=GFX950 \
     --export=ALL,UHD_CORPUS=/exchange/corpus-950,UHD_ARCH=gfx950,"UHD_MODELS=rocKE=/exchange/out-950-dense/l1/model:hipkernel:Gfx950AttentionDense;AITER=/exchange/out-950-aiter/l1/model:ASM_SDPA_ENGINE",UHD_KEEP=/exchange/bakeoff-950 \
     bakeoff.sbatch
+```
+
+Then score it — predicted winner against measured winner, per regime, with the throughput
+given up when they disagree:
+
+```bash
+python3 score_predictions.py --manifest /tmp/corpus-950/manifest.json \
+    --predictions /exchange/bakeoff-950/predictions.json \
+    --measured rocKE=/exchange/out-950-dense/l1/corpus.csv \
+    --measured AITER=/exchange/out-950-aiter/l1/corpus.csv
 ```
 
 Then join its `predictions.json` against the measured `corpus.csv` files: for every graph
@@ -98,6 +126,23 @@ names the provider *release* and the engine's dispatch generation
 (`hip-kernel-provider/<version>/asm-sdpa-untuned-v1`), not the build hash — a hash would
 expire every model on every commit. `UHD_COMMIT=<sha>` pins `bakeoff.sbatch` to an older
 build when you do need to reproduce against one.
+
+## 4b. Including flyDSL
+
+flyDSL's kernels are not committed anywhere; `flydsl_catalog.sbatch` clones
+`https://github.com/ROCm/FlyDSL.git`, builds all 240 variants with the `flydsl==0.3.2` wheel,
+checks every one still carries the 608-byte kernarg and the pack's entry point, and stages
+them. `flydsl_enable.sbatch` then proves the engine registers and executes one graph.
+
+```bash
+$SUBMIT --constraint=GFX950 --time=04:00:00 \
+    --export=ALL,UHD_KEEP=/exchange/flydsl-catalog flydsl_catalog.sbatch
+```
+
+Collection and bake-off then take `UHD_COMPOSE_FLYDSL=1`,
+`UHD_HSACO_DIR=/exchange/flydsl-catalog` and `UHD_FLYDSL_CATALOG=/exchange/flydsl-catalog`:
+the pack lives outside `arch_content`, and `HIPDNN_DESCRIPTOR_DIR` replaces the search roots
+rather than adding to them, so rocKE and flyDSL are only both visible from one composed tree.
 
 ## 5. Which engine answers at all
 
@@ -126,6 +171,23 @@ sbatch --export=ALL,UHD_BUNDLE=/exchange/delta.bundle,... <script>.sbatch
 
 Every script here fetches the bundle over the clone and checks out its tip, so the job
 builds the tree you meant.
+
+## What the shipped artifacts were actually built from
+
+Exact provenance for everything committed on this branch, so a check can reproduce the same
+inputs rather than similar ones:
+
+| artifact | built by |
+|---|---|
+| comparison corpus (1000 graphs, gfx950) | `--count 1000 --seed 0 --kdp-root <rocKE/gfx950_attention_dense> --min-candidates 2 --head-dim 64 --head-dim 128` |
+| gfx942 corpus (5000 graphs) | `--count 5000 --seed 0` |
+| flyDSL 240-kernel catalog | `flydsl_catalog.sbatch` (waves 1/2/4 x stagger on/off x lazy on/off, setprio on) |
+| rocKE gfx950 L1+L2, flyDSL L1+L2 | `generate.sbatch`, `UHD_ROLES=l2+l1`, on the comparison corpus |
+| AITER gfx950 L1 | `--count 2500 --seed 11 --dtype bf16 --head-dim 128 --causal 0 --exclude-corpus <comparison manifest>` then `generate.sbatch UHD_ROLES=l1` |
+| the 94.2% number | `bakeoff.sbatch` over the comparison corpus, then `score_predictions.py` |
+
+flyDSL additionally needs a FlyDSL checkout; `flydsl_catalog.sbatch` clones
+`https://github.com/ROCm/FlyDSL.git` itself, and the standalone builders take `FLYDSL_REPO`.
 
 ## Known gaps
 

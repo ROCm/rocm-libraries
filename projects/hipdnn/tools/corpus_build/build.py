@@ -10,6 +10,7 @@ it runnable on a laptop before the cluster time it is preparing for.
 from __future__ import annotations
 
 import dataclasses
+import json
 from pathlib import Path
 
 from . import assemble, kernels, model_shapes, sweep
@@ -62,7 +63,7 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
           declaration: Path | None = None,
           min_candidates: int = DEFAULT_MIN_CANDIDATES,
           max_bytes: int = DEFAULT_MAX_BYTES, shares=None,
-          keep: Filter | None = None) -> dict:
+          keep: Filter | None = None, exclude: Path | None = None) -> dict:
     """Assemble a corpus into `out` and return its manifest."""
     catalog = REPO / model_shapes.DEFAULT_CATALOG if catalog is None else Path(catalog)
     declaration = (REPO / sweep.DEFAULT_DECLARATION if declaration is None
@@ -93,6 +94,21 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
 
     model_pool, kernel_pool = both_anchors(model_pool), both_anchors(kernel_pool)
 
+    # Shapes an earlier corpus already carries, removed before anything is measured. A model
+    # judged on a corpus must not have been trained on it, and a random split does not give
+    # that -- the two corpora are drawn from one declared space, so they overlap by
+    # construction (47 of 1734 shapes, measured). `benchmark` is content-derived, so this is
+    # a set difference rather than a heuristic.
+    excluded_shapes = 0
+    if exclude is not None:
+        held = {row["name"] for row in
+                json.loads(Path(exclude).read_text(encoding="utf-8"))["graphs"]}
+        for pool in (model_pool, kernel_pool):
+            before = len(pool)
+            pool[:] = [candidate for candidate in pool if candidate.shape.name not in held]
+            excluded_shapes += before - len(pool)
+
+
     # The sweep is asked only for shapes the first two do not already have, so its
     # allocation is never spent on a duplicate that is then dropped. `count` is its
     # capacity: no corpus can need more sampled shapes than it has graphs.
@@ -100,6 +116,10 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
     declared = sweep.load(declaration)
     sweep_pool, sweep_report = sweep.sample(declared, count, seed, max_bytes, taken, keep)
     sweep_pool = both_anchors(sweep_pool)
+    if exclude is not None:
+        before = len(sweep_pool)
+        sweep_pool = [candidate for candidate in sweep_pool if candidate.shape.name not in held]
+        excluded_shapes += before - len(sweep_pool)
 
     pools, duplicates = assemble.deduplicate(
         {"model": model_pool, "kernel": kernel_pool, "sweep": sweep_pool})
@@ -116,5 +136,7 @@ def build(out: Path, *, count: int = DEFAULT_COUNT, seed: int = 0,
                  "sweep": sweep_report,
                  "pool_sizes": {source: len(pool) for source, pool in pools.items()},
                  "filter": keep.describe(), "filtered_out": excluded,
+                 "held_out": {"corpus": str(exclude) if exclude else None,
+                              "shapes_removed": excluded_shapes},
                  "shape_dirs": [str(directory) for directory in shape_dirs],
                  "shares": shares})
