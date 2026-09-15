@@ -472,28 +472,19 @@ namespace TensileLite
         // WARNING: this is NOT ContractionSolution::requiredWorkspaceSize()'s return
         // value, even though the names are close. requiredWorkspaceSize() is the
         // separate, caller-facing implementation of the reserve-or-not rule -- it is
-        // what the allocator sizes the workspace buffer from -- and it computes the
-        // answer differently: it always asks getSKReduction(), and for parallel
-        // reduction it sizes with requiredWorkspaceSizeGsu(problem, hardware,
-        // grid / tiles) instead of partialTileSize(grid).
-        //
-        // The two could in principle disagree about WHETHER a workspace is needed,
-        // not just about how many bytes: at a k-split factor grid / tiles of 1,
-        // requiredWorkspaceSizeGsu() short-circuits to 0 while partialTileSize(grid)
-        // does not, so a parallel reduction whose grid came back equal to tiles
-        // would reserve here and not there. That case is unreachable -- both call
-        // sites run streamKReconcileReduction() on the same (reduction, grid, tiles)
-        // triple immediately after getSKGridImpl(), and it demotes parallel to tree
-        // whenever the split factor is below 2, so neither sizing ever sees parallel
-        // at a split of 1. The formulas differ; the reserve-or-not answer does not.
+        // what the allocator sizes the workspace buffer from. It reaches its answer
+        // by the same route: the reduction (getSKReduction(), or the SK4 /
+        // SK5-dynamic tree forcing), getSKGridImpl(), then
+        // streamKReconcileReduction() on the same (reduction, grid, tiles) triple,
+        // and finally partialTileSize(grid) for the byte count.
         //
         // That agreement is load-bearing rather than incidental: it is what lets the
         // allocate-then-launch flow close. The allocator sizes from
         // requiredWorkspaceSize(), that size is what problem.workspaceSize() reports
         // on the subsequent launch, and re-deriving this snapshot against it reaches
-        // a self-consistent fixed point. Both implementations encode the same
-        // intended rule, by way of the same reconcile helper -- change one, check
-        // the other two.
+        // a self-consistent fixed point. All three implementations encode the same
+        // intended rule, by way of the same helpers -- change one, check the other
+        // two.
         size_t requiredWorkspaceBytes = 0;
         // recomputed: partials(+work-queue) bytes wanted, before the fit check against
         // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
