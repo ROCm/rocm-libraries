@@ -14,6 +14,7 @@ C++ table; this file tests that the loader actually asks it, and that the
 emitter writes and stages what the loader will look for.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,10 @@ class TestConfigLoading:
         assert [k.kernel_source.kind for k in kernels] == ["hiprtc_file"] * 2
         # The point of the kind: one source file, two kernels, two binaries.
         assert {k.kernel_source.source_file for k in kernels} == {"ScaleAddHiprtc.hip"}
-        assert [k.metadata["dtype"] for k in kernels] == ["float", "_Float16"]
+        # Flatbuffers enum spellings, because a kernel-scoped dtype matcher
+        # compares metadata.dtype to EnumNameDataType(<the graph's dtype>). The
+        # C++ spellings match nothing, silently, on every graph.
+        assert [k.metadata["dtype"] for k in kernels] == ["FLOAT", "HALF"]
 
     def test_defines_survive_loading(self, dropin_config):
         assert dropin_config.packs[0].kernels[0].kernel_source.defines == {
@@ -189,18 +193,19 @@ class TestEmission:
         return written, tmp_path
 
     def test_kdp_carries_the_hiprtc_kernel_source(self, rendered, dropin_config):
-        import json
-
         _written, out = rendered
         kdp = json.loads(
-            (out / "descriptors/scale_add_hiprtc/scale_add_hiprtc.kdp.json").read_text()
+            (
+                out
+                / "descriptors/scale_add_hiprtc/scale_add_hiprtc_f32_block64.kdp.json"
+            ).read_text()
         )
-        sources = [k["kernel_source"] for k in kdp["kernelDescriptors"]]
-        assert {s["kind"] for s in sources} == {"hiprtc_file"}
-        assert {s["bundle"] for s in sources} == {"scale_add_sources"}
+        source = kdp["kernelDescriptors"][0]["kernel_source"]
+        assert source["kind"] == "hiprtc_file"
+        assert source["bundle"] == "scale_add_sources"
         # Templates ship VERBATIM: the descriptor is resolved on the target
         # against that kernel's completed metadata, not here.
-        assert sources[0]["defines"]["SCALE_ADD_DTYPE"] == "$kernel.dtype"
+        assert source["defines"]["SCALE_ADD_DTYPE"] == "$kernel.dtype"
 
     def test_bundle_is_staged_beside_the_descriptors(self, rendered):
         _written, out = rendered
@@ -235,3 +240,219 @@ class TestEmission:
         with tempfile.TemporaryDirectory() as tmp:
             written = generator.render(dropin_config, Path(tmp))
         assert sorted(generator.preview_files(dropin_config)) == sorted(written)
+
+
+class TestOneKdpPerKernel:
+    """A drop-in is staged by copying descriptors into an installed tree, so
+    the KDP is the unit of staging. With every variant inline in one file
+    there is no way to add the second without re-shipping the first."""
+
+    @pytest.fixture
+    def rendered(self, generator, dropin_config, tmp_path):
+        generator.render(dropin_config, tmp_path)
+        return tmp_path / "descriptors/scale_add_hiprtc"
+
+    def test_each_kernel_gets_its_own_kdp_named_after_it(self, rendered):
+        assert sorted(p.name for p in rendered.glob("*.kdp.json")) == [
+            "scale_add_hiprtc_f16_block256.kdp.json",
+            "scale_add_hiprtc_f32_block64.kdp.json",
+        ]
+
+    def test_each_kdp_holds_exactly_its_own_kernel(self, rendered):
+        by_file = {
+            p.name: json.loads(p.read_text()) for p in rendered.glob("*.kdp.json")
+        }
+        assert [
+            k["name"]
+            for k in by_file["scale_add_hiprtc_f32_block64.kdp.json"][
+                "kernelDescriptors"
+            ]
+        ] == ["scale_add_hiprtc.f32_block64"]
+        assert [
+            k["name"]
+            for k in by_file["scale_add_hiprtc_f16_block256.kdp.json"][
+                "kernelDescriptors"
+            ]
+        ] == ["scale_add_hiprtc.f16_block256"]
+
+    def test_the_two_kdps_have_distinct_ids(self, rendered):
+        """The loader keys the catalog by descriptor id. Two KDPs sharing one
+        id are one entry, so staging the second would replace the first rather
+        than add to it -- which is the whole point of the split."""
+        ids = {json.loads(p.read_text())["id"] for p in rendered.glob("*.kdp.json")}
+        assert len(ids) == 2
+
+    def test_everything_else_is_shared_verbatim(self, rendered):
+        """They are one pack: same engine, same dispatch, same matcher list,
+        same arch. Only id, name and kernelDescriptors may differ."""
+        documents = [json.loads(p.read_text()) for p in rendered.glob("*.kdp.json")]
+        shared = [
+            {k: v for k, v in d.items() if k not in ("id", "name", "kernelDescriptors")}
+            for d in documents
+        ]
+        assert shared[0] == shared[1]
+
+    def test_an_embedded_source_engine_still_gets_one_kdp_per_pack(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """The split is drop-in-only. An `embedded_source` engine ships in the
+        provider binary; there is nothing to stage a file at a time."""
+        generator.render(scale_add_config, tmp_path)
+        emitted = tmp_path / f"descriptors/{scale_add_config.engine.slug}"
+        assert [p.name for p in emitted.glob("*.kdp.json")] == [
+            f"{scale_add_config.engine.slug}.kdp.json"
+        ]
+
+    def test_colliding_kernel_stems_are_refused(self, tmp_path):
+        """Kernel names are not unique by construction and the stem collapses
+        punctuation, so `fixture.f32` and `fixture_f32` reduce to one file. The
+        second would overwrite the first and a variant would vanish."""
+        raw = yaml.safe_load((FIXTURES / "valid.yaml").read_text())
+        twin = yaml.safe_load(yaml.safe_dump(raw["packs"][0]["kernels"][0]))
+        twin["name"] = "fixture_f32"
+        twin["metadata"]["block_size"] = 128
+        raw["packs"][0]["kernels"].append(twin)
+        path = tmp_path / "colliding_stems.yaml"
+        path.write_text(yaml.safe_dump(raw))
+        with pytest.raises(ConfigError, match="same output file"):
+            load_config(path)
+
+
+class TestNoProvenance:
+    """`provenance` is an extension the runtime loader does not parse: it logs
+    `extension key 'provenance' ... ignoring it` once per KDP, in exactly the
+    log an author reads to find the one LOG_ERROR that means their set was
+    dropped."""
+
+    def test_a_dropin_kdp_carries_none(self, generator, dropin_config, tmp_path):
+        generator.render(dropin_config, tmp_path)
+        emitted = tmp_path / "descriptors/scale_add_hiprtc"
+        for path in emitted.glob("*.kdp.json"):
+            assert "provenance" not in json.loads(path.read_text())
+
+    def test_a_declared_specialization_block_is_still_not_emitted(
+        self, generator, tmp_path
+    ):
+        """The removal is keyed on the dialect, not on the declaration's
+        absence: `valid.yaml` declares a full contract and still ships none."""
+        config = load_fixture("valid.yaml")
+        assert config.specialization
+        generator.render(config, tmp_path)
+        path = tmp_path / "descriptors/fixture/fixture_f32.kdp.json"
+        assert "provenance" not in json.loads(path.read_text())
+
+    def test_a_dropin_config_need_not_declare_one_at_all(
+        self, generator, dropin_config, tmp_path
+    ):
+        """Presence is enforced at emission, so dropping the block from the
+        emitted document is what makes the config key optional."""
+        assert not dropin_config.specialization
+        generator.render(dropin_config, tmp_path)
+
+    def test_a_packaged_kdp_still_carries_it(
+        self, generator, gfx950_attention_dense_config, tmp_path
+    ):
+        """The packaged and rocKE paths check a received binary against the
+        shipped contract, which is the only thing they have. B.3 must not
+        reach them."""
+        generator.render(gfx950_attention_dense_config, tmp_path)
+        config = gfx950_attention_dense_config
+        emitted = tmp_path / config.descriptor_dir
+        documents = [json.loads(p.read_text()) for p in emitted.glob("*.kdp.json")]
+        assert documents
+        for document in documents:
+            assert document["provenance"]["specialization_contract"]["consumers"]
+
+
+class TestNativeSymbolNamespace:
+    """G1: the namespace was derived from the engine name, so a set reusing an
+    installed pack's symbols had to author the installed engine's name -- and
+    therefore hash to its id."""
+
+    def test_the_override_decouples_symbols_from_the_engine_name(self):
+        config = load_fixture("installed_symbols_new_name.yaml")
+        assert config.engine.name == "hipkernel:FixtureHiprtcDropin"
+        assert config.native_symbol_namespace == "hipkernel.fixture"
+        assert config.graph_match_symbol == "hipkernel.fixture.graph_match"
+        assert config.dispatch_symbol == "hipkernel.fixture.dispatch"
+        assert config.score_symbol == "hipkernel.fixture.score"
+        assert config.kernel_match_symbol == "hipkernel.fixture.kernel_match"
+
+    def test_the_emitted_descriptors_carry_both(self, generator, tmp_path):
+        """The negative B.4 names: the installed symbols AND the new engine
+        name, in one run, with no hand edit between them."""
+        config = load_fixture("installed_symbols_new_name.yaml")
+        generator.render(config, tmp_path)
+        emitted = tmp_path / "descriptors/fixture_hiprtc_dropin"
+        ued = json.loads((emitted / "fixture_hiprtc_dropin.ued.json").read_text())
+        udd = json.loads((emitted / "fixture_hiprtc_dropin.udd.json").read_text())
+        assert ued["name"] == "hipkernel:FixtureHiprtcDropin"
+        assert ued["graph_match"] == {"native": "hipkernel.fixture.graph_match"}
+        assert udd["dispatch_symbol"] == "hipkernel.fixture.dispatch"
+
+    def test_omitting_it_derives_from_the_name_as_before(self):
+        config = load_fixture("valid.yaml")
+        assert config.native_symbol_namespace == "hipkernel.fixture"
+
+    def test_a_malformed_namespace_is_refused(self, tmp_path):
+        """The loader pre-flights every match/dispatch/score symbol and drops
+        the whole engine on a miss, with one log line."""
+        raw = yaml.safe_load((FIXTURES / "valid.yaml").read_text())
+        raw["engine"]["native_symbol_namespace"] = "hipkernel:fixture"
+        path = tmp_path / "bad_namespace.yaml"
+        path.write_text(yaml.safe_dump(raw))
+        with pytest.raises(ConfigError, match="dotted symbol prefix"):
+            load_config(path)
+
+
+class TestSinglePackDiscriminatorWarning:
+    """Review M3. `build_operation_umd` returned None for a single-pack engine
+    with no warning, so a drop-in silently claimed every operation its reused
+    `graph_match` admits -- the pointwise pack's MUL and SUB graphs included.
+
+    The condition, verbatim and shared with `hiprtc-mining.md`:
+    `generator.SINGLE_PACK_DISCRIMINATOR_RULE`."""
+
+    def test_a_single_pack_engine_warns_with_the_remedy(
+        self, generator, dropin_config, tmp_path, capsys
+    ):
+        generator.render(dropin_config, tmp_path)
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "hipkernel:ScaleAddHiprtc" in out
+        # The consequence...
+        assert "claim every operation its `graph_match` admits" in out
+        # ...and the remedy, which is the actionable half.
+        assert "operation_is_<op>" in out
+        assert "matchers" in out
+
+    def test_pack_discriminates_silences_it(self, generator, tmp_path, capsys):
+        """The same single-pack shape, opted out. The fact is not derivable --
+        the shipped conv pack self-discriminates inside native code this
+        generator cannot read -- so the author is the only source for it."""
+        config = load_fixture("pack_discriminates.yaml")
+        assert config.engine.pack_discriminates
+        generator.render(config, tmp_path)
+        assert "WARNING" not in capsys.readouterr().out
+
+    def test_it_still_emits_no_graph_scoped_umd_either_way(self, generator, tmp_path):
+        """The warning changes what is SAID, never what is emitted:
+        TestConvFwdPack.cpp asserts zero graph-scoped matchers for this shape,
+        and §5 rejected both refusing and deriving a discriminator."""
+        config = load_fixture("pack_discriminates.yaml")
+        written = generator.render(config, tmp_path)
+        assert not [f for f in written if "operation_is_" in f]
+        kdp = json.loads(
+            (tmp_path / "descriptors/fixture/fixture_f32.kdp.json").read_text()
+        )
+        assert len(kdp["matchers"]) == 1
+
+    def test_a_multi_pack_engine_never_warns(
+        self, generator, binary_ops_config, tmp_path, capsys
+    ):
+        generator.render(binary_ops_config, tmp_path)
+        assert "WARNING" not in capsys.readouterr().out
+
+    def test_pack_discriminates_is_refused_on_a_multi_pack_engine(self):
+        with pytest.raises(ConfigError, match="pack_discriminates"):
+            load_fixture("multi_pack_discriminates.yaml")

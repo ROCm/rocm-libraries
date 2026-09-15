@@ -29,6 +29,7 @@ from .models import (
     IngestorConfig,
     KernelSpec,
     PackSpec,
+    _to_file_stem,
 )
 
 #: Two-line AMD copyright + SPDX header every emitted C++/CMake file opens with.
@@ -44,6 +45,21 @@ CMAKE_COPYRIGHT_HEADER = (
 
 class BundleError(Exception):
     """Raised when a ``hiprtc_file`` bundle cannot be staged."""
+
+
+#: Stand-in id for `IngestorGenerator.preview_files`, which answers "what would
+#: be written" and must therefore mint nothing: `mint_ids` is the single mint
+#: point and a preview that called it would burn a bundle's worth of uuids per
+#: `--dry-run`. Every lookup yields the same obviously-unreal value, and no
+#: previewed document is ever written.
+PREVIEW_ID = "00000000-0000-0000-0000-000000000000"
+
+
+class _PreviewIds(dict):
+    """Id map that answers every key with `PREVIEW_ID` instead of minting."""
+
+    def __missing__(self, key):
+        return PREVIEW_ID
 
 
 def _bundle_source_dir(config: IngestorConfig, bundle: str) -> Path:
@@ -119,8 +135,16 @@ def mint_ids(config: IngestorConfig) -> dict:
         ids[("pack", pack_index)] = str(uuid.uuid4())
         if config.is_multi_pack:
             ids[("operation_umd", pack_index)] = str(uuid.uuid4())
-        for kernel_index, _kernel in enumerate(pack.kernels):
+        for kernel_index, kernel in enumerate(pack.kernels):
             ids[("kernel", pack_index, kernel_index)] = str(uuid.uuid4())
+            if config.is_dropin:
+                # A drop-in ships one KDP per kernel, so each needs a pack id of
+                # its own -- two KDPs under one id are one catalog entry to the
+                # loader, and staging the second would replace the first rather
+                # than add to it. Keyed by STEM, not by position, because the
+                # stem is what names the file and the loader's check
+                # (`_check_dropin_kdp_stems`) has already made it unique.
+                ids[("kdp_split", config.dropin_kdp_stem(kernel))] = str(uuid.uuid4())
     return ids
 
 
@@ -465,13 +489,42 @@ def _pack_index(config: IngestorConfig, pack: PackSpec) -> int:
     raise ValueError(f"pack {pack.name!r} is not part of this config")
 
 
+#: The rule the generator and `hiprtc-mining.md` both state, held here in one
+#: wording so the two cannot drift apart. The page quotes this sentence; the
+#: warning below is what enforces it.
+#:
+#: Whether a single-pack engine's `graph_match` discriminates is NOT derivable
+#: from the config: the shipped conv pack admits the node type and validates it
+#: in one pass inside `convFwdGraphMatches`, which is native code this
+#: generator cannot read, and the shipped pointwise pack does not discriminate
+#: at all. Guessing either way is a silent wrong answer, so the generator warns
+#: and the author opts out by stating the fact.
+SINGLE_PACK_DISCRIMINATOR_RULE = "warn whenever a single-pack engine emits no graph-scope discriminator, unless the config carries `engine.pack_discriminates: true`"  # noqa: E501
+
+
 def build_operation_umd(
     config: IngestorConfig, pack: PackSpec, ids: dict
 ) -> dict | None:
     """UMD policy: emitted only for genuine per-pack narrowing, i.e. only
     when the engine has more than one pack. A single-pack engine gets zero
-    graph-scoped UMDs -- TestConvFwdPack.cpp asserts exactly this."""
+    graph-scoped UMDs -- TestConvFwdPack.cpp asserts exactly this.
+
+    That policy was written for the single-pack NATIVE case, where the pack's
+    own `graph_match` decides which graphs it answers, and it is right there.
+    It is wrong for a descriptor set that reuses an installed pack's
+    `graph_match` without narrowing it -- which is what a drop-in does -- and
+    the two are indistinguishable from here. So: `SINGLE_PACK_DISCRIMINATOR_RULE`.
+    """
     if not config.is_multi_pack:
+        if not config.engine.pack_discriminates:
+            print(
+                f"  WARNING: engine '{config.engine.name}' has one pack and so "
+                f"emits no graph-scope discriminator. This pack will claim "
+                f"every operation its `graph_match` admits; add the installed "
+                f"`operation_is_<op>` UMD to the KDP's `matchers` to narrow it. "
+                f"If this pack's `graph_match` discriminates on its own, say so "
+                f"with `engine.pack_discriminates: true` and this warning stops."
+            )
         return None
     return {
         "version": "1.0",
@@ -603,7 +656,15 @@ def build_kdp(
     if seen_metadata is None:
         seen_metadata = {}
     duplicates: list = []
-    contract = build_specialization_contract(config, ids)
+    # A drop-in carries no `provenance`. The key is an EXTENSION the runtime
+    # descriptor loader does not parse -- it logs `extension key 'provenance'
+    # ... ignoring it`, once per KDP, in exactly the log an author is told to
+    # read for the one LOG_ERROR that means their set was dropped. It earns
+    # that noise on the packaged and rocKE paths, where the
+    # specialization-agreement check is the only thing a receiving machine has.
+    # A hipRTC kernel is specialized by `-D` flags the descriptor already
+    # states verbatim in `defines`, so there is nothing the contract would add.
+    contract = None if config.is_dropin else build_specialization_contract(config, ids)
     for index, kernel in enumerate(pack.kernels):
         # Resolve FIRST, then key on the resolved form: the dedup key and the emitted
         # document are derived from the same values, so they cannot drift apart.
@@ -687,6 +748,8 @@ def build_kdp(
         "matchers": matchers,
         "engine": ids["ued"],
         "dispatch": ids["udd"],
+    }
+    if contract is not None:
         # Declared ONCE for the whole pack, and emitted AFTER minting so the ids in
         # it are this bundle's real ids. Every inline kernel below is one engine's,
         # one KMD's, one field partition's, so the declaration they would each
@@ -695,9 +758,8 @@ def build_kdp(
         # declaration first and this one second
         # (``hkp_pack.agreement.resolved_contract``), so a kernel needing different
         # terms can still state them.
-        "provenance": {"specialization_contract": contract},
-        "kernelDescriptors": kernel_descriptors,
-    }
+        kdp["provenance"] = {"specialization_contract": contract}
+    kdp["kernelDescriptors"] = kernel_descriptors
     if pack.arch:
         kdp["arch"] = list(pack.arch)
     elif config.is_packaged:
@@ -712,19 +774,62 @@ def build_kdp(
     return kdp
 
 
+def split_dropin_kdp(config: IngestorConfig, document: dict, ids: dict) -> list:
+    """One drop-in pack's KDP, split into ``[(stem, document), ...]`` -- one
+    per kernel, each with its own uuid.
+
+    A drop-in is staged by copying files into an installed tree and
+    restarting, so the KDP is the unit of staging: with every variant inline
+    in one file there is no way to add the second without also re-shipping the
+    first, and no way to take one back. One file per kernel makes both a ``cp``
+    and an ``rm``.
+
+    Each split needs an id of its own, not a copy: the loader keys the catalog
+    by descriptor id, and two KDPs sharing one id are one entry -- the second
+    staged file would silently replace the first rather than add to it.
+
+    Everything else is shared verbatim, because it is the same pack: the same
+    engine, the same dispatch, the same matcher list, the same arch. Only
+    ``id``, ``name`` and the single-element ``kernelDescriptors`` differ.
+    """
+    splits = []
+    for descriptor in document["kernelDescriptors"]:
+        stem = _to_file_stem(descriptor["name"])
+        split = dict(document)
+        split["id"] = ids[("kdp_split", stem)]
+        split["name"] = f"{config.engine.namespace}:{stem}"
+        split["kernelDescriptors"] = [descriptor]
+        splits.append((stem, split))
+    return splits
+
+
 def build_kdp_documents(config: IngestorConfig, ids: dict) -> list:
-    """Every pack's KDP, ``[(pack, document), ...]``, de-duplicated ENGINE-WIDE.
+    """Every KDP this bundle emits, ``[(pack, stem, document), ...]``,
+    de-duplicated ENGINE-WIDE.
 
     The one de-duplication scope, in one place. The loader collects every pack
     sharing an engine id into ONE catalog, so a duplicate that spans two packs is
     still a duplicate catalog tuple -- and a duplicate tuple drops the whole engine
     at load, not one entry. Building the packs separately, each against its own
     fresh state, is exactly the arrangement that ships one.
+
+    ``stem`` is carried rather than re-derived by each caller, because a
+    drop-in emits one KDP per kernel (`split_dropin_kdp`) and the pack alone no
+    longer names the file. It is the split that runs AFTER de-duplication: a
+    kernel dropped as a duplicate must not leave a KDP behind naming nothing.
     """
     seen_metadata: dict = {}
-    return [
-        (pack, build_kdp(config, pack, ids, seen_metadata)) for pack in config.packs
-    ]
+    documents = []
+    for pack in config.packs:
+        document = build_kdp(config, pack, ids, seen_metadata)
+        if config.is_dropin:
+            documents.extend(
+                (pack, stem, split)
+                for stem, split in split_dropin_kdp(config, document, ids)
+            )
+        else:
+            documents.append((pack, config.kdp_stem(pack), document))
+    return documents
 
 
 #: Inventory key for descriptors that name no architecture at all.
@@ -757,9 +862,10 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
     that is the coverage the loader gives it; a pack stating none either is filed
     under `ARCH_WILDCARD`.
 
-    ``kdp_documents`` is a list of ``(pack, document)`` pairs: the document carries
-    the finalized descriptors, the pack carries the stem the file is named for --
-    which is derived, not stored in the document.
+    ``kdp_documents`` is a list of ``(pack, stem, document)`` triples: the
+    document carries the finalized descriptors, the stem is the file it is
+    written to. A drop-in emits one KDP per kernel, so pack and stem are no
+    longer one-to-one and the stem is the one that counts here.
     """
     arches: dict[str, dict[str, set]] = {}
 
@@ -767,9 +873,8 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
         return arches.setdefault(arch, {"descriptor_names": set(), "pack_names": set()})
 
     total = 0
-    for pack, document in kdp_documents:
+    for _pack, stem, document in kdp_documents:
         pack_arch = list(document.get("arch") or []) or [ARCH_WILDCARD]
-        stem = config.kdp_stem(pack)
         for arch in pack_arch:
             bucket(arch)["pack_names"].add(stem)
         for descriptor in document["kernelDescriptors"]:
@@ -794,6 +899,10 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
             for arch, entry in sorted(arches.items())
         },
         "total_descriptor_count": total,
+        #: Every KDP file this bundle writes, in emission order. The CMake
+        #: fragment installs one `install(FILES)` line per entry, and for a
+        #: drop-in that is one per KERNEL -- which the pack list cannot say.
+        "kdp_stems": [stem for _pack, stem, _document in kdp_documents],
     }
 
 
@@ -815,7 +924,16 @@ class IngestorGenerator:
         )
 
     def preview_files(self, config: IngestorConfig) -> list[str]:
-        """The file list :meth:`render` would write, without writing anything."""
+        """The file list :meth:`render` would write, without writing anything.
+
+        The KDP names come from BUILDING the documents, not from re-deriving
+        stems off the config, because a drop-in emits one KDP per surviving
+        kernel and survival is decided by the de-duplication pass inside
+        `build_kdp`. A second derivation would list a file `render` does not
+        write for exactly the configs whose authored and emitted counts differ.
+        `_PreviewIds` is what keeps this free of the one thing a preview must
+        not do: mint.
+        """
         slug = config.engine.slug
         ddir = config.descriptor_dir
         files = [
@@ -826,8 +944,9 @@ class IngestorGenerator:
         if config.engine.has_heuristic:
             files.append(f"{ddir}/{slug}.uhd.json")
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
+        for _pack, stem, _document in build_kdp_documents(config, _PreviewIds()):
+            files.append(f"{ddir}/{stem}.kdp.json")
         for pack in config.packs:
-            files.append(f"{ddir}/{config.kdp_stem(pack)}.kdp.json")
             if config.is_multi_pack:
                 files.append(f"{ddir}/operation_is_{pack.discriminator}.umd.json")
         for bundle in config.bundle_names:
@@ -875,8 +994,11 @@ class IngestorGenerator:
             f"{ddir}/kernel_dtype_matches_graph.umd.json",
             build_kernel_match_umd(config, ids),
         )
-        for pack, document in kdp_documents:
-            write_json(f"{ddir}/{config.kdp_stem(pack)}.kdp.json", document)
+        for _pack, stem, document in kdp_documents:
+            write_json(f"{ddir}/{stem}.kdp.json", document)
+        # Per PACK, not per emitted KDP: a drop-in splits one pack across many
+        # KDPs, and the operation-scoped UMD they share is the pack's.
+        for pack in config.packs:
             op_umd = build_operation_umd(config, pack, ids)
             if op_umd is not None:
                 write_json(
