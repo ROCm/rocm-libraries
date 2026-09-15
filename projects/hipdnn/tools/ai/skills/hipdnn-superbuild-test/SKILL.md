@@ -108,8 +108,10 @@ when proving a named engine; a generic `command:` line is not that proof.
 
 ## Ingestor proof boundaries
 
-[The ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) is the sole ordered
-create/extend workflow. Its early `device_probe.py --mode early` requires the
+[The ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) owns production mining and
+lowering; the create path belongs to
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md). Its early
+`device_probe.py --mode early` requires the
 requested device and writable root, not an install tree, and ignores inherited
 `INSTALL`. After installation, `device_probe.py --mode installed` requires explicit
 `--install <existing-install>`. Probe success is not dispatch.

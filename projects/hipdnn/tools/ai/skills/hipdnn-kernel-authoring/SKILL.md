@@ -18,6 +18,7 @@ contracts, not alternate procedures:
 | [prior-art.md](prior-art.md) | Where to mine an algorithm: in-tree, external repositories, HIP/ISA documentation |
 | [device-envelope.md](device-envelope.md) | hipRTC language/header/flag envelope and target-architecture facts, local or remote |
 | [harness.md](harness.md) | Reference oracle, input parity, tolerance, launch, comparison and reporting |
+| [hipdnn-rocke-kernel-authoring](../hipdnn-rocke-kernel-authoring/SKILL.md) | The same arrow for the rocKE dialect: a Python builder lowered through comgr and packed at build time |
 | [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) | Everything downstream: native symbols, descriptors, registration and graph coverage |
 | [hipdnn-ingestor-engine](../hipdnn-ingestor-engine/SKILL.md) | Production mining and lowering once an integration exists: corpus, sweeps, tuning, packaging, rocKE |
 

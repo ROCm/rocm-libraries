@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "1f01bd0c-a36c-425c-83aa-2c5a056b2178",
+  "name": "hipkernel:BatchnormInference",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.batchnorm_inference.graph_match"
+  },
+  "metadata": "20c56e06-9fa5-43a3-a537-35b2226eac46",
+  "heuristic": "7430c959-7e50-4bc8-9a23-06f20ccc1f93",
+  "knobs": [
+    "block_size"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

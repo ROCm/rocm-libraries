@@ -43,6 +43,52 @@ graphs, and the Build and Execute buttons stay disabled.
 
 ## Quick start
 
+### Shared local installation
+
+From the outer `rocm-libraries` checkout, use Python 3.12+, Bun, Node.js 20+,
+and a native C++ build toolchain. On Windows, use a Visual Studio 2022 developer
+terminal. Initialize only the benchmarking submodule; do not recurse into its
+nested `rocm-libraries` submodule.
+
+```bash
+git submodule update --init -- projects/hipdnn/tools/dnn-benchmarking
+python3 projects/hipdnn/tools/dnn-benchmarking/setup_env.py --graph-studio --gpu-arch <gfx-target> --yes
+build/install/bin/start-graph-studio
+build/install/bin/dnn-benchmark --graph /path/to/graph.json -o /path/to/results.json
+```
+
+Use the target for the host GPU. An explicit target permits building when device
+detection is unavailable; it does not establish that the GPU can execute kernels.
+On Windows, use the generated `start-graph-studio.bat` and `dnn-benchmark.bat`.
+
+Setup preserves the outer checkout's `.venv`, provisions PyTorch and the ROCm
+wheel SDK, and builds hipDNN, its Python bindings, all three providers, and Studio
+in one superbuild. It installs fresh artifacts into `build/install`, not into
+the dependency SDK. The benchmarking package and matching frontend wheel install
+into `.venv`. The nested benchmarking checkout is not used.
+
+Use `--source-dir`, `--build-dir`, `--install-prefix`, and `--workspace` to select
+other locations. `--workspace` owns `.venv`; `--rocm-prefix` selects an existing
+dependency SDK, not the application destination. Rerun setup to rebuild and
+reinstall. Add `--reuse-artifacts` to reinstall an already-built superbuild
+without configuring or compiling it.
+
+The installed launchers work from any directory without Bun, Node.js, or source
+files at runtime. They use the bundled Electron executable, the exact configured
+Python interpreter, application libraries before SDK libraries, and the explicit
+application plugin directory. Benchmark startup selects the fresh backend before
+PyTorch probes can preload the SDK copy. Keep the configured `.venv` and ROCm
+dependencies at their recorded paths; this is a per-host install, not a standalone
+redistributable package.
+
+An import check or a zero benchmark exit code is not proof of GPU execution.
+Check report rows for actual executed engines. A host without a working ROCm
+device can render Studio and produce reports with every engine skipped.
+Studio's Build and Execute actions remain native; this setup does not replace
+them with the benchmarking backend.
+
+### Source development
+
 Windows, from the project folder:
 
 ```

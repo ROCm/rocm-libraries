@@ -45,8 +45,26 @@ symbol is a rebuild and a reinstall, and steps 5 and 6 run against the installed
 
 ## Environment
 
-These cost two failed jobs the first time and are not rediscoverable from an error
-message:
+None of this is rediscoverable from an error message. Read the half that applies to you.
+
+### Any host — these gate the build itself
+
+- **`HIPDNN_ENABLE_KERNEL_INGESTOR=ON` pulls in Python build-time dependencies.** The
+  `rocm_kpack` package must be importable, and it needs `msgpack` and `zstandard`. A
+  configure that cannot import them fails or silently drops the ingestor, depending on
+  where it trips.
+- **The generator needs `PyYAML` and `Jinja2`.** Where a `.venv` is absent — it is not
+  checked in, and no bootstrap step creates one for you — the interpreter you point `PY`
+  at must already have both. Targets guarded on "a Python that can import PyYAML and
+  Jinja2" **skip silently** when it cannot, leaving a `message(STATUS)` as the only
+  signal.
+- `PY="$GEN/.venv/bin/python"` and the generator README's setup block are **POSIX-only**.
+  On Windows use the interpreter directly (`.venv\Scripts\python.exe`, or any Python with
+  the two packages); there is no Windows variant of that block anywhere in the repo.
+
+### Scheduled / multi-node hosts only
+
+Skip this entire subsection on a local box — none of it applies.
 
 - **A worktree under `workspace/worktrees/` may be a symlink into the login
   node's `/var/tmp`**, which is login-node-local storage no compute node can see —
@@ -212,6 +230,29 @@ worked example of the first, with its graph matcher, its three graph-scoped oper
 matchers, its kernel matcher, its score and its dispatch handler all added to one scope.
 Add the pack's source and test files to the engine's `target_sources` in the same pass.
 
+**The `IngestorPacks.cpp` row's cache fields follow your handler, not your dialect.** The
+row is `(label, registerSymbols, ownsModuleCache, resetModuleCache)`, and
+`TestIngestorPacksModuleCacheOwnership` asserts only that the last two agree — it passes
+for both shapes, so it cannot tell you which one you needed. The rule that holds in
+shipped code: **if your `prepare()` routes through `buildIngestorKernelCode`, your handler
+holds a `KpackKernelLoader` and owns a module cache, so the row is
+`true, &reset<Name>ModuleCache`** — define the reset outside the pack's anonymous
+namespace and declare it in `IngestorPacks.hpp`. `hipkernel:Pointwise` is exactly this
+case and ships `true, &resetPointwiseModuleCache` (`IngestorPacks.cpp:16`) despite its
+kernels being `embedded_source`. Only a handler that does **not** route —
+`hipkernel:ConvFwd`, `IngestorPacks.cpp:19` — takes `false, nullptr`. The generator's
+`ingestor_packs_cpp.j2` fragment keys this off the *packaged* dialect instead, which
+emits `false, nullptr` for a routed non-packaged engine; prefer this rule over the
+fragment's comment when they disagree.
+
+**The embedded header set is global and shared across the whole binary.** Adding a header
+to your pack's embedded list changes what every other pack sees. `TestHiprtcFileKernelSource`
+pins the virtual-header vector on the premise that the test binary embeds no headers of
+its own, so a new embedded header breaks
+`CollectsOnlyTopLevelHeadersByExtensionInNameOrder` — a real signal about a shared
+resource, not incidental breakage. Expect to update that expectation in the same commit,
+and say in the message that the set is shared.
+
 Use `buildIngestorKernelCode` in `prepare()` rather than calling the compiler directly:
 it is the one place source loading and path containment are handled for every
 `kernel_source.kind` (`IngestorKernelCode.hpp:235-248`). A handler that calls
@@ -276,9 +317,12 @@ against the installed tree.
 The shared suite binary already takes `--test-engine` on the command line, so you can run
 your engine by hand before this step exists — but **registration is what makes anyone
 else run it.** Add an `add_external_integration_test_target` entry for your engine
-alongside the provider's existing ones
-(`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:213`,
-`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:277`), supplying:
+alongside the provider's existing ones. The two long-standing examples are
+`HIP_MLOPS_ENGINE` and `ASM_SDPA_ENGINE` (`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:391`,
+`:455`); the three `hipkernel:*` entries at `:313`, `:322` and `:359` are closer models for
+a new ingestor engine, and `:359` is the one that also stages a descriptor tree.
+**Re-derive these line numbers before citing them** — this file gains entries regularly and
+the numbers drift; `grep -n add_external_integration_test_target` is the reliable form. Supply:
 
 - `ENGINE_NAME` — your UED engine name, passed through as `--test-engine`.
 - `TEST_CONFIG` — a TOML your engine owns under
@@ -312,6 +356,23 @@ case id:
     --bundle-dir "$REPO/dnn-providers/integration-tests/integration-test-bundles/"
 ```
 
+**Do this before the step 3/4 build, not after it.** The step numbering here is a
+dependency order for *authoring*, not a wall-clock order for *building*: bundles are
+`file(COPY)`-ed at CMake **configure** time, so a case imported after your last configure
+is absent from the build and install trees no matter how correct it is. The symptom is
+silent — "my case doesn't run" with no error — so import your graphs, then configure and
+build, then run. If you have already built, re-configure after importing.
+
+**`import_graph.py` is not turnkey when a skeleton hash is shared.** Sweeps are matched by
+topology skeleton, and several can collide on one hash — `BatchnormInference` shares its
+skeleton with `BatchnormFwdInference`. The tool then picks the alphabetically first within
+the tier, whose template may use different tensor names, and dies with
+`ERROR: round-trip verify failed after extraction`, naming neither the sweep it chose nor
+the mismatched field. Two fixes, usually both: **narrow `--bundle-dir`** to the exact
+target directory so no other sweep is a candidate, and **match your graph's tensor names to
+the target template's** (for `BatchnormInference`: `X`, `BatchnormInference_0::Y`, and so
+on). Read the template you are appending to before generating the graph.
+
 It reports `DUPLICATE` and skips an identical case, appends to an existing topology's
 `sweep.json`, or creates a new template+sweep directory, and prints the generated case id
 to stderr — that id is the gtest name you will cite.
@@ -336,18 +397,42 @@ when a bespoke harness says it served. A harness you wrote proves your kernel; t
 suite proves your *integration*, against the same reference executor and the same bundle
 corpus every other provider is held to.
 
+**First, check the reference executor can actually run your op.** This gate comes before
+the command, not after a failed run. The GPU reference executor implements a plan builder
+per op family, and today that is exactly six — `ConvolutionFwd`, `LayernormFwd`,
+`LayernormBwd`, `RMSNorm`, `Pointwise`, `SdpaFwd`
+(`dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/`, one
+`Gpu<Op>Plan.hpp` each). **If your op is not on that list, `--verification-mode gpu`
+produces the exact silent skip it is prescribed to prevent**: every case reports *"GPU
+reference cannot run this op"* and skips, the run exits 0 having passed zero, and the
+target goes green. Measured in a dry run: `BatchnormInference` with `gpu`, **0 of 731
+passed**, exit 0.
+
+Pick the mode from that check and name it explicitly:
+
+| Your op | Mode | Why |
+|---|---|---|
+| has a `Gpu<Op>Plan.hpp` | `gpu` | live GPU reference; strongest oracle |
+| does not | `cpu` | live CPU reference; still an independent oracle |
+| either | **never `auto`** | its golden → GPU → CPU → **skip** chain ends in a silent skip |
+
+`graph-contract.md`'s rule still governs: missing capable independent numerics blocks the
+feature. If neither reference executor can run your op, you do not have an oracle and that
+is a `STOP`, not a mode to work around.
+
 ```bash
 hipdnn_integration_tests --test-article <prefix>/lib/hipdnn_plugins/engines/<your>.so \
                          --test-engine "$ENGINE" \
-                         --verification-mode gpu \
+                         --verification-mode <gpu|cpu, per the check above> \
                          --gtest_filter='*<YourOp>*'
 ```
 
 - `--test-engine` pins the run to your engine, so an op your engine cannot serve **SKIPs**
   instead of falling through to another loaded engine. That is what makes the result
   attributable.
-- `--verification-mode gpu` demands a live GPU reference rather than `auto`'s fallback
-  chain, which can silently land on golden tensors that were never pulled.
+- An **explicit** mode is a demand for a specific oracle rather than `auto`'s fallback
+  chain, which can silently land on golden tensors that were never pulled — or on nothing
+  at all. Explicit does not mean `gpu`; it means the one you checked for above.
 - **Naming an absent engine is a hard failure**, not a skip:
   `Error: Engine '<name>' is not loaded. Check the plugin path.`, exit 1, zero tests run.
   Use it as the negative control — it proves the positive run's passes were conditional

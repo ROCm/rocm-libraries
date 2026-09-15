@@ -358,14 +358,18 @@ def test_cancel_is_recorded_and_the_manifest_is_left_alone(supervisors, run_root
     # The engine checkpoints again when the step launches. Snapshot after that,
     # or the comparison is against a manifest the engine was always going to
     # replace on its own.
+    # Read the way the server reads. The engine replaces the manifest after
+    # every transition, and on Windows a reader that opens inside that window
+    # gets PermissionError -- so a raw read here races a window the production
+    # reader already knows how to survive.
     wait_for(
         lambda: manifest.is_file()
         and any(
             record["status"] == "running"
-            for record in json.loads(manifest.read_text())["steps"]
+            for record in json.loads(resources.read_text(manifest))["steps"]
         )
     )
-    frozen = manifest.read_bytes()
+    frozen = resources.read_bytes(manifest)
 
     cancelled = supervisor.cancel(result["runId"])
 
@@ -379,7 +383,7 @@ def test_cancel_is_recorded_and_the_manifest_is_left_alone(supervisors, run_root
     assert record["cancelledAt"]
     # The supervisor never writes the manifest. A tree-killed worker leaves its
     # last checkpoint exactly as it was, which is the evidence for the run.
-    assert manifest.read_bytes() == frozen
+    assert resources.read_bytes(manifest) == frozen
     assert supervisor.status(result["runId"])["status"] == "cancelled"
 
 

@@ -49,6 +49,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             FILES ${CMAKE_CURRENT_BINARY_DIR}/kernels/${kernel}.cpp
         )
     endforeach()
+    foreach(header IN LISTS HIPDNN_INGESTOR_PACK_KERNEL_HEADERS)
+        configure_file(
+            ${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${header}
+            ${CMAKE_CURRENT_BINARY_DIR}/kernels/${header}
+            COPYONLY
+        )
+        add_kernels_for_embedding(
+            TARGET hip_kernel_provider_tests
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/kernels/${header}
+        )
+    endforeach()
 endif()
 embed_kernel_sources(
     TARGET hip_kernel_provider_tests

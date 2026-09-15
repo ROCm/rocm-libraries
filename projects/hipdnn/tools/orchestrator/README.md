@@ -33,7 +33,9 @@ there and tells you which step they belong on.
 Prompts live in `configs/prompts/*.md`, not inside YAML, and are rendered with the same
 `${...}` references as the flow.
 
-## First flow: `rtc-kernel-review`
+## The flows
+
+### `rtc-kernel-review`
 
 Generate a HIP RTC kernel for a graph, then have a **second, independent** agent review
 it. Critical issues are appended to a shared feedback file and the generator runs again;
@@ -49,6 +51,118 @@ The reviewer is a fresh session on purpose -- `--resume`ing the generator's sess
 would give the reviewer the generator's blind spots and get its own work rubber-stamped.
 Continuity across iterations comes from two files instead: the kernel on disk, and
 `feedback.md`.
+
+### `test-engine-kernel`
+
+Hand it a graph; it makes `TEST_ENGINE` run that graph. `TEST_ENGINE` lives in
+`dnn-providers/hip-kernel-provider/src/engines/test_engine`: the engine, its plan
+builders and its kernel compilation path all work, and its kernel source is a set of
+empty stubs, so it runs and computes nothing. An agent fills that in, the provider is
+built, the integration cases covering the graph's operations have to pass, and the
+graph is then timed against `HIP_MLOPS_ENGINE` -- the engine `TEST_ENGINE` duplicates
+-- which the new kernels have to **beat** by a stated margin.
+
+```
+profile           python            -> which suites cover this graph
+reference_probe   graph_bench       -> HIP_MLOPS_ENGINE runs it, so a baseline exists
+baseline_coverage integration_tests -> how many cases TEST_ENGINE accepts today
+scope_baseline    python            -> hash the files that define the measurement
+loop kernel_cycle (max 6, until ${steps.compare.outputs.meets_target} == 1)
+  implement   claude            -> writes the engine in the checkout + implement.json
+  scope       python            -> the engine changed; nothing that measures it did
+  build       cmake --build     -> the provider compiles
+  integration integration_tests -> zero failures, no fewer passes than the floor
+  bench_new   graph_bench       -> the graph, 50 iterations, pinned to TEST_ENGINE
+  bench_ref   graph_bench       -> the same graph, same 50, HIP_MLOPS_ENGINE
+  compare     python            -> new/ref median ratio vs the speed target
+```
+
+Each stage gates the next. A stage that fails abandons the iteration and records the
+failing step and its log directory in `feedback.md`; the prompt tells the agent to
+open that directory, because the one-line note is not the evidence -- the compiler
+diagnostic and the failing test names are.
+
+**Nothing in it is specific to one operation.** `scripts/graph_profile.py` maps the
+graph's node types to the bundle suites that exercise them (`BatchnormInferenceAttributes`
+→ `quick_BatchnormInference_*`, `MatmulAttributes` → `quick_Matmul_*`, a fused graph
+to both), the graph is what gets benchmarked, and the coverage floor is measured from
+this checkout at the start of the run. Point it at a batchnorm graph and the agent
+writes batchnorm kernels; point it at a graph whose operation `TEST_ENGINE` cannot
+plan for yet and the job includes porting that plan family from `HIP_MLOPS_ENGINE`.
+
+Four things this flow does that are worth copying:
+
+**Fail fast on the things that make the run impossible.** Before any agent launches:
+the derived filter has to select tests, the reference engine has to actually run the
+graph, and `TEST_ENGINE` has to accept at least one selected case. Each of those would
+otherwise surface hours in, as a gate that cannot be satisfied for reasons that have
+nothing to do with the kernel.
+
+**A measured coverage floor, not "zero failures."** `Failed: 0` is also what a run
+that skipped everything prints, and an engine makes a case skip by declining the
+graph. So `baseline_coverage` runs the suite once up front and the loop requires
+`passed >= baseline passed + baseline failed` -- pass at least as many cases as the
+engine accepted before the run started. Measured on the batchnorm graph, filter
+`quick_BatchnormInference_*` selects 72 cases and stub `TEST_ENGINE` reports
+`Passed 0, Skipped 24, Failed 48` -- so the floor is 48, measured rather than written
+down anywhere. The token is anchored between `_` separators on purpose: an unanchored
+`quick_*BatchnormInference*` also drags in `BatchnormInferencePointwise`,
+`BatchnormInferenceAttributesVarianceExt` and `BatchnormInferencePointwiseBatchnormBackward`
+-- 434 cases, most of them fusions of a different operation.
+
+**The scope guard, both directions.** Every gate above can be made green by editing
+the wrong file: weaken a tolerance in the harness, edit a bundle's shapes, add a
+`test_skips` entry to the engine TOML, or "fix" the kernel by changing the reference
+engine it is compared against. None of that shows up as a failing test. Every gate
+above can *also* be passed by an agent that wrote nothing at all -- the build
+succeeds, the suite reports what it reported last round, the benchmark times the
+previous engine. `scripts/guard_scope.py` hashes the measurement files and the engine
+files before the loop and re-hashes both after every agent step: the first set must be
+unchanged, the second must not be. It runs before the build, so a violation costs
+seconds rather than an hour.
+
+**Arithmetic lives in a step.** The condition grammar compares numbers and cannot
+divide them, so the ratio is computed by `scripts/compare_bench.py`, which writes one
+integer the loop's `until` reads. That script also refuses to compare two runs that
+disagree on graph, iteration count or timing method -- comparing a 50-iteration run
+against a 5-iteration one produces a number, and that number is the bug.
+
+#### The speed target is what stops it copying the reference
+
+`perf_target_ratio` is the largest acceptable `new/ref` median ratio, and it reads in
+either direction: `1.15` allows a 15% regression, `1.00` demands parity, and the
+default `0.80` demands **at least 20% faster**.
+
+That default is not decoration. The first real run of this flow passed every gate on
+iteration 1 at ratio **1.0046** -- and the agent's own transcript shows why: it `cp`'d
+the three `HIP_MLOPS_ENGINE` batchnorm kernel sources, renamed them, and repointed the
+plans. A correct answer, and a ratio of ~1.0 by construction. Under a parity-or-better
+bar that is a pass; under `0.80` it cannot be, so the loop has to find something the
+generic reference kernel leaves on the table. The prompt says this outright rather
+than leaving the agent to discover it after four wasted iterations.
+
+Room to move the bar: the reference engine's run-to-run spread against itself on the
+benchmark graph is ~1.5% (medians 4.355 / 4.346 / 4.410 ms), so anything from `0.98`
+down is comfortably outside the noise.
+
+#### Size the graph you hand it
+
+`hipdnn_graph_bench` times submit-plus-drain, which has a floor of roughly 0.03 ms on
+gfx1151. On `test-graphs/batchnorm_inference_fp32_nchw.json` (2352 elements),
+`HIP_MLOPS_ENGINE` and a stub `TEST_ENGINE` both measure ~0.03 ms: the benchmark
+cannot tell a good kernel from no kernel. Use
+`test-graphs/batchnorm_inference_fp32_nchw_xl.json`, where the same pair reads
+4.35 ms against 0.11 ms. `test-graphs/README.md` has the full measured sizing ladder,
+including why `bench_warmup` defaults to 10 at that size.
+
+```bash
+$P orchestrate.py run configs/flows/test-engine-kernel.yaml \
+    --input graph=test-graphs/batchnorm_inference_fp32_nchw_xl.json --tee
+```
+
+This flow writes into the checkout, not into the run directory -- a kernel that is not
+in the tree cannot be built. Run it in a worktree you are willing to have edited, and
+expect `git status` to show changes under `test_engine/` afterwards.
 
 ## Running it
 
@@ -87,10 +201,13 @@ runs/<flow>/<utc-stamp>-<suffix>/
   review_cycle/iter-00/<step>/{cmd.txt,argv.json,stdin.txt,stdout.log,stdout.pretty.json,stderr.log,result.json}
 ```
 
-`stdout.log` is byte-exact. `stdout.pretty.json` is written alongside it when stdout
-parses as JSON -- an agent CLI in `--output-format json` mode emits its whole session on
-one line with the answer buried in an escaped string, and embedded multi-line strings
-are split into real lines so the final message is readable.
+`stdout.log` is byte-exact. For **agent steps it is JSONL**: they run with
+`--output-format stream-json --verbose`, so the CLI emits one event per turn *as it
+happens* rather than buffering the whole session and dumping it at exit. That is what
+makes a three-hour step observable instead of a process that either finishes or does
+not. `stdout.pretty.json` is still written alongside any step whose stdout parses as a
+single JSON document; a JSONL stream does not, so agent steps no longer get one --
+`scripts/agent_log.py` is what reads them.
 
 `stdin.txt` is the prompt the agent actually received, after interpolation. When a run
 goes wrong, read that first: a reference that resolved to something unexpected is
@@ -106,6 +223,49 @@ and each prompt file, plus the checkout revision when one is available.
 A run directory is created, never joined. The timestamp carries a random suffix because
 two runs starting in the same second is ordinary, and `--run-dir` pointing at a
 directory that already holds a run is refused rather than merged into it.
+
+## Watching a run
+
+Agent steps are the long ones, and their log is machine-shaped. `scripts/agent_log.py`
+renders it:
+
+```bash
+$P scripts/agent_log.py                 # newest run, newest iteration, implement step
+$P scripts/agent_log.py --follow        # ...and keep reading while it runs
+$P scripts/agent_log.py --no-thinking   # tool calls and messages only
+$P scripts/agent_log.py --run runs/test-engine-kernel/<stamp> --step review --iter 2
+```
+
+```
+== kernel_cycle\iter-00\implement  (20260915T033903Z-a232)
+-- session afb706e5-aa4d-4ee8-aa25-0e407343fbb6  cwd D:\...\agent_kernel_integration_poc
+   . The plans compile TestEngineBatchnormNoop.cpp.
+   . I need to check the launch argument order first.
+   Reading the plan sources.
+  -> Read  file_path=.../plans/batchnorm/BatchnormFwdInferencePlan.cpp
+  -> Grep  pattern=getKernel\(
+  !! error: File does not exist: .../nope.cpp
+-- done  7 turns  94s  $1.23  stop=end_turn
+```
+
+Lines starting `.` are reasoning, `->` is a tool call, `!!` is a tool error, and the
+last line is turns, wall time and cost. `--tee` on the run itself shows the same events
+live but raw, one long JSON line each; this is the readable form, and it works on a
+finished run too.
+
+### Reopening the conversation
+
+Every agent step records the CLI's own `session_id` as a step output, so `run.json`
+carries it and the session stays reachable after the run:
+
+```bash
+$P scripts/agent_log.py --session-id            # -> afb706e5-aa4d-4ee8-aa25-...
+claude --resume afb706e5-aa4d-4ee8-aa25-...     # from the step's cwd
+```
+
+That is the difference between a run that leaves a verdict and one that leaves the
+reasoning behind it. Ask the session why it chose a tile size; the result file cannot
+tell you.
 
 ## Writing a flow
 

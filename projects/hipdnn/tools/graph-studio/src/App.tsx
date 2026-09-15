@@ -17,6 +17,8 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthoringPanel } from "./components/AuthoringPanel";
+import { SAMPLE_LABEL, sampleReport } from "./benchmark/sample";
+import { BenchmarkReportView } from "./components/BenchmarkReportView";
 import { CommandPanel } from "./components/CommandPanel";
 import { Inspector } from "./components/Inspector";
 import { EnginePanel } from "./components/EnginePanel";
@@ -369,7 +371,9 @@ function Studio() {
         <CommandPanel scope="implement" getGraph={getGraph} />
       </TabPanel>
       <TabPanel id="verify" active={activeTab}>
-        <CommandPanel scope="verify" getGraph={getGraph} />
+        <CommandPanel scope="verify" getGraph={getGraph}>
+          <BenchmarkReportView report={sampleReport} sourceLabel={SAMPLE_LABEL} sample />
+        </CommandPanel>
       </TabPanel>
       <dialog
         ref={resultsDialog}

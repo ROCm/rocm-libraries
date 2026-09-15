@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -89,6 +90,24 @@ inline constexpr PackSymbols CONV_FWD{"hipkernel:ConvFwd",
                                       "conv_fwd.x.uid",
                                       "conv_fwd.w.uid",
                                       "conv_fwd.y.uid"};
+
+/// The third engine, again split by graph node type and again one pack, so
+/// `operationMatcher` is empty. Its node has six operands where PackSymbols carries
+/// three token names; the remaining three are named beside the builder below.
+inline constexpr PackSymbols BATCHNORM_INFERENCE{"hipkernel:BatchnormInference",
+                                                 "hipkernel.batchnorm_inference.graph_match",
+                                                 "",
+                                                 "hipkernel.batchnorm_inference.kernel_match",
+                                                 "hipkernel.batchnorm_inference.score",
+                                                 "hipkernel.batchnorm_inference.dispatch",
+                                                 "batchnorm_inference.x.uid",
+                                                 "batchnorm_inference.mean.uid",
+                                                 "batchnorm_inference.y.uid"};
+
+/// The three operand tokens PackSymbols has no slot for.
+constexpr std::string_view BN_INV_VARIANCE_TOKEN = "batchnorm_inference.inv_variance.uid";
+constexpr std::string_view BN_SCALE_TOKEN = "batchnorm_inference.scale.uid";
+constexpr std::string_view BN_BIAS_TOKEN = "batchnorm_inference.bias.uid";
 
 /// The descriptor set this provider ships for @p engineName. Asserting against the
 /// loaded set rather than a hand-written twin is what makes these tests fail if the
@@ -489,6 +508,134 @@ inline hipdnn_flatbuffers_sdk::utilities::UuidBytes makeGraphId(uint8_t seed)
     return id;
 }
 
+/// Tensor uids buildBatchnormInferenceGraph() uses, in kernel argument order.
+constexpr int64_t BN_X_UID = 1;
+constexpr int64_t BN_MEAN_UID = 2;
+constexpr int64_t BN_INV_VARIANCE_UID = 3;
+constexpr int64_t BN_SCALE_UID = 4;
+constexpr int64_t BN_BIAS_UID = 5;
+constexpr int64_t BN_Y_UID = 6;
+
+/**
+ * @brief Builds a single-node batchnorm-inference graph, parameterized on everything
+ *        this pack's matcher gates.
+ *
+ * Defaults to the dnn-benchmarking template graph: [2,3,4,4] packed NCHW, FLOAT
+ * throughout, per-channel operands [1,3,1,1]. Unlike the conv builder there is no
+ * packed-layout assumption to preserve -- x and y strides are independent inputs
+ * because the kernel reads them independently.
+ *
+ * @param paramDataType Overrides the four per-channel operands' dtype away from
+ *        @p dataType. The pack admits a 16-bit io dtype against float parameters, so
+ *        this is an acceptance axis as well as a refusal one.
+ * @param xStridesOverride, yStridesOverride Strides away from packed row-major, for the
+ *        NHWC and padded acceptances and the zero-stride refusal.
+ * @param yDimsOverride y's extents away from x's, for the shape-disagreement refusal.
+ * @param paramDimsOverride The per-channel operands' extents away from [1, C, 1, 1].
+ * @param aliasYWithX Points the node's `y_tensor_uid` at x and emits no separate y, for
+ *        the in-place refusal the kernel's `__restrict__` requires.
+ * @param nodeComputeDataType The node's own `compute_data_type`, independent of the
+ *        tensors' dtype, for the compute-precision refusal.
+ * @param yDataTypeOverride y's dtype away from x's. The kernel has one BnIoElement
+ *        covering both, so a graph storing them at different widths has no candidate
+ *        that can serve it; this exists for that refusal.
+ */
+inline flatbuffers::FlatBufferBuilder buildBatchnormInferenceGraph(
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> paramDataType = std::nullopt,
+    const std::vector<int64_t>& xDims = {2, 3, 4, 4},
+    const std::optional<std::vector<int64_t>>& xStridesOverride = std::nullopt,
+    const std::optional<std::vector<int64_t>>& yStridesOverride = std::nullopt,
+    const std::optional<std::vector<int64_t>>& yDimsOverride = std::nullopt,
+    const std::optional<std::vector<int64_t>>& paramDimsOverride = std::nullopt,
+    bool aliasYWithX = false,
+    bool xVirtual = false,
+    bool yVirtual = false,
+    bool xPassByValue = false,
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> nodeComputeDataType
+    = std::nullopt,
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> yDataTypeOverride = std::nullopt)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto resolvedParamDataType = paramDataType.value_or(dataType);
+    const auto yDims = yDimsOverride.value_or(xDims);
+    // [1, C, 1, 1] at x's rank, so a rank-3 refusal case keeps its operands consistent
+    // and is refused for its rank rather than incidentally for a rank mismatch.
+    const auto paramDims = paramDimsOverride.has_value() ? *paramDimsOverride : [&xDims] {
+        std::vector<int64_t> dims(xDims.size(), 1);
+        dims.at(1) = xDims.at(1);
+        return dims;
+    }();
+
+    const auto xStrides = xStridesOverride.value_or(packedRowMajorStrides(xDims));
+    const auto yStrides = yStridesOverride.value_or(packedRowMajorStrides(yDims));
+    const auto paramStrides = packedRowMajorStrides(paramDims);
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                 BN_X_UID,
+                                                                 nullptr,
+                                                                 dataType,
+                                                                 &xStrides,
+                                                                 &xDims,
+                                                                 xVirtual,
+                                                                 data_objects::TensorValue::NONE,
+                                                                 0,
+                                                                 xPassByValue));
+    for(const auto uid : {BN_MEAN_UID, BN_INV_VARIANCE_UID, BN_SCALE_UID, BN_BIAS_UID})
+    {
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(
+            builder, uid, nullptr, resolvedParamDataType, &paramStrides, &paramDims));
+    }
+    if(!aliasYWithX)
+    {
+        tensors.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       BN_Y_UID,
+                                                       nullptr,
+                                                       yDataTypeOverride.value_or(dataType),
+                                                       &yStrides,
+                                                       &yDims,
+                                                       yVirtual));
+    }
+
+    auto attributes
+        = data_objects::CreateBatchnormInferenceAttributes(builder,
+                                                           BN_X_UID,
+                                                           BN_MEAN_UID,
+                                                           BN_INV_VARIANCE_UID,
+                                                           BN_SCALE_UID,
+                                                           BN_BIAS_UID,
+                                                           aliasYWithX ? BN_X_UID : BN_Y_UID);
+
+    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "batchnorm_inference",
+                                       // Defaults to FLOAT independently of the tensor
+                                       // dtype, as the suite's own BatchnormInference
+                                       // template does: its node computes in float with
+                                       // bf16 or fp16 io.
+                                       nodeComputeDataType.value_or(data_objects::DataType::FLOAT),
+                                       data_objects::NodeAttributes::BatchnormInferenceAttributes,
+                                       attributes.Union()));
+
+    auto name = builder.CreateString("batchnorm_inference_test");
+    auto tensorsVector = builder.CreateVector(tensors);
+    auto nodesVector = builder.CreateVector(nodes);
+
+    data_objects::GraphBuilder graphBuilder(builder);
+    graphBuilder.add_name(name);
+    graphBuilder.add_tensors(tensorsVector);
+    graphBuilder.add_nodes(nodesVector);
+    builder.Finish(graphBuilder.Finish());
+
+    return builder;
+}
+
 /// Wraps a built graph buffer so a test reads it the way an engine does.
 class GraphFixture
 {
@@ -535,6 +682,20 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
     kernel.source.entryPoint = entryPoint;
     kernel.metadata
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
+    return kernel;
+}
+
+/// A KernelDefinition for a batchnorm-inference candidate. Its KMD carries two dtype
+/// fields rather than one, because BnIoElement and BnParamElement are independent.
+inline hipdnn_plugin_sdk::ingestor::KernelDefinition
+    makeBatchnormKernel(int64_t blockSize,
+                        const std::string& ioDtype = "FLOAT",
+                        const std::string& paramDtype = "FLOAT")
+{
+    auto kernel = makeKernel(blockSize, ioDtype, "BatchnormInference");
+    kernel.metadata = {{std::string(BLOCK_SIZE_FIELD), blockSize},
+                       {"io_dtype", ioDtype},
+                       {"param_dtype", paramDtype}};
     return kernel;
 }
 
