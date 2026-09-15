@@ -56,7 +56,7 @@ hipBLASLt uses a **build-time** generator (TensileLite, in-repo) to produce GPU 
 
 ### Python environment for building device libraries
 
-The `tensilelite-device-libraries` target runs a Python script (`tensilelite.tensilelite_create_library`) that needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the TensileLite requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
+The `tensilelite-device-libraries` target invokes `python -m tensilelite create-library`, which needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the TensileLite requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
 
 ```bash
 cd projects/hipblaslt
