@@ -799,3 +799,27 @@ steps:
     ]
     assert len({entry[1] for entry in seen}) == 2
     assert [record.exit_code for record in report.steps] == [0, 0]
+
+
+def test_the_manifest_describes_the_run_without_the_flow_beside_it(
+    tmp_path, registry_file, agent_script
+):
+    """A consumer reading `run.json` must not need a second join against the flow
+    YAML to know what a step invoked or where the cross-iteration channel is. That
+    join is a second source of truth, and it drifts the moment the flow is edited
+    mid-run."""
+    flow = f"""
+version: 1
+name: described
+steps:
+  - id: first
+    tool: agent
+    args: ["{agent_script.as_posix()}"]
+"""
+    engine = engine_with(tmp_path, registry_file, flow, run_dir=tmp_path / "run")
+    engine.run()
+
+    manifest = json.loads((engine.run_dir / "run.json").read_text())
+    assert [record["tool"] for record in manifest["steps"]] == ["agent"]
+    assert Path(manifest["feedback_path"]).is_file()
+    assert Path(manifest["feedback_path"]) == engine.feedback_path

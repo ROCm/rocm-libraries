@@ -1,0 +1,9 @@
+# The MCP server only. Deliberately not in requirements.txt: `runner/` stays
+# PyYAML-only, and the hermetic test suite must pass without this installed --
+# `flowmcp/server.py` is the single module that imports the SDK.
+#
+# The floor is 1.10 rather than something older because the server declares an
+# `outputSchema` per tool and returns `structuredContent`, both of which arrived
+# with the 2025-06-18 protocol revision. An older SDK would drop them silently
+# and the advertised capability would be a lie.
+mcp>=1.10
