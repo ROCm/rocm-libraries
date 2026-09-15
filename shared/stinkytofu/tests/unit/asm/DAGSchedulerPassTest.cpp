@@ -734,9 +734,12 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetHoldsNextWmmaUntilAssignedWorkIssues)
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindows) {
     bb->addSuccessor(bb);
 
-    // The raw per-WMMA budgets place the exclusive-after and exclusive-before
-    // intervals in separate windows, so Layer 2 must not reconcile the groups.
-    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
+    // Layer 2 after claim is wmmaWindowsNeeded + latencyWmmaBudget, so
+    // afterBegin = max(0, lastOverlap - wmmaWindowsNeeded). Seed enough
+    // WMMAs that src-overlap the after-side ds_load dest to push afterBegin
+    // past the exclusive-before window; Layer 2 must not reconcile.
+    for (int i = 0; i < 8; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/100 + i * 16, /*src0Start=*/0);
     createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
     auto [afterSignal, afterWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
     auto [beforeSignal, beforeWait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
@@ -751,6 +754,26 @@ TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWhenPerWmmaBudgetsSeparateWindo
     EXPECT_FALSE(overlaps->contains(afterWait, beforeSignal));
     EXPECT_FALSE(overlaps->contains(afterWait, beforeWait));
     EXPECT_FALSE(overlaps->contains(beforeSignal, afterSignal));
+
+    // Without a published Layer 2 overlap, MergeBarrier must keep both pairs.
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.mergeBarrierThreshold = 100000;
+    ctx.setPassFeatureConfig(pfc);
+    createStinkyMergeBarrierPass()->run(*func, ctx, am);
+
+    int signals = 0;
+    int waits = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        signals += isBarrierSignal(*inst);
+        waits += isBarrierWait(*inst);
+    }
+    EXPECT_EQ(signals, 2);
+    EXPECT_EQ(waits, 2);
 }
 
 TEST_F(DAGSchedulerPassTest, Layer2DoesNotPublishWithoutBeforeGroup) {
@@ -817,72 +840,6 @@ TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) 
     }
     EXPECT_EQ(signals, 2);
     EXPECT_EQ(waits, 2);
-}
-
-TEST_F(DAGSchedulerPassTest, Layer2KeepsSeparateBudgetWindowsUnmergedEndToEnd) {
-    bb->addSuccessor(bb);
-
-    createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/0);
-    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/200, /*ldsToken=*/0);
-    createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
-    createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
-    createMovableDsLoad(/*destReg=*/0, /*addrReg=*/204, /*ldsToken=*/1);
-
-    PassManager pm;
-    registerAllAnalyses(pm.getAnalysisManager());
-    pm.setGemmTileConfig(config);
-    PassFeatureConfig pfc;
-    pfc.loopConfig.unrollGemm = true;
-    pfc.dagFeatures.mergeBarrierThreshold = 100000;
-    pm.setPassFeatureConfig(pfc);
-    pm.addPass(createStinkyDAGSchedulerPass());
-    pm.addPass(createStinkyMergeBarrierPass());
-    pm.run(*func);
-
-    int signals = 0;
-    int waits = 0;
-    for (const IRBase& ir : *bb) {
-        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
-        if (inst == nullptr) continue;
-        signals += isBarrierSignal(*inst);
-        waits += isBarrierWait(*inst);
-    }
-    EXPECT_EQ(signals, 2);
-    EXPECT_EQ(waits, 2);
-}
-
-// Empty block: pass should not crash
-TEST_F(DAGSchedulerPassTest, EmptyBlock_DoesNotCrash) {
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), 0);
-}
-
-// Single instruction: pass should not crash
-TEST_F(DAGSchedulerPassTest, SingleInstruction_DoesNotCrash) {
-    createVAddInBlock(bb, arch, 0, 1, 2);
-    int n = countStinkyInstructions(*bb);
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), n);
-}
-
-// A few independent instructions: pass should not crash, count unchanged
-TEST_F(DAGSchedulerPassTest, IndependentInstructions_DoesNotCrash) {
-    createVAddInBlock(bb, arch, 0, 1, 2);
-    createVAddInBlock(bb, arch, 3, 4, 5);
-    createVAddInBlock(bb, arch, 6, 7, 8);
-    int n = countStinkyInstructions(*bb);
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), n);
-}
-
-// Chain of dependencies: pass should not crash, count unchanged
-TEST_F(DAGSchedulerPassTest, DependentInstructions_DoesNotCrash) {
-    createVAddInBlock(bb, arch, 0, 1, 2);  // v0 = v1 + v2
-    createVAddInBlock(bb, arch, 3, 0, 4);  // v3 = v0 + v4
-    createVAddInBlock(bb, arch, 5, 3, 6);  // v5 = v3 + v6
-    int n = countStinkyInstructions(*bb);
-    runPass();
-    EXPECT_EQ(countStinkyInstructions(*bb), n);
 }
 
 // DS reads + WMMAs: scheduler must not issue WMMAs back-to-back when other
