@@ -574,7 +574,7 @@ namespace TensileLite
 
                 if(static_cast<ContractionProblemGemm::TENSOR>(i)
                        == ContractionProblemGemm::TENSOR::PARTIALBUF
-                   && problem.usePartialRMS())
+                   && problem.rmsEpilogue())
                 {
                     rv &= checkPartialRMSRowSums(problem, tensor, refPtr, resPtr, result.gpu);
                     continue;
@@ -599,7 +599,7 @@ namespace TensileLite
                                                          double       threshold)
         {
             // Only the sum-of-squares rows [0, M_tokens) are row-reduced; the amax
-            // second half (partialRMSQuant) is a per-tile max, not a sum, so it is not
+            // second half (MXFP8 quant path) is a per-tile max, not a sum, so it is not
             // validated here.
             int errorCount   = 0;
             int printedCount = 0;

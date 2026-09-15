@@ -1013,8 +1013,11 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
     ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
               hipSuccess);
 
-    // Reference: D[m,n] = (alpha * sum_k A[k,m]*B[k,n]) * rstd[m]. K3 keeps the normal
-    // orientation (per-M-row scale, no reduction), so D is col-major [M, N].
+    // Reference: the decomposed consumer (K3) swaps the GEMM operands (transposeForScaleApply)
+    // so the token axis (M) lands on the tensile N-direction, where UseScaleAlphaVec=2 applies
+    // the per-token rstd. The kernel therefore writes the output col-major [N, M] (tokens on the
+    // N stride): element (m tokens, n N_out) lands at address n + m*N. The GEMM value and the
+    // per-token rstd[m] scale are unchanged from the natural orientation.
     std::vector<float> expected(static_cast<size_t>(M) * N);
     for(int64_t m = 0; m < M; ++m)
         for(int64_t n = 0; n < N; ++n)
@@ -1022,7 +1025,7 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
             float acc = 0.0f;
             for(int64_t kk = 0; kk < K; ++kk)
                 acc += bf16_to_f32(hA[kk + m * K]) * bf16_to_f32(hB[kk + n * K]);
-            expected[n * M + m] = acc * alpha * hRstd[m]; // D col-major [M, N]
+            expected[n + m * N] = acc * alpha * hRstd[m]; // kernel writes col-major [N, M]
         }
     expectBf16Near(hD, expected);
 
@@ -1175,7 +1178,7 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
                 const float h2bf = bf16_to_f32(f32_to_bf16(gemm1[m * Nhidden + j])); // gamma=1
                 acc += h2bf * bf16_to_f32(hW1[j + n * Nhidden]);
             }
-            expected[n * M + m] = bf16_to_f32(f32_to_bf16(acc * rstd[m])); // D2 col-major
+            expected[n + m * Nout] = bf16_to_f32(f32_to_bf16(acc * rstd[m])); // D2 col-major [Nout, Mtok]
         }
     expectBf16Near(hD2, expected, 3e-2f);
 
@@ -1949,7 +1952,7 @@ static void runConsumerAndValidate(hipblasLtHandle_t                         han
     for(int64_t mt = 0; mt < d.mTok; ++mt)
         for(int64_t no = 0; no < d.nOut; ++no)
         {
-            const float got   = bf16_to_f32(hD2[mt + no * d.mTok]);
+            const float got   = bf16_to_f32(hD2[no + mt * d.nOut]);
             const float ref   = refY[mt * d.nOut + no];
             const float abse  = std::abs(got - ref);
             const float denom = std::max(std::abs(ref), 1e-3f);
