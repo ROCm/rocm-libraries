@@ -297,7 +297,8 @@ void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
     constexpr unsigned int BLOCK_SIZE = 256;
     const auto isLayoutNhwc = isChannelLastLayout(inputStrides);
     defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(BLOCK_SIZE));
-    defines.emplace_back(std::string("-DIS_CHANNEL_LAST_LAYOUT=") + std::to_string(isLayoutNhwc));
+    defines.emplace_back(std::string("-DIS_CHANNEL_LAST_LAYOUT=")
+                         + std::to_string(isLayoutNhwc ? 1 : 0));
 
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     const auto& kernel
