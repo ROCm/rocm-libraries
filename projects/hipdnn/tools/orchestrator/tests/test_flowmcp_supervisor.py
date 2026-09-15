@@ -316,9 +316,7 @@ def test_a_request_below_the_budget_is_applied_as_asked(supervisors):
     supervisor = supervisors()
     supervisor.start()
 
-    result = supervisor.launch(
-        flow="bounded", inputs={"target": "x"}, max_iterations=1
-    )
+    result = supervisor.launch(flow="bounded", inputs={"target": "x"}, max_iterations=1)
 
     assert result["maxIterations"] == 1
     assert result["warnings"] == []
@@ -672,6 +670,4 @@ def test_a_launched_runs_artifacts_are_addressable_and_confined(supervisors):
     listed = {entry["uri"] for entry in supervisor.list_resources()}
     assert schema.manifest_uri(result["runId"]) in listed
     with pytest.raises(resources.PathRefused):
-        supervisor.read_resource(
-            f"run://{result['runId']}/../../../secrets.txt"
-        )
+        supervisor.read_resource(f"run://{result['runId']}/../../../secrets.txt")

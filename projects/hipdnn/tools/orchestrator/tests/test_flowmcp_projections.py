@@ -106,7 +106,9 @@ steps:
     args: ["--build"]
 """,
     )
-    kinds = {step.id: projections.step_kind(step) for step, _ in projections.walk_steps(flow)}
+    kinds = {
+        step.id: projections.step_kind(step) for step, _ in projections.walk_steps(flow)
+    }
 
     assert kinds == {"first": "agent", "second": "tool"}
 
@@ -308,9 +310,7 @@ def typed_run(tmp_path):
 def test_only_outputs_the_flow_declared_as_paths_become_output_artifacts(typed_run):
     flow, run_dir, run_json = typed_run
 
-    found = projections.artifacts_for(
-        run_json, flow, run_id="r-0001", run_dir=run_dir
-    )
+    found = projections.artifacts_for(run_json, flow, run_id="r-0001", run_dir=run_dir)
     outputs = {item["outputName"] for item in found if item["source"] == "output"}
 
     assert outputs == {"bundle"}
@@ -324,9 +324,7 @@ def test_only_outputs_the_flow_declared_as_paths_become_output_artifacts(typed_r
 def test_step_evidence_and_the_run_walk_are_both_discovered(typed_run):
     flow, run_dir, run_json = typed_run
 
-    found = projections.artifacts_for(
-        run_json, flow, run_id="r-0001", run_dir=run_dir
-    )
+    found = projections.artifacts_for(run_json, flow, run_id="r-0001", run_dir=run_dir)
     by_label = {item["label"]: item for item in found}
 
     assert by_label["stdout.log"]["source"] == "step"
@@ -343,9 +341,7 @@ def test_step_evidence_and_the_run_walk_are_both_discovered(typed_run):
 def test_the_feedback_role_is_matched_by_path_not_by_name(typed_run):
     flow, run_dir, run_json = typed_run
 
-    found = projections.artifacts_for(
-        run_json, flow, run_id="r-0001", run_dir=run_dir
-    )
+    found = projections.artifacts_for(run_json, flow, run_id="r-0001", run_dir=run_dir)
     flagged = [item["label"] for item in found if item["role"] == "feedback"]
 
     # The run's recorded channel is what carries the role, whatever it is called.
@@ -386,9 +382,7 @@ steps:
         ],
     }
 
-    found = projections.artifacts_for(
-        run_json, flow, run_id="r-0002", run_dir=run_dir
-    )
+    found = projections.artifacts_for(run_json, flow, run_id="r-0002", run_dir=run_dir)
     roles = {item["label"]: item["role"] for item in found}
 
     assert roles["feedback"] is None
@@ -415,9 +409,7 @@ def test_a_path_output_written_outside_the_run_is_not_addressable(tmp_path):
         ],
     }
 
-    found = projections.artifacts_for(
-        run_json, flow, run_id="r-0003", run_dir=run_dir
-    )
+    found = projections.artifacts_for(run_json, flow, run_id="r-0003", run_dir=run_dir)
 
     # `run://` addresses one run directory. An output the flow wrote elsewhere
     # is real, but there is no honest URI for it here.

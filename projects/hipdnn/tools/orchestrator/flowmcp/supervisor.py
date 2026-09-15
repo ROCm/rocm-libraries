@@ -312,9 +312,7 @@ class Supervisor:
         ]
         return bind_inputs(flow, pairs)
 
-    def _clamp(
-        self, flow: Any, requested: int | None
-    ) -> tuple[int | None, list[str]]:
+    def _clamp(self, flow: Any, requested: int | None) -> tuple[int | None, list[str]]:
         """Bound a requested iteration budget by what the flow itself declares.
 
         The engine treats `max_iterations` as an unconditional override in both
@@ -341,9 +339,7 @@ class Supervisor:
         return requested, []
 
     def _live_count(self) -> int:
-        return sum(
-            1 for run in self._runs.values() if run.process.poll() is None
-        )
+        return sum(1 for run in self._runs.values() if run.process.poll() is None)
 
     def _env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -469,11 +465,15 @@ class Supervisor:
             self._runs[run_id] = run
         run.threads = [
             threading.Thread(
-                target=self._pump_stderr, args=(run,), daemon=True,
+                target=self._pump_stderr,
+                args=(run,),
+                daemon=True,
                 name=f"flowmcp-err-{run_id}",
             ),
             threading.Thread(
-                target=self._pump_frames, args=(run,), daemon=True,
+                target=self._pump_frames,
+                args=(run,),
+                daemon=True,
                 name=f"flowmcp-out-{run_id}",
             ),
         ]
@@ -715,7 +715,9 @@ class Supervisor:
                 return dict(run.record)
         return resources.read_json(self._record_path(run_id))
 
-    def _run_dir_for(self, run_id: str, record: Mapping[str, Any] | None) -> Path | None:
+    def _run_dir_for(
+        self, run_id: str, record: Mapping[str, Any] | None
+    ) -> Path | None:
         if record and record.get("runDir"):
             candidate = Path(str(record["runDir"]))
             if candidate.is_dir():
@@ -790,7 +792,9 @@ class Supervisor:
             run_dir=str(run_dir) if run_dir else str(record.get("runDir", "")),
             flow=str((run_json or {}).get("flow") or (record or {}).get("flow") or ""),
             flow_path=str(
-                (run_json or {}).get("flow_path") or (record or {}).get("flowPath") or ""
+                (run_json or {}).get("flow_path")
+                or (record or {}).get("flowPath")
+                or ""
             ),
             status=status,
             engine_status=engine_status,
@@ -839,9 +843,7 @@ class Supervisor:
         if not path.is_file():
             raise resources.RunNotFound(f"{uri} does not exist")
         return {
-            "uri": schema.format_run_uri(
-                run_id, path.relative_to(run_dir).as_posix()
-            ),
+            "uri": schema.format_run_uri(run_id, path.relative_to(run_dir).as_posix()),
             "mimeType": resources.mime_for(path),
             "text": resources.read_text(path),
         }
