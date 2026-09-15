@@ -51,6 +51,7 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
                                        resolvePrefetchGlobalReadSpecialValues
 from Tensile.Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
+from Tensile.Components.TDMCross import tdmCrossRejectReason
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.CustomKernels import supportsUserSgprKernargPreload
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3084,6 +3085,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, papGroupingReason)
         return
 
+    # TDMCross rearranges which wave issues which member of a group that
     # TDMFuse already chose. Every reject above therefore has precedence: an
     # arrangement of a grouping that cannot be built is not a separate defect,
     # and reporting "nothing to cross" for a solution whose real problem is a
@@ -3093,6 +3095,10 @@ class Solution(collections.abc.Mapping):
     # TDMFuse value, so it covers scale-less types (whose {MXSA,MXSB} group has
     # no live member left, leaving one group and nothing to cross) and any
     # grouping added to the table later, with no branch per value.
+    tdmCrossReason = tdmCrossRejectReason(state)
+    if tdmCrossReason:
+      reject(state, printRejectionReason, tdmCrossReason)
+      return
 
     # DepthU == -1?
     if state["DepthU"] == -1:
