@@ -558,26 +558,31 @@ function registerQuitPolicy() {
 
     event.preventDefault();
     const live = liveRuns().length;
+    // Quitting ends every run, and the dialog says so because the alternative
+    // was measured and does not exist: the server is a stdio child, so when
+    // this process goes its stdin closes, the server exits on EOF and takes
+    // its workers with it. Leaving the client open changes nothing -- there is
+    // no parent left to hold it. Offering to leave runs running would promise
+    // something only a detached server, reconnected to by run id, could keep.
     const choice = dialog.showMessageBoxSync({
       type: "warning",
-      buttons: ["Stop runs and quit", "Leave runs running", "Cancel"],
-      defaultId: 0,
-      cancelId: 2,
+      buttons: ["Stop runs and quit", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
       noLink: true,
       title: "Runs in progress",
       message: live === 1 ? "One run is still running." : `${live} runs are still running.`,
       detail:
-        "Stop runs and quit ends each run and every process it started.\n\n" +
-        "Leave runs running lets them continue in the background. Graph Studio stops " +
-        "monitoring them as it exits: from then on their progress is recorded only in " +
-        "their own run directories, and this window will not show them again.",
+        "Quitting ends each run and every process it started, including any agent " +
+        "session it is waiting on. Work already finished stays on disk: each run " +
+        "keeps its manifest, logs and artifacts in its own run directory.",
     });
-    if (choice === 2) return;
+    if (choice === 1) return;
 
     quitting = true;
     void (async () => {
-      if (choice === 0) await stopLiveRuns();
-      await shutdown(choice === 0);
+      await stopLiveRuns();
+      await shutdown(true);
       app.quit();
     })();
   });
