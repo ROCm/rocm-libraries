@@ -16,8 +16,6 @@
 
 #pragma once
 
-// TODO(libhipcxx): remove this file once libhipcxx gets ready
-
 #include <thrust/detail/config.h>
 
 #include <thrust/detail/type_traits.h>
@@ -33,10 +31,7 @@ THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
   b                = temp;
 } // end swap()
 
-// define null_type for backwards compatibility
-struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type
-{};
-
+// We can ignore deprecated 'null_type' usage here.
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
 // forward declaration for tuple
@@ -46,8 +41,6 @@ template <
   class T6 = null_type, class T7 = null_type, class T8 = null_type,
   class T9 = null_type>
 class tuple;
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template <size_t N, class T> struct tuple_element;
 
@@ -104,8 +97,6 @@ template<class T>
 template<class T>
   struct tuple_size<T const volatile> : public tuple_size<T> {};
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 /*! This metafunction returns the number of elements
  *  of a \p tuple type of interest.
  *
@@ -122,7 +113,6 @@ template<class T>
   static const int value = 1 + tuple_size<typename T::tail_type>::value;
 }; // end tuple_size
 
-THRUST_SUPPRESS_DEPRECATED_POP
 
 // specializations for tuple_size
 template<>
@@ -131,15 +121,13 @@ template<>
   static const int value = 0;
 }; // end tuple_size< tuple<> >
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template<>
   struct tuple_size<null_type>
 {
   static const int value = 0;
 }; // end tuple_size<null_type>
 
-THRUST_SUPPRESS_DEPRECATED_POP
+
 
 // forward declaration of detail::cons
 namespace detail
@@ -276,7 +264,7 @@ template <class T> struct wrap_non_storeable_type
 {
   // XXX is_function looks complicated; punt for now -jph
   //typedef typename IF<
-  //  THRUST_NS_QUALIFIER::detail::is_function<T>::value, non_storeable_type<T>, T
+  //  ::thrust::detail::is_function<T>::value, non_storeable_type<T>, T
   //>::RET type;
 
   using type = T;
@@ -287,7 +275,6 @@ template <> struct wrap_non_storeable_type<void>
   using type = non_storeable_type<void>;
 };
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <class HT, class TT>
   struct cons
@@ -537,7 +524,7 @@ template <>
   using type = null_type;
 }; // end map_tuple_to_cons<...>
 
-THRUST_SUPPRESS_DEPRECATED_POP
+
 
 // ---------------------------------------------------------------------------
 // The call_traits for make_tuple
@@ -615,7 +602,6 @@ struct make_tuple_traits<const volatile T[n]> {
 //  using type = T&;
 //};
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 
 // a helper traits to make the make_tuple functions shorter (Vesa Karvonen's
 // suggestion)
@@ -637,8 +623,6 @@ struct make_tuple_mapper {
                      typename make_tuple_traits<T8>::type,
                      typename make_tuple_traits<T9>::type>;
 };
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 } // end detail
 
@@ -873,14 +857,9 @@ inline bool eq(const T1& lhs, const T2& rhs) {
   return lhs.get_head() == rhs.get_head() &&
          eq(lhs.get_tail(), rhs.get_tail());
 }
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template<>
 THRUST_HOST_DEVICE
 inline bool eq<null_type,null_type>(const null_type&, const null_type&) { return true; }
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template<class T1, class T2>
 THRUST_HOST_DEVICE
@@ -888,14 +867,9 @@ inline bool neq(const T1& lhs, const T2& rhs) {
   return lhs.get_head() != rhs.get_head()  ||
          neq(lhs.get_tail(), rhs.get_tail());
 }
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template<>
 THRUST_HOST_DEVICE
 inline bool neq<null_type,null_type>(const null_type&, const null_type&) { return false; }
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template<class T1, class T2>
 THRUST_HOST_DEVICE
@@ -904,14 +878,9 @@ inline bool lt(const T1& lhs, const T2& rhs) {
             (!(rhs.get_head() < lhs.get_head()) &&
              lt(lhs.get_tail(), rhs.get_tail()));
 }
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template<>
 THRUST_HOST_DEVICE
 inline bool lt<null_type,null_type>(const null_type&, const null_type&) { return false; }
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template<class T1, class T2>
 THRUST_HOST_DEVICE
@@ -920,14 +889,9 @@ inline bool gt(const T1& lhs, const T2& rhs) {
             (!(rhs.get_head() > lhs.get_head()) &&
              gt(lhs.get_tail(), rhs.get_tail()));
 }
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template<>
 THRUST_HOST_DEVICE
 inline bool gt<null_type,null_type>(const null_type&, const null_type&) { return false; }
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template<class T1, class T2>
 THRUST_HOST_DEVICE
@@ -936,14 +900,9 @@ inline bool lte(const T1& lhs, const T2& rhs) {
           ( !(rhs.get_head() <= lhs.get_head()) ||
             lte(lhs.get_tail(), rhs.get_tail()));
 }
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template<>
 THRUST_HOST_DEVICE
 inline bool lte<null_type,null_type>(const null_type&, const null_type&) { return true; }
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 template<class T1, class T2>
 THRUST_HOST_DEVICE
@@ -952,14 +911,9 @@ inline bool gte(const T1& lhs, const T2& rhs) {
           ( !(rhs.get_head() >= lhs.get_head()) ||
             gte(lhs.get_tail(), rhs.get_tail()));
 }
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
 template<>
 THRUST_HOST_DEVICE
 inline bool gte<null_type,null_type>(const null_type&, const null_type&) { return true; }
-
-THRUST_SUPPRESS_DEPRECATED_POP
 
 } // end detail
 
@@ -1038,5 +992,7 @@ inline bool operator>=(const detail::cons<T1, T2>& lhs, const detail::cons<S1, S
 
   return detail::gte(lhs, rhs);
 } // end operator>=()
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END

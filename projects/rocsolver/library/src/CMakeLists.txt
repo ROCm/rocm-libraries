@@ -143,6 +143,10 @@ set(rocsolver_lapack_source
   lapack/roclapack_gerqf.cpp
   lapack/roclapack_gerqf_batched.cpp
   lapack/roclapack_gerqf_strided_batched.cpp
+  # - Cholesky QR
+  lapack/roclapack_cholqr.cpp
+  lapack/roclapack_cholqr_strided_batched.cpp
+  lapack/roclapack_cholqr_batched.cpp
   #### Problem and Matrix Reductions (Diagonalizations) ####
   ##########################################################
   #- bidiagonalization
@@ -166,6 +170,12 @@ set(rocsolver_lapack_source
   lapack/roclapack_sygst_hegst.cpp
   lapack/roclapack_sygst_hegst_batched.cpp
   lapack/roclapack_sygst_hegst_strided_batched.cpp
+  lapack/roclapack_gehd2.cpp
+  lapack/roclapack_gehd2_batched.cpp
+  lapack/roclapack_gehd2_strided_batched.cpp
+  lapack/roclapack_gehrd.cpp
+  lapack/roclapack_gehrd_batched.cpp
+  lapack/roclapack_gehrd_strided_batched.cpp
   #### Singular Value Decomposition ####
   ######################################
   #- classic
@@ -242,6 +252,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_aliases.cpp
   auxiliary/rocauxiliary_lacgv.cpp
   auxiliary/rocauxiliary_laswp.cpp
+  auxiliary/rocauxiliary_laset.cpp
   # householder reflections
   auxiliary/rocauxiliary_larfg.cpp
   auxiliary/rocauxiliary_larf.cpp
@@ -269,6 +280,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_ormql_unmql.cpp
   auxiliary/rocauxiliary_ormbr_unmbr.cpp
   auxiliary/rocauxiliary_ormtr_unmtr.cpp
+  auxiliary/rocauxiliary_ormtr_unmtr_hb2st.cpp
   # bidiagonal matrices
   auxiliary/rocauxiliary_bdsqr.cpp
   auxiliary/rocauxiliary_bdsvdx.cpp
@@ -283,10 +295,15 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_stein.cpp
   auxiliary/rocauxiliary_latrd.cpp
   auxiliary/rocauxiliary_latrd_forsytrd.cpp
+  # Hessenberg reduction auxiliary
+  auxiliary/rocauxiliary_lahr2.cpp
   # symmetric matrices
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices
   auxiliary/rocauxiliary_lauum.cpp
+  # band matrices
+  auxiliary/rocauxiliary_sb2st_hb2st.cpp
+  auxiliary/rocauxiliary_sy2sb_he2hb.cpp
 )
 
 set(rocsolver_refact_source
@@ -505,20 +522,26 @@ if(OPTIMAL)
   target_compile_definitions(rocsolver PRIVATE OPTIMAL)
 endif()
 
-# Feature flag: 64-bit eigensolver API (syev/heev/syevd/heevd). Option is declared
-# at the top-level CMakeLists.txt so the library and test client stay in sync.
-# PUBLIC so the definition propagates through the exported roc::rocsolver interface,
-# letting consumers (e.g. hipSOLVER) detect whether the _64 entry points are available.
-if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
-  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
-endif()
-
 if(ROCSOLVER_USE_INTERNAL_BLAS)
   target_compile_definitions(rocsolver PRIVATE USE_INTERNAL_GEMM USE_INTERNAL_TRSM)
 endif()
 
 if(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+endif()
+
+# Feature flags
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+if(ROCSOLVER_ENABLE_EIG_2STAGE)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
+if(ROCSOLVER_ENABLE_HESSENBERG)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
 endif()
 
 target_compile_definitions(rocsolver PRIVATE
@@ -529,6 +552,11 @@ target_compile_definitions(rocsolver PRIVATE
 )
 
 add_armor_flags(rocsolver "${ARMOR_LEVEL}")
+
+# Embed PE version metadata (VERSIONINFO) into the DLL
+if(WIN32 AND BUILD_SHARED_LIBS)
+  target_sources(rocsolver PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
 
 if(WIN32)
   if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
@@ -575,4 +603,3 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
 )
-

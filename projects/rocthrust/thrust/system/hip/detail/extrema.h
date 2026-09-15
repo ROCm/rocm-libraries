@@ -1,6 +1,6 @@
 /*******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_HAS_HIP_COMPILER()
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
 
@@ -53,8 +53,6 @@
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
-
-#  include _THRUST_STD_INCLUDE(iterator)
 
 #  include <cstdint>
 
@@ -182,7 +180,7 @@ struct arg_minmax_f
 // this is an init-less reduce, needed for min/max-element functionality
 // this will avoid copying the first value from device->host
 template <typename Derived, typename InputIt, typename Size, typename BinaryOp, typename T>
-THRUST_HIP_RUNTIME_FUNCTION T
+THRUST_RUNTIME_FUNCTION T
 extrema(execution_policy<Derived>& policy, InputIt first, Size num_items, BinaryOp binary_op, T*)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
@@ -229,7 +227,7 @@ extrema(execution_policy<Derived>& policy, InputIt first, Size num_items, Binary
 }
 
 template <template <class, class, class> class ArgFunctor, class Derived, class ItemsIt, class BinaryPred>
-ItemsIt THRUST_HIP_RUNTIME_FUNCTION
+ItemsIt THRUST_RUNTIME_FUNCTION
 element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPred binary_pred)
 {
   if (first == last)
@@ -237,8 +235,8 @@ element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPr
     return last;
   }
 
-  using InputType = thrust::detail::it_value_t<ItemsIt>;
-  using IndexType = thrust::detail::it_difference_t<ItemsIt>;
+  using InputType = typename iterator_traits<ItemsIt>::value_type;
+  using IndexType = typename iterator_traits<ItemsIt>::difference_type;
 
   IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
 
@@ -266,18 +264,18 @@ ItemsIt THRUST_HOST_DEVICE
 min_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPred binary_pred)
 {
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__extrema::element<__extrema::arg_min_f, Derived, ItemsIt, BinaryPred>) );
-#  if !defined(__HIP_DEVICE_COMPILE__)
+#  if __THRUST_HAS_HIPRT__
   last = __extrema::element<__extrema::arg_min_f>(policy, first, last, binary_pred);
-#  else // !defined(__HIP_DEVICE_COMPILE__)
+#  else // __THRUST_HAS_HIPRT__
   last = thrust::min_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
-#  endif // !defined(__HIP_DEVICE_COMPILE__)
+#  endif // __THRUST_HAS_HIPRT__
   return last;
 }
 
 template <class Derived, class ItemsIt>
 ItemsIt THRUST_HOST_DEVICE min_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using value_type = thrust::detail::it_value_t<ItemsIt>;
+  using value_type = typename iterator_value<ItemsIt>::type;
   return hip_rocprim::min_element(policy, first, last, less<value_type>());
 }
 
@@ -289,18 +287,18 @@ ItemsIt THRUST_HOST_DEVICE
 max_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPred binary_pred)
 {
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__extrema::element<__extrema::arg_max_f, Derived, ItemsIt, BinaryPred>) );
-#  if !defined(__HIP_DEVICE_COMPILE__)
+#  if __THRUST_HAS_HIPRT__
   last = __extrema::element<__extrema::arg_max_f>(policy, first, last, binary_pred);
-#  else // !defined(__HIP_DEVICE_COMPILE__)
+#  else // __THRUST_HAS_HIPRT__
   last = thrust::max_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
-#  endif // !defined(__HIP_DEVICE_COMPILE__)
+#  endif // __THRUST_HAS_HIPRT__
   return last;
 }
 
 template <class Derived, class ItemsIt>
 ItemsIt THRUST_HOST_DEVICE max_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using value_type = thrust::detail::it_value_t<ItemsIt>;
+  using value_type = typename iterator_value<ItemsIt>::type;
   return hip_rocprim::max_element(policy, first, last, less<value_type>());
 }
 
@@ -313,8 +311,8 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 {
   auto ret = thrust::make_pair(last, last);
 
-  using InputType = thrust::detail::it_value_t<ItemsIt>;
-  using IndexType = thrust::detail::it_difference_t<ItemsIt>;
+  using InputType = typename iterator_traits<ItemsIt>::value_type;
+  using IndexType = typename iterator_traits<ItemsIt>::difference_type;
 
   using iterator_tuple = tuple<ItemsIt, counting_iterator<IndexType>>;
   using zip_iterator   = zip_iterator<iterator_tuple>;
@@ -326,7 +324,7 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
     (__extrema::extrema<Derived, transform_t, IndexType, arg_minmax_t, two_pairs_type>) );
-#  if !defined(__HIP_DEVICE_COMPILE__)
+#  if __THRUST_HAS_HIPRT__
   if (first == last)
   {
     return ret;
@@ -340,16 +338,16 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
   two_pairs_type result = __extrema::extrema(
     policy, transform_t(begin, duplicate_t()), num_items, arg_minmax_t(binary_pred), (two_pairs_type*) (nullptr));
   ret = thrust::make_pair(first + get<1>(get<0>(result)), first + get<1>(get<1>(result)));
-#  else // defined(__HIP_DEVICE_COMPILE__)
+#  else // __THRUST_HAS_HIPRT__
   ret = thrust::minmax_element(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
-#  endif // !defined(__HIP_DEVICE_COMPILE__)
+#  endif // __THRUST_HAS_HIPRT__
   return ret;
 }
 
 template <class Derived, class ItemsIt>
 pair<ItemsIt, ItemsIt> THRUST_HOST_DEVICE minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
 {
-  using value_type = thrust::detail::it_value_t<ItemsIt>;
+  using value_type = typename iterator_value<ItemsIt>::type;
   return hip_rocprim::minmax_element(policy, first, last, less<value_type>());
 }
 

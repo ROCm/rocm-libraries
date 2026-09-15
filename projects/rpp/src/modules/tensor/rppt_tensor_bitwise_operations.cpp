@@ -46,7 +46,7 @@ RppStatus rppt_bitwise_and(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -91,7 +91,7 @@ RppStatus rppt_bitwise_xor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -135,7 +135,7 @@ RppStatus rppt_bitwise_or(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDes
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -179,7 +179,7 @@ RppStatus rppt_bitwise_not(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
@@ -246,7 +246,7 @@ RppStatus rppt_tensor_and_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
     }
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if (((srcPtr1GenericDescPtr->dataType == RpptDataType::U8) &&
@@ -381,7 +381,7 @@ RppStatus rppt_tensor_or_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
     }
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if (((srcPtr1GenericDescPtr->dataType == RpptDataType::U8) &&
@@ -516,7 +516,7 @@ RppStatus rppt_tensor_xor_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2,
     }
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if (((srcPtr1GenericDescPtr->dataType == RpptDataType::U8) &&

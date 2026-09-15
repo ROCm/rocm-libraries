@@ -3,8 +3,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 #include "SdpaGraphUtils.hpp"
 #include "SdpaTensorBundles.hpp"
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
@@ -18,6 +25,137 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
+using hipdnn_data_sdk::utilities::Tensor;
+
+namespace
+{
+
+/// Build an SDPA forward graph with explicit per-tensor input/output data types and
+/// optional per-tensor Q/K/V descale tensors. Used to exercise the FP8 + descale
+/// paths of SdpaFwdPlanBuilder/SdpaFwdPlan on the CPU (no GPU kernels involved).
+/// Fixed UIDs: Q=1, K=2, V=3, O=4, descaleQ=5, descaleK=6, descaleV=7.
+std::shared_ptr<hipdnn_frontend::graph::Graph>
+    buildDescaleSdpaFwdGraph(const std::vector<int64_t>& qDims,
+                             const std::vector<int64_t>& kDims,
+                             const std::vector<int64_t>& vDims,
+                             hipdnn_frontend::DataType inputDataType,
+                             hipdnn_frontend::DataType outputDataType,
+                             bool withDescale,
+                             bool withDescaleS = false)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+    using hipdnn_frontend::DataType;
+    using hipdnn_frontend::graph::Graph;
+    using hipdnn_frontend::graph::SdpaAttributes;
+    using hipdnn_frontend::graph::TensorAttributes;
+
+    auto makeAttr = [](const std::string& name,
+                       DataType dataType,
+                       const std::vector<int64_t>& dims,
+                       int64_t uid) {
+        auto attr = std::make_shared<TensorAttributes>();
+        attr->set_name(name)
+            .set_data_type(dataType)
+            .set_dim(dims)
+            .set_stride(generateStrides(dims))
+            .set_uid(uid);
+        return attr;
+    };
+
+    auto graph = std::make_shared<Graph>();
+    graph->set_name("SdpaFwdDescaleTest");
+    graph->set_io_data_type(inputDataType)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto qAttr = makeAttr("Q", inputDataType, qDims, 1);
+    auto kAttr = makeAttr("K", inputDataType, kDims, 2);
+    auto vAttr = makeAttr("V", inputDataType, vDims, 3);
+
+    SdpaAttributes sdpaAttrs;
+    sdpaAttrs.set_name("SdpaFwdDescale");
+    if(withDescale)
+    {
+        const std::vector<int64_t> scalarDims = {1, 1, 1, 1};
+        sdpaAttrs.set_descale_q(makeAttr("DESCALE_Q", DataType::FLOAT, scalarDims, 5));
+        sdpaAttrs.set_descale_k(makeAttr("DESCALE_K", DataType::FLOAT, scalarDims, 6));
+        sdpaAttrs.set_descale_v(makeAttr("DESCALE_V", DataType::FLOAT, scalarDims, 7));
+        if(withDescaleS)
+        {
+            // Softmax descale is part of the fp8 contract but unsupported by the v3
+            // forward kernel, so the executor must reject graphs that carry it.
+            sdpaAttrs.set_descale_s(makeAttr("DESCALE_S", DataType::FLOAT, scalarDims, 8));
+        }
+    }
+
+    auto [oAttr, statsAttr] = graph->sdpa(qAttr, kAttr, vAttr, sdpaAttrs);
+    if(!oAttr->has_uid())
+    {
+        oAttr->set_uid(4);
+    }
+    const std::vector<int64_t> oDims = {qDims[0], qDims[1], qDims[2], vDims[3]};
+    oAttr->set_data_type(outputDataType)
+        .set_dim(oDims)
+        .set_stride(generateStrides(oDims))
+        .set_is_virtual(false);
+
+    return graph;
+}
+
+} // namespace
+
+namespace
+{
+
+// Builds a minimal single-node SDPA-forward flatbuffer graph directly. The frontend
+// graph builder only emits the O and Stats (LSE) outputs and silently drops any
+// max/sum_exp request, so the plan builder's rejection of those softmax-stats outputs
+// can only be exercised at the flatbuffer level. `attrs` carries the unsupported field
+// under test; the q/k/v/o uids and a packed float [1, 2, 4, 8] shape are filled in here.
+flatbuffers::FlatBufferBuilder makeRawSdpaFwdGraph(SdpaAttributesT attrs)
+{
+    constexpr int64_t Q_UID = 1;
+    constexpr int64_t K_UID = 2;
+    constexpr int64_t V_UID = 3;
+    constexpr int64_t O_UID = 4;
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    attrs.q_tensor_uid = Q_UID;
+    attrs.k_tensor_uid = K_UID;
+    attrs.v_tensor_uid = V_UID;
+    attrs.o_tensor_uid = O_UID;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, Q_UID, "Q", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, K_UID, "K", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, V_UID, "V", DataType::FLOAT, &strides, &dims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, O_UID, "O", DataType::FLOAT, &strides, &dims));
+
+    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttrs.Union()));
+    auto graph = CreateGraphDirect(builder,
+                                   "SdpaFwdRejectGraph",
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   &tensors,
+                                   &nodes);
+    builder.Finish(graph);
+    return builder;
+}
+
+} // namespace
 
 TEST(TestSdpaFwdPlan, ExecutePlan)
 {
@@ -88,6 +226,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithRuntimeScaleFromPack)
                                         /*rightBound=*/std::nullopt,
                                         hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
                                         /*alibiMask=*/false,
+                                        /*generateStats=*/false,
                                         /*runtimeScaleHostPtr=*/&scaleHostValue);
     auto& graph = std::get<0>(graphTuple);
     auto& variantPack = std::get<1>(graphTuple);
@@ -333,6 +472,108 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsAlibiMask)
         << "SdpaFwdPlanBuilder must reject nodes with alibi_mask=true";
 }
 
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsMaxStats)
+{
+    // The reference produces only the log-sum-exp stats output; the running-max softmax
+    // stat is not produced, so a node requesting max_tensor_uid must be rejected. (The
+    // stats/LSE output, by contrast, is supported — see IsApplicableAndExecutesWithStatsOutput.)
+    SdpaAttributesT attrs;
+    attrs.max_tensor_uid = 50;
+    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+
+    const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
+        << "SdpaFwdPlanBuilder must reject nodes requesting the max softmax-stats output";
+}
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsSumExpStats)
+{
+    // The running sum-exp softmax stat is not produced by the reference, so a node
+    // requesting sum_exp_tensor_uid must be rejected (only the LSE stats output is supported).
+    SdpaAttributesT attrs;
+    attrs.sum_exp_tensor_uid = 51;
+    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+
+    const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
+        << "SdpaFwdPlanBuilder must reject nodes requesting the sum_exp softmax-stats output";
+}
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
+{
+    // A graph configured to emit the softmax log-sum-exp (LSE) stats output is supported.
+    // The plan must be applicable, build into the concrete SdpaFwdPlan, report the stats uid
+    // among its output tensor ids, and write rank-4 [B, H, Sq, 1] LSE values when executed.
+    const std::vector<int64_t> qDims = {1, 2, 4, 8};
+    const std::vector<int64_t> kDims = {1, 2, 4, 8};
+    const std::vector<int64_t> vDims = {1, 2, 4, 8};
+
+    SdpaFwdTensorBundle<float> tensorBundle(qDims, kDims, vDims, /*seed=*/1);
+
+    auto graphTuple = buildSdpaFwdGraph(tensorBundle,
+                                        DataType::FLOAT,
+                                        /*causalMask=*/false,
+                                        /*causalMaskBottomRight=*/false,
+                                        /*leftBound=*/std::nullopt,
+                                        /*rightBound=*/std::nullopt,
+                                        hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
+                                        /*alibiMask=*/false,
+                                        /*generateStats=*/true);
+    auto& graph = std::get<0>(graphTuple);
+    auto& variantPack = std::get<1>(graphTuple);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
+    ASSERT_TRUE(nodeAttributes->stats_tensor_uid().has_value());
+    const int64_t statsUid = nodeAttributes->stats_tensor_uid().value();
+
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+    EXPECT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
+
+    auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    auto* concretePlan = dynamic_cast<SdpaFwdPlan<float, float, float, float>*>(builtPlan.get());
+    ASSERT_NE(concretePlan, nullptr);
+
+    // The stats uid must be reported as an output so the harness binds and validates it.
+    const auto outputIds = concretePlan->getOutputTensorIds();
+    EXPECT_NE(std::find(outputIds.begin(), outputIds.end(), statsUid), outputIds.end());
+
+    // Allocate the rank-4 LSE output buffer and bind it before executing.
+    hipdnn_data_sdk::utilities::Tensor<float> lseTensor({qDims[0], qDims[1], qDims[2], 1});
+    lseTensor.fillWithValue(-1.0f);
+    variantPack[statsUid] = lseTensor.memory().hostData();
+
+    builtPlan->execute(variantPack);
+
+    // Independently compute the expected LSE via the direct reference and compare.
+    SdpaFwdTensorBundle<float> directBundle(qDims, kDims, vDims, /*seed=*/1);
+    hipdnn_data_sdk::utilities::Tensor<float> directLse({qDims[0], qDims[1], qDims[2], 1});
+    CpuFpReferenceSdpa::forward<float, float, float, float, float>(directBundle.qTensor,
+                                                                   directBundle.kTensor,
+                                                                   directBundle.vTensor,
+                                                                   directBundle.oTensor,
+                                                                   std::nullopt,
+                                                                   /*attnMask=*/nullptr,
+                                                                   /*leftBound=*/-1,
+                                                                   /*rightBound=*/-1,
+                                                                   /*topLeftAlignment=*/true,
+                                                                   &directLse);
+
+    const float tolerance = 1e-5f;
+    const CpuFpReferenceValidation<float> lseValidation(tolerance, tolerance);
+    EXPECT_TRUE(lseValidation.allClose(directLse, lseTensor))
+        << "Plan-produced LSE does not match the direct CpuFpReferenceSdpa LSE output.";
+}
+
 TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
 {
     // The dispatcher in SdpaFwdPlanBuilder maps the deprecated causal_mask=true flag
@@ -479,4 +720,200 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
     EXPECT_TRUE(cpuRefOutputValidation.allClose(deprecatedBundle.oTensor, explicitBundle.oTensor))
         << "Deprecated causal_mask_bottom_right=true should produce identical output to "
            "leftBound=-1, rightBound=0, BOTTOM_RIGHT alignment.";
+}
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableFp8RequiresDescale)
+{
+    // FP8 inputs require q/k/v descales (mirrors AITER's TORCH_CHECK). The dispatcher
+    // must reject fp8-without-descale and accept fp8-with-descale.
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+
+    const SdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::BFLOAT16>
+        fp8Builder;
+
+    {
+        auto graph = buildDescaleSdpaFwdGraph(dims,
+                                              dims,
+                                              dims,
+                                              hipdnn_frontend::DataType::FP8_E4M3,
+                                              hipdnn_frontend::DataType::BFLOAT16,
+                                              /*withDescale=*/false);
+        auto [bin, err] = graph->to_binary();
+        ASSERT_TRUE(err.is_good()) << err.get_message();
+        const GraphWrapper wrapper(bin.data(), bin.size());
+        EXPECT_FALSE(fp8Builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()))
+            << "FP8 inputs without descales must be rejected";
+    }
+
+    {
+        auto graph = buildDescaleSdpaFwdGraph(dims,
+                                              dims,
+                                              dims,
+                                              hipdnn_frontend::DataType::FP8_E4M3,
+                                              hipdnn_frontend::DataType::BFLOAT16,
+                                              /*withDescale=*/true);
+        auto [bin, err] = graph->to_binary();
+        ASSERT_TRUE(err.is_good()) << err.get_message();
+        const GraphWrapper wrapper(bin.data(), bin.size());
+        EXPECT_TRUE(fp8Builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()))
+            << "FP8 inputs with q/k/v descales must be accepted";
+    }
+}
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsDescaleForNonFp8)
+{
+    // Non-FP8 inputs must not carry descales; the dispatcher rejects such graphs.
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    auto graph = buildDescaleSdpaFwdGraph(dims,
+                                          dims,
+                                          dims,
+                                          hipdnn_frontend::DataType::FLOAT,
+                                          hipdnn_frontend::DataType::FLOAT,
+                                          /*withDescale=*/true);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatBuilder;
+    EXPECT_FALSE(floatBuilder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()))
+        << "Non-FP8 inputs carrying descales must be rejected";
+}
+
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithSoftmaxDescale)
+{
+    // The v3 forward kernel supports only q/k/v descales. Softmax/output
+    // (de)quantization (descale_s, scale_s/o, amax) is not modeled, so an fp8 graph
+    // that additionally carries descale_s must be rejected even though q/k/v descales
+    // are present.
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    auto graph = buildDescaleSdpaFwdGraph(dims,
+                                          dims,
+                                          dims,
+                                          hipdnn_frontend::DataType::FP8_E4M3,
+                                          hipdnn_frontend::DataType::BFLOAT16,
+                                          /*withDescale=*/true,
+                                          /*withDescaleS=*/true);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+    const SdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::BFLOAT16>
+        fp8Builder;
+    EXPECT_FALSE(fp8Builder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()))
+        << "fp8 graphs carrying descale_s (softmax quant) must be rejected";
+}
+
+TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
+{
+    // Drives the full FP8 path through SdpaFwdPlanBuilder -> SdpaFwdPlan::execute:
+    // descale UIDs are read in buildNodePlan and the descale tensors are passed to
+    // CpuFpReferenceSdpa. Validates against an independent dequantized-float reference.
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_data_sdk::types::fp8_e4m3;
+
+    const int64_t batch = 1;
+    const int64_t numHeads = 2;
+    const int64_t seqLen = 4;
+    const int64_t headDim = 8;
+    const std::vector<int64_t> dims = {batch, numHeads, seqLen, headDim};
+
+    Tensor<fp8_e4m3> qTensor(dims);
+    Tensor<fp8_e4m3> kTensor(dims);
+    Tensor<fp8_e4m3> vTensor(dims);
+    Tensor<bfloat16> oTensor(dims);
+
+    // Deterministic, exactly-representable fp8 values (small multiples of 1/4).
+    auto fillPattern = [&](Tensor<fp8_e4m3>& t, int64_t phase) {
+        int64_t flat = 0;
+        for(int64_t b = 0; b < batch; ++b)
+        {
+            for(int64_t h = 0; h < numHeads; ++h)
+            {
+                for(int64_t s = 0; s < seqLen; ++s)
+                {
+                    for(int64_t d = 0; d < headDim; ++d)
+                    {
+                        const float value = static_cast<float>(((flat + phase) % 5) - 2) * 0.25f;
+                        t.setHostValue(fp8_e4m3(value), b, h, s, d);
+                        ++flat;
+                    }
+                }
+            }
+        }
+    };
+    fillPattern(qTensor, 0);
+    fillPattern(kTensor, 1);
+    fillPattern(vTensor, 2);
+
+    Tensor<float> descaleQ({1, 1, 1, 1});
+    Tensor<float> descaleK({1, 1, 1, 1});
+    Tensor<float> descaleV({1, 1, 1, 1});
+    descaleQ.fillWithValue(2.0f);
+    descaleK.fillWithValue(0.5f);
+    descaleV.fillWithValue(1.5f);
+
+    auto graph = buildDescaleSdpaFwdGraph(dims,
+                                          dims,
+                                          dims,
+                                          hipdnn_frontend::DataType::FP8_E4M3,
+                                          hipdnn_frontend::DataType::BFLOAT16,
+                                          /*withDescale=*/true);
+    auto [bin, err] = graph->to_binary();
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    const SdpaFwdPlanBuilder<DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::FP8_E4M3,
+                             DataType::BFLOAT16>
+        planBuilder;
+    ASSERT_TRUE(planBuilder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()));
+    auto plan = planBuilder.buildNodePlan(wrapper, wrapper.getNode(0));
+
+    const auto* nodeAttributes = wrapper.getNode(0).attributes_as_SdpaAttributes();
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[nodeAttributes->q_tensor_uid()] = qTensor.memory().hostData();
+    variantPack[nodeAttributes->k_tensor_uid()] = kTensor.memory().hostData();
+    variantPack[nodeAttributes->v_tensor_uid()] = vTensor.memory().hostData();
+    variantPack[nodeAttributes->o_tensor_uid()] = oTensor.memory().hostData();
+    variantPack[nodeAttributes->descale_q_tensor_uid().value()] = descaleQ.memory().hostData();
+    variantPack[nodeAttributes->descale_k_tensor_uid().value()] = descaleK.memory().hostData();
+    variantPack[nodeAttributes->descale_v_tensor_uid().value()] = descaleV.memory().hostData();
+    plan->execute(variantPack);
+
+    // Independent reference: dequantize inputs to float (decode(fp8) * descale) and run
+    // the plain (descale-free) reference.
+    Tensor<float> qF(dims);
+    Tensor<float> kF(dims);
+    Tensor<float> vF(dims);
+    Tensor<bfloat16> oExpected(dims);
+    for(int64_t b = 0; b < batch; ++b)
+    {
+        for(int64_t h = 0; h < numHeads; ++h)
+        {
+            for(int64_t s = 0; s < seqLen; ++s)
+            {
+                for(int64_t d = 0; d < headDim; ++d)
+                {
+                    qF.setHostValue(
+                        static_cast<float>(qTensor.getHostValue(b, h, s, d)) * 2.0f, b, h, s, d);
+                    kF.setHostValue(
+                        static_cast<float>(kTensor.getHostValue(b, h, s, d)) * 0.5f, b, h, s, d);
+                    vF.setHostValue(
+                        static_cast<float>(vTensor.getHostValue(b, h, s, d)) * 1.5f, b, h, s, d);
+                }
+            }
+        }
+    }
+    CpuFpReferenceSdpa::forward<float, float, float, bfloat16, float>(qF, kF, vF, oExpected);
+
+    const float tolerance = 1e-2f;
+    const CpuFpReferenceValidation<bfloat16> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(oExpected, oTensor))
+        << "FP8 plan output does not match the dequantized-input reference";
 }

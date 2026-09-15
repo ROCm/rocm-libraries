@@ -93,9 +93,9 @@ void testing_prune_dense2csr_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_prune_dense2csr(const Arguments& arg)
 {
-    rocsparse_int        M    = arg.M;
-    rocsparse_int        N    = arg.N;
-    rocsparse_int        LDA  = arg.denseld;
+    int64_t              M    = arg.M;
+    int64_t              N    = arg.N;
+    int64_t              LDA  = arg.denseld;
     rocsparse_index_base base = arg.baseA;
 
     host_scalar<T> h_threshold(arg.threshold);
@@ -108,16 +108,6 @@ void testing_prune_dense2csr(const Arguments& arg)
 
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descr, base));
-
-    if(LDA < M)
-    {
-        EXPECT_ROCSPARSE_STATUS(
-            rocsparse_prune_dense2csr<T>(
-                handle, M, N, nullptr, LDA, nullptr, descr, nullptr, nullptr, nullptr, nullptr),
-            rocsparse_status_invalid_size);
-
-        return;
-    }
 
     // Allocate host memory
     host_vector<T>             h_A(LDA * N);
@@ -134,18 +124,18 @@ void testing_prune_dense2csr(const Arguments& arg)
     rocsparse_seedrand();
 
     // Initialize the entire allocated memory.
-    for(rocsparse_int j = 0; j < N; ++j)
+    for(int64_t j = 0; j < N; ++j)
     {
-        for(rocsparse_int i = 0; i < LDA; ++i)
+        for(int64_t i = 0; i < LDA; ++i)
         {
             h_A[j * LDA + i] = -1;
         }
     }
 
     // Random initialization of the matrix.
-    for(rocsparse_int j = 0; j < N; ++j)
+    for(int64_t j = 0; j < N; ++j)
     {
-        for(rocsparse_int i = 0; i < M; ++i)
+        for(int64_t i = 0; i < M; ++i)
         {
             h_A[j * LDA + i] = random_cached_generator_normal<T>();
         }

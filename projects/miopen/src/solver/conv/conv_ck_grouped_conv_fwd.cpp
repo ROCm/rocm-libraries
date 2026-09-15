@@ -102,10 +102,6 @@ bool ConvDepthwiseFwd2D::IsApplicable(const ExecutionContext& ctx,
     if(!ctx.use_hip_kernels)
         return false;
 
-    // Kernel requires a wavefront size of 64
-    if(64 != ctx.GetStream().GetWavefrontWidth())
-        return false;
-
     if(!problem.IsLayoutDefault())
         return false;
 

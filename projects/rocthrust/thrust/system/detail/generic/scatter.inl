@@ -26,7 +26,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/permutation_iterator.h>

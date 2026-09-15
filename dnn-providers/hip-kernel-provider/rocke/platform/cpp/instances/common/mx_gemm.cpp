@@ -425,12 +425,10 @@ rocke_kernel_def_t*
         b_scale_off
             = rocke_b_add(b, rocke_b_mul(b, kg, rocke_b_const_i32(b, spec->N)), n_global_col);
 
-        /* a_scale = decode_mx_scale_e8m0(b, b.global_load(AScale, a_scale_off, I8, align=1)) */
-        a_scale = rocke_decode_mx_scale_e8m0(
-            b, rocke_b_global_load(b, AScale, a_scale_off, rocke_i8(), 1));
-        /* b_scale = decode_mx_scale_e8m0(b, b.global_load(BScale, b_scale_off, I8, align=1)) */
-        b_scale = rocke_decode_mx_scale_e8m0(
-            b, rocke_b_global_load(b, BScale, b_scale_off, rocke_i8(), 1));
+        /* a_scale = decode_mx_scale_e8m0(b, b.global_load_i8(AScale, a_scale_off)) */
+        a_scale = rocke_decode_mx_scale_e8m0(b, rocke_b_global_load_i8(b, AScale, a_scale_off, 0));
+        /* b_scale = decode_mx_scale_e8m0(b, b.global_load_i8(BScale, b_scale_off)) */
+        b_scale = rocke_decode_mx_scale_e8m0(b, rocke_b_global_load_i8(b, BScale, b_scale_off, 0));
         /* ab_scale = b.fmul(a_scale, b_scale) */
         ab_scale = rocke_b_fmul(b, a_scale, b_scale);
 

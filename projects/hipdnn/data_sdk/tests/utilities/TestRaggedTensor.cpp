@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <hip/hip_runtime.h>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -307,16 +308,22 @@ TEST(TestRaggedTensor, LargeOffsetExceedsInt32Max)
 {
     const int64_t largeOffset = static_cast<int64_t>(INT32_MAX) + 1; // 2^31
 
-    // B=1 with seqStride == off[B] so a single sequence row satisfies validation.
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    // B=2 so batch 1's base (ragged_offset[1] == 2^31) is an INTERIOR, addressable index:
+    // elementSpace == ragged_offset[B] == 2^32 > 2^31, so getIndex(1) stays in bounds and
+    // exercises the full addressing path (getIndex -> getIndexImpl -> readOffset).
+    const int64_t twoLargeOffsets = largeOffset * 2; // 2^32
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     const std::vector<int64_t> strides = {largeOffset, largeOffset, 1, 1};
-    auto aux = makeOffsetAux<int64_t>({0, largeOffset});
+    auto aux = makeOffsetAux<int64_t>({0, largeOffset, twoLargeOffsets});
 
-    // Shallow (borrowed) so no buffer is allocated for the ~2^31 element span; only
-    // getIndex is exercised, which reads the offset without touching the backing memory.
+    // Shallow (borrowed) so no buffer is allocated for the ~2^32 element span; only the
+    // addressing math is exercised, without touching the backing memory.
     float backing{};
     const ShallowRaggedTensor<float> tensor(&backing, dims, strides, BSHD_SEQ_AXIS, aux);
 
+    // getIndex(1) bases at ragged_offset[1] == 2^31; the returned index only equals 2^31 if
+    // the int64 offset survived the type-erased read AND the addressing return path without
+    // truncating to int32.
     EXPECT_EQ(tensor.getIndex(1), largeOffset);
     EXPECT_EQ(tensor.getIndex(0), 0);
 }
@@ -461,4 +468,97 @@ TEST(TestRaggedTensor, ValidationSeqAxisOutOfRangeThrows)
     // Sequence axis must be strictly less than the rank.
     EXPECT_THROW(const RaggedTensor<float> tensor(K_DIMS, K_STRIDES, 4, aux),
                  std::invalid_argument);
+}
+
+// ============================================================================
+// Fill Tests
+// ============================================================================
+
+TEST(TestRaggedTensor, FillWithValuesHostGenerator)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    struct UniformCpuGenerator
+    {
+        explicit UniformCpuGenerator(float min, float max, unsigned int seed)
+            : _min(min)
+            , _max(max)
+            , _seed(seed)
+        {
+        }
+
+        void operator()(float* data, size_t count) const
+        {
+            std::mt19937 rng(_seed);
+            std::uniform_real_distribution<float> dist(_min, _max);
+
+            for(size_t i = 0; i < count; ++i)
+            {
+                data[i] = static_cast<float>(dist(rng));
+            }
+        }
+
+    private:
+        float _min;
+        float _max;
+        unsigned int _seed;
+    };
+
+    const float min = 2.0f;
+    const float max = 5.0f;
+    tensor.fillWithValues(UniformCpuGenerator(min, max, std::random_device{}()), true);
+
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, min);
+        EXPECT_LE(val, max);
+    }
+}
+
+TEST(TestRaggedTensor, FillWithValuesDeviceGenerator)
+{
+    SKIP_IF_NO_DEVICES();
+
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    struct DeviceGpuGenerator
+    {
+        void operator()(float* data, size_t count) const
+        {
+            std::vector<float> writeData(count);
+            std::iota(writeData.begin(), writeData.end(), 0.0f);
+
+            auto err = hipMemcpyWithStream(
+                data, writeData.data(), count * sizeof(float), hipMemcpyHostToDevice, nullptr);
+            if(err != hipSuccess)
+            {
+                throw std::runtime_error("hipMemcpyWithStream failed");
+            }
+        }
+    };
+
+    tensor.fillWithValues(DeviceGpuGenerator(), false);
+
+    auto hostData = static_cast<float*>(tensor.rawHostData());
+    for(size_t i = 0; i < tensor.elementSpace(); i++)
+    {
+        EXPECT_EQ(hostData[i], static_cast<float>(i));
+    }
+}
+
+TEST(TestRaggedTensor, FillWithRandomValues)
+{
+    auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
+    RaggedTensor<float> tensor(K_DIMS, K_STRIDES, BSHD_SEQ_AXIS, aux);
+
+    tensor.fillWithRandomValues(1.0f, 3.0f);
+    for(auto it{tensor.cbegin()}; it != tensor.cend(); ++it)
+    {
+        auto val{(*static_cast<const float*>((*it)))};
+        EXPECT_GE(val, 1.0f);
+        EXPECT_LE(val, 3.0f);
+    }
 }

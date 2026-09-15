@@ -3,7 +3,7 @@
 
 from typing import Any, Dict, List, Tuple
 
-from geko.config_generator.mi_designer import MIDesign
+from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.fork_params.optimization_param import BaseParamBuilder
 from geko.config_generator.shared_utils import (
     ForkParameter,
@@ -22,7 +22,7 @@ class BasePostProcessor(BaseParamBuilder):
     """Base class for post-processing MI groups and fork params.
 
     Runs after MIDesigner + OptimizationParams have produced their
-    outputs.  Heuristic-only (GA params don't depend on MI properties).
+    outputs.  Heuristic-only (generic params don't depend on MI properties).
 
     Decorate methods with @mark_post_process.  Each receives
     (fork_params, mi_groups) and returns the modified pair.
@@ -98,6 +98,5 @@ class BasePostProcessor(BaseParamBuilder):
 
 def _mi_matches_mt(entry: Dict[str, ForkParameter], fixed_MT0: int, fixed_MT1: int) -> bool:
     """Check if an MI group entry's macro tile matches the fixed MT."""
-    mi = entry["MatrixInstruction"].values
-    MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-    return MT0 == fixed_MT0 and MT1 == fixed_MT1
+    mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+    return mfma_params.MT0 == fixed_MT0 and mfma_params.MT1 == fixed_MT1

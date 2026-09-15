@@ -205,7 +205,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexPreservedInRoundTr
     ASSERT_NE(opNode, nullptr);
 
     ASSERT_TRUE(opNode->generate_index.has_value());
-    EXPECT_EQ(opNode->generate_index.value(), true);
+    EXPECT_TRUE(opNode->generate_index.value());
     ASSERT_TRUE(opNode->index_tensor_uid.has_value());
     EXPECT_EQ(opNode->index_tensor_uid.value(), K_RESAMPLE_FWD_TENSOR_INDEX_UID);
 }
@@ -549,7 +549,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPool)
     ASSERT_NE(opNode, nullptr);
 
     ASSERT_TRUE(opNode->generate_index.has_value());
-    EXPECT_EQ(opNode->generate_index.value(), true);
+    EXPECT_TRUE(opNode->generate_index.value());
     ASSERT_FALSE(opNode->index_tensor_uid.has_value());
     ASSERT_EQ(opNode->resample_mode,
               hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING);

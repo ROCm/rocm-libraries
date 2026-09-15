@@ -276,6 +276,7 @@ typedef enum rocke_opcode
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32,
     ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,
+    ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16,
     ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE,
 
     /* vector.* */
@@ -321,6 +322,12 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_GLOBAL_LOAD_LDS,
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS,
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,
+    ROCKE_OP_TILE_BUFFER_LOAD_LDS_ASYNC,
+    ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS,
+    ROCKE_OP_TILE_GLOBAL_STORE_ASYNC_FROM_LDS,
+    ROCKE_OP_TILE_GLOBAL_LOAD_TR16_B128,
+    ROCKE_OP_TILE_TENSOR_LOAD_TO_LDS,
+    ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS,
     ROCKE_OP_TILE_BUFFER_RSRC,
     ROCKE_OP_TILE_BUFFER_LOAD_F16,
     ROCKE_OP_TILE_BUFFER_LOAD_VN_F16,
@@ -351,6 +358,18 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_DS_BPERMUTE,
     ROCKE_OP_TILE_DS_BPERMUTE_B64,
     ROCKE_OP_TILE_DS_SWIZZLE_XOR,
+    ROCKE_OP_TILE_DS_SWIZZLE,
+    ROCKE_OP_TILE_MOV_DPP8,
+    ROCKE_OP_TILE_WAVE_REDUCE,
+    ROCKE_OP_TILE_READLANE,
+    ROCKE_OP_TILE_WRITELANE,
+    ROCKE_OP_TILE_PERMLANE16,
+    ROCKE_OP_TILE_PERMLANE64,
+    ROCKE_OP_TILE_ALIGNBYTE,
+    ROCKE_OP_TILE_S_WQM,
+    ROCKE_OP_TILE_AV_LOAD_B128,
+    ROCKE_OP_TILE_AV_STORE_B128,
+    ROCKE_OP_TILE_S_ALLOC_VGPR,
     ROCKE_OP_TILE_MOV_DPP,
     ROCKE_OP_TILE_PERMLANE32_SWAP,
     ROCKE_OP_TILE_PERM_B32,
@@ -366,14 +385,34 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_SYNC_LDS_ONLY,
     ROCKE_OP_TILE_S_BARRIER_BARE,
     ROCKE_OP_TILE_S_WAITCNT,
+    ROCKE_OP_TILE_S_WAIT_ASYNCCNT,
+    ROCKE_OP_TILE_S_WAIT_TENSORCNT,
+    ROCKE_OP_TILE_S_BARRIER_SIGNAL,
+    ROCKE_OP_TILE_S_BARRIER_WAIT,
+    ROCKE_OP_TILE_S_BARRIER_INIT,
+    ROCKE_OP_TILE_S_BARRIER_SIGNAL_VAR,
+    ROCKE_OP_TILE_S_BARRIER_JOIN,
+    ROCKE_OP_TILE_S_WAKEUP_BARRIER,
+    ROCKE_OP_TILE_S_BARRIER_LEAVE,
+    ROCKE_OP_TILE_ASYNCMARK,
+    ROCKE_OP_TILE_WAIT_ASYNCMARK,
+    ROCKE_OP_TILE_S_WAIT_EVENT,
+    ROCKE_OP_TILE_S_PREFETCH_INST,
     ROCKE_OP_TILE_S_SETPRIO,
     ROCKE_OP_TILE_IGLP_OPT,
     ROCKE_OP_TILE_SCHED_BARRIER,
     ROCKE_OP_TILE_SCHED_GROUP_BARRIER,
 
+    /* tile.* -- exec-mask (wavelet pipeline, MFMA path) */
+    ROCKE_OP_TILE_EXEC_AND_SAVEEXEC,
+    ROCKE_OP_TILE_EXEC_XOR,
+    ROCKE_OP_TILE_EXEC_OR_SAVEEXEC,
+    ROCKE_OP_TILE_EXEC_OR,
+
     /* scf.* / cf.* control flow */
     ROCKE_OP_SCF_FOR,
     ROCKE_OP_SCF_IF,
+    ROCKE_OP_SCF_IF_ELSE,
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
 
@@ -495,6 +534,14 @@ typedef struct rocke_if
     rocke_op_t* op;
     rocke_region_t* then_region;
 } rocke_if_t;
+
+/* If/else handle: the C analog of _IfElseBuilder (scf.if_else). */
+typedef struct rocke_if_else
+{
+    rocke_op_t* op;
+    rocke_region_t* then_region;
+    rocke_region_t* else_region;
+} rocke_if_else_t;
 
 /* (name, init) pair for scf_for_iter. */
 typedef struct rocke_iter_arg
@@ -748,6 +795,11 @@ rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
                                                  rocke_value_t* idx,
                                                  rocke_value_t* value,
                                                  const char* ordering);
+rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
+                                                const char* ordering);
 
 /* ----- gpu ids ----- */
 rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
@@ -795,6 +847,18 @@ rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
                                         rocke_value_t* ptr,
                                         rocke_value_t* idx,
                                         int align);
+rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
+                                      rocke_value_t* ptr,
+                                      rocke_value_t* idx,
+                                      int align);
+rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
+                                           rocke_value_t* ptr,
+                                           rocke_value_t* idx,
+                                           int align);
 rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
                                            rocke_value_t* ptr,
                                            rocke_value_t* idx,
@@ -901,6 +965,10 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const rocke_type_t* const* result_types,
                                int num_results,
                                const rocke_inline_asm_opts_t* opts);
+void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_clause(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm);
 
 /* ----- cross-lane / vector pack-extract ----- */
 rocke_value_t* rocke_b_readfirstlane(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -984,6 +1052,18 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* c,
                                                        rocke_value_t* a_scale,
                                                        rocke_value_t* b_scale);
+rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                        rocke_value_t* a,
+                                                        rocke_value_t* bb,
+                                                        rocke_value_t* c,
+                                                        rocke_value_t* a_scale,
+                                                        rocke_value_t* b_scale);
+rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                          rocke_value_t* a,
+                                                          rocke_value_t* bb,
+                                                          rocke_value_t* c,
+                                                          rocke_value_t* a_scale,
+                                                          rocke_value_t* b_scale);
 rocke_value_t* rocke_b_wmma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
                                              rocke_value_t* bb,
@@ -1039,6 +1119,33 @@ rocke_value_t* rocke_b_ds_bpermute(rocke_ir_builder_t* b, rocke_value_t* addr, r
 rocke_value_t*
     rocke_b_ds_bpermute_b64(rocke_ir_builder_t* b, rocke_value_t* addr, rocke_value_t* data);
 rocke_value_t* rocke_b_ds_swizzle_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
+rocke_value_t* rocke_b_ds_swizzle(rocke_ir_builder_t* b, rocke_value_t* data, int offset);
+rocke_value_t* rocke_b_mov_dpp8(rocke_ir_builder_t* b, rocke_value_t* data, int sel);
+rocke_value_t* rocke_b_wave_reduce(rocke_ir_builder_t* b,
+                                   rocke_value_t* v,
+                                   const char* reduce_op,
+                                   int strategy);
+rocke_value_t* rocke_b_readlane(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* lane);
+rocke_value_t* rocke_b_writelane(rocke_ir_builder_t* b,
+                                 rocke_value_t* uniform_val,
+                                 rocke_value_t* lane,
+                                 rocke_value_t* passthrough);
+rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
+                                  rocke_value_t* old,
+                                  rocke_value_t* src0,
+                                  rocke_value_t* src1,
+                                  rocke_value_t* src2,
+                                  bool fi,
+                                  bool bound_ctrl);
+rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
+rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
+                                 rocke_value_t* a,
+                                 rocke_value_t* bb,
+                                 rocke_value_t* shift);
+rocke_value_t* rocke_b_s_wqm(rocke_ir_builder_t* b, rocke_value_t* mask);
+rocke_value_t* rocke_b_av_load_b128(rocke_ir_builder_t* b, rocke_value_t* ptr);
+void rocke_b_av_store_b128(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* data);
+rocke_value_t* rocke_b_s_alloc_vgpr(rocke_ir_builder_t* b, int count);
 /* mov_dpp: exactly one of row_shr/row_shl must be >= 0 (the other < 0 = unset). */
 rocke_value_t* rocke_b_mov_dpp(
     rocke_ir_builder_t* b, rocke_value_t* data, int row_shr, int row_shl, bool bound_ctrl);
@@ -1100,6 +1207,45 @@ void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b,
                                    rocke_value_t* soffset,
                                    int dwords,
                                    int coherency);
+void rocke_b_buffer_load_lds_async(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* lds_ptr,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   int dwords,
+                                   int coherency);
+void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b,
+                                      rocke_value_t* src_ptr,
+                                      rocke_value_t* src_index,
+                                      rocke_value_t* lds_smem,
+                                      rocke_value_t* const* lds_indices,
+                                      int num_lds_indices,
+                                      int width_bytes,
+                                      int coherency,
+                                      int offset_bytes);
+void rocke_b_global_store_async_from_lds(rocke_ir_builder_t* b,
+                                         rocke_value_t* dst_ptr,
+                                         rocke_value_t* lds_ptr,
+                                         int width_bytes,
+                                         int offset_bytes,
+                                         int cachepolicy);
+rocke_value_t* rocke_b_global_load_tr16_b128(rocke_ir_builder_t* b,
+                                             rocke_value_t* src_ptr,
+                                             const rocke_type_t* dtype);
+void rocke_b_tensor_load_to_lds(rocke_ir_builder_t* b,
+                                rocke_value_t* d0,
+                                rocke_value_t* d1,
+                                rocke_value_t* d2,
+                                rocke_value_t* d3,
+                                rocke_value_t* d4,
+                                int cachepolicy);
+void rocke_b_tensor_store_from_lds(rocke_ir_builder_t* b,
+                                   rocke_value_t* d0,
+                                   rocke_value_t* d1,
+                                   rocke_value_t* d2,
+                                   rocke_value_t* d3,
+                                   rocke_value_t* d4,
+                                   int cachepolicy);
 void rocke_b_global_load_lds(rocke_ir_builder_t* b,
                              rocke_value_t* src_ptr,
                              rocke_value_t* byte_off,
@@ -1211,6 +1357,23 @@ void rocke_b_sync_half_block(rocke_ir_builder_t* b, rocke_value_t* half_selector
 void rocke_b_sync_lds_only(rocke_ir_builder_t* b);
 /* s_waitcnt: pass -1 to leave a counter alone, 0 to fully drain. */
 void rocke_b_s_waitcnt(rocke_ir_builder_t* b, int vmcnt, int lgkmcnt, int expcnt);
+void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);
+void rocke_b_s_wait_tensorcnt(rocke_ir_builder_t* b, int n);
+void rocke_b_s_barrier_signal(rocke_ir_builder_t* b, uint32_t barrier_type);
+void rocke_b_s_barrier_wait(rocke_ir_builder_t* b, int barrier_type);
+void rocke_b_s_barrier_init(rocke_ir_builder_t* b,
+                            rocke_value_t* barrier,
+                            rocke_value_t* member_count);
+void rocke_b_s_barrier_signal_var(rocke_ir_builder_t* b,
+                                  rocke_value_t* barrier,
+                                  rocke_value_t* member_count);
+void rocke_b_s_barrier_join(rocke_ir_builder_t* b, rocke_value_t* barrier);
+void rocke_b_s_wakeup_barrier(rocke_ir_builder_t* b, rocke_value_t* barrier);
+void rocke_b_s_barrier_leave(rocke_ir_builder_t* b, int barrier_type);
+void rocke_b_asyncmark(rocke_ir_builder_t* b);
+void rocke_b_wait_asyncmark(rocke_ir_builder_t* b, int n);
+void rocke_b_s_wait_event(rocke_ir_builder_t* b, int imm);
+void rocke_b_s_prefetch_inst(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* length);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
@@ -1237,7 +1400,21 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
                                  bool elide_trailing_barrier);
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values);
 rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
+/* scf.if_else: both then and else converge at the same join block.
+ * Use rocke_b_region_enter/leave to emit into then_region then else_region. */
+rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond);
 void rocke_b_ret(rocke_ir_builder_t* b);
+
+/* ---- tile.exec_* (wavelet exec-mask split, MFMA path) ----
+ * These emit AMDGPU exec-mask manipulation instructions:
+ *   exec_and_saveexec: s_and_saveexec_b64 dst, mask  -> dst = old exec (i64)
+ *   exec_xor:          s_xor_b64 dst, exec, saved    -> dst = compl (i64)
+ *   exec_or_saveexec:  s_or_saveexec_b64 dst, compl  -> dst = old exec (i64)
+ *   exec_or:           s_or_b64 exec, exec, saved    -> void (restore exec) */
+rocke_value_t* rocke_b_exec_and_saveexec(rocke_ir_builder_t* b, rocke_value_t* mask);
+rocke_value_t* rocke_b_exec_xor(rocke_ir_builder_t* b, rocke_value_t* saved);
+rocke_value_t* rocke_b_exec_or_saveexec(rocke_ir_builder_t* b, rocke_value_t* compl_v);
+void rocke_b_exec_or(rocke_ir_builder_t* b, rocke_value_t* saved);
 
 #ifdef __cplusplus
 } /* extern "C" */

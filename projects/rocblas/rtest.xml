@@ -15,7 +15,7 @@
   <run name="ctest standard">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*-*known_bug*</run>
 </test>
 <test sets="ctest_comprehensive">
-  <run name="ctest comprehensive">{TEST_BASE_OPTIONS} --gtest_filter=*nightly*-*known_bug*</run>
+  <run name="ctest comprehensive">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*:*nightly*-*known_bug*</run>
 </test>
 <test sets="ctest_full">
   <run name="ctest full">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*:*nightly*-*known_bug*</run>

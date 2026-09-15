@@ -18,13 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
@@ -55,11 +48,11 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   BinaryPredicate binary_pred,
   BinaryFunction binary_op)
 {
-  using InputKeyType   = thrust::detail::it_value_t<InputIterator1>;
-  using InputValueType = thrust::detail::it_value_t<InputIterator2>;
+  using InputKeyType   = typename thrust::iterator_traits<InputIterator1>::value_type;
+  using InputValueType = typename thrust::iterator_traits<InputIterator2>::value_type;
 
   // Use the input iterator's value type per https://wg21.link/P0571
-  using TemporaryType = thrust::detail::it_value_t<InputIterator2>;
+  using TemporaryType = typename thrust::iterator_value<InputIterator2>::type;
 
   if (keys_first != keys_last)
   {

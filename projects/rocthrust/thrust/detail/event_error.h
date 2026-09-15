@@ -21,18 +21,14 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
+#include <thrust/detail/cpp_version_check.h>
 
-#include <thrust/detail/type_traits.h>
-#include <thrust/system/error_code.h>
+#if THRUST_CPP_DIALECT >= 2017
 
-#include <stdexcept>
+#  include <thrust/detail/type_traits.h>
+#  include <thrust/system/error_code.h>
+
+#  include <stdexcept>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -158,3 +154,5 @@ inline bool operator<(event_error const& lhs, event_error const& rhs) noexcept
 }
 
 THRUST_NAMESPACE_END
+
+#endif // C++14

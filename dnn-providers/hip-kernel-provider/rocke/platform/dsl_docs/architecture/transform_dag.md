@@ -8,8 +8,7 @@ simple bijective linear permutation of the underlying memory layout.
 
 This doc walks through every transform with worked examples, ending
 with the full implicit-GEMM convolution descriptor used in
-`rocke/examples/common/bake_off_implicit_gemm.py` (which reaches ~280
-TFLOPS in HIP-graph mode on MI300X).
+[`rocke/examples/common/bake_off_implicit_gemm.py`](../../python/rocke/examples/common/bake_off_implicit_gemm.py).
 
 ## The core idea
 
@@ -218,7 +217,7 @@ After the chain:
   - `desc.offset(b, m=m_val, k=k_val)` produces `(i32 offset, i1
     valid)`.
 
-This is the exact descriptor used by `rocke/instances/common/conv_implicit_gemm.py`.
+This is the exact descriptor used by `library/kernels/common/conv_implicit_gemm.py`.
 The kernel body never writes `(m / (Ho*Wo)) * Hi*Wi*C + (m / Wo) % Ho
 * Wi * C + ...` by hand. The algebra captures every offset
 computation, and editing the conv shape (e.g., stride 2 or dilated)
@@ -316,7 +315,9 @@ validity predicate is AND-ed into the descriptor's final `valid`.
 Internally, `TensorDescriptor.offset(b, **coords)` walks the chain
 in **topological order**: a transform is applied once all its
 `upper` coords are present in the running coord map. The
-implementation is in `transforms.py::TensorDescriptor.offset`:
+implementation is in
+[`helpers/transforms.py`](../../python/rocke/helpers/transforms.py)
+(`TensorDescriptor.offset`):
 
 ```python
 remaining = list(self.chain)

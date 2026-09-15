@@ -372,7 +372,7 @@ size_t grid_k_split_aware(const problem_t& problem,
   // Split remaining tiles as evenly as possible for better caching
   if (tiles > cu_count) {
     size_t virt_cu_count = cu_count;
-    if (config.occupancy > 1 && cu_budget == 0) virt_cu_count *= config.occupancy;
+    if (config.occupancy > 1) virt_cu_count *= config.occupancy;
 
     const std::vector<double> tile_fractions = {
         0.0, 1.0 / 2.0, 1.0 / 8.0, 1.0 / 5.0, 1.0 / 4.0, 1.0 / 3.0};

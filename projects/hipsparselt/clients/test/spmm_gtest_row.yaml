@@ -90,7 +90,7 @@ Tests:
 - name: spmm_small
   category: quick
   function:
-    spmm: *hpa_half_precision
+    spmm: *real_precisions_2b
   matrix_size: *small_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
@@ -98,11 +98,12 @@ Tests:
   sparse_b: [ true, false]
   alpha_vector_scaling: [true, false]
   gate_residual: [true]  
+  gate_type: [f16_r, bf16_r]
   orderA: [R]
   orderB: [R]
   orderC: [R]
   orderD: [R]
-  gpu_arch: '942'
+  gpu_arch: '9(42|50)'
 
 - name: spmm_medium
   category: pre_checkin

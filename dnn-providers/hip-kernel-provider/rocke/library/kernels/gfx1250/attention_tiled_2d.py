@@ -168,6 +168,7 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
+    use_d256_fast: bool = False,
 ) -> Tuple[bool, str]:
     del (
         use_mfma_32x32x8,
@@ -175,6 +176,7 @@ def supports_tiled_2d(
         use_k_single_buffer,
         use_conflict_free_v_store,
         use_k_sliced_ring,
+        use_d256_fast,
     )
     if arch != "gfx1250":
         return False, f"gfx1250 tiled 2D only supports arch='gfx1250' (got {arch!r})"

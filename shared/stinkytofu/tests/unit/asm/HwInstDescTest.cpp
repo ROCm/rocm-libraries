@@ -461,6 +461,103 @@ TEST_F(HwInstDescTest, VOP3_2SRC_Commutative_InheritsVALU) {
 }
 
 // ---------------------------------------------------------------------------
+// VOP3_2SRC shifts: v_lshrrev_b64 / v_lshlrev_b16 (AIHPBLAS-4142)
+//
+// These are 2-source VALU shifts (dst, shiftAmount, value). They were once
+// declared under the 4-field VOP3 format (dst+src0+src1+src2); because a
+// partial .operand_fields override inherits all base-format fields, the VOP3
+// base left a PHANTOM third source (src2) in each descriptor. The
+// StinkyIRVerifier read that phantom field and reported a missing operand
+// src[2] (e.g. under PrefetchGL2 codegen on gfx1250). They now live under the
+// 3-field VOP3_2SRC format, so the descriptor exposes exactly dst/src0/src1
+// with no phantom src2. These tests would FAIL on the pre-fix descriptor
+// (fields.size() == 4 with a trailing src2) and PASS post-fix.
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, VOP3_2SRC_VLshrrevB64_NoPhantomSrc2) {
+    auto* desc = getDescByMnemonic("v_lshrrev_b64");
+    ASSERT_NE(desc, nullptr);
+    // VOP3_2SRC inherits MC_VOP3 microcode from its parent format.
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
+
+    auto fields = desc->operandFields;
+    // Exactly 3 fields: dst + 2 sources. No phantom src2.
+    ASSERT_EQ(fields.size(), 3u);
+
+    // D0: 64-bit VGPR destination (size overridden from format default 32).
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_EQ(fields[0].encodeField, EncodeField::vdst);
+    EXPECT_EQ(fields[0].fieldType, FieldType::vgpr);
+    EXPECT_EQ(fields[0].fieldSizeBits, 64u);
+
+    // S0: 32-bit shift amount (format default, not overridden).
+    EXPECT_FALSE(fields[1].isDest);
+    EXPECT_EQ(fields[1].encodeField, EncodeField::src0);
+    EXPECT_EQ(fields[1].fieldType, FieldType::src);
+    EXPECT_EQ(fields[1].fieldSizeBits, 32u);
+
+    // S1: 64-bit value operand (size overridden from format default 32).
+    EXPECT_FALSE(fields[2].isDest);
+    EXPECT_EQ(fields[2].encodeField, EncodeField::src1);
+    EXPECT_EQ(fields[2].fieldType, FieldType::src);
+    EXPECT_EQ(fields[2].fieldSizeBits, 64u);
+
+    // No field may be a third source (src2): that was the phantom operand.
+    for (const auto& f : fields) {
+        EXPECT_NE(f.encodeField, EncodeField::src2) << "v_lshrrev_b64 must not carry a src2 field";
+    }
+}
+
+TEST_F(HwInstDescTest, VOP3_2SRC_VLshlrevB16_NoPhantomSrc2) {
+    auto* desc = getDescByMnemonic("v_lshlrev_b16");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
+
+    auto fields = desc->operandFields;
+    // Exactly 3 fields: dst + 2 sources. No phantom src2.
+    ASSERT_EQ(fields.size(), 3u);
+
+    // D0: 16-bit VGPR destination.
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_EQ(fields[0].encodeField, EncodeField::vdst);
+    EXPECT_EQ(fields[0].fieldType, FieldType::vgpr);
+    EXPECT_EQ(fields[0].fieldSizeBits, 16u);
+
+    // S0 / S1: both 16-bit source operands.
+    EXPECT_FALSE(fields[1].isDest);
+    EXPECT_EQ(fields[1].encodeField, EncodeField::src0);
+    EXPECT_EQ(fields[1].fieldType, FieldType::src);
+    EXPECT_EQ(fields[1].fieldSizeBits, 16u);
+
+    EXPECT_FALSE(fields[2].isDest);
+    EXPECT_EQ(fields[2].encodeField, EncodeField::src1);
+    EXPECT_EQ(fields[2].fieldType, FieldType::src);
+    EXPECT_EQ(fields[2].fieldSizeBits, 16u);
+
+    for (const auto& f : fields) {
+        EXPECT_NE(f.encodeField, EncodeField::src2) << "v_lshlrev_b16 must not carry a src2 field";
+    }
+}
+
+// Regression guard: a genuine 3-source VOP3 op must KEEP its src2. This ensures
+// the phantom-src2 fix did not strip src2 from real 3-operand instructions.
+// v_lshl_add_u32 = (src0 << src1) + src2, declared under the 4-field VOP3 format.
+TEST_F(HwInstDescTest, VOP3_VLshlAddU32_HasSrc2) {
+    auto* desc = getDescByMnemonic("v_lshl_add_u32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
+
+    auto fields = desc->operandFields;
+    // dst + src0 + src1 + src2 = 4 fields.
+    ASSERT_EQ(fields.size(), 4u);
+
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_EQ(fields[0].encodeField, EncodeField::vdst);
+
+    EXPECT_FALSE(fields[3].isDest);
+    EXPECT_EQ(fields[3].encodeField, EncodeField::src2);
+}
+
+// ---------------------------------------------------------------------------
 // VOPC: v_cmp_eq_f32 — compare, promotable to VOP3
 // ---------------------------------------------------------------------------
 TEST_F(HwInstDescTest, VOPC_VCmpEqF32) {

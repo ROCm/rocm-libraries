@@ -284,6 +284,14 @@ rocke_schedule_policy_t rocke_schedule_policy_for_pipeline(rocke_ir_builder_t* b
         p.mode = "intrawave";
         return p;
     }
+    else if(strcmp(pipeline, "basic") == 0)
+    {
+        /* CK pipeline_basic: naive single-buffer pipeline with global-read/
+         * compute overlap. No scheduling hints (lowest resource pressure). */
+        p.name = "basic";
+        p.emit_hints = false;
+        return p;
+    }
 
     /* Python: raise ValueError(f"unknown schedule policy {pipeline!r}").
      * No public error-setter is exposed in ir.h; the caller can detect the

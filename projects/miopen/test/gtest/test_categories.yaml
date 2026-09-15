@@ -2,13 +2,6 @@
 # Time-based test organization for CI/CD pipeline efficiency
 # This file defines test categories by execution time and criticality
 
-# Some information is not available at configure time. For example, the
-# list of all gtest fixtures must be extracted from the binaries. Defining
-# 'gtest_runner' informs CMake to have the target run the given script
-# of running the gtest command directly.
-# The path is relative to ${PROJECT_SOURCE_DIR}.
-gtest_runner: scripts/run_miopen_gtest.py
-
 # Common comprehensive patterns - used by both standard and comprehensive
 # Standard applies exclude list to filter out slower tests
 # Comprehensive runs all patterns without exclusion
@@ -71,6 +64,10 @@ positive_patterns: &positive_patterns
   - "*/GPU_Dropout*"
   - "*/GPU_MIOpenDriver*"
   - "*/GPU_HipGraphExist*"
+  # Unprefixed: these are plain TEST/TEST_F with no INSTANTIATE_TEST_SUITE_P,
+  # so they carry no "Prefix/" and the leading "*/" above would not match them.
+  - "GPU_StreamTracker_FP32*"
+  - "GPU_NaiveTimeout_FP32*"
   - "Standard/*" # include all standard tests by default
 
 
@@ -88,12 +85,6 @@ test_categories:
 
     exclude:
       - "*/GPU_MIOpenDriver*"
-      # ALMIOPEN-2206: HIPRTC fails to compile miopen_conv3d_depthwise_fwd.cpp
-      # ('hip/hip_runtime.h' not found). Re-enable once fixed. (Only FP16 and
-      # BFP16 GPU variants of this solver exist; there is no FP32 GPU variant.
-      # The CPU dev-applicability check is unaffected.)
-      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
       # Each fans out to 32 worker processes loading MIOpen, OOM-killing
       # small shared-RAM runners (e.g. gfx1151). Still run in standard/full.
       - "CPU_PerfDb_NONE.*"
@@ -108,8 +99,6 @@ test_categories:
 
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
-    enable_dapper: "False"
-    dapper_json_file: ""
     test_patterns: *positive_patterns
 
     exclude:
@@ -160,6 +149,7 @@ test_categories:
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupBwdXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
       # Large BN tests - full suite only
       - "Full/GPU_BNCKFWDTrainLarge2D_*"
       - "Full/GPU_BNOCLFWDTrainLarge2D_*"
@@ -257,6 +247,9 @@ test_categories:
       # share the same dispatch code path and stay in full. Keep BFP16 in
       # comprehensive (nightly) for coverage.
       - "Full/GPU_UnitTestConvSolverImplicitGemm*Xdlops_LargeStride_FP*"
+      # Heavyweight (~60s) large-tensor wrw test; full-only like _LargeStride.
+      # FP16-only (no BFP16 variant to keep in nightly), so exclude the family.
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -469,11 +462,6 @@ test_categories:
 
     exclude:
       - "*/GPU_MIOpenDriver*"
-      # ALMIOPEN-2206: HIPRTC fails to compile miopen_conv3d_depthwise_fwd.cpp
-      # ('hip/hip_runtime.h' not found). Re-enable once fixed. (Only FP16 and
-      # BFP16 GPU variants of this solver exist; there is no FP32 GPU variant.
-      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
       # OOM-killing on small shared-RAM runners (e.g. gfx1151).
       - "CPU_PerfDb_NONE.*"
       # Long-running Smoke suites excluded to keep ffm-quick under ~30s.

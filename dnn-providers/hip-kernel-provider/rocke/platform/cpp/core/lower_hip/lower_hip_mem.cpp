@@ -194,7 +194,7 @@ static rocke_status_t _op_tile_smem_store_vN(rocke_h_lowerer_t* lw, const rocke_
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 2);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/true);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_store_vN");
     rocke_h_emitf(lw,
                   "*reinterpret_cast<%s%lld*>(&%s[%s]) = %s;",
                   prefix,
@@ -324,7 +324,9 @@ static rocke_status_t _op_tile_smem_load_vN(rocke_h_lowerer_t* lw, const rocke_o
     smem = op->operands[0];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    /* Full map, like Python _smem_vec_prefix: an f32/i32/i8 LDS vector load must
+     * not be reinterpreted through the f16 view. */
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "smem_load_vN");
     storage = mem_storage_of(lw, smem);
     if(!storage)
     {
@@ -526,7 +528,7 @@ static rocke_status_t _op_memref_global_load_vN(rocke_h_lowerer_t* lw, const roc
     idx = op->operands[1];
     vec = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_load_vN");
     res = rocke_h_name(lw, op->results[0]);
     rocke_h_emitf(lw,
                   "%s%lld %s = *reinterpret_cast<const %s%lld*>(%s + %s);",
@@ -601,7 +603,7 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
     val = op->operands[2];
     n = mem_attr_int(op, "vec", 0);
     elem_name = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem_name, /*full_map=*/false);
+    prefix = rocke_h_vec_prefix_checked(lw, elem_name, /*full_map=*/true, "global_store_vN");
     rocke_h_emitf(lw,
                   "*reinterpret_cast<%s%lld*>(%s + %s) = %s;",
                   prefix,
@@ -684,6 +686,33 @@ static rocke_status_t _op_memref_global_atomic_add_pk_bf16(rocke_h_lowerer_t* lw
     val = op->operands[2];
     rocke_h_emitf(lw,
                   "bf16x2 %s = __builtin_amdgcn_global_atomic_fadd_v2bf16("
+                  "%s + %s, %s);",
+                  rocke_h_name(lw, op->results[0]),
+                  rocke_h_name(lw, ptr),
+                  rocke_h_name(lw, idx),
+                  rocke_h_name(lw, val));
+    return lw->status;
+}
+
+/* Python _op_memref_global_atomic_add_pk_f16 */
+static rocke_status_t _op_memref_global_atomic_add_pk_f16(rocke_h_lowerer_t* lw,
+                                                          const rocke_op_t* op)
+{
+    rocke_value_t *ptr, *idx, *val;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_atomic_add_pk_f16: bad operand/result count");
+    }
+    ptr = op->operands[0];
+    idx = op->operands[1];
+    val = op->operands[2];
+    rocke_h_emitf(lw,
+                  "half2 %s = __builtin_amdgcn_global_atomic_fadd_v2f16("
                   "%s + %s, %s);",
                   rocke_h_name(lw, op->results[0]),
                   rocke_h_name(lw, ptr),
@@ -903,7 +932,15 @@ static rocke_status_t _op_tile_buffer_load_vN(rocke_h_lowerer_t* lw, const rocke
     soffset = op->operands[2];
     dwords = mem_attr_int(op, "dwords", 0);
     elem = mem_attr_str(op, "elem_type", "f16");
-    prefix = rocke_h_vec_prefix(elem, /*full_map=*/false);
+    /* Python _op_tile_buffer_load_vN indexes a 4-entry map ({f16,bf16,f32,i32})
+     * and raises KeyError otherwise, so f32/i32 must not resolve to "f16x". */
+    if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
+       && strcmp(elem, "i32") != 0)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_KEY, "tile.buffer_load_vN: unsupported element type '%s'", elem);
+    }
+    prefix = rocke_h_vec_prefix(elem, /*full_map=*/true);
     n = (strcmp(elem, "f16") == 0 || strcmp(elem, "bf16") == 0) ? dwords * 2 : dwords;
     if(dwords == 1)
     {
@@ -1426,6 +1463,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD, _op_memref_global_atomic_add},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, _op_memref_global_atomic_add_f32},
            {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16, _op_memref_global_atomic_add_pk_bf16},
+           {ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_F16, _op_memref_global_atomic_add_pk_f16},
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},

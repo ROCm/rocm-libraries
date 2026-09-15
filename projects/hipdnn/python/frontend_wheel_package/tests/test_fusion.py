@@ -1,13 +1,14 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for operation fusion (conv + pointwise)."""
+"""Tests for operation fusion (conv + pointwise)."""
 
+import numpy as np
 import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .helpers import build_operation_graph, create_float_graph
+from .helpers import build_all_plans, create_float_graph, execute_zeros
 
 
 def build_conv_relu_fusion_graph(
@@ -52,12 +53,13 @@ def build_conv_relu_fusion_graph(
 class TestConvReluFusion:
     """Tests for a fused convolution + ReLU graph."""
 
-    def test_fused_graph_builds_operation_graph(self):
-        """A fused conv + ReLU graph lowers to a backend operation graph.
-
-        Execution is intentionally not exercised: fusion coverage only needs to
-        confirm the fused graph is buildable.
-        """
+    def test_execution_succeeds(self):
+        """A fused conv + ReLU graph builds plans and executes against the stub engine."""
         graph, x, weight, y = build_conv_relu_fusion_graph()
 
-        build_operation_graph(graph)
+        handle = build_all_plans(graph)
+        execute_zeros(
+            graph,
+            [(x, np.float32), (weight, np.float32), (y, np.float32)],
+            handle,
+        )

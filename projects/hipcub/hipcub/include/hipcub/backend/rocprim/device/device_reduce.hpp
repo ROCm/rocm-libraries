@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -46,11 +46,8 @@
 #include <hip/hip_bfloat16.h> // hip_bfloat16
 #include <hip/hip_fp16.h> // __half
 
-#include _HIPCUB_LIBCXX_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(functional)
-#include _HIPCUB_STD_INCLUDE(limits)
-
 #include <iterator>
+#include <limits>
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail
@@ -69,7 +66,7 @@ HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
 template<class T>
 HIPCUB_HOST_DEVICE inline T get_lowest_value()
 {
-    return _HIPCUB_STD::numeric_limits<T>::lowest();
+    return std::numeric_limits<T>::lowest();
 }
 
 template<>
@@ -89,7 +86,7 @@ HIPCUB_HOST_DEVICE inline hip_bfloat16 get_lowest_value<hip_bfloat16>()
 template<class T>
 HIPCUB_HOST_DEVICE inline T get_max_value()
 {
-    return _HIPCUB_STD::numeric_limits<T>::max();
+    return std::numeric_limits<T>::max();
 }
 
 template<>
@@ -119,7 +116,7 @@ template<class T>
 inline auto get_lowest_special_value() ->
     typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
 {
-    return -_HIPCUB_STD::numeric_limits<T>::infinity();
+    return -std::numeric_limits<T>::infinity();
 }
 
 template<>
@@ -149,7 +146,7 @@ template<typename T>
 inline auto get_max_special_value() ->
     typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
 {
-    return _HIPCUB_STD::numeric_limits<T>::infinity();
+    return std::numeric_limits<T>::infinity();
 }
 
 template<>
@@ -232,15 +229,15 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using InputT  = detail::it_value_t<InputIteratorT>;
-        using OutputT = detail::it_value_t<OutputIteratorT>;
-        using InitT   = detail::non_void_value_t<OutputT, InputT>;
+        using InputT  = typename std::iterator_traits<InputIteratorT>::value_type;
+        using OutputT = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using InitT   = hipcub::detail::non_void_value_t<OutputT, InputT>;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_out,
                       num_items,
-                      _HIPCUB_STD::plus<>{},
+                      ::hipcub::Sum(),
                       InitT(0),
                       stream);
     }
@@ -267,17 +264,13 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using T = detail::it_value_t<InputIteratorT>;
+        using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_out,
                       num_items,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-                      _HIPCUB_LIBCXX::minimum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? b : a;},
-#endif
+                      ::hipcub::Min(),
                       detail::get_max_value<T>(),
                       stream);
     }
@@ -309,8 +302,8 @@ public:
                                                      hipStream_t     stream = 0)
     {
         using OffsetT      = NumItemsT;
-        using T            = detail::it_value_t<InputIteratorT>;
-        using O            = detail::it_value_t<OutputIteratorT>;
+        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
+        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
         using OutputTupleT = hipcub::detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
 
         using OutputValueT = typename OutputTupleT::Value;
@@ -388,17 +381,13 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using T = detail::it_value_t<InputIteratorT>;
+        using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
                       d_out,
                       num_items,
-#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
-                      _HIPCUB_LIBCXX::maximum<>{},
-#else
-                      [] (auto a, auto b) { return a > b ? a : b;},
-#endif
+                      ::hipcub::Max(),
                       detail::get_lowest_value<T>(),
                       stream);
     }
@@ -430,9 +419,9 @@ public:
                                                      hipStream_t     stream = 0)
     {
         using OffsetT      = NumItemsT;
-        using T            = detail::it_value_t<InputIteratorT>;
-        using O            = detail::it_value_t<OutputIteratorT>;
-        using OutputTupleT = detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
+        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
+        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using OutputTupleT = hipcub::detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
 
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
@@ -557,7 +546,8 @@ public:
                     NumItemsT                 num_items,
                     hipStream_t               stream = 0)
     {
-        using key_compare_op = ::rocprim::equal_to<detail::it_value_t<KeysInputIteratorT>>;
+        using key_compare_op
+            = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIteratorT>::value_type>;
         return ::rocprim::reduce_by_key(d_temp_storage,
                                         temp_storage_bytes,
                                         d_keys_in,

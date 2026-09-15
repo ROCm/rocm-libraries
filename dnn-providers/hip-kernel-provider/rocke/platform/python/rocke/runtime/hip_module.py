@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from ._ctypes_bind import _LazyFn
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
-
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
 HIP_LAUNCH_PARAM_BUFFER_SIZE = ctypes.c_void_p(2)
 HIP_LAUNCH_PARAM_END = ctypes.c_void_p(3)
@@ -88,6 +87,9 @@ _hipInit = _b("hipInit", ctypes.c_uint)
 _hipSetDevice = _b("hipSetDevice", ctypes.c_int)
 _hipGetDevice = _b("hipGetDevice", ctypes.POINTER(ctypes.c_int))
 _hipGetDeviceCount = _b("hipGetDeviceCount", ctypes.POINTER(ctypes.c_int))
+_hipDeviceGetAttribute = _b(
+    "hipDeviceGetAttribute", ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int
+)
 _hipModuleLoadData = _b(
     "hipModuleLoadData", ctypes.POINTER(_HipModuleHandle), ctypes.c_void_p
 )
@@ -263,6 +265,33 @@ def get_device_count() -> int:
     except (AttributeError, OSError):
         return 0
     return int(n.value) if rc == 0 else 0
+
+
+# hipDeviceAttributeMultiprocessorCount. Part of the stable ``hipDeviceAttribute_t``
+# ABI enum (AMD preserves numeric positions with ``...Unused`` placeholders), so this
+# is far more durable than reading a field offset out of the churny hipDeviceProp_t.
+_HIP_ATTR_MULTIPROCESSOR_COUNT = 63
+
+
+def get_device_num_cus(device: int = 0) -> Optional[int]:
+    """CU (multiprocessor) count of a HIP device, or None if unqueryable.
+
+    Torch-free ctypes twin of ``get_device_arch`` / ``get_device_name``: uses
+    ``hipDeviceGetAttribute`` (single ``int``, no struct-offset guessing) so the
+    dispatch/benchmark layers can size split-KV device subscription without a torch
+    dependency. Best-effort and side-effect-free (``hipDeviceGetAttribute`` lazily
+    inits the runtime internally). NOTE: this reports CUs on CU-mode devices (CDNA);
+    a WGP-mode (RDNA) device reports half the CU count — inert for the current
+    CDNA-only callers (gfx942 / gfx950), but a non-CDNA caller must account for it.
+    """
+    v = ctypes.c_int(0)
+    try:
+        rc = _hipDeviceGetAttribute(
+            ctypes.byref(v), _HIP_ATTR_MULTIPROCESSOR_COUNT, int(device)
+        )
+    except (AttributeError, OSError):
+        return None
+    return int(v.value) if rc == 0 and v.value > 0 else None
 
 
 @dataclass

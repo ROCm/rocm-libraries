@@ -34,12 +34,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class QMRCGStab
-  * \brief Quasi-Minimal Residual Conjugate Gradient Stabilized Method
-  * \details
-  * The Quasi-Minimal Residual Conjugate Gradient Stabilized method is a variant of the
-  * Krylov subspace BiCGStab method for solving sparse (non) symmetric linear systems
-  * \f$Ax=b\f$.
-  * \cite qmrcgstab
+  * \brief Quasi-Minimal Residual Conjugate Gradient Stabilized method.
   *
   * \tparam OperatorType - can be LocalMatrix or GlobalMatrix
   * \tparam VectorType - can be LocalVector or GlobalVector

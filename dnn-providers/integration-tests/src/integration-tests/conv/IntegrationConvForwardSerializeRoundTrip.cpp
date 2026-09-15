@@ -119,16 +119,16 @@ protected:
         GraphTensorBundle gpuBundle;
         GraphTensorBundle refBundle;
         this->generateBundles(graphObj, refBundle, gpuBundle);
-        this->synthesis().setGlobalSeed(convTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(convTestCase.seed);
         auto gpuInit = this->initializeBundle(graphObj, gpuBundle);
         if(!gpuInit.filled)
         {
-            GTEST_SKIP() << "Cannot synthesize GPU inputs: " << gpuInit.reason;
+            GTEST_SKIP() << "Cannot fill GPU inputs: " << gpuInit.reason;
         }
         auto refInit = this->initializeBundle(graphObj, refBundle);
         if(!refInit.filled)
         {
-            GTEST_SKIP() << "Cannot synthesize ref inputs: " << refInit.reason;
+            GTEST_SKIP() << "Cannot fill ref inputs: " << refInit.reason;
         }
 
         // Finalize a plan on the original graph, then compute the reference.
@@ -227,3 +227,18 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationConvFwdSerializeRoundTripFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases4D())));
+
+// 1D layout tests (NCL, NLC)
+using IntegrationConvFwdSerializeRoundTrip1dFp32 = ConvForwardSerializeRoundTrip<float>;
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationConvFwdSerializeRoundTrip1dFp32);
+TEST_P(IntegrationConvFwdSerializeRoundTrip1dFp32, SerializeRoundTripExecutesCorrectly)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationConvFwdSerializeRoundTrip1dFp32,
+    testing::Combine(testing::Values(TensorLayout::NCL, TensorLayout::NLC),
+                     testing::ValuesIn(test_conv_common::getConvTestCases3D())));

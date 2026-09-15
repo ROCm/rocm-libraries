@@ -176,6 +176,16 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
 {
     auto originalGraph = buildGraph();
 
+    auto& originalNodes = originalGraph->getSubNodes();
+    ASSERT_EQ(originalNodes.size(), 1u);
+    auto* originalNode = dynamic_cast<SdpaFwdNode*>(originalNodes[0].get());
+    ASSERT_NE(originalNode, nullptr);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
+    scale->set_value(0.125f);
+    originalNode->attributes.set_attn_scale(scale);
+
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -190,6 +200,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 5u);
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_SCALE_UID), 0u);
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -197,6 +209,11 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
     auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr);
 
+    // Verify the tensor scale is restored and shared with the tensor map.
+    ASSERT_NE(opNode->attributes.get_attn_scale(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_attn_scale()->get_uid(), K_SDPA_TENSOR_SCALE_UID);
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_SCALE_UID].get(), opNode->attributes.get_attn_scale().get());
+    EXPECT_FALSE(opNode->attributes.attn_scale_value.has_value());
     // Verify q tensor sharing
     EXPECT_EQ(opNode->attributes.get_q()->get_uid(), K_SDPA_TENSOR_Q_UID);
     EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID].get(), opNode->attributes.get_q().get());
@@ -271,10 +288,10 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_stride(), toVec(K_SDPA_TENSOR_O_STRIDES));
 }
 
-// Builds an SDPA fprop graph with all optional boolean flags, scalar parameters,
+// Builds an SDPA fprop graph with all compatible optional boolean flags, scalar parameters,
 // and optional tensors set, lowers via the C-API, lifts back, and verifies
 // every attribute survives.
-TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaCApi)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttributesViaCApi)
 {
     auto originalGraph = buildGraph();
 
@@ -283,10 +300,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
     auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
-    // Optional input tensors
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
-    scale->set_value(0.125f);
+    // Compatible optional input tensors; attention scale is set as a scalar below.
 
     auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID)
@@ -327,8 +341,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
     dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
     dropoutScale->set_value(1.0f / (1.0f - 0.1f));
 
-    sdpaNode->attributes.set_attn_scale(scale)
-        .set_bias(attnMask)
+    sdpaNode->attributes.set_bias(attnMask)
         .set_seq_len_q(seqLenQ)
         .set_seq_len_kv(seqLenKv)
         .set_dropout(0.1f, seed, offset)
@@ -367,14 +380,9 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
 
     const auto& attrs = liftedNode->attributes;
 
-    // Optional tensor UIDs and field verification on the node
-    // Value tensors (created via set_value()) are stored as rank-1 scalars: dim={1}, stride={1}.
-    ASSERT_NE(attrs.get_attn_scale(), nullptr);
-    EXPECT_EQ(attrs.get_attn_scale()->get_uid(), K_SDPA_TENSOR_SCALE_UID);
-    EXPECT_EQ(attrs.get_attn_scale()->get_name(), "SCALE");
-    EXPECT_EQ(attrs.get_attn_scale()->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(attrs.get_attn_scale()->get_dim(), (std::vector<int64_t>{1}));
-    EXPECT_EQ(attrs.get_attn_scale()->get_stride(), (std::vector<int64_t>{1}));
+    // Compatible optional tensor UIDs and field verification on the node.
+    // Attention scale is represented by the scalar attribute below.
+    EXPECT_EQ(attrs.get_attn_scale(), nullptr);
 
     ASSERT_NE(attrs.get_bias(), nullptr);
     EXPECT_EQ(attrs.get_bias()->get_uid(), K_SDPA_TENSOR_ATTN_MASK_UID);

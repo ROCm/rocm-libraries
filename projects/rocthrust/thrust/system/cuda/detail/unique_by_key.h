@@ -36,7 +36,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if _CCCL_HAS_CUDA_COMPILER()
+#if _CCCL_HAS_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
 
@@ -44,6 +44,7 @@
 #  include <cub/util_math.cuh>
 
 #  include <thrust/detail/alignment.h>
+#  include <thrust/detail/minmax.h>
 #  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
@@ -122,10 +123,10 @@ struct DispatchUniqueByKey
       num_items,
       binary_pred,
       stream);
-    _CUDA_CUB_RET_IF_FAIL(status);
+    CUDA_CUB_RET_IF_FAIL(status);
 
     status = cub::detail::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
-    _CUDA_CUB_RET_IF_FAIL(status);
+    CUDA_CUB_RET_IF_FAIL(status);
 
     // Return if we're only querying temporary storage requirements
     if (d_temp_storage == nullptr)
@@ -155,11 +156,11 @@ struct DispatchUniqueByKey
       num_items,
       binary_pred,
       stream);
-    _CUDA_CUB_RET_IF_FAIL(status);
+    CUDA_CUB_RET_IF_FAIL(status);
 
     // Get number of selected items
     status = cuda_cub::synchronize(policy);
-    _CUDA_CUB_RET_IF_FAIL(status);
+    CUDA_CUB_RET_IF_FAIL(status);
     OffsetT num_selected = get_value(policy, d_num_selected_out);
 
     result_end = thrust::make_pair(keys_out + num_selected, values_out + num_selected);
@@ -182,7 +183,7 @@ THRUST_RUNTIME_FUNCTION pair<KeyOutputIt, ValOutputIt> unique_by_key(
   ValOutputIt values_result,
   BinaryPred binary_pred)
 {
-  using size_type = thrust::detail::it_difference_t<KeyInputIt>;
+  using size_type = typename iterator_traits<KeyInputIt>::difference_type;
 
   size_type num_items = static_cast<size_type>(thrust::distance(keys_first, keys_last));
   pair<KeyOutputIt, ValOutputIt> result_end{};
@@ -273,7 +274,7 @@ pair<KeyOutputIt, ValOutputIt> _CCCL_HOST_DEVICE unique_by_key_copy(
   KeyOutputIt keys_result,
   ValOutputIt values_result)
 {
-  using key_type = thrust::detail::it_value_t<KeyInputIt>;
+  using key_type = typename iterator_traits<KeyInputIt>::value_type;
   return cuda_cub::unique_by_key_copy(
     policy, keys_first, keys_last, values_first, keys_result, values_result, equal_to<key_type>());
 }
@@ -298,7 +299,7 @@ template <class Derived, class KeyInputIt, class ValInputIt>
 pair<KeyInputIt, ValInputIt> _CCCL_HOST_DEVICE
 unique_by_key(execution_policy<Derived>& policy, KeyInputIt keys_first, KeyInputIt keys_last, ValInputIt values_first)
 {
-  using key_type = thrust::detail::it_value_t<KeyInputIt>;
+  using key_type = typename iterator_traits<KeyInputIt>::value_type;
   return cuda_cub::unique_by_key(policy, keys_first, keys_last, values_first, equal_to<key_type>());
 }
 

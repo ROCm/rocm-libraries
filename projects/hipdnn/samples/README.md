@@ -4,7 +4,8 @@
 
 1. **Prerequisites:**
 
-   - If you're new to hipDNN, see the [Consumer Quick Start](../docs/ConsumerQuickStart.md) for project setup basics.
+   - A hipDNN installation that CMake can discover (via `find_package`), plus an engine plugin for the samples to load at runtime. If you are building hipDNN from source, see [Building the Samples](../docs/Building.md#building-the-samples) for how to build the samples against your build (the superbuild sets up hipDNN and the plugins together).
+   - If you're new to hipDNN, see [Add hipDNN to your project](https://rocm.docs.amd.com/projects/hipdnn/en/latest/install/add-project.html) for project setup basics.
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja

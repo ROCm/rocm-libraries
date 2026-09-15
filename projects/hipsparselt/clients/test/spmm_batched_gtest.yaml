@@ -60,7 +60,7 @@ Tests:
 - name: spmm_batched_small
   category: quick
   function:
-    - spmm_batched: *hpa_half_precision
+    - spmm_batched: *real_precisions_2b
   matrix_size: *batched_small_matrix_size_range
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
@@ -70,7 +70,8 @@ Tests:
   alpha_vector_scaling: [true]
   factor_dim: [0, 1]
   gate_residual: [true]
-  gpu_arch: '942'
+  gate_type: [f16_r, bf16_r]
+  gpu_arch: '9(42|50)'
 
 - name: spmm_batched_medium
   category: pre_checkin

@@ -10,6 +10,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -19,13 +20,14 @@
 // NOLINTBEGIN(readability-identifier-naming)
 
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 namespace
 {
 
 std::filesystem::path goldenDataRoot()
 {
-    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration_test_bundles";
+    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration-test-bundles";
 }
 
 std::filesystem::path batchNormSmallBundle()
@@ -189,9 +191,7 @@ TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
 // ---------------------------------------------------------------------------
 TEST(TestVerificationRouting, BundleDiscoveryFindsOnlyAuthoredBundleData)
 {
-    auto path = std::filesystem::temp_directory_path() / "golden_routing_test";
-    std::filesystem::remove_all(path);
-    const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
+    const auto tempDir = claimScratchDirectory("golden_routing");
 
     writeMinimalBatchNormBundle(tempDir.path() / "BatchnormInference" / "nchw" / "fp32" / "Small",
                                 "Small");

@@ -92,6 +92,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
           # - Exact: [256, 256, 1, 32] # classic format
+          - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
@@ -164,6 +165,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
           # - Exact: [256, 256, 1, 32] # classic format
+          - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
@@ -236,6 +238,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
           # - Exact: [256, 256, 1, 32] # classic format
+          - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:
@@ -308,6 +311,7 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 16] # classic format
           # - Exact: [256, 256, 1, 32] # classic format
+          - Exact: [1024, 1024, 1, 1024]
         - BiasTypeArgs: ['s']
         - FactorDimArgs: [0]
         - ActivationArgs:

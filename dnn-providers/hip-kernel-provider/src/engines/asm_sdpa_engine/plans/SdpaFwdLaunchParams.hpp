@@ -20,14 +20,10 @@ struct SdpaFwdLaunchParams
     uint32_t tuneOpt;
 };
 
-// Pure function: compute forward launch parameters from SdpaFwdParams.
-//
-// Ports AITER's grid math including `tg_div = (mask_type != 0) ? 2 : 1`
-// so that causal kernels launch half the workgroups (the other half are
-// redundant because the causal mask zeroes them out).
-//
-// The hd192x128/gfx942 path swaps gridDimX/Y, uses blockDimX=256,
-// and forces tuneOpt=0, matching AITER behaviour.
+// Ports AITER's forward grid math. Causal masks halve the Q-tile grid via
+// ceiling division; the kernel load-balances the full Q range onto the
+// surviving workgroups. The hd192x128/gfx942 path swaps gridDimX/Y, uses
+// blockDimX=256, and forces tuneOpt=0.
 inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 {
     SdpaFwdLaunchParams lp{};
@@ -57,12 +53,12 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     // gridDimX = ceil(seqLenQ / tileSizeQo)
     unsigned int gridDimX = (params.seqLenQ + params.tileSizeQo - 1U) / params.tileSizeQo;
 
-    // tg_div: halve gridDimX when masked (AITER: tg_div = mask_type != 0 ? 2 : 1).
-    // TODO: Once group mode is supported, skip halving when
-    // is_group_mode && hdim_q == 192 && hdim_v == 128 && gfx942 (AITER sets tg_div = 1).
-    if(masked)
+    // Halve the causal Q-tile grid; ceiling division keeps a single tile at 1.
+    // hd192x128/gfx942 is excluded (its swap path never halves).
+    // TODO: port AITER's group-mode gdz remap when group mode lands.
+    if(masked && !isHd192x128Gfx942)
     {
-        gridDimX /= 2;
+        gridDimX = (gridDimX + 1U) / 2U;
     }
 
     unsigned int gridDimY = params.numHeadsQ;

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -73,7 +73,7 @@ struct ExtendedFloatBoolOp
 };
 
 /**
- * \brief ExtendedFloatBinOp general functor - Because test_utils::plus{}, Difference(), Division(),
+ * \brief ExtendedFloatBinOp general functor - Because hipcub::Sum(), Difference(), Division(),
  * Max() and Min() don't work with input types <test_utils::half, test_utils::half>,
  * <test_utils::bfloat16, test_utils::bfloat16> and
  * <test_utils::half, float> and <test_utils::bfloat16, float>.
@@ -155,13 +155,13 @@ struct ArgMax
 {
     template<typename OffsetT,
              class T,
-             std::enable_if_t<std::is_same_v<T, test_utils::half>
-                                  || std::is_same_v<T, test_utils::bfloat16>,
+             std::enable_if_t<std::is_same<T, test_utils::half>::value
+                                  || std::is_same<T, test_utils::bfloat16>::value,
                               bool>
              = true>
-    HIPCUB_HOST_DEVICE __forceinline__
-    hipcub::KeyValuePair<OffsetT, T> operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
-                                                const hipcub::KeyValuePair<OffsetT, T>& b) const
+    HIPCUB_HOST_DEVICE __forceinline__ hipcub::KeyValuePair<OffsetT, T>
+                                       operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
+                   const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
         const hipcub::KeyValuePair<OffsetT, float> native_a(a.key, a.value);
         const hipcub::KeyValuePair<OffsetT, float> native_b(b.key, b.value);
@@ -179,13 +179,13 @@ struct ArgMin
 {
     template<typename OffsetT,
              class T,
-             std::enable_if_t<std::is_same_v<T, test_utils::half>
-                                  || std::is_same_v<T, test_utils::bfloat16>,
+             std::enable_if_t<std::is_same<T, test_utils::half>::value
+                                  || std::is_same<T, test_utils::bfloat16>::value,
                               bool>
              = true>
-    HIPCUB_HOST_DEVICE __forceinline__
-    hipcub::KeyValuePair<OffsetT, T> operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
-                                                const hipcub::KeyValuePair<OffsetT, T>& b) const
+    HIPCUB_HOST_DEVICE __forceinline__ hipcub::KeyValuePair<OffsetT, T>
+                                       operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
+                   const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
         const hipcub::KeyValuePair<OffsetT, float> native_a(a.key, a.value);
         const hipcub::KeyValuePair<OffsetT, float> native_b(b.key, b.value);
@@ -279,50 +279,50 @@ struct AlgebraicSelector<OpT, test_utils::bfloat16, U>
 template<typename T, typename U>
 struct MaxSelector
 {
-    using type = test_utils::maximum;
+    using type = hipcub::Max;
 };
 
 template<typename T, typename U>
 struct MaxSelector<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
 {
-    using type = CustomTestOp<test_utils::maximum>;
+    using type = CustomTestOp<hipcub::Max>;
 };
 
 template<typename U>
 struct MaxSelector<test_utils::half, U>
 {
-    using type = ExtendedFloatBinOp<test_utils::maximum>;
+    using type = ExtendedFloatBinOp<hipcub::Max>;
 };
 
 template<typename U>
 struct MaxSelector<test_utils::bfloat16, U>
 {
-    using type = ExtendedFloatBinOp<test_utils::maximum>;
+    using type = ExtendedFloatBinOp<hipcub::Max>;
 };
 
 // Min functor selector.
 template<typename T, typename U>
 struct MinSelector
 {
-    using type = test_utils::minimum;
+    using type = hipcub::Min;
 };
 
 template<typename T, typename U>
 struct MinSelector<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
 {
-    using type = CustomTestOp<test_utils::minimum>;
+    using type = CustomTestOp<hipcub::Min>;
 };
 
 template<typename U>
 struct MinSelector<test_utils::half, U>
 {
-    using type = ExtendedFloatBinOp<test_utils::minimum>;
+    using type = ExtendedFloatBinOp<hipcub::Min>;
 };
 
 template<typename U>
 struct MinSelector<test_utils::bfloat16, U>
 {
-    using type = ExtendedFloatBinOp<test_utils::minimum>;
+    using type = ExtendedFloatBinOp<hipcub::Min>;
 };
 
 // ArgMax functor selector

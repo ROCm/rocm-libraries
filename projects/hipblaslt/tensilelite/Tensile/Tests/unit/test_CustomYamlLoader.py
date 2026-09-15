@@ -39,6 +39,7 @@ from Tensile.CustomYamlLoader import (
     load_yaml_sequence_item,
     load_yaml_dict_item,
     load_logic_gfx_arch,
+    load_logic_schedule_name,
 )
 
 pytestmark = pytest.mark.unit
@@ -226,3 +227,34 @@ class TestLoadLogicGfxArch:
     def test_map_root_falls_back_to_architecture_name(self, tmp_path):
         text = "ArchitectureName: gfx1100\nOther: 1\n"
         assert load_logic_gfx_arch(_write_yaml(tmp_path, text)) == "gfx1100"
+
+
+class TestLoadLogicScheduleName:
+    # ScheduleName is the second element (index 1) of a logic file, and it is
+    # the only field that separates a gfx1250 ASIC revision's logic from the
+    # base architecture's: both declare ArchitectureName: gfx1250, because the
+    # two revisions share one compiler target and one ISA.
+    def test_sequence_root_returns_the_schedule_name(self, tmp_path):
+        # Distinct from the architecture at index 2, so an off-by-one read is
+        # not masked by the two fields agreeing, as they do for gfx1250.
+        text = "- {MinimumRequiredVersion: 4.33.0}\n- Aldebaran\n- gfx90a\n"
+        assert load_logic_schedule_name(_write_yaml(tmp_path, text)) == "Aldebaran"
+
+    def test_asic_revision_schedule_name_is_read_verbatim(self, tmp_path):
+        # The overlay files that carry v0-only tuning differ from the base
+        # architecture's here and nowhere else.
+        text = "- {MinimumRequiredVersion: 5.0.0}\n- gfx1250v0\n- gfx1250\n"
+        assert load_logic_schedule_name(_write_yaml(tmp_path, text)) == "gfx1250v0"
+        assert load_logic_gfx_arch(_write_yaml(tmp_path, text)) == "gfx1250"
+
+    def test_sequence_too_short_returns_none(self, tmp_path):
+        text = "- {MinimumRequiredVersion: 5.0.0}\n"
+        assert load_logic_schedule_name(_write_yaml(tmp_path, text)) is None
+
+    def test_map_root_falls_back_to_schedule_name_key(self, tmp_path):
+        text = "ScheduleName: gfx1250v0\nArchitectureName: gfx1250\n"
+        assert load_logic_schedule_name(_write_yaml(tmp_path, text)) == "gfx1250v0"
+
+    def test_map_root_without_the_key_returns_none(self, tmp_path):
+        text = "ArchitectureName: gfx1250\n"
+        assert load_logic_schedule_name(_write_yaml(tmp_path, text)) is None

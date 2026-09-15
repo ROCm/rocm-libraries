@@ -36,7 +36,11 @@ enum class {{ fe_type }}
 # — toBackend converter (frontend -> backend C-API)
 # ============================================================
 
+{% if df.mode_converter_returns_optional %}
 inline std::optional<{{ df.test_c_type }}> {{ df.backend_converter }}(const {{ fe_type }}& type)
+{% else %}
+inline {{ df.test_c_type }} {{ df.backend_converter }}(const {{ fe_type }}& type)
+{% endif %}
 {
     switch(type)
     {
@@ -45,7 +49,11 @@ inline std::optional<{{ df.test_c_type }}> {{ df.backend_converter }}(const {{ f
         return {{ df.enum_def.backend_prefix }}{{ v.name }};
 {% endfor %}
     default:
+{% if df.mode_converter_returns_optional %}
         return std::nullopt;
+{% else %}
+        return {{ df.enum_def.backend_prefix }}{{ df.enum_def.non_sentinel_values[0].name }};
+{% endif %}
     }
 }
 

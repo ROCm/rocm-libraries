@@ -238,6 +238,18 @@ struct HwInstDesc {
     // after this instruction is issued (used for matrix instructions).
     uint16_t coIssueWindow = 0;
 
+    // cycles of the latency window the hardware occupies outright: nothing of any pipe
+    // (VALU, SALU, memory) can be issued into them. Distinct from coIssueWindow, which
+    // only gates VALU. Non-zero for the VOP3PX2/VOP3PX3 scale pairs, whose window
+    // carries an LD_SCALE sub-issue alongside the WMMA.
+    //
+    // Anchored at the END of the window, not the start: bit 0 = last cycle, bit 1 =
+    // second-to-last, and so on. The anchor matters because a matrix instruction's
+    // latency varies with its operand formats (see matrixFmtCostOverrides -- the same
+    // v_wmma_scale_* runs 16 or 8 cycles on gfx1250v0), and an end-anchored mask tracks
+    // every one of those without a per-format override of its own.
+    uint16_t blockedScaleMask = 0;
+
     // mnemonic string for the instruction.
     const char* mnemonic = nullptr;
 
@@ -280,6 +292,29 @@ struct HwInstDesc {
     /// Operand field descriptions for the promoted encoding.
     /// Empty when no promoted encoding exists.
     span<const OperandFieldDesc> promotedFields;
+
+    /// Matrix-format-keyed cost override: when the instruction's matrix data
+    /// formats match (fmtA, fmtB), use (issue, latency) instead of the default.
+    /// fmtA/fmtB values match stinkytofu::MatrixFmt (0xFF = NONE/any).
+    struct MatrixFmtCostOverride {
+        uint8_t fmtA = 0xFF;
+        uint8_t fmtB = 0xFF;
+        uint16_t issue = 0;
+        uint16_t latency = 0;
+    };
+
+    /// Matrix-format-keyed co-issue-window override: when the instruction's
+    /// matrix data formats match (fmtA, fmtB), use coIssueWindow instead of the
+    /// default. fmtA/fmtB values match stinkytofu::MatrixFmt (0xFF = NONE/any).
+    struct MatrixFmtCoIssueOverride {
+        uint8_t fmtA = 0xFF;
+        uint8_t fmtB = 0xFF;
+        uint16_t coIssueWindow = 0;
+    };
+
+    /// Matrix-format-keyed overrides for this instruction. Empty when none.
+    span<const MatrixFmtCostOverride> matrixFmtCostOverrides;
+    span<const MatrixFmtCoIssueOverride> matrixFmtCoIssueOverrides;
 
     bool has(InstFlag f) const {
         return flags.test((size_t)f);

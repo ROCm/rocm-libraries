@@ -370,3 +370,43 @@ TEST(TestDefaultConfigSpatialMultiple, NoConfigAssignedOnFailure)
     defaultConfigSpatialMultiple(1, 1, 1, 1, false, true, 80, 12345, config);
     EXPECT_EQ(config.variant, -1);
 }
+
+// ====================================================================================================
+// The multi-workgroup reduction path stashes intermediate per-channel results into the
+// dx output buffer. The stash field count is how many fields it needs there: 4 when the
+// backward pass computes stats (mean, variance, dscale, dbias), 2 when they are supplied
+// (dscale, dbias only). The applicability gate selects that path only when that many
+// fields fit in dx. The shape {2,3,1,1} NHWC fp32 sits at the boundary: its last block
+// holds 2 stash fields but not 4. These CPU tests pin that boundary, so the gate keeps
+// rejecting the path for any field count whose stash would not fit in dx.
+// ====================================================================================================
+
+TEST(TestBatchnormBwdStashFix, NotSavedValueRejectsAsanShapeFromVariant2)
+{
+    KernelConfig config;
+
+    // dx at {2,3,1,1} holds 2 stash fields, not 4, so a 4-field request (what a
+    // stats-computing backward pass needs) makes the gate reject the reduction path.
+    defaultConfigSpatialMultiple(2, 3, 1, 1, true, true, 1, 4, config);
+    EXPECT_NE(config.variant, 2);
+}
+
+TEST(TestBatchnormBwdStashFix, OldValueAcceptedAsanShapeIntoVariant2)
+{
+    KernelConfig config;
+
+    // A 2-field request fits dx at this shape, so the gate selects the reduction path.
+    // This is the boundary the field count must clear: 2 fits where 4 does not.
+    defaultConfigSpatialMultiple(2, 3, 1, 1, true, true, 1, 2, config);
+    EXPECT_EQ(config.variant, 2);
+}
+
+TEST(TestBatchnormBwdStashFix, ApplicabilityGateFlipsOnStashValues)
+{
+    // The gate the two tests above reach indirectly. At {2,3,1,1} NHWC fp32 the config
+    // resolves to ylocalsize=256, zlocalsize=1, nelements=2, whose last block holds 2
+    // stash fields but not 4, so the gate accepts a 2-field request and rejects a
+    // 4-field one.
+    EXPECT_TRUE(isSpatialMultipleApplicable(2, 3, 1, 1, true, true, 1, 2, 256, 1, 2));
+    EXPECT_FALSE(isSpatialMultipleApplicable(2, 3, 1, 1, true, true, 1, 4, 256, 1, 2));
+}

@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from typing import Optional, List
 from pathlib import Path
 from github_cli_client import GitHubCLIClient
@@ -192,10 +193,85 @@ def _set_authenticated_remote(repo_path: Path, repo_url: str) -> None:
     _run_git(["remote", "set-url", "origin", remote_url], cwd=repo_path)
 
 
-def _push_changes(repo_path: Path, branch: str) -> None:
-    """Push the commit to origin of branch."""
-    _run_git(["push", "origin", branch], cwd=repo_path)
-    logger.debug(f"Pushed changes from {repo_path} to origin")
+def _push_changes(repo_path: Path, branch: str, *, max_attempts: int = 3) -> None:
+    """Push the commit to origin/<branch> with retry and post-push verification.
+
+    Retry strategy (up to max_attempts total attempts):
+    - Non-fast-forward rejection: fetch + rebase, then retry.
+    - Transient / 5xx error: exponential backoff, then retry.
+    - Auth / permission error: fail immediately (no retry).
+
+    After a successful push, verifies via ``git ls-remote`` that the remote
+    HEAD advanced to the local commit SHA.
+    """
+    # Capture the local commit SHA before any push attempt.
+    local_sha = _run_git(["rev-parse", "HEAD"], cwd=repo_path)
+
+    for attempt in range(max_attempts):
+        try:
+            _run_git(["push", "origin", branch], cwd=repo_path)
+            break  # push accepted by remote — proceed to verification
+        except RuntimeError as exc:
+            err = str(exc)
+            is_last = attempt == max_attempts - 1
+
+            if "non-fast-forward" in err or "fetch first" in err:
+                if is_last:
+                    raise RuntimeError(
+                        f"Push rejected (non-fast-forward) after {attempt + 1} attempt(s)."
+                    ) from exc
+                logger.warning(
+                    f"Push rejected non-fast-forward (attempt {attempt + 1}/{max_attempts}); "
+                    f"fetching and rebasing before retry."
+                )
+                _run_git(["fetch", "origin", branch], cwd=repo_path)
+                _run_git(["rebase", f"origin/{branch}"], cwd=repo_path)
+                # Re-capture SHA: rebase rewrites the commit, producing a new SHA.
+                local_sha = _run_git(["rev-parse", "HEAD"], cwd=repo_path)
+
+            # Indicators of transient GitHub infrastructure errors
+            # (matched against git/GitHub CLI stderr output).
+            elif any(
+                indicator in err
+                for indicator in (
+                    "HTTP 500",
+                    "HTTP 502",
+                    "HTTP 503",
+                    "HTTP 504",
+                    "Internal Server Error",
+                    "unavailable",
+                )
+            ):
+                if is_last:
+                    raise RuntimeError(
+                        f"Push failed with transient error after {attempt + 1} attempt(s): {err}"
+                    ) from exc
+                delay = 2 ** (attempt + 1)  # 2, 4, 8 … seconds
+                logger.warning(
+                    f"Push failed with transient error (attempt {attempt + 1}/{max_attempts}); "
+                    f"retrying in {delay}s."
+                )
+                time.sleep(delay)
+
+            else:
+                # Auth failure, permission denied, etc. — fail immediately, no retry.
+                raise
+
+    # Verify the remote branch actually advanced to our commit.
+    ls_output = _run_git(["ls-remote", "origin", f"refs/heads/{branch}"], cwd=repo_path)
+    parts = ls_output.split()
+    if not parts:
+        raise RuntimeError(
+            f"Post-push verification failed: ls-remote returned no output for "
+            f"refs/heads/{branch}. The branch may not exist on the remote."
+        )
+    remote_sha = parts[0]
+    if remote_sha != local_sha:
+        raise RuntimeError(
+            f"Post-push verification failed: remote {branch} is at {remote_sha!r} "
+            f"but expected {local_sha!r}."
+        )
+    logger.info(f"Pushed and verified {local_sha[:7]} → origin/{branch}")
 
 
 def generate_patch(prefix: str, merge_sha: str, patch_path: Path) -> None:

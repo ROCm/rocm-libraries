@@ -54,8 +54,6 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #include <hip/hip_runtime_api.h>
 #include <functional>
 
-#define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
-
 // Use values which are distinctively greater then miopenStatus_t,
 // so that these can be ORed with any miopen status code
 // without loss of information.
@@ -188,8 +186,7 @@ class GpumemTensor
 {
     std::unique_ptr<GPUMem> dev;
     tensor<Tgpu> host;
-    bool is_gpualloc         = false;
-    bool init_gpu_output_nan = false;
+    bool is_gpualloc = false;
 
 public:
     void SetGpuallocMode(bool v) { is_gpualloc = v; }
@@ -479,11 +476,8 @@ public:
     Driver()
     {
         data_type = miopenFloat;
-        hipStream_t s;
-        (void)hipStreamCreate(&s);
-        miopenCreateWithStream(&handle, s);
-
-        miopenGetStream(handle, &q);
+        (void)hipStreamCreate(&q);
+        miopenCreateWithStream(&handle, q);
     }
 
     miopenHandle_t GetHandle() { return handle; }
@@ -502,7 +496,11 @@ public:
     int ExecuteKernel();
     void FinalizeKernel();
     float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
-    virtual ~Driver() { miopenDestroy(handle); }
+    virtual ~Driver()
+    {
+        miopenDestroy(handle);
+        (void)hipStreamDestroy(q);
+    }
 
     // TODO: add timing APIs
     virtual int AddCmdLineArgs()                         = 0;

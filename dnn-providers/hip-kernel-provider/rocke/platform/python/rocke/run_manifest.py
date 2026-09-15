@@ -19,16 +19,13 @@ compatibility target, but this module is the maintained runtime path.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 from .runtime.hip_module import Runtime
-from .instances.common.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_fp16_manifest_problem,
-)
-from .instances.common.manifest_runner.conv import run_conv_manifest_problem
 from .instances.common.manifest_runner.gemm import (
     run_batched_gemm_manifest_problem,
     run_gemm_iu8_manifest_problem,
@@ -38,9 +35,6 @@ from .instances.common.manifest_runner.matmul_nbits import (
     run_matmul_nbits_manifest_problem,
 )
 from .instances.common.manifest_runner.simple_ops import run_simple_op_manifest_problem
-from .instances.gfx1151.deep_fused_conv_pool import (
-    run_deep_fused_conv_pool_i8i4_manifest_problem,
-)
 
 # Try to import torch-based launcher, fall back to direct HIP timing if unavailable
 try:
@@ -59,6 +53,126 @@ class RunSummary:
     max_abs_diff: float = 0.0
     bad_count: int = 0
     total: int = 0
+
+
+# A problem builder turns (manifest, shape, verify) into the launch recipe
+# ``(make_args, grid, block, flop, bytes_xfer, check)``. See
+# :mod:`rocke.instances.common.manifest_runner.gemm` for the reference shape.
+ProblemBuilder = Callable[[dict, Optional[Tuple[int, int, int]], bool], tuple]
+
+_RUNNERS: Dict[str, ProblemBuilder] = {}
+
+
+def register_manifest_runner(kind: str, builder: ProblemBuilder) -> None:
+    """Teach the runner how to execute one manifest ``kind``.
+
+    A registry rather than a branch chain because the families that own the
+    knowledge do not all live in this package: ``library/`` holds the attention
+    and MoE builders, and it cannot add a case to a function in the shipped
+    platform wheel. Registering from the owning module keeps the adapter beside
+    the code that knows the buffer layout.
+    """
+    existing = _RUNNERS.get(kind)
+    if existing is not None and existing is not builder:
+        raise ValueError(
+            f"manifest kind {kind!r} is already handled by "
+            f"{existing.__module__}.{existing.__qualname__}"
+        )
+    _RUNNERS[kind] = builder
+
+
+def registered_manifest_kinds() -> Tuple[str, ...]:
+    """Every manifest kind this process can run, for error messages and CI.
+
+    Includes library-owned kinds from ``_LIBRARY_RUNNER_MODULES`` even before
+    their module has been lazily imported, so this stays accurate regardless
+    of whether ``resolve_manifest_runner`` has already run for them.
+    """
+    return tuple(sorted(set(_RUNNERS) | set(_LIBRARY_RUNNER_MODULES)))
+
+
+# Library-owned manifest runners: imported lazily on first use so the platform
+# package stays importable without the library on sys.path. The module is
+# imported via importlib (no top-level platform→library import) and the runner
+# function is looked up by name. This extends the existing runner_module
+# mechanism from manifest JSON to built-in library families.
+_LIBRARY_RUNNER_MODULES: Dict[str, Tuple[str, str]] = {
+    "deep_fused_conv_pool_fp16": (
+        "kernels.common.deep_fused_conv_pool",
+        "run_deep_fused_conv_pool_fp16_manifest_problem",
+    ),
+    "deep_fused_conv_pool_i8i4": (
+        "kernels.gfx1151.deep_fused_conv_pool",
+        "run_deep_fused_conv_pool_i8i4_manifest_problem",
+    ),
+    "conv_fp16": (
+        "kernels.common.manifest_runner.conv",
+        "run_conv_manifest_problem",
+    ),
+    "conv_bf16": (
+        "kernels.common.manifest_runner.conv",
+        "run_conv_manifest_problem",
+    ),
+    "conv_fp32": (
+        "kernels.common.manifest_runner.conv",
+        "run_conv_manifest_problem",
+    ),
+}
+
+
+def resolve_manifest_runner(manifest: dict) -> ProblemBuilder:
+    """Return the problem builder for ``manifest['kind']``.
+
+    Built-in kinds are registered when this module is imported. A family
+    whose pack/check lives outside this package (library builders, an
+    out-of-tree adapter) sets ``manifest['runner_module']`` to an import
+    path; that module is imported here so it can call
+    :func:`register_manifest_runner`. The import is skipped when the kind
+    is already registered, so a GEMM manifest is unaffected.
+
+    Library-owned kinds (e.g. deep_fused_conv_pool_*) are resolved lazily
+    via :data:`_LIBRARY_RUNNER_MODULES` — the library module is imported on
+    first use so a standalone-installed rocke wheel stays importable without
+    the library on sys.path.
+    """
+    kind = str(manifest["kind"])
+    module_name = manifest.get("runner_module")
+    if kind not in _RUNNERS and module_name:
+        importlib.import_module(str(module_name))
+    if kind not in _RUNNERS and kind in _LIBRARY_RUNNER_MODULES:
+        mod_path, fn_name = _LIBRARY_RUNNER_MODULES[kind]
+        mod = importlib.import_module(mod_path)
+        register_manifest_runner(kind, getattr(mod, fn_name))
+    try:
+        return _RUNNERS[kind]
+    except KeyError:
+        raise ValueError(
+            f"unsupported manifest kind {kind!r}; registered kinds are "
+            f"{list(registered_manifest_kinds())}. A kind whose adapter lives "
+            "outside this package must import that module first, or set "
+            "manifest 'runner_module' to that import path."
+        ) from None
+
+
+def _register_builtin_runners() -> None:
+    for kind in (
+        "elementwise_fp16",
+        "reduce_fp16",
+        "layernorm_fp16",
+        "rmsnorm_fp16",
+        "transpose_fp16",
+    ):
+        register_manifest_runner(kind, run_simple_op_manifest_problem)
+    register_manifest_runner("gemm_fp16", run_gemm_manifest_problem)
+    register_manifest_runner("gemm_iu8", run_gemm_iu8_manifest_problem)
+    register_manifest_runner("batched_gemm_fp16", run_batched_gemm_manifest_problem)
+    register_manifest_runner("matmul_nbits_fp16", run_matmul_nbits_manifest_problem)
+    # deep_fused_conv_pool_* and conv_{fp16,bf16,fp32} runners live in the
+    # library tree and are resolved lazily via _LIBRARY_RUNNER_MODULES in
+    # resolve_manifest_runner().
+
+
+_register_builtin_runners()
 
 
 def _parse_shape(s: Optional[str]) -> Optional[Tuple[int, int, int]]:
@@ -124,50 +238,14 @@ def run_manifest(
     verify: bool = False,
 ) -> RunSummary:
     manifest, blob, _resolved = _load(manifest_path, hsaco_path)
+    # Resolve the adapter before touching the device: an unrunnable kind is a
+    # property of the manifest, and saying so should not require a GPU.
+    builder = resolve_manifest_runner(manifest)
+
     rt = Runtime()
     module = rt.load_module(blob)
     fn = module.get_function(str(manifest["kernel_name"]))
-    kind = str(manifest["kind"])
-    if kind == "gemm_fp16":
-        make_args, grid, block, flop, bytes_xfer, check = run_gemm_manifest_problem(
-            manifest, shape, verify
-        )
-    elif kind == "gemm_iu8":
-        make_args, grid, block, flop, bytes_xfer, check = run_gemm_iu8_manifest_problem(
-            manifest, shape, verify
-        )
-    elif kind == "batched_gemm_fp16":
-        make_args, grid, block, flop, bytes_xfer, check = (
-            run_batched_gemm_manifest_problem(manifest, shape, verify)
-        )
-    elif kind in ("conv_fp16", "conv_bf16", "conv_fp32"):
-        make_args, grid, block, flop, bytes_xfer, check = run_conv_manifest_problem(
-            manifest, shape, verify
-        )
-    elif kind == "matmul_nbits_fp16":
-        make_args, grid, block, flop, bytes_xfer, check = (
-            run_matmul_nbits_manifest_problem(manifest, shape, verify)
-        )
-    elif kind == "deep_fused_conv_pool_i8i4":
-        make_args, grid, block, flop, bytes_xfer, check = (
-            run_deep_fused_conv_pool_i8i4_manifest_problem(manifest, shape, verify)
-        )
-    elif kind == "deep_fused_conv_pool_fp16":
-        make_args, grid, block, flop, bytes_xfer, check = (
-            run_deep_fused_conv_pool_fp16_manifest_problem(manifest, shape, verify)
-        )
-    elif kind in (
-        "elementwise_fp16",
-        "reduce_fp16",
-        "layernorm_fp16",
-        "rmsnorm_fp16",
-        "transpose_fp16",
-    ):
-        make_args, grid, block, flop, bytes_xfer, check = (
-            run_simple_op_manifest_problem(manifest, shape, verify)
-        )
-    else:
-        raise ValueError(f"unsupported manifest kind {kind!r}")
+    make_args, grid, block, flop, bytes_xfer, check = builder(manifest, shape, verify)
 
     args, ptrs = make_args(rt)
     warmup = int(manifest.get("warmup_iters", 5))

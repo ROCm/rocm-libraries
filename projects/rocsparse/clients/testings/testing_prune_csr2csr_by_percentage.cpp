@@ -152,9 +152,11 @@ void testing_prune_csr2csr_by_percentage(const Arguments& arg)
     rocsparse_matrix_factory<T> matrix_factory(arg);
     rocsparse_int               M          = arg.M;
     rocsparse_int               N          = arg.N;
-    T                           percentage = static_cast<T>(arg.percentage);
     rocsparse_index_base        csr_base_A = arg.baseA;
     rocsparse_index_base        csr_base_C = arg.baseB;
+
+    floating_data_t<T> percentage = arg.get_percentage<T>();
+
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 

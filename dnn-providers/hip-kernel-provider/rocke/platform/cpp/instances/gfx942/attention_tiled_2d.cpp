@@ -119,6 +119,8 @@ rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
     s.use_conflict_free_v_ck_vlds = true;
     s.use_k_single_buffer = false;
     s.use_k_sliced_ring = false;
+    s.ring_depth = 3;
+    s.k_slice_hd = 32;
     s.use_k_sliced_ldsseq = false;
     s.use_iglp_opt = false;
     s.use_qk_pv_sched_group_barrier = false;
@@ -403,22 +405,80 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
     }
     if(s->use_k_sliced_ring)
     {
-        /* The 32-wide K slices need HD %% 32 == 0; the ring is byte-size driven
-         * so fp16 and bf16 (both 2-byte) are legal. Mirrors the Python gate. */
+        /* The ring is byte-size driven, so fp16 and bf16 (both 2-byte) are legal.
+         * Mirrors the Python gate. */
         if(!(rocke_streq(s->dtype, "fp16") || rocke_streq(s->dtype, "bf16"))
            || !(s->head_size == 64 || s->head_size == 128) || (s->head_size % 32 != 0)
            || !(t_eff == 64 || t_eff == 128))
         {
             rocke_attn2d_set_err(b,
                                  ROCKE_ERR_VALUE,
-                                 "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
-                                 "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}");
+                                 "use_k_sliced_ring requires fp16/bf16, head_size in {64,128}, "
+                                 "T in {64,128}");
+            return false;
+        }
+        if(!(s->ring_depth == 2 || s->ring_depth == 3))
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "ring_depth must be 2 or 3 when use_k_sliced_ring is set "
+                                 "(got %d)",
+                                 s->ring_depth);
+            return false;
+        }
+        /* The head dim must split into whole slices, or the last slice would read
+         * past the K_lds row. */
+        if(s->k_slice_hd <= 0 || (s->head_size % s->k_slice_hd) != 0)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "k_slice_hd must divide head_size=%d (got %d)",
+                                 s->head_size,
+                                 s->k_slice_hd);
+            return false;
+        }
+        /* The ring runs on the 32x32x8 path, so the QK atom consumes 8 head-dim
+         * elements per step and the schedule takes k_steps_per_group = k_slice_hd
+         * / QK_K_STEP. Below one full step that floors to zero and the slice emits
+         * no MFMA at all, which is why 8 is the floor rather than merely the
+         * narrowest useful width. */
+        if((s->k_slice_hd % 8) != 0)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "k_slice_hd must be a multiple of the QK k-step 8 (got %d)",
+                                 s->k_slice_hd);
+            return false;
+        }
+        /* A single group is a ring with nothing to pipeline: the prologue's second
+         * issue and the in-loop prefetch are both skipped, yet ring_depth slots are
+         * still allocated and only slot 0 is ever touched. Reject it rather than
+         * reserve dead LDS. */
+        if((s->head_size / s->k_slice_hd) < 2)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "k_slice_hd=%d gives k_groups=%d at head_size=%d; the ring "
+                                 "needs at least 2 slices",
+                                 s->k_slice_hd,
+                                 s->head_size / s->k_slice_hd,
+                                 s->head_size);
             return false;
         }
     }
     if(s->use_k_sliced_ldsseq && !s->use_k_sliced_ring)
     {
         rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "use_k_sliced_ldsseq requires use_k_sliced_ring");
+        return false;
+    }
+    if(s->use_k_sliced_ldsseq && s->ring_depth != 3)
+    {
+        /* The CK LdsSeq slot maps are 3-slot layouts; they are undefined for the
+         * depth-2 ring (only slots {0, 1} exist). */
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "use_k_sliced_ldsseq requires ring_depth == 3 (got %d)",
+                             s->ring_depth);
         return false;
     }
 
