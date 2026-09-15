@@ -9,7 +9,7 @@ helper predicates (``getMIOutputInfo``, ``setGlobalLoadTileDimClassic``,
 ``isDirectToVgprDoable``) across parameter combinations that the existing
 SolutionDerivation / SolutionDerivationSweep suites miss.
 
-Target miss ranges in Tensile/SolutionStructs/Solution.py:
+Target miss ranges in tensilelite/SolutionStructs/Solution.py:
   500-680  : Solution.__init__ (ISA-fallback, CodeObjectVersion, per-key copy),
              getMIOutputInfo WMMA branches, assignProblemIndependentDerivedParameters
              EnableMatrixInstruction=None auto-detect / =False non-MI path,

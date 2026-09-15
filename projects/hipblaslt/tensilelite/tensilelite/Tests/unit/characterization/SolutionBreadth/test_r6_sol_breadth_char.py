@@ -4,7 +4,7 @@
 ################################################################################
 """R6 — Solution derivation breadth sweep (P4 coverage round 6).
 
-TARGET: Tensile/SolutionStructs/Solution.py — derivation/validity arms
+TARGET: tensilelite/SolutionStructs/Solution.py — derivation/validity arms
 reached by gfx942 MFMA kernels that existing tests miss.
 
 PRIMARY MISS RANGES (62% line coverage, ~1165 uncovered):
@@ -63,7 +63,7 @@ _CONFIG_YAML = """\
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 ################################################################################
-# Breadth sweep for Tensile/SolutionStructs/Solution.py coverage (R6).
+# Breadth sweep for tensilelite/SolutionStructs/Solution.py coverage (R6).
 #
 # ForkParameters cartesian (capped at limit=8 by harness):
 #   TransposeLDS x AssertSummationElementMultiple x LdsPadA/B x StoreVectorWidth

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-# Characterization of Tensile/Toolchain/Validators.py:226 [guard-raise]
+# Characterization of tensilelite/Toolchain/Validators.py:226 [guard-raise]
 #   branch_id: 8fc5b4598eb96fa53f4a1b7e36901b460b6300bb
 #   function: _validateExecutable
 #   predicate: not any((supportedCxxCompiler(file), supportedCCompiler(file),
