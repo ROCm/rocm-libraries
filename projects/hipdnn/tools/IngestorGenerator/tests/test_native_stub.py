@@ -8,10 +8,11 @@ produces.
 engine serve real graphs (see RUNBOOK.md). These tests observe a real compiler's
 verdict on the emitted C++.
 
-``TestRealCompile`` -- best-effort host compile of the emitted native stub and
-of the emitted matcher-test stub, guarded by a module fixture that skips (not
-fails) when the plugin SDK's CMake-baked version/config headers are
-unavailable, so the run reports honestly whether it happened. The compile is
+``TestRealCompile`` -- best-effort host compile of all three emitted C++ files:
+the native stub, the matcher-test stub and the pack-census test, guarded by a
+module fixture that skips (not fails) when the plugin SDK's CMake-baked
+version/config headers are unavailable, so the run reports honestly whether it
+happened. The compile is
 ``-fsyntax-only``: it proves the emitted translation unit parses and
 type-checks against the real SDK headers, and nothing more. Linking, symbol
 registration, loader pre-flight, inventory and runtime behaviour are owned by
@@ -162,6 +163,89 @@ def _compile(compile_env, source: str, tmp_path: Path) -> subprocess.CompletedPr
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+#: A minimal stand-in for the gtest surface the emitted test files use. gtest is not
+#: a dependency of this tool, so those files are parsed against this rather than by
+#: pulling googletest into the generator's test environment. That is enough to catch
+#: the realistic defects -- an unbalanced stub, a bad string concatenation, a name
+#: that does not exist -- without taking on the dependency.
+#:
+#: Every expectation macro NAMES each operand it is handed. One expanding to
+#: ``(void)0`` discards them, so a typo'd identifier inside an expectation parses
+#: clean and this check reports success on a file that cannot build against real
+#: gtest -- which is the whole class of defect the parse exists to find.
+_GTEST_STUB_HEADER = """#pragma once
+
+struct GTestMsg
+{
+    template <typename T>
+    GTestMsg& operator<<(const T&)
+    {
+        return *this;
+    }
+};
+
+template <typename... Ts>
+GTestMsg gtestNames(const Ts&...)
+{
+    return GTestMsg();
+}
+
+namespace testing
+{
+class Test
+{
+public:
+    virtual ~Test() = default;
+
+protected:
+    virtual void SetUp() {}
+    virtual void TearDown() {}
+};
+} // namespace testing
+
+#define TEST(a, b) void a##_##b##_generated_test()
+#define TEST_F(fixture, name)                \\
+    struct fixture##_##name##_case : fixture \\
+    {                                        \\
+        void testBody();                     \\
+    };                                       \\
+    void fixture##_##name##_case::testBody()
+#define GTEST_SKIP() GTestMsg()
+#define EXPECT_TRUE(x) gtestNames((x))
+#define EXPECT_FALSE(x) gtestNames((x))
+#define ASSERT_TRUE(x) gtestNames((x))
+#define ASSERT_FALSE(x) gtestNames((x))
+#define EXPECT_EQ(a, b) gtestNames((a), (b))
+#define EXPECT_NE(a, b) gtestNames((a), (b))
+#define ASSERT_EQ(a, b) gtestNames((a), (b))
+#define ASSERT_NE(a, b) gtestNames((a), (b))
+"""
+
+
+def _parse_test_stub(
+    compile_env, source: str, tmp_path: Path, stem: str
+) -> subprocess.CompletedProcess:
+    """``-fsyntax-only`` one emitted gtest file against the stand-in above."""
+    gtest_dir = tmp_path / "stub" / "gtest"
+    gtest_dir.mkdir(parents=True, exist_ok=True)
+    (gtest_dir / "gtest.h").write_text(_GTEST_STUB_HEADER)
+    src_path = tmp_path / f"{stem}.cpp"
+    src_path.write_text(source)
+    cmd = [
+        compile_env["gxx"],
+        "-fsyntax-only",
+        "-std=c++20",
+        "-D__HIP_PLATFORM_AMD__",
+        "-DHIPDNN_ENABLE_KERNEL_INGESTOR",
+        "-I",
+        str(tmp_path / "stub"),
+    ]
+    for inc in compile_env["includes"]:
+        cmd += ["-I", str(inc)]
+    cmd.append(str(src_path))
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
 class TestRealCompile:
     """Host-compile the emitted stub with g++, best-effort.
 
@@ -217,50 +301,107 @@ class TestRealCompile:
     ):
         """The OTHER emitted C++ file. Nothing compiled it.
 
-        `test_matchers.cpp.j2` gained three pre-wired `GTEST_SKIP()` stubs this
-        session and no test has ever fed it to a compiler -- the same gap the
-        packaged native stub had, one template over. A malformed stub would ship
-        and first fail inside the provider's build, days later.
-
-        gtest is not a dependency of this tool, so this parses against a minimal
-        stand-in for the handful of macros the emitted file uses. That is enough
-        to catch the realistic defect (an unbalanced stub, a bad string
-        concatenation) without pulling googletest into the generator's test env.
+        `test_matchers.cpp.j2` carries pre-wired `GTEST_SKIP()` stubs and no test
+        fed it to a compiler -- the same gap the packaged native stub had, one
+        template over. A malformed stub would ship and first fail inside the
+        provider's build, days later.
         """
-        gtest_dir = tmp_path / "stub/gtest"
-        gtest_dir.mkdir(parents=True)
-        (gtest_dir / "gtest.h").write_text(
-            "#pragma once\n"
-            "struct GTestMsg { template <typename T>\n"
-            "    GTestMsg& operator<<(const T&) { return *this; } };\n"
-            "#define TEST(a, b) void a##_##b##_generated_test()\n"
-            "#define GTEST_SKIP() GTestMsg()\n"
-            "#define EXPECT_TRUE(x) (void)(x)\n"
-            "#define EXPECT_FALSE(x) (void)(x)\n"
-            "#define EXPECT_NE(a, b) (void)0\n"
-            "#define EXPECT_EQ(a, b) (void)0\n"
-        )
         rendered = generator._render_template(
             "test_matchers.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
-        src = tmp_path / "TestMatchers.cpp"
-        src.write_text(rendered)
-        cmd = [
-            compile_env["gxx"],
-            "-fsyntax-only",
-            "-std=c++20",
-            "-D__HIP_PLATFORM_AMD__",
-            "-DHIPDNN_ENABLE_KERNEL_INGESTOR",
-            "-I",
-            str(tmp_path / "stub"),
-        ]
-        for inc in compile_env["includes"]:
-            cmd += ["-I", str(inc)]
-        cmd.append(str(src))
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestMatchers")
         assert (
             result.returncode == 0
         ), f"emitted matcher-test stub does not parse:\n{result.stderr}"
+
+    def test_pack_census_stub_parses(
+        self, compile_env, generator, scale_add_config, tmp_path
+    ):
+        """The THIRD emitted C++ file, and the one nothing had ever read.
+
+        `generator.py` renders `test_packs.cpp.j2` for every config and no test
+        under `tests/` named one of its identifiers, so `StrictUndefined` at render
+        time was the whole of its coverage -- it judges the template's names and
+        nothing about the C++ that comes out. The other two files are stubs an
+        author is expected to finish; this one is emitted COMPLETE and meant to run
+        as written, so a defect in it ships inside something that looks finished.
+        """
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
+        )
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestPacks")
+        assert (
+            result.returncode == 0
+        ), f"emitted pack-census test does not parse:\n{result.stderr}"
+
+    def test_multi_pack_census_stub_parses(
+        self, compile_env, generator, binary_ops_config, tmp_path
+    ):
+        """The census's multi-pack arm counts one graph-scoped matcher per pack,
+        against the single-pack arm's zero -- different code, not a different
+        constant, so it needs its own parse."""
+        config = binary_ops_config
+        assert config.is_multi_pack, "fixture is no longer the multi-pack one"
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", config, ids=mint_ids(config)
+        )
+        result = _parse_test_stub(compile_env, rendered, tmp_path, "TestPacksMulti")
+        assert (
+            result.returncode == 0
+        ), f"emitted multi-pack census does not parse:\n{result.stderr}"
+
+    def test_heuristic_free_stubs_parse(
+        self, compile_env, generator, heuristic_free_config, tmp_path
+    ):
+        """`heuristic: none` reaches a compiler for the first time here.
+
+        Every shipped config declares `heuristic: native`, so the `{% else %}` arms
+        of the native stub, the matcher stub and the census were emitted by nothing
+        that parses. The first heuristic-free integration would have been the one to
+        discover whether they are valid C++.
+        """
+        config = heuristic_free_config
+        assert not config.engine.has_heuristic
+        ids = mint_ids(config)
+        native = generator._render_template("native.cpp.j2", config, ids=ids)
+        result = _compile(compile_env, native, tmp_path)
+        assert (
+            result.returncode == 0
+        ), f"heuristic-free native stub failed to compile:\n{result.stderr}"
+
+        for template, stem in (
+            ("test_matchers.cpp.j2", "TestMatchersNoHeuristic"),
+            ("test_packs.cpp.j2", "TestPacksNoHeuristic"),
+        ):
+            rendered = generator._render_template(template, config, ids=ids)
+            result = _parse_test_stub(compile_env, rendered, tmp_path, stem)
+            assert (
+                result.returncode == 0
+            ), f"heuristic-free {template} does not parse:\n{result.stderr}"
+
+    def test_the_census_parse_catches_a_typo_inside_an_expectation(
+        self, compile_env, generator, scale_add_config, tmp_path
+    ):
+        """Sanity check on the gtest stand-in, where it is weakest.
+
+        `EXPECT_EQ`/`EXPECT_NE` used to expand to `(void)0`, discarding both
+        operands, so an undeclared name inside the census's most common statement
+        parsed clean and this class reported success on a file real gtest rejects.
+        """
+        rendered = generator._render_template(
+            "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
+        )
+        broken = rendered.replace(
+            "EXPECT_EQ(loaded, _expected->packNames)",
+            "EXPECT_EQ(loaded, _expected->thisMemberDoesNotExist)",
+            1,
+        )
+        assert broken != rendered, "the census no longer carries the mutated statement"
+        result = _parse_test_stub(compile_env, broken, tmp_path, "TestPacksBroken")
+        assert result.returncode != 0, (
+            "an undeclared member inside EXPECT_EQ parsed cleanly -- the gtest "
+            "stand-in is discarding the operands it is handed"
+        )
 
     def test_multi_pack_stub_compiles(
         self, compile_env, generator, binary_ops_config, tmp_path

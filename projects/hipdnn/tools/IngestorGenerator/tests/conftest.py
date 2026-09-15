@@ -9,6 +9,7 @@ import pytest
 
 from codegen.config_loader import load_config
 from codegen.generator import IngestorGenerator
+from tests.helpers import make_engine, make_minimal_config
 
 
 @pytest.fixture(scope="session")
@@ -59,6 +60,24 @@ def gfx950_attention_dense_config(load_test_config):
     require the kernel toolchain to be installed.
     """
     return load_test_config("gfx950_attention_dense.yaml")
+
+
+@pytest.fixture
+def heuristic_free_config():
+    """An engine declaring ``heuristic: none`` -- legal, and shipped by nothing.
+
+    Every config under ``configs/`` declares ``heuristic: native`` and
+    ``EngineSpec.heuristic`` defaults to it, so the ``{% else %}`` arm of every
+    template that branches on ``has_heuristic`` renders for no fixture at all. An
+    engine may ship no ranking model (it then ranks on priority, then descriptor
+    id), and the first integration that does would be the first to render those
+    arms -- on its own deadline.
+
+    Built from the unit helpers rather than added as a fourth file under
+    ``configs/``: the arms belong to the templates, while a config in ``configs/``
+    is also a worked example this tool tells its readers to copy.
+    """
+    return make_minimal_config(engine=make_engine(heuristic="none"))
 
 
 @pytest.fixture(scope="session")

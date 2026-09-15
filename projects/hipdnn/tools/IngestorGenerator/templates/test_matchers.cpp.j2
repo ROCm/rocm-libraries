@@ -35,11 +35,16 @@ using hipdnn_plugin_sdk::ingestor::DeviceProperties;
 /// everywhere except whatever arch happens to be running CI
 /// (TestAsmSdpaForwardMatchers.cpp:27-33) -- it would silently stop testing the one
 /// thing an arch-gated matcher exists to gate the moment CI's hardware changes.
+///
+/// Both fields come from this bundle's own architecture: `warpSize` is that arch's
+/// wavefront width (codegen/models.py's `wave_size_for_arch`), not a constant, because
+/// it takes part in DeviceKey's equality and hash and a wave size paired with the
+/// wrong arch describes a device no one can run.
 DeviceProperties fixedDeviceProperties()
 {
     DeviceProperties properties;
-    properties.gcnArchName = "{{ (config.packs[0].arch[0] if config.packs and config.packs[0].arch else 'gfx942') }}";
-    properties.warpSize = 64;
+    properties.gcnArchName = "{{ config.device_fixture_arch }}";
+    properties.warpSize = {{ config.device_fixture_wave_size }};
     return properties;
 }
 

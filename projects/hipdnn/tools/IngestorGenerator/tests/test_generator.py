@@ -4,15 +4,18 @@
 """Unit tests for codegen/generator.py.
 
 Covers: rendered content assertions (not golden-file diffing), UUID
-cross-reference threading, allow-listed JSON keys, and the UMD policy
-(single-pack -> zero graph-scoped UMDs, multi-pack -> one per pack).
+cross-reference threading, allow-listed JSON keys, the UMD policy
+(single-pack -> zero graph-scoped UMDs, multi-pack -> one per pack), and the
+shape of the gtest cases the emitted C++ test stubs carry.
 """
 
 import json
+import re
 
 import pytest
 
 from codegen.generator import (
+    PLACEHOLDER_MARKER,
     _dedup_key,
     build_kdp,
     build_kdp_documents,
@@ -21,8 +24,24 @@ from codegen.generator import (
     emitted_inventory,
     mint_ids,
 )
-from codegen.models import KmdField
+from codegen.models import DEFAULT_FIXTURE_ARCH, KmdField
 from tests.helpers import make_kernel, make_minimal_config, make_pack
+
+
+def emitted_cases(rendered: str, macro: str, suite: str) -> dict:
+    """The gtest cases one suite of an emitted C++ stub carries, name -> body.
+
+    Keyed by each case's OWN name, because that is the only thing a deletion or a
+    rename cannot satisfy: a substring check for the text a case happens to contain
+    still passes once the case is gone, since the surrounding comment argues for it
+    in the same words.
+
+    ``macro`` is ``TEST`` or ``TEST_F``. A body ends at the first closing brace in
+    column 0, which is the case's own -- every nested block in these templates is
+    indented.
+    """
+    pattern = rf"{macro}\({re.escape(suite)}, (\w+)\)\n\{{\n(.*?)\n\}}"
+    return {m.group(1): m.group(2) for m in re.finditer(pattern, rendered, re.DOTALL)}
 
 
 class TestUuidThreading:
@@ -1024,3 +1043,262 @@ class TestEmittedInventory:
             generator.env.get_template = original
         assert "emitted" in captured
         assert captured["emitted"]["sdk_version"] == scale_add_config.engine.sdk_version
+
+
+#: The two cases ``test_matchers.cpp.j2`` must hand every generated engine. Named
+#: once, because both the shipped-config check and the heuristic-free one assert the
+#: same pair and a check that drifted to a subset would stop defending the argument.
+_BOTH_DIRECTIONS = {
+    "AcceptsAGraphThisEngineServes",
+    "DeclinesAGraphOutsideItsApplicability",
+}
+
+
+class TestMatcherStubDirections:
+    """Both matcher directions, which only the rendered output can hold.
+
+    ``test_matchers.cpp.j2`` argues -- correctly -- that an accept-only test passes
+    for a matcher stuck on ``true`` and a decline-only test for one stuck on
+    ``false``, so a generated engine must be handed both. The argument lived only in
+    a comment: deleting the decline case left every check in this suite green, and
+    the omission would first be visible as an engine over-accepting on a device,
+    days later and on someone else's schedule.
+    """
+
+    @staticmethod
+    def _cases(config, rendered: str) -> dict:
+        return emitted_cases(rendered, "TEST", f"{config.engine.pascal_name}Matchers")
+
+    def test_the_stub_emits_an_accept_case_and_a_decline_case(
+        self, generator, scale_add_config
+    ):
+        rendered = generator._render_template("test_matchers.cpp.j2", scale_add_config)
+        cases = self._cases(scale_add_config, rendered)
+        missing = _BOTH_DIRECTIONS - set(cases)
+        assert not missing, (
+            f"the matcher stub is missing {sorted(missing)} and emitted "
+            f"{sorted(cases)}. An engine handed one direction is an engine whose "
+            "matcher can be stuck on a constant and pass everything before a device"
+        )
+
+    def test_each_direction_instructs_the_expectation_that_proves_it(
+        self, generator, scale_add_config
+    ):
+        """Two cases naming the same expectation are one case written twice.
+
+        The decline stub is a plausible copy-paste of the accept stub, and a pair
+        that both say ``EXPECT_TRUE`` restores exactly the hole having two cases
+        exists to close -- while still reading as two directions.
+        """
+        rendered = generator._render_template("test_matchers.cpp.j2", scale_add_config)
+        cases = self._cases(scale_add_config, rendered)
+        symbol = scale_add_config.graph_match_symbol
+        accept = cases["AcceptsAGraphThisEngineServes"]
+        decline = cases["DeclinesAGraphOutsideItsApplicability"]
+        assert f"EXPECT_TRUE({symbol})" in accept
+        assert f"EXPECT_FALSE({symbol})" not in accept
+        assert f"EXPECT_FALSE({symbol})" in decline
+        assert f"EXPECT_TRUE({symbol})" not in decline
+
+    def test_every_emitted_case_announces_itself_as_unfilled(
+        self, generator, scale_add_config
+    ):
+        """A skipping stub is honest only while it says it is one.
+
+        Both directions ship as skips, so a generated suite reports success for an
+        engine nothing has matched. That is tolerable only because the skip is loud
+        and carries the marker ``unfilled_placeholders`` counts; a case that skipped
+        silently would be a green suite with nothing behind it.
+        """
+        rendered = generator._render_template("test_matchers.cpp.j2", scale_add_config)
+        cases = self._cases(scale_add_config, rendered)
+        assert cases
+        for name, body in cases.items():
+            assert "GTEST_SKIP()" in body, name
+            assert PLACEHOLDER_MARKER in body, name
+
+
+class TestHeuristicFreeArms:
+    """``heuristic: none``: the arm every shipped config declines to take.
+
+    All three configs under ``configs/`` declare ``heuristic: native``, so the
+    ``{% else %}`` arms of ``test_packs.cpp.j2``, ``test_matchers.cpp.j2`` and the
+    omitted ``SCORE_SYMBOL`` paths of ``native.cpp.j2`` were never rendered, never
+    compiled and never read. An engine without a ranking model is legal -- it ranks
+    on priority, then descriptor id -- so these arms exist for a real integration,
+    which would be the first to find out whether they work.
+    """
+
+    def test_every_template_renders_for_an_engine_with_no_ranking_model(
+        self, generator, heuristic_free_config
+    ):
+        """The first thing to state, because ``StrictUndefined`` makes an arm that
+        names anything unavailable a render-time error rather than a bad string."""
+        assert not heuristic_free_config.engine.has_heuristic
+        for name in ("native.cpp.j2", "test_matchers.cpp.j2", "test_packs.cpp.j2"):
+            assert generator._render_template(name, heuristic_free_config)
+
+    def test_the_native_stub_omits_the_score_symbol_and_still_registers_the_rest(
+        self, generator, heuristic_free_config
+    ):
+        config = heuristic_free_config
+        rendered = generator._render_template("native.cpp.j2", config)
+        assert "SCORE_SYMBOL" not in rendered
+        assert "scoreKernel" not in rendered
+        assert config.score_symbol not in rendered
+        # The omission is of the score symbol alone: an arm that also dropped the
+        # kernel matcher or the dispatch handler would register an engine that
+        # loads and then serves nothing.
+        assert (
+            "scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);" in rendered
+        )
+        assert "scope.add(std::string(DISPATCH_SYMBOL)" in rendered
+        assert config.graph_match_symbol in rendered
+        assert config.kernel_match_symbol in rendered
+
+    def test_the_native_stub_declares_a_score_symbol_when_the_engine_ranks(
+        self, generator, scale_add_config
+    ):
+        """The control on the assertions above: a template emitting nothing at all
+        satisfies every 'not in' check on the heuristic-free arm."""
+        rendered = generator._render_template("native.cpp.j2", scale_add_config)
+        assert f'SCORE_SYMBOL = "{scale_add_config.score_symbol}"' in rendered
+        assert "double scoreKernel(" in rendered
+        assert "scope.add(std::string(SCORE_SYMBOL), &scoreKernel);" in rendered
+
+    def test_the_matcher_stub_drops_the_score_case_and_keeps_both_directions(
+        self, generator, heuristic_free_config
+    ):
+        """The score case goes; the two directions are not collateral.
+
+        They sit outside the heuristic branch, and an arm that swallowed them would
+        hand a heuristic-free engine a matcher suite that tests no direction.
+        """
+        config = heuristic_free_config
+        rendered = generator._render_template("test_matchers.cpp.j2", config)
+        cases = emitted_cases(rendered, "TEST", f"{config.engine.pascal_name}Matchers")
+        assert "ScoreReadsAtLeastOneDescriptorField" not in cases
+        assert not _BOTH_DIRECTIONS - set(cases), sorted(cases)
+        # The guidance names the symbols this engine HAS, and no score symbol --
+        # pointing a reader at a symbol nobody registered is worse than silence.
+        assert config.kernel_match_symbol in rendered
+        assert config.score_symbol not in rendered
+        assert "heuristic: none" in rendered
+
+    def test_the_pack_census_asserts_the_absence_of_a_ranking_model(
+        self, generator, heuristic_free_config
+    ):
+        """Loading successfully cannot show a registration did NOT happen.
+
+        An unreferenced score registration loads perfectly well, so the arm asks the
+        registry directly -- and it has to ask about the symbol this engine WOULD
+        have used. An arm that rendered an empty string there would pass against a
+        registry holding the real symbol.
+        """
+        config = heuristic_free_config
+        rendered = generator._render_template("test_packs.cpp.j2", config)
+        suite = f"Test{config.engine.pascal_name}Packs"
+        cases = emitted_cases(rendered, "TEST_F", suite)
+        assert "RanksThroughItsRegisteredScoreSymbol" not in cases
+        body = cases["ShipsNoHeuristicAndRegistersNoScoreSymbol"]
+        assert "EXPECT_FALSE(_set->heuristic.has_value())" in body
+        registration = f'isRegistered("{config.score_symbol}")'
+        assert f"EXPECT_FALSE(ingestor::ScoreRegistry::{registration})" in body
+        assert 'isRegistered("")' not in rendered
+
+    def test_the_pack_census_checks_the_registration_when_the_engine_ranks(
+        self, generator, scale_add_config
+    ):
+        """The control: the two arms must be opposites, not one arm twice."""
+        config = scale_add_config
+        rendered = generator._render_template("test_packs.cpp.j2", config)
+        suite = f"Test{config.engine.pascal_name}Packs"
+        cases = emitted_cases(rendered, "TEST_F", suite)
+        assert "ShipsNoHeuristicAndRegistersNoScoreSymbol" not in cases
+        body = cases["RanksThroughItsRegisteredScoreSymbol"]
+        assert "ASSERT_TRUE(_set->heuristic.has_value())" in body
+        registration = f'isRegistered("{config.score_symbol}")'
+        assert f"EXPECT_TRUE(ingestor::ScoreRegistry::{registration})" in body
+
+    def test_the_uhd_is_not_written_for_an_engine_with_no_ranking_model(
+        self, generator, heuristic_free_config, tmp_path
+    ):
+        """The arms above describe a bundle that must also SHIP no UHD, or the
+        census asserts the absence of a descriptor sitting right beside it."""
+        config = heuristic_free_config
+        written = generator.render(config, tmp_path)
+        assert not [rel for rel in written if rel.endswith(".uhd.json")]
+        assert sorted(written) == sorted(generator.preview_files(config))
+
+
+class TestMatcherStubDeviceFixture:
+    """The by-value device the matcher stub hands every generated engine.
+
+    ``warpSize`` takes part in ``DeviceKey``'s equality AND its hash
+    (``plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DeviceKey.hpp``), so the arch
+    and the wave size are one fact about one device. Templating the arch while
+    writing 64 beside it emits a device that does not exist on any wave32 target,
+    and a wave-size-gated matcher is then tested against an impossible machine --
+    with the stub rendering, parsing and passing throughout.
+    """
+
+    @staticmethod
+    def _fixture_body(rendered: str) -> str:
+        """The body of the emitted ``fixedDeviceProperties()``.
+
+        Scoped to that function rather than matched against the whole file: the
+        surrounding comment names both fields and the wave sizes in prose, so a
+        file-wide substring check for ``warpSize = 32`` can be satisfied by the
+        documentation of the rule instead of by the code implementing it.
+        """
+        match = re.search(
+            r"DeviceProperties fixedDeviceProperties\(\)\n\{\n(.*?)\n\}",
+            rendered,
+            re.DOTALL,
+        )
+        assert match, "the matcher stub no longer emits a by-value device fixture"
+        return match.group(1)
+
+    def _rendered_fixture(self, generator, config) -> str:
+        return self._fixture_body(
+            generator._render_template("test_matchers.cpp.j2", config)
+        )
+
+    def test_a_wave64_arch_renders_a_wave64_device(self, generator, scale_add_config):
+        assert scale_add_config.packs[0].arch == ["gfx942"], "fixture arch changed"
+        body = self._rendered_fixture(generator, scale_add_config)
+        assert 'properties.gcnArchName = "gfx942";' in body
+        assert "properties.warpSize = 64;" in body
+
+    def test_a_wave32_arch_renders_a_wave32_device(self, generator):
+        """The case the hard-coded 64 got wrong, and the only one that catches it.
+
+        Every config under ``configs/`` targets CDNA, so a constant 64 agrees with
+        all of them and the defect is invisible until an RDNA bundle is generated.
+        """
+        config = make_minimal_config(packs=[make_pack(arch=["gfx1250"])])
+        body = self._rendered_fixture(generator, config)
+        assert 'properties.gcnArchName = "gfx1250";' in body
+        assert "properties.warpSize = 32;" in body
+        assert "properties.warpSize = 64;" not in body
+
+    def test_a_config_naming_no_arch_still_gets_the_documented_default(
+        self, generator, binary_ops_config
+    ):
+        """The fallback is not collateral of deriving the wave size.
+
+        A bundle restricting no architecture still needs a device to be, and the
+        wave size has to be that default's own -- a fallback arch paired with the
+        other family's wave is the same impossible device by another route.
+        """
+        assert not any(pack.arch for pack in binary_ops_config.packs), (
+            "fixture now names an architecture, so it no longer exercises the "
+            "no-arch fallback"
+        )
+        body = self._rendered_fixture(generator, binary_ops_config)
+        # Spelled out rather than interpolated from DEFAULT_FIXTURE_ARCH: a test
+        # written against the constant agrees with whatever the constant becomes,
+        # including a value whose wave size the fallback then states wrongly.
+        assert 'properties.gcnArchName = "gfx942";' in body
+        assert "properties.warpSize = 64;" in body
+        assert DEFAULT_FIXTURE_ARCH == "gfx942"

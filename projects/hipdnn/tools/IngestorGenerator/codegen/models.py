@@ -131,6 +131,43 @@ KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
     }
 )
 
+#: The architecture the emitted matcher-test device fixture is built for when the
+#: config names none. A concrete CDNA id rather than an empty string, because the
+#: fixture constructs a device BY VALUE and a device with no arch matches nothing.
+DEFAULT_FIXTURE_ARCH = "gfx942"
+
+#: Base-id prefixes whose targets run a 32-lane wavefront. Everything else is 64.
+#:
+#: Mirrored BY HAND from rocKE's architecture SSOT,
+#: ``dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/core/arch/data/
+#: arch_specs.json`` (``gfx90a``/``gfx942``/``gfx950`` -> 64;
+#: ``gfx1151``/``gfx1201``/``gfx1250``/``gfx11-generic`` -> 32) -- check there for
+#: drift when a new target lands. Mirroring rather than importing is this repo's
+#: established shape for this datum: rocKE's own C99 tables under
+#: ``rocke/platform/cpp/core/arch/data.cpp`` are a second hand-mirror of the same
+#: file. Importing ``rocke.core.arch`` here would make descriptor generation
+#: require the kernel toolchain to be installed, which it deliberately does not.
+#:
+#: A PREFIX rule rather than a per-id table, because the datum this tool needs is
+#: the family's, and an id absent from a table would have to fall back to a
+#: default that is wrong for exactly the new RDNA target nobody has added yet.
+WAVE32_ARCH_PREFIXES: tuple[str, ...] = ("gfx10", "gfx11", "gfx12")
+
+WAVE32_SIZE = 32
+WAVE64_SIZE = 64
+
+
+def wave_size_for_arch(arch: str) -> int:
+    """The wavefront width of ``arch``'s family.
+
+    Paired with the arch wherever a device is described, never defaulted beside
+    a templated arch: ``warpSize`` participates in ``DeviceKey``'s equality and
+    hash (``plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DeviceKey.hpp``), so an
+    arch/wave pair chosen independently describes a device that does not exist
+    and a wave-size-gated matcher gets tested against it.
+    """
+    return WAVE32_SIZE if arch.startswith(WAVE32_ARCH_PREFIXES) else WAVE64_SIZE
+
 
 def _to_pascal_case(snake: str) -> str:
     """Convert ``snake_case`` or ``kebab-case`` to ``PascalCase``."""
@@ -413,6 +450,28 @@ class IngestorConfig:
             if not self.is_multi_pack
             else f"{self.engine.slug}_{pack.name}"
         )
+
+    @property
+    def device_fixture_arch(self) -> str:
+        """The architecture the emitted matcher-test device fixture names.
+
+        The first pack's first arch, because that is the device this bundle is
+        authored against; `DEFAULT_FIXTURE_ARCH` where the config restricts none,
+        since a by-value device still has to be some device.
+        """
+        first_pack_arch = self.packs[0].arch if self.packs else []
+        return first_pack_arch[0] if first_pack_arch else DEFAULT_FIXTURE_ARCH
+
+    @property
+    def device_fixture_wave_size(self) -> int:
+        """That fixture's ``warpSize``, DERIVED from `device_fixture_arch`.
+
+        Derived rather than written beside it: the two are one fact about one
+        device, and a generator that templates the arch while hard-coding the wave
+        emits an impossible device for every wave32 target -- silently, because
+        every mechanical check still passes.
+        """
+        return wave_size_for_arch(self.device_fixture_arch)
 
     @property
     def kmd_field_by_name(self) -> dict:

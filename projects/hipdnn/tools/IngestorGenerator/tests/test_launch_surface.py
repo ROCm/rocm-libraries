@@ -619,8 +619,8 @@ class TestGfx950RealProfile:
             f"sound: {failures}"
         )
         # spec_resolution alone: prepare() trusts persistent/num_persistent/ragged
-        # exactly as the KMD states them, defended offline by test_dispatch_parity
-        # rather than a runtime check -- see the profile's own comment.
+        # exactly as the KMD states them, rather than re-checking them at launch --
+        # see the profile's own comment for why.
         assert set(unguarded) == {"spec_resolution"}
 
     def test_the_real_gfx950_profile_passes_with_allow_unguarded(self):
