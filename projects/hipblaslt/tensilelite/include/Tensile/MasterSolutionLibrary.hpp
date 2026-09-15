@@ -35,6 +35,7 @@
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/LibraryGeneration.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -168,6 +169,11 @@ namespace TensileLite
         std::shared_ptr<SolutionBlobCache<MySolution>> blobCache;
         mutable std::map<std::string, std::shared_ptr<SolutionBlobCache<MySolution>>>
             solutionSources;
+
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+        // Shared with the CachingLibrary that wraps `library`.
+        std::shared_ptr<LibraryGeneration> generation = globalLibraryGeneration();
+#endif
 
         MasterSolutionLibrary() = default;
 

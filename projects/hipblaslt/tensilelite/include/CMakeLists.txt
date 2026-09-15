@@ -44,6 +44,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/GranularitySelectionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelArguments.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelLanguageTypes.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LibraryGeneration.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLFeatures.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassification.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassificationLibrary.hpp"

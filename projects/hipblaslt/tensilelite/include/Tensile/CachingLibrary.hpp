@@ -31,6 +31,7 @@
 #include <unordered_map>
 
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/LibraryGeneration.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <Tensile/AMDGPU_Detail.hpp>
@@ -155,6 +156,216 @@ namespace TensileLite
         std::atomic<int64_t> m_hits;
     };
 
+    // With user kernels the library can change after loading, so every memoized
+    // value is stamped with a LibraryGeneration. Without them the #else branch
+    // is the unstamped memo.
+#ifdef TENSILELITE_ENABLE_USER_KERNELS
+    template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
+    class CachingLibrary : public SolutionLibrary<MyProblem, MySolution>
+    {
+    public:
+        using Library = SolutionLibrary<MyProblem, MySolution>;
+        using Cache = CacheMap<std::tuple<std::shared_ptr<MySolution>, double, uint64_t>,
+                               AMDGPU,
+                               MyProblem>;
+        // The solution vector and its "holds every solution" flag share one entry
+        // because the flag alone can satisfy a hit, so both need one stamp.
+        using Caches
+            = CacheMap<std::tuple<SolutionVector<MySolution>, bool, uint64_t>, AMDGPU, MyProblem>;
+        using CachesGroupedGemm = CacheMap<std::tuple<SolutionVector<MySolution>, uint64_t>,
+                                           AMDGPU,
+                                           std::vector<MyProblem>>;
+
+        // Without a shared generation the cache uses a private one that never
+        // advances.
+        CachingLibrary(std::shared_ptr<Library>           subLibrary,
+                       std::shared_ptr<LibraryGeneration> generation = nullptr)
+            : m_subLibrary(subLibrary)
+            , m_generation(generation ? generation : std::make_shared<LibraryGeneration>())
+            , m_cache(std::make_tuple(nullptr, std::numeric_limits<double>::max(), uint64_t{0}))
+            , m_caches(std::make_tuple(SolutionVector<MySolution>{}, false, uint64_t{0}))
+            , m_cachesGroupedGemm(std::make_tuple(SolutionVector<MySolution>{}, uint64_t{0}))
+        {
+        }
+
+        virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
+                                                               Hardware const&  hardware,
+                                                               const int index) const override
+        {
+            return m_subLibrary->getSolutionByIndex(problem, hardware, index);
+        }
+
+        virtual std::shared_ptr<MySolution> findBestSolution(MyProblem const& problem,
+                                                             Hardware const&  hardware,
+                                                             double*          fitness
+                                                             = nullptr) const override
+        {
+            try
+            {
+                double cachedFitness = std::numeric_limits<double>::max();
+                fitness              = (fitness) ? fitness : &cachedFitness;
+
+                auto const& amdgpu = dynamic_cast<AMDGPU const&>(hardware);
+
+                // Read before resolving, so a change made during resolution
+                // leaves this result stale.
+                const uint64_t gen = m_generation->value.load(std::memory_order_acquire);
+
+                std::shared_ptr<MySolution> solution;
+                uint64_t                    entryGen   = 0;
+                std::tie(solution, *fitness, entryGen) = m_cache.find(problem, amdgpu);
+
+                if(solution && entryGen == gen)
+                    return solution;
+
+                // A stale hit has already written its fitness; reset it as a
+                // miss would.
+                if(solution)
+                    *fitness = std::numeric_limits<double>::max();
+
+                solution = m_subLibrary->findBestSolution(problem, hardware, fitness);
+                if(solution)
+                    m_cache.add(std::make_tuple(solution, *fitness, gen), problem, amdgpu);
+
+                return solution;
+            }
+            catch(std::bad_cast const& exc)
+            {
+                return m_subLibrary->findBestSolution(problem, hardware, fitness);
+            }
+        }
+
+        virtual SolutionSet<MySolution>
+            findAllSolutions(MyProblem const&          problem,
+                             Hardware const&           hardware,
+                             SolutionLibrarySearchType searchType
+                             = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return m_subLibrary->findAllSolutions(problem, hardware, searchType);
+        }
+
+        virtual SolutionSet<MySolution>
+            findAllSolutionsGroupedGemm(std::vector<MyProblem> const& problems,
+                                        Hardware const&               hardware,
+                                        SolutionLibrarySearchType     searchType
+                                        = SolutionLibrarySearchType::DEFAULT) const override
+        {
+            return m_subLibrary->findAllSolutionsGroupedGemm(problems, hardware, searchType);
+        }
+
+        std::shared_ptr<MySolution> findSolutionInCache(MyProblem const& problem,
+                                                        Hardware const&  hardware) const
+        {
+            auto const& amdgpu = dynamic_cast<AMDGPU const&>(hardware);
+
+            auto entry = m_cache.find(problem, amdgpu);
+            if(std::get<uint64_t>(entry) != m_generation->value.load(std::memory_order_acquire))
+                return nullptr;
+
+            return std::get<std::shared_ptr<MySolution>>(entry);
+        }
+
+        virtual std::string type() const override
+        {
+            return "Caching Library";
+        }
+        virtual std::string description() const override
+        {
+            return "Caching Library";
+        }
+
+        std::shared_ptr<Library> library() const
+        {
+            return m_subLibrary;
+        }
+
+        virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
+                                                            Hardware const&  hardware,
+                                                            int numSolutions) const override
+        {
+            try
+            {
+                auto const&    amdgpu = dynamic_cast<AMDGPU const&>(hardware);
+                const uint64_t gen    = m_generation->value.load(std::memory_order_acquire);
+
+                SolutionVector<MySolution> solutions;
+                bool                       cacheAlreadyContainAll = false;
+                uint64_t                   entryGen               = 0;
+                std::tie(solutions, cacheAlreadyContainAll, entryGen)
+                    = m_caches.find(problem, amdgpu);
+
+                if(entryGen == gen && (solutions.size() >= numSolutions || cacheAlreadyContainAll))
+                {
+                    // getBestSolutions reads lastFindTopAlreadyRetAll(), so a hit
+                    // must publish it too.
+                    lastFindTopRetAll = cacheAlreadyContainAll;
+                    return solutions;
+                }
+
+                solutions = m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+                if(solutions.size() != 0)
+                {
+                    bool alreadyRetAll = m_subLibrary->lastFindTopAlreadyRetAll();
+                    m_caches.add(std::make_tuple(solutions, alreadyRetAll, gen), problem, amdgpu);
+                }
+
+                // can't reach the requested number, means findTop already done its best
+                lastFindTopRetAll = (solutions.size() < numSolutions);
+                return solutions;
+            }
+            catch(std::bad_cast const& exc)
+            {
+                return m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+            }
+            // TODO- redundant ??
+            return m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
+        }
+
+        virtual SolutionVector<MySolution>
+            findTopSolutionsGroupedGemm(std::vector<MyProblem> const& problems,
+                                        Hardware const&               hardware,
+                                        int                           numSolutions) const override
+        {
+            try
+            {
+                auto const&    amdgpu = dynamic_cast<AMDGPU const&>(hardware);
+                const uint64_t gen    = m_generation->value.load(std::memory_order_acquire);
+
+                SolutionVector<MySolution> solutions;
+                uint64_t                   entryGen = 0;
+                std::tie(solutions, entryGen)       = m_cachesGroupedGemm.find(problems, amdgpu);
+
+                if(solutions.size() != 0 && entryGen == gen)
+                    return solutions;
+
+                solutions
+                    = m_subLibrary->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
+                if(solutions.size() != 0)
+                    m_cachesGroupedGemm.add(std::make_tuple(solutions, gen), problems, amdgpu);
+
+                return solutions;
+            }
+            catch(std::bad_cast const& exc)
+            {
+                return m_subLibrary->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
+            }
+            return m_subLibrary->findTopSolutionsGroupedGemm(problems, hardware, numSolutions);
+        }
+
+    private:
+        std::shared_ptr<Library>           m_subLibrary;
+        std::shared_ptr<LibraryGeneration> m_generation;
+        mutable Cache                      m_cache;
+        mutable Caches                     m_caches;
+        mutable CachesGroupedGemm          m_cachesGroupedGemm;
+        mutable std::atomic<bool>          lastFindTopRetAll = false;
+    };
+#else
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     class CachingLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
@@ -333,5 +544,6 @@ namespace TensileLite
         mutable CachesGroupedGemm m_cachesGroupedGemm;
         mutable std::atomic<bool> lastFindTopRetAll = false;
     };
+#endif // TENSILELITE_ENABLE_USER_KERNELS
 
 } // namespace TensileLite
