@@ -1262,28 +1262,6 @@ inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
 }
 #endif // BUILD_WITH_TENSILE
 
-template <typename Ti, typename To, typename Tc>
-bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
-{
-#ifdef BUILD_WITH_HIPBLASLT
-    if constexpr(sizeof(Ti) != 2)
-    {
-        if(!prob.handle->isHipBLASLtForcedOn())
-        {
-            // gfx950: hipBLASLt is used only for fp16/bf16
-            // TODO remove after all types are supported
-            if(rocblas_internal_get_arch(prob.handle) == 950)
-                return false;
-        }
-    }
-
-    bool batched = !prob.strided_batch;
-    return prob.handle->tryHipBLASLt(batched);
-#else
-    return false;
-#endif
-}
-
 /******************************************************************************
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasContractionProblem                                               *
@@ -1309,7 +1287,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
     {
 
 #ifdef BUILD_WITH_HIPBLASLT
-        if(useHipBLASLt(prob))
+        if(useHipBLASLt<Ti>(prob.handle, !prob.strided_batch))
         {
             try
             {
@@ -1575,7 +1553,7 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob
     // constexpr bool rocblas_kernel = rocblas_internal_source_gemm<TiA, TiB, Tc, To>();
 
 #ifdef BUILD_WITH_HIPBLASLT
-    if(useHipBLASLt(prob))
+    if(useHipBLASLt<Ti>(prob.handle, !prob.strided_batch))
     {
         // getAllSolutionsHipBlasLT also includes call to getRocblasSolutions() as to not change API
         return getAllSolutionsHipBlasLT(prob, option, list_array, list_size);
