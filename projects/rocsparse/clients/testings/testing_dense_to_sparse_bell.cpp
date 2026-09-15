@@ -300,15 +300,13 @@ INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 
+template <typename I, typename T>
 void testing_dense_to_sparse_bell_extra_687(const Arguments& arg)
 {
     if(!arg.unit_check)
     {
         return;
     }
-
-    using I = int32_t;
-    using T = float;
 
     int             device;
     hipDeviceProp_t prop;
@@ -431,5 +429,5 @@ void testing_dense_to_sparse_bell_extra_687(const Arguments& arg)
 
 void testing_dense_to_sparse_bell_extra(const Arguments& arg)
 {
-    testing_dense_to_sparse_bell_extra_687(arg);
+    testing_dense_to_sparse_bell_extra_687<int32_t, float>(arg);
 }
