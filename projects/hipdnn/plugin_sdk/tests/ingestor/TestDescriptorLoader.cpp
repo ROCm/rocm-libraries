@@ -194,8 +194,8 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
          {{"version", "1.0"},
           {"id", heuristicId},
           {"name", "selector"},
-          {"kind", "native"},
-          {"payload", SCORE_SYMBOL}}},
+          {"adapter", "native"},
+          {"native", {{"symbol", SCORE_SYMBOL}}}}},
         {".ued.json",
          {{"version", "1.0"},
           {"id", engineId},
@@ -350,13 +350,251 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     EXPECT_EQ(set.engine.name, "test:complete");
     EXPECT_EQ(set.schema.fields.size(), 2u);
     ASSERT_TRUE(set.heuristic.has_value());
-    EXPECT_EQ(set.heuristic->payload, SCORE_SYMBOL);
+    EXPECT_EQ(set.heuristic->nativeSymbol, SCORE_SYMBOL);
+    // A model artifact is a path relative to the .uhd.json that declared it, so the
+    // descriptor has to carry that directory -- nothing downstream can recover it.
+    EXPECT_EQ(set.heuristic->baseDir, dir.path());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
     ASSERT_EQ(set.packs.size(), 1u);
     EXPECT_EQ(set.packs.front().kernels.size(), 3u);
     ASSERT_EQ(set.engine.behaviorNotes.size(), 1u);
     EXPECT_EQ(set.engine.behaviorNotes.front(), HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
+}
+
+/// RFC 0019 §8.1: a UHD is generated against particular descriptor versions and reads its
+/// inputs through them, so a UHD paired with a descriptor set it was not trained for must not
+/// load. features_hash cannot catch this -- it covers the signature, not the descriptors the
+/// signature resolves against.
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstAMatchingDescriptorSetLoads)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_ok"));
+    auto documents = makeSetDocuments('1', "test:trained");
+    // The fixtures declare 1.0 throughout, so training against 1.0 is the matching case.
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.0"}, {"kmd", "1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_EQ(loadFrom(dir.path()).size(), 1u);
+}
+
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstAnOlderMinorStillLoads)
+{
+    // The descriptor has since gained a field. That is forward motion, not skew: everything
+    // the model was trained to read is still there, so §8.1 permits minor >= trained.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_older"));
+    auto documents = makeSetDocuments('1', "test:older");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_EQ(loadFrom(dir.path()).size(), 1u);
+}
+
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstANewerMinorIsRefused)
+{
+    // The reverse: the model was generated against a UED newer than the one shipped beside
+    // it, so a field it expects may simply not be there. Dropping the engine is the point --
+    // ranking on a descriptor the model was not generated for is silent misranking.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_newer"));
+    auto documents = makeSetDocuments('1', "test:newer");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.7"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// RFC 0019 §8.1 applies to every UHD the engine names, not only the one that resolves as the
+/// default. A per-arch model is trained the same way and read the same way, so a version skew in
+/// one is the same defect -- and it used to load unchecked, deferring the failure to whichever
+/// device selected that arch.
+///
+/// The case with no `default` is the one worth asserting, and the only one that exercises the
+/// new code: with a `default` present, the pre-existing check catches the skew whether or not
+/// the per-arch entries are examined. A first version of this pair covered that case too and
+/// passed identically with the fix reverted, so it was removed rather than kept as decoration.
+TEST(TestDescriptorLoader, AnArchScopedHeuristicWithNoDefaultIsVersionCheckedToo)
+{
+    // The case the old code could not reach at all: no `default`, so nothing was resolved into
+    // engine.heuristicId and the skew loop had nothing to run on. The engine still shipped a
+    // model, and it was still read through the UED it was not generated for.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("arch_skew_nodef"));
+    auto documents = makeSetDocuments('1', "test:arch_skew_nodef");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"] = {{"gfx950", uhdId}};
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"ued", "1.7"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty())
+        << "an arch-scoped model with no default skipped the version check";
+}
+
+TEST(TestDescriptorLoader, AHeuristicTrainedAgainstADifferentMajorIsRefused)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_major"));
+    auto documents = makeSetDocuments('1', "test:major");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"kmd", "2.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+TEST(TestDescriptorLoader, AHeuristicDeclaringNoTrainedAgainstStillLoads)
+{
+    // §4's field table makes it conditional on the adapter carrying features; a static_order
+    // UHD reads no descriptor fields, so requiring it would break the zero-authoring case.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_absent"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:absent"));
+
+    EXPECT_EQ(loadFrom(dir.path()).size(), 1u);
+}
+
+TEST(TestDescriptorLoader, TrainedAgainstNamingSomethingOtherThanADescriptorKindIsRefused)
+{
+    // A typo like "uhd" or "kdp" would otherwise be silently ignored, leaving the author
+    // believing a coupling is enforced when nothing checks it.
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trained_typo"));
+    auto documents = makeSetDocuments('1', "test:typo");
+    documentOfType(documents, ".uhd.json")["trained_against"] = {{"kdp", "1.0"}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// RFC 0019 §3.1 lets a UED name up to three role-scoped UHDs, each mapped by architecture.
+/// The older single `heuristic` key is one of those roles with one entry, so it has to keep
+/// loading unchanged -- every shipped descriptor set uses it.
+TEST(TestDescriptorLoader, TheLegacySingleHeuristicKeyBecomesTheDefaultCatalogRole)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("legacy_role"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:legacy"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    ASSERT_TRUE(engine.heuristicId.has_value());
+    ASSERT_EQ(engine.sortKernelCatalog.size(), 1u);
+    EXPECT_EQ(engine.sortKernelCatalog.at("default"), *engine.heuristicId);
+    EXPECT_TRUE(engine.predictEngineTflops.empty());
+    EXPECT_TRUE(engine.predictApplicableKernels.empty());
+}
+
+/// The multiple-reference form: roles are independently optional and each is an arch map.
+TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_scoped"));
+    auto documents = makeSetDocuments('1', "test:roles");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    // Same UHD under two arches and under a second role: what matters here is that the
+    // shape parses and every reference resolves, not that they differ.
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"] = {{"gfx942", uhdId}, {"default", uhdId}};
+    engineDocument["predict_engine_tflops"] = {{"default", uhdId}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.sortKernelCatalog.size(), 2u);
+    EXPECT_EQ(engine.predictEngineTflops.size(), 1u);
+    // The resolved single reference every existing consumer reads is the default entry.
+    ASSERT_TRUE(engine.heuristicId.has_value());
+    EXPECT_EQ(engine.sortKernelCatalog.at("default"), *engine.heuristicId);
+}
+
+/// RFC 0019 §8.3 resolves the exact gcnArchName, then `default`, then nothing. An arch-named
+/// entry is a claim about that architecture, not about every architecture, so it must not become
+/// the single reference consumers read as the universal model.
+///
+/// It used to, whenever the map held exactly one entry -- on the reasoning that one model means
+/// one model. The consequence was a gfx950-only UHD ranking every device, including ones it says
+/// nothing about, with nothing in the output to show it. The candidates stay in
+/// heuristicsByArch, where rank() resolves them against the running device.
+TEST(TestDescriptorLoader, ASingleArchScopedHeuristicDoesNotBecomeTheDefault)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("single_arch"));
+    auto documents = makeSetDocuments('1', "test:single_arch");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"] = {{"gfx950", uhdId}};
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.sortKernelCatalog.size(), 1u);
+    EXPECT_FALSE(engine.heuristicId.has_value())
+        << "a model named only for gfx950 was promoted to the engine's default";
+
+    // But it is still reachable: discarding it would leave the engine ranking by declared order
+    // even on gfx950, which is the architecture it does have a model for.
+    EXPECT_EQ(sets.front().heuristicsByArch.count("gfx950"), 1u);
+}
+
+/// The legacy spelling stays a default. A bare `"heuristic": "<id>"` is keyed "default" by the
+/// loader, so tightening the rule above must not disturb the form every shipped UED uses.
+TEST(TestDescriptorLoader, ABareHeuristicIdIsStillTheDefault)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bare_id"));
+    auto documents = makeSetDocuments('1', "test:bare_id");
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().engine.heuristicId.has_value());
+    EXPECT_EQ(sets.front().engine.sortKernelCatalog.count("default"), 1u);
+}
+
+/// A per-arch reference to a UHD nothing defines is the same broken install as a dangling
+/// default one. Loading it would defer the failure to whichever device selects that arch.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseArchScopedHeuristicDoesNotResolve)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_arch"));
+    auto documents = makeSetDocuments('1', "test:dangling");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    const auto uhdId = engineDocument.at("heuristic").get<std::string>();
+
+    engineDocument.erase("heuristic");
+    engineDocument["sort_kernel_catalog"]
+        = {{"default", uhdId}, {"gfx942", testUuid('9', ROLE_HEURISTIC)}};
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty())
+        << "an arch-scoped reference to a heuristic no descriptor defines must drop the engine";
+}
+
+/// Both spellings of the same role would silently disagree about which model ranks.
+TEST(TestDescriptorLoader, RefusesAUedThatNamesTheCatalogRoleTwice)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_twice"));
+    auto documents = makeSetDocuments('1', "test:twice");
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    engineDocument["sort_kernel_catalog"] = engineDocument.at("heuristic");
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
 /// A UED naming no UHD ranks on priority then id instead of failing, so the SDK can adopt a
@@ -1266,6 +1504,213 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseHeuristicIsMissing)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
+namespace
+{
+
+/// Turns the set's UHD into a tree_data one naming @p artifact, and writes the tree.
+///
+/// Returns the directory, so a case can create or withhold the artifact afterwards.
+std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
+                                             const std::string& engineName,
+                                             const std::string& artifact)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "max";
+    heuristic["tree_data"] = {{"artifact", artifact}};
+    writeDocuments(root, documents);
+    return root;
+}
+
+/// Contents are irrelevant: the loader checks that the path resolves to a file, and the
+/// artifact is only parsed later, by the adapter, in a test that builds a real one.
+void writeArtifact(const std::filesystem::path& path)
+{
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary) << "not a real model";
+}
+
+} // namespace
+
+/// A model-backed UHD whose artifact shipped loads with the engine intact.
+///
+/// The baseline the failure cases are read against: without it, "the engine survived"
+/// proves nothing, because an engine that never had a model survives too.
+TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_present"));
+    writeModelHeuristicSet(dir.path(), "test:model_present", "model.bin");
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->adapter, UhdAdapter::TREE_DATA);
+    EXPECT_EQ(sets.front().heuristic->modelArtifactPath, "model.bin");
+}
+
+/// The whole RFC 0019 §4 header survives the parse, `derived` included.
+///
+/// These fields used to live in a FlatBuffer the loader never opened, so nothing here
+/// could be wrong. They are the descriptor's own now, and every one of them changes what
+/// the heuristic computes: a dropped `derived` entry silently removes a feature the model
+/// was trained on, and a dropped `score` block silently relabels the units a caller
+/// compares across engines.
+TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_header"));
+
+    auto documents = makeSetDocuments('1', "test:model_header");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"]
+        = nlohmann::json::array({R"("$kernel.tile_m")", R"("$derived.tiles_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    // max with a calibrated score: the pair a cross-engine consumer may act on, and the
+    // one combination where `calibrated` is not its default, so the boolean parse is real.
+    heuristic["objective"] = "max";
+    heuristic["derived"] = nlohmann::json::array(
+        {{{"name", "tiles_m"}, {"expression", R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})"}}});
+    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["categorical_encoding"] = {{"$kernel.dtype", {{"fp16", 0}, {"bf16", 1}}}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", "sha256:model"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    const auto& parsed = *sets.front().heuristic;
+
+    EXPECT_EQ(parsed.objective, "max");
+    ASSERT_EQ(parsed.featuresSignature.size(), 2u);
+    EXPECT_EQ(parsed.featuresSignature[1], R"("$derived.tiles_m")");
+    EXPECT_EQ(parsed.featuresHash, "sha256:unchecked");
+    ASSERT_EQ(parsed.derived.size(), 1u);
+    EXPECT_EQ(parsed.derived.front().name, "tiles_m");
+    EXPECT_EQ(parsed.derived.front().expression, R"({"ceil_div": ["$q.M", "$kernel.tile_m"]})");
+    EXPECT_EQ(parsed.score.units, "tflops");
+    EXPECT_TRUE(parsed.score.calibrated);
+    EXPECT_EQ(parsed.score.transform, "log1p");
+    EXPECT_EQ(parsed.modelHash, "sha256:model");
+    ASSERT_EQ(parsed.categoricalEncoding.count("$kernel.dtype"), 1u);
+    EXPECT_EQ(parsed.categoricalEncoding.at("$kernel.dtype").at("bf16"), 1);
+}
+
+/// A cost-target UHD is ordinary: `min` on an uncalibrated score parses and is kept.
+///
+/// The direction is the author's to choose, because only they know what their model
+/// predicts -- a model fitted on TFLOPS ranks descending, one fitted on latency ascending.
+/// Neither is a fallback for the other, and dropping `min` on the floor would silently
+/// invert every ranking a latency model produces.
+TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_min"));
+
+    auto documents = makeSetDocuments('1', "test:objective_min");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"units", "latency_ms"}, {"calibrated", false}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_TRUE(sets.front().heuristic.has_value());
+    EXPECT_EQ(sets.front().heuristic->objective, "min");
+    EXPECT_FALSE(sets.front().heuristic->score.calibrated);
+}
+
+/// `min` with a calibrated score is a load error, not a preference.
+///
+/// RFC 0019 §11.3 defines cross-engine comparison on an absolute throughput metric, which
+/// is higher-wins by construction. A descriptor claiming both asks two engines to be
+/// ranked against each other while reporting their scores in opposite directions. Caught
+/// at parse (RFC 0019.13 §15.1): at comparison time the symptom is an inverted choice
+/// between two engines, with nothing left to attribute it to.
+TEST(TestDescriptorLoader, RejectsAMinimisingObjectiveOnACalibratedScore)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_clash"));
+
+    auto documents = makeSetDocuments('1', "test:objective_clash");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "min";
+    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "calibrated"));
+}
+
+/// A `derived` that is not a list of name/expression objects is a parse error.
+///
+/// The expression language is the one place an author writes code into a descriptor, and
+/// a malformed entry that parsed as absent would drop a feature rather than report one.
+TEST(TestDescriptorLoader, RejectsAMalformedDerivedEntry)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bad_derived"));
+
+    auto documents = makeSetDocuments('1', "test:bad_derived");
+    auto& heuristic = documentOfType(documents, ".uhd.json");
+    heuristic["adapter"] = "tree_data";
+    heuristic.erase("native");
+    heuristic["features_signature"] = nlohmann::json::array({R"("$kernel.tile_m")"});
+    heuristic["features_hash"] = "sha256:unchecked";
+    heuristic["objective"] = "max";
+    heuristic["derived"] = nlohmann::json::array({"tiles_m"});
+    heuristic["tree_data"] = {{"artifact", "model.bin"}};
+    writeDocuments(dir.path(), documents);
+    writeArtifact(dir.path() / "model.bin");
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    EXPECT_TRUE(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "derived"));
+}
+
+/// A missing artifact degrades rather than dropping: RFC 0019 §5 keeps the engine
+/// selecting, by declared order, and the warning is what says why.
+TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("model_absent"));
+    writeModelHeuristicSet(dir.path(), "test:model_absent", "never_packaged.bin");
+
+    EXPECT_EQ(loadValidatedDescriptorSets<LoaderHandle>(dir.path()).size(), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "never_packaged.bin"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "which is absent"));
+}
+
 TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("id_collision"));
@@ -1512,7 +1957,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredScoreSymbo
     writeDocuments(dir.path(), makeSetDocuments('1', "test:score_check_sibling"));
 
     auto unregistered = makeSetDocuments('2', "test:unregistered_score");
-    documentOfType(unregistered, ".uhd.json")["payload"] = "descriptorloader.absent";
+    documentOfType(unregistered, ".uhd.json")["native"]["symbol"] = "descriptorloader.absent";
     writeDocuments(dir.path(), unregistered);
 
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());

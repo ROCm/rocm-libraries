@@ -164,6 +164,8 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/resample_fwd_attributes.fbs
         schemas/resample_bwd_attributes.fbs
         schemas/tensor_attributes.fbs
+        schemas/gbdt_model.fbs
+        schemas/table_model.fbs
         schemas/moe_grouped_matmul_attributes.fbs
         schemas/moe_grouped_matmul_bwd_attributes.fbs
     )

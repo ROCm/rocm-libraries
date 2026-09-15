@@ -1,0 +1,338 @@
+{
+  "schema_version": "1.0",
+  "operation": "matmul",
+  "display_name": "Matrix Multiply",
+  "description": "C = A x B. A is [M, K], B is [K, N].",
+  "parameters": {
+    "M": {
+      "type": "int64"
+    },
+    "N": {
+      "type": "int64"
+    },
+    "K": {
+      "type": "int64"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "fp32",
+        "fp16",
+        "bf16"
+      ]
+    }
+  },
+  "stratification_axis": "arithmetic_intensity",
+  "regimes": {
+    "m": {
+      "parameter": "M",
+      "buckets": [
+        1,
+        8,
+        32,
+        128,
+        1024,
+        4096,
+        8192
+      ]
+    },
+    "n": {
+      "parameter": "N",
+      "buckets": [
+        1024,
+        4096,
+        8192,
+        11008,
+        28672
+      ]
+    },
+    "k": {
+      "parameter": "K",
+      "buckets": [
+        256,
+        1024,
+        4096,
+        8192,
+        11008
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "matmul",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "aDims",
+        "kind": "expr",
+        "value": [
+          "$q.M",
+          "$q.K"
+        ]
+      },
+      {
+        "name": "aStrides",
+        "kind": "strides_of",
+        "of": "aDims"
+      },
+      {
+        "name": "bDims",
+        "kind": "expr",
+        "value": [
+          "$q.K",
+          "$q.N"
+        ]
+      },
+      {
+        "name": "bStrides",
+        "kind": "strides_of",
+        "of": "bDims"
+      },
+      {
+        "name": "cDims",
+        "kind": "expr",
+        "value": [
+          "$q.M",
+          "$q.N"
+        ]
+      },
+      {
+        "name": "cStrides",
+        "kind": "strides_of",
+        "of": "cDims"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      }
+    ]
+  },
+  "archetypes": [
+    {
+      "name": "llama3_8b_projection",
+      "note": "the attention and MLP projections; tokens on M, model width on N and K",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "N": [
+          4096,
+          14336
+        ],
+        "K": [
+          4096
+        ]
+      }
+    },
+    {
+      "name": "llama3_8b_mlp_down",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "N": [
+          4096
+        ],
+        "K": [
+          14336
+        ]
+      }
+    },
+    {
+      "name": "llama3_70b_projection",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096,
+          8192,
+          16384
+        ],
+        "N": [
+          8192,
+          28672
+        ],
+        "K": [
+          8192
+        ]
+      }
+    },
+    {
+      "name": "gpt3_175b_projection",
+      "values": {
+        "M": [
+          512,
+          1024,
+          2048,
+          4096
+        ],
+        "N": [
+          12288,
+          49152
+        ],
+        "K": [
+          12288
+        ]
+      }
+    },
+    {
+      "name": "bert_base_projection",
+      "values": {
+        "M": [
+          1024,
+          4096,
+          16384
+        ],
+        "N": [
+          768,
+          3072
+        ],
+        "K": [
+          768
+        ]
+      }
+    },
+    {
+      "name": "decode_gemv",
+      "note": "batch-1 decode: a tall-skinny GEMM, memory bound and a different kernel entirely",
+      "values": {
+        "M": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32
+        ],
+        "N": [
+          4096,
+          8192,
+          14336
+        ],
+        "K": [
+          4096,
+          8192
+        ]
+      }
+    },
+    {
+      "name": "vit_projection",
+      "values": {
+        "M": [
+          1576,
+          4616,
+          18464
+        ],
+        "N": [
+          768,
+          3072
+        ],
+        "K": [
+          768
+        ]
+      }
+    },
+    {
+      "name": "square_benchmark",
+      "note": "the classic square case; not a workload but the shape every library is tuned on",
+      "values": {
+        "M": [
+          1024,
+          2048,
+          4096,
+          8192
+        ],
+        "N": [
+          "$q.M"
+        ],
+        "K": [
+          "$q.M"
+        ]
+      }
+    }
+  ],
+  "neighbourhood": {
+    "M": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        0.75,
+        1,
+        1.5,
+        2
+      ]
+    },
+    "N": {
+      "kind": "multiple",
+      "of": 128,
+      "steps": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    },
+    "K": {
+      "kind": "multiple",
+      "of": 128,
+      "steps": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    }
+  },
+  "mixture": {
+    "archetypes": 0.2,
+    "neighbourhood": 0.6,
+    "exploration": 0.2
+  },
+  "// archetypes": "Transformer projection shapes, where nearly all production GEMM time goes. M carries tokens and moves with batch and sequence length; N and K are model widths and take a few architecture-fixed values, which is why they are perturbed by whole 128-element multiples rather than scaled.",
+  "// mixture": "Same shares as conv_fwd; see the note there.",
+  "// flops": "2*M*N*K -- one multiply and one add per output element per K step. A property of the problem, not of the kernel: the same count however it is tiled. tflops = flops / measured time.",
+  "flops": {
+    "*": [
+      2,
+      "$q.M",
+      "$q.N",
+      "$q.K"
+    ]
+  },
+  "// elements": "A (M*K) + B (K*N) + C (M*N). Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "+": [
+      {
+        "*": [
+          "$q.M",
+          "$q.K"
+        ]
+      },
+      {
+        "*": [
+          "$q.K",
+          "$q.N"
+        ]
+      },
+      {
+        "*": [
+          "$q.M",
+          "$q.N"
+        ]
+      }
+    ]
+  }
+}

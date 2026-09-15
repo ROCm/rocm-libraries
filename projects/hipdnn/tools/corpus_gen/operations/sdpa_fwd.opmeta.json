@@ -1,0 +1,473 @@
+{
+  "schema_version": "1.0",
+  "operation": "sdpa_fwd",
+  "display_name": "Scaled Dot-Product Attention Forward",
+  "description": "Multi-head attention forward. Q is [batch, heads, seqlen_q, head_dim]; K and V share seqlen_k.",
+  "parameters": {
+    "batch": {
+      "type": "int64"
+    },
+    "heads": {
+      "type": "int64"
+    },
+    "seqlen_q": {
+      "type": "int64"
+    },
+    "seqlen_k": {
+      "type": "int64"
+    },
+    "head_dim": {
+      "type": "int64"
+    },
+    "is_causal": {
+      "type": "bool",
+      "description": "Decode is always causal (RFC 0019.13 \u00a712.3)"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "fp16",
+        "bf16"
+      ]
+    }
+  },
+  "stratification_axis": "arithmetic_intensity",
+  "regimes": {
+    "batch": {
+      "parameter": "batch",
+      "buckets": [
+        1,
+        4,
+        16,
+        64,
+        256
+      ]
+    },
+    "heads": {
+      "parameter": "heads",
+      "buckets": [
+        1,
+        8,
+        16,
+        32,
+        96
+      ]
+    },
+    "seqlen_q": {
+      "parameter": "seqlen_q",
+      "buckets": [
+        1,
+        128,
+        512,
+        2048,
+        8192
+      ]
+    },
+    "seqlen_k": {
+      "parameter": "seqlen_k",
+      "buckets": [
+        128,
+        512,
+        2048,
+        8192,
+        32768
+      ]
+    },
+    "head_dim": {
+      "parameter": "head_dim",
+      "buckets": [
+        64,
+        128,
+        256
+      ]
+    }
+  },
+  "constraints": [
+    {
+      "<=": [
+        "$q.seqlen_q",
+        "$q.seqlen_k"
+      ]
+    }
+  ],
+  "graph_builder": {
+    "function": "sdpaForward",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "qDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "qStrides",
+        "kind": "strides_of",
+        "of": "qDims"
+      },
+      {
+        "name": "kDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_k",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "kStrides",
+        "kind": "strides_of",
+        "of": "kDims"
+      },
+      {
+        "name": "vDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_k",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "vStrides",
+        "kind": "strides_of",
+        "of": "vDims"
+      },
+      {
+        "name": "oDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "oStrides",
+        "kind": "strides_of",
+        "of": "oDims"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      },
+      {
+        "name": "causalMask",
+        "kind": "direct",
+        "source": "$q.is_causal"
+      }
+    ]
+  },
+  "archetypes": [
+    {
+      "name": "llama3_8b_decode",
+      "source": "RFC 0019.13 \u00a712.3",
+      "note": "one query token against the whole KV cache",
+      "values": {
+        "batch": [
+          1,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256
+        ],
+        "heads": [
+          32
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          512,
+          2048,
+          8192,
+          32768
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "llama3_8b_prefill",
+      "source": "RFC 0019.13 \u00a712.3",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "heads": [
+          32
+        ],
+        "seqlen_q": [
+          512,
+          2048,
+          8192
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "llama3_70b_gqa",
+      "note": "grouped-query attention is declared once the builder exposes the KV head count",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          64
+        ],
+        "heads": [
+          64
+        ],
+        "seqlen_q": [
+          1,
+          512,
+          2048
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "gpt3_175b_prefill",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4
+        ],
+        "heads": [
+          96
+        ],
+        "seqlen_q": [
+          2048,
+          4096
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "bert_base_encoder",
+      "note": "bidirectional: an encoder is the uncausal case",
+      "values": {
+        "batch": [
+          8,
+          32,
+          128
+        ],
+        "heads": [
+          12,
+          16
+        ],
+        "seqlen_q": [
+          128,
+          512
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          64
+        ],
+        "is_causal": [
+          false
+        ]
+      }
+    },
+    {
+      "name": "vit_encoder",
+      "note": "patch tokens plus a class token",
+      "values": {
+        "batch": [
+          8,
+          32,
+          64
+        ],
+        "heads": [
+          12,
+          16
+        ],
+        "seqlen_q": [
+          197,
+          577
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          64
+        ],
+        "is_causal": [
+          false
+        ]
+      }
+    },
+    {
+      "name": "long_context",
+      "values": {
+        "batch": [
+          1,
+          4,
+          16
+        ],
+        "heads": [
+          32,
+          96
+        ],
+        "seqlen_q": [
+          8192,
+          16384,
+          32768
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          64,
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    }
+  ],
+  "neighbourhood": {
+    "batch": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        1,
+        2
+      ]
+    },
+    "heads": {
+      "kind": "values",
+      "values": [
+        8,
+        12,
+        16,
+        24,
+        32,
+        40,
+        64,
+        96,
+        128
+      ]
+    },
+    "seqlen_q": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        0.75,
+        1,
+        1.5,
+        2
+      ]
+    },
+    "seqlen_k": {
+      "kind": "mirror",
+      "of": "seqlen_q",
+      "ratios": [
+        1,
+        1,
+        2,
+        4,
+        16
+      ]
+    }
+  },
+  "mixture": {
+    "archetypes": 0.2,
+    "neighbourhood": 0.6,
+    "exploration": 0.2
+  },
+  "// archetypes": "Recorded transformer configurations (RFC 0019.13 \u00a712.3). Decode and prefill are the same operation and different problems -- seqlen_q of 1 against a long cache is memory bound, and a square prefill is compute bound -- so each is anchored separately rather than left to a range over seqlen_q.",
+  "// neighbourhood": "head_dim is absent on purpose: it takes one of a few values fixed by the model architecture, and an interpolated 96 or 112 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, which keeps the declared seqlen_q <= seqlen_k relation satisfied by construction rather than by rejection.",
+  "// mixture": "Same shares as conv_fwd; see the note there.",
+  "// flops": "Effective, not dense: the work a causal mask leaves, which is what aiter and Triton report. A number that means the same thing outside AMD is worth more than one that flatters a kernel by crediting it for arithmetic the mask discarded. 4*batch*heads*Sq*Sk*head_dim is the dense count -- two matmuls, QK^T and PV, at 2*Sq*Sk*D each per head -- scaled by (1 - is_causal/2), since a causal mask leaves about half the entries of a square problem. Written as arithmetic on the boolean rather than a conditional so the declaration needs no `if`: is_causal reads as 1 or 0, giving a factor of 0.5 or 1.",
+  "flops": {
+    "*": [
+      4,
+      "$q.batch",
+      "$q.heads",
+      "$q.seqlen_q",
+      "$q.seqlen_k",
+      "$q.head_dim",
+      {
+        "-": [
+          1,
+          {
+            "/": [
+              "$q.is_causal",
+              2
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "// elements": "Q and O are Sq-long, K and V are Sk-long, all B*H*D wide: B*H*D*(2*Sq + 2*Sk). Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "*": [
+      "$q.batch",
+      "$q.heads",
+      "$q.head_dim",
+      {
+        "+": [
+          {
+            "*": [
+              2,
+              "$q.seqlen_q"
+            ]
+          },
+          {
+            "*": [
+              2,
+              "$q.seqlen_k"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

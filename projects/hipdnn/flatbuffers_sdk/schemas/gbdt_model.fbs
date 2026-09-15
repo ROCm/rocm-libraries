@@ -1,0 +1,87 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+/// @brief A single decision tree in the GBDT ensemble.
+///
+/// Trees are stored in a flat array format for cache-friendly traversal.
+/// Node i is internal if left_children[i] >= 0; leaf if left_children[i] == -1.
+///
+/// Traversal: start at node 0, compare features[feature_indices[i]] against
+/// thresholds[i], go left (left_children[i]) if less-or-equal (or less, if
+/// decision_type at i is false) or if missing and default_left,
+/// else right (right_children[i]). At a leaf, return leaf_values[i].
+table GbdtTree {
+    /// Feature index to split on at each internal node.
+    feature_indices: [int32];
+
+    /// Split threshold at each internal node.
+    thresholds: [double];
+
+    /// Left child index for each node. -1 indicates this is a leaf.
+    left_children: [int32];
+
+    /// Right child index for each node. -1 indicates this is a leaf.
+    right_children: [int32];
+
+    /// Leaf value at each leaf node. Ignore for internal nodes.
+    leaf_values: [double];
+
+    /// Default direction for missing values: true = go left, false = go right.
+    default_left: [bool];
+
+    /// Decision type per node: true = use <= (LightGBM default), false = use <.
+    /// If absent, defaults to all true (<=) for LightGBM compatibility.
+    decision_lte: [bool];
+}
+
+/// @brief GBDT (Gradient Boosted Decision Tree) model for the tree_data adapter.
+///
+/// This is the model artifact format for UHD's default shipping path. The model
+/// is exported from LightGBM or XGBoost training and converted to this FlatBuffer
+/// format at build time.
+///
+/// Prediction: sum leaf_values from all trees after traversal, then add base_score:
+///     score = base_score + sum(leaf_values)
+///
+/// learning_rate is metadata only and must NOT be applied here. LightGBM's
+/// dump_model() already folds it into leaf_values, so multiplying again double-counts
+/// it. A producer whose leaf values exclude the learning rate must scale them before
+/// serializing. See TreeDataAdapter::score, which implements this formula.
+table GbdtModel {
+    /// Array of decision trees in the ensemble.
+    trees: [GbdtTree];
+
+    /// Number of input features expected.
+    num_features: int32;
+
+    /// SHA-256 hash of the features_signature this model was trained on.
+    /// Must match UHD.features_hash at load time.
+    features_hash: string;
+
+    /// Base prediction (bias term).
+    base_score: double = 0.0;
+
+    /// Learning rate (shrinkage factor). Usually 1.0 for inference.
+    learning_rate: double = 1.0;
+
+    /// Optional model metadata.
+    framework: string;          // "lightgbm", "xgboost", etc.
+    training_date: string;      // ISO 8601 timestamp
+    num_training_samples: int64;
+    training_objective: string; // "regression", "lambdarank", etc.
+
+    /// Model provenance (RFC 0019 §9.2, §13).
+    /// GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
+    /// Runtime compares $device.arch against this list; warns or degrades to
+    /// static_order if the device arch is unseen during training.
+    training_arches: [string];
+
+    /// Semantic version of the model (e.g., "1.0.0").
+    model_version: string;
+}
+
+root_type GbdtModel;
+
+file_identifier "HGBM";  // HipDNN GBDT Model

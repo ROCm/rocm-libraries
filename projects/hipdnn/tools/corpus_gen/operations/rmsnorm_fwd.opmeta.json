@@ -1,0 +1,236 @@
+{
+  "schema_version": "1.0",
+  "operation": "rmsnorm_fwd",
+  "display_name": "RMSNorm Forward",
+  "parameters": {
+    "batch": {
+      "type": "int64"
+    },
+    "seq_len": {
+      "type": "int64"
+    },
+    "hidden_dim": {
+      "type": "int64"
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "fp32",
+        "fp16",
+        "bf16"
+      ]
+    }
+  },
+  "stratification_axis": "working_set",
+  "regimes": {
+    "hidden_dim": {
+      "parameter": "hidden_dim",
+      "buckets": [
+        768,
+        1024,
+        4096,
+        5120,
+        8192
+      ]
+    },
+    "batch": {
+      "parameter": "batch",
+      "buckets": [
+        1,
+        4,
+        32,
+        128
+      ]
+    },
+    "seq_len": {
+      "parameter": "seq_len",
+      "buckets": [
+        128,
+        512,
+        2048,
+        8192
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "rmsNormForward",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "dims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "strides",
+        "kind": "strides_of",
+        "of": "dims"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      }
+    ]
+  },
+  "archetypes": [
+    {
+      "name": "llama3_8b",
+      "note": "one normalization per block, so seq_len 1 is the decode step",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8,
+          16,
+          32
+        ],
+        "seq_len": [
+          1,
+          512,
+          2048,
+          8192
+        ],
+        "hidden_dim": [
+          4096
+        ]
+      }
+    },
+    {
+      "name": "llama3_70b",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "seq_len": [
+          1,
+          512,
+          2048,
+          8192
+        ],
+        "hidden_dim": [
+          8192
+        ]
+      }
+    },
+    {
+      "name": "gpt3_175b",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4,
+          8
+        ],
+        "seq_len": [
+          1,
+          2048,
+          4096
+        ],
+        "hidden_dim": [
+          12288
+        ]
+      }
+    },
+    {
+      "name": "bert_base",
+      "values": {
+        "batch": [
+          8,
+          32,
+          128
+        ],
+        "seq_len": [
+          128,
+          512
+        ],
+        "hidden_dim": [
+          768
+        ]
+      }
+    },
+    {
+      "name": "bert_large",
+      "values": {
+        "batch": [
+          8,
+          32,
+          64
+        ],
+        "seq_len": [
+          128,
+          512
+        ],
+        "hidden_dim": [
+          1024
+        ]
+      }
+    },
+    {
+      "name": "vit",
+      "values": {
+        "batch": [
+          8,
+          32,
+          64
+        ],
+        "seq_len": [
+          197,
+          577
+        ],
+        "hidden_dim": [
+          768,
+          1024
+        ]
+      }
+    }
+  ],
+  "neighbourhood": {
+    "batch": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        1,
+        2
+      ]
+    },
+    "seq_len": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        0.75,
+        1,
+        1.5,
+        2
+      ]
+    }
+  },
+  "mixture": {
+    "archetypes": 0.2,
+    "neighbourhood": 0.6,
+    "exploration": 0.2
+  },
+  "// archetypes": "Normalization runs once or twice per transformer block, on the same activation tensor the block's matmuls produce -- so its shapes are the model's hidden width against however many tokens are in flight, not arbitrary three-dimensional boxes.",
+  "// neighbourhood": "hidden_dim is absent from the neighbourhood: it is fixed by the model architecture and takes a handful of values, so an interpolated 5000 is a width nobody ships. batch and seq_len are what actually vary between requests.",
+  "// elements": "in + out, plus the scale vector. No bias, unlike layernorm. Element count across every tensor the operation touches, inputs and outputs. Dtype-free on purpose: bytes is elements times the dtype width, and the width table belongs to the tool rather than repeated as a nested dtype lookup in seven declarations. gbs = bytes / measured time, which is the metric that ranks a memory-bound kernel where tflops cannot.",
+  "elements": {
+    "+": [
+      {
+        "*": [
+          2,
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      "$q.hidden_dim"
+    ]
+  }
+}
