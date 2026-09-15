@@ -26,6 +26,9 @@
  *   ArchTarget.from_gfx(gfx)          rocke_arch_target_from_gfx()
  *   known_arches()                    rocke_known_arches()
  *   arch_from_isa(isa)                rocke_arch_from_isa()
+ *   target_id_from_isa(isa)           rocke_target_id_from_isa()
+ *   base_arch_from_target_id(id)      rocke_base_arch_from_target_id()
+ *   compiler_target_from_target_id(id) rocke_compiler_target_from_target_id()
  *
  * The Python loader reads core/arch/data/arch_specs.json at import time. The C99
  * port embeds that frozen SSOT as static tables (libc-only: no JSON parser), so
@@ -306,10 +309,25 @@ int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
  * (excluding the terminating NULL). */
 const char* const* rocke_known_arches(int* count);
 
-/* arch_from_isa: extract the gfx token from an isa triple
- * ("amdgcn-amd-amdhsa--gfx942" -> "gfx942"). Writes into `out` (>= out_cap) and
- * returns `out`. If `isa` has no '-', it is copied verbatim (Python identity
- * fallthrough). */
+/* Target identity helpers mirror rocke.core.arch.target. They do not validate
+ * compiler support or query a GPU. Inputs and output buffers must not overlap.
+ * Each writes at most out_cap - 1 bytes plus a NUL and returns out; a small
+ * buffer receives a truncated result (the existing arch_from_isa convention).
+ * NULL input/output or zero capacity returns NULL without writing. */
+
+/* Extract from the last "gfx", preserving profile and feature suffixes.
+ * If there is no "gfx", copy the input unchanged. */
+const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap);
+
+/* Remove features and profiles for catalog lookup, preserving catalog names
+ * such as gfx11-generic. gfx1250-strict and gfx942:xnack- become gfx1250/gfx942. */
+const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* Remove profiles but preserve compiler features: gfx1250-strict:xnack-
+ * becomes gfx1250:xnack-. */
+const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap);
+
+/* Extract the target ID from an ISA name, then derive its base architecture. */
 const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap);
 
 #ifdef __cplusplus

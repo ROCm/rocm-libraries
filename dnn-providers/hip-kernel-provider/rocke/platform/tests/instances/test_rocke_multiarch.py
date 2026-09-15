@@ -574,20 +574,17 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
 
 
 class TestDeviceQueryParsing(unittest.TestCase):
-    """Field extraction for the HIP device queries, pinned without a GPU.
-
-    Uses a synthetic hipDeviceProp_t buffer so the parsing is deterministic: the
-    marketing ``name`` is the char[256] at offset 0; ``gcnArchName`` carries the gfx
-    token further in and may carry ``:sramecc+:xnack-`` feature suffixes to strip.
-    """
+    """Read named HIP property fields without a GPU."""
 
     @staticmethod
-    def _props(name: bytes, gcn_arch: bytes | None) -> bytes:
-        buf = bytearray(4096)
-        buf[0 : len(name)] = name  # name[256] at offset 0, NUL-terminated
+    def _props(name: bytes, gcn_arch: bytes | None):
+        from rocke.runtime._hip_device_properties import HipDevicePropR0600
+
+        props = HipDevicePropR0600()
+        props.name = name
         if gcn_arch is not None:
-            buf[256 : 256 + len(gcn_arch)] = gcn_arch
-        return bytes(buf)
+            props.gcnArchName = gcn_arch
+        return props
 
     def test_arch_strips_feature_flags(self):
         import unittest.mock as mock
@@ -605,7 +602,7 @@ class TestDeviceQueryParsing(unittest.TestCase):
         with mock.patch.object(hip_module, "_device_props", return_value=raw):
             self.assertEqual(hip_module.get_device_arch(0), "gfx00a")
 
-    def test_name_read_from_offset_zero_to_nul(self):
+    def test_name_read_from_name_field(self):
         import unittest.mock as mock
         from rocke.runtime import hip_module
 
@@ -613,7 +610,7 @@ class TestDeviceQueryParsing(unittest.TestCase):
         with mock.patch.object(hip_module, "_device_props", return_value=raw):
             self.assertEqual(hip_module.get_device_name(0), "Marketing Name")
 
-    def test_no_gfx_token_yields_none_arch(self):
+    def test_empty_target_yields_none_arch(self):
         import unittest.mock as mock
         from rocke.runtime import hip_module
 
