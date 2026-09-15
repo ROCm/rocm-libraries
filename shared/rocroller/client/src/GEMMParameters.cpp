@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include <regex>
+#include <string_view>
 
 #include "client/GEMMParameters.hpp"
-#include <common/SourceMatcher.hpp>
 
 #include <functional>
 
@@ -14,6 +14,9 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
+            using HostNumerics::DataInitialization;
+            using HostNumerics::DataInitializationMode;
+
             std::string TypeParameters::kernelNamePart() const
             {
                 std::ostringstream rv;
@@ -163,6 +166,12 @@ namespace rocRoller
                 return s;
             }
 
+            std::ostream& operator<<(std::ostream& s, DataInitialization const& x)
+            {
+                s << toString(x);
+                return s;
+            }
+
             std::string toString(XYTuple x)
             {
                 return fmt::format("{}x{}", x.x, x.y);
@@ -300,6 +309,9 @@ namespace rocRoller
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
+    using HostNumerics::DataInitialization;
+    using HostNumerics::DataInitializationMode;
+
     bool ParseXY(const std::string& arg, XYTuple& x)
     {
         if(arg.empty())
@@ -426,7 +438,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         return PARSE_SUCCESS;
     }
 
-    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result)
+    bool ParseInitMode(const std::string& arg, DataInitialization& result)
     {
         if(arg.empty())
             return PARSE_FAILURE;
@@ -436,20 +448,20 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::string        token;
 
         if(arg == "Bounded")
-            result = DGen::DataInitMode(DGen::Bounded{});
+            result = DataInitialization{DataInitializationMode::Bounded};
         else if(arg == "BoundedAlternatingSign")
-            result = DGen::DataInitMode(DGen::BoundedAlternatingSign{});
+            result = DataInitialization{DataInitializationMode::BoundedAlternatingSign};
         else if(arg == "Unbounded")
-            result = DGen::DataInitMode(DGen::Unbounded{});
+            result = DataInitialization{DataInitializationMode::Unbounded};
         else if(arg == "Identity")
-            result = DGen::DataInitMode(DGen::Identity{});
+            result = DataInitialization{DataInitializationMode::Identity};
         else if(arg == "Ones")
-            result = DGen::DataInitMode(DGen::Ones{});
+            result = DataInitialization{DataInitializationMode::Ones};
         else if(arg == "Zeros")
-            result = DGen::DataInitMode(DGen::Zeros{});
+            result = DataInitialization{DataInitializationMode::Zeros};
         else if(arg == "TrigonometricFromFloat")
-            result = DGen::DataInitMode(DGen::TrigonometricFromFloat{});
-        else if(startsWith("NormalFromFloat", arg.begin(), arg.end()))
+            result = DataInitialization{DataInitializationMode::TrigonometricFromFloat};
+        else if(arg.starts_with("NormalFromFloat"))
         {
             try
             {
@@ -461,7 +473,7 @@ namespace rocRoller::Client::GEMMClient::CLI
                 std::getline(iss, token, ')');
                 double std_dev = std::stod(token);
 
-                result = DGen::DataInitMode(DGen::NormalFromFloat{mean, std_dev});
+                result = DataInitialization{DataInitializationMode::NormalFromFloat, mean, std_dev};
             }
             catch(const std::invalid_argument&)
             {

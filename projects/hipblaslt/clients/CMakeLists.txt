@@ -28,86 +28,17 @@ endif()
 
 add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
-if(HIPBLASLT_ENABLE_BLIS)
-    target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
-    target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_BLIS)
-endif()
-
-# LAPACK_LIBRARIES is a plain Fortran static library. With gfortran this has
-# always linked cleanly, but with LLVM Flang (see invoke's Fortran-compiler
-# auto-detection) the CHARACTER-argument routines it uses (e.g. zlange/clange/
-# dlange) pull in Flang runtime symbols (e.g. _FortranACharacterCompareScalar1)
-# that amdclang++ never links automatically, since Fortran isn't the link
-# driver for these C++/HIP targets. Search every root we can derive for the
-# selected Flang install (resolving symlinks, since invoke may hand us e.g.
-# /opt/rocm/bin/amdflang -> .../llvm/bin/flang-N), plus HIP_CLANG_ROOT, for
-# either the older split FortranRuntime+FortranDecimal or the newer merged
-# flang_rt.runtime. Prefer linking the absolute path find_library resolves:
-# amdclang++ isn't always installed under the same directory as flang (e.g.
-# .../bin/amdclang++ vs .../llvm/bin/flang), so its default linker search
-# doesn't reliably cover the runtime's directory, and a bare -l name can fail
-# to link even though the file exists (see git history for a CI regression
-# from trying that). Only fall back to linking by bare name when we can't
-# resolve any absolute path at all, on the chance amdclang++'s default search
-# happens to cover a packaging layout our probe above can't find (this is
-# what several of Math CI's precheckin images need). This mirrors the
-# approach used in hipsparselt's clients. Leave the working gfortran path
-# untouched.
-set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES)
-if(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
-    get_filename_component(_hipblaslt_fortran_real "${CMAKE_Fortran_COMPILER}" REALPATH)
-    get_filename_component(_hipblaslt_fortran_bin_dir "${_hipblaslt_fortran_real}" DIRECTORY)
-    get_filename_component(_hipblaslt_fortran_root_dir "${_hipblaslt_fortran_bin_dir}" DIRECTORY)
-    set(_hipblaslt_fortran_search_dirs "${_hipblaslt_fortran_root_dir}/lib")
-    if(HIP_CLANG_ROOT)
-        list(APPEND _hipblaslt_fortran_search_dirs "${HIP_CLANG_ROOT}/lib")
-    endif()
-    find_library(HIPBLASLT_FORTRANRUNTIME_LIBRARY NAMES FortranRuntime
-        PATHS ${_hipblaslt_fortran_search_dirs} NO_DEFAULT_PATH)
-    if(HIPBLASLT_FORTRANRUNTIME_LIBRARY)
-        find_library(HIPBLASLT_FORTRANDECIMAL_LIBRARY NAMES FortranDecimal
-            PATHS ${_hipblaslt_fortran_search_dirs} NO_DEFAULT_PATH)
-        if(HIPBLASLT_FORTRANDECIMAL_LIBRARY)
-            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES
-                ${HIPBLASLT_FORTRANRUNTIME_LIBRARY} ${HIPBLASLT_FORTRANDECIMAL_LIBRARY})
-        else()
-            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lFortranRuntime -lFortranDecimal)
-        endif()
-    else()
-        # Newer LLVM Flang releases merged FortranRuntime/FortranDecimal into
-        # a single flang_rt.runtime library.
-        find_library(HIPBLASLT_FLANGRT_LIBRARY NAMES flang_rt.runtime
-            PATHS ${_hipblaslt_fortran_search_dirs} NO_DEFAULT_PATH)
-        if(HIPBLASLT_FLANGRT_LIBRARY)
-            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES ${HIPBLASLT_FLANGRT_LIBRARY})
-        else()
-            set(HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES -lflang_rt.runtime)
-        endif()
-    endif()
-    unset(_hipblaslt_fortran_real)
-    unset(_hipblaslt_fortran_bin_dir)
-    unset(_hipblaslt_fortran_root_dir)
-    unset(_hipblaslt_fortran_search_dirs)
-endif()
-
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
+        roc::host-numerics
+        roc::host-numerics-amd-gpu-layout
         OpenMP::OpenMP_CXX
-        ${LAPACK_LIBRARIES}
-        ${HIPBLASLT_FORTRAN_RUNTIME_LIBRARIES}
     PRIVATE
         hip::device
+        roc::host-numerics-blas
         roc::tensilelite-host
 )
-
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    # PUBLIC because public headers such as testing_matmul.hpp guard
-    # `<mxDataGen.hpp>` on `HIPBLASLT_ENABLE_MXDATAGENERATOR`, so downstream
-    # targets (hipblaslt-test, hipblaslt-bench, ...) need to see the macro,
-    # the include path, and the C++20 floor all the way through.
-    target_link_libraries(hipblaslt-clients-common PUBLIC hipblaslt::mxdatagen)
-endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
@@ -131,11 +62,6 @@ if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(hipblaslt-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-# `clients/common/CMakeLists.txt` itself only declares the mxdatagen helper
-# (which the project root already added when needed); the `include` and
-# `src` subdirectories populate hipblaslt-clients-common's sources, so they
-# are added directly here, avoiding a second `add_subdirectory(common)` that
-# would clash with the root-level one.
 add_subdirectory(common/include)
 add_subdirectory(common/src)
 add_subdirectory(bench)
@@ -146,7 +72,12 @@ target_compile_definitions(hipblaslt-api-overhead PRIVATE ROCBLASLT_INTERNAL_API
 target_include_directories(hipblaslt-api-overhead PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/samples/common")
 
 add_executable(hipblaslt-bench-groupedgemm-fixed-mk "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_groupedgemm_fixed_mk.cpp")
-target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE hipblaslt-clients-common hip::device)
+target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk
+    PRIVATE
+        hipblaslt-clients-common
+        hip::device
+        roc::host-numerics
+)
 target_compile_definitions(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE ROCBLASLT_INTERNAL_API)
 
 add_executable(hipblaslt-bench-extop-layernorm "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_layernorm.cpp")
@@ -196,6 +127,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
+            roc::host-numerics
             roc::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX
@@ -206,6 +138,15 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
     if(HIPBLASLT_ENABLE_COVERAGE)
+        target_compile_options(
+            hipblaslt-test
+            PRIVATE
+                -g
+                -O0
+                -fprofile-instr-generate
+                -fcoverage-mapping
+        )
+        target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
         target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
         # For coverage testing, link against hipblaslt's object files to access internal symbols
         # This ensures we test the real library code, not stubs

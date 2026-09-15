@@ -137,6 +137,7 @@ namespace TensileLite
             m_tensorStrides.resize(tensors.size());
             m_constantTypes.resize(constants.size());
             m_constantValues.resize(constants.size());
+            const auto initializationSeed = args["init-seed"].as<unsigned int>();
             // Get types and values from the information from ContractionProblem
             // May contain useless information for ClientProblemFactory
             // Get tensor types
@@ -185,8 +186,10 @@ namespace TensileLite
                 std::string valueName = "init-" + constants[i].name;
                 if(args.count(valueName))
                 {
-                    m_constantValues[i]
-                        = DataInitialization::getValue<double>(args[valueName].as<InitMode>());
+                    m_constantValues[i] = hostNumericsDoubleValue(
+                        args[valueName].as<InitMode>(),
+                        DataInitializationKey{initializationSeed,
+                                              stableDataInitializationStream(valueName)});
                 }
                 else
                 {

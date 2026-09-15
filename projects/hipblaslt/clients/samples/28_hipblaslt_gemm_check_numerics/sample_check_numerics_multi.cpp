@@ -19,11 +19,13 @@
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
+#include <roc/host_numerics/generation.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 #include <vector>
 
 #define CHECK_HIP(x)                                                                               \
@@ -37,15 +39,15 @@
         }                                                                                          \
     } while(0)
 
-#define CHECK_HBL(x)                                                                            \
-    do                                                                                          \
-    {                                                                                           \
-        hipblasStatus_t s = (x);                                                                \
-        if(s != HIPBLAS_STATUS_SUCCESS)                                                         \
-        {                                                                                       \
-            std::fprintf(stderr, "hipBLASLt fail %s:%d (%d)\n", __FILE__, __LINE__, (int)s);    \
-            std::exit(2);                                                                       \
-        }                                                                                       \
+#define CHECK_HBL(x)                                                                         \
+    do                                                                                       \
+    {                                                                                        \
+        hipblasStatus_t s = (x);                                                             \
+        if(s != HIPBLAS_STATUS_SUCCESS)                                                      \
+        {                                                                                    \
+            std::fprintf(stderr, "hipBLASLt fail %s:%d (%d)\n", __FILE__, __LINE__, (int)s); \
+            std::exit(2);                                                                    \
+        }                                                                                    \
     } while(0)
 
 constexpr int M = 8, N = 8, K = 8;
@@ -75,8 +77,10 @@ static hipblasStatus_t one_matmul(hipblasLtHandle_t handle,
     hipblasLtMatmulDesc_t md{};
     CHECK_HBL(hipblasLtMatmulDescCreate(&md, HIPBLAS_COMPUTE_32F, HIP_R_32F));
     int32_t no_op = HIPBLAS_OP_N;
-    CHECK_HBL(hipblasLtMatmulDescSetAttribute(md, HIPBLASLT_MATMUL_DESC_TRANSA, &no_op, sizeof(no_op)));
-    CHECK_HBL(hipblasLtMatmulDescSetAttribute(md, HIPBLASLT_MATMUL_DESC_TRANSB, &no_op, sizeof(no_op)));
+    CHECK_HBL(
+        hipblasLtMatmulDescSetAttribute(md, HIPBLASLT_MATMUL_DESC_TRANSA, &no_op, sizeof(no_op)));
+    CHECK_HBL(
+        hipblasLtMatmulDescSetAttribute(md, HIPBLASLT_MATMUL_DESC_TRANSB, &no_op, sizeof(no_op)));
 
     hipblasLtMatmulPreference_t pref{};
     CHECK_HBL(hipblasLtMatmulPreferenceCreate(&pref));
@@ -97,10 +101,23 @@ static hipblasStatus_t one_matmul(hipblasLtHandle_t handle,
     if(heur[0].workspaceSize > 0)
         CHECK_HIP(hipMalloc(&dW, heur[0].workspaceSize));
 
-    float alpha = 1.0f, beta = 0.0f;
-    hipblasStatus_t st = hipblasLtMatmul(
-        handle, md, &alpha, dA, lA, dB, lB, &beta, dC, lC, dD, lD, &heur[0].algo,
-        dW, heur[0].workspaceSize, stream);
+    float           alpha = 1.0f, beta = 0.0f;
+    hipblasStatus_t st = hipblasLtMatmul(handle,
+                                         md,
+                                         &alpha,
+                                         dA,
+                                         lA,
+                                         dB,
+                                         lB,
+                                         &beta,
+                                         dC,
+                                         lC,
+                                         dD,
+                                         lD,
+                                         &heur[0].algo,
+                                         dW,
+                                         heur[0].workspaceSize,
+                                         stream);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     std::vector<float> hD(M * N);
@@ -110,7 +127,10 @@ static hipblasStatus_t one_matmul(hipblasLtHandle_t handle,
         if(std::isnan(v))
             ++nans;
     std::printf("[#%2d] status=%d nans=%d/%d %s%s\n",
-                call_idx_for_log, (int)st, nans, M * N,
+                call_idx_for_log,
+                (int)st,
+                nans,
+                M * N,
                 expect_nan ? "(expect NaN)" : "(expect clean)",
                 ((expect_nan && nans > 0) || (!expect_nan && nans == 0)) ? " OK" : " MISMATCH");
 
@@ -142,7 +162,8 @@ int main(int argc, char** argv)
         inject_at = total / 2;
 
     if(const char* cn = std::getenv("HIPBLASLT_CHECK_NUMERICS"))
-        std::printf("HIPBLASLT_CHECK_NUMERICS=\"%s\"  total=%d  inject_at=%d\n", cn, total, inject_at);
+        std::printf(
+            "HIPBLASLT_CHECK_NUMERICS=\"%s\"  total=%d  inject_at=%d\n", cn, total, inject_at);
     else
         std::printf("HIPBLASLT_CHECK_NUMERICS not set. total=%d  inject_at=%d\n", total, inject_at);
 
@@ -151,17 +172,29 @@ int main(int argc, char** argv)
     CHECK_HBL(hipblasLtCreate(&handle));
     CHECK_HIP(hipStreamCreate(&stream));
 
-    std::vector<float> A_clean(M * K, 1.0f);
-    std::vector<float> B(K * N, 1.0f);
-    std::vector<float> A_dirty(M * K, 1.0f);
-    A_dirty[0] = std::nanf("");
+    std::vector<float> A_clean(M * K);
+    std::vector<float> B(K * N);
+    const auto         ones = roc::host_numerics::GenerationRecipe::realOnly(
+        roc::host_numerics::GenerationRecipe::constant({.value = 1.0}));
+    roc::host_numerics::Tensor cleanTensor
+        = roc::host_numerics::generate(roc::host_numerics::ScalarType::Float32,
+                                         roc::host_numerics::Shape{A_clean.size()},
+                                         ones);
+    std::memcpy(A_clean.data(), cleanTensor.rawEncodedBackingStorage().data(), cleanTensor.rawEncodedBackingStorage().size());
+    roc::host_numerics::Tensor bTensor = roc::host_numerics::generate(
+        roc::host_numerics::ScalarType::Float32, roc::host_numerics::Shape{B.size()}, ones);
+    std::memcpy(B.data(), bTensor.rawEncodedBackingStorage().data(), bTensor.rawEncodedBackingStorage().size());
+    std::vector<float> A_dirty = A_clean;
+    const auto         nan     = roc::host_numerics::GenerationRecipe::realOnly(
+        roc::host_numerics::GenerationRecipe::typeNaN());
+    roc::host_numerics::Tensor dirtyTensor = cleanTensor.deepCopy();
+    roc::host_numerics::generateAt(dirtyTensor, 0, nan);
+    std::memcpy(A_dirty.data(), dirtyTensor.rawEncodedBackingStorage().data(), dirtyTensor.rawEncodedBackingStorage().size());
 
     for(int i = 1; i <= total; ++i)
     {
         const bool dirty = (i == inject_at);
-        one_matmul(handle, stream,
-                   dirty ? A_dirty.data() : A_clean.data(),
-                   B.data(), i, dirty);
+        one_matmul(handle, stream, dirty ? A_dirty.data() : A_clean.data(), B.data(), i, dirty);
     }
 
     CHECK_HIP(hipStreamDestroy(stream));

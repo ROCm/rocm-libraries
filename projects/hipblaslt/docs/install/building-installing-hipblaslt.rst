@@ -82,18 +82,6 @@ Here are some common ways to build the dependencies, library, and client:
    "``inv build --install-deps --clients``", "Install system dependencies and build the library and client."
    "``inv build --clients``", "Build the library and client. Assumes dependencies are already installed."
    "``inv build --install-deps --clients --install-pkg``", "Build everything and install the hipBLASLt package."
-   "``inv build --clients --fortran-compiler gfortran``", "Build the library and client using gfortran instead of auto-detected ROCm flang."
-
-Client builds require a Fortran compiler because they link LAPACK.
-``inv build --clients`` passes ``-DCMAKE_Fortran_COMPILER`` (and the same
-value to the ``deps`` CMake when ``--install-deps`` is used). The compiler is
-taken from ``--fortran-compiler`` if given, otherwise ``FC``, otherwise
-``CMAKE_Fortran_COMPILER``, otherwise ROCm ``flang`` under ``--rocm-path`` /
-``ROCM_PATH`` / ``/opt/rocm`` (``llvm/bin/flang``, ``bin/amdflang``,
-``bin/flang``, then ``flang`` on ``PATH``), otherwise ``gfortran`` on
-``PATH``. Invoke exits if none of those are found.
-Without ``--clients``, Fortran is not enabled.
-
 Static library
 --------------
 
@@ -146,23 +134,30 @@ You can find this code in the ``clients`` subdirectory.
 Dependencies for the hipBLASLt clients
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The hipBLASLt samples have no external dependencies, but the unit test and benchmarking applications do.
-These clients introduce the following dependencies:
+The hipBLASLt samples have no external dependencies, but the unit test and
+benchmarking applications do. These clients introduce the following
+dependencies:
 
-- `LAPACK <https://github.com/Reference-LAPACK/lapack-release>`_,  which adds a dependency on a Fortran compiler
-- `GoogleTest <https://github.com/google/googletest>`_
+- An LP64 CBLAS implementation that provides ``cblas.h`` and the
+  ``cblas_sgemm``, ``cblas_dgemm``, ``cblas_cgemm``, and ``cblas_zgemm``
+  entry points.
+- `GoogleTest <https://github.com/google/googletest>`_ for the unit tests.
+
+hipBLASLt does not select a particular CBLAS provider. CMake's ``BLA_VENDOR``
+input can restrict provider selection, while ``CMAKE_PREFIX_PATH`` can point to
+a provider installed outside the system search paths. The client reference
+backend requires the 32-bit LP64 integer ABI.
 
 .. _building-hipblaslt-clients:
 
 Building the hipBLASLt clients
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-GoogleTest and LAPACK are not easy to install. Many Linux distributions don't provide a GoogleTest package
-with precompiled libraries and the LAPACK packages don't have the necessary CMake configuration files
-to allow the ``cmake`` command to configure links with the ``cblas`` library. hipBLASLt provides an optional CMake script that builds
-the above dependencies from source. You can provide your own builds for
-these dependencies and help ``cmake`` find them by setting the ``CMAKE_PREFIX_PATH`` definition.
-Follow this sequence of steps to build the dependencies and install them to the default CMake directory ``/usr/local``.
+Many Linux distributions don't provide a GoogleTest package with precompiled
+libraries. hipBLASLt provides an optional CMake script that builds GoogleTest
+from source. Install an LP64 CBLAS provider through the build environment's
+package manager, or provide your own installation through
+``CMAKE_PREFIX_PATH``.
 
 #. Build the dependencies from source (optional).
 
@@ -170,7 +165,7 @@ Follow this sequence of steps to build the dependencies and install them to the 
 
       mkdir -p [HIPBLASLT_BUILD_DIR]/release/deps
       cd [HIPBLASLT_BUILD_DIR]/release/deps
-      ccmake -DBUILD_BOOST=OFF [HIPBLASLT_SOURCE]/deps   # assuming boost is installed through package manager as above
+      cmake -DBUILD_GTEST=ON [HIPBLASLT_SOURCE]/deps
       make -j$(nproc) install
 
 #. After the dependencies are available on the system, configure the clients to build.
@@ -181,7 +176,8 @@ Follow this sequence of steps to build the dependencies and install them to the 
    .. code-block:: bash
 
       -DCMAKE_PREFIX_PATH="<semicolon separated paths>"
+      -DBLA_VENDOR="<optional CMake FindBLAS vendor selector>"
       # Default install location is in /opt/rocm, use -DCMAKE_INSTALL_PREFIX=<path> to specify other
-      CXX=/opt/rocm/bin/amdclang++ ccmake -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON [HIPBLASLT_SOURCE]
+      CXX=/opt/rocm/bin/amdclang++ ccmake -DHIPBLASLT_ENABLE_CLIENT=ON -DHIPBLASLT_BUILD_TESTING=ON [HIPBLASLT_SOURCE]
       make -j$(nproc)
       sudo make install   # sudo required if installing into system directory such as /opt/rocm

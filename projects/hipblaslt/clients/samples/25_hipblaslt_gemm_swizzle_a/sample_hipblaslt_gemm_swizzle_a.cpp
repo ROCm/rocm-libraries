@@ -24,12 +24,19 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
-#include <algorithm>
+#include <roc/host_numerics/comparison.hpp>
+#include <roc/host_numerics/tensor.hpp>
+#include <span>
+#include <stdexcept>
+#include <type_traits>
 
-#include "TensorDataManipulation.hpp"
 #include "datatype_interface.hpp"
 #include "helper.h"
 
@@ -61,23 +68,39 @@ void calculateKforSwizzling(hipDataType datatype, size_t& MiK, size_t& MiKv, siz
 template <typename T>
 void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
 {
-    using Tensor = Tensor::Manipulation::Tensor;
-    size_t MiM   = 16;
+    using Storage = std::conditional_t<
+        sizeof(T) == 1,
+        std::uint8_t,
+        std::conditional_t<sizeof(T) == 2,
+                           std::uint16_t,
+                           std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>>>;
+    static_assert(sizeof(T) == sizeof(Storage));
+
+    using roc::host_numerics::Layout;
+    using roc::host_numerics::Shape;
+    using roc::host_numerics::Tensor;
+
+    size_t MiM = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(hipblaslt_type2datatype<T>(), MiK, MiKv, PackK);
-    auto tmpTensor = Tensor::create<T>({m, k});
-    std::copy(src, src + m * k, static_cast<T*>(tmpTensor.template as<void>()));
 
+    std::vector<Storage> nativeStorage(m * k);
+    const auto           sourceBytes = std::as_bytes(std::span(src, m * k));
+    auto                 nativeBytes = std::as_writable_bytes(std::span(nativeStorage));
+    std::copy(sourceBytes.begin(), sourceBytes.end(), nativeBytes.begin());
+
+    const Shape sourceShape = colMaj ? Shape{k, m} : Shape{m, k};
+    Tensor      tmpTensor   = Tensor::copyNativeStorage(Layout::contiguousLastDimensionFastest(sourceShape),
+                                                 std::span<const Storage>(nativeStorage));
     if(colMaj)
-    {
-        auto orgTensor = Tensor::create<T>({k, m});
-        std::copy(src, src + m * k, static_cast<T*>(orgTensor.template as<void>()));
-        tmpTensor = permute(orgTensor, {1, 0});
-    }
+        tmpTensor = tmpTensor.copyWithPermutedDimensions({1, 0});
 
-    tmpTensor.reshape({m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor permuted = permute(tmpTensor, {0, 2, 3, 1, 4});
-    std::copy(static_cast<const T*>(permuted.template as<void>()), static_cast<const T*>(permuted.template as<void>()) + m * k, dst);
+    const Tensor permuted
+        = tmpTensor.reshapeSharingStorage(Shape{m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .copyWithPermutedDimensions({0, 2, 3, 1, 4});
+    const std::span<const std::byte> swizzledBytes = permuted.rawEncodedBackingStorage();
+    auto destinationBytes                          = std::as_writable_bytes(std::span(dst, m * k));
+    std::copy(swizzledBytes.begin(), swizzledBytes.end(), destinationBytes.begin());
 }
 
 template <typename T>
@@ -189,35 +212,41 @@ int main()
 
     swizzleRunner_F8.run([&swizzleRunner_F8, &runner, m, n, k] {
         // convert inputs from reference runner to fp8
-        std::vector<hipblasLtHalf>     cpuAF16(m * k, hipblasLtHalf(0.f));
-        std::vector<hipblasLtHalf>     cpuBF16(k * n, hipblasLtHalf(0.f));
-        std::vector<hipblaslt_f8_fnuz> cpuAF8(m * k, hipblaslt_f8_fnuz(0.f));
-        std::vector<hipblaslt_f8_fnuz> cpuBF8(k * n, hipblaslt_f8_fnuz(0.f));
+        std::vector<hipblasLtHalf> cpuAF16(m * k, hipblasLtHalf(0.f));
+        std::vector<hipblasLtHalf> cpuBF16(k * n, hipblasLtHalf(0.f));
+        std::vector<std::byte>     cpuAF8(m * k);
+        std::vector<std::byte>     cpuBF8(k * n);
 
         CHECK_HIP_ERROR(hipMemcpy(cpuAF16.data(),
-                  runner.d_a,
-                  cpuAF16.size() * sizeof(hipblasLtHalf),
-                  hipMemcpyDeviceToHost));
+                                  runner.d_a,
+                                  cpuAF16.size() * sizeof(hipblasLtHalf),
+                                  hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(cpuBF16.data(),
-                  runner.d_b,
-                  cpuBF16.size() * sizeof(hipblasLtHalf),
-                  hipMemcpyDeviceToHost));
+                                  runner.d_b,
+                                  cpuBF16.size() * sizeof(hipblasLtHalf),
+                                  hipMemcpyDeviceToHost));
 
-        for(size_t i = 0; i < cpuAF16.size(); ++i)
-        {
-            cpuAF8[i] = hipblaslt_f8_fnuz(float(cpuAF16[i]));
-        }
-
-        for(size_t i = 0; i < cpuBF16.size(); ++i)
-        {
-            cpuBF8[i] = hipblaslt_f8_fnuz(float(cpuBF16[i]));
-        }
+        auto convertToFp8 = [](std::span<const hipblasLtHalf> source,
+                               std::span<std::byte>           destination) {
+            const roc::host_numerics::Tensor converted
+                = hipblaslt::host_numerics::copyTensorFromEncodedStorage(
+                      source.data(),
+                      source.size(),
+                      roc::host_numerics::Layout::contiguousLastDimensionFastest(
+                          roc::host_numerics::Shape{source.size()}))
+                      .copyConvertedTo(roc::host_numerics::ScalarType::Float8E4M3Fnuz);
+            if(converted.rawEncodedBackingStorage().size() != destination.size())
+                throw std::runtime_error("Converted FP8 storage size mismatch.");
+            std::memcpy(destination.data(), converted.rawEncodedBackingStorage().data(), converted.rawEncodedBackingStorage().size());
+        };
+        convertToFp8(cpuAF16, cpuAF8);
+        convertToFp8(cpuBF16, cpuBF8);
 
         // copy inputs from first runner for comparison and validation
         CHECK_HIP_ERROR(hipMemcpy(swizzleRunner_F8.d_a,
-                  cpuAF8.data(),
-                  m * k * sizeof(hipblaslt_f8_fnuz),
-                  hipMemcpyHostToDevice));
+                                  cpuAF8.data(),
+                                  m * k * sizeof(hipblaslt_f8_fnuz),
+                                  hipMemcpyHostToDevice));
         CHECK_HIP_ERROR(hipMemcpy(swizzleRunner_F8.d_b,
                   cpuBF8.data(),
                   n * k * sizeof(hipblaslt_f8_fnuz),
@@ -256,26 +285,30 @@ int main()
     const hipblasLtHalf* swizzledCpuD    = static_cast<hipblasLtHalf*>(swizzleRunner.d);
     const hipblasLtHalf* swizzledCpuD_F8 = static_cast<hipblasLtHalf*>(swizzleRunner_F8.d);
 
-    for(size_t i = 0; i < m * n; ++i)
+    using namespace roc::host_numerics;
+    const auto layout = Layout::contiguousLastDimensionFastest(Shape{m * n});
+    const auto expected = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(regularCpuD, m * n)));
+    const auto swizzledF16 = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(swizzledCpuD, m * n)));
+    const auto swizzledF8 = Tensor::copyEncodedBackingStorage(
+        ScalarType::Float16,
+        layout,
+        std::as_bytes(std::span<const hipblasLtHalf>(swizzledCpuD_F8, m * n)));
+    const auto options = nearComparisonOptions(1e-5);
+    if(!compare(swizzledF16, expected, options).passed())
     {
-        const auto diff = std::abs(float(regularCpuD[i] - float(swizzledCpuD[i])));
-        if(diff > 1e-5)
-        {
-            std::cerr << "F16 Swizzle Validation Error at index: " << i << ", diff: " << diff
-                      << '\n';
-            break;
-        }
+        std::cerr << "F16 swizzle validation failed.\n";
+        return 1;
     }
-
-    for(size_t i = 0; i < m * n; ++i)
+    if(!compare(swizzledF8, expected, options).passed())
     {
-        const auto diff = std::abs(float(regularCpuD[i] - float(swizzledCpuD_F8[i])));
-        if(diff > 1e-5)
-        {
-            std::cerr << "F8 Swizzle Validation Error at index: " << i << ", diff: " << diff
-                      << '\n';
-            break;
-        }
+        std::cerr << "F8 swizzle validation failed.\n";
+        return 1;
     }
 
     return 0;
