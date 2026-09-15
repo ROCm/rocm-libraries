@@ -725,7 +725,10 @@ class LocalReadMFMA(LocalRead):
         halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c" % tc]
         for nt in range(numNtile):
             for r in range(numKChunk):
-                off = nt * nWaveN * nOStride + r * kOStride + swapByteOff
+                # localReadOffset carries the K-sub-iteration progression in the immediate (like the
+                # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
+                # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
+                off = nt * nWaveN * nOStride + r * kOStride + swapByteOff + int(tP["localReadOffset"])
                 reg = nt * regsPerNtile + r * regsPerLoad
                 offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
                 ds = DSModifiers(na=1, offset=offSplit)
