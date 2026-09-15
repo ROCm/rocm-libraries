@@ -1,0 +1,25 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_HISTOGRAM_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+histogram_config_params{kernel_config_params{ {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} }, {{ measurement['cfg']['max_grid_size'] }}, {{ measurement['cfg']['shared_impl_max_bins'] }}, {{ measurement['cfg']['shared_impl_histograms'] }}, kernel_config_params{ {{ measurement['cfg']['global_hist_bs'] }}, {{ measurement['cfg']['global_hist_ipt'] }} } }
+{%- endmacro %}
+
+{% macro config_picker() -%}
+template<class Target, class value_type, unsigned int channels, unsigned int active_channels> constexpr auto histogram_config_picker()
+{%- endmacro %}
+
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("histogram_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return histogram_config_params_base<value_type, channels, active_channels>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return histogram_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, value_type, channels, active_channels>();
+{%- endmacro %}

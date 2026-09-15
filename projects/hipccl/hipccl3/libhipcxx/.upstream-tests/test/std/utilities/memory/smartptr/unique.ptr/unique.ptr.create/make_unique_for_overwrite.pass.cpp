@@ -1,0 +1,191 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of libcu++, the C++ Standard Library for your entire system,
+// under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
+//
+//===----------------------------------------------------------------------===//
+
+// MIT License
+//
+// Modifications Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// TODO(HIP/AMD): in the current ROCm version this test fails (TheRock January 12th 2026)
+// We therefore unsupport this test for now. 
+// See Issue https://github.com/ROCm/libhipcxx/issues/15
+// UNSUPPORTED: hipcc, hiprtc
+
+// template<class T>
+//   constexpr unique_ptr<T> make_unique_for_overwrite(); // T is not array
+//
+// template<class T>
+//   constexpr unique_ptr<T> make_unique_for_overwrite(size_t n); // T is U[]
+//
+// template<class T, class... Args>
+//   unspecified make_unique_for_overwrite(Args&&...) = delete; // T is U[N]
+
+#include <cuda/std/cassert>
+#include <cuda/std/concepts>
+// #include <cuda/std/cstring>
+#include <cuda/std/__memory_>
+#include <cuda/std/utility>
+
+#include "test_macros.h"
+
+template <class T, class... Args>
+_CCCL_CONCEPT HasMakeUniqueForOverwrite = _CCCL_REQUIRES_EXPR((T, variadic Args), T t, Args&&... args)(
+  (cuda::std::make_unique_for_overwrite<T>(cuda::std::forward<Args>(args)...)));
+
+struct Foo
+{
+  int i;
+};
+
+// template<class T>
+//   constexpr unique_ptr<T> make_unique_for_overwrite();
+static_assert(HasMakeUniqueForOverwrite<int>, "");
+static_assert(HasMakeUniqueForOverwrite<Foo>, "");
+static_assert(!HasMakeUniqueForOverwrite<int, int>, "");
+static_assert(!HasMakeUniqueForOverwrite<Foo, Foo>, "");
+
+// template<class T>
+//   constexpr unique_ptr<T> make_unique_for_overwrite(size_t n);
+static_assert(HasMakeUniqueForOverwrite<int[], cuda::std::size_t>, "");
+static_assert(HasMakeUniqueForOverwrite<Foo[], cuda::std::size_t>, "");
+static_assert(!HasMakeUniqueForOverwrite<int[]>, "");
+static_assert(!HasMakeUniqueForOverwrite<Foo[]>, "");
+static_assert(!HasMakeUniqueForOverwrite<int[], cuda::std::size_t, int>, "");
+static_assert(!HasMakeUniqueForOverwrite<Foo[], cuda::std::size_t, int>, "");
+
+// template<class T, class... Args>
+//   unspecified make_unique_for_overwrite(Args&&...) = delete;
+static_assert(!HasMakeUniqueForOverwrite<int[2]>, "");
+static_assert(!HasMakeUniqueForOverwrite<int[2], cuda::std::size_t>, "");
+static_assert(!HasMakeUniqueForOverwrite<int[2], int>, "");
+static_assert(!HasMakeUniqueForOverwrite<int[2], int, int>, "");
+static_assert(!HasMakeUniqueForOverwrite<Foo[2]>, "");
+static_assert(!HasMakeUniqueForOverwrite<Foo[2], cuda::std::size_t>, "");
+static_assert(!HasMakeUniqueForOverwrite<Foo[2], int>, "");
+static_assert(!HasMakeUniqueForOverwrite<Foo[2], int, int>, "");
+
+struct WithDefaultConstructor
+{
+  int i;
+  __host__ __device__ constexpr WithDefaultConstructor()
+      : i(5)
+  {}
+};
+
+__host__ __device__ TEST_CONSTEXPR_CXX23 bool test()
+{
+  // single int
+  {
+    decltype(auto) ptr = cuda::std::make_unique_for_overwrite<int>();
+    static_assert(cuda::std::same_as<cuda::std::unique_ptr<int>, decltype(ptr)>, "");
+    // memory is available for write, otherwise constexpr test would fail
+    *ptr = 5;
+  }
+
+  // unbounded array int[]
+  {
+    decltype(auto) ptrs = cuda::std::make_unique_for_overwrite<int[]>(3);
+    static_assert(cuda::std::same_as<cuda::std::unique_ptr<int[]>, decltype(ptrs)>, "");
+
+    // memory is available for write, otherwise constexpr test would fail
+    ptrs[0] = 3;
+    ptrs[1] = 4;
+    ptrs[2] = 5;
+  }
+
+  // single with default constructor
+  {
+    decltype(auto) ptr = cuda::std::make_unique_for_overwrite<WithDefaultConstructor>();
+    static_assert(cuda::std::same_as<cuda::std::unique_ptr<WithDefaultConstructor>, decltype(ptr)>, "");
+    assert(ptr->i == 5);
+  }
+
+  // unbounded array with default constructor
+  {
+    decltype(auto) ptrs = cuda::std::make_unique_for_overwrite<WithDefaultConstructor[]>(3);
+    static_assert(cuda::std::same_as<cuda::std::unique_ptr<WithDefaultConstructor[]>, decltype(ptrs)>, "");
+    assert(ptrs[0].i == 5);
+    assert(ptrs[1].i == 5);
+    assert(ptrs[2].i == 5);
+  }
+
+  return true;
+}
+
+// The standard specifically says to use `new (p) T`, which means that we should pick up any
+// custom in-class operator new if there is one.
+
+TEST_GLOBAL_VARIABLE bool WithCustomNew_customNewCalled    = false;
+TEST_GLOBAL_VARIABLE bool WithCustomNew_customNewArrCalled = false;
+
+struct WithCustomNew
+{
+  __host__ __device__ static void* operator new(cuda::std::size_t n)
+  {
+    WithCustomNew_customNewCalled = true;
+    return ::operator new(n);
+    ;
+  }
+
+  __host__ __device__ static void* operator new[](cuda::std::size_t n)
+  {
+    WithCustomNew_customNewArrCalled = true;
+    return ::operator new[](n);
+  }
+};
+
+__host__ __device__ void testCustomNew()
+{
+  // single with custom operator new
+  {
+    decltype(auto) ptr = cuda::std::make_unique_for_overwrite<WithCustomNew>();
+    static_assert(cuda::std::same_as<cuda::std::unique_ptr<WithCustomNew>, decltype(ptr)>, "");
+
+    assert(WithCustomNew_customNewCalled);
+    unused(ptr);
+  }
+
+  // unbounded array with custom operator new
+  {
+    decltype(auto) ptr = cuda::std::make_unique_for_overwrite<WithCustomNew[]>(3);
+    static_assert(cuda::std::same_as<cuda::std::unique_ptr<WithCustomNew[]>, decltype(ptr)>, "");
+
+    assert(WithCustomNew_customNewArrCalled);
+    unused(ptr);
+  }
+}
+
+int main(int, char**)
+{
+  test();
+  testCustomNew();
+#if TEST_STD_VER >= 2023
+  static_assert(test());
+#endif // TEST_STD_VER >= 2023
+
+  return 0;
+}

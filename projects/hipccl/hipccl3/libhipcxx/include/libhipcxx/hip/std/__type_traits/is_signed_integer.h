@@ -1,0 +1,55 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef _LIBCUDACXX___TYPE_TRAITS_IS_SIGNED_INTEGER_H
+#define _LIBCUDACXX___TYPE_TRAITS_IS_SIGNED_INTEGER_H
+
+#include <cuda/std/detail/__config>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <cuda/std/__type_traits/remove_cv.h>
+
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
+
+template <class _Tp>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_impl_v = false;
+
+template <>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_impl_v<signed char> = true;
+
+template <>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_impl_v<signed short> = true;
+
+template <>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_impl_v<signed int> = true;
+
+template <>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_impl_v<signed long> = true;
+
+template <>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_impl_v<signed long long> = true;
+
+#if _CCCL_HAS_INT128()
+template <>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_impl_v<__int128_t> = true;
+#endif // _CCCL_HAS_INT128()
+
+template <class _Tp>
+_CCCL_INLINE_VAR constexpr bool __cccl_is_signed_integer_v = __cccl_is_signed_integer_impl_v<remove_cv_t<_Tp>>;
+
+_LIBCUDACXX_END_NAMESPACE_STD
+
+#endif // _LIBCUDACXX___TYPE_TRAITS_IS_SIGNED_INTEGER_H

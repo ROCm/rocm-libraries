@@ -1,0 +1,58 @@
+"""
+Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+"""
+
+name: Documentation Request
+description: Suggest an idea to improve libhipcxx
+title: '[DOC]: '
+labels: ['doc']
+
+body:
+  - type: checkboxes
+    id: check-duplicates
+    attributes:
+      label: Is this a duplicate?
+      description: Check for duplicate issues.
+      options:
+        - label: I confirmed there appear to be no [duplicate issues](https://github.com/ROCm/libhipcxx/issues) for this bug.
+          required: true
+
+  - type: dropdown
+    id: new_or_correction
+    attributes:
+      label: Is this for new documentation, or an update to existing docs?
+      options:
+        - New
+        - Update
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Describe the incorrect/future/missing documentation
+      placeholder: "Example: A code snippet mentions function foo(args) but I cannot find any documentation on it."
+    validations:
+      required: true
+
+  - type: textarea
+    id: search_locs
+    attributes:
+      label: If this is a correction, please provide a link to the incorrect documentation. If this is a new documentation request, please link to where you have looked.
+      placeholder: |
+        https://rocm.docs.amd.com/projects/libhipcxx/en/latest/
