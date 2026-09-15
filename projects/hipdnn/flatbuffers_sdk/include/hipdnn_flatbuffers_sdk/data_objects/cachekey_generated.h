@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <type_traits>
 
@@ -33,7 +34,7 @@ public:
     {
         static_assert(std::is_trivially_copyable_v<TValue>);
         uint8_t bytes[sizeof(TValue)];
-        __builtin_memcpy(bytes, &value, sizeof(TValue));
+        std::memcpy(bytes, &value, sizeof(TValue));
         for(uint8_t byte : bytes)
         {
             tag(byte);
@@ -413,9 +414,13 @@ inline bool logicallyEqual(const BFloat16Value* a, const BFloat16Value* b, const
     {
         return false;
     }
-    if(a->value() != b->value())
     {
-        return false;
+        const auto aValue = a->value();
+        const auto bValue = b->value();
+        if(std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0)
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -1625,9 +1630,13 @@ inline bool logicallyEqual(const Float16Value* a, const Float16Value* b, const U
     {
         return false;
     }
-    if(a->value() != b->value())
     {
-        return false;
+        const auto aValue = a->value();
+        const auto bValue = b->value();
+        if(std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0)
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -1653,9 +1662,13 @@ inline bool logicallyEqual(const Float32Value* a, const Float32Value* b, const U
     {
         return false;
     }
-    if(a->value() != b->value())
     {
-        return false;
+        const auto aValue = a->value();
+        const auto bValue = b->value();
+        if(std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0)
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -1681,9 +1694,13 @@ inline bool logicallyEqual(const Float64Value* a, const Float64Value* b, const U
     {
         return false;
     }
-    if(a->value() != b->value())
     {
-        return false;
+        const auto aValue = a->value();
+        const auto bValue = b->value();
+        if(std::memcmp(&aValue, &bValue, sizeof(aValue)) != 0)
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -2371,17 +2388,41 @@ inline bool logicallyEqual(const PointwiseAttributes* a, const PointwiseAttribut
     {
         return false;
     }
-    if(a->relu_lower_clip() != b->relu_lower_clip())
     {
-        return false;
+        const auto aValue = a->relu_lower_clip();
+        const auto bValue = b->relu_lower_clip();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
-    if(a->relu_upper_clip() != b->relu_upper_clip())
     {
-        return false;
+        const auto aValue = a->relu_upper_clip();
+        const auto bValue = b->relu_upper_clip();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
-    if(a->relu_lower_clip_slope() != b->relu_lower_clip_slope())
     {
-        return false;
+        const auto aValue = a->relu_lower_clip_slope();
+        const auto bValue = b->relu_lower_clip_slope();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
     if(a->axis_tensor_uid() != b->axis_tensor_uid())
     {
@@ -2419,17 +2460,41 @@ inline bool logicallyEqual(const PointwiseAttributes* a, const PointwiseAttribut
     {
         return false;
     }
-    if(a->swish_beta() != b->swish_beta())
     {
-        return false;
+        const auto aValue = a->swish_beta();
+        const auto bValue = b->swish_beta();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
-    if(a->elu_alpha() != b->elu_alpha())
     {
-        return false;
+        const auto aValue = a->elu_alpha();
+        const auto bValue = b->elu_alpha();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
-    if(a->softplus_beta() != b->softplus_beta())
     {
-        return false;
+        const auto aValue = a->softplus_beta();
+        const auto bValue = b->softplus_beta();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -3587,13 +3652,29 @@ inline bool logicallyEqual(const SdpaAttributes* a, const SdpaAttributes* b, con
     {
         return false;
     }
-    if(a->dropout_probability() != b->dropout_probability())
     {
-        return false;
+        const auto aValue = a->dropout_probability();
+        const auto bValue = b->dropout_probability();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
-    if(a->attn_scale_value() != b->attn_scale_value())
     {
-        return false;
+        const auto aValue = a->attn_scale_value();
+        const auto bValue = b->attn_scale_value();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
     if(a->left_bound() != b->left_bound())
     {
@@ -3940,13 +4021,29 @@ inline bool logicallyEqual(const SdpaBackwardAttributes* a, const SdpaBackwardAt
     {
         return false;
     }
-    if(a->dropout_probability() != b->dropout_probability())
     {
-        return false;
+        const auto aValue = a->dropout_probability();
+        const auto bValue = b->dropout_probability();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
-    if(a->attn_scale_value() != b->attn_scale_value())
     {
-        return false;
+        const auto aValue = a->attn_scale_value();
+        const auto bValue = b->attn_scale_value();
+        if(aValue.has_value() != bValue.has_value())
+        {
+            return false;
+        }
+        if(aValue.has_value() && std::memcmp(&*aValue, &*bValue, sizeof(*aValue)) != 0)
+        {
+            return false;
+        }
     }
     if(a->left_bound() != b->left_bound())
     {
