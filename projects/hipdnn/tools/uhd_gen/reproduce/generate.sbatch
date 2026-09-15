@@ -61,6 +61,16 @@ rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
 GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 \
     || { echo "FATAL: clone failed"; tail -5 /tmp/uhd/clone.log; exit 1; }
+# A bundle whose branch merged another one carries prerequisites that the merged-INTO
+# branch cannot reach on its own, so a clone of $BRANCH alone fails the apply with
+# "Repository lacks these prerequisite commits". UHD_PREREQ_REFS names the other
+# branches (space separated); they are fetched unshallowed, because the prerequisite can
+# sit deeper than the tip.
+for ref in ${UHD_PREREQ_REFS:-}; do
+    git -C "$SRC" fetch --unshallow origin "$ref" >> /tmp/uhd/clone.log 2>&1 \
+        || git -C "$SRC" fetch origin "$ref" >> /tmp/uhd/clone.log 2>&1 \
+        || { echo "FATAL: prerequisite ref $ref did not fetch"; tail -5 /tmp/uhd/clone.log; exit 1; }
+done
 if [ -n "${UHD_BUNDLE:-}" ]; then
     # The compute sites do not all resolve github.com to the same mirror: a node can clone a
     # branch tip hours behind the one `git ls-remote` reports from the login node (measured:
