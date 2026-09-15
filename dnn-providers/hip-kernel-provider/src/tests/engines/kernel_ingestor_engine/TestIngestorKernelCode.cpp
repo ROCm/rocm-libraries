@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -494,6 +495,249 @@ TEST(TestIngestorKernelCode, DoesNotCompareOffsets)
         EXPECT_NE(std::string(error.what()).find("does not exist"), std::string::npos)
             << error.what();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-device resolution
+// ---------------------------------------------------------------------------
+//
+// A plan is re-usable across handles, and a handle names its device only through its
+// stream, so which device launches is not known until execute(). These cases pin which
+// ordinal is admitted, which is refused, and which is answered without touching hardware
+// at all.
+//
+// Faked rather than measured: proving that a second ordinal of ANOTHER architecture is
+// refused needs a host holding two architectures at once, and no such host exists. The
+// subclass below stands in for the two steps a new device needs -- reading its
+// architecture, and loading its module -- so the decision logic above them is exercised
+// on any machine, including one with no GPU.
+
+/// Counts launches so a test can tell which device's kernel it was handed back.
+class CountingKernel : public compilation::IRunnableKernel
+{
+public:
+    explicit CountingKernel(int ordinal)
+        : _ordinal(ordinal)
+    {
+    }
+
+    void setBlockSize(unsigned int x, unsigned int y, unsigned int z) override
+    {
+        blockX = x;
+        blockY = y;
+        blockZ = z;
+    }
+
+    void setGridSize(unsigned int x, unsigned int y, unsigned int z) override
+    {
+        gridX = x;
+        gridY = y;
+        gridZ = z;
+    }
+
+    void setSharedMemBytes(unsigned int bytes) override
+    {
+        sharedMemBytes = bytes;
+    }
+
+    int ordinal() const
+    {
+        return _ordinal;
+    }
+
+    unsigned int blockX = 0;
+    unsigned int blockY = 0;
+    unsigned int blockZ = 0;
+    unsigned int gridX = 0;
+    unsigned int gridY = 0;
+    unsigned int gridZ = 0;
+    unsigned int sharedMemBytes = 0;
+
+private:
+    // Never reached: no case here launches. Present because the interface demands it.
+    void launchImpl(hipStream_t /*stream*/, void** /*kernelParams*/) const override
+    {
+        FAIL() << "no case in this fixture launches";
+    }
+
+    int _ordinal;
+};
+
+class CountingProgram : public compilation::ICompiledProgram
+{
+public:
+    explicit CountingProgram(int ordinal)
+        : _ordinal(ordinal)
+    {
+    }
+
+    std::unique_ptr<compilation::IRunnableKernel>
+        getKernel(const std::string& /*kernelName*/) const override
+    {
+        return std::make_unique<CountingKernel>(_ordinal);
+    }
+
+private:
+    int _ordinal;
+};
+
+/// Stands in for a machine: every ordinal's architecture is dictated, and loading a
+/// module is recorded rather than performed.
+class FakeDeviceCode : public IngestorKernelCode
+{
+public:
+    FakeDeviceCode(std::map<int, std::string> architectures, int firstOrdinal)
+        : IngestorKernelCode(std::make_unique<CountingProgram>(firstOrdinal),
+                             std::make_unique<CountingKernel>(firstOrdinal),
+                             firstOrdinal,
+                             architectures.at(firstOrdinal))
+        , _architectures(std::move(architectures))
+    {
+    }
+
+    // Mutated from the const resolution path, which is what the object under test calls.
+    mutable std::vector<int> archQueries;
+    mutable std::vector<int> resolves;
+
+protected:
+    hipError_t queryDeviceArch(int deviceOrdinal, std::string& reportedArch) const override
+    {
+        archQueries.push_back(deviceOrdinal);
+        const auto found = _architectures.find(deviceOrdinal);
+        if(found == _architectures.end())
+        {
+            return hipErrorInvalidDevice;
+        }
+        reportedArch = found->second;
+        return hipSuccess;
+    }
+
+    Resolved resolveForDevice(int deviceOrdinal, const std::string& /*reportedArch*/) const override
+    {
+        resolves.push_back(deviceOrdinal);
+        return Resolved{std::make_unique<CountingProgram>(deviceOrdinal),
+                        std::make_unique<CountingKernel>(deviceOrdinal)};
+    }
+
+private:
+    std::map<int, std::string> _architectures;
+};
+
+TEST(TestIngestorKernelCodeDevice, ResolvesASecondOrdinalOfTheSameArchitecture)
+{
+    FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}, {1, "gfx942:sramecc+:xnack-"}}, 0);
+    code.setBlockSize(64, 1, 1);
+    code.setGridSize(7, 1, 1);
+
+    const auto& first = dynamic_cast<const CountingKernel&>(code.kernelFor(0));
+    const auto& second = dynamic_cast<const CountingKernel&>(code.kernelFor(1));
+
+    // Device 1 gets its own module rather than device 0's: a hipModule_t belongs to the
+    // device it was loaded on.
+    EXPECT_EQ(first.ordinal(), 0);
+    EXPECT_EQ(second.ordinal(), 1);
+    EXPECT_EQ(code.resolves, std::vector<int>{1});
+
+    // Configured identically. Without the recorded geometry the second device would
+    // launch 1x1x1 and quietly compute a fraction of the output.
+    EXPECT_EQ(second.blockX, 64U);
+    EXPECT_EQ(second.gridX, 7U);
+}
+
+TEST(TestIngestorKernelCodeDevice, RefusesAnOrdinalOfAnotherArchitecture)
+{
+    const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}, {1, "gfx950"}}, 0);
+
+    try
+    {
+        code.kernelFor(1);
+        FAIL() << "expected a device of another architecture to be refused";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        // Author-facing, not an internal inconsistency: the caller paired a plan with a
+        // handle on an architecture it was never matched for.
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        EXPECT_NE(std::string(error.what()).find("gfx950"), std::string::npos) << error.what();
+        EXPECT_NE(std::string(error.what()).find("gfx942"), std::string::npos) << error.what();
+    }
+
+    // Refused before anything was loaded for it.
+    EXPECT_TRUE(code.resolves.empty());
+}
+
+TEST(TestIngestorKernelCodeDevice, AnswersASeenOrdinalWithoutQueryingOrLoading)
+{
+    const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}, {1, "gfx942:sramecc+:xnack-"}}, 0);
+
+    code.kernelFor(1);
+    const size_t queriesAfterFirst = code.archQueries.size();
+    const size_t resolvesAfterFirst = code.resolves.size();
+
+    const auto& repeat = dynamic_cast<const CountingKernel&>(code.kernelFor(1));
+
+    // The fast path this exists for: a dispatch on a device already seen touches neither
+    // HIP nor the archive.
+    EXPECT_EQ(repeat.ordinal(), 1);
+    EXPECT_EQ(code.archQueries.size(), queriesAfterFirst);
+    EXPECT_EQ(code.resolves.size(), resolvesAfterFirst);
+
+    // The ordinal the object was built for is likewise never re-queried.
+    code.kernelFor(0);
+    EXPECT_EQ(code.archQueries.size(), queriesAfterFirst);
+}
+
+/// A program that runs anywhere is answered without resolving a device at all. The
+/// non-kpack path could not fail here before and must not start.
+class AnyDeviceCode : public IngestorKernelCode
+{
+public:
+    AnyDeviceCode()
+        : IngestorKernelCode(std::make_unique<CountingProgram>(99),
+                             std::make_unique<CountingKernel>(99))
+    {
+    }
+
+    mutable int ordinalResolutions = 0;
+
+protected:
+    int resolveLaunchOrdinal(hipStream_t stream) const override
+    {
+        ++ordinalResolutions;
+        return IngestorKernelCode::resolveLaunchOrdinal(stream);
+    }
+};
+
+TEST(TestIngestorKernelCodeDevice, AnswersANonDeviceBoundProgramWithoutResolvingADevice)
+{
+    const AnyDeviceCode code;
+
+    // A stream token that names no device: were the ordinal resolved eagerly, this would
+    // query HIP and could throw. It must not be reached at all.
+    const auto& kernel
+        = dynamic_cast<const CountingKernel&>(code.kernelForStream(hipStreamPerThread));
+
+    EXPECT_EQ(kernel.ordinal(), 99);
+
+    // The discriminating assertion: resolving eagerly would consult HIP on a path that
+    // has no device to resolve and previously could not fail here.
+    EXPECT_EQ(code.ordinalResolutions, 0);
+}
+
+TEST(TestIngestorKernelCodeDevice, ReportsADeviceItCannotQuery)
+{
+    const FakeDeviceCode code({{0, "gfx942:sramecc+:xnack-"}}, 0);
+
+    try
+    {
+        code.kernelFor(4);
+        FAIL() << "expected an unqueryable device to be reported";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
+    EXPECT_TRUE(code.resolves.empty());
 }
 
 } // namespace

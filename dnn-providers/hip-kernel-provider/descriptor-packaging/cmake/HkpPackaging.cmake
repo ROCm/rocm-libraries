@@ -513,15 +513,17 @@ endfunction()
 # ---------------------------------------------------------------------------
 function(hkp_probe_comgr_resolvable out_ok out_detail)
     set(_rocke_root "${HKP_PKG_DIR}/../rocke")
-    # Backslash-escaped on Windows: PYTHONPATH's separator there is also CMake's
-    # list separator, so a bare one would split _probe_env into three elements and
-    # hand the second path to `cmake -E env` as the command to run. The escape is
-    # consumed when the argument is passed, so the child still sees a plain ';'.
+    # Joined with the platform's own PYTHONPATH separator. The assignment reaches
+    # `cmake -E env` as one argv element because the expansion at the call site below is
+    # quoted; a quoted argument never splits on a semicolon, so the Windows separator
+    # needs no escaping here. Escaping it would put a literal backslash in the child's
+    # first sys.path entry.
     if(WIN32)
-        set(_pp "${_rocke_root}/platform/python\;${_rocke_root}/library")
+        set(_sep ";")
     else()
-        set(_pp "${_rocke_root}/platform/python:${_rocke_root}/library")
+        set(_sep ":")
     endif()
+    set(_pp "${_rocke_root}/platform/python${_sep}${_rocke_root}/library")
     # Probe under the SAME override the build will use, so configure and build
     # ask the same question. Without this a machine that only resolves comgr via
     # the override would fail configure despite being correctly configured.
