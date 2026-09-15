@@ -7,7 +7,7 @@
 Drives the designed kwfeat.yaml config (BBS bf16, ScheduleIterAlg=[1,2],
 GlobalSplitU=[1,2]) through the config-driven emit harness to exercise the
 uncovered ScheduleIterAlg 1 and ScheduleIterAlg 2 code arms in
-Tensile/KernelWriter.py (_makeSubIterSchedule):
+tensilelite/KernelWriter.py (_makeSubIterSchedule):
 
   lines 951- 997: scheduleIterAlg == 1 block
                   (interleave: half-reads, globalReadCode, rest reads,

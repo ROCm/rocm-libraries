@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Characterization test for Tensile/LibraryLogic.py (p4 round).
+"""Characterization test for tensilelite/LibraryLogic.py (p4 round).
 
 Targets miss ranges: 112-169, 419-455, 477-538, 552-632, 671-758,
                      782-1017, 1024-1141, 1215-1424.

@@ -6,7 +6,7 @@
 Characterisation test — branch_id 2829358caa879be3c22e412e96e81fe8c9fd7610
 
 Predicate : not kernel["EnableMatrixInstruction"]
-Site      : Tensile/KernelWriterAssembly.py:1839
+Site      : tensilelite/KernelWriterAssembly.py:1839
 Function  : macroAndSet
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 
@@ -33,7 +33,7 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# Predicate semantics (pure; no Tensile import required)
+# Predicate semantics (pure; no TensileLite import required)
 # ---------------------------------------------------------------------------
 
 def _pred(enable_matrix_instruction: bool) -> bool:

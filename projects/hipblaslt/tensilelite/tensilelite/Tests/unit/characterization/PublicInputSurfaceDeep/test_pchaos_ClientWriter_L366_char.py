@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: ``if os.name != "nt"`` at
-``Tensile/ClientWriter.py:366`` inside ``writeRunScript``.
+``tensilelite/ClientWriter.py:366`` inside ``writeRunScript``.
 
 Branch 3ae422d17a07911474102c74d1a2bf4a79523ede.
 

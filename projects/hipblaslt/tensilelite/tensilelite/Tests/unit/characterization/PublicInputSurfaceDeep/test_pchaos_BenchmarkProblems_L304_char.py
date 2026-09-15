@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: ``if failOnMismatch`` at
-``Tensile/BenchmarkProblems.py:304`` inside ``_generateCustomKernelSolutions``.
+``tensilelite/BenchmarkProblems.py:304`` inside ``_generateCustomKernelSolutions``.
 
 Branch 0d3cd6b0f66334e1de87f9308a6b6fa141445428.
 
