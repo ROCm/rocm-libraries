@@ -87,6 +87,33 @@ PLSIN_STORE_HOIST_ADDR = _plsinStoreGate("PLSIN_STORE_HOIST_ADDR", default=True)
 #   stores use a separate, already LDS-free path.  Changes the cross-lane assembly
 #   AND the per-lane store row address; correctness must be proven on hardware.
 PLSIN_STORE_PERMLANE16 = _plsinStoreGate("PLSIN_STORE_PERMLANE16", default=True)
+
+
+def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
+    """Whether this store emission uses the AITER ``v_permlane16_swap`` shuffle.
+
+    gfx950 wave64 MI16 paired stores use permlane16 by default. MT320x256 is
+    the exception: its serial store (plain NLL / post-loop / Lend fused) has
+    only ``s_nop 0`` between ``buffer_store_dwordx4`` (reads ``vPack``) and the
+    next pair's ``v_cvt_pk``, which is not a reliable WAR fence. Keep
+    ``ds_bpermute`` + ``s_waitcnt`` on those arms.
+
+    Fused PLSIN Weave is eligible: last-K MFMAs sit in the pair gaps, so the
+    next convert cannot overwrite ``vPack`` until the store has latched.
+    ``weaveGroups is not None`` is the same predicate that selects the woven
+    paired-store emitter.
+    """
+    if not PLSIN_STORE_PERMLANE16:
+        return False
+    if tuple(kernel.get("ISA", ())) != (9, 5, 0):
+        return False
+    if kernel.get("MatrixInstM") != 16:
+        return False
+    if kernel.get("MacroTile0") == 320 and kernel.get("MacroTile1") == 256:
+        return weaveGroups is not None
+    return True
+
+
 # Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
 #   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
 PLSIN_STORE_DIRECT_EPILOGUE = _plsinStoreGate("PLSIN_STORE_DIRECT_EPILOGUE")
@@ -1748,24 +1775,12 @@ class GlobalWriteBatchWriter:
       # The AITER mapping is specific to the gfx950 wave64 MI16 paired-store
       # geometry.  Keep the established ds_bpermute implementation everywhere
       # else; those kernels may not have v_permlane16_swap or the same lane layout.
-      # MT320x256 (MIWaveTile [10,8]) is excluded: it intermittently produces wrong
-      # results with the permlane16 shuffle.  The defect is not in the shuffle itself
-      # but in the WAR fence that follows the paired store -- buffer_store_dwordx4
-      # reads vPack[0:3] as store data and the next pair's v_cvt_pk overwrites those
-      # same VGPRs, guarded only by `s_nop 0`, which cannot guarantee the store has
-      # latched its sources.  Replacing that s_nop with `s_waitcnt vmcnt(N)` makes the
-      # failure rate track N exactly (0/1 -> 0/10 runs bad, 2 -> 3/10, 4 -> 7/10,
-      # >=8 -> 10/10), confirming the hazard.  Component C removed the 4 ds_bpermute
-      # plus s_waitcnt that used to sit in that window, so this geometry -- the widest
-      # MT0 on the guarded (PLSIN0) store path -- is the one that loses the race.
-      # A correct fence costs ~6% geomean, so keep the ds_bpermute path here instead.
-      # See ~/findings/store-wait-hazard/ for the full investigation.
-      self._permlane16Active = (
-        PLSIN_STORE_PERMLANE16
-        and tuple(self.kernel["ISA"]) == (9, 5, 0)
-        and self.kernel.get("MatrixInstM") == 16
-        and not (self.kernel["MacroTile0"] == 320 and self.kernel["MacroTile1"] == 256)
-      )
+      # MT320x256 (MIWaveTile [10,8]): the serial store (plain NLL / post-loop /
+      # Lend fused) still uses ds_bpermute as the vPack WAR fence. Fused PLSIN
+      # Weave places last-K MFMAs between pairs, so that arm is eligible for
+      # v_permlane16_swap. See plsinStorePermlane16Active.
+      self._permlane16Active = plsinStorePermlane16Active(
+        self.kernel, self._weaveMfmaGroups())
       vPermAddr = self.cvtVgprStruct.vgprPermAddr
       vTmp = self.cvtVgprStruct.vgprBf16Temp  # reuse scratch temp before it's used for mask init
       if self._permlane16Active:

@@ -3845,9 +3845,9 @@ class LogicalScheduler:
         fusedEmitted = copy.deepcopy(emitted_3d)
         # PLSINStoreMode selects the fused epilogue:
         #   Weave — planner moves last-subIterK MFMAs into store gaps. Tiles
-        #           <=256x256 have occupancy headroom; MT>256x256 (e.g. 256x320)
-        #           first lends K=0 A/B (+ unused scale) so store temps reuse
-        #           those holes while last-K sources stay live.
+        #           <=256x256 have occupancy headroom; MT>256x256 (256x320 and
+        #           320x256) first lends K=0 A/B (+ unused scale) so store temps
+        #           reuse those holes while last-K sources stay live.
         #   Lend  — keep every terminal MFMA in the loop, then lend all operand
         #           tiles. TENSILE_PLSIN_SMALLTILE_LEND=1 forces this.
         # buildSubtileFusedStore still skips any lent tile that overlaps spilled D.

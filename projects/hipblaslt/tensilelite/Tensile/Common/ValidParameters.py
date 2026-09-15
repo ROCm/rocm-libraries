@@ -1171,7 +1171,7 @@ validParameters = { # we need to make sure this matches develop
     # PLSIN store-epilogue mode (only meaningful when PostLoopStoreInNll is True):
     #   "Weave" - last-K MFMAs interleaved with the fused store. Tiles <=256x256
     #             keep input VGPRs live (occupancy headroom). Larger tiles (e.g.
-    #             MT256x320) lend K=0 A/B so store temps reuse those holes.
+    #             MT256x320 / MT320x256) lend K=0 A/B so store temps reuse those holes.
     #   "Lend"  - all terminal MFMAs kept in the loop, every dead input-tile VGPR
     #             lent to the fused store pool.
     # Weave and Lend require incompatible static VGPR allocations, so this is a

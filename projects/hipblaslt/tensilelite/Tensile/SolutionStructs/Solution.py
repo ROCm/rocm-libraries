@@ -1820,8 +1820,8 @@ class Solution(collections.abc.Mapping):
       # A/B tiles + store temps + spilled accs exceed the occ-1 256 arch-VGPR
       # budget). Large-MT Weave instead lends K=0 A/B after the last K=0 MFMA
       # and weaves last-K MFMAs into the store using those holes. Lend keeps
-      # every terminal MFMA in-loop. Enable PLSIN for macrotiles larger than
-      # 256x256 (first target: MT256x320 / MIWT [8,10]).
+      # every terminal MFMA in-loop. Enable PLSIN Weave for macrotiles larger
+      # than 256x256 (MT256x320 / MIWT [8,10] and MT320x256 / MIWT [10,8]).
       # MIWaveTile is only present for EnableMatrixInstruction solutions.
       miwt = state.get("MIWaveTile")
       largeTileLend = (int(state.get("MacroTile0", 0)) > 256
