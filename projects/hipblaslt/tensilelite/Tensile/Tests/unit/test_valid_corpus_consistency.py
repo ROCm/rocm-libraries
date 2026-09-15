@@ -11,7 +11,6 @@ not existing behavior being characterized, so plain asserts are used rather
 than snapshots.
 """
 
-import importlib.util
 import sys
 import types
 
@@ -20,18 +19,6 @@ from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.unit
-
-
-# Load ValidCorpusConsistency.py via importlib to bypass
-# Tensile/TensileLogic/__init__.py, which transitively imports joblib / heavy
-# build deps via Run.py (see test_ValidChipId.py for the same pattern).
-def _load_vcc_mod():
-    p = Path(__file__).resolve().parents[2] / "TensileLogic" / "ValidCorpusConsistency.py"
-    spec = importlib.util.spec_from_file_location("ValidCorpusConsistency_under_test", p)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _install_rocisa_stub(monkeypatch):
@@ -61,7 +48,9 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def vcc(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    return _load_vcc_mod()
+    from Tensile.TensileLogic import ValidCorpusConsistency
+
+    return ValidCorpusConsistency
 
 
 def _all_yaml(root: Path):
