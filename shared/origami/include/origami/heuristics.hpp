@@ -104,6 +104,12 @@ struct heuristic_defaults_t {
   static constexpr size_t DEEPEN_K_MAX                   = 2048;
   static constexpr double TAIL_WASTE_PENALTY             = 4.0;
   static constexpr double OVERSIZE_WASTE_WEIGHT          = 3.0;
+  // Cap on depth_waste_ratio.  A DepthU window leaves ceil(K/MT_K)*MT_K - K < MT_K
+  // of unused depth -- under one MT_K-deep iteration -- and the charge it feeds is
+  // denominated in K-iterations, so one iteration is the most waste there can be.
+  // Only reachable on the MT_K > K branch, where normalising by K rather than by
+  // the loaded depth diverges as K shrinks.
+  static constexpr double DEPTH_WASTE_RATIO_MAX          = 1.0;
   static constexpr double M_EDGE_PENALTY                 = 2.0;
   static constexpr size_t SUBMI_GEMV_K_MIN               = 256;
   // Max min(M,N) for a shape to be "skinny" enough that K-split LSU (degenerate

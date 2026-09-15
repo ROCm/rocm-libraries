@@ -2333,8 +2333,12 @@ double compute_tile_latency(const problem_t& problem,
   // preferred over an oversized one when K has no clean divisor.
   const double oversize_weight = (mt_k_dd > K_problem)
       ? heuristic_defaults_t::OVERSIZE_WASTE_WEIGHT : 1.0;
+  // Bounded by DEPTH_WASTE_RATIO_MAX: the unused depth is under one MT_K-deep
+  // iteration, so it may not charge more than one.  Inert while MT_K <= K.
   const double depth_waste_ratio = (K_problem > 0.0)
-      ? (loaded_depth - K_problem) / K_problem * oversize_weight : 0.0;
+      ? std::min((loaded_depth - K_problem) / K_problem * oversize_weight,
+                 heuristic_defaults_t::DEPTH_WASTE_RATIO_MAX)
+      : 0.0;
   // Gate the single-iter penalty (below) to K large enough that a smaller MT_K
   // would give a real multi-iter K-loop; for tiny K, MT_K==K is the natural pick
   // and penalising it would flip the model to a costlier MT_K>K.
