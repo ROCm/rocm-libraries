@@ -601,18 +601,10 @@ def _lraTileAssignment_fp8_legacy(writer, kernel, module):
 def _lraColScatterBase(writer, module, tc, base, csc):
   """Build the column-scatter LR base LDS byte offset in ``base``.
 
-  On entry ``base`` holds the logical K-column (kGroup*groupKStride + frow).
-  On exit it holds ``load*blkBytes + interleave(col_group)*16`` (m_chunk=0; the
-  m_chunk and readIdx terms are added as ds_read immediates in emitSingleDsRead).
-
-      load      = k_col & (N-1)
-      col_group = k_col >> log2(N)
-      t         = sum_i col_group[i] << cgThreadBits[i]      (bit-interleave)
-      base      = load*blkBytes + t*16
-
-  This mirrors the GR de-interleave (physical thread T holds col_group whose bit
-  i sits at thread bit cgThreadBits[i]); interleave is its inverse, so GR write
-  and LR read address the identical LDS chunk.  See SubtileTLUSwizzle.
+  On entry ``base`` holds the logical K-column; on exit ``load*blkBytes +
+  interleave(col_group)*16`` (m_chunk=0 -- the m_chunk and readIdx terms become
+  ds_read immediates in emitSingleDsRead).  The bit-interleave inverts the GR
+  de-interleave, so both sides address the identical chunk.
   """
   N = csc.N
   logN = N.bit_length() - 1
@@ -666,28 +658,15 @@ def _lraColScatterBase(writer, module, tc, base, csc):
 def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
   """LR per-lane LDS base offset for TLU=1 (NT) transpose reads.
 
-  GR wrote this operand into LDS free-dim (M/N) contiguous, K-major: one K row
-  is ``mStripBytes = subtileM * bpe`` bytes wide (the whole free-dim strip), and
-  consecutive K rows are that many bytes apart.
+  GR wrote this operand K-major, free-dim contiguous, so one K row is
+  ``mStripBytes`` wide and the first read's base is::
 
-  ds_read_b64_tr_b4 reads a transposed 16(K) x 16(free) block. For the K-major
-  LDS image our GR write produces (nibble(M,K) = K*subtileM + M), the per-lane
-  base address of the first read (M-tile 0, instr 0) is
-
-      kGroup = lane // instM          (0..numGroups-1)
-      frow   = lane %  instM          (free-dim row within the 16-row block)
       base(lane) = (kGroup * groupKStride + frow) * mStripBytes
 
-  where groupKStride = instK // numGroups is the K-row distance between adjacent
-  lane groups (32 for fp4 16x16x128 with 4 groups).  The second transpose read
-  within a tile (+K/2 of a group) and the M-tile selection are constant ds
-  offsets applied by emitSingleDsRead.
-
-  This map is verified on gfx950 hardware (benchmark-tools tr4_nt_readmap,
-  formula `fmd`): reading LDS filled in the K-major layout above with these
-  per-lane bases reconstructs A[M=lane%16, K=32*(lane//16)+rd*16+slot] exactly
-  (2048/2048 slots).  The shipping non-subtile s+m+k formula is co-designed with
-  a *padded* layout and does NOT match this unpadded K-major image.
+  The second read within a tile and the M-tile selection are constant ds offsets
+  applied by emitSingleDsRead.  Verified on gfx950 (benchmark-tools
+  tr4_nt_readmap): this reconstructs A exactly.  The shipping non-subtile
+  s+m+k formula assumes a *padded* layout and does not match this image.
   """
   tc = tileInfo.tc
   wavesize = kernel["WavefrontSize"]
@@ -715,28 +694,18 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
              src=vgpr(kGroup), comment="%s: kGroup * %u (groupKStride)" % (tc, groupKStride)))
   module.add(VAddU32(dst=vgpr(base), src0=vgpr(kGroup), src1=vgpr(frow),
              comment="%s: kGroup*%u + frow" % (tc, groupKStride)))
-  # Column-scatter LR base (8x1 and up): ``base`` now holds the logical K-column
-  # (kGroup*groupKStride + frow).  Build the scattered LDS byte address from it
-  # (load*blkBytes + interleave(col_group)*16) and skip the contiguous
-  # *mStripBytes + single-bit XOR path used by 2x1/4x1.  The per-wave and LDS
-  # start tails below still apply.
+  # ``base`` holds the logical K-column.  Column-scatter (8x1 and up) builds the
+  # scattered address from it instead of the contiguous *mStripBytes + XOR path.
   csc = selectTLUColScatter(tileInfo)
   if csc is not None:
     _lraColScatterBase(writer, module, tc, base, csc)
   else:
     module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=hex(mStripBytes.bit_length() - 1),
                src=vgpr(base), comment="%s: * %u (mStripBytes)" % (tc, mStripBytes)))
-  # Bank-conflict swizzle: apply the same chunk XOR + load-block pad the GR write
-  # used, so the transpose read addresses the permuted physical chunk.  fswz is
-  # an involution, so GR and LR apply the identical flip and A round-trips.
-  #
-  # ``base`` here holds the chunk's LDS byte address, and a b128 chunk is always
-  # 16 bytes, so chunk bit b lives at byte bit b + 4 (log2 16), independent of
-  # the strip width mStripBytes.  The swizzle bits are pure per-lane for every
-  # wired stack (2x1: chunk[6]^=chunk[5]; 4x1: chunk[7]^=chunk[4]), but they do
-  # not all live in the kGroup sub-field (4x1's chunk[4] comes from frow), so the
-  # source bit is read straight from ``base`` rather than from kGroup -- this is
-  # field-agnostic and stays correct as the stack grows.  See SubtileTLUSwizzle.
+  # Apply the same chunk XOR + pad the GR write used; the XOR is an involution,
+  # so both sides flip identically and A round-trips.  The source bit is read
+  # from ``base`` rather than kGroup because it does not always live in the
+  # kGroup sub-field (4x1's chunk[4] comes from frow).  See SubtileTLUSwizzle.
   swz = selectTLUSwizzle(tileInfo)
   if swz:
     CHUNK_BYTE_BITS = 4  # log2(16 bytes per b128 chunk)

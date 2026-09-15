@@ -1,28 +1,22 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# MX-scaled F4 subtile GEMM correctness on the layouts with a free-dim contiguous
-# operand: NT (both operands), NN (A) and TT (B).  subtile_mxfp4.yaml covers TN,
-# where neither operand is free-dim contiguous.
+# MX-scaled F4 subtile GEMM correctness on layouts with a free-dim contiguous
+# operand: NT (both), NN (A) and TT (B).  subtile_mxfp4.yaml covers TN.
 #
-# Geometry is picked per operand from TLU{A,B}: free-dim contiguous (TLU=1) gets
-# the stacked transpose-read layout, K-contiguous (TLU=0) gets the row-major one.
-# NT uses TLU=1 for both, TN TLU=0 for both, and NN / TT pair one of each -- so
-# the mixed layouts also put the two scale operands on different group spans in
-# the same kernel.  Stack = MIWaveTile[0]; MT = 16 * stack * waveGroup.  The 16x1
-# blocks are rectangular because acc VGPRs scale as MIWT[0]*MIWT[1]*4.
+# Geometry is per operand from TLU{A,B}, so NN and TT pair one TLU=1 with one
+# TLU=0 and put the two scale operands on different group spans in one kernel.
 #
-# The suite is a matrix: each of the three layouts is run at each output type
-# (S, B, H) over the same 12 groups, so no combination is covered more deeply
-# than another.  The NT / S cell holds the definitions and the other eight alias
-# them, which is why only that cell carries comments -- edit a tile or size list
-# there and all nine cells follow.
+# A matrix of three layouts x three output types (S, B, H) over the same 12
+# groups.  The NT / S cell holds the definitions and the other eight alias it,
+# so only that cell carries comments.  Stack = MIWaveTile[0]; MT = 16 * stack *
+# waveGroup, and the 16x1 blocks are rectangular because acc VGPRs scale as
+# MIWT[0]*MIWT[1]*4.
 #
-# Two things cannot go in the shared matrix, and sit in the extras at the end.
-# An odd free-dim extent is legal only on an operand that is not TLU=1, so NN
-# takes an odd N and TT an odd M while NT takes neither.  And DepthU 768 needs
-# LdsBlockSizePerPad (1024) to divide depthU * bpe, which fails at fp4, so it
-# runs only on NT where neither operand is row-major and neither pads.
+# Two cases cannot be shared and sit in the extras at the end: an odd free-dim
+# extent is legal only on a non-TLU=1 operand (NN takes odd N, TT odd M), and
+# DepthU 768 needs LdsBlockSizePerPad (1024) to divide depthU * bpe, which fails
+# at fp4, so it runs only on NT where neither operand pads.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -234,19 +228,11 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [384, 768, 1, 512]
   -
-    - &prob4 # NT, non-power-of-two macro tiles at four waves in N.  The stack is picked
-      # for cache-line utilization and then backed off until the wave group can
-      # lay it out, so a tile that no stack suits at a given wave group is still
-      # rejected.  MT224 is 14 MI tiles and is one of those: every M wave group
-      # above 1 leaves 7 tiles per wave, which no power-of-two stack tiles.
-      # MT192 (12 tiles) is not -- it shares a strip at wg2x2 on a stack of 2,
-      # covered by the MT192x192 entry above.
-      #
-      # MT256x224 puts the non-power-of-two on N instead, where the same rule
-      # pins the N wave group to 1 and leaves M free to take all four waves.
-      # NT is the layout where that matters: both operands are TLU=1, so the
-      # 14-tile dim is stacked here, whereas in TT (which carries the same tile)
-      # only B is.
+    - &prob4 # NT, non-power-of-two macro tiles at four waves in N.  MT224 is 14 MI
+      # tiles, which no power-of-two stack covers at any M wave group above 1, so
+      # it pins that group to 1.  MT256x224 moves the odd dim to N, freeing M to
+      # take all four waves.  Both NT operands are TLU=1, so the 14-tile dim is
+      # stacked here where in TT only B is.
       OperationType: GEMM
       DataType: F4
       DestDataType: S
@@ -324,20 +310,12 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]
           - Exact: [512, 512, 1, 512]
   -
-    - &prob6 # M/N edge coverage: every other block uses whole macro tiles, so the edge
-      # goes untested there.
-      #
-      # The K tail is covered here.  It used to return NaN on this layout, because
-      # the scale swizzle built its grid as if the row axis were always K -- true
-      # for a K-contiguous operand, transposed for a free-dim contiguous one.  The
-      # assert never caught it: 320 and 384 are both whole multiples of the MXBlock
-      # 32 that ASEM derives from.  Tails run down to that multiple, not to 64.
-      #
-      # Odd M/N cannot live here: two fp4 share a byte, so an odd extent on a
-      # contiguous dim leaves the leading stride on a half byte, and the subtile
-      # geometry raises AssertFree0/1ElementMultiple to 2 on whichever operand is
-      # TLU=1 -- every block in this file has at least one.  Those sizes are
-      # covered in subtile_mxfp4.yaml, where K is the contiguous dim.
+    - &prob6 # M/N edge coverage: every other block uses whole macro tiles.  The K tail
+      # here once returned NaN, because the scale swizzle built its grid as if the
+      # row axis were always K -- transposed for a free-dim contiguous operand.
+      # Odd M/N cannot live here: two fp4 share a byte, so the subtile geometry
+      # raises AssertFree0/1ElementMultiple to 2 on any TLU=1 operand.  Those
+      # sizes are covered in subtile_mxfp4.yaml, where K is contiguous.
       OperationType: GEMM
       DataType: F4
       DestDataType: S

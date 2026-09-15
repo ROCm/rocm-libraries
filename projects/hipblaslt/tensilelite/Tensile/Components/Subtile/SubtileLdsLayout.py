@@ -6,17 +6,13 @@
 ################################################################################
 """LDS layout for the subtile path.
 
-The subtile kernel packs LDS as a flat sequence of per-operand regions::
+LDS is packed as a flat sequence of per-operand regions::
 
     | A strips | B strips | MX scale A | MX scale B |
-    ^          ^          ^            ^
     0          offsetB    offsetMXSA   offsetMXSB
 
-`computeLdsLayout` sizes those regions and returns their start offsets, which
-the emitters read back off the writer as ``ldsStartOffset<tc>`` /
-``ldsTotalSize``.  Keeping the arithmetic here rather than in `KernelWriter`
-makes it testable in isolation and keeps it next to the geometry
-(`Kernel.TileInfo`) and swizzle (`SubtileTLUSwizzle`) code it depends on.
+`computeLdsLayout` sizes them and returns the start offsets, which emitters read
+back off the writer as ``ldsStartOffset<tc>`` / ``ldsTotalSize``.
 """
 
 import math
@@ -104,20 +100,18 @@ def initSubtileInfos(writer, kernel: dict):
 def subtileRegionSize(tileInfo, macroTile: int, ldsRowBankSize: int) -> int:
   """Bytes reserved for one operand's subtile strips, including alignment.
 
-  Sized from *this* operand's subtileSize: with an asymmetric tile -- the NT fp4
-  16x1 stack, where A stacks 16 MFMA-M tiles per strip and B only 2 -- charging
-  B the A granularity would round B's 2KB of strips up to A's 16KB.
+  Sized from *this* operand's subtileSize: on an asymmetric tile, charging B the
+  A granularity would round B's strips up to A's much larger stack.
   """
   numStrips = int(tileInfo.globalSubtileGrid[0] * tileInfo.globalSubtileGrid[1])
   payload = (int(numStrips * tileInfo.subtileSize)
              + int(tileInfo.ldsRowPadBytes) * macroTile
              + swizzlePadPerStrip(tileInfo) * numStrips)
 
-  # A region is measured in subtiles but filled by DTL write groups, so a
-  # trailing partial group would spill into the next operand unless the region
-  # is a whole number of groups.  At most one subtile per write, nothing to
-  # round.  Floor at an LDS bank row either way, so the bank-conflict swizzle
-  # maps the same way in B's region as it does in A's.
+  # Regions are measured in subtiles but filled by DTL write groups, so round to
+  # a whole group or a trailing partial spills into the next operand; at most one
+  # subtile per write there is nothing to round.  Floor at an LDS bank row either
+  # way, so the swizzle maps the same way in every region.
   subtilesPerWrite = tileInfo.loadRatioGR
   writeGroupBytes = (int(math.ceil(subtilesPerWrite) * tileInfo.subtileSize)
                      if subtilesPerWrite > 1 else 0)
