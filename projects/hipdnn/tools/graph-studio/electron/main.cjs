@@ -9,6 +9,8 @@ const { existsSync } = require("node:fs");
 const path = require("node:path");
 
 const studioPaths = require("./paths.cjs");
+const flowBridge = require("./flow.cjs");
+const graphfile = require("./graphfile.cjs");
 
 // Dev mode = a Vite dev server URL was provided (set by the electron:dev
 // script). electron:start builds first and loads the bundled files instead.
@@ -196,9 +198,6 @@ const runningCommands = new Map();
 
 const errorText = (err) => (err instanceof Error ? err.message : String(err));
 
-const sanitizeName = (name) =>
-  String(name ?? "").replace(/[^\w.-]+/g, "_").replace(/^[._]+|[._]+$/g, "") || "graph";
-
 // The path is quoted unless the placeholder already sits between quotes, so a
 // temp directory containing spaces survives the shell either way.
 function substituteGraphPath(command, graphPath) {
@@ -214,14 +213,6 @@ function substituteGraphPath(command, graphPath) {
   }
 }
 
-async function writeGraphFile(scope, graphName, graphJson) {
-  const dir = path.join(app.getPath("temp"), "hipdnn-graph-studio", sanitizeName(scope));
-  await fs.mkdir(dir, { recursive: true });
-  const file = path.join(dir, `${sanitizeName(graphName)}.hipdnn.json`);
-  await fs.writeFile(file, graphJson ?? "", "utf8");
-  return file;
-}
-
 ipcMain.handle("command:execute", async (event, request) => {
   const { id, command, graphJson, graphName, scope } = request ?? {};
   if (typeof command !== "string" || command.trim() === "") {
@@ -233,7 +224,7 @@ ipcMain.handle("command:execute", async (event, request) => {
 
   let graphPath;
   try {
-    graphPath = await writeGraphFile(scope, graphName, graphJson);
+    graphPath = await graphfile.writeGraphFile(scope, graphName, graphJson);
   } catch (err) {
     return { ok: false, error: `Failed to write the graph: ${errorText(err)}` };
   }
@@ -284,6 +275,12 @@ ipcMain.handle("command:cancel", async (_event, id) => {
   const child = runningCommands.get(id);
   if (child) killCommand(child);
 });
+
+// ── Agent flows (flow bridge) ──────────────────────────────────────────
+// One long-lived MCP server child, its own IPC surface and its own quit
+// policy, all owned by flow.cjs.
+
+flowBridge.registerFlowIpc();
 
 app.on("before-quit", () => {
   for (const child of runningCommands.values()) killCommand(child);
