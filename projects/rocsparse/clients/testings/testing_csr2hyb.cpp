@@ -388,9 +388,8 @@ void testing_csr2hyb_extra(const Arguments& arg)
     rocsparse_hyb_mat ptr  = hyb;
     test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
 
-    // The ELL width is the dense row length, and ell_nnz is the true 64-bit
-    // element count. Before the fix ell_nnz wrapped (small / negative) here.
-    unit_check_scalar<int32_t>(static_cast<int32_t>(N), static_cast<int32_t>(dhyb->ell_width));
+    // The ELL width is the dense row length.
+    unit_check_scalar(N, dhyb->ell_width);
     // ell_nnz must be the true 64-bit element count; before the fix it wrapped
     // (small / negative) because ell_width * m was truncated to 32-bit.
     unit_check_scalar<int32_t>(dhyb->ell_nnz > static_cast<int64_t>(INT32_MAX) ? 1 : 0, 1);
@@ -407,7 +406,7 @@ void testing_csr2hyb_extra(const Arguments& arg)
                               sizeof(rocsparse_int),
                               hipMemcpyDeviceToHost));
     // Padding sentinel (-1) of the last ELL slot must have been written.
-    unit_check_scalar<int32_t>(static_cast<int32_t>(-1), static_cast<int32_t>(last_col));
+    unit_check_scalar<rocsparse_int>(-1, last_col);
 
     // Memory-safety probe #2: a real (dense-row) entry whose physical ELL index
     // exceeds INT32_MAX. Row n_dense-1, ELL column N-1 -> idx = (N-1)*M + (n_dense-1)
@@ -420,5 +419,5 @@ void testing_csr2hyb_extra(const Arguments& arg)
     CHECK_HIP_ERROR(hipMemcpy(
         &probe_col, dhyb->ell_col_ind + probe_idx, sizeof(rocsparse_int), hipMemcpyDeviceToHost));
     // ELL entry past the 2^31 index boundary must return the true CSR column.
-    unit_check_scalar<int32_t>(static_cast<int32_t>(N - 1 + base), static_cast<int32_t>(probe_col));
+    unit_check_scalar<rocsparse_int>(N - 1 + base, probe_col);
 }
