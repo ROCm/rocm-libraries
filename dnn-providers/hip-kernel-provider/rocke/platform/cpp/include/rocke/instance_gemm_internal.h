@@ -345,6 +345,8 @@ void rocke_gemm_emit_wmma_phase(rocke_gemm_build_ctx_t* ctx,
                                 rocke_value_t* B_src,
                                 rocke_value_t* const* iter_vars,
                                 int num_iter_vars,
+                                int parity_imm,
+                                rocke_value_t* parity_v,
                                 rocke_value_t** out_accs);
 
 /* emit_mfma_phase(ctx, A_src, B_src, iter_vars[n], parity_imm, parity_v,

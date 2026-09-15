@@ -75,6 +75,11 @@ def main() -> int:
         help="stage A/B with the architecture's direct global-to-LDS instruction",
     )
     p.add_argument(
+        "--dtl-prefetch",
+        action="store_true",
+        help="double-buffer direct-to-LDS and prefetch the next K tile",
+    )
+    p.add_argument(
         "--cshuffle-no-alias",
         action="store_true",
         help="give the cshuffle C tile its own LDS bytes (no A/B aliasing) and "
@@ -122,6 +127,7 @@ def main() -> int:
         pad_k=True,
         cshuffle_no_alias=args.cshuffle_no_alias,
         direct_to_lds=args.direct_to_lds,
+        dtl_prefetch=args.dtl_prefetch,
     )
     data = DataSpec(
         dtype_a=args.dtype,

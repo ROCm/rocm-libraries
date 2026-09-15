@@ -613,10 +613,6 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("WMMA path does not support preshuffle_b on %s", arch);
         }
-        if(spec->trait.dtl_prefetch)
-        {
-            CK_GEMM_REJECT("WMMA path does not support dtl_prefetch on %s", arch);
-        }
         if(spec->trait.active_tile_skip)
         {
             CK_GEMM_REJECT("WMMA path does not support active_tile_skip on %s", arch);
@@ -624,6 +620,17 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(spec->trait.chiplet_swizzle)
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
+        }
+        if(spec->trait.dtl_prefetch)
+        {
+            if(strcmp(arch, "gfx1250") != 0)
+            {
+                CK_GEMM_REJECT("WMMA path does not support dtl_prefetch on %s", arch);
+            }
+            if(!spec->trait.direct_to_lds)
+            {
+                CK_GEMM_REJECT("dtl_prefetch requires direct_to_lds=True");
+            }
         }
         if(spec->trait.direct_to_lds)
         {

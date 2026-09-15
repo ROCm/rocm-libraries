@@ -502,8 +502,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # ``default`` epilogue. The richer pipelines (compv3 / compv4 scheduler
     # interleave, cshuffle LDS-staged C, and preshuffle) encode MFMA-shaped
     # assumptions and are gated off until ported. gfx1250 additionally supports
-    # its native async direct-to-LDS instruction without prefetch. CDNA MFMA
-    # keeps the full matrix.
+    # its native async direct-to-LDS instruction, including double-buffered
+    # prefetch. CDNA MFMA keeps the full matrix.
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
@@ -525,12 +525,16 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             )
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
-            (spec.trait.dtl_prefetch, "dtl_prefetch"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
+        if spec.trait.dtl_prefetch:
+            if arch != "gfx1250":
+                return False, f"WMMA path does not support dtl_prefetch on {arch}"
+            if not spec.trait.direct_to_lds:
+                return False, "dtl_prefetch requires direct_to_lds=True"
         if spec.trait.direct_to_lds:
             if arch != "gfx1250":
                 return False, f"WMMA path does not support direct_to_lds on {arch}"
@@ -1359,11 +1363,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     ),
                 )
                 if arch == "gfx1250":
+                    if _prefetch and _parity_is_value:
+                        lds_row = b.add(
+                            row, b.mul(lds_parity, b.const_i32(block_m))
+                        )
+                    elif _prefetch and lds_parity:
+                        lds_row = b.add(row, b.const_i32(lds_parity * block_m))
+                    else:
+                        lds_row = row
                     b.global_load_async_to_lds(
                         A,
                         off_elems,
                         A_smem,
-                        [row, col],
+                        [lds_row, col],
                         width_bytes=_DTL_BYTES_PER_LANE,
                         coherency=spec.trait.dtl_cache_a,
                     )
@@ -1398,11 +1410,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     ),
                 )
                 if arch == "gfx1250":
+                    if _prefetch and _parity_is_value:
+                        lds_row = b.add(
+                            row, b.mul(lds_parity, b.const_i32(block_n))
+                        )
+                    elif _prefetch and lds_parity:
+                        lds_row = b.add(row, b.const_i32(lds_parity * block_n))
+                    else:
+                        lds_row = row
                     b.global_load_async_to_lds(
                         Bp,
                         off_elems,
                         B_smem,
-                        [row, col],
+                        [lds_row, col],
                         width_bytes=_DTL_BYTES_PER_LANE,
                         coherency=spec.trait.dtl_cache_b,
                     )
@@ -1652,6 +1672,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         A_src: Value,
         B_src: Value,
         iter_vars: Sequence[Value],
+        lds_parity=0,
     ) -> List[Value]:
         """One K-tile of WMMA atoms, fully MMA-contract driven.
 
@@ -1667,12 +1688,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+        _parity_is_value = isinstance(lds_parity, Value)
+        if _prefetch and _parity_is_value:
+            a_par_row_v = b.mul(lds_parity, b.const_i32(block_m))
+            b_par_row_v = b.mul(lds_parity, b.const_i32(block_n))
+            a_par_row_static = 0
+            b_par_row_static = 0
+        else:
+            a_par_row_v = None
+            b_par_row_v = None
+            a_par_row_static = lds_parity * block_m if _prefetch else 0
+            b_par_row_static = lds_parity * block_n if _prefetch else 0
         new_accs: List[Value] = list(iter_vars)
         for kk in range(k_atoms):
             k_tile_base = b.const_i32(kk * t.warp_tile_k)
             a_rows = []
             for mi in range(mfmas_m):
-                atom_row = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m))
+                atom_row = b.add(
+                    warp_m_off,
+                    b.const_i32(mi * t.warp_tile_m + a_par_row_static),
+                )
+                if a_par_row_v is not None:
+                    atom_row = b.add(atom_row, a_par_row_v)
                 a_rows.append(
                     _emit_frag_smem_load(
                         A_src,
@@ -1685,7 +1722,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
             b_cols = []
             for ni in range(mfmas_n):
-                atom_row = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n))
+                atom_row = b.add(
+                    warp_n_off,
+                    b.const_i32(ni * t.warp_tile_n + b_par_row_static),
+                )
+                if b_par_row_v is not None:
+                    atom_row = b.add(atom_row, b_par_row_v)
                 b_cols.append(
                     _emit_frag_smem_load(
                         B_src,
@@ -1748,7 +1790,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         runtime i32 Value.
         """
         if op.family == "wmma":
-            return _emit_wmma_phase(A_src, B_src, iter_vars)
+            return _emit_wmma_phase(A_src, B_src, iter_vars, lds_parity)
         _mp_is_val = isinstance(lds_parity, Value)
         if _prefetch or _db:
             if _mp_is_val:
@@ -1996,22 +2038,30 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
           prologue:        DTLA load tile 0 -> half 0
           for k in [0, K-block_k) step block_k:
               parity = (k / block_k) & 1   ; next_parity = parity ^ 1
+              drain architecture-specific async loads ; LDS barrier
               DTLA load tile k+block_k -> half (parity ^ 1)
-              s_waitcnt vmcnt(loads_in_flight_for_next_tile) ; barrier
               MFMA from half parity
               ; no end-barrier — half (parity ^ 1) has its own LDS region
           epilogue:        ; last tile already loaded into the final parity
-              s_waitcnt vmcnt(0) ; barrier
+              drain architecture-specific async loads ; LDS barrier
               MFMA from final parity
 
-        The post-issue ``s_waitcnt vmcnt(N)`` keeps N loads (= next
-        tile's count) in flight while the current tile drains, so the
-        loop's MFMA work overlaps the next tile's HBM transfers.
+        Issuing the next tile after the current tile's drain but before its
+        MFMAs overlaps the next tile's HBM transfer with current-tile compute.
+        gfx1250 tracks these transfers with ASYNCcnt; gfx9 uses VMEM waitcnt.
         """
+        def _drain_prefetch_and_sync() -> None:
+            if arch == "gfx1250":
+                b.s_wait_asynccnt(0)
+                b.sync_lds_only()
+            else:
+                b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+                b.s_barrier_bare()
+
         loads_per_tile = _dtl_a_passes + _dtl_b_passes
         # vmcnt is 6 bits on gfx950 (max 63). If next-tile loads exceed
         # that, we'd saturate and the prefetch buys nothing extra.
-        if loads_per_tile > 63:
+        if arch != "gfx1250" and loads_per_tile > 63:
             # Fall back to the non-prefetched path; the constant would
             # have to be encoded as 63 either way.
             _emit_kloop_simple()
@@ -2035,14 +2085,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 emit_load_phase(
                     A_smem, B_smem, b.const_i32(j * tk), lds_parity=j % nbuf
                 )
-            # Steady state: per tile i, drain (vmcnt(0): buffer_load_lds is
-            # out-of-order, so a partial drain would be incorrect), barrier,
+            # Steady state: per tile i, fully drain the architecture's async
+            # counter (completion may be out of order), synchronize LDS,
             # issue tile i+D's load, then MFMA tile i from ring i%nbuf. With the
             # mandatory full drain, depth>1 keeps no extra loads usefully in
             # flight -- the empirical confirmation of the wsp3 finding.
             for i in range(trip):
-                b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-                b.s_barrier_bare()
+                _drain_prefetch_and_sync()
                 nj = i + D
                 if nj < trip:
                     emit_load_phase(
@@ -2070,31 +2119,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             acc_iter = iter_vars[1:]
             next_parity = b.sub(c1_i32, parity)  # 1 - parity (0/1 only)
             k_next = b.add(k0, c_block_k)
-            # Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier
-            # per K-tile (vs the prior WAR+RAW two-barrier form, which halved
-            # the available MFMA-shadow time at 1 WG/CU). The single barrier
-            # serves both hazards because we issue the next-tile write AFTER it:
-            #   * vmcnt(0)  -> the current tile's DTL loads (issued last iter
-            #                  into half(parity)) have landed: RAW-safe to read.
-            #   * lgkmcnt(0)-> the previous iter's ds_reads of half(next_parity)
-            #                  have drained: WAR-safe to overwrite that half.
-            #   * s_barrier -> WG rendezvous so the freshly-loaded current half
-            #                  is visible to every wave before any MFMA reads it.
+            # One drain + LDS synchronization per K-tile serves both hazards:
+            #   * ASYNCcnt/VMEM drain -> current tile has landed (RAW-safe).
+            #   * LDS drain           -> prior reads of next_parity completed
+            #                            (WAR-safe to overwrite).
+            #   * barrier             -> current half is visible to every wave.
             # The async next-tile load is issued AFTER the barrier (cannot race
             # the just-drained reads -> no second barrier needed) but BEFORE the
             # MFMAs (its HBM transfer overlaps the matrix work). The prior
             # structure issued that write BEFORE draining, which both raced and
             # forced the extra barrier this collapses away.
-            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-            b.s_barrier_bare()
+            _drain_prefetch_and_sync()
             emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
             new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
             b.scf_yield(next_parity, *new_accs)
 
         # Epilogue: drain the final tile's loads, rendezvous, MFMA last tile.
         final_parity = for_op.results[0]
-        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-        b.s_barrier_bare()
+        _drain_prefetch_and_sync()
         epi_accs = emit_mfma_phase(
             A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
         )

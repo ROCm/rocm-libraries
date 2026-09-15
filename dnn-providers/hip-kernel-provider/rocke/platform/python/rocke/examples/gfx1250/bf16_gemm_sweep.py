@@ -58,6 +58,7 @@ def _make_spec(
     lds_swizzle: bool = False,
     lds_k_pad: int = 0,
     direct_to_lds: bool = False,
+    dtl_prefetch: bool = False,
 ) -> UniversalGemmSpec:
     target = config["target"]
     warp_tile_m, warp_tile_n, warp_tile_k = target["warp_tile"]
@@ -86,6 +87,7 @@ def _make_spec(
             lds_swizzle=lds_swizzle,
             lds_k_pad=lds_k_pad,
             direct_to_lds=direct_to_lds,
+            dtl_prefetch=dtl_prefetch,
         ),
         data=DataSpec(
             dtype_a=dtype,
@@ -168,21 +170,25 @@ def enumerate_trait_configs(
                                 for direct_to_lds in traits.get(
                                     "direct_to_lds", [False]
                                 ):
-                                    specs.append(
-                                        replace(
-                                            base,
-                                            trait=replace(
-                                                base.trait,
-                                                pipeline=pipeline,
-                                                scheduler=scheduler,
-                                                epilogue=epilogue,
-                                                waves_per_eu=waves_per_eu,
-                                                lds_swizzle=lds_swizzle,
-                                                lds_k_pad=lds_k_pad,
-                                                direct_to_lds=direct_to_lds,
-                                            ),
+                                    for dtl_prefetch in traits.get(
+                                        "dtl_prefetch", [False]
+                                    ):
+                                        specs.append(
+                                            replace(
+                                                base,
+                                                trait=replace(
+                                                    base.trait,
+                                                    pipeline=pipeline,
+                                                    scheduler=scheduler,
+                                                    epilogue=epilogue,
+                                                    waves_per_eu=waves_per_eu,
+                                                    lds_swizzle=lds_swizzle,
+                                                    lds_k_pad=lds_k_pad,
+                                                    direct_to_lds=direct_to_lds,
+                                                    dtl_prefetch=dtl_prefetch,
+                                                ),
+                                            )
                                         )
-                                    )
     return _dedupe_valid(specs, arch=config["target"]["arch"])
 
 
