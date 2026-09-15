@@ -959,17 +959,13 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
 def _tluPadFreeExtent(kernel, tileInfo):
   """Real free-dim element extent when the GR strip is padded, else None.
 
-  _subtileStackForTile rounds an operand onto a taller stack when the padding
-  ratio is inside the cap, so a 12-MMA-tile operand rides a 16-tile strip.  The
-  extra tiles are fetched and written to LDS but never read, and the SRD limit
-  cannot exclude them: it is one linear bound over the K window, so a pad offset
-  only exceeds it on the final K row.  Returning the real extent lets the caller
-  send the pad lanes out of range instead.
-
-  Only the single-strip case pads (_subtileTLU1StackReason rejects a partial tail
-  across several strips), and only when this tensor's wave group is 1 does the
-  strip coincide with the macro tile, so m_chunk is the absolute free-dim
-  position.  Both conditions are required for the comparison to be right.
+  _subtileStackForTile can round an operand onto a taller stack, whose extra
+  tiles are fetched and written to LDS but never read.  The SRD limit cannot
+  exclude them -- it is one linear bound over the K window, so a pad offset
+  exceeds it only on the final K row -- so the caller sends the pad lanes out of
+  range using this extent.  The two guards below are both load-bearing: only the
+  single-strip case pads, and only at wave group 1 does the strip coincide with
+  the macro tile, making m_chunk the absolute free-dim position.
   """
   tc = tileInfo.tc
   wgIdx = 0 if tc == 'A' else 1
@@ -987,18 +983,13 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
                                       strideK, cs):
   """GR per-lane offsets for the column-scatter TLU layout (8x1 fp4 and up).
 
-  Each DTL load i owns a scattered set of K-columns: physical thread T within a
-  load holds logical (m_chunk, col_group) recovered by de-interleaving T (the
-  inverse of the bit-interleave the LR read applies).  The global K-column is
-  ``col = col_group * N + i`` and the free-dim (M/N) start is
-  ``m_chunk * elemsPerChunk``, so the per-lane byte offset for load i is
+  Thread T within load i holds logical (m_chunk, col_group), de-interleaved from
+  T as the inverse of the LR read's bit-interleave, giving::
 
-      offset(T, i) = (col * strideK + m_chunk * elemsPerChunk) * bpe
-                   = ((col_group*N + i) * strideK + m_chunk * elemsPerChunk) * bpe
+      offset(T, i) = ((col_group*N + i) * strideK + m_chunk * elemsPerChunk) * bpe
 
-  col_group and m_chunk are load-independent, so their contribution is computed
-  once per lane; the loop only adds ``i * strideK`` in K.  See SubtileTLUSwizzle
-  (TLUColScatter) and the verified bank model.
+  col_group and m_chunk are load-independent, so they are computed once per lane
+  and the loop only adds ``i * strideK``.  See SubtileTLUSwizzle.
   """
   tc = tileInfo.tc
   tile = tileInfo.gr
@@ -1113,16 +1104,13 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
 def _graTileAssignment_tlu(writer, kernel, tileInfo):
   """GR per-lane offset for TLU=1 (NT / free-dim contiguous) subtile tiles.
 
-  For NT the free dimension (M for A, N for B) is contiguous in global memory,
-  so a single 128-bit buffer_load covers a full free-dim strip at one K row.
-  The wave's 64 lanes span 64 K rows; numGRPerSubtile loads cover the remaining
-  K.  The per-lane global byte offset is therefore a pure K ramp:
+  The free dim is contiguous, so one 128-bit buffer_load covers a full free-dim
+  strip at one K row and the per-lane byte offset is a pure K ramp::
 
       offset(lane, i) = (laneId + i * wavesize) * strideK * bpe
 
-  where strideK is the tensor's unroll (K) stride in elements.  One VGPR is
-  produced per GR load into sharedVgprGROffset[]; the M/N position lives inside
-  the load width, so no per-lane free-dim term and no bank-swizzle is needed.
+  One VGPR per GR load into sharedVgprGROffset[].  The M/N position lives inside
+  the load width, so the base case needs no free-dim term and no bank swizzle.
   """
   module = Module()
   tc = tileInfo.tc
@@ -1153,16 +1141,10 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   tmpVgpr = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_tmpVgpr")
   swzTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_swzTmp") if swz else None
 
-  # M-tiling across b128 loads (fp4 taller stacks).  Each lane's b128 covers
-  # elemsPerChunk (16/bpe) contiguous free-dim (M/N) elements at one K row.  A
-  # strip is mStripBytes wide, i.e. chunksPerK = mStripBytes/16 b128 chunks per
-  # K row.  For the baseline 2x1 fp4 stack chunksPerK==1 (one b128 == one full
-  # K row) and the per-lane offset is a pure K ramp; for taller fp4 stacks (4x1,
-  # 8x1) a single b128 covers only part of a K row, so physical chunk
-  # P = i*wavesize + laneId splits into K row (P // chunksPerK) plus an intra-row
-  # M block (P % chunksPerK) of elemsPerChunk elements.  See the LDS image in
-  # SubtileLREmit emitSingleDsRead.  Scoped to fp4 (bpe 0.5); other TLU dtypes
-  # (e.g. bf16 AB_B16_TLU1) keep the original single-chunk-per-K-row ramp.
+  # M-tiling across b128 loads (fp4 taller stacks).  When a b128 covers only part
+  # of a K row (chunksPerK > 1), physical chunk P = i*wavesize + laneId splits
+  # into K row (P // chunksPerK) plus an intra-row M block (P % chunksPerK) of
+  # elemsPerChunk elements.  Scoped to fp4; other TLU dtypes keep the pure ramp.
   instM = int(tileInfo.mmaTileShape[0])
   mStripBytes = int(tileInfo.subtileShape[0] * instM * tileInfo.bpe)
   isFp4 = float(tileInfo.bpe) == 0.5
