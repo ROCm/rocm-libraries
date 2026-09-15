@@ -329,7 +329,7 @@ def test_gfx950_post_processor_cms_helpers(monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert len(mi) == 9
 
-    # Cover CMS loading path with injected tensilelite modules.
+    # Cover CMS loading path with injected TensileLite modules.
     cs_mod = types.ModuleType("tensilelite.Components.CustomSchedule")
     cs_mod.query_cms_kernels = lambda **_k: [
         {
