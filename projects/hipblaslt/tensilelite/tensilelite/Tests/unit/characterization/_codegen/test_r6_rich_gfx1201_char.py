@@ -10,7 +10,7 @@ emit path, exercising RDNA4-specific WMMA V2 arms in KernelWriter.py /
 Components/* that the baseline test_emit_gfx1201_char.py does not reach via
 the narrow single-permutation curated logic files.
 
-Target paths in Tensile/KernelWriter.py (gfx1201: HasWMMA_V2=True,
+Target paths in tensilelite/KernelWriter.py (gfx1201: HasWMMA_V2=True,
 HasWMMA_V1=False, HasEccHalf=False):
   - else branch of "if HasEccHalf or not HasWMMA_V1" (lines ~1012-1018):
     WMMA V2 instPerRegPack = 0 (not int8 pack) => pack scheduling

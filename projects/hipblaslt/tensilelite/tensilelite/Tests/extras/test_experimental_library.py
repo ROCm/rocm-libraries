@@ -388,7 +388,7 @@ def test_gen_logic_arch_mismatch_maps_to_nonzero_exit(monkeypatch, tmp_path):
 
 
 def test_gen_logic_matching_arch_passes_guard_and_omits_cpu_only(monkeypatch, tmp_path):
-    """Matching arch clears the guard; the constructed Tensile cmd has no --cpu-only."""
+    """Matching arch clears the guard; the constructed TensileLite cmd has no --cpu-only."""
     pytest.importorskip("rocisa")
     import tensilelite.Common.Architectures as Arch
     import tensilelite.ExperimentalLibrary as E

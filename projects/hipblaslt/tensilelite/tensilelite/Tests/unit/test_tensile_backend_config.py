@@ -48,7 +48,7 @@ def _write_config(tmp_path, config):
 
 
 def _stub_pipeline(monkeypatch):
-    """Stub out all expensive Tensile pipeline steps. Returns captured dict."""
+    """Stub out all expensive TensileLite pipeline steps. Returns captured dict."""
     captured = {}
     monkeypatch.setattr(TensileModule, "validateToolchain", lambda *a: ("cxx", "cc", "bundler"))
     monkeypatch.setattr(
