@@ -102,8 +102,8 @@ def _assertBenchmarkProducedResults(output_dir):
         if dataRows > 0:
             assert sawPositive, (
                 f"All benchmark results are -1 in {csvPath}: no kernel launched or validated. "
-                f"Likely cause: DQuantType/epilogue params missing from ClientParameters.ini "
-                f"(cache-path writeClientConfigIni not passing dquantType/partialRMSStoreBf16D)."
+                f"Likely cause: epilogue params missing from ClientParameters.ini "
+                f"(cache-path writeClientConfigIni not passing useRMSEpilogue)."
             )
 
 

@@ -419,10 +419,7 @@ namespace TensileLite
                 ("rotating-buffer-size",      po::value<int32_t>()->default_value(0), "Size of rotating buffer in the unit of MB.")
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
-                ("dquant-type",               po::value<std::string>()->default_value("none"),      "Dynamic-quant fused epilogue type: none|tile|mxfp8.")
                 ("init-quantScale",           po::value<InitMode>()->default_value(InitMode::Zero), "Init mode for quantScale output.")
-                ("dquant-size-0",             po::value<size_t>()->default_value(0),               "Dynamic-quant tile M extent (0 = whole MacroTile0).")
-                ("dquant-size-1",             po::value<size_t>()->default_value(0),               "Dynamic-quant tile N extent (0 = whole MacroTile1).")
                 ("use-deepseek-scale-a",      po::value<bool>()->default_value(false), "Enable Deepseek fp32 A scale epilogue.")
                 ("use-deepseek-scale-b",      po::value<bool>()->default_value(false), "Enable Deepseek fp32 B scale epilogue.")
                 ("deepseek-scale-aq0",        po::value<size_t>()->default_value(128), "M-dim quantization block size for scaleA (default 128).")
@@ -431,14 +428,9 @@ namespace TensileLite
                 ("deepseek-scale-bq1",        po::value<size_t>()->default_value(128), "N-dim quantization block size for scaleB (default 128).")
                 ("init-scaleADeepseek",       po::value<InitMode>()->default_value(InitMode::TrigAbsSin), "Init mode for Deepseek A scale buffer.")
                 ("init-scaleBDeepseek",       po::value<InitMode>()->default_value(InitMode::TrigAbsSin), "Init mode for Deepseek B scale buffer.")
-                ("use-partial-rms",           po::value<bool>()->default_value(false), "Enable PartialRMS fused epilogue.")
-                ("partial-rms-residual-add",  po::value<bool>()->default_value(false), "PartialRMS: add residual before reduction.")
-                ("partial-rms-quant",         po::value<bool>()->default_value(false), "PartialRMS: also compute amax(|D|)/448 into partialBuf second half.")
-                ("partial-rms-store-bf16-d",  po::value<bool>()->default_value(false), "PartialRMS+MXFP8: store pre-quant bf16 values to ResidualOut buffer.")
-                ("partial-rms-mt0",           po::value<size_t>()->default_value(0), "MacroTile0 for PartialRMS (0 = conservative bound).")
-                ("partial-rms-mt1",           po::value<size_t>()->default_value(0), "MacroTile1 for PartialRMS (0 = conservative bound).")
-                ("partial-rms-gamma-type",    po::value<rocisa::DataType>()->default_value(rocisa::DataType::BFloat16), "PartialRMS gamma element type (default bf16).")
-                ("partial-rms-residual-type", po::value<rocisa::DataType>()->default_value(rocisa::DataType::BFloat16), "PartialRMS residual element type (default bf16).")
+                ("use-rms-epilogue",           po::value<bool>()->default_value(false), "Enable RMSEpilogue fused epilogue.")
+                ("rms-epilogue-gamma-type",    po::value<rocisa::DataType>()->default_value(rocisa::DataType::BFloat16), "RMSEpilogue gamma element type (default bf16).")
+                ("rms-epilogue-residual-type", po::value<rocisa::DataType>()->default_value(rocisa::DataType::BFloat16), "RMSEpilogue residual element type (default bf16).")
                 ("init-rmsGamma",             po::value<InitMode>()->default_value(InitMode::Random), "Init mode for RMS gamma buffer.")
                 ("init-partialBuf",           po::value<InitMode>()->default_value(InitMode::Zero),   "Init mode for partialBuf output.")
                 ("init-residual",             po::value<InitMode>()->default_value(InitMode::Random), "Init mode for residual buffer.")
@@ -589,10 +581,7 @@ namespace TensileLite
             DUMP_OPT("init-scaleC", InitMode);
             DUMP_OPT("init-scaleD", InitMode);
             DUMP_OPT("init-scaleAlphaVec", InitMode);
-            DUMP_OPT("dquant-type", std::string);
             DUMP_OPT("init-quantScale", InitMode);
-            DUMP_OPT("dquant-size-0", size_t);
-            DUMP_OPT("dquant-size-1", size_t);
             DUMP_OPT("use-deepseek-scale-a", bool);
             DUMP_OPT("use-deepseek-scale-b", bool);
             DUMP_OPT("deepseek-scale-aq0", size_t);
@@ -601,11 +590,7 @@ namespace TensileLite
             DUMP_OPT("deepseek-scale-bq1", size_t);
             DUMP_OPT("init-scaleADeepseek", InitMode);
             DUMP_OPT("init-scaleBDeepseek", InitMode);
-            DUMP_OPT("use-partial-rms", bool);
-            DUMP_OPT("partial-rms-residual-add", bool);
-            DUMP_OPT("partial-rms-quant", bool);
-            DUMP_OPT("partial-rms-mt0", size_t);
-            DUMP_OPT("partial-rms-mt1", size_t);
+            DUMP_OPT("use-rms-epilogue", bool);
             DUMP_OPT("init-rmsGamma", InitMode);
             DUMP_OPT("init-partialBuf", InitMode);
             DUMP_OPT("init-residual", InitMode);

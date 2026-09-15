@@ -169,16 +169,10 @@ def _buildTypePredicates(args):
 
 
 def _buildRmsPredicates(args):
-    """Build partial-RMS filter predicates from args."""
+    """Build RMSEpilogue filter predicates from args."""
     preds = []
-    if args.partial_rms:
-        preds.append(lambda rec: any(
-            rec["problemType"].get(k) for k in (
-                "PartialRMSResidualAdd", "PartialRMSQuant", "PartialRMSStoreBf16D")))
-    if args.residual_add:
-        preds.append(lambda rec: bool(rec["problemType"].get("PartialRMSResidualAdd")))
-    if args.residual_out:
-        preds.append(lambda rec: bool(rec["problemType"].get("PartialRMSStoreBf16D")))
+    if args.rms_epilogue:
+        preds.append(lambda rec: bool(rec["problemType"].get("useRMSEpilogue")))
     return preds
 
 
@@ -194,10 +188,6 @@ def buildPredicates(args):
     preds.extend(_buildTypePredicates(args))
     preds.extend(_buildRmsPredicates(args))
 
-    if args.dquant_type is not None:
-        val = args.dquant_type.lower()
-        preds.append(lambda rec, v=val:
-            rec["problemType"].get("DQuantType", "None").lower() == v)
 
     if args.arch is not None:
         pat = args.arch
@@ -279,14 +269,9 @@ def _buildArgParser():
         help="Match DataTypeB exactly.")
     parser.add_argument("--dest-type", metavar="CODE",
         help="Match DestDataType.")
-    parser.add_argument("--dquant-type", metavar="VALUE",
-        help="Match DQuantType (case-insensitive: None, Tile, MXFP8).")
-    parser.add_argument("--partial-rms", action="store_true",
-        help="Match files with any PartialRMS field set.")
-    parser.add_argument("--residual-add", action="store_true",
-        help="Match files with PartialRMSResidualAdd set.")
-    parser.add_argument("--residual-out", action="store_true",
-        help="Match files with PartialRMSStoreBf16D set.")
+
+    parser.add_argument("--rms-epilogue", action="store_true",
+        help="Match files with useRMSEpilogue set in the problem type.")
     parser.add_argument("--arch", metavar="PATTERN",
         help="Match architecture name (fnmatch glob or substring).")
     parser.add_argument("--schedule-name", metavar="PATTERN",

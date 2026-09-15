@@ -109,19 +109,13 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::FreeSizeMatching>(),
                      Base::template Pair<Predicates::Contraction::PredictionMatching>(),
                      Base::template Pair<Predicates::Contraction::GridBasedMatching>(),
-                     Base::template Pair<Predicates::Contraction::UsePartialRMSEqual>(),
-                     Base::template Pair<Predicates::Contraction::DQuantTypeEqual>(),
-                     Base::template Pair<Predicates::Contraction::DQuantSize0Equal>(),
-                     Base::template Pair<Predicates::Contraction::DQuantSize1Equal>(),
+                     Base::template Pair<Predicates::Contraction::UseRMSEpilogueEqual>(),
                      Base::template Pair<Predicates::Contraction::UseDeepseekScaleAEqual>(),
                      Base::template Pair<Predicates::Contraction::UseDeepseekScaleBEqual>(),
                      Base::template Pair<Predicates::Contraction::DeepseekScaleAq0Equal>(),
                      Base::template Pair<Predicates::Contraction::DeepseekScaleAq1Equal>(),
                      Base::template Pair<Predicates::Contraction::DeepseekScaleBq0Equal>(),
                      Base::template Pair<Predicates::Contraction::DeepseekScaleBq1Equal>(),
-                     Base::template Pair<Predicates::Contraction::UsePartialRMSResidualAddEqual>(),
-                     Base::template Pair<Predicates::Contraction::UsePartialRMSQuantEqual>(),
-                     Base::template Pair<Predicates::Contraction::UsePartialRMSStoreBf16DEqual>(),
                      Base::template Pair<Predicates::Contraction::UseGradientEqual>(),
                      Base::template Pair<Predicates::Contraction::ActivationCheck>(),
                      Base::template Pair<Predicates::Contraction::ActivationComputeTypeEqual>(),
@@ -462,26 +456,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::UsePartialRMSEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSEqual, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::DQuantTypeEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::DQuantTypeEqual, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::DQuantSize0Equal, IO>
-            : public AutoMappingTraits<Predicates::Contraction::DQuantSize0Equal, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::DQuantSize1Equal, IO>
-            : public AutoMappingTraits<Predicates::Contraction::DQuantSize1Equal, IO>
+        struct MappingTraits<Predicates::Contraction::UseRMSEpilogueEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UseRMSEpilogueEqual, IO>
         {
         };
 
@@ -521,23 +497,6 @@ namespace TensileLite
         {
         };
 
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::UsePartialRMSResidualAddEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSResidualAddEqual, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::UsePartialRMSQuantEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSQuantEqual, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::UsePartialRMSStoreBf16DEqual, IO>
-            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSStoreBf16DEqual, IO>
-        {
-        };
 
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::ActivationCheck, IO>
