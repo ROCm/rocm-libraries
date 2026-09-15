@@ -1,0 +1,70 @@
+# MIT License
+# 
+# Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+# Variables of the form ${<variable>} are substituted, currently the following
+# list is supported:
+#   - ${branch} (or {branch}) the name of the current branch
+#   - ${url} (or {url}) github url of the current project
+#   - ${project:<project_name>} base url of the documentation of <project_name>
+#     based on intersphinx_mapping.
+# These comments will also be removed.
+defaults:
+  numbered: False
+  maxdepth: 6
+root: overview.md
+subtrees:
+  - entries: 
+      - file: setup.md
+        subtrees:
+        - entries:
+          - file: setup/requirements.md
+          - file: setup/getting.md
+          - file: setup/building_and_testing.md
+
+  - entries:
+      - file: standard_api.md 
+        subtrees:
+        - entries:
+          - file: standard_api/time_library.md
+            subtrees: 
+            - entries:
+              - file: standard_api/time_library/chrono.md
+          - file: standard_api/numerics_library.md
+          - file: standard_api/utility_library.md
+            subtrees: 
+            - entries:
+              - file: standard_api/utility_library/functional.md
+              - file: standard_api/utility_library/utility.md
+              - file: standard_api/utility_library/version.md
+
+   #  - entries:
+   #   - file: extended_api.md 
+   #     subtrees:
+   #     - entries:
+   #       - file: extended_api/memory_model.md
+   #       - file: extended_api/thread_groups.md
+   #       - file: extended_api/shapes.md
+   #       - file: extended_api/synchronization_primitives.md
+   #       - file: extended_api/asynchronous_operations.md
+   #       - file: extended_api/memory_access_properties.md
+   #       - file: extended_api/functional.md

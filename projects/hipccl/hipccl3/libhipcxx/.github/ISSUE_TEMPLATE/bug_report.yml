@@ -1,0 +1,125 @@
+# Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+
+name: Bug Report
+description: Create a report to help us improve
+title: '[BUG]: '
+labels: ['bug']
+body:
+  - type: checkboxes
+    id: check-duplicates
+    attributes:
+      label: Is this a duplicate?
+      description: Check for duplicate issues.
+      options:
+        - label: I confirmed there appear to be no [duplicate issues](https://github.com/ROCm/libhipcxx/issues) for this bug.
+          required: true
+
+  - type: dropdown
+    id: bug-type
+    attributes:
+      label: Type of Bug
+      description: What kind of bug are you running into?
+      multiple: false
+      options:
+        - Silent Failure
+        - Runtime Error
+        - Compile-time Error
+        - Performance
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what problem you are running into.
+      placeholder: "Attempting to use structured bindings with `cuda::std::tuple` fails to compile."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to Reproduce
+      description: Steps used to reproduce the bug.
+      placeholder: |
+        0. See godbolt link below for exact reproducer
+        1. Construct a `hip::std::tuple`
+        2. Use structured bindings to destructure the elements of the tuple.
+        3. Compilation fails with the error message:
+        ```
+        <source>(5): error: cannot bind to non-public member "hip::std::__4::tuple<_Tp...>::__base_ [with _Tp=<int, int>]"
+        auto [a,b] = t;
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+      placeholder: "Using structured bindings with `hip::std::tuple` should successfully compile and destructure the elements of the tuple."
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: '# System information'
+
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating System
+      description:
+        If applicable, the OS version where this bug occurs.
+      placeholder: Ubuntu Linux 20.04
+    validations:
+      required: false
+
+  - type: textarea
+    id: rocm-smi-output
+    attributes:
+      label: rocm-smi output
+      description: If applicable, the output from running the `rocm-smi --showhw` command.
+      placeholder: |
+        ======================= ROCm System Management Interface =======================
+        ============================ Concise Hardware Info =============================
+        GPU  DID   GFX RAS  SDMA RAS  UMC RAS  VBIOS            BUS           
+        0    740f  ENABLED  ENABLED   ENABLED  113-D67301V-073  0000:4A:00.0  
+        ================================================================================
+        ============================= End of ROCm SMI Log ==============================
+    validations:
+      required: false
+
+  - type: textarea
+    id: hipcc-version
+    attributes:
+      label: hipcc version
+      description: If applicable, the version of hipcc you're using.
+      placeholder: |
+        HIP version: 6.2.41133-dd7f95766
+        AMD clang version 18.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.2.0 24292 26466ce804ac523b398608f17388eb6d605a3f09)
+        Target: x86_64-unknown-linux-gnu
+        Thread model: posix
+        InstalledDir: /opt/rocm-6.2.0/lib/llvm/bin
+        Configuration file: /opt/rocm-6.2.0/lib/llvm/bin/clang++.cfg
+    validations:
+      required: false

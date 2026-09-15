@@ -1,0 +1,142 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES.
+//
+//===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef _LIBCUDACXX___EXPECTED_BAD_EXPECTED_ACCESS_H
+#define _LIBCUDACXX___EXPECTED_BAD_EXPECTED_ACCESS_H
+
+#include <cuda/std/detail/__config>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <cuda/std/__exception/terminate.h>
+#include <cuda/std/__utility/forward.h>
+#include <cuda/std/__utility/move.h>
+
+#include <nv/target>
+
+#ifndef _CCCL_NO_EXCEPTIONS
+#  ifdef __cpp_lib_expected
+#    include <expected>
+#  else // ^^^ __cpp_lib_expected ^^^ / vvv !__cpp_lib_expected vvv
+#    include <exception>
+#  endif // !__cpp_lib_expected
+#endif // _CCCL_NO_EXCEPTIONS
+
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
+
+#ifndef _CCCL_NO_EXCEPTIONS
+
+#  ifdef __cpp_lib_expected
+
+using ::std::bad_expected_access;
+
+#  else // ^^^ __cpp_lib_expected ^^^ / vvv !__cpp_lib_expected vvv
+
+template <class _Err>
+class bad_expected_access;
+
+template <>
+class bad_expected_access<void> : public ::std::exception
+{
+public:
+  // The way this has been designed (by using a class template below) means that we'll already
+  // have a profusion of these vtables in TUs, and the dynamic linker will already have a bunch
+  // of work to do. So it is not worth hiding the <void> specialization in the dylib, given that
+  // it adds deployment target restrictions.
+  const char* what() const noexcept override
+  {
+    return "bad access to cuda::std::expected";
+  }
+};
+
+template <class _Err>
+class bad_expected_access : public bad_expected_access<void>
+{
+public:
+#    if _CCCL_CUDA_COMPILER(CLANG) || defined(_CCCL_COMPILER_HIPCC) || defined(_CCCL_COMPILER_HIPRTC) // Clang needs this or it breaks with device only types
+  _CCCL_HOST_DEVICE
+#    endif // _CCCL_CUDA_COMPILER(CLANG)
+  _CCCL_HIDE_FROM_ABI explicit bad_expected_access(_Err __e)
+      : __unex_(_CUDA_VSTD::move(__e))
+  {}
+
+#    if _CCCL_CUDA_COMPILER(CLANG) || defined(_CCCL_COMPILER_HIPCC) || defined(_CCCL_COMPILER_HIPRTC) // Clang needs this or it breaks with device only types
+  _CCCL_HOST_DEVICE
+#    endif // _CCCL_CUDA_COMPILER(CLANG)
+  _CCCL_HIDE_FROM_ABI ~bad_expected_access() noexcept
+  {
+    __unex_.~_Err();
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI _Err& error() & noexcept
+  {
+    return __unex_;
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI const _Err& error() const& noexcept
+  {
+    return __unex_;
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI _Err&& error() && noexcept
+  {
+    return _CUDA_VSTD::move(__unex_);
+  }
+
+  _LIBCUDACXX_HIDE_FROM_ABI const _Err&& error() const&& noexcept
+  {
+    return _CUDA_VSTD::move(__unex_);
+  }
+
+private:
+  _Err __unex_;
+};
+#  endif // !__cpp_lib_expected
+
+#endif // !_CCCL_NO_EXCEPTIONS
+
+template <class _Err, class _Arg>
+_CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_bad_expected_access(_Arg&& __arg)
+{
+#ifndef _CCCL_NO_EXCEPTIONS
+  NV_IF_ELSE_TARGET(NV_IS_HOST_LIBHIPCXX,
+                    (throw _CUDA_VSTD::bad_expected_access<_Err>(_CUDA_VSTD::forward<_Arg>(__arg));),
+                    ((void) __arg; _CUDA_VSTD_NOVERSION::terminate();))
+#else // ^^^ !_CCCL_NO_EXCEPTIONS ^^^ / vvv _CCCL_NO_EXCEPTIONS vvv
+  (void) __arg;
+  _CUDA_VSTD_NOVERSION::terminate();
+#endif // _CCCL_NO_EXCEPTIONS
+}
+
+_LIBCUDACXX_END_NAMESPACE_STD
+
+#endif // _LIBCUDACXX___EXPECTED_BAD_EXPECTED_ACCESS_H

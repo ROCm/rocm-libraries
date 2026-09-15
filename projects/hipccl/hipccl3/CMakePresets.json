@@ -1,0 +1,58 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 2
+    },
+    "configurePresets": [
+        {
+            "name": "default:release",
+            "description": "Configure release build with installation to /opt/rocm",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/rocm-clang.cmake",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INSTALL_PREFIX": "/opt/rocm"
+            }
+        },
+        {
+            "name": "hipccl-all",
+            "description": "Build all hipCCL components (rocprim, hipcub, rocthrust; libhipcxx not yet wired in)",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "HIPCCL_BUILD_ALL": "ON"
+            }
+        },
+        {
+            "name": "rocprim",
+            "description": "Build rocPRIM only",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "HIPCCL_BUILD_ROCPRIM": "ON",
+                "HIPCCL_BUILD_HIPCUB": "OFF",
+                "HIPCCL_BUILD_ROCTHRUST": "OFF"
+            }
+        },
+        {
+            "name": "hipcub",
+            "description": "Build hipCUB only (pulls in rocPRIM as a dependency, not as a sibling build)",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "HIPCCL_BUILD_ROCPRIM": "OFF",
+                "HIPCCL_BUILD_HIPCUB": "ON",
+                "HIPCCL_BUILD_ROCTHRUST": "OFF"
+            }
+        },
+        {
+            "name": "rocthrust",
+            "description": "Build rocThrust only (pulls in rocPRIM as a dependency, not as a sibling build)",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "HIPCCL_BUILD_ROCPRIM": "OFF",
+                "HIPCCL_BUILD_HIPCUB": "OFF",
+                "HIPCCL_BUILD_ROCTHRUST": "ON"
+            }
+        }
+    ]
+}

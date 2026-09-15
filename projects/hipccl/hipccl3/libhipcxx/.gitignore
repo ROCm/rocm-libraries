@@ -1,0 +1,78 @@
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+samples/trie
+samples/trie.exe
+.vscode/*
+samples/pg996.txt
+samples/1342-0.txt
+samples/2600-0.txt
+samples/2701-0.txt
+samples/35-0.txt
+samples/84-0.txt
+samples/8800.txt
+samples/pg1727.txt
+samples/pg55.txt
+samples/pg6130.txt
+samples/log.txt
+samples/trie.exp
+samples/trie.lib
+samples/trie.txt
+samples/out.txt
+samples/temp.txt
+samples/trie.cu.txt
+samples/trie_mt.exe
+samples/trie.obj
+samples/trie_mt.obj
+samples/trie_st.exe
+samples/trie_st.obj
+samples/trial
+samples/trie_st
+samples/trie_mt
+samples/rtc
+samples/benchmark
+*.pyc
+build-*/
+build/
+.p4config
+compare_git_to_perforce.bash
+*.log
+.clangd/
+.cache
+Output/
+compile_commands.json
+*~
+*lit_test_times.txt
+llvm-project/
+compile_flags.txt
+.idea/
+build*/
+.cache
+.aws
+.config
+_deps/catch2-src/
+.vscode/
+_site/
+compile_commands.json
+CMakeUserPresets.json
+/ci/rapids/.conda
+/ci/rapids/.log
+/ci/rapids/.repos
+*.egg-info/
+*.pyc
+__pycache__
+*.pyd

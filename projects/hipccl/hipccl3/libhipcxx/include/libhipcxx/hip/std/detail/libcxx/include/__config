@@ -1,0 +1,457 @@
+//===----------------------------------------------------------------------===//
+//
+// Part of libcu++, the C++ Standard Library for your entire system,
+// under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
+//
+//===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2024-2026 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef _LIBCUDACXX_CONFIG
+#define _LIBCUDACXX_CONFIG
+
+#include <cuda/__cccl_config> // IWYU pragma: export
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if defined(_CCCL_COMPILER_CLANG)
+#  ifndef __apple_build_version__
+#    define _LIBCUDACXX_CLANG_VER (__clang_major__ * 100 + __clang_minor__)
+#  endif
+#endif
+
+#include <cuda/std/__internal/cpp_dialect.h>
+#include <cuda/std/__internal/features.h>
+#include <cuda/std/__internal/namespaces.h>
+
+#ifdef __cplusplus
+
+// __config may be included in `extern "C"` contexts, switch back to include <nv/target>
+extern "C++" {
+#  include <nv/target>
+}
+
+#  define _LIBCUDACXX_VERSION 10000
+
+#  ifndef __has_extension
+#    define __has_extension(__x) 0
+#  endif
+
+#  ifdef __LITTLE_ENDIAN__
+#    if __LITTLE_ENDIAN__
+#      define _LIBCUDACXX_LITTLE_ENDIAN
+#    endif // __LITTLE_ENDIAN__
+#  endif // __LITTLE_ENDIAN__
+
+#  ifdef __BIG_ENDIAN__
+#    if __BIG_ENDIAN__
+#      define _LIBCUDACXX_BIG_ENDIAN
+#    endif // __BIG_ENDIAN__
+#  endif // __BIG_ENDIAN__
+
+#  ifdef __BYTE_ORDER__
+#    if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#      define _LIBCUDACXX_LITTLE_ENDIAN
+#    elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#      define _LIBCUDACXX_BIG_ENDIAN
+#    endif // __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#  endif // __BYTE_ORDER__
+
+#  if defined(_WIN32)
+#    define _LIBCUDACXX_LITTLE_ENDIAN
+#    if (defined(_M_AMD64) || defined(__x86_64__)) || (defined(_M_ARM) || defined(__arm__))
+#      define _LIBCUDACXX_HAS_BITSCAN64
+#    endif
+
+// Some CRT APIs are unavailable to store apps
+#    if defined(WINAPI_FAMILY)
+#      include <winapifamily.h>
+#      if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) \
+        && (!defined(WINAPI_PARTITION_SYSTEM) || !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_SYSTEM))
+#        define _LIBCUDACXX_WINDOWS_STORE_APP
+#      endif
+#    endif
+#  endif // defined(_WIN32)
+
+#  ifndef _LIBCUDACXX_LITTLE_ENDIAN
+#    if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
+#      define _LIBCUDACXX_LITTLE_ENDIAN
+#    endif
+#  endif // _LIBCUDACXX_LITTLE_ENDIAN
+
+#  if !defined(_LIBCUDACXX_LITTLE_ENDIAN) && !defined(_LIBCUDACXX_BIG_ENDIAN)
+#    include <endian.h>
+#    if __BYTE_ORDER == __LITTLE_ENDIAN
+#      define _LIBCUDACXX_LITTLE_ENDIAN
+#    elif __BYTE_ORDER == __BIG_ENDIAN
+#      define _LIBCUDACXX_BIG_ENDIAN
+#    else // __BYTE_ORDER == __BIG_ENDIAN
+#      error unable to determine endian
+#    endif
+#  endif // !defined(_LIBCUDACXX_LITTLE_ENDIAN) && !defined(_LIBCUDACXX_BIG_ENDIAN)
+
+#  if _CCCL_HAS_ATTRIBUTE(__no_sanitize__) && !_CCCL_COMPILER(GCC)
+#    define _LIBCUDACXX_NO_CFI __attribute__((__no_sanitize__("cfi")))
+#  else
+#    define _LIBCUDACXX_NO_CFI
+#  endif
+
+#  if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
+#    define __alignof(x) alignof(x)
+#  endif // _CCCL_COMPILER(NVRTC)
+
+#  if _CCCL_COMPILER(MSVC)
+#    define __alignof__ __alignof
+#  endif
+
+#  define _LIBCUDACXX_PREFERRED_ALIGNOF(_Tp) __alignof(_Tp)
+
+#  if _CCCL_COMPILER(MSVC)
+#    define _CCCL_ALIGNAS_TYPE(x) alignas(x)
+#    define _CCCL_ALIGNAS(x)      __declspec(align(x))
+#  elif _CCCL_HAS_FEATURE(cxx_alignas)
+#    define _CCCL_ALIGNAS_TYPE(x) alignas(x)
+#    define _CCCL_ALIGNAS(x)      alignas(x)
+#  else
+#    define _CCCL_ALIGNAS_TYPE(x) __attribute__((__aligned__(alignof(x))))
+#    define _CCCL_ALIGNAS(x)      __attribute__((__aligned__(x)))
+#  endif // !_CCCL_COMPILER(MSVC) && !_CCCL_HAS_FEATURE(cxx_alignas)
+
+#  if _CCCL_HAS_CUDA_COMPILER() || defined(_CCCL_HIP_COMPILER)
+#    define _LIBCUDACXX_ATOMIC_ALWAYS_LOCK_FREE(size, ptr) (size <= 8)
+#  elif _CCCL_COMPILER(CLANG) || _CCCL_COMPILER(GCC)
+#    define _LIBCUDACXX_ATOMIC_ALWAYS_LOCK_FREE(...) __atomic_always_lock_free(__VA_ARGS__)
+#  endif // _CCCL_CUDA_COMPILER
+
+#  if _CCCL_COMPILER(CLANG)
+
+// Allow for build-time disabling of unsigned integer sanitization
+#    if !defined(_LIBCUDACXX_DISABLE_UBSAN_UNSIGNED_INTEGER_CHECK) && _CCCL_HAS_ATTRIBUTE(no_sanitize)
+#      define _LIBCUDACXX_DISABLE_UBSAN_UNSIGNED_INTEGER_CHECK \
+        __attribute__((__no_sanitize__("unsigned-integer-overflow")))
+#    endif
+
+#  endif //  _CCCL_COMPILER(CLANG)
+
+#  ifdef _LIBCUDACXX_HAS_NO_UNICODE_CHARS
+using char16_t = unsigned short;
+using char32_t = unsigned int;
+#  endif // _LIBCUDACXX_HAS_NO_UNICODE_CHARS
+
+#  ifdef _LIBCUDACXX_DEBUG
+#    if _LIBCUDACXX_DEBUG == 0
+#      define _LIBCUDACXX_DEBUG_LEVEL 1
+#    elif _LIBCUDACXX_DEBUG == 1
+#      define _LIBCUDACXX_DEBUG_LEVEL 2
+#    else
+#      error Supported values for _LIBCUDACXX_DEBUG are 0 and 1
+#    endif
+#    if !defined(_LIBCUDACXX_BUILDING_LIBRARY)
+#      define _LIBCUDACXX_EXTERN_TEMPLATE(...)
+#    endif
+#  endif
+
+#  ifdef _LIBCUDACXX_DISABLE_EXTERN_TEMPLATE
+#    define _LIBCUDACXX_EXTERN_TEMPLATE(...)
+#  endif
+
+#  ifndef _LIBCUDACXX_EXTERN_TEMPLATE
+#    define _LIBCUDACXX_EXTERN_TEMPLATE(...) extern template __VA_ARGS__;
+#  endif
+
+// Deprecation macros.
+//
+// Deprecations warnings are always enabled, except when users explicitly opt-out
+// by defining _LIBCUDACXX_DISABLE_DEPRECATION_WARNINGS.
+// NVCC 11.1 and 11.2 are broken with the deprecated attribute, so disable it
+#  if !defined(_LIBCUDACXX_DISABLE_DEPRECATION_WARNINGS)
+#    if _CCCL_HAS_ATTRIBUTE(deprecated)
+#      define _LIBCUDACXX_DEPRECATED __attribute__((deprecated))
+#    else // ^^^ _CCCL_HAS_ATTRIBUTE(deprecated) ^^^ / vvv !_CCCL_HAS_ATTRIBUTE(deprecated) vvv
+#      define _LIBCUDACXX_DEPRECATED [[deprecated]]
+#    endif // !_CCCL_HAS_ATTRIBUTE(deprecated)
+#  else
+#    define _LIBCUDACXX_DEPRECATED
+#  endif
+
+#  define _LIBCUDACXX_DEPRECATED_IN_CXX11 _LIBCUDACXX_DEPRECATED
+
+#  if _CCCL_STD_VER >= 2014
+#    define _LIBCUDACXX_DEPRECATED_IN_CXX14 _LIBCUDACXX_DEPRECATED
+#  else
+#    define _LIBCUDACXX_DEPRECATED_IN_CXX14
+#  endif
+
+#  if _CCCL_STD_VER >= 2017
+#    define _LIBCUDACXX_DEPRECATED_IN_CXX17 _LIBCUDACXX_DEPRECATED
+#  else
+#    define _LIBCUDACXX_DEPRECATED_IN_CXX17
+#  endif
+
+#  if _CCCL_STD_VER >= 2020
+#    define _LIBCUDACXX_DEPRECATED_IN_CXX20 _LIBCUDACXX_DEPRECATED
+#  else
+#    define _LIBCUDACXX_DEPRECATED_IN_CXX20
+#  endif
+
+// Thread API
+#  ifndef _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
+#    if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC) || defined(__EMSCRIPTEN__)
+#      define _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
+#    endif
+#  endif // _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
+
+#  ifndef _LIBCUDACXX_HAS_THREAD_API_CUDA
+#    if (defined(__CUDA_ARCH__) || defined(__EMSCRIPTEN__)) || defined(__HIP_DEVICE_COMPILE__) || defined(_CCCL_COMPILER_HIPRTC)
+#      define _LIBCUDACXX_HAS_THREAD_API_CUDA
+#    endif // __cuda_std__
+#  endif // _LIBCUDACXX_HAS_THREAD_API_CUDA
+
+#  ifndef _LIBCUDACXX_HAS_THREAD_API_WIN32
+#    if _CCCL_COMPILER(MSVC) && !defined(_LIBCUDACXX_HAS_THREAD_API_CUDA)
+#      define _LIBCUDACXX_HAS_THREAD_API_WIN32
+#    endif
+#  endif // _LIBCUDACXX_HAS_THREAD_API_WIN32
+
+#  if !defined(_LIBCUDACXX_HAS_NO_THREADS) && !defined(_LIBCUDACXX_HAS_THREAD_API_PTHREAD) \
+    && !defined(_LIBCUDACXX_HAS_THREAD_API_WIN32) && !defined(_LIBCUDACXX_HAS_THREAD_API_EXTERNAL)
+#    if defined(__linux__) || defined(__GNU__) || defined(__APPLE__) \
+      || (defined(__MINGW32__) && _CCCL_HAS_INCLUDE(<pthread.h>))
+#      define _LIBCUDACXX_HAS_THREAD_API_PTHREAD
+#    elif defined(_WIN32)
+#      define _LIBCUDACXX_HAS_THREAD_API_WIN32
+#    else
+#      define _LIBCUDACXX_UNSUPPORTED_THREAD_API
+#    endif // _LIBCUDACXX_HAS_THREAD_API
+#  endif // _LIBCUDACXX_HAS_NO_THREADS
+
+#  if defined(_LIBCUDACXX_HAS_NO_THREADS) && defined(_LIBCUDACXX_HAS_THREAD_API_PTHREAD)
+#    error _LIBCUDACXX_HAS_THREAD_API_PTHREAD may only be defined when \
+       _LIBCUDACXX_HAS_NO_THREADS is not defined.
+#  endif
+
+#  if defined(_LIBCUDACXX_HAS_NO_THREADS) && defined(_LIBCUDACXX_HAS_THREAD_API_EXTERNAL)
+#    error _LIBCUDACXX_HAS_THREAD_API_EXTERNAL may not be defined when \
+       _LIBCUDACXX_HAS_NO_THREADS is defined.
+#  endif
+
+#  if defined(__STDCPP_THREADS__) && defined(_LIBCUDACXX_HAS_NO_THREADS)
+#    error _LIBCUDACXX_HAS_NO_THREADS cannot be set when __STDCPP_THREADS__ is set.
+#  endif
+
+#  if !defined(_LIBCUDACXX_HAS_NO_THREADS) && !defined(__STDCPP_THREADS__)
+#    define __STDCPP_THREADS__ 1
+#  endif
+
+// TODO: Support C11 Atomics?
+// #if _CCCL_HAS_FEATURE(cxx_atomic) || __has_extension(c_atomic) || _CCCL_HAS_KEYWORD(_Atomic)
+// #  define _LIBCUDACXX_HAS_C_ATOMIC_IMP
+#  if _CCCL_COMPILER(CLANG)
+#    define _LIBCUDACXX_HAS_GCC_ATOMIC_IMP
+#  elif _CCCL_COMPILER(GCC)
+#    define _LIBCUDACXX_HAS_GCC_ATOMIC_IMP
+#  elif _CCCL_COMPILER(NVHPC)
+#    define _LIBCUDACXX_HAS_GCC_ATOMIC_IMP
+#  elif _CCCL_COMPILER(MSVC)
+#    define _LIBCUDACXX_HAS_MSVC_ATOMIC_IMPL
+#  endif
+
+#  define _LIBCUDACXX_ATOMIC_UNSAFE_AUTOMATIC_STORAGE
+// Enable bypassing automatic storage checks in atomics when using CTK 12.2 and below and if NDEBUG is defined.
+// #  if _CCCL_CUDACC_BELOW(12, 2) && !defined(NDEBUG)
+// #    define _LIBCUDACXX_ATOMIC_UNSAFE_AUTOMATIC_STORAGE
+// #  endif // _CCCL_CUDACC_BELOW(12, 2)
+
+// CUDA Atomics supersede host atomics in order to insert the host/device dispatch layer
+#  if _CCCL_CUDA_COMPILER(NVCC) || _CCCL_COMPILER(NVRTC) || _CCCL_COMPILER(NVHPC) || _CCCL_HAS_CUDA_COMPILER() || defined(_CCCL_COMPILER_HIPRTC) || defined(_CCCL_COMPILER_HIPCC)
+#    define _LIBCUDACXX_HAS_CUDA_ATOMIC_IMPL
+#  endif
+
+#  if (!defined(_LIBCUDACXX_HAS_C_ATOMIC_IMP) && !defined(_LIBCUDACXX_HAS_GCC_ATOMIC_IMP) \
+       && !_LIBCUDACXX_HAS_EXTERNAL_ATOMIC_IMP())                                         \
+    || defined(_LIBCUDACXX_HAS_NO_THREADS)
+#    define _LIBCUDACXX_HAS_NO_ATOMIC_HEADER
+#  else
+#    ifdef __cuda_std__
+#      undef _LIBCUDACXX_ATOMIC_FLAG_TYPE
+#      define _LIBCUDACXX_ATOMIC_FLAG_TYPE int
+#    endif
+#    ifndef _LIBCUDACXX_ATOMIC_FLAG_TYPE
+#      define _LIBCUDACXX_ATOMIC_FLAG_TYPE bool
+#    endif
+#  endif
+
+#  ifndef _LIBCUDACXX_DISABLE_UBSAN_UNSIGNED_INTEGER_CHECK
+#    define _LIBCUDACXX_DISABLE_UBSAN_UNSIGNED_INTEGER_CHECK
+#  endif
+
+#  if _CCCL_HAS_ATTRIBUTE(require_constant_initialization)
+#    define _LIBCUDACXX_SAFE_STATIC __attribute__((__require_constant_initialization__))
+#  else
+#    define _LIBCUDACXX_SAFE_STATIC
+#  endif
+
+#  if _CCCL_HAS_ATTRIBUTE(diagnose_if) && !defined(_LIBCUDACXX_DISABLE_ADDITIONAL_DIAGNOSTICS)
+#    define _LIBCUDACXX_DIAGNOSE_WARNING(...) __attribute__((diagnose_if(__VA_ARGS__, "warning")))
+#    define _LIBCUDACXX_DIAGNOSE_ERROR(...)   __attribute__((diagnose_if(__VA_ARGS__, "error")))
+#  else
+#    define _LIBCUDACXX_DIAGNOSE_WARNING(...)
+#    define _LIBCUDACXX_DIAGNOSE_ERROR(...)
+#  endif
+
+#  if _CCCL_HAS_ATTRIBUTE(__preferred_name__)
+#    define _LIBCUDACXX_PREFERRED_NAME(x) __attribute__((__preferred_name__(x)))
+#  else
+#    define _LIBCUDACXX_PREFERRED_NAME(x)
+#  endif
+
+#  if defined(_LIBCUDACXX_ENABLE_CXX17_REMOVED_FEATURES)
+#    define _LIBCUDACXX_ENABLE_CXX17_REMOVED_AUTO_PTR
+#    define _LIBCUDACXX_ENABLE_CXX17_REMOVED_UNEXPECTED_FUNCTIONS
+#    define _LIBCUDACXX_ENABLE_CXX17_REMOVED_RANDOM_SHUFFLE
+#    define _LIBCUDACXX_ENABLE_CXX17_REMOVED_BINDERS
+#  endif // _LIBCUDACXX_ENABLE_CXX17_REMOVED_FEATURES
+
+#  define _LIBCUDACXX_UNUSED_VAR(x) ((void) (x))
+
+#  ifndef _LIBCUDACXX_SYS_CLOCK_DURATION
+#    if defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
+// 25 MHz TSC for wall_clock64 -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle (gfx90a and gfx908 only!)
+// FIXME(HIP): Other devices (e.g., from NVIDIA) may have a different clock rate for wall_clock64 and are currently not supported with HIP.
+// We may need to hardcode their clock rate at compile time or find a way to query it at runtime.
+// gfx90a and gfx908: 25 MHz TSC for wall_clock64 -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle
+#      if defined(__gfx908__) || defined(__gfx90a__)
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 25000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 40 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
+// gfx940 gfx941,gfx942 and gfx950: 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
+#      elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)
+// other gfx9 arch: we assume 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
+#      elif defined(__GFX9__)
+#        ifndef NDEBUG
+#          warning Assuming 100 MHz realtime clock rate (TSC) for this gfx9 architecture. Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
+#        endif
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
+// gfx1030 : no info from the RDNA2 ISA docs
+#      elif defined(__GFX10__)
+#        ifndef NDEBUG
+#          warning Assuming 100 MHz realtime clock rate (TSC) for gfx1030. Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
+#        endif
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)
+// gfx1100 and gfx1101 : from the RDNA3 ISA docs: "constantly running clock (typically 100MHz)"
+#      elif defined(__GFX11__)
+#        ifndef NDEBUG
+#          warning Assuming 100 MHz realtime clock rate (TSC) for gfx1100/gfx1101 (according to the RDNA3 ISA). Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
+#        endif
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)
+// gfx1200 and gfx1201: ASSUMED: 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
+#      elif defined(__GFX12__)
+#        ifndef NDEBUG
+#          warning Assuming 100 MHz realtime clock rate (TSC) for gfx1200/gfx1201 (from the RDNA4 ISA). Timing-related APIs (e.g., chrono) or sleep instructions may behave incorrectly!
+#        endif
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)
+//       The clock rate on other architectures like gfx1030/RDNA2 is not specified in the ISA docs.
+#      else
+#        ifdef _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE
+#          ifndef  NDEBUG
+#            warning Timing-related utility APIs (e.g., chrono) are currently not supported on the current architecture by libhipcxx. \
+Using _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE for these APIs will result in incorrect results (timings).
+#          endif
+#        else
+#          error Timing-related utility APIs (e.g., chrono) are currently not supported on the current architecture by libhipcxx. \
+To override this error and proceed with the build, please set the compile-time flag _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE
+#        endif
+         // This should intentionally make no sense and tell the user that the value is meaningless
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 1
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 1
+#      endif
+#      define _LIBCUDACXX_SYS_CLOCK_DURATION duration<long long, std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>
+#    else
+#      define _LIBCUDACXX_SYS_CLOCK_DURATION nanoseconds
+#    endif // defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
+#  endif // _LIBCUDACXX_SYS_CLOCK_DURATION
+
+// There are a handful of public standard library types that are intended to
+// support CTAD but don't need any explicit deduction guides to do so. This
+// macro is used to mark them as such, which suppresses the
+// '-Wctad-maybe-unsupported' compiler warning when CTAD is used in user code
+// with these classes.
+#  if (!_CCCL_COMPILER(GCC) || _CCCL_COMPILER(GCC, >, 6))
+#    define _LIBCUDACXX_CTAD_SUPPORTED_FOR_TYPE(_ClassName) \
+      template <class... _Tag>                              \
+      _ClassName(typename _Tag::__allow_ctad...)->_ClassName<_Tag...>
+#  else
+#    define _LIBCUDACXX_CTAD_SUPPORTED_FOR_TYPE(_ClassName) static_assert(true, "")
+#  endif
+
+// Older nvcc do not handle the constraint of `construct_at` in earlier std modes
+// So to preserve our performance optimization we default to the unconstrained
+// `__construct_at` and only in C++20 use `construct_at`
+#  if _CCCL_STD_VER > 2017
+#    define _LIBCUDACXX_CONSTRUCT_AT(_LOCATION, ...) \
+      _CUDA_VSTD::construct_at(_CUDA_VSTD::addressof(_LOCATION), __VA_ARGS__)
+#  else
+#    define _LIBCUDACXX_CONSTRUCT_AT(_LOCATION, ...) \
+      _CUDA_VSTD::__construct_at(_CUDA_VSTD::addressof(_LOCATION), __VA_ARGS__)
+#  endif
+
+// We can only expose constexpr allocations if the compiler supports it
+#  if defined(__cpp_constexpr_dynamic_alloc) && defined(__cpp_lib_constexpr_dynamic_alloc) && _CCCL_STD_VER >= 2020 \
+    && !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
+#    define _CCCL_HAS_CONSTEXPR_ALLOCATION
+#    define _CCCL_CONSTEXPR_CXX20_ALLOCATION constexpr
+#  else // ^^^ __cpp_constexpr_dynamic_alloc ^^^ / vvv !__cpp_constexpr_dynamic_alloc vvv
+#    define _CCCL_CONSTEXPR_CXX20_ALLOCATION
+#  endif
+
+// NVRTC has a bug that prevented the use of delegated constructors, as it did not accept execution space annotations.
+// This creates a whole lot of boilerplate that we can avoid through a macro (see nvbug3961621)
+#  if _CCCL_COMPILER(NVRTC, <, 12, 6)
+#    define _LIBCUDACXX_DELEGATE_CONSTRUCTORS(__class, __baseclass, ...)       \
+      using __base = __baseclass<__VA_ARGS__>;                                 \
+      _CCCL_TEMPLATE(class... _Args)                                           \
+      _CCCL_REQUIRES(_CCCL_TRAIT(is_constructible, __base, _Args...))          \
+      _LIBCUDACXX_HIDE_FROM_ABI constexpr __class(_Args&&... __args) noexcept( \
+        _CCCL_TRAIT(is_nothrow_constructible, __base, _Args...))               \
+          : __base(_CUDA_VSTD::forward<_Args>(__args)...)                      \
+      {}                                                                       \
+      _CCCL_HIDE_FROM_ABI constexpr __class() noexcept = default;
+#  else // ^^^ workaround ^^^ / vvv no workaround vvv
+#    define _LIBCUDACXX_DELEGATE_CONSTRUCTORS(__class, __baseclass, ...) \
+      using __base = __baseclass<__VA_ARGS__>;                           \
+      using __base::__base;                                              \
+      _CCCL_HIDE_FROM_ABI constexpr __class() noexcept = default;
+#  endif // ^^^ no workaround ^^^
+
+#endif // __cplusplus
+
+#endif // _LIBCUDACXX_CONFIG
