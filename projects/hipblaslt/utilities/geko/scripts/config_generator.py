@@ -85,7 +85,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate Tensile tuning configurations from a YAML config file",
+        description="Generate TensileLite tuning configurations from a YAML config file",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

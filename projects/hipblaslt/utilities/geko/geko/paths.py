@@ -3,7 +3,7 @@
 
 """Resolution of the hipBLASLt checkout root used by GEKO entry points.
 
-GEKO needs a built hipBLASLt checkout to locate tensilelite, the Tensile
+GEKO needs a built hipBLASLt checkout to locate tensilelite, the TensileLite
 driver, hipblaslt-bench and the generated device-library artifacts. These
 are build outputs of a hipBLASLt checkout, not part of the installable geko
 package, so the package's own location is NOT a reliable anchor once it has been
@@ -36,7 +36,7 @@ def looks_like_hipblaslt_root(path: Path) -> bool:
     """Return True if path looks like a hipBLASLt checkout root.
 
     Uses the presence of a tensilelite/ directory as the marker, since every
-    GEKO workflow depends on it (Tensile driver, client build, etc.). This is a
+    GEKO workflow depends on it (TensileLite driver, client build, etc.). This is a
     structural check only and is used to *locate* the root; whether the checkout
     has been compiled is a separate concern (see is_hipblaslt_built).
     """

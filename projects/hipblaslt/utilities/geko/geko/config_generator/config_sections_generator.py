@@ -32,7 +32,7 @@ class ConfigSectionGenerator:
 
     @staticmethod
     def _convert_type(dtype: str) -> str:
-        """Map config datatype to Tensile datatype."""
+        """Map config datatype to TensileLite datatype."""
         if dtype == "X1":
             return "B"
         if dtype == "X":
