@@ -144,9 +144,9 @@ void testing_scatter_extra(const Arguments& arg)
     //
     // This drives the 64-bit-index path of rocsparse_scatter (which dispatches
     // to sctr_template) with nnz just past the 2^32 boundary and checks that an
-    // element beyond that boundary is actually scattered. To stay within a
-    // single device allocation everything is initialized on the device and a
-    // single element is probed.
+    // element beyond that boundary is actually scattered. Everything is
+    // initialized on the device and a single element is probed, so no host
+    // buffer of this size is ever needed.
     using I = int64_t;
     using T = float;
 
@@ -154,8 +154,11 @@ void testing_scatter_extra(const Arguments& arg)
 
     // nnz just beyond 2^32 so at least one block has a block index whose
     // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
-    const I nnz  = two_pow_32 + 512;
-    const I size = 2;
+    const I nnz = two_pow_32 + 512;
+
+    // rocsparse_create_spvec_descr rejects nnz > size, so the dense vector has
+    // to be at least as long as the sparse one.
+    const I size = nnz;
 
     const rocsparse_index_base base = rocsparse_index_base_zero;
 

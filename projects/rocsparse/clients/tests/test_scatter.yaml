@@ -154,4 +154,4 @@ Tests:
   category: nightly
   function: scatter_extra
   host_memory_gb: 1
-  device_memory_gb: 55
+  device_memory_gb: 70
