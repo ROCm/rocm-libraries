@@ -45,12 +45,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -545,6 +547,63 @@ const char* predictionStatus(hipdnn_frontend::PredictionStatus status)
     }
 }
 
+/// @brief Uids of every tensor some node of @p graph writes.
+///
+/// The variant pack plan is a flat list of non-virtual tensors and carries no direction, so
+/// the fill below needs this to tell an input from a result. A tensor no node produces is a
+/// graph input; everything else the graph writes itself, and writing over one of those
+/// would hide the kernel that writes nothing -- the case leftOutputUntouched() exists to
+/// catch.
+std::unordered_set<int64_t> producedUids(const hipdnn_frontend::graph::Graph& graph)
+{
+    std::unordered_set<int64_t> produced;
+    const std::function<void(const hipdnn_frontend::graph::INode&)> collect
+        = [&produced](const hipdnn_frontend::graph::INode& node) {
+              for(const auto& tensor : node.getNodeOutputTensorAttributes())
+              {
+                  if(tensor != nullptr && tensor->has_uid())
+                  {
+                      produced.insert(tensor->get_uid());
+                  }
+              }
+          };
+    graph.visit(collect);
+    return produced;
+}
+
+/// @brief Writes the validation fill into every input buffer of @p variantPack.
+///
+/// A tensor of a type this build cannot encode exactly keeps its zero fill: writing a code
+/// from a guessed exponent bias would put a NaN into an input, and a catalog that all
+/// computes NaN is condemned for a defect this tool introduced.
+hipdnn_frontend::Error fillGraphInputs(const hipdnn_frontend::graph::Graph& graph,
+                                       const hipdnn_bench::VariantPackPlan& plan,
+                                       const std::unordered_map<int64_t, void*>& variantPack,
+                                       uint64_t seed)
+{
+    const auto produced = producedUids(graph);
+    for(const auto& tensor : plan.tensors)
+    {
+        const auto buffer = variantPack.find(tensor.uid);
+        if(produced.count(tensor.uid) != 0 || buffer == variantPack.end())
+        {
+            continue; // A result, an intermediate, or something not in the pack at all.
+        }
+        const auto image = hipdnn_bench::detail::inputFillImage(
+            tensor.dataType, static_cast<size_t>(tensor.bytes), seed, tensor.uid);
+        if(image.empty())
+        {
+            continue;
+        }
+        HIPDNN_CHECK_ERROR(hipError(hipMemcpy(buffer->second,
+                                              image.data(),
+                                              image.size(),
+                                              hipMemcpyHostToDevice),
+                                    "Could not fill a candidate's input"));
+    }
+    return {};
+}
+
 /// @brief Runs one candidate once, untimed, and copies back everything it wrote.
 ///
 /// RFC 0019 §13.2 admits a timing as a training label only once the candidate is known
@@ -554,14 +613,19 @@ const char* predictionStatus(hipdnn_frontend::PredictionStatus status)
 ///
 /// A freshly deserialized graph per candidate, because `create_execution_plan_ext` refuses
 /// to run after `add_engine_variants` (Graph.hpp: "Cannot call create_execution_plan_ext()
-/// after add_engine_*()"), and the timing graph has had exactly that called on it. The
-/// buffers are allocated and zero-filled the same way the timed run's were, so the two runs
-/// differ only in the plan -- a candidate compared against inputs it did not see would be
-/// reported as wrong for a difference the benchmark itself introduced.
+/// after add_engine_*()"), and the timing graph has had exactly that called on it.
+///
+/// The inputs are filled rather than left at the allocator's zeros. A graph run on zeros
+/// can still leave a non-zero output -- a bias, a normalisation epsilon, a mask fill -- and
+/// then every candidate agrees on an output that exercised nothing: a wrong reduction
+/// order, a wrong mask and a wrong tile boundary are all bit-identical on zero input, so
+/// `agrees_with_catalog` would be claiming more than was tested. The seed is the graph's
+/// and not the candidate's, so every candidate of one problem reads identical bytes, which
+/// is what makes their outputs comparable at all.
 ///
 /// Untimed and outside the measurement loop: this execution never contributes to a row's
-/// timing, and its cost is one extra launch beside the warmup plus up to `--max-iterations`
-/// timed launches the same candidate already pays.
+/// timing, so the fill cannot move a number either, and its cost is one extra launch beside
+/// the warmup plus up to `--max-iterations` timed launches the same candidate already pays.
 hipdnn_frontend::Error captureCandidateOutput(hipdnnHandle_t handle,
                                               const std::vector<uint8_t>& graphBytes,
                                               bool looksLikeJson,
@@ -586,6 +650,8 @@ hipdnn_frontend::Error captureCandidateOutput(hipdnnHandle_t handle,
     DeviceBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
     HIPDNN_CHECK_ERROR(allocateVariantPack(graph, buffers, variantPack));
+    HIPDNN_CHECK_ERROR(fillGraphInputs(
+        graph, plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes)));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     void* workspace = workspaceSize > 0 ? buffers.add(workspaceSize) : nullptr;
@@ -1059,9 +1125,12 @@ int runBench(const std::vector<std::string>& args)
     // Index-aligned with `results`, so both the JSON and the CSV row read their verdict by
     // position. The verdict is recorded on every row including the ones it cannot decide;
     // an absent field would be read as "valid" by the first consumer that defaults it.
+    //
+    // Each capture is handed straight to the cross-check and never kept here: the images of
+    // a 60-candidate sweep do not fit in host memory, and CatalogCrossCheck holds one per
+    // distinct answer instead of one per candidate.
     std::map<int64_t, hipdnn_bench::TensorDescription> tensors;
-    std::vector<hipdnn_bench::CandidateOutput> outputs;
-    outputs.reserve(results.size());
+    hipdnn_bench::CatalogCrossCheck crossCheck(tensors);
     for(const auto& result : results)
     {
         hipdnn_bench::CandidateOutput captured;
@@ -1088,9 +1157,9 @@ int runBench(const std::vector<std::string>& args)
                 captured.images.clear();
             }
         }
-        outputs.push_back(std::move(captured));
+        crossCheck.add(std::move(captured));
     }
-    const auto verdicts = hipdnn_bench::crossCheckCandidates(outputs, tensors);
+    const auto verdicts = crossCheck.verdicts();
 
     if(options.json)
     {
