@@ -205,8 +205,8 @@ def load_CMS_groups(
     MIBlockM), matching the loop below.
     """
     try:
-        from tensilelite.Components.CustomSchedule import query_cms_kernels
-        from tensilelite.Common.ValidParameters import validParameters
+        from Tensile.Components.CustomSchedule import query_cms_kernels
+        from Tensile.Common.ValidParameters import validParameters
     except ImportError:
         import sys
         import os
@@ -226,8 +226,8 @@ def load_CMS_groups(
         
         if tensilelite_path:
             sys.path.insert(0, tensilelite_path)
-            from tensilelite.Components.CustomSchedule import query_cms_kernels
-            from tensilelite.Common.ValidParameters import validParameters
+            from Tensile.Components.CustomSchedule import query_cms_kernels
+            from Tensile.Common.ValidParameters import validParameters
         else:
             raise ImportError(
                 "Tensile not found. Could not locate tensilelite directory "
