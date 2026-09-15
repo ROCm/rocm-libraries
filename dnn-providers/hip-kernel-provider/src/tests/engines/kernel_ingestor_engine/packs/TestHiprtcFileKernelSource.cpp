@@ -3,7 +3,9 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -508,13 +510,34 @@ TEST(TestHiprtcFileKernelSource, CollectsOnlyTopLevelHeadersByExtensionInNameOrd
     const auto kernel = makeHiprtcKernel(tree.root(), BUNDLE_NAME, "bfloat16", {}, 0x80);
     buildIngestorKernelCode(compiler, unusedKpackLoader(), fixture.context(), kernel, options);
 
-    // Exactly these, in this order: the extension filter kept `.txt` and `.hip` out, the
-    // one-level rule kept `nested/c.h` out, and the name sort put `a.hpp` before `b.h`
-    // though the directory holds them the other way round. This binary embeds no headers
-    // of its own, so the embedded prefix is empty and the bundle's list is the whole list.
+    // Exactly these, in this order, at the END of the list: the extension filter kept
+    // `.txt` and `.hip` out, the one-level rule kept `nested/c.h` out, and the name sort
+    // put `a.hpp` before `b.h` though the directory holds them the other way round.
+    //
+    // The bundle's contribution is checked as the tail rather than as the whole vector.
+    // What precedes it is the provider's embedded header list, which is whatever this
+    // binary happens to embed -- any engine adding a kernel header changes it, and that
+    // is not this test's subject. Pinning the whole vector made an unrelated pack's new
+    // header fail here instead of wherever it was wrong.
     const std::vector<compilation::KernelHeader> expected{{"a.hpp", "// a.hpp\n"},
                                                           {"b.h", "// b.h\n"}};
-    EXPECT_EQ(captured.headers, expected);
+    ASSERT_GE(captured.headers.size(), expected.size());
+    EXPECT_EQ(std::vector<compilation::KernelHeader>(
+                  captured.headers.end() - static_cast<std::ptrdiff_t>(expected.size()),
+                  captured.headers.end()),
+              expected);
+
+    // And the excluded files are absent from the list ENTIRELY, not merely out of order:
+    // a `.txt`, a second `.hip` or a nested header reaching hipRTC at all is the defect.
+    for(const auto* excluded : {"z.txt", "helper.hip", "c.h"})
+    {
+        EXPECT_EQ(
+            std::count_if(captured.headers.begin(),
+                          captured.headers.end(),
+                          [excluded](const auto& header) { return header.first == excluded; }),
+            0)
+            << excluded;
+    }
 }
 
 // ---------------------------------------------------------------------------

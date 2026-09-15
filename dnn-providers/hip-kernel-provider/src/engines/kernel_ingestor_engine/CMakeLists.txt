@@ -9,6 +9,9 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/IngestorKernels.cmake")
 foreach(kernel IN LISTS HIPDNN_INGESTOR_PACK_KERNELS)
     list(APPEND _ingestor_pack_kernel_sources "${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp")
 endforeach()
+foreach(header IN LISTS HIPDNN_INGESTOR_PACK_KERNEL_HEADERS)
+    list(APPEND _ingestor_pack_kernel_sources "${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${header}")
+endforeach()
 
 add_kernels_for_embedding(
     TARGET hip_kernel_provider_impl
@@ -23,6 +26,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # and CONFIGURE_DEPENDS does not re-run on removal under every generator.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/BatchnormInferenceNative.cpp
 )
 
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
