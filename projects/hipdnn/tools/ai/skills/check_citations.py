@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve the code citations, boundary links and cross-stream contract of the three
+"""Resolve the code citations, boundary links and cross-stream contract of the four
 hipDNN kernel skills.
 
 Standard library only. Exits 0 when every check passes, 1 otherwise, 2 on a usage or
@@ -7,11 +7,12 @@ environment error.
 
 Scope
 -----
-Exactly three directories, by path, under this script's own directory:
+Exactly four directories, by path, under this script's own directory:
 
     hipdnn-kernel-integration/
     hipdnn-ingestor-engine/
     hipdnn-kernel-authoring/
+    hipdnn-rocke-kernel-authoring/
 
 The other skills under `skills/` are not walked.
 
@@ -70,6 +71,7 @@ SKILL_DIRS = (
     "hipdnn-kernel-integration",
     "hipdnn-ingestor-engine",
     "hipdnn-kernel-authoring",
+    "hipdnn-rocke-kernel-authoring",
 )
 
 INDEX_ROOTS = ("dnn-providers", "projects/hipdnn")
@@ -330,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="check_citations.py",
         description=(
-            "Resolve every `file:line` citation in the three hipDNN kernel skills, "
+            "Resolve every `file:line` citation in the four hipDNN kernel skills, "
             "confirm each cited symbol is still on its cited line, confirm no "
             "create-path link escapes into the ingestor RUNBOOK, and confirm the "
             "single-pack discriminator condition is stated verbatim on both sides."
