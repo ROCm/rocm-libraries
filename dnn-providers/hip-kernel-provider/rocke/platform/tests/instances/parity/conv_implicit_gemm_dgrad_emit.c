@@ -144,6 +144,26 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
         spec->lds_k_outer = true;
         *arch = "gfx950";
         return 0;
+    case 13:
+        /* gfx1250 wave32 WMMA 16x16x32 K-outer. The shared transpose-read
+         * helper takes its wave32 branch here and lowers to ds_load_tr16_b128
+         * (8 per lane), so a 16-element fragment is two reads. Configs 11 and
+         * 12 are both wave64. */
+        spec->problem = rocke_conv_problem_make(8, 56, 56, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        spec->pipeline = "mem";
+        spec->epilogue = "default";
+        spec->lds_k_outer = true;
+        *arch = "gfx1250";
+        return 0;
     default:
         return -1;
     }

@@ -20,6 +20,13 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 ### Known issues
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
 
 
 ## rocSOLVER 3.37.0 for ROCm 10.1.0
