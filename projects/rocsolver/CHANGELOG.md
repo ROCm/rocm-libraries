@@ -12,15 +12,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     * GEHRD
 
 ### Changed
-
-### Removed
-
-### Optimized
-
-### Resolved issues
-
-### Known issues
-### Changed
 ### Removed
 ### Optimized
 ### Resolved issues
