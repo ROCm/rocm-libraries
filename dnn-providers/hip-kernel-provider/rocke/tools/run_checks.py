@@ -234,6 +234,22 @@ def main() -> int:
             if op:
                 cmd += ["--only", op]
             status |= _run("on-GPU numeric", cmd, env, cwd=LIBRARY)
+            # gfx950 fp8 KV-decode 3D numeric gate. The dense FMHA lane above is
+            # fp16 2D only, so this covers the fp8 long-KV decode -> 3D split-KV
+            # cohort the routing gate re-routes. Self-skips (exit 0) off gfx950.
+            decode3d = (
+                LIBRARY / "builders" / "gfx950" / "attention" / "decode"
+                / "fp8_decode_3d_verify.py"
+            )
+            if decode3d.exists() and (
+                not op or any(k in op.lower() for k in ("attn", "fmha", "decode"))
+            ):
+                status |= _run(
+                    "on-GPU numeric (gfx950 fp8 decode 3D)",
+                    [sys.executable, str(decode3d)],
+                    env,
+                    cwd=LIBRARY,
+                )
         elif steps_explicit:
             # numeric was explicitly requested; no device is an error, not a skip.
             print("\n== numeric: NO HIP device visible (explicitly requested) ==")

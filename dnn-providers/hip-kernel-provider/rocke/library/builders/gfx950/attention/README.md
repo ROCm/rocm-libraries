@@ -916,3 +916,21 @@ Passing `--report PATH` writes a list of per-scenario records:
   ...
 ]
 ```
+
+## Related: fp8 KV-cache decode cohort
+
+The fp8 (e4m3) KV-cache decode work on gfx950 — correctness + benchmark coverage
+plus the documented perf investigation (the cohort routes to 3D on its own via
+the live-CU-count resolver, #10583; no production kernel change) — is a separate
+cohort from this parity harness. It has its own driver, case study, and benchmark
+scenario (paths relative to `library/`):
+
+| Artifact | Path |
+|---|---|
+| Case study (coverage, and why there's no kernel change) | `builders/gfx950/attention/decode/README.md` |
+| On-GPU numeric gate (real launch, independent numpy ref, `run_checks --steps numeric`) | `builders/gfx950/attention/decode/fp8_decode_3d_verify.py` |
+| Benchmark scenario (cohort shapes) | `benchmarks/gfx950/attention/decode/gpt_oss_fp8_decode_shapes.json` (run via `benchmark_decode_live.py --shapes ...`) |
+| rocKE vs AITER / Triton comparison harness | `benchmarks/gfx950/attention/decode/fp8_decode_vs_baselines.py` |
+
+Measurement conditions and numbers live on the protected Confluence page (per
+`platform/AGENTS.md` §Compliance), not in this repo.
