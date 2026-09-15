@@ -516,6 +516,29 @@ constexpr const char* PACKED_UKD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
 /// The entry point that descriptor names.
 constexpr const char* PACKED_SYMBOL = "ConvFwd";
 
+/// What the conv pack's own convFwdKernelSignature() declares: three device pointers
+/// followed by the seven int extents. A descriptor built here has to agree with it or the
+/// dispatch is refused before the archive is ever opened, which would mask the behaviour
+/// each case is after.
+const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& convSignature()
+{
+    static const hipdnn_plugin_sdk::ingestor::KernelArgument s_buffer{
+        "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
+    static const hipdnn_plugin_sdk::ingestor::KernelArgument s_extent{
+        "by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
+    static const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument> s_signature{s_buffer,
+                                                                                      s_buffer,
+                                                                                      s_buffer,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent,
+                                                                                      s_extent};
+    return s_signature;
+}
+
 /// A KernelDefinition whose code comes from a kpack archive at
 /// `originDirectory / library`. Metadata carries exactly what the conv handler reads, so
 /// the only thing that differs from the embedded-source path is the source.
@@ -523,11 +546,16 @@ constexpr const char* PACKED_SYMBOL = "ConvFwd";
 /// `treeRoot` is the containment boundary the loader would have stamped. Passed
 /// separately from originDirectory because they differ for a nested descriptor, which is
 /// exactly the case whose archive lives at the arch root above it.
+///
+/// `sha256` is the descriptor's own digest rather than one recomputed here: the loader
+/// checks the shipped claim, and recomputing would compare this test's hash of the bytes
+/// against the loader's hash of the same bytes, which agrees however wrong both are.
 hipdnn_plugin_sdk::ingestor::KernelDefinition
     makeKpackConvKernel(const std::filesystem::path& originDirectory,
                         const std::filesystem::path& treeRoot,
                         const std::string& library,
                         const std::string& tocKey,
+                        const std::string& sha256,
                         int64_t blockSize)
 {
     auto kernel = makeKernel(blockSize, "HALF", PACKED_SYMBOL);
@@ -536,6 +564,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition
     kernel.source.library = library;
     kernel.source.tocKey = tocKey;
     kernel.source.symbol = PACKED_SYMBOL;
+    kernel.source.sha256 = sha256;
+    kernel.source.signature = convSignature();
     kernel.originDirectory = originDirectory;
     kernel.treeRoot = treeRoot;
     return kernel;
@@ -585,10 +615,10 @@ TEST(TestConvFwdDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
 
     // originDirectory is the descriptor's own (nested) folder; the arch root is the tree,
     // and the archive sits under it -- the real shipped shape.
-    const auto first
-        = makeKpackConvKernel(source.originDirectory, packed, source.library, source.tocKey, 64);
-    const auto second
-        = makeKpackConvKernel(source.originDirectory, packed, source.library, source.tocKey, 256);
+    const auto first = makeKpackConvKernel(
+        source.originDirectory, packed, source.library, source.tocKey, source.sha256, 64);
+    const auto second = makeKpackConvKernel(
+        source.originDirectory, packed, source.library, source.tocKey, source.sha256, 256);
 
     const auto& handler = dispatchHandler(CONV_FWD);
     const size_t before = convFwdKpackModuleCache().size();
