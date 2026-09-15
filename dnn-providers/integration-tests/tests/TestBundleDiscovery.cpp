@@ -15,12 +15,14 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 // NOLINTBEGIN(readability-identifier-naming)
 
@@ -48,12 +50,7 @@ protected:
 
     void SetUp() override
     {
-        auto path
-            = std::filesystem::temp_directory_path()
-              / ("bundle_discovery_test_"
-                 + std::to_string(::testing::UnitTest::GetInstance()->current_test_info()->line()));
-        std::filesystem::remove_all(path);
-        _scopedDir.emplace(path);
+        _scopedDir.emplace(claimScratchDirectory("bundle_discovery"));
         _tempDir = _scopedDir->path();
     }
 

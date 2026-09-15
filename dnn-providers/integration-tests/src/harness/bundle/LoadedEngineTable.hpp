@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -14,15 +15,10 @@
 #include <hipdnn_backend.h>
 
 #include "common/Utilities.hpp"
+#include "harness/bundle/LoadedEngine.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
-
-struct LoadedEngine
-{
-    int64_t id = 0;
-    std::string name;
-};
 
 class LoadedEngineTable
 {
@@ -94,6 +90,18 @@ public:
         return std::any_of(_engines.begin(), _engines.end(), [name](const LoadedEngine& e) {
             return e.name == name;
         });
+    }
+
+    /// The loaded engine with this name, or nullptr. Used to resolve --test-engine
+    /// into the LoadedEngine injected into each harness, so the harness never has
+    /// to reach back into a singleton to learn what it is running.
+    const LoadedEngine* find(std::string_view name) const
+    {
+        requireBuilt();
+        const auto it = std::find_if(_engines.begin(),
+                                     _engines.end(),
+                                     [name](const LoadedEngine& e) { return e.name == name; });
+        return it == _engines.end() ? nullptr : &*it;
     }
 
 private:

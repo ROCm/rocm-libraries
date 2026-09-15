@@ -28,16 +28,30 @@ Two invariants must hold together; either alone is insufficient:
 1. Sibling logic YAMLs (same arch, same basename) declare identical DeviceNames.
 2. The ``_ID<chipid>`` placeholder-filename suffix is gated on
    ``supportsChipIdPredicate``, mirroring ``HardwarePredicate.FromHardware``.
+
+Sibling-DeviceNames consistency is the enforcement point in CI: it runs
+unconditionally inside ``TensileLogic --check-all`` via
+``Tensile.TensileLogic.ValidCorpusConsistency.check_corpus_invariants``. The
+chip-ID-arch-lock check is *not* wired into ``--check-all`` (it guards a
+future source-policy change, not the artifact any one build selects -- see
+``check_corpus_invariants``'s docstring); its enforcement point is this
+file's own pytest assertion against the real corpus, run in CI's unit-test
+job. Either way, these pytest copies exercise the real ``Logic/asm_full``
+directory when it's present in *this* test environment, and are a
+convenience/local-dev signal otherwise -- hence ``skipif`` (an unmet
+precondition), not ``xfail`` (an expected failure).
 """
 import ast
-import re
-from collections import defaultdict
 from pathlib import Path
 
 import pytest
 
 from Tensile import SolutionLibrary
 from Tensile.Common.Architectures import supportsChipIdPredicate
+from Tensile.TensileLogic.ValidCorpusConsistency import (
+    find_chip_id_arch_lock_violations,
+    find_sibling_device_names_violations,
+)
 
 
 _LOGIC_ROOT = (
@@ -46,75 +60,20 @@ _LOGIC_ROOT = (
     / "Tensile" / "Logic" / "asm_full"
 )
 
-_needs_logic_dir = pytest.mark.xfail(
+_needs_logic_dir = pytest.mark.skipif(
     not _LOGIC_ROOT.is_dir(),
     reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
 )
 
-# Logic YAMLs come in two header dialects: the positional list form, where
-# DeviceNames is the 4th sequence entry (``- [Device ...]``), and the mapping
-# form used by e.g. Origami (``DeviceNames: [Device ...]``). Match both, or
-# divergence in the mapping-form files is silently skipped.
-_DEVICE_NAMES_RE = re.compile(r"^\s*(?:-|DeviceNames:)\s*\[\s*Device\s+([^\]]+)\]\s*$")
 _ID_SUFFIX_LITERAL = "_ID"
 _GATE_FUNC_NAME = "supportsChipIdPredicate"
 
 
-def _iter_arch_dirs():
-    for codename_dir in _LOGIC_ROOT.iterdir():
-        if not codename_dir.is_dir():
-            continue
-        for arch_dir in codename_dir.iterdir():
-            if arch_dir.is_dir() and arch_dir.name.startswith("gfx"):
-                yield codename_dir.name, arch_dir
-
-
-def _all_arch_names():
-    if not _LOGIC_ROOT.is_dir():
-        return []
-    return sorted({arch_dir.name for _, arch_dir in _iter_arch_dirs()})
-
-
-def _read_device_names(yaml_path: Path):
-    """Return sorted DeviceNames tuple from a logic-YAML header, or None."""
-    try:
-        with yaml_path.open("r") as f:
-            for _ in range(8):
-                line = f.readline()
-                if not line:
-                    return None
-                m = _DEVICE_NAMES_RE.match(line)
-                if m:
-                    parts = [p.strip() for p in m.group(1).split(",")]
-                    parts = [p[len("Device "):].strip() if p.startswith("Device ") else p
-                             for p in parts]
-                    return tuple(sorted(parts))
-    except OSError:
-        return None
-    return None
-
-
 @_needs_logic_dir
 def test_logic_yaml_sibling_device_names_consistent():
-    """Same-basename YAMLs in one arch dir must declare identical DeviceNames."""
-    assert _LOGIC_ROOT.is_dir(), f"Logic root not found: {_LOGIC_ROOT}"
-    violations = []
-    for codename, arch_dir in _iter_arch_dirs():
-        by_basename = defaultdict(lambda: defaultdict(list))
-        for yaml_path in arch_dir.rglob("*.yaml"):
-            names = _read_device_names(yaml_path)
-            if names is None:
-                continue
-            by_basename[yaml_path.name][names].append(yaml_path)
-        for basename, dn_map in by_basename.items():
-            if len(dn_map) > 1:
-                detail = {
-                    str(names): [str(p.relative_to(_LOGIC_ROOT)) for p in paths]
-                    for names, paths in dn_map.items()
-                }
-                violations.append(f"  {codename}/{arch_dir.name}/{basename}: {detail}")
-
-    assert not violations, "Divergent sibling DeviceNames:\n" + "\n".join(violations)
+    """Same-basename YAMLs in one logic tree must declare identical DeviceNames."""
+    violations = find_sibling_device_names_violations(sorted(_LOGIC_ROOT.rglob("*.yaml")), _LOGIC_ROOT)
+    assert not violations, "\n".join(violations)
 
 
 def _annotate_parents(tree: ast.AST) -> None:
@@ -205,16 +164,11 @@ def test_hardware_gates_placeholder_chip_id_suffix(
 
 
 @_needs_logic_dir
-@pytest.mark.parametrize("arch", _all_arch_names())
-def test_supports_chip_id_predicate_only_gfx950(arch):
-    """Lock chip-id-aware archs to gfx950; new entries require re-audit of
-    YAMLs and the SolutionLibrary suffix gate."""
-    base_arch = arch.split("_", 1)[0]
-    expected = base_arch == "gfx950"
-    assert supportsChipIdPredicate(base_arch) is expected, (
-        f"{arch} (base {base_arch}): supportsChipIdPredicate={not expected}, "
-        f"expected={expected}"
-    )
+def test_supports_chip_id_predicate_only_gfx950():
+    """Lock chip-id-aware archs (as seen in the corpus) to gfx950; new
+    entries require re-audit of YAMLs and the SolutionLibrary suffix gate."""
+    violations = find_chip_id_arch_lock_violations(sorted(_LOGIC_ROOT.rglob("*.yaml")))
+    assert not violations, "\n".join(violations)
 
 
 def test_supports_chip_id_predicate_includes_gfx950():
