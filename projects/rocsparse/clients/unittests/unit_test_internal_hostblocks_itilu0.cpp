@@ -120,8 +120,8 @@ TEST(internal_hostblocks_itilu0, buffer_layout_contiguous_init)
     // Generously sized backing store, 256-byte aligned like a device allocation
     // would be, so every assign_b succeeds.
     std::vector<char> backing(65536, 0);
-    const uintptr_t   offset = reinterpret_cast<uintptr_t>(backing.data()) % 256;
-    void*             buffer = backing.data() + ((offset > 0) ? (256 - offset) : 0);
+    const uintptr_t   offset      = reinterpret_cast<uintptr_t>(backing.data()) % 256;
+    void*             buffer      = backing.data() + ((offset > 0) ? (256 - offset) : 0);
     size_t            buffer_size = 32768;
 
     void* const  base      = buffer;
@@ -163,9 +163,6 @@ TEST(internal_hostblocks_itilu0, buffer_layout_contiguous_init)
     EXPECT_EQ(layout.get_pointer(layout_t::x), reinterpret_cast<void*>(cursor));
     cursor += rocsparse::align_size<double>(nnz);
 
-    // Every array, and the trailing buffer, is 256-byte aligned. The trailing
-    // buffer is handed over to the expert routines, which carve 64-bit atomic
-    // counters out of it.
     for(void* p : {layout.get_pointer(layout_t::perm),
                    layout.get_pointer(layout_t::lnnz),
                    layout.get_pointer(layout_t::lptr),

@@ -71,18 +71,14 @@ namespace rocsparse
     template <typename T, typename J>
     struct itilu0x_info_t
     {
-        T*    nrm_matrix{};
-        T*    nrm_corr{};
-        T*    nrm_residual{};
-        J*    options;
-        J*    nmaxiter;
-        J*    local_iter{};
-        J*    iter{};
+        T* nrm_matrix{};
+        T* nrm_corr{};
+        T* nrm_residual{};
+        J* options;
+        J* nmaxiter;
+        J* local_iter{};
+        J* iter{};
 
-        // The J fields are targets of 64-bit device atomics (the fusion kernel does
-        // atomic_max on local_iter), so they must be 8-byte aligned. The caller
-        // hands over a 256-byte aligned buffer and each slice below is 256-byte
-        // aligned, so they are.
         void* init(void* buffer_)
         {
             char* base = static_cast<char*>(buffer_);

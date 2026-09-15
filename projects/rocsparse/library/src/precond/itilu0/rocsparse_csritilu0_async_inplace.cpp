@@ -772,10 +772,6 @@ namespace rocsparse
     struct buffer_layout_inplace_t
     {
     public:
-        //
-        // Size of the header at the front of the buffer, it stores the device
-        // side copy of the layout itself.
-        //
         static size_t get_header_size()
         {
             return align_size<buffer_layout_inplace_t>(1);
@@ -902,7 +898,7 @@ namespace rocsparse
             m_tsizes[buffer]    = buffer_size_;
         }
 
-        buffer_layout_inplace_t(){};
+        buffer_layout_inplace_t() {};
 
     private:
         void*  m_buffer{};
@@ -1629,27 +1625,26 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_async_inplace>
             else
             {
 
-                RETURN_IF_ROCSPARSE_ERROR(
-                    (compute_iter<BLOCKSIZE, T, I, J>::light_run)(handle_,
-                                                                  options_,
-                                                                  nmaxiter_[0]
-                                                                      + nmaxiter_[0] * nfreeiter_,
-                                                                  m_,
-                                                                  nnz_,
-                                                                  ptr_,
-                                                                  ptr_ + 1,
-                                                                  p_coo_row_ind,
-                                                                  ind_,
-                                                                  val_,
-                                                                  base_,
-                                                                  p_lptr_begin,
-                                                                  p_lptr_end,
-                                                                  ind_,
-                                                                  p_uptr_begin,
-                                                                  p_uptr_end,
-                                                                  p_uind,
-                                                                  p_uperm,
-                                                                  sol_));
+                RETURN_IF_ROCSPARSE_ERROR((compute_iter<BLOCKSIZE, T, I, J>::light_run)(
+                    handle_,
+                    options_,
+                    nmaxiter_[0] + nmaxiter_[0] * nfreeiter_,
+                    m_,
+                    nnz_,
+                    ptr_,
+                    ptr_ + 1,
+                    p_coo_row_ind,
+                    ind_,
+                    val_,
+                    base_,
+                    p_lptr_begin,
+                    p_lptr_end,
+                    ind_,
+                    p_uptr_begin,
+                    p_uptr_end,
+                    p_uind,
+                    p_uperm,
+                    sol_));
             }
             return rocsparse_status_success;
         }

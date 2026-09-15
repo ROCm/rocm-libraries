@@ -116,10 +116,6 @@ namespace rocsparse
     struct buffer_layout_crtp_t
     {
     public:
-        //
-        // Size of the header at the front of the buffer, it stores the device
-        // side copy of the layout itself.
-        //
         static size_t get_header_size()
         {
             return align_size<IMPL>(1);
@@ -178,7 +174,7 @@ namespace rocsparse
         }
 
     protected:
-        buffer_layout_crtp_t(){};
+        buffer_layout_crtp_t() {};
         void*  m_buffer;
         size_t m_buffer_size;
     };
@@ -303,7 +299,7 @@ namespace rocsparse
             m_tpointers[parent_t::buffer] = buffer_;
             m_tsizes[parent_t::buffer]    = buffer_size_;
         }
-        buffer_layout_contiguous_t(){};
+        buffer_layout_contiguous_t() {};
 
     private:
         size_t m_isizes[7]{};

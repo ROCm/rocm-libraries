@@ -95,10 +95,6 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_sync_split>
                                     rocsparse_datatype   datatype_,
                                     size_t* __restrict__ buffer_size_)
         {
-            //
-            // Every array carved out of the buffer is 256-byte aligned, the size
-            // below must account for it.
-            //
             using layout_t = buffer_layout_contiguous_t;
 
             size_t buffer_size = 0;
