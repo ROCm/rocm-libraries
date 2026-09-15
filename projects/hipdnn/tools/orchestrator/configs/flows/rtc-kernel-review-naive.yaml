@@ -48,7 +48,10 @@ steps:
         args:
           - "--print"
           - "--output-format"
-          - "json"
+          - "stream-json"
+          - "--verbose"
+          - "--model"
+          - "claude-opus-5[1m]"
           - "--permission-mode"
           - "acceptEdits"
           - "--add-dir"
@@ -68,6 +71,7 @@ steps:
           kernel_sha: { sha256: "${vars.kernel_dir}/kernel.hip" }
           entry_point: { json_file: result, path: "$.entry_point" }
           assumptions: { json_file: result, path: "$.assumptions", type: json }
+          session_id: { regex: '"session_id":"([^"]+)"' }
         assert:
           - that: "${steps.generate.outputs.kernel_path} == ${steps.generate.outputs.expected_kernel}"
             message: "the kernel must be written to <run>/kernel/kernel.hip - a kernel written elsewhere is reviewed but never hash-checked"
@@ -82,7 +86,10 @@ steps:
         args:
           - "--print"
           - "--output-format"
-          - "json"
+          - "stream-json"
+          - "--verbose"
+          - "--model"
+          - "claude-opus-5[1m]"
           - "--permission-mode"
           - "acceptEdits"
           - "--disallowedTools"
@@ -106,6 +113,7 @@ steps:
           reported_critical_count: { json_file: result, path: "$.critical_count", type: int }
           kernel_sha: { sha256: "${vars.kernel_dir}/kernel.hip" }
           feedback: { json_file: result, path: "$.feedback" }
+          session_id: { regex: '"session_id":"([^"]+)"' }
         assert:
           - that: "${steps.review.outputs.reported_critical_count} == ${steps.review.outputs.critical_count}"
             message: "critical_count disagrees with the number of entries in critical_issues"
