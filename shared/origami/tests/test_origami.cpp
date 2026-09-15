@@ -551,8 +551,8 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
-      REQUIRE(env_val == 0.01);  // Return default value 0.01 when
-                                 // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
+      REQUIRE(env_val == 0.0);  // Return default value (tie-break disabled) when
+                                // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
 
       portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
       // Read back and parse
@@ -1387,16 +1387,17 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
                  << " | capped winner=" << capped_mt.m << "x" << capped_mt.n << "x" << capped_mt.k
                  << " (lat " << capped[0].latency << ")");
 
-      // With the corrected partial-cacheline model, the fewer-tiles tile
-      // (192x192x64) wins under both the full and the capped CU budget —
-      // the winner identity no longer changes, only the latency magnitude.
+      // On raw latency (tie-break disabled) the CU budget flips the winner:
+      // 256x128x64 (more, more-efficient tiles) wins with the full budget, while
+      // 192x192x64 (fewer tiles -> fewer timesteps) wins when the budget is
+      // squeezed to N_CU / 8.
       const bool winner_flipped =
           full_mt.m != capped_mt.m || full_mt.n != capped_mt.n || full_mt.k != capped_mt.k;
-      REQUIRE(!winner_flipped);
+      REQUIRE(winner_flipped);
 
       // Pin the concrete expected winners so the intent is unambiguous.
-      REQUIRE(full_mt.m == 192);
-      REQUIRE(full_mt.n == 192);
+      REQUIRE(full_mt.m == 256);
+      REQUIRE(full_mt.n == 128);
       REQUIRE(capped_mt.m == 192);
       REQUIRE(capped_mt.n == 192);
     }
