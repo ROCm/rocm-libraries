@@ -286,6 +286,18 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         help="Columns for GroupKFold (prevents problem leakage)",
     )
     parser.add_argument(
+        "--group-by-feature",
+        default=None,
+        dest="group_by_feature",
+        metavar="FEATURE",
+        help=(
+            "Train two layers into one artifact: this feature names a candidate's group "
+            "(e.g. kernel.solver_id). Layer 1 ranks groups, layer 2 ranks candidates within "
+            "the chosen one. Ranking a whole catalog then takes the group decision first, "
+            "which a single ensemble over all candidates cannot express."
+        ),
+    )
+    parser.add_argument(
         "--report-regret",
         nargs="+",
         default=None,
@@ -564,11 +576,77 @@ def _run_train(args: argparse.Namespace) -> int:
         groups = args.group_by
         if groups is None and "benchmark" in df.columns:
             groups = ["benchmark"] + (["device"] if "device" in df.columns else [])
+        # Layer 1 ranks groups, so it is fitted on one row per (problem, group) carrying
+        # that group's best achievable target -- not on every candidate. Fitted on the raw
+        # rows it would instead rank individual candidates, and taking the group of the best
+        # one answers a different question: the error over a group's whole candidate set
+        # propagates into what should be a choice among a handful of groups.
+        layer_one_df, layer_one_matrix = df, matrix
+        if args.group_by_feature:
+            if not groups:
+                raise ValueError(
+                    "--group-by-feature needs --group-by: layer 1 is fitted on one row per "
+                    "(problem, group), so it has to know which columns identify a problem. "
+                    "Without them every group would collapse to a single row."
+                )
+            keys = list(groups) + [args.group_by_feature]
+            positions = (
+                df.assign(_uhd_row=np.arange(len(df)))
+                  .sort_values(args.target, ascending=(args.objective == "min"))
+                  .drop_duplicates(subset=keys, keep="first")["_uhd_row"]
+                  .to_numpy()
+            )
+            positions = np.sort(positions)
+            layer_one_df = df.iloc[positions].reset_index(drop=True)
+            layer_one_matrix = None if matrix is None else matrix[positions]
+            logger.info("Layer 1 fitted on %d group rows (from %d candidates)",
+                        len(layer_one_df), len(df))
+
         model = train_model(
-            df, names, args.target, groups, num_boost_round=args.num_boost_round,
+            layer_one_df, names, args.target, groups, num_boost_round=args.num_boost_round,
             early_stopping_rounds=args.early_stopping, categorical_encoding=categorical_encoding,
-            feature_matrix=matrix,
+            feature_matrix=layer_one_matrix,
         )
+
+        # Layer 2: one ensemble per group, fitted on that group's rows alone. Trained on the
+        # same feature columns, so one signature describes both layers; the slots a layer
+        # does not read are simply unused by its trees.
+        group_models: list[tuple[float, object]] = []
+        group_index = -1
+        if args.group_by_feature:
+            if args.group_by_feature not in names:
+                raise ValueError(
+                    f"--group-by-feature {args.group_by_feature!r} is not among --features; "
+                    "the runtime reads the group from a slot in the feature row, so it has "
+                    "to be one of them"
+                )
+            group_index = names.index(args.group_by_feature)
+            tagged = df.assign(_uhd_row=np.arange(len(df)))
+            for value, rows in tagged.groupby(args.group_by_feature, sort=True):
+                at = rows["_uhd_row"].to_numpy()
+                # train_model cross-validates over problems, not rows, so a group with more
+                # rows than problems can still be unfittable. Skipping leaves the group to
+                # layer 1, which the adapter already handles -- a group it chose but layer 2
+                # does not describe ranks by layer 1 rather than being discarded.
+                try:
+                    group_models.append((
+                        float(value),
+                        train_model(
+                            df.iloc[at].reset_index(drop=True), names, args.target, groups,
+                            num_boost_round=args.num_boost_round,
+                            early_stopping_rounds=args.early_stopping,
+                            categorical_encoding=categorical_encoding,
+                            feature_matrix=None if matrix is None else matrix[at],
+                        ),
+                    ))
+                except (ValueError, RuntimeError) as error:
+                    # Warn rather than fail: one unfittable group must not cost the artifact
+                    # every other group's layer 2, and the degradation is visible here.
+                    logger.warning("group %s not fitted (%s); it will rank by layer 1",
+                                   value, str(error).split(chr(10))[0][:90])
+            logger.info("Trained %d group model(s) on %s",
+                        len(group_models), args.group_by_feature)
+
         metrics = None
         if args.report_regret:
             metrics = evaluate_regret(
@@ -587,7 +665,8 @@ def _run_train(args: argparse.Namespace) -> int:
 
     fb_path = output_dir / "model.bin"
     convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
-            training_arches=args.training_arches, model_version=args.model_version)
+            training_arches=args.training_arches, model_version=args.model_version,
+            group_by_feature_index=group_index, group_models=group_models or None)
     if not args.keep_lgbm:
         lgbm_path.unlink()
     descriptor = {
@@ -613,7 +692,14 @@ def _run_train(args: argparse.Namespace) -> int:
         # refuses cross-engine comparison between models trained on different ones, so
         # a consumer has to be able to read it off the artifact rather than infer it.
         "timing_statistic": args.timing_statistic,
-        "score_transform": "log1p", "group_by": groups or [], "num_trees": model.num_trees(),
+        "score_transform": "log1p", "group_by": groups or [],
+        # The feature layer 1 groups on, and the count it produced. Recorded because the
+        # artifact alone gives an evaluator only a slot index, and a slot index cannot say
+        # which column it came from -- without the name, a report cannot attribute a regret
+        # to choosing the wrong group rather than the wrong member of the right one.
+        "group_by_feature": args.group_by_feature,
+        "group_models": len(group_models or []),
+        "num_trees": model.num_trees(),
         "feature_importance": {
             name: {"gain": float(gain), "split": int(split)}
             for name, gain, split in zip(names, model.feature_importance(importance_type="gain"),

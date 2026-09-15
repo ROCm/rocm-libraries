@@ -165,6 +165,12 @@ class ProblemResult:
     #: expectations over the candidate set, never sampled, so neither moves run to run.
     random_regret: float
     random_tail_fraction: float
+    #: For a two-layer model, `regret` split by which decision lost it. Both are expressed
+    #: against the same oracle so they sum to `regret`: the shortfall of the best member of
+    #: the chosen group, plus the shortfall of the chosen member within that group. None when
+    #: the model is single-layer or the corpus does not carry the grouping column.
+    group_regret: float | None = None
+    in_group_regret: float | None = None
 
 
 @dataclass
@@ -457,6 +463,7 @@ def evaluate_corpus(
     tie_sigma: float = DEFAULT_TIE_SIGMA,
     regret_tail_threshold: float = DEFAULT_REGRET_TAIL_THRESHOLD,
     device_column: str | None = None,
+    group_column: str | None = None,
     score_declaration: dict | None = None,
 ) -> EvaluationResult:
     """Compute §11.2's metrics for `scorer` over the held-out slice of `df`."""
@@ -597,15 +604,25 @@ def evaluate_corpus(
                 f"scorer returned {predictions.shape} scores for {measured.shape} "
                 "candidate rows"
             )
-        if not np.all(np.isfinite(predictions)):
+        if np.isnan(predictions).any():
             raise ValueError(
-                f"scorer produced a non-finite score for problem {key}; a NaN score "
+                f"scorer produced a NaN score for problem {key}; a NaN score "
                 "would sort arbitrarily and silently randomise the model's pick"
             )
 
         # Rank in the objective's direction. `argsort` is stable, so predicted ties
         # keep corpus order rather than depending on the sort implementation.
-        order = np.argsort(-predictions if objective == "max" else predictions, kind="stable")
+        #
+        # An infinite score is "unusable", not broken: a grouped model returns -inf for every
+        # candidate outside the group layer 1 chose, which is the value `rankScored` already
+        # treats as unrankable. Forcing it last explicitly rather than letting its sign do the
+        # work -- under `min`, -inf is the smallest value and would otherwise be *picked*,
+        # turning a rejected candidate into the winner. If nothing is usable the stable sort
+        # leaves corpus order, which is §5 step 7's degraded ranking.
+        rankable = np.isfinite(predictions)
+        ranking_key = -predictions if objective == "max" else predictions
+        ranking_key = np.where(rankable, ranking_key, np.inf)
+        order = np.argsort(ranking_key, kind="stable")
         picked_position = int(order[0])
         picked_value = float(measured[picked_position])
         regret = regret_of(picked_value, oracle_value, objective)
@@ -617,10 +634,16 @@ def evaluate_corpus(
         # models that never saw each other's candidates. Kept per row, and separately for
         # the row the model actually picked: that is the one that runs, so its error is
         # the one an engine comparison is decided on.
-        calibration_predicted.extend(predictions.tolist())
-        calibration_measured.extend(measured.tolist())
-        calibration_picked_predicted.append(float(predictions[picked_position]))
-        calibration_picked_measured.append(picked_value)
+        #
+        # A declined candidate is a decision, not a prediction: a grouped model returns -inf
+        # for everything outside the group it chose, and counting those as predicted values
+        # would report an arbitrarily large calibration error for the design working as
+        # intended. Only what the model actually scored is calibrated.
+        calibration_predicted.extend(predictions[rankable].tolist())
+        calibration_measured.extend(measured[rankable].tolist())
+        if rankable[picked_position]:
+            calibration_picked_predicted.append(float(predictions[picked_position]))
+            calibration_picked_measured.append(picked_value)
 
         rank_of = np.empty(len(order), dtype=int)
         rank_of[order] = np.arange(len(order))
@@ -651,6 +674,19 @@ def evaluate_corpus(
             labels = rows[regime_column].astype(str).str.strip()
             regime = labels.iloc[0] if labels.nunique() == 1 else "<mixed>"
 
+        # Split the shortfall by which of a two-layer model's decisions lost it. Both parts are
+        # measured against the same oracle, so they sum to `regret` and a bad total is
+        # attributable: choosing the wrong group is a different failure from choosing the wrong
+        # member of the right one, and they are fixed in different places.
+        group_regret = in_group_regret = None
+        if group_column is not None and group_column in candidates.columns:
+            same_group = (candidates[group_column].to_numpy()
+                          == candidates[group_column].iloc[picked_position])
+            in_group = measured[same_group]
+            group_best = float(in_group.min() if objective == "min" else in_group.max())
+            group_regret = regret_of(group_best, oracle_value, objective)
+            in_group_regret = regret - group_regret
+
         results.append(
             ProblemResult(
                 key=tuple(key),
@@ -668,6 +704,8 @@ def evaluate_corpus(
                 static_order_tied_rank=int(np.flatnonzero(tied)[0]),
                 random_regret=float(candidate_regrets.mean()),
                 random_tail_fraction=float((candidate_regrets > regret_tail_threshold).mean()),
+                group_regret=group_regret,
+                in_group_regret=in_group_regret,
             )
         )
 
@@ -715,6 +753,7 @@ def evaluate_corpus(
         corpus_problems=len(split.train_problems) + len(split.eval_problems),
         calibration=calibration,
         warnings=warnings,
+        group_column=group_column,
     )
     return EvaluationResult(report=report, problems=results, warnings=warnings)
 
@@ -962,6 +1001,7 @@ def _build_report(
     corpus_problems: int,
     calibration: dict[str, Any],
     warnings: list[str],
+    group_column: str | None = None,
 ) -> dict[str, Any]:
     regrets = [item.regret for item in results]
     tail = [item for item in results if item.regret > regret_tail_threshold]
@@ -977,6 +1017,24 @@ def _build_report(
             recall["trivial"][str(k)] = sum(item.candidates <= k for item in results) / len(results)
         else:
             recall["strict"][str(k)] = recall["tie_aware"][str(k)] = recall["trivial"][str(k)] = None
+
+    # Present only when the model groups and the corpus carries the column, so an absent
+    # section means "not a two-layer model", not "the split came out zero".
+    split_results = [item for item in results if item.group_regret is not None]
+    two_stage = None
+    if split_results:
+        two_stage = {
+            "group_column": group_column,
+            "problems": len(split_results),
+            "group_regret": _summarise([item.group_regret for item in split_results]),
+            "in_group_regret": _summarise([item.in_group_regret for item in split_results]),
+            "note": (
+                "Both parts are measured against the same oracle, so they sum to "
+                "top1_regret. group_regret is what choosing the group cost -- the best "
+                "member of the chosen group against the best anywhere -- and "
+                "in_group_regret is what choosing within it cost."
+            ),
+        }
 
     if regime_column is None:
         per_regime = None
@@ -1080,6 +1138,7 @@ def _build_report(
                 "fraction": (len(tail) / len(results)) if results else None,
             },
             "topk_recall": recall,
+            "two_stage": two_stage,
             "per_regime": per_regime,
             "calibration": calibration,
             "per_regime_status": per_regime_status,
@@ -1152,6 +1211,9 @@ class ModelBundle:
     descriptor: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
     role: str | None = None
+    #: The feature layer 1 grouped on, from the manifest. The artifact carries only a slot
+    #: index, which cannot name the corpus column the report needs to decompose regret.
+    group_feature: str | None = None
 
 
 def _flatbuffer_scorer(
@@ -1188,40 +1250,81 @@ def _flatbuffer_scorer(
         if stored_hash != expected_hash:
             raise ValueError("descriptor features_hash does not match the shipped model artifact")
 
-    trees = [
-        (
-            np.asarray(tree.featureIndices, dtype=np.int64),
-            np.asarray(tree.thresholds, dtype=np.float64),
-            np.asarray(tree.leftChildren, dtype=np.int64),
-            np.asarray(tree.rightChildren, dtype=np.int64),
-            np.asarray(tree.leafValues, dtype=np.float64),
-            np.asarray(tree.defaultLeft, dtype=bool),
-            np.asarray(tree.decisionLte, dtype=bool),
-        )
-        for tree in model.trees
-    ]
+    def arrays_of(trees) -> list[tuple[np.ndarray, ...]]:
+        return [
+            (
+                np.asarray(tree.featureIndices, dtype=np.int64),
+                np.asarray(tree.thresholds, dtype=np.float64),
+                np.asarray(tree.leftChildren, dtype=np.int64),
+                np.asarray(tree.rightChildren, dtype=np.int64),
+                np.asarray(tree.leafValues, dtype=np.float64),
+                np.asarray(tree.defaultLeft, dtype=bool),
+                np.asarray(tree.decisionLte, dtype=bool),
+            )
+            for tree in trees or []
+        ]
+
+    trees = arrays_of(model.trees)
     base = float(model.baseScore)
 
-    def score(frame: pd.DataFrame) -> np.ndarray:
-        matrix = build_feature_matrix(frame, features, categorical_encoding,
-                                      signature=signature, feature_evaluator=feature_evaluator)
-        total = np.full(len(frame), base, dtype=np.float64)
-        for feature_index, threshold, left, right, leaf, default_left, lte in trees:
-            node = np.zeros(len(frame), dtype=np.int64)
+    # A grouped artifact (RFC 0019 two-layer) decides twice: layer 1 picks the group, layer 2
+    # orders within it. Reading only `trees` would score layer 1 alone and silently report a
+    # single-layer model's behaviour for a two-layer one -- the same number a correct
+    # single-layer model produces, so nothing about the output would look wrong.
+    group_slot = int(model.groupByFeatureIndex if model.groupByFeatureIndex is not None else -1)
+    groups = {float(group.value): arrays_of(group.trees) for group in (model.groups or [])}
+
+    def ensemble(arrays: list[tuple[np.ndarray, ...]], matrix: np.ndarray,
+                 rows: np.ndarray) -> np.ndarray:
+        total = np.full(len(rows), base, dtype=np.float64)
+        for feature_index, threshold, left, right, leaf, default_left, lte in arrays:
+            node = np.zeros(len(rows), dtype=np.int64)
             # Descend every row one level per iteration rather than one row at a time:
             # a 500-tree model over a corpus is otherwise minutes of Python.
             while True:
                 internal = left[node] >= 0
                 if not internal.any():
                     break
-                rows = np.flatnonzero(internal)
-                here = node[rows]
-                x = matrix[rows, feature_index[here]]
-                go_left = np.where(lte[here], x <= threshold[here], x > threshold[here])
+                at = np.flatnonzero(internal)
+                here = node[at]
+                x = matrix[rows[at], feature_index[here]]
+                # `decision_lte` false is `<`, not `>`: the schema, TreeDataAdapter and
+                # test_converter.py all read it that way, and the complement would send every
+                # row down the opposite subtree -- ranking such a model backwards while the
+                # runtime scored it correctly.
+                go_left = np.where(lte[here], x <= threshold[here], x < threshold[here])
                 go_left = np.where(np.isnan(x), default_left[here], go_left)
-                node[rows] = np.where(go_left, left[here], right[here])
+                node[at] = np.where(go_left, left[here], right[here])
             total += leaf[node]
-        return np.expm1(total) if score_transform == "log1p" else total
+        return total
+
+    def score(frame: pd.DataFrame) -> np.ndarray:
+        matrix = build_feature_matrix(frame, features, categorical_encoding,
+                                      signature=signature, feature_evaluator=feature_evaluator)
+        every = np.arange(len(frame))
+        layer_one = ensemble(trees, matrix, every)
+        if group_slot < 0 or not groups:
+            return np.expm1(layer_one) if score_transform == "log1p" else layer_one
+
+        # `evaluate_corpus` calls a scorer with one problem's candidates, which is the batch
+        # TreeDataAdapter::scoreBatch is handed, so the group decision is made over exactly
+        # this frame. Choosing one group across several problems would let one problem's
+        # winner blank out another's candidates.
+        chosen = matrix[int(np.argmax(layer_one)), group_slot]
+        inside = np.flatnonzero(matrix[:, group_slot] == chosen)
+        raw = np.full(len(frame), -np.inf, dtype=np.float64)
+        # A group layer 1 picked but layer 2 does not describe is ranked by layer 1, matching
+        # the adapter: a partially trained artifact degrades rather than refusing its own pick.
+        within = groups.get(float(chosen))
+        raw[inside] = ensemble(within, matrix, inside) if within else layer_one[inside]
+
+        if score_transform != "log1p":
+            return raw
+        scores = np.expm1(raw)
+        # expm1(-inf) is -1.0, a finite value that would outrank a genuinely negative score.
+        # Restoring -inf keeps a rejected group unusable, which is what `rankScored` expects.
+        scores[raw == -np.inf] = -np.inf
+        return scores
 
     return score
 
@@ -1285,6 +1388,8 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
     # is the oracle, and getting it backwards inverts every number in the report.
     objective = descriptor.get("objective") or manifest.get("objective")
 
+    group_feature = manifest.get("group_by_feature")
+
     categorical_encoding = descriptor.get("categorical_encoding", manifest.get("categorical_encoding", {}))
     expected_hash = descriptor.get("features_hash", manifest.get("features_hash"))
     if any(isinstance(entry, dict) for entry in signature):
@@ -1316,7 +1421,10 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
             candidate = model_file
         elif descriptor.get("tree_data", {}).get("artifact"):
             candidate = model_dir / descriptor["tree_data"]["artifact"]
-        elif (model_dir / "model.lgbm").exists():
+        elif (model_dir / "model.lgbm").exists() and not group_feature:
+            # A grouped model's `model.lgbm` holds layer 1 alone -- LightGBM has no way to
+            # carry the per-group ensembles -- so ranking with it would silently measure half
+            # the model and report a single-layer figure that looks entirely plausible.
             candidate = model_dir / "model.lgbm"
         else:
             candidate = model_dir / "model.bin"
@@ -1335,6 +1443,7 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
         scorer=scorer, features=list(features), target=manifest.get("target", "tflops" if immediate else None),
         objective=objective, source=str(candidate), trained_on=manifest.get("input_file"),
         training_rows=manifest.get("num_samples"), descriptor=descriptor, manifest=manifest, role=role,
+        group_feature=group_feature,
     )
 
 
@@ -1447,6 +1556,14 @@ def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
         dest="regime_column",
         help="Column holding the corpus regime for the §11.2 per-regime table "
         f"(default: the first of {', '.join(REGIME_COLUMN_CANDIDATES)} that is present)",
+    )
+    parser.add_argument(
+        "--group-column",
+        default=None,
+        dest="group_column",
+        help="Column naming the group a candidate belongs to, for the two-stage regret "
+        "split of a grouped model (default: the manifest's `group_by_feature`). Only "
+        "affects reporting; the model's own grouping is read from the artifact.",
     )
     parser.add_argument(
         "--tie-rel-tolerance",
@@ -1579,6 +1696,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
             seed=args.seed,
             regime_column=args.regime_column,
             device_column=args.device_column,
+            group_column=args.group_column or bundle.group_feature,
             tie_rel_tolerance=args.tie_rel_tolerance,
             tie_sigma=args.tie_sigma,
             regret_tail_threshold=args.regret_tail_threshold,

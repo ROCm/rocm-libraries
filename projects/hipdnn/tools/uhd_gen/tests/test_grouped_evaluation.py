@@ -323,10 +323,20 @@ def test_a_generated_encoding_survives_train_then_score(tmp_path):
     ])
     frame.to_csv(corpus, index=False)
 
+    # `train` refuses to record an unattributable model, so the round trip needs a
+    # provenance snapshot. It is fixture scaffolding: this test is about the encoding
+    # surviving the trip, not about what the snapshot says.
+    snapshot = tmp_path / "provenance.json"
+    snapshot.write_text(json.dumps({
+        "ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": "1.0"},
+        "kmd": {"id": "46d64d06-18eb-483d-9bb4-94472d32b78d", "revision": "1.0"},
+        "umd": [],
+    }), encoding="utf-8")
+
     out = tmp_path / "model"
     result = subprocess.run(
         [sys.executable, "-m", "uhd_gen", "train",
-         "--input", str(corpus),
+         "--input", str(corpus), "--provenance", str(snapshot),
          "--features", "q.size", "kernel.pipeline",
          "--target", "tflops", "--group-by", "q.size",
          "--output-dir", str(out), "--name", "encoding round trip"],
