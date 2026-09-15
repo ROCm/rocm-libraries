@@ -55,7 +55,10 @@ done
 
 step "source: $BRANCH"
 rm -rf /tmp/uhd; mkdir -p /tmp/uhd "$OUT"
-GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --single-branch --branch "$BRANCH" \
+# --depth 200, not 1: a bundle carries commits relative to a base, and a one-commit
+# clone has no ancestor for it to apply against ("Repository lacks these prerequisite
+# commits", run 67933122, on a node whose mirror was current rather than stale).
+GIT_LFS_SKIP_SMUDGE=1 git clone --depth 200 --single-branch --branch "$BRANCH" \
     https://github.com/ROCm/rocm-libraries.git "$SRC" > /tmp/uhd/clone.log 2>&1 \
     || { echo "FATAL: clone failed"; tail -5 /tmp/uhd/clone.log; exit 1; }
 if [ -n "${UHD_BUNDLE:-}" ]; then
@@ -120,6 +123,14 @@ done
 
 if [ "${UHD_COMPOSE_FLYDSL:-0}" = "1" ]; then
     step "compose the flyDSL pack into the descriptor tree"
+    # The POC tree is not on this branch: it lives on users/jascampb/uhd-integration-test-branch
+    # and lands here with the rest of that work. Checked rather than assumed, because
+    # `cp -r` of a missing source composes a tree with no flyDSL in it and the run then
+    # reports "no engine UHD is deployed" several minutes later, far from this cause.
+    [ -d "$SRC/flydsl_poc_scratch/flydsl_descriptors_attention" ] || {
+        echo "FATAL: UHD_COMPOSE_FLYDSL=1 but $SRC/flydsl_poc_scratch is not in this checkout"
+        exit 1
+    }
     # flyDSL's 21 HSACOs are not committed (REPLICATE_ATTENTION.md) and its pack lives in
     # flydsl_poc_scratch, outside arch_content. HIPDNN_DESCRIPTOR_DIR replaces the search
     # roots, so the only way to have rocKE and flyDSL loaded at once is one composed tree.
