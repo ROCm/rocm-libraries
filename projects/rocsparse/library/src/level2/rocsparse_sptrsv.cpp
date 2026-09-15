@@ -347,6 +347,20 @@ try
             break;
         }
         case rocsparse_format_ell:
+        {
+#ifndef ROCSPARSE_WITH_ELL_TRSV
+            // ELL support disabled at build time (BUILD_WITH_ELL_TRSV=OFF).
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+#else
+            auto ellsv_info = sptrsv_descr->get_ellsv_info();
+            if(ellsv_info != nullptr)
+            {
+                symbolic_pivot = static_cast<rocsparse::pivot_info_t*>(ellsv_info);
+                exact_pivot    = ellsv_info->get_singularity_numeric_exact();
+            }
+            break;
+#endif
+        }
         case rocsparse_format_bell:
         case rocsparse_format_sell:
         case rocsparse_format_coo_aos:
