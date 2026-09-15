@@ -1,0 +1,71 @@
+# Integration vehicle for the MCP server. Not a real pipeline: every step is a
+# few milliseconds of Python, so launch, subscribe, status, artifacts and cancel
+# can all be exercised without spending agent sessions.
+#
+# Its shape is deliberately unlike the shipped flows -- one ungrouped step ahead
+# of a loop group -- because the integration must not depend on the shape of any
+# particular flow.
+version: 1
+name: fast-converge
+description: A fast, agent-free flow used to exercise the MCP integration path.
+
+inputs:
+  countdown_from:
+    description: How many iterations the loop should need before it is satisfied.
+    type: int
+    default: 2
+  label:
+    description: Free text carried into the run for identification.
+    type: string
+    default: integration
+
+vars:
+  emit: "${vars.hipdnn_root}/tools/orchestrator/scripts/fast_converge_step.py"
+  artifacts: "${run.dir}/produced"
+
+steps:
+  - id: prepare
+    tool: python
+    args:
+      - "${vars.emit}"
+      - "${step.result_file}"
+      - "0"
+      - "${vars.artifacts}/prepare.txt"
+      - "0"
+    result_file: "${run.dir}/prepare.json"
+    result_schema:
+      required:
+        - remaining
+        - produced
+    outputs:
+      produced: { json_file: result, path: "$.produced", type: path }
+      looks_like_a_path: { json_file: result, path: "$.looks_like_a_path", type: string }
+      summary: { json_file: result, path: "$.summary", type: string }
+
+  - id: converge
+    loop:
+      max_iterations: 4
+      until: "${steps.attempt.outputs.remaining} == 0"
+      on_exhausted: fail
+      on_step_failure: fail
+      feedback_from: "${steps.attempt.outputs.summary}"
+    steps:
+      - id: attempt
+        tool: python
+        args:
+          - "${vars.emit}"
+          - "${step.result_file}"
+          - "${loop.iteration}"
+          - "${vars.artifacts}/attempt-${loop.iteration}.txt"
+          - "${inputs.countdown_from}"
+        result_file: "${loop.attempt_dir}/attempt.json"
+        result_schema:
+          required:
+            - remaining
+            - produced
+            - summary
+        outputs:
+          remaining: { json_file: result, path: "$.remaining", type: int }
+          produced: { json_file: result, path: "$.produced", type: path }
+          looks_like_a_path: { json_file: result, path: "$.looks_like_a_path", type: string }
+          summary: { json_file: result, path: "$.summary", type: string }

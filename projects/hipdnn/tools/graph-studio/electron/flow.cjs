@@ -43,7 +43,7 @@ const graphfile = require("./graphfile.cjs");
 const CLIENT_NAME = "hipdnn-graph-studio";
 
 /** Temp-directory scope for the graphs handed to runs; see graphfile.cjs. */
-const GRAPH_SCOPE = "authoring";
+const GRAPH_SCOPE = "implement";
 const LAUNCH_DIR_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Connecting means starting an interpreter; launching means loading the flow,

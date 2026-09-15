@@ -40,14 +40,14 @@ const LOG_TAIL = 200;
 const CAUTION =
   "Nothing in this run was compiled or executed. Every step was an agent working on text, so this is review evidence, not a correctness claim.";
 
-interface AuthoringPanelProps {
+interface ImplementPanelProps {
   /** Produces the current graph on demand, as the command panel does. */
   getGraph(): Graph;
-  /** True while the Authoring tab is the selected one. Guards the first listing only. */
+  /** True while the Implement tab is the selected one. Guards the first listing only. */
   active: boolean;
 }
 
-export function AuthoringPanel({ getGraph, active }: AuthoringPanelProps) {
+export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
   const [flows, setFlows] = useState<readonly FlowSummary[] | null>(null);
   const [listing, setListing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -311,14 +311,14 @@ export function AuthoringPanel({ getGraph, active }: AuthoringPanelProps) {
   const controlsDisabled = unavailable || running || disconnected !== null;
 
   return (
-    <div className="authoring">
-      <div className="authoring__bar">
-        <label className="authoring__label" htmlFor="authoring-flow">
+    <div className="implement">
+      <div className="implement__bar">
+        <label className="implement__label" htmlFor="implement-flow">
           Flow:
         </label>
         <select
-          id="authoring-flow"
-          className="authoring__select"
+          id="implement-flow"
+          className="implement__select"
           value={selectedName}
           disabled={controlsDisabled || (flows?.length ?? 0) === 0}
           onChange={(event) => setSelectedName(event.target.value)}
@@ -332,7 +332,7 @@ export function AuthoringPanel({ getGraph, active }: AuthoringPanelProps) {
         </select>
         <button
           type="button"
-          className="authoring__refresh"
+          className="implement__refresh"
           onClick={() => void refresh()}
           disabled={unavailable || listing || running}
         >
@@ -340,12 +340,12 @@ export function AuthoringPanel({ getGraph, active }: AuthoringPanelProps) {
         </button>
         {flow && flow.loops.length > 0 && (
           <>
-            <label className="authoring__label" htmlFor="authoring-iterations">
+            <label className="implement__label" htmlFor="implement-iterations">
               Iterations:
             </label>
             <input
-              id="authoring-iterations"
-              className="authoring__number"
+              id="implement-iterations"
+              className="implement__number"
               type="number"
               min={1}
               max={budgetCap}
@@ -356,12 +356,12 @@ export function AuthoringPanel({ getGraph, active }: AuthoringPanelProps) {
                 if (Number.isFinite(parsed)) setBudget(Math.min(Math.max(1, Math.trunc(parsed)), budgetCap));
               }}
             />
-            <span className="authoring__cap">of {budgetCap} declared</span>
+            <span className="implement__cap">of {budgetCap} declared</span>
           </>
         )}
         <button
           type="button"
-          className="authoring__run"
+          className="implement__run"
           data-running={running}
           onClick={() => (running ? doStop() : void doRun())}
           disabled={unavailable || !flow || disconnected !== null}
@@ -370,19 +370,19 @@ export function AuthoringPanel({ getGraph, active }: AuthoringPanelProps) {
         </button>
       </div>
 
-      {unavailable && <div className="authoring__banner">{FLOW_UNAVAILABLE}</div>}
+      {unavailable && <div className="implement__banner">{FLOW_UNAVAILABLE}</div>}
       {disconnected !== null && (
-        <div className="authoring__banner authoring__banner--error">{disconnected}</div>
+        <div className="implement__banner implement__banner--error">{disconnected}</div>
       )}
-      {listError && <div className="authoring__banner authoring__banner--error">{listError}</div>}
+      {listError && <div className="implement__banner implement__banner--error">{listError}</div>}
       {flow?.loadError && (
-        <div className="authoring__banner authoring__banner--error">{flow.loadError}</div>
+        <div className="implement__banner implement__banner--error">{flow.loadError}</div>
       )}
-      {notice && <div className="authoring__banner">{notice}</div>}
+      {notice && <div className="implement__banner">{notice}</div>}
 
-      <div className="authoring__body">
-        <div className="authoring__form">
-          {flow?.description && <p className="authoring__desc">{flow.description}</p>}
+      <div className="implement__body">
+        <div className="implement__form">
+          {flow?.description && <p className="implement__desc">{flow.description}</p>}
           {flow?.inputs.map((input) => (
             <InputField
               key={input.name}
@@ -402,52 +402,52 @@ export function AuthoringPanel({ getGraph, active }: AuthoringPanelProps) {
             />
           ))}
           {flow && flow.inputs.length === 0 && (
-            <p className="authoring__desc">This flow declares no inputs.</p>
+            <p className="implement__desc">This flow declares no inputs.</p>
           )}
           {flow && (
-            <p className="authoring__cost">
+            <p className="implement__cost">
               Worst case: {worstCase.steps} step execution{worstCase.steps === 1 ? "" : "s"}
               {worstCase.seconds > 0 && `, up to ${Math.round(worstCase.seconds / 60)} minutes of declared timeouts`}
             </p>
           )}
         </div>
 
-        <div className="authoring__run-view">
+        <div className="implement__run-view">
           {launched && (
-            <div className="authoring__runinfo">
-              <span className="authoring__runid">{launched.runId}</span>
-              <span className="authoring__dim">{launched.runDir}</span>
-              {launched.graphPath && <span className="authoring__dim">{launched.graphPath}</span>}
-              {progress && <span className="authoring__dim">{progress}</span>}
+            <div className="implement__runinfo">
+              <span className="implement__runid">{launched.runId}</span>
+              <span className="implement__dim">{launched.runDir}</span>
+              {launched.graphPath && <span className="implement__dim">{launched.graphPath}</span>}
+              {progress && <span className="implement__dim">{progress}</span>}
             </div>
           )}
           {timeline ? (
             <>
-              <div className="authoring__terminal" data-status={timeline.terminal.statusKind}>
-                <span className="authoring__headline">{timeline.terminal.headline}</span>
+              <div className="implement__terminal" data-status={timeline.terminal.statusKind}>
+                <span className="implement__headline">{timeline.terminal.headline}</span>
                 {timeline.durationText && (
-                  <span className="authoring__dim">{timeline.durationText}</span>
+                  <span className="implement__dim">{timeline.durationText}</span>
                 )}
                 {timeline.terminal.detail.map((line) => (
-                  <span className="authoring__detail" key={line}>
+                  <span className="implement__detail" key={line}>
                     {line}
                   </span>
                 ))}
               </div>
-              {timeline.caution && <div className="authoring__caution">{CAUTION}</div>}
+              {timeline.caution && <div className="implement__caution">{CAUTION}</div>}
               <FlowTimeline timeline={timeline} />
             </>
           ) : (
-            <div className="authoring__empty">
+            <div className="implement__empty">
               {unavailable ? FLOW_UNAVAILABLE : "No run yet."}
             </div>
           )}
           {logLines.length > 0 && (
-            <div className="authoring__log">
-              <h4 className="authoring__log-title">Run log (supplementary — the timeline above is the state)</h4>
-              <div className="authoring__log-body" ref={logRef}>
+            <div className="implement__log">
+              <h4 className="implement__log-title">Run log (supplementary — the timeline above is the state)</h4>
+              <div className="implement__log-body" ref={logRef}>
                 {logLines.map((line, index) => (
-                  <span className="authoring__log-line" key={index}>
+                  <span className="implement__log-line" key={index}>
                     {line}
                   </span>
                 ))}
@@ -472,15 +472,15 @@ interface InputFieldProps {
 
 /** One control, chosen from the type the flow declared for the input. */
 function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, onBrowse }: InputFieldProps) {
-  const id = `authoring-input-${input.name}`;
+  const id = `implement-input-${input.name}`;
   const isPath = input.type === "path";
   const numeric = input.type === "int" || input.type === "float";
   return (
-    <div className="authoring__field">
-      <label className="authoring__field-label" htmlFor={id}>
+    <div className="implement__field">
+      <label className="implement__field-label" htmlFor={id}>
         {input.name}
-        {input.required && <span className="authoring__required">required</span>}
-        <span className="authoring__field-type">{input.type}</span>
+        {input.required && <span className="implement__required">required</span>}
+        <span className="implement__field-type">{input.type}</span>
       </label>
       {input.type === "bool" ? (
         <input
@@ -491,10 +491,10 @@ function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, on
           onChange={(event) => onValue(event.target.checked)}
         />
       ) : (
-        <div className="authoring__field-row">
+        <div className="implement__field-row">
           <input
             id={id}
-            className="authoring__input"
+            className="implement__input"
             type={numeric ? "number" : "text"}
             step={input.type === "float" ? "any" : undefined}
             value={typeof value === "boolean" ? "" : value}
@@ -506,7 +506,7 @@ function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, on
           {isPath && (
             <button
               type="button"
-              className="authoring__browse"
+              className="implement__browse"
               onClick={onBrowse}
               disabled={disabled || usesGraph}
             >
@@ -516,7 +516,7 @@ function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, on
         </div>
       )}
       {isPath && (
-        <label className="authoring__usegraph">
+        <label className="implement__usegraph">
           <input
             type="checkbox"
             checked={usesGraph}
@@ -526,9 +526,9 @@ function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, on
           Use the current canvas graph
         </label>
       )}
-      {input.description && <p className="authoring__help">{input.description}</p>}
+      {input.description && <p className="implement__help">{input.description}</p>}
       {isPath && input.exists && (
-        <p className="authoring__help">Checked for existence before the run starts.</p>
+        <p className="implement__help">Checked for existence before the run starts.</p>
       )}
     </div>
   );
