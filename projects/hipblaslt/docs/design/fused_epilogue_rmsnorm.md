@@ -39,12 +39,12 @@ For each row `x` of the post-GEMM tensor (optionally after a residual add), RMSN
 y = x * rsqrt(mean(x^2) + eps) * gamma
 ```
 
-- Normalization axis: per row of `D`, over the `N` (feature) dimension.
+- Normalization axis: per row of `D`, over the `D.M` (feature) dimension. Rows are `D.N`.
 - Accumulation precision: FP32 for the sum of squares and the reciprocal sqrt, regardless
   of the storage type of `D`.
 - `eps`: user-specified small constant added inside the rsqrt for numerical stability.
-- `gamma`: required per-feature scale vector of length `N` (the column count of `D`). This
-  corresponds to the RMSNorm affine scale.
+- `gamma`: required per-feature scale vector of length `D.M`. This corresponds to the RMSNorm
+  affine scale.
 - Unlike LayerNorm, RMSNorm does not subtract the mean and has no `beta`. It also does not
   emit `mean`/`invvar` side outputs (the standalone `hipblasltExtLayerNorm` does; the fused
   RMSNorm epilogue writes only the normalized result into `D`).
@@ -64,14 +64,13 @@ fused epilogue therefore needs an explicit write-back rule for `z`, independent 
 
 ## 3. Cross-tile RMSNorm via partial reduction
 
-Because RMSNorm reduces over the full `N` feature dimension of each row, computing it inside a
-single GEMM epilogue only works when a whole output row lives in one workgroup, i.e. when the
-N-direction macro tile (`MacroTile1`) covers all of `N`. In the transformer shapes this fusion
-targets, `N` is much larger than `MacroTile1`, so each row is split across
-`ceil(N / MacroTile1)` workgroups and no single workgroup holds the whole row needed to
-compute `mean(x^2)`. RMSNorm therefore cannot be a single tile-local epilogue in general; it
-is realized as a producer epilogue that emits tile-local partial statistics, plus a
-lightweight cross-tile reduction.
+Because RMSNorm reduces over the full `D.M` feature dimension of each row, computing it inside a
+single GEMM epilogue only works when a whole output row lives in one workgroup, i.e. when
+`MacroTile0` covers all of `D.M`. In the transformer shapes this fusion targets, `D.M` is much
+larger than `MacroTile0`, so each row is split across `ceil(D.M / MacroTile0)` workgroups and no
+single workgroup holds the whole row needed to compute `mean(x^2)`. RMSNorm therefore cannot be a
+single tile-local epilogue in general; it is realized as a producer epilogue that emits tile-local
+partial statistics, plus a lightweight cross-tile reduction.
 
 This section adopts the GEMM-epilogue reparameterization idea from CODA
 ([arXiv:2605.19269](https://arxiv.org/abs/2605.19269)): emit tile-local partial statistics in
@@ -195,7 +194,7 @@ Kernel 1:  h2, r_hat as above, then block-quantize h2 as:
            write this tile's codes and scales, plus r_hat
 
 Kernel 2:  r = rsqrt(reduce(r_hat) / d + eps)   # reduce + return r (no h2 read)
-Kernel 3:  u = MXGEMM(q_e4m3(h2), s, W1)        # K1 output is GEMM2 A + A-scale input
+Kernel 3:  u = MXGEMM(A=W1, B=q_e4m3(h2), B_scale=s)
            y = r ⊙ u                           # CODA scale-apply epilogue
 ```
 
@@ -218,11 +217,11 @@ scale tensor from the output values. The current implementation also does not wi
 `REQUANT_AMAX_POINTER` for MX requant.
 
 **Direct handoff to GEMM2.** The producer blocks its output along the axis that becomes GEMM2's
-reduction dimension, so each block is exactly one A-side block of the consumer GEMM, and Kernel 1
-writes the scale bytes in the swizzled layout that the consumer A-scale mode expects. Kernel 3 can
-therefore take the same device `D` buffer as its FP8 A input and the same UE8M0 scale buffer as its
-A-side matrix scale, with no host download, dequantization, requantization, or device conversion
-pass in between.
+reduction dimension, so each block is exactly one B-side block of the consumer GEMM,
+and Kernel 1 writes the scale bytes in the swizzled layout that the consumer B-scale mode expects.
+Kernel 3 can therefore take the same device `D` buffer as its FP8 B input and the same UE8M0 scale
+buffer as its B-side matrix scale, with no host download, dequantization, requantization, or device
+conversion pass in between.
 
 ### 3.4 Choosing a flow
 
@@ -236,7 +235,7 @@ use case; the library never substitutes one flow for the other based on a shape 
   the standalone RMSNorm pass and defers the scale into the consuming GEMM's epilogue.
 
 Both flows run the same producer plus a cross-tile reduction, so launch counts are comparable.
-The ordinary decomposed variant writes only the per-row scale `[M]` and folds the scale-apply
+The ordinary decomposed variant writes only the per-row scale `[D.N]` and folds the scale-apply
 into the consuming GEMM's epilogue, avoiding the write and re-read of the full `[M, N]`
 normalized tensor that the full flow materializes. The MX producer mode writes E4M3 `q(h2)` plus
 UE8M0 scale metadata instead of BF16/FP16 `h2`; GEMM2 consumes that representation directly,
@@ -334,8 +333,8 @@ calls, linked by an opaque RMSNorm handoff descriptor (section 5.2):
 The MX/block-quantized decomposed variant extends the producer chain to
 `bias -> residual add -> partial RMSNorm stats -> requant`. In this chain, `requant` writes
 E4M3 codes for `h2` and records the K1-local UE8M0 block scales, while the handoff descriptor
-carries `rstd`. The caller passes the producer `D` buffer to GEMM2 as A and the same UE8M0 scale
-buffer as GEMM2's A-side matrix scale. The consumer chain remains `RMSNorm scale-apply`: GEMM2
+carries `rstd`. The caller passes W1 to GEMM2 as A, the producer `D` buffer as B, and the same UE8M0
+scale buffer as GEMM2's B-side matrix scale. The consumer chain remains `RMSNorm scale-apply`: GEMM2
 consumes the block scales in its mainloop and applies `rstd` from the handoff descriptor in its
 epilogue.
 
@@ -416,8 +415,8 @@ The producer matmul call runs Kernel 1 plus the cross-tile reduction, and the re
 `1/d` and `eps` into the finalized per-row scale before the call returns. The **only** state that
 must cross the API boundary into the consumer call (`RMSNorm scale-apply`) is therefore small:
 
-- the consumer row scale buffer, FP32, tightly packed `[M * batch]` for the initial per-row
-  modes (one value per valid output row, per batch).
+- the consumer row scale buffer, FP32, tightly packed `[D.N * batch]` (one value per `D.N` row,
+  per batch). The producer and consumer must use the same `D.N` row count.
 - a populated/validity token, so a `RMSNorm scale-apply` chain attached to a descriptor that no
   producer has written is rejected at `hipblasLtMatmul` time.
 
@@ -478,7 +477,7 @@ These attributes apply to full RMSNorm and the decomposed producer/consumer stag
 
 | Attribute                                | Type                                        | Stage                       | Meaning                                                                                    |
 |------------------------------------------|---------------------------------------------|-----------------------------|--------------------------------------------------------------------------------------------|
-| `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA` | `void*`                                     | RMSNorm / partial stats     | Non-null device pointer to gamma, length `N`                                               |
+| `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA` | `void*`                                     | RMSNorm / partial stats     | Non-null device pointer to gamma, length equal to producer `D.M`                           |
 | `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS`   | `float`                                     | RMSNorm / partial stats     | Epsilon inside the rsqrt                                                                    |
 | `HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS` | `hipblasLtFusedEpilogueRMSNormDescriptor_t` | partial stats / scale apply | Opaque handoff object with a caller-owned FP32 buffer; producer writes it and consumer reads it |
 
@@ -494,7 +493,7 @@ problem shape) is consumed by the internal reduction that finalizes the per-row 
 handoff descriptor is set on both the producer and consumer handles and must refer to the same
 object. The descriptor carries the finalized RMSNorm row scale `rstd`. When the producer also
 has an MX/block requant stage, that stage's scale pointer carries the activation block-scale
-tensor separately. The caller retains that pointer and supplies it to GEMM2 through the A-side
+tensor separately. The caller retains that pointer and supplies it to GEMM2 through the B-side
 matrix-scale attributes; it is intentionally not normalization state stored in the handoff
 descriptor. The partial sum-of-squares scratch stays in the matmul preference workspace and is
 consumed by the reduction inside the producer call.
@@ -586,13 +585,13 @@ producer's results across three separate outputs:
 
 ```text
 producer D      = q_e4m3(h2)               # E4M3 codes, 32x1 hidden/K blocks
-MX scale tensor = UE8M0 producer output    # pre-swizzled for the consumer A-scale mode
+MX scale tensor = UE8M0 producer output    # pre-swizzled for the consumer B-scale mode
 handoff scale   = rstd                     # FP32 per row, from Kernel 2
 ```
 
-On the consumer call the caller attaches `RMSNORM_SCALE_APPLY`, passes the producer `D` pointer as
-GEMM2's A, and passes the same UE8M0 scale tensor through
-`HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER` with the matching A-scale mode, initially
+On the consumer call the caller attaches `RMSNORM_SCALE_APPLY`, passes W2 as GEMM2's A, passes the
+producer `D` pointer as GEMM2's B, and passes the same UE8M0 scale tensor through
+`HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER` with the matching B-scale mode, initially
 `HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT`.
 
 ##### Relationship to the existing matmul-descriptor scale/amax attributes
@@ -612,6 +611,9 @@ Full RMSNorm, exposed as a single `hipblasLtMatmul` call (the library runs the p
 the reduce-and-apply internally). Note there is no handoff descriptor: the internal producer ->
 reduce-and-apply state lives in the preference workspace for the duration of the call
 (section 5.2):
+
+For a row-major framework result, present the equivalent column-major problem with features in
+`D.M` and rows in `D.N`.
 
 ```c
 hipblasLtFusedEpilogueDescriptor_t fused;
@@ -637,7 +639,8 @@ hipblasLtFusedEpilogueDestroy(fused);
 #### 5.4.2 Full RMSNorm + requant
 
 Full RMSNorm followed by static/dynamic per-tensor FP8 requant, capturing the derived dequant scale
-(which can feed a consuming GEMM as its `A_SCALE_POINTER`) and, optionally, the amax:
+(which can feed a consuming GEMM as its `B_SCALE_POINTER`) and, optionally, the amax. Use the same
+`D.M` feature and `D.N` row convention as above:
 
 ```c
 hipblasLtFusedEpilogueDescriptor_t fused;
@@ -668,20 +671,21 @@ hipblasLtFusedEpilogueDestroy(fused);
 
 Decomposed flow for `GEMM -> residual -> RMSNorm -> GEMM`, using the opaque handoff descriptor.
 The optional MX producer mode adds `REQUANT` to GEMM1. Its 32x1 scale layout is a direct GEMM2
-A-side representation; see section 5.3.3.
+B-side representation; see section 5.3.3.
 
 ```c
 // Handoff object shared by the producer and consumer matmul calls.
 hipblasLtFusedEpilogueRMSNormDescriptor_t stats;
 hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats);
-// Caller-owned device storage: one FP32 scale for each producer output row and batch.
+// Caller-owned device storage: one FP32 scale for each D.N row and batch.
 // Allocate it before stream capture when the matmul pair is captured in a HIP graph.
-size_t stats_bytes = M * batch_count * sizeof(float);
+size_t stats_bytes = N1 * batch_count * sizeof(float);
 void* d_stats;
 hipMalloc(&d_stats, stats_bytes);
 hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, d_stats, stats_bytes);
 
-// GEMM1 producer: residual add + gamma + partial RMSNorm stats.
+// GEMM1 producer: D1.M is the feature dimension and D1.N is the row dimension.
+// The epilogue performs residual add + gamma + partial RMSNorm stats.
 hipblasLtFusedEpilogueDescriptor_t prod;
 hipblasLtFusedEpilogueCreate(&prod);
 hipblasLtFusedEpilogueAdd(prod, HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD);
@@ -720,11 +724,10 @@ hipblasLtMatmulDescSetAttribute(matmulDesc1, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGU
 // Internally launches GEMM1 producer + auxiliary reduce-and-return kernel.
 // After the queued work completes, `stats` carries rstd.
 
-// GEMM2 consumer: apply the deferred per-row scale from `stats` in the epilogue.
-// For ordinary decomposed flow, A points directly at matD1's BF16/FP16 h2 output.
-// For the MX variant, A points directly at matD1's E4M3 q_e4m3(h2) output and
-// d_h2_mx_scale is supplied as GEMM2's A-side matrix scale tensor with the matching
-// 32x1 hidden/K-block scale mode.
+// GEMM2 consumer: apply the deferred per-row scale from `stats` along D2.N in the epilogue.
+// B points at matD1's BF16/FP16 h2 output for the ordinary flow or its E4M3
+// q_e4m3(h2) output for the MX variant. In the MX variant, d_h2_mx_scale is supplied as
+// GEMM2's B-side matrix scale tensor with the matching 32x1 hidden/K-block scale mode.
 hipblasLtFusedEpilogueDescriptor_t cons;
 hipblasLtFusedEpilogueCreate(&cons);
 hipblasLtFusedEpilogueAdd(cons, HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY);
@@ -732,13 +735,13 @@ hipblasLtFusedEpilogueSetAttribute(cons, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS,
                                    &stats, sizeof(stats)); // same object as the producer
 hipblasLtMatmulDescSetAttribute(matmulDesc2, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE,
                                 &cons, sizeof(cons));
-// MX direct handoff: matA2 points at matD1, and the same K1-produced scale tensor is used
-// as GEMM2's A scale. The K1 producer emits 32x1 hidden/K blocks in this exact layout.
-hipblasLtMatmulMatrixScale_t a_scale_mode =
+// MX direct handoff: matB2 points at matD1, and the same K1-produced scale tensor is used
+// as GEMM2's B scale. The K1 producer emits 32x1 hidden/K blocks in this exact layout.
+hipblasLtMatmulMatrixScale_t b_scale_mode =
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
-hipblasLtMatmulDescSetAttribute(matmulDesc2, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE,
-                                &a_scale_mode, sizeof(a_scale_mode));
-hipblasLtMatmulDescSetAttribute(matmulDesc2, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER,
+hipblasLtMatmulDescSetAttribute(matmulDesc2, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE,
+                                &b_scale_mode, sizeof(b_scale_mode));
+hipblasLtMatmulDescSetAttribute(matmulDesc2, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
                                 &d_h2_mx_scale, sizeof(d_h2_mx_scale));
 // ... hipblasLtMatmul(GEMM2) ...
 // launches GEMM2; its epilogue reads `stats`
@@ -765,22 +768,22 @@ combine and the deferred scale match the full-flow accumulation precision.
 For the MX/block-quantized producer variant, `D` uses `HIP_R_8F_E4M3`; no other MX output type is
 accepted. The source value for quantization is still `h2`, so `gamma` has the same storage type as
 the pre-requant producer output. The RMSNorm handoff scale `rstd` remains FP32, while producer
-block scales are UE8M0 bytes in the producer's gfx950 A-compatible layout. GEMM2 uses the same
-E4M3 buffer and UE8M0 scale tensor as its A input and A-side scale metadata, then applies `rstd`
+block scales are UE8M0 bytes in the producer's gfx950 B-compatible layout. GEMM2 uses the same
+E4M3 buffer and UE8M0 scale tensor as its B input and B-side scale metadata, then applies `rstd`
 through `RMSNorm scale-apply`.
 
 ### 5.6 Strided-batched semantics
 
 When `batch_count > 1` in a strided-batched GEMM:
 
-- `gamma` is broadcast across batches (a single vector of length `N` shared by all batches).
+- `gamma` is broadcast across batches (a single vector of length `D.M` shared by all batches).
 - `eps` is a scalar and is always shared across batches.
 - The residual input tensor follows the same batch stride as `D`. If
   `HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER` is set, the residual output also uses
   the same batch stride as `D`.
 - For the decomposed flow, the per-row scale is indexed per `(row, batch)` inside the handoff
-  descriptor. The per-batch row count `M` and the batch count are derived from the matmul
-  descriptor, so the producer and consumer stay consistent without any caller-supplied layout.
+  descriptor. The `D.N` row count and batch count are derived from the matmul descriptors, and
+  the producer and consumer values must match.
 
 ## 6. Error conditions and return codes
 
@@ -821,7 +824,7 @@ For MX requant, attachment validates only the MX-specific producer attributes:
 `PER_BLOCK_MX`, a non-null MX scale output pointer, a positive block size, and E4M3 output type.
 It does not require `DYNAMIC_FROM_AMAX` or inspect the ordinary f32 scale/amax attributes. The
 consumer validates that the handoff has been populated before using `rstd`. The producer and
-consumer must use matching E4M3 and A-scale layouts; this cross-call compatibility is not carried
+consumer must use matching E4M3 and B-scale layouts; this cross-call compatibility is not carried
 by the handoff descriptor and is validated by the selected GEMM2 solution.
 
 ## 7. Interaction with existing descriptors and preferences
@@ -838,14 +841,14 @@ by the handoff descriptor and is validated by the selected GEMM2 solution.
   persistent FP32 consumer-scale buffer through the handoff descriptor. The optional
   MX/block-quantized flow also writes a producer scale tensor through
   `REQUANT_MX_SCALE_POINTER`. That tensor is activation quantization metadata; the caller
-  supplies the same tensor to GEMM2 as its A-side matrix scale. The producer's `partialBuf`
+  supplies the same tensor to GEMM2 as its B-side matrix scale. The producer's `partialBuf`
   scratch and any synchronizer/flag buffer remain internal, transient workspace sized through
   the workspace-size query.
 - On the codegen side, the ordinary GEMM kernels for both flows come from a single
   TensileLite option (`FusedEpilogues = 1`) that bundles the optional-residual, RMSNorm-producer, and
   RMSNorm-scale-apply epilogue options and selects among them at runtime. The MX/block-quantized
   producer uses a K1 epilogue that computes local block amax, encodes the UE8M0 scale tensor, and
-  stores E4M3 `q(h2)` in 32x1 hidden/K blocks. GEMM2 consumes this output directly as its MX A
+  stores E4M3 `q(h2)` in 32x1 hidden/K blocks. GEMM2 consumes this output directly as its MX B
   operand and uses the same scale tensor with `RMSNorm scale-apply`. The cross-tile reduction
   remains a separate custom kernel.
 - The C++ extension API (`hipblaslt_ext::GemmEpilogue` / `GemmInputs`) is outside this
