@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
+
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -11,7 +13,6 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
-#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
