@@ -1,27 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Solution-validation guards for HalfPLR on StreamK (SK3) on gfx1250.
-
-These are the unit-test replacement for the former
-``Tensile/Tests/common/streamk/gfx1250/core/sk_halfplr_reject.yaml`` negative
-config. Instead of round-tripping a benchmark run to inspect ``reject:`` log
-lines, we build a fully-derived gfx1250 StreamK HalfPLR ``Solution`` in-process
-and assert that each incompatible knob is rejected with its exact diagnostic,
-plus a positive assertion that the known-good combination is *accepted* (so the
-guards do not over-reject).
-
-The harness mirrors the ``SolutionEdges`` characterization suite: real gfx1250
-capability maps from ``makeIsaInfoMap`` (needs ``amdclang++``; the module skips
-if the toolchain cannot target gfx1250) and a real assembler, feeding
-``Solution.__init__`` which runs ``assignDerivedParameters`` end-to-end. The
-reject reason is captured from stdout via ``capsys`` exactly as
-``test_PrefetchAcrossPersistent`` does.
-
-The base solution is the known-good pure-F8 (F8/F8/S) TN StreamK=3 HalfPLR
-candidate from ``sk_halfplr_f8gemm_tdm.yaml`` (TDMInst=3, PLR=1, PGR=2,
-MIWaveTile [2,2], InnerUnroll=1, WavefrontSize=32, SIA=4, PAP=0,
-UseSubtileImpl=0); each negative test flips exactly one knob.
-"""
+"""HalfPLR + StreamK=3 gfx1250 solution-validation guards."""
 
 import copy
 
@@ -33,11 +12,7 @@ from Tensile.SolutionStructs.Solution import Solution
 pytestmark = pytest.mark.unit
 
 
-# Snapshot the pristine process-global defaultSolution at import time (collection
-# runs before any test executes). Sibling unit tests mutate it in place (e.g.
-# test_MatrixInstructionConversion injects a raw "ProblemType" key), which makes
-# Solution.__init__'s `for key in defaultSolution` loop overwrite the derived
-# ProblemType object and break Solution construction in an order-dependent way.
+# Snapshot defaultSolution at import; sibling tests mutate it in place.
 _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 
 
@@ -89,10 +64,7 @@ def _gp_gfx1250(gfx1250_iim):
     defaultSolution.update(saved_ds)
 
 
-# ---------------------------------------------------------------------------
-# Base solution: known-good pure-F8 TN StreamK=3 HalfPLR (from
-# sk_halfplr_f8gemm_tdm.yaml). Mirrors the SolutionEdges gfx1250 helper.
-# ---------------------------------------------------------------------------
+# Base solution: known-good pure-F8 TN StreamK=3 HalfPLR.
 def _make_params(gfx1250_iim, mi=None, **overrides):
     from Tensile.Common.Architectures import gfxToIsa
     from Tensile.SolutionStructs.Validators.MatrixInstruction import (
@@ -177,15 +149,10 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
 
 
 # ---------------------------------------------------------------------------
-# Positive: the known-good combination must be ACCEPTED (guard vs over-reject).
+# Positive: known-good combination must be accepted.
 # ---------------------------------------------------------------------------
 def test_halfplr_streamk_sk3_sia4_is_accepted(_gp_gfx1250, gfx1250_iim, assembler, capsys):
-    """HalfPLR=1 + StreamK=3 + SIA=4 + PAP=0 + UseSubtileImpl=0 is valid.
-
-    This is the survivor from sk_halfplr_f8gemm_tdm.yaml; if it were rejected
-    the three guards below would be vacuously satisfied, so this pins the
-    accept path.
-    """
+    """Accept control so the guards below are not vacuous."""
     sol, out = _derive(gfx1250_iim, assembler, capsys)
     assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
     # Sanity: the HalfPLR block ran and derived its A/B split.
@@ -234,8 +201,7 @@ def test_halfplr_pap_supports_tail_capable_solution(
 
 
 # ---------------------------------------------------------------------------
-# Guard 1: HalfPLR + PrefetchAcrossPersistent outside the narrowly validated
-# StreamK=3 + StreamKForceDPOnly=1 path -> rejected.
+# Guard 1: HalfPLR + PAP outside StreamK=3 + StreamKForceDPOnly=1.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("half_plr", [1, 2, 3])
 def test_halfplr_pap_rejects_without_force_dp_only(
@@ -295,7 +261,7 @@ def test_halfplr_pap_is_cleared_without_streamk(
 
 
 # ---------------------------------------------------------------------------
-# Guard 2: HalfPLR + StreamK + ScheduleIterAlg != 4 -> rejected.
+# Guard 2: HalfPLR + StreamK + ScheduleIterAlg != 4.
 # ---------------------------------------------------------------------------
 def test_halfplr_streamk_rejects_non_stinkytofu_sia(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
@@ -308,7 +274,7 @@ def test_halfplr_streamk_rejects_non_stinkytofu_sia(
 
 
 # ---------------------------------------------------------------------------
-# Guard 3: HalfPLR + UseSubtileImpl -> rejected.
+# Guard 3: HalfPLR + UseSubtileImpl.
 # ---------------------------------------------------------------------------
 def test_halfplr_rejects_use_subtile_impl(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
@@ -316,3 +282,35 @@ def test_halfplr_rejects_use_subtile_impl(
     sol, out = _derive(gfx1250_iim, assembler, capsys, UseSubtileImpl=True)
     assert sol.get("Valid") is False
     assert "HalfPLR is not supported with UseSubtileImpl" in out
+
+
+# ---------------------------------------------------------------------------
+# Guard 4: HalfPLR + TDMFuse=1 at a divergent pair. The increment mask rides
+# in the module the single-buffered fill relocation moves.
+# ---------------------------------------------------------------------------
+def test_halfplr_rejects_tdmfuse1_at_a_divergent_pair(
+    _gp_gfx1250, gfx1250_iim, assembler, capsys
+):
+    sol, out = _derive(
+        gfx1250_iim,
+        assembler,
+        capsys,
+        TDMFuse=1,
+        PrefetchGlobalReadA=1,
+        PrefetchGlobalReadB=2,
+        mi=[16, 16, 128, 1, 1, 2, 16, 2, 2],
+        WorkGroup=[32, 4, 1],
+        MXScaleFormat="InMemorySwizzle",
+        LDSTrInst=True,
+        ProblemType={
+            "MacDataTypeA": "F8",
+            "MacDataTypeB": "F4",
+            "DestDataType": "s",
+            "MXBlockA": 32,
+            "MXBlockB": 32,
+            "DataTypeMXSA": "E8",
+            "DataTypeMXSB": "E8",
+        },
+    )
+    assert sol.get("Valid") is False
+    assert "TDMFuse=1 requires HalfPLR=0 at a divergent decoupled pair" in out

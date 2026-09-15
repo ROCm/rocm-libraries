@@ -1,31 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Disassembly-backed checks that custom-kernel StaggerU metadata is truthful.
+"""Custom-kernel StaggerU metadata vs executed instructions.
 
-The host-side launch gate for uniform summation order (``checkUniformSummationOrder``
-in ``ContractionSolution.cpp``) currently refuses handwritten custom kernels, and
-the StaggerU clamp still reasons from declared metadata for every other solution.
-It clamps StaggerU by writing zero into a bitfield of a packed kernel argument, and
-refuses any solution declaring ``SupportCustomStaggerU: False`` with a non-zero
-``StaggerU``.  These tests pin that metadata against the instructions the kernels
-execute, so a later admission path cannot trust a lying declaration.
-
-Reading the ``.s`` files cannot do it: 98 of the 119 shipped custom kernels are
-pre-assembled ``.long`` blobs with no readable mnemonics, and every kernel that
-declares a non-zero StaggerU -- exactly the set the gate's safety argument turns
-on -- is among them.  So each kernel is assembled for its own ``.amdgcn_target``
-and disassembled, which also sees through the macros and ``.set`` aliases the
-readable kernels are written in.
-
-Of the two halves the mechanism has (``KernelWriterAssembly.declareStaggerParms``
-and ``calculateStagger``), only the in-loop conditional wrap of a buffer
-descriptor -- shaped as in ``_findStaggerWrapSites`` below -- is decisive and
-recognisable without symbols.  A kernel with no such site cannot rotate its
-K-loop start position, whatever its metadata says.
-
-Scope note: these checks establish that the canonical packed decode is present
-in a kernel that staggers, not that the decoded value reaches every individual
-wrap site; proving the latter would need a full dataflow analysis.
+Most shipped kernels are pre-assembled ``.long`` blobs, so each is assembled
+for its ``.amdgcn_target`` and disassembled.
 """
 
 import os
@@ -50,6 +28,9 @@ from Tensile.CustomKernels import (
     getCustomKernelContents,
     readCustomKernelConfig,
 )
+from Tensile.Components.TDMFuse import tdmWavePartition
+from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from rocisa.code import Module
 
 
 _ROCM_LLVM_BIN = os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "llvm", "bin")
@@ -193,15 +174,7 @@ def _toolchainHandlesAmdgcn() -> bool:
 
 
 def _whyDisassemblyRequired() -> Optional[str]:
-    """Why an unusable toolchain is an error here rather than a reason to skip.
-
-    These checks are the only thing holding the gate's metadata to the shipped
-    code, so skipping them where they were meant to run is the worst outcome
-    available: a green suite that verified nothing.  A machine carrying ROCm's
-    own LLVM is taken to be such a place.  ``TENSILE_REQUIRE_AMDGCN_DISASM``
-    overrides the inference in both directions, so CI can demand the checks
-    whatever its layout, and a deliberately toolchain-less run can opt out.
-    """
+    """Fail rather than skip when ROCm LLVM is present; TENSILE_REQUIRE_AMDGCN_DISASM overrides."""
     forced = os.environ.get("TENSILE_REQUIRE_AMDGCN_DISASM")
     if forced:
         return None if forced == "0" else f"TENSILE_REQUIRE_AMDGCN_DISASM={forced} is set"
@@ -398,11 +371,7 @@ def readAllMetadata() -> Dict[str, KernelMetadata]:
 
 
 def clampCannotReach(code: KernelCode, metadata: KernelMetadata) -> Optional[str]:
-    """Why the host clamp fails to stop this kernel staggering, or None.
-
-    Per-kernel so it can be run against a mutated declaration as easily as
-    against a shipped one.
-    """
+    """Why the host clamp fails to stop this kernel staggering, or None."""
     if not code.staggers:
         return None
 
@@ -429,7 +398,6 @@ def clampCannotReach(code: KernelCode, metadata: KernelMetadata) -> Optional[str
 
 @pytest.mark.parametrize("name", KERNEL_NAMES)
 def test_every_custom_kernel_disassembles(name):
-    """Coverage guard: no kernel may quietly drop out of the checks below."""
     code = analyzeAllKernels()[name]
     assert code.numInstructions > 0
     assert code.arch.startswith("gfx"), f"{name}: unexpected target {code.arch}"
@@ -437,12 +405,6 @@ def test_every_custom_kernel_disassembles(name):
 
 @pytest.mark.parametrize("name", KERNEL_NAMES)
 def test_declared_stagger_is_present_in_the_machine_code(name):
-    """Direction one: a non-zero declared StaggerU must be real staggering.
-
-    Metadata claiming a stagger the code does not have is not a safety hole,
-    but the gate would refuse solutions it never needed to, and the
-    declaration can no longer be trusted in the other direction either.
-    """
     code = analyzeAllKernels()[name]
     metadata = readAllMetadata()[name]
     if metadata.effectiveStaggerU == 0:
@@ -462,20 +424,13 @@ def test_declared_stagger_is_present_in_the_machine_code(name):
 
 @pytest.mark.parametrize("name", KERNEL_NAMES)
 def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
-    """Direction two, the one the gate's correctness rests on: a kernel that
-    staggers either reads StaggerU from the packed argument the host clamps, or
-    declares a non-zero StaggerU so the gate refuses it outright."""
     code = analyzeAllKernels()[name]
     metadata = readAllMetadata()[name]
     unreachable = clampCannotReach(code, metadata)
     assert unreachable is None, unreachable
 
 
-# Kernels that declare StaggerU: 0 and stagger anyway: their assembly was
-# generated with staggering enabled and the declaration edited down afterwards.
-# Each is safe only because it also inherits SupportCustomStaggerU: True and does
-# unpack the runtime argument.  Pinned so a new one has to be looked at by a
-# human rather than joining the exception quietly.
+# Declared StaggerU 0 but still stagger: inherit SupportCustomStaggerU True and unpack.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
@@ -485,9 +440,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     }
 )
 
-# The shipped population, as reconciled against the disassembly.  Pinned so that
-# adding or retuning a custom kernel forces the reconciliation to be redone
-# rather than shifting the ground truth underneath the gate.
+# Shipped population vs disassembly; pin so a new kernel forces reconciliation.
 EXPECTED_CENSUS = {
     "kernels": 119,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
@@ -504,7 +457,7 @@ EXPECTED_CENSUS = {
 
 
 def test_shipped_population_matches_the_reconciled_ground_truth():
-    """The census the gate's safety argument was reviewed against."""
+    """Pinned census of shipped custom-kernel StaggerU metadata vs disassembly."""
     codes = analyzeAllKernels()
     metadata = readAllMetadata()
     declaredNonZero = [
@@ -525,18 +478,15 @@ def test_shipped_population_matches_the_reconciled_ground_truth():
         "undeclared": sum(1 for meta in metadata.values() if meta.declaredStaggerU is None),
     }
     assert census == EXPECTED_CENSUS, (
-        f"the shipped custom-kernel population no longer matches the set the uniform "
-        f"summation order gate was reviewed against: {census} != {EXPECTED_CENSUS}. "
-        f"Re-reconcile the new kernels against the disassembly and update EXPECTED_CENSUS"
+        f"shipped custom-kernel census {census} != {EXPECTED_CENSUS}; "
+        f"re-reconcile against the disassembly"
     )
     assert all(codes[name].staggers for name in declaredNonZero), (
-        "every kernel declaring a non-zero StaggerU used to contain the in-loop wrap; "
-        "one no longer does"
+        "a kernel declaring non-zero StaggerU has no in-loop wrap"
     )
 
 
 def test_kernels_that_stagger_despite_declaring_zero_are_the_known_ones():
-    """The one place declared metadata understates the shipped code."""
     codes = analyzeAllKernels()
     metadata = readAllMetadata()
     observed = {
@@ -553,9 +503,7 @@ def test_kernels_that_stagger_despite_declaring_zero_are_the_known_ones():
 
 
 def _ablate(source: str) -> Tuple[str, int]:
-    """Rewrite ``s_cselect_b32 dst, wrap, inc`` into ``s_mov_b32 dst, inc`` at the
-    wrap sites only, keeping the instruction count identical, so the kernel
-    always takes the forward increment and never rotates."""
+    """Rewrite wrap-site ``s_cselect_b32 dst, wrap, inc`` to ``s_mov_b32 dst, inc``."""
     pattern = re.compile(
         r"^s_cselect_b32\s+(?P<dst>[^,]+),\s*[^,]+,\s*(?P<inc>[^/\n]+?)\s*"
         r"(?P<comment>//\s*inc(?:Lower|Upper) <- \?.*)$",
@@ -568,10 +516,6 @@ def _ablate(source: str) -> Tuple[str, int]:
 
 
 def test_wrap_detector_goes_quiet_when_the_wrap_is_ablated():
-    """Ablation control: the detector tracks the conditional wrap, not the kernel.
-
-    A detector that fired on everything would pass every check above.
-    """
     codes = analyzeAllKernels()
     candidates = [
         name
@@ -637,7 +581,6 @@ NEAR_MISSES = [
 
 
 def test_wrap_detector_needs_every_part_of_the_signature():
-    """Negative controls: every part of the mechanism is load-bearing."""
     assert len(_findStaggerWrapSites(_snippet(WRAP_SNIPPET))) == 1
     for description, line, replacement in NEAR_MISSES:
         variant = WRAP_SNIPPET.replace(line, replacement)
@@ -647,13 +590,6 @@ def test_wrap_detector_needs_every_part_of_the_signature():
 
 
 def test_a_lying_declaration_is_caught(tmp_path):
-    """Mutation control: the checks are not vacuously satisfiable.
-
-    A kernel whose machine code really does stagger is given, in a temp copy of
-    its ``.s``, each of the two declarations that would claim the kernel is
-    clamp-safe or non-staggering.  Both must be reported, and the shipped
-    declaration must not be.
-    """
 
     codes = analyzeAllKernels()
     metadata = readAllMetadata()
@@ -707,22 +643,9 @@ def test_a_lying_declaration_is_caught(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The generated-kernel arm.
-#
-# Everything above is about the 119 handwritten custom kernels.  The same
-# question has to be answered for generated kernels, because the uniform
-# summation order gate admits a solution whose StaggerU the host clamps to 0 and
-# that admission is only sound if the kernel reads StaggerU from the packed
-# argument the clamp writes.  For a generated kernel that is a property of the
-# code generator rather than of a checked-in file, so it is checked by running
-# the generator: emit a solution that declares SupportCustomStaggerU: False with
-# a non-zero StaggerU -- the shape that used to be refused outright -- and hold
-# the emitted assembly to the same clampCannotReach predicate.
-#
-# supportsCustomStaggerU is passed as True on purpose.  Passing the solution's
-# own False would take the branch that means "the gate refuses this outright",
-# which is vacuous here: under the narrowed predicate the gate no longer
-# refuses it, so the assertion that has to hold is the clamp-based one.
+# Generated kernels: SupportCustomStaggerU False + non-zero StaggerU must still
+# unpack the packed argument the host clamp writes. Pass supportsCustomStaggerU
+# True so the check is the clamp, not an outright refuse.
 # ---------------------------------------------------------------------------
 
 _CODEGEN_DIR = os.path.join(
@@ -756,18 +679,14 @@ COMPILED_IN_STAGGERU_LOGIC = (
 
 
 def _logicSolutions(document):
-    """Solutions out of either tuning-logic schema.
-
-    Equality logic is a mapping with a 'Solutions' key; the positional schema
-    used by the StreamK and Origami files keeps them at index 5.
-    """
+    """Solutions out of either tuning-logic schema."""
     if isinstance(document, dict):
         return document["Solutions"]
     return document[5]
 
 
 def _declaresCompiledInStaggerU(solution) -> bool:
-    """The shape the CompiledInStaggerU clause used to refuse."""
+    """SupportCustomStaggerU False with a non-zero StaggerU."""
     support = solution.get("InternalSupportParams", {})
     staggerU = solution.get("StaggerU", DEFAULT_STAGGERU)
     return support.get("SupportCustomStaggerU", DEFAULT_SUPPORT_CUSTOM_STAGGERU) is False and (
@@ -805,14 +724,6 @@ def _writeSingleSolutionLogic(document, solution, path):
 
 @pytest.mark.parametrize("rel", COMPILED_IN_STAGGERU_LOGIC)
 def test_generated_kernels_read_stagger_from_the_packed_argument(rel, tmp_path):
-    """A generated kernel that staggers must unpack the value the host clamps.
-
-    This is the premise the narrowed CompiledInStaggerU clause rests on:
-    SupportCustomStaggerU: False means only that the host declines to write the
-    packed field, leaving it 0.  It does not mean the kernel took its stagger
-    from somewhere the clamp cannot reach.  If the generator ever learns to bake
-    a literal StaggerU into a wrap site, this fails and the clause has to widen
-    again."""
     logic = os.path.join(_LOGIC_ROOT, rel)
     if not os.path.exists(logic):
         pytest.skip(f"tuning logic tree not present: {rel}")
@@ -854,3 +765,245 @@ def test_generated_kernels_read_stagger_from_the_packed_argument(rel, tmp_path):
             ),
         )
         assert unreachable is None, unreachable
+
+
+# TDMFuse=2's stagger gates must dispatch per wave, not by two-way parity.
+
+
+NUM_WAVES = 4
+
+
+class _Tmp:
+    def __init__(self, idx, size):
+        self.idx = idx
+        self.size = size
+
+
+class _TmpCtx:
+    """Stand-in for allocTmpSgpr's context manager, from a fixed high base."""
+
+    def __init__(self, idx, size):
+        self._t = _Tmp(idx, size)
+
+    def __enter__(self):
+        return self._t
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _Labels:
+    def __init__(self):
+        self._n = {}
+
+    def getNameInc(self, name):
+        self._n[name] = self._n.get(name, -1) + 1
+        return name if self._n[name] == 0 else f"{name}_{self._n[name]}"
+
+
+class _States:
+    def __init__(self, waveIdxLive, packedBits):
+        self.staggerUCode = True
+        self.tdmParityPackedInArgType = packedBits > 0
+        self.tdmWaveIdBitsInArgType = packedBits
+        self.waveIdxReleasedAfterStagger = not waveIdxLive
+        self.unrollIdx = 0
+
+
+class _Writer:
+    """Enough of KernelWriterAssembly for the stagger gate emitters."""
+
+    def __init__(self, kernel, waveIdxLive=True, packedBits=0):
+        self._kernel = kernel
+        self._waveIdxLive = waveIdxLive
+        self.states = _States(waveIdxLive, packedBits)
+        self.labels = _Labels()
+        self.sgprs = {"WaveIdx": 4, "ArgType": 5}
+
+    # Real KernelWriterAssembly predicates.
+    def isTdmWaveSeparated(self, kernel):
+        return KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
+
+    def tdmFusePaired(self, kernel):
+        return KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def tdmArgTypeWaveIdBits(self, kernel):
+        return KernelWriterAssembly.tdmArgTypeWaveIdBits(self, kernel)
+
+    def isTdmWaveIdxLive(self, kernel):
+        return self._waveIdxLive
+
+    def _emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc):
+        return KernelWriterAssembly._emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc)
+
+    def _emitTdmWaveIdIntoSgpr(self, kernel, dstIdx, comment="waveId"):
+        return KernelWriterAssembly._emitTdmWaveIdIntoSgpr(self, kernel, dstIdx, comment)
+
+    def allocTmpSgpr(self, num, align=None, tag=None):
+        return _TmpCtx(90, num)
+
+    # -- emitters under test --
+    def applyStagger(self, kernel, tc, group0, offsetSgpr=80,
+                     labelName="SkipStagger", commentTag="stagger"):
+        mod = Module("t")
+        KernelWriterAssembly._applyStaggerTdmSharedScale(
+            self, mod, kernel, tc, group0, offsetSgpr, labelName, commentTag)
+        return str(mod)
+
+    def waveSetSkip(self, kernel, waves, tc):
+        mod = Module("t")
+        KernelWriterAssembly._emitTdmWaveSetSkipSCC(self, mod, kernel, waves, tc)
+        return str(mod)
+
+    def waveId(self, kernel, dst=90):
+        return str(KernelWriterAssembly._emitTdmWaveIdIntoSgpr(self, kernel, dst))
+
+    def hoist(self, kernel, tcA="A"):
+        return str(KernelWriterAssembly._hoistTdmSharedScaleWrapUSel(self, kernel, tcA))
+
+
+def _kernel(tdmFuse=2, numWaves=NUM_WAVES):
+    return {
+        "TDMFuse": tdmFuse,
+        "NumWaves": numWaves,
+        "WavefrontSize": 32,
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "TDMInst": 0x03,
+        "TDMSplit": False,
+        "UseSubtileImpl": False,
+        "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
+    }
+
+
+# Wave sets, spelled out so tdmWavePartition cannot redefine the expectation.
+EXPECTED_WAVES = {"A": (0, 1), "MXSA": (2,), "MXSB": (3,), "B": (0, 1, 2, 3)}
+
+
+@pytest.mark.parametrize("tc, waves", sorted(EXPECTED_WAVES.items()))
+def test_partition_is_the_1_1_2_remainder_split(tc, waves):
+    assert tdmWavePartition(_kernel(), tc)[1] == waves
+
+
+# --------------------------------------------------- which waves are admitted --
+def _admitted(text, numWaves=NUM_WAVES):
+    """Waves whose stagger add runs. SCC1 means skip, so admitted == compare is false."""
+    if "s_cbranch_scc1" not in text:
+        return tuple(range(numWaves))
+    for rx, fn in (
+        (r"s_cmp_lg_u32 s\[sgprWaveIdx\], (\d+)", lambda w, n: w != n),
+        (r"s_cmp_ge_u32 s\[sgprWaveIdx\], (\d+)", lambda w, n: w >= n),
+        (r"s_cmp_eq_u32 s\[sgprWaveIdx\], (\d+)", lambda w, n: w == n),
+        (r"s_bitcmp1_b32 s\[sgprWaveIdx\], (\d+)", lambda w, n: bool((w >> n) & 1)),
+    ):
+        m = re.search(rx, text)
+        if m:
+            n = int(m.group(1))
+            return tuple(w for w in range(numWaves) if not fn(w, n))
+    raise AssertionError("no recognized guard in:\n" + text)
+
+
+@pytest.mark.parametrize("tc, waves", sorted(EXPECTED_WAVES.items()))
+def test_stagger_add_runs_on_exactly_the_waves_that_carry_the_tensor(tc, waves):
+    kernel = _kernel()
+    text = _Writer(kernel).applyStagger(kernel, tc, f"tdm{tc}Group0")
+    assert _admitted(text) == waves
+
+
+def test_the_shared_descriptor_gets_one_tensors_offset_per_wave():
+    """{A,MXSA,MXSB} share a descriptor, so each wave is admitted by exactly one of them."""
+    kernel = _kernel()
+    admits = {tc: _admitted(_Writer(kernel).applyStagger(kernel, tc, "tdmAGroup0"))
+              for tc in ("A", "MXSA", "MXSB")}
+    for wave in range(NUM_WAVES):
+        owners = [tc for tc, waves in admits.items() if wave in waves]
+        assert len(owners) == 1, f"wave {wave} staggered by {owners}, want exactly one"
+
+
+def test_b_is_not_gated_because_every_wave_carries_a_component():
+    kernel = _kernel()
+    text = _Writer(kernel).applyStagger(kernel, "B", "tdmBGroup0")
+    assert "s_cbranch" not in text
+    assert text.count("s_add_u32") == 1 and text.count("s_addc_u32") == 1
+
+
+@pytest.mark.parametrize("tc", sorted(EXPECTED_WAVES))
+def test_gate_never_uses_two_way_parity(tc):
+    # s_bitcmp1 WaveIdx,0 is the two-way parity test.
+    kernel = _kernel()
+    text = _Writer(kernel).applyStagger(kernel, tc, f"tdm{tc}Group0")
+    assert "s_bitcmp1_b32 s[sgprWaveIdx], 0" not in text
+
+
+def test_single_wave_tensors_compare_for_equality_not_parity():
+    kernel = _kernel()
+    for tc, wave in (("MXSA", 2), ("MXSB", 3)):
+        text = _Writer(kernel).applyStagger(kernel, tc, f"tdm{tc}Group0")
+        assert f"s_cmp_lg_u32 s[sgprWaveIdx], {wave}" in text
+
+
+def test_the_a_run_is_a_low_contiguous_bound():
+    kernel = _kernel()
+    text = _Writer(kernel).applyStagger(kernel, "A", "tdmAGroup0")
+    assert "s_cmp_ge_u32 s[sgprWaveIdx], 2" in text
+
+
+# --------------------------------------------------------- wave-id sourcing ---
+def test_live_waveidx_is_read_directly_with_no_temporary():
+    kernel = _kernel()
+    text = _Writer(kernel, waveIdxLive=True).waveSetSkip(kernel, (2,), "MXSA")
+    assert "s[sgprWaveIdx]" in text
+    assert "v_readfirstlane" not in text and "sgprArgType" not in text
+
+
+def test_dead_waveidx_recovers_the_index_from_the_argtype_pack():
+    kernel = _kernel()
+    text = _Writer(kernel, waveIdxLive=False, packedBits=2).waveId(kernel)
+    # Two bits from bit 8 up: the whole index, not just parity.
+    assert "s_lshr_b32" in text and "s[sgprArgType]" in text
+    assert "0x3" in text
+
+
+def test_dead_waveidx_without_a_pack_rematerializes_from_serial():
+    kernel = _kernel()
+    text = _Writer(kernel, waveIdxLive=False, packedBits=0).waveId(kernel)
+    assert "v_readfirstlane_b32" in text
+    assert "s_lshr_b32" in text
+
+
+def test_argtype_pack_is_one_bit_for_two_way_paths_and_wide_for_fuse_amx():
+    # TDMFuse=0/1 stay at one packed bit; TDMFuse=2 needs two.
+    for fuse in (0, 1):
+        kernel = _kernel(tdmFuse=fuse)
+        assert _Writer(kernel).tdmArgTypeWaveIdBits(kernel) == 1
+    kernel = _kernel(tdmFuse=2)
+    assert _Writer(kernel).tdmArgTypeWaveIdBits(kernel) == 2
+
+
+def test_argtype_wave_id_bits_stay_inside_the_masked_side_channel():
+    # cmpNamedArgTypeEq masks 0xFF, so the pack has bits 8..31 to live in.
+    kernel = _kernel(numWaves=4)
+    assert 8 + _Writer(kernel).tdmArgTypeWaveIdBits(kernel) <= 32
+
+
+# ---------------------------------------------------------------- the hoist ---
+def test_hoist_leaves_the_a_waves_on_their_own_wrapu():
+    """Waves 0-1 carry A, so a two-way fold would corrupt wave 1's WrapUA."""
+    kernel = _kernel()
+    text = _Writer(kernel).hoist(kernel)
+    assert "s_cmp_eq_u32 s[sgprWaveIdx], 2" in text
+    assert "s_cmp_eq_u32 s[sgprWaveIdx], 3" in text
+    # Nothing selects WrapUB into WrapUA: B has its own descriptor here.
+    assert "sgprWrapUB" not in text
+    # Both halves of both scale wraps are selected over.
+    assert text.count("s_cselect_b32") == 4
+
+
+def test_hoist_does_not_disturb_the_scale_wrapu_registers():
+    # removeStagger MXSA/MXSB still read WrapUMXSA/WrapUMXSB, so the fold may
+    # only ever write WrapUA.
+    kernel = _kernel()
+    for line in _Writer(kernel).hoist(kernel).splitlines():
+        if "s_cselect_b32" in line:
+            assert line.split(",")[0].endswith("s[sgprWrapUA+0]") or \
+                   line.split(",")[0].endswith("s[sgprWrapUA+1]")
