@@ -572,6 +572,9 @@ def test_rocke_compiles_and_packs(
         "global_buffer",
         "global_buffer",
         "by_value",
+        "by_value",
+        "by_value",
+        "by_value",
     ]
     assert [a["name"] for a in signature] == [
         "q_ptr",
@@ -579,6 +582,9 @@ def test_rocke_compiles_and_packs(
         "v_ptr",
         "o_ptr",
         "scale",
+        "batch",
+        "seqlen_q",
+        "seqlen_kv",
     ]
 
 
