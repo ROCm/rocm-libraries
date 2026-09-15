@@ -22,8 +22,8 @@ def load_tensile_metadata() -> Dict[str, ParamMeta]:
     """Pull defaults and valid ranges from tensilelite's validParameters
     and defaultBenchmarkCommonParameters.  Returns Dict[str, ParamMeta].
     Loaded lazily and cached for reuse across callers."""
-    from tensilelite.Common.GlobalParameters import defaultBenchmarkCommonParameters
-    from tensilelite.Common.ValidParameters import validParameters
+    from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
+    from Tensile.Common.ValidParameters import validParameters
 
     defaults = {}
     for dp in defaultBenchmarkCommonParameters:

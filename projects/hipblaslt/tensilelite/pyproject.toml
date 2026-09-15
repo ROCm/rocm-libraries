@@ -116,7 +116,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["tensilelite*"]
+include = ["tensilelite*", "Tensile"]
 
 [tool.setuptools.package-data]
 tensilelite = ["cmake/*"]
