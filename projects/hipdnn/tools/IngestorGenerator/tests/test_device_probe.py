@@ -96,6 +96,39 @@ class TestExitStatusDistinguishesUnobservedFromNegative:
         monkeypatch.setattr(device_probe.subprocess, "run", _fake_run(returncode=1))
         assert device_probe.main(_args(tmp_path)) == 1
 
+    def test_second_utility_observes_what_the_first_could_not(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """A host missing only the reference tool is observable, not unobserved.
+
+        The Windows ROCm wheels ship hipInfo and no rocminfo. Falling through to it
+        is the difference between a verified device and a gate that can never be met
+        on that platform, so the fallthrough is behaviour rather than convenience.
+        """
+
+        def run(args, **kwargs):
+            if args[0] == "rocminfo":
+                raise FileNotFoundError(2, "No such file or directory: 'rocminfo'")
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout="gcnArchName: gfx942\n", stderr=""
+            )
+
+        monkeypatch.setattr(device_probe.subprocess, "run", run)
+        rc = device_probe.main(_args(tmp_path))
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "UNOBSERVED" not in err
+        assert "FAIL" not in err
+
+    def test_every_utility_missing_is_still_unobserved(self, tmp_path, monkeypatch):
+        """The fallthrough must not turn an unobservable host into a verdict."""
+
+        def raise_missing(*args, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(device_probe.subprocess, "run", raise_missing)
+        assert device_probe.main(_args(tmp_path)) == 3
+
 
 class TestDeviceInfoRaisesTheDistinctType:
     def test_oserror_becomes_probe_unavailable(self, monkeypatch):

@@ -33,26 +33,42 @@ class ProbeUnavailable(Exception):
     """
 
 
+#: Inspection utilities in probe order. `rocminfo` is the reference tool and reports
+#: the architecture as `Name:`/`gfx...`; `hipInfo` reports it as `gcnArchName:` and is
+#: what the Windows ROCm wheels ship instead. Trying the second one turns an
+#: unobservable condition into an observed one wherever it can: exit 3 is honest, but
+#: it still leaves a gate unmet on a host whose device is present and healthy.
+DEVICE_TOOLS = ("rocminfo", "hipInfo")
+
+
 def device_info(arch: str, *, cwd=None, env=None) -> str:
-    """Return successful rocminfo evidence containing the exact requested arch."""
-    try:
-        result = subprocess.run(
-            ["rocminfo"], cwd=cwd, env=env, capture_output=True, text=True
+    """Return successful device evidence containing the exact requested arch.
+
+    Raises ValueError when a utility ran and contradicted the request, and
+    ProbeUnavailable only when none of them could be run at all.
+    """
+    unrunnable = []
+    for tool in DEVICE_TOOLS:
+        try:
+            result = subprocess.run(
+                [tool], cwd=cwd, env=env, capture_output=True, text=True
+            )
+        except OSError as exc:
+            unrunnable.append(f"cannot run {tool}: {exc}")
+            continue
+        if result.returncode:
+            raise ValueError(
+                f"{tool} exited {result.returncode}: {result.stderr.strip()}"
+            )
+        found = set(
+            re.findall(rf"(?<![A-Za-z0-9_]){ARCH_TOKEN}(?![A-Za-z0-9_])", result.stdout)
         )
-    except OSError as exc:
-        raise ProbeUnavailable(f"cannot run rocminfo: {exc}") from exc
-    if result.returncode:
-        raise ValueError(
-            f"rocminfo exited {result.returncode}: {result.stderr.strip()}"
-        )
-    found = set(
-        re.findall(rf"(?<![A-Za-z0-9_]){ARCH_TOKEN}(?![A-Za-z0-9_])", result.stdout)
-    )
-    if arch not in found:
-        raise ValueError(
-            f"wanted {arch}, found: {', '.join(sorted(found)) or 'no GPU agents'}"
-        )
-    return result.stdout
+        if arch not in found:
+            raise ValueError(
+                f"wanted {arch}, found: {', '.join(sorted(found)) or 'no GPU agents'}"
+            )
+        return result.stdout
+    raise ProbeUnavailable("; ".join(unrunnable))
 
 
 def main(argv=None) -> int:
