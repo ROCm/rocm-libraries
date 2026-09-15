@@ -20,7 +20,7 @@ namespace ck {
 #define __gfx120__
 #endif
 
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define __gfx125__
 #endif
 

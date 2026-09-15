@@ -618,11 +618,11 @@ struct amdgcn_compiler_target_state
 #endif // __gfx12_generic__
 
     // GFX12.5
-#if defined(__gfx1250__)
+#if defined(__gfx125__)
     static constexpr bool CK_TILE_ARCH_GFX1250 = true;
 #else
     static constexpr bool CK_TILE_ARCH_GFX1250 = false;
-#endif // __gfx1250__
+#endif // __gfx125__
 
     // SPIR-V (target-agnostic, JIT-compiled at runtime)
     // Guard with __HIP_DEVICE_COMPILE__ because __SPIRV__ is defined during

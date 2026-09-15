@@ -31,7 +31,7 @@ struct BaseGemmPipelineAgBgCrCompV3
     // 8-warp special case on gfx1250 so those blocks use the standard path.
     // NOTE: all users of these functions are CK_TILE_DEVICE (the pipeline
     // operator() and the grouped/persistent kernel launchers), and TailHandler's
-    // scenarios[] compiles in the same device pass, so this __gfx1250__/__GFX12__
+    // scenarios[] compiles in the same device pass, so this __gfx125__/__GFX12__
     // guard is host/device consistent.
 #if defined(__gfx125__) || defined(__GFX12__)
     static constexpr bool Use8WarpSchedule = false;

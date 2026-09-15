@@ -821,7 +821,7 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
     {
-#ifdef __gfx1250__
+#ifdef __gfx125__
         return __builtin_amdgcn_wmma_f32_32x16x128_f4(
             bit_cast<int32x16_t>(a_vec), bit_cast<int32x8_t>(b_vec), 0, bit_cast<fp32x16_t>(c_vec));
 #else
