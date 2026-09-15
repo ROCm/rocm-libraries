@@ -14,6 +14,25 @@ the archetype anchors, the neighbourhood factors, the regime buckets, the dtype 
 and the `seqlen_q <= seqlen_k` constraint. One exception is marked as such: the KV
 head count, which the declaration does not carry yet and this tool's graph builder
 does. See `_gqa_ratios`.
+
+This is the SECOND sampler over that declaration, and it is deliberately an
+approximation of the first rather than a port of it. `corpus_gen`'s
+`ProblemSpace.hpp` samples the same `archetypes` / `neighbourhood` / `mixture`
+blocks, and the two differ in exactly one respect worth naming: `ProblemSpace.hpp`
+turns the mixture shares into per-combination QUOTAS (`archetypeQuota`,
+`neighbourhoodQuota`, then whatever is left over goes to the exploration), while this
+module draws each point independently with the shares as WEIGHTS. Over a whole pool
+the two agree on the expected composition; a short pool from here holds the shares
+only in expectation, where a short pool from there holds them per combination.
+
+That difference is acceptable and the duplication is not accidental.
+`ProblemSpace.hpp` samples against a live oracle -- it asks an engine whether it will
+accept each drawn point -- so it lives behind a GPU-requiring executable, and this
+tool has to build a corpus offline from a checked-in declaration. Merging them would
+put a GPU on the path of a file-only step. What must NOT drift is the declaration's
+own arithmetic, so the shares, the constraint clause and the fallback for a missing
+`mixture` block are read the same way by both halves and pinned by a test
+(`test_both_samplers_fall_back_to_the_same_mixture_shares`).
 """
 from __future__ import annotations
 
@@ -40,6 +59,33 @@ DEFAULT_DECLARATION = Path("projects/hipdnn/tools/corpus_gen/operations/sdpa_fwd
 #: 1 is repeated because MHA is not a rare case; a ratio is kept only when it divides
 #: the drawn head count.
 GQA_RATIOS = (1, 1, 2, 4, 8)
+
+#: Shares for a declaration that names archetypes but no `mixture`, copied from
+#: `OperationMetadata.hpp`'s `metadata.mixture = Mixture{0.20, 0.60, 0.20}`. Declaring
+#: anchors and no mixture is asking for them to be used, and the C++ half says so in
+#: as many words: "picking the shares silently is worse than picking them visibly".
+ANCHORED_MIXTURE = {"archetypes": 0.20, "neighbourhood": 0.60, "exploration": 0.20}
+
+#: Shares for a declaration with no archetypes to anchor on, which is `Mixture`'s own
+#: member initialisation (`archetypes = 0.0, neighbourhood = 0.0, exploration = 1.0`)
+#: and the state `isExplorationOnly()` names. This module used to fall back to
+#: `ANCHORED_MIXTURE` unconditionally: the draws still all ended up in the exploration
+#: (`sample` has nothing to anchor to), but 80% of them were counted under
+#: `by_kind["archetypes"]` and `by_kind["neighbourhood"]`, so the manifest reported a
+#: composition the pool did not have.
+EXPLORATION_ONLY = {"archetypes": 0.0, "neighbourhood": 0.0, "exploration": 1.0}
+
+
+def mixture(declaration: dict) -> dict:
+    """The declared mixture shares, or the fallback `OperationMetadata.hpp` picks.
+
+    Two samplers read one declaration (see the module docstring); the shares are the
+    part of it they must not disagree on, because they are the corpus composition.
+    """
+    declared = declaration.get("mixture")
+    if declared:
+        return dict(declared)
+    return dict(ANCHORED_MIXTURE if declaration.get("archetypes") else EXPLORATION_ONLY)
 
 
 def load(path: Path) -> dict:
@@ -194,10 +240,9 @@ def sample(declaration: dict, wanted: int, seed: int, max_bytes: int,
     rng = random.Random(seed)
     satisfied = _constraint(declaration)
     archetypes = _archetype_points(declaration)
-    mixture = declaration.get("mixture") or {"archetypes": 0.2, "neighbourhood": 0.6,
-                                             "exploration": 0.2}
-    kinds = sorted(mixture)
-    weights = [mixture[kind] for kind in kinds]
+    shares = mixture(declaration)
+    kinds = sorted(shares)
+    weights = [shares[kind] for kind in kinds]
 
     seen = set(exclude)
     candidates: list[Candidate] = []

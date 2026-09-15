@@ -95,18 +95,54 @@ def deduplicate(pools: dict) -> tuple[dict, dict]:
     return unique, dropped
 
 
+def _spread(pool: list) -> list:
+    """One pool reordered so that any prefix of it holds the pool's regime mix.
+
+    The model pool is the only source that arrives in an order carrying no
+    information: `model_shapes.from_shape_dir` walks `sorted(root.rglob("*"))`, so the
+    pool is grouped by file name and each file's rows are contiguous. Truncating the
+    front of that is truncating the alphabet -- against the cluster's published
+    `~/model-shapes` it dropped 95 of 200 shapes and with them every regime that
+    happened to be written down in a late-named file. The packs are already spread by
+    `make_sdpa_bundles.stratified` and the sweep is already drawn in its declared
+    mixture proportions; this is the same guarantee for the third source.
+
+    Proportional rather than round-robin: the model pool's own mix is the fact worth
+    preserving -- it is what real models run -- so a prefix should look like the pool
+    and not like one row of every regime the pool happens to mention. Each member is
+    placed at its fractional position within its regime and the positions are merged,
+    which puts `n * share` of every regime in any prefix of length `n` and keeps each
+    regime's internal order.
+    """
+    buckets: dict = {}
+    for candidate in pool:
+        buckets.setdefault(candidate.shape.regime, []).append(candidate)
+    placed = []
+    # `rank` breaks ties between regimes of equal size deterministically, by first
+    # appearance, so one pool always orders one way.
+    for rank, members in enumerate(buckets.values()):
+        span = len(members)
+        placed.extend(((index * 2 + 1) / (span * 2), rank, index, candidate)
+                      for index, candidate in enumerate(members))
+    placed.sort(key=lambda row: row[:3])
+    return [row[3] for row in placed]
+
+
 def select(pools: dict, count: int, shares: dict) -> tuple[list, dict]:
     """The corpus: each pool's allocation, taken from the front of the pool.
 
-    The front, not a sample: every pool is already ordered so that a prefix stays
-    spread across the space it covers (`make_sdpa_bundles.stratified` for the packs,
-    the declared mixture weights for the sweep). Re-sampling here would undo that.
+    The front, not a sample: every pool is ordered so that a prefix stays spread
+    across the space it covers -- `make_sdpa_bundles.stratified` for the packs, the
+    declared mixture weights for the sweep, `_spread` here for the model pool.
+    Re-sampling at this point would undo all three.
     """
-    capacity = {source: len(pools.get(source, [])) for source in SOURCES}
+    ordered = {source: list(pools.get(source, [])) for source in SOURCES}
+    ordered["model"] = _spread(ordered["model"])
+    capacity = {source: len(ordered[source]) for source in SOURCES}
     allocation = allocate(count, capacity, shares)
     selected: list[Candidate] = []
     for source in SOURCES:
-        selected.extend(pools.get(source, [])[:allocation[source]])
+        selected.extend(ordered[source][:allocation[source]])
     return selected, allocation
 
 

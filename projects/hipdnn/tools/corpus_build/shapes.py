@@ -71,7 +71,15 @@ class Shape:
             value = getattr(self, field)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError(f"{field} must be a positive int, got {value!r}")
-        if self.heads_q % self.heads_kv and self.heads_kv % self.heads_q:
+        # Strictly `heads_q % heads_kv`, not "either divides the other".
+        # `EngineFeatures.hpp:185` declines a graph whose `heads % kv_heads != 0`, so
+        # `hq=4, hkv=8` never binds `graph.flops` and `uhd_gen/immediate.py` raises
+        # "full-graph graph.flops must be a positive finite number" -- the abort this
+        # tool exists to catch before cluster time is spent. The shipped packs carry no
+        # such geometry (0 of 2733 descriptors), so it arrives only from the `model`
+        # source's published rows or a future `sweep` declaration, neither of which is
+        # bounded by what rocKE compiled.
+        if self.heads_q % self.heads_kv:
             raise ValueError(
                 f"head counts must divide: {self.heads_q} query heads against "
                 f"{self.heads_kv} KV heads is not a grouping any kernel implements"
@@ -83,14 +91,19 @@ class Shape:
             raise ValueError(
                 f"a non-causal shape has no diagonal to anchor, so it carries the "
                 f"canonical {TOP_LEFT!r}; got {self.alignment!r}")
-        if self.causal and self.seqlen_q > self.seqlen_kv:
+        if self.alignment == BOTTOM_RIGHT and self.seqlen_q > self.seqlen_kv:
             raise ValueError(
-                f"causal cross attention is not a problem: {self.seqlen_q} queries against "
-                f"{self.seqlen_kv} keys leaves the later queries with nothing to attend to, "
-                "and `sdpa_fwd.opmeta.json`'s masked FLOP count "
-                "(Sq*Sk - Sq*(Sq-1)/2) goes non-positive, so the measurement cannot be "
-                "labelled at all -- `full-graph graph.flops must be a positive finite "
-                "number` ended AITER's 843-graph collection on run 67929589"
+                f"a bottom-right causal diagonal cannot carry {self.seqlen_q} queries "
+                f"against {self.seqlen_kv} keys: anchoring at the corner leaves the "
+                "leading queries with an empty mask row, and the runtime's bottom-right "
+                "arm (`EngineFeatures.hpp` `Sq*Sk - Sq*(Sq-1)/2`) returns nullopt rather "
+                "than approximate it, so no label can be derived -- `full-graph "
+                "graph.flops must be a positive finite number` ended AITER's 843-graph "
+                "collection on run 67929589. The TOP_LEFT arm of the same function is a "
+                "different formula (`t*(t+1)/2 + (Sq-t)*Sk`, `t = min(Sq, Sk)`) which "
+                "stays strictly positive for Sq > Sk, so top-left causal cross attention "
+                "is admitted: refusing it too deleted 28 of gfx942_attention_dense's 664 "
+                "compiled geometries from the corpus as unlabellable"
             )
         # No `seqlen_q <= seqlen_kv` check. That relation is a constraint on the
         # DECLARED space (`sdpa_fwd.opmeta.json` `constraints`), which the sweep reads

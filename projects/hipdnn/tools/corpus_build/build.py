@@ -47,11 +47,16 @@ def both_anchors(pool: list) -> list:
     Beside, not appended: `assemble.select` takes a prefix of each pool, so twins
     collected at the end would be cut off by every allocation short of the whole pool
     -- which is a corpus that carries the second anchor only when nothing needed it.
+
+    A causal shape with more queries than keys is carried at its top-left anchor
+    alone. That is not a preference: the runtime's bottom-right FLOP arm
+    (`EngineFeatures.hpp`) returns nullopt for `Sq > Sk` and `Shape` refuses the
+    combination, so the twin would be a graph no training row can be made of.
     """
     twinned = []
     for candidate in pool:
         twinned.append(candidate)
-        if candidate.shape.causal:
+        if candidate.shape.causal and candidate.shape.seqlen_q <= candidate.shape.seqlen_kv:
             twinned.append(dataclasses.replace(candidate, shape=dataclasses.replace(
                 candidate.shape, alignment=BOTTOM_RIGHT)))
     return twinned
