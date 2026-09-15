@@ -43,9 +43,6 @@ WARP_MEDIUM_LWS = [16, 32]
 WARP_MEDIUM_IPT = list(range(1, 18)) 
 WARP_MEDIUM_BS = [128, 256]
 
-SEGMENT_COUNT = [10, 100, 1000, 2500, 5000, 7500, 10000, 100000]
-SEGMENT_LENGTH = [30, 256, 3000, 300000]
-
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
@@ -68,10 +65,6 @@ class Tuner(BaseTuner):
         params['warp_medium_bs'] = WARP_MEDIUM_BS
         params['warp_partitioning_allowed'] = [1]
 
-        # Not a tunable param, but is useful for seperating runs
-        params['segment_count'] = SEGMENT_COUNT
-        params['segment_length'] = SEGMENT_LENGTH 
-
         return params
 
     def _get_restrictions(
@@ -80,8 +73,6 @@ class Tuner(BaseTuner):
 
         key_size = TYPE_CONFIGS[key_type].size
         TUNING_SHARED_MAX = 65536
-        MIN_SIZE = 300000
-        MAX_SIZE = 33554432
 
         def validate(params):
             bs = params['block_size_x']
@@ -91,14 +82,6 @@ class Tuner(BaseTuner):
             warp_small_ipt = params['warp_small_ipt']
             warp_medium_lws = params['warp_medium_lws']
             warp_medium_ipt = params['warp_medium_ipt']
-
-            sc = params['segment_count']
-            sl = params['segment_length']
-
-            num_elem = sc * sl
-
-            if not MIN_SIZE <= num_elem <= MAX_SIZE:
-                return False
 
             if warp_small_lws * warp_small_ipt > warp_medium_lws * warp_medium_ipt:
                 return False

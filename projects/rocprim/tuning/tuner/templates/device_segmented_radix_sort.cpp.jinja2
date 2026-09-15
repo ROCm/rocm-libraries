@@ -44,5 +44,29 @@
 {% endblock %}
 
 {% block benchmark_queue %}
-    executor.queue<benchmark_type>({{ config.segment_count }}, {{ config.segment_length }});
+    const std::vector<size_t> segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
+    const std::vector<size_t> segment_lengths{30, 256, 3000, 300000};
+    constexpr size_t min_size = 30000;
+    constexpr size_t max_size = 33554432;
+
+    for(const size_t & sc : segment_counts){
+        for(const size_t & sl : segment_lengths){
+            const size_t n_elem = sc * sl;
+            if(n_elem < min_size || n_elem > max_size)
+                continue;
+            executor.queue<benchmark_type>(sc, sl);
+        }
+    }
+{% endblock %}
+
+{% block get_time %}
+    double log_sum = 0;
+    double n = 0;
+
+    for(const double & x : executor.get_all_bytes_per_second()){
+        log_sum += std::log((1000.0 * primbench::GiB) / x);
+        n++;
+    }
+
+    return std::exp(log_sum / n);
 {% endblock %}
