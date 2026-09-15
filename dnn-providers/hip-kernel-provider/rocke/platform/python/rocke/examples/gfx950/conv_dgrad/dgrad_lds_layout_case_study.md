@@ -134,13 +134,18 @@ python3 python/rocke/benchmark/benchmark_implicit_gemm_conv.py \
     --csv dgrad_sweep.csv
 ```
 
-The layout is deduced by `DgradConvSpec.default_lds_k_outer`, which the sweep
-driver and dispatch both call. Because that predicate answers the same way for
-every combo of a given shape, a plain sweep measures **one** layout and has no
-baseline to compare against — the `_kouter` suffix appears on every kernel or on
-none. Use `--lds-k-outer {auto,on,off}` to force it and get a real A/B; `auto`
-is the default and reproduces the deduced behaviour. Pair the two runs by config
-identity rather than by rank. Keep `--csv` output outside the git work tree.
+**There is no `--lds-k-outer` flag to A/B against**, exactly as on wgrad. The
+layout is deduced by `DgradConvSpec.default_lds_k_outer`, which the sweep driver
+and library dispatch both call, so the sweep reports the deduced layout rather
+than a choice — a run-level override would let the sweep measure a kernel
+dispatch can never select. On gfx950 that predicate answers the same way for
+every buildable combo of a given shape (`wavelet`, the one pipeline it excludes,
+does not build on MFMA), so a sweep measures **one** layout and has no baseline
+to compare against: the `_kouter` suffix appears on every kernel or on none.
+
+To A/B the layout itself, build both specs directly and compare — the numeric
+tests above do it in-process, and the single-config driver below does it for a
+traced run. Keep `--csv` output outside the git work tree.
 
 Single-config run, for a trace or a focused A/B —
 [`run_one_dgrad.py`](run_one_dgrad.py) builds and launches exactly one

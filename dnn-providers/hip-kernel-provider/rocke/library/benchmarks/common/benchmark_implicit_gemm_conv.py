@@ -820,26 +820,6 @@ def main() -> int:
     )
 
     parser.add_argument(
-        "--lds-k-outer",
-        choices=("auto", "on", "off"),
-        default="auto",
-        dest="lds_k_outer",
-        help=(
-            "dgrad only: override the K-outer B-tile layout. "
-            "auto = ask DgradConvSpec.default_lds_k_outer per combo (the "
-            "shipped dispatch policy, and the default), "
-            "on/off = force the flag for every combo. "
-            "Forcing exists so the two layouts can be A/B'd on identical "
-            "configs. 'auto' answers per combo: on gfx950 it answers the same "
-            "way for every buildable combo of a shape (wavelet, the one "
-            "pipeline the predicate excludes, does not build on MFMA), so a "
-            "single sweep measures one layout and silently has no baseline; on "
-            "gfx1250 wavelet does build and the predicate returns False for "
-            "it, so an auto sweep there can already contain both layouts."
-        ),
-    )
-
-    parser.add_argument(
         "--split-k-prune",
         type=float,
         default=None,
@@ -1590,7 +1570,7 @@ def _build_dgrad_one(args_tuple):
     Returns ``(combo, spec, resolved_split_k, kernel)`` on success, or ``None``.
     Must live at module level for pickle.
     """
-    combo, problem, dtype, arch, vec_a, vec_b, vec_c, lds_k_outer_mode = args_tuple
+    combo, problem, dtype, arch, vec_a, vec_b, vec_c = args_tuple
     (
         tile_m,
         tile_n,
@@ -1649,25 +1629,18 @@ def _build_dgrad_one(args_tuple):
 
     spec = DgradConvSpec(
         problem=problem,
-        # Deduced per combo by default, not a run-level flag: warp_tile_mn is
-        # itself a sweep axis, and the predicate keys on it. Mirrors the wgrad
-        # caller. --lds-k-outer on/off forces it instead, so the two layouts can
-        # be compared on identical configs -- on gfx950 the predicate is
-        # constant across a sweep of one shape (wavelet, the pipeline it
-        # excludes, does not build on MFMA), so a sweep measures one layout and
-        # silently has no baseline; on gfx1250 wavelet does build, so an auto
-        # sweep there can already contain both layouts.
-        lds_k_outer=(
-            DgradConvSpec.default_lds_k_outer(
-                arch=arch,
-                dtype_b=dtype,
-                warp_tile_n=warp_tile_mn,
-                cpg=problem.cpg,
-                wave_size=target.wave_size,
-                pipeline=pipeline,
-            )
-            if lds_k_outer_mode == "auto"
-            else lds_k_outer_mode == "on"
+        # Deduced per combo, not a run-level flag: warp_tile_mn is itself a
+        # sweep axis, and the predicate keys on it. Mirrors the wgrad caller.
+        # The M-outer path keeps coverage through the in-process A/B tests in
+        # tests/instances/test_conv_dgrad_correctness.py, which construct both
+        # layouts directly rather than going through this driver.
+        lds_k_outer=DgradConvSpec.default_lds_k_outer(
+            arch=arch,
+            dtype_b=dtype,
+            warp_tile_n=warp_tile_mn,
+            cpg=problem.cpg,
+            wave_size=target.wave_size,
+            pipeline=pipeline,
         ),
         name="rocke_bench_igemm_dgrad",
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
@@ -2924,10 +2897,7 @@ def _run_dgrad_sweep(
     # ---- Phase 1: build + validate all specs, collect kernels (parallel) ----
     if jobs != 1:
         print(f"Building IR for {len(combos)} dgrad combos in parallel ...", flush=True)
-    work = [
-        (combo, problem, dtype, arch, vec_a, vec_b, vec_c, args.lds_k_outer)
-        for combo in combos
-    ]
+    work = [(combo, problem, dtype, arch, vec_a, vec_b, vec_c) for combo in combos]
     pending = _build_ir_parallel(work, _build_dgrad_one, jobs)
     n_skipped = len(combos) - len(pending)
 

@@ -79,12 +79,17 @@ def _parse_args(argv=None):
     )
     ap.add_argument(
         "--kouter",
-        choices=("on", "off"),
-        default="on",
-        help="force the K-outer B tile. The dispatch policy deduces this via "
-        "DgradConvSpec.default_lds_k_outer, which returns one fixed answer for "
-        "any single config -- so forcing it is the only way to A/B the two "
-        "layouts.",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="K-outer B tile layout. auto (the default) asks "
+        "DgradConvSpec.default_lds_k_outer, the same predicate library dispatch "
+        "and the sweep driver call, so a plain run traces the kernel that would "
+        "actually ship for this shape. on/off set the field directly on the "
+        "spec this driver builds -- what "
+        "tests/instances/test_conv_dgrad_correctness.py does to A/B the two "
+        "layouts in-process -- which is how you get an M-outer baseline to "
+        "trace against. Neither dispatch nor the sweep driver takes an "
+        "override.",
     )
     ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--iters", type=int, default=200)
@@ -156,6 +161,22 @@ def main(argv=None) -> int:
         return 2
 
     vec_a, vec_b, vec_c = DgradConvSpec.default_vector_sizes(p.cpg, p.kpg, a.dtype)
+    # auto reproduces the shipped dispatch decision; on/off force the field so
+    # the two layouts can be traced on one config. The predicate declines on an
+    # odd channel run, so forcing "on" there traces a kernel dispatch would
+    # never select -- deliberate for an A/B, wrong for a "what ships?" capture.
+    lds_k_outer = (
+        DgradConvSpec.default_lds_k_outer(
+            arch=a.arch,
+            dtype_b=a.dtype,
+            warp_tile_n=a.warp_tile_mn,
+            cpg=p.cpg,
+            wave_size=tgt.wave_size,
+            pipeline=a.pipeline,
+        )
+        if a.kouter == "auto"
+        else a.kouter == "on"
+    )
     spec = DgradConvSpec(
         problem=p,
         name=a.name,
@@ -172,7 +193,7 @@ def main(argv=None) -> int:
         pipeline=a.pipeline,
         epilogue=a.epilogue,
         split_k=a.split_k,
-        lds_k_outer=(a.kouter == "on"),
+        lds_k_outer=lds_k_outer,
         vector_size_a=vec_a,
         vector_size_b=vec_b,
         vector_size_c=vec_c,
@@ -190,7 +211,8 @@ def main(argv=None) -> int:
     print(
         f"config tile={a.tile_m}x{a.tile_n}x{a.tile_k} warp={a.warp_m}x{a.warp_n} "
         f"atom={a.warp_tile_mn}x{a.warp_tile_mn}x{atom.k} {a.pipeline}/{a.epilogue} "
-        f"spk={a.split_k} kouter={a.kouter} sub_gemms={len(sub_gemms)} "
+        f"spk={a.split_k} kouter={'on' if lds_k_outer else 'off'}"
+        f"{' (auto)' if a.kouter == 'auto' else ''} sub_gemms={len(sub_gemms)} "
         f"needs_atomic={spec.needs_atomic}",
         flush=True,
     )
