@@ -1053,8 +1053,12 @@ loaded is the one named here.")
         "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/pointwise_model.bin")
     add_custom_command(
         OUTPUT ${_pointwise_model_generated}
+        # Second argument is the descriptor root the tool resolves the fixture's UED from,
+        # for the provenance it stamps into the generated UHD. The staged set is that root,
+        # so the staging commands above have to have run: they are named as dependencies.
         COMMAND uhd_model_gen "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}"
-        DEPENDS uhd_model_gen
+                "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}"
+        DEPENDS uhd_model_gen ${_pointwise_model_staged}
         COMMENT "hkp: generating the pointwise_model UHD and model artifact"
         VERBATIM)
 
