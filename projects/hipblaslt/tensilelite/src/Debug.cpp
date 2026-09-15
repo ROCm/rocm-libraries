@@ -40,6 +40,12 @@ namespace TensileLite
 {
     std::once_flag debug_init;
 
+    Debug& Debug::Instance()
+    {
+        static Debug instance;
+        return instance;
+    }
+
     bool Debug::printPropertyEvaluation() const
     {
         return m_value & (0x2 | 0x4);

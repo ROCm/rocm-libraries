@@ -47,6 +47,8 @@ namespace TensileLite
     class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
     {
     public:
+        static Debug& Instance();
+
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
         bool printPredicateEvaluationVerbose() const;
@@ -172,4 +174,3 @@ namespace TensileLite
         Debug();
     };
 } // namespace TensileLite
-
