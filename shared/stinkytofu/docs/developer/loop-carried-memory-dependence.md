@@ -252,6 +252,21 @@ previous trip's reads before the fill issues. `war_already_drained` pins that.
 Safe by accident of the schedule, not by construction: deepen register buffering
 or hoist the fill and the drain vanishes while the hazard stays.
 
+**Adding a wait can remove later ones.** `restoreTensorState` makes the pass
+non-monotonic, and this is demonstrated, not theoretical. Preserving the StreamK
+persistent-loop barrier (a `CK_Tensor` consumer, so it drains and trims the queue
+in sweep 0) caused `restoreTensorState` to propagate that empty snapshot
+downstream, and a `TDMPlusLdsBuf=0` StreamK kernel lost **three**
+`s_wait_tensorcnt 0` — before the loop, *inside* the main loop body, and at
+`toPGR1`. One added barrier, three guards deleted, on a kernel with no rotating
+ring and no annotations anywhere near it.
+
+Two consequences. Any change that introduces a tensor-counter consumer needs the
+whole suite re-diffed, not just the kernel it targets; and kernels that look
+correct today may be relying on waits that exist only as an artifact of where the
+sweep-0 snapshot happened to be taken. Removing the freeze (item 2 above) is no
+longer a tidy-up — it is what makes results in this pass composable.
+
 **`tripsBack` is lattice state.** It is part of `operator==`. Convergence was
 verified (no cap-hit warnings across the suite), but changes here can stall the
 fixed point and silently fall back to `s_wait_* 0` everywhere.
