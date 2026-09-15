@@ -139,27 +139,27 @@ namespace detail
 
     ROCPRIM_DEVICE ROCPRIM_INLINE unsigned char atomic_load(const unsigned char* address)
     {
-        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        return __scoped_atomic_load_n(address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE unsigned short atomic_load(const unsigned short* address)
     {
-        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        return __scoped_atomic_load_n(address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE unsigned int atomic_load(const unsigned int* address)
     {
-        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        return __scoped_atomic_load_n(address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE unsigned long atomic_load(const unsigned long* address)
     {
-        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        return __scoped_atomic_load_n(address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE unsigned long long atomic_load(const unsigned long long* address)
     {
-        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        return __scoped_atomic_load_n(address, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
 // atomic_load for uint128 is not supported for unknown targets or spirv
@@ -257,28 +257,28 @@ namespace detail
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void atomic_store(unsigned char* address, unsigned char value)
     {
-        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        __scoped_atomic_store_n(address, value, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned short* address, unsigned short value)
     {
-        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        __scoped_atomic_store_n(address, value, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned int* address, unsigned int value)
     {
-        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        __scoped_atomic_store_n(address, value, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned long* address, unsigned long value)
     {
-        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        __scoped_atomic_store_n(address, value, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned long long* address,
                                                     unsigned long long  value)
     {
-        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        __scoped_atomic_store_n(address, value, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     }
 
 // atomic_store for uint128 is not supported for unknown targets or spirv
