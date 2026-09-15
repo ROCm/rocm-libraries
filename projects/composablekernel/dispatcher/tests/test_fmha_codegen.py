@@ -158,6 +158,119 @@ class TestFmhaCodegen(unittest.TestCase):
         self.assertFalse(result.valid)
         self.assertTrue(any("group mode" in error for error in result.errors))
 
+    def test_gfx1100_batch_prefill_codegen_emits_gfx11_policy(self):
+        config = sample_config(
+            arch="gfx1100",
+            signature={
+                "family": "batch_prefill",
+                "mode": "group",
+                "paged_kv": True,
+                "page_size": 16,
+                "kv_memory_layout": "linear",
+                "kv_lookup_table": "vllm",
+            },
+            algorithm={
+                "pipeline": "batch_prefill_gfx11",
+                "tile": [128, 32, 32, 128, 32, 128],
+                "wave": [8, 1, 1, 8, 1, 1, 1, 1, 1],
+                "warp": [16, 16, 16, 16, 16, 16, 16, 16, 16],
+            },
+        )
+        result = validate_config(config)
+        self.assertTrue(result.valid, result.errors)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cmd = [
+                sys.executable,
+                str(CODEGEN),
+                "--output-dir",
+                tmpdir,
+                "--gpu-target",
+                "gfx1100",
+                "--config-json",
+                json.dumps(config),
+            ]
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(ROOT / "codegen")
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
+            generated = list(Path(tmpdir).glob("fmha_*.hpp"))
+            self.assertEqual(len(generated), 1)
+            text = generated[0].read_text()
+            self.assertIn("BlockFmhaBatchPrefillPipelineQRKSVSAsyncGfx11Policy", text)
+            self.assertNotIn("QRKSVSAsyncDefaultPolicy", text)
+            # kHasSink occupies the bool slot immediately before kPageBlockSize.
+            self.assertRegex(
+                text,
+                r"TileFmhaBatchPrefillTraits<[\s\S]*false,\s*16,",
+            )
+
+    def _batch_prefill_traits_args(self, sink=False):
+        config = sample_config(
+            arch="gfx950",
+            signature={
+                "family": "batch_prefill",
+                "mode": "group",
+                "paged_kv": True,
+                "page_size": 16,
+                "kv_memory_layout": "linear",
+                "kv_lookup_table": "vllm",
+                "sink": sink,
+            },
+            algorithm={"pipeline": "qr_async", "tile": [128, 128, 32, 128, 32, 128]},
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cmd = [
+                sys.executable,
+                str(CODEGEN),
+                "--output-dir",
+                tmpdir,
+                "--gpu-target",
+                "gfx950",
+                "--config-json",
+                json.dumps(config),
+            ]
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(ROOT / "codegen")
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
+            generated = list(Path(tmpdir).glob("fmha_*.hpp"))
+            self.assertEqual(len(generated), 1)
+            text = generated[0].read_text()
+
+        start = text.index("TileFmhaBatchPrefillTraits<") + len(
+            "TileFmhaBatchPrefillTraits<"
+        )
+        end = text.index(">;", start)
+        return config, [a.strip() for a in text[start:end].split(",")]
+
+    def test_batch_prefill_traits_pass_sink_before_page_size(self):
+        config, args = self._batch_prefill_traits_args()
+
+        # kBlockPerCu, kSkipMinSeqlenQ, kHasSink, kPageBlockSize, layout, lookup
+        self.assertEqual(len(args), 16, args)
+        self.assertEqual(args[10], str(config["algorithm"]["block_per_cu"]), args)
+        self.assertIn(args[11], ("true", "false"), args)
+        self.assertIn(args[12], ("true", "false"), args)
+        self.assertEqual(args[13], "16", args)
+        self.assertTrue(args[14].endswith("LINEAR_LAYOUT"), args)
+        self.assertTrue(args[15].endswith("VLLM_BLOCK_TABLE_2D"), args)
+
+    def test_batch_prefill_sink_slot_tracks_the_signature(self):
+        """Pin kHasSink to its input, not merely to "some bool".
+
+        kSkipMinSeqlenQ (slot 11) and kHasSink (slot 12) are adjacent bools, so
+        asserting only that each is "true"/"false" still passes if the two slots
+        are swapped or if the sink flag is emitted as a hard-coded constant.
+        Sweeping sink and requiring slot 12 to follow it rules both out.
+        """
+        seen = {}
+        for sink in (False, True):
+            _, args = self._batch_prefill_traits_args(sink=sink)
+            self.assertEqual(len(args), 16, args)
+            self.assertEqual(args[12], "true" if sink else "false", args)
+            seen[sink] = args[12]
+        self.assertNotEqual(seen[False], seen[True], seen)
+
     def test_receipt_aliases_match_profiles(self):
         flash = sample_config(signature={"bias": "alibi"})
         pytorch = sample_config(signature={"bias": "bias"})
