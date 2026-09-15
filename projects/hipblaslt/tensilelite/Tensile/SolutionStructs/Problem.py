@@ -425,11 +425,7 @@ _defaultProblemType = {
     # in:f32, intermediate:xf32, out:f32. f32 = xf32(f32) * xf32(f32)
     "UseBeta": True,  # =True use beta parameter (asm will check for B=0 and optimize the write for that), =False don't use beta parameter
     "UseE": False,  # =True use output E to output gemm results before activation
-    "UsePartialRMS":         False,
-    "PartialRMSResidualAdd": False,
-    "PartialRMSQuant":       False,
-    "PartialRMSStoreBf16D":  False,
-    "DQuantType":            "None",
+    "UseRMSEpilogue":        False,
     "UseDeepseekScaleA":     False,
     "UseDeepseekScaleB":     False,
     "DeepseekScaleAq0":      128,  # M-dimension quantization block size for scaleA
@@ -1362,12 +1358,8 @@ class ProblemType(Mapping):
       name.append("AmaxD")
     if self["FusedGemmA2A"]:
       name.append("FusedA2A")
-    if self["UsePartialRMS"]:
-      name.append("PRMS")
-      if self["PartialRMSResidualAdd"]:
-        name.append("RA")
-      if self["PartialRMSQuant"]:
-        name.append("Q")
+    if self["UseRMSEpilogue"]:
+      name.append("RMSE")
     if self["Sparse"]:
       if self["Sparse"] == 2:
         name.append("SPBML%d"%(self["MetadataLayout"]))

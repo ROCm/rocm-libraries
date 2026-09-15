@@ -206,36 +206,12 @@ namespace TensileLite
             if(args.count("output-amaxD"))
                 m_outputAmaxD = args["output-amaxD"].as<bool>();
 
-            if(args.count("dquant-type"))
-            {
-                std::string dq = args["dquant-type"].as<std::string>();
-                if(dq == "tile")
-                    m_dquantType = DQuantType::Tile;
-                else if(dq == "mxfp8")
-                    m_dquantType = DQuantType::MXFP8;
-                else
-                    m_dquantType = DQuantType::None;
-            }
-            if(args.count("dquant-size-0"))
-                m_dquantSize0Override = static_cast<int>(args["dquant-size-0"].as<size_t>());
-            if(args.count("dquant-size-1"))
-                m_dquantSize1Override = static_cast<int>(args["dquant-size-1"].as<size_t>());
-            if(args.count("use-partial-rms"))
-                m_usePartialRMS = args["use-partial-rms"].as<bool>();
-            if(args.count("partial-rms-residual-add"))
-                m_partialRMSResidualAdd = args["partial-rms-residual-add"].as<bool>();
-            if(args.count("partial-rms-quant"))
-                m_partialRMSQuant = args["partial-rms-quant"].as<bool>();
-            if(args.count("partial-rms-store-bf16-d"))
-                m_partialRMSStoreBf16D = args["partial-rms-store-bf16-d"].as<bool>();
-            if(args.count("partial-rms-mt0"))
-                m_partialRMSMT0Override = static_cast<int>(args["partial-rms-mt0"].as<size_t>());
-            if(args.count("partial-rms-mt1"))
-                m_partialRMSMT1Override = static_cast<int>(args["partial-rms-mt1"].as<size_t>());
-            if(args.count("partial-rms-gamma-type"))
-                m_partialRMSGammaType = args["partial-rms-gamma-type"].as<rocisa::DataType>();
-            if(args.count("partial-rms-residual-type"))
-                m_partialRMSResidualType = args["partial-rms-residual-type"].as<rocisa::DataType>();
+            if(args.count("use-rms-epilogue"))
+                m_rmsEpilogue = args["use-rms-epilogue"].as<bool>();
+            if(args.count("rms-epilogue-gamma-type"))
+                m_rmsEpilogueGammaType = args["rms-epilogue-gamma-type"].as<rocisa::DataType>();
+            if(args.count("rms-epilogue-residual-type"))
+                m_rmsEpilogueResidualType = args["rms-epilogue-residual-type"].as<rocisa::DataType>();
             if(args.count("use-deepseek-scale-a"))
                 m_useDeepseekScaleA = args["use-deepseek-scale-a"].as<bool>();
             if(args.count("use-deepseek-scale-b"))
@@ -460,15 +436,13 @@ namespace TensileLite
                                 rv.back().setUseGateResidual(m_useGateResidual);
                                 rv.back().setUseE(m_useE);
                                 rv.back().setOutputAmaxD(m_outputAmaxD);
-                                rv.back().setDquantType(m_dquantType);
                                 rv.back().setUseDeepseekScaleA(m_useDeepseekScaleA);
                                 rv.back().setUseDeepseekScaleB(m_useDeepseekScaleB);
                                 rv.back().setDeepseekScaleAq0(m_deepseekScaleAq0);
                                 rv.back().setDeepseekScaleAq1(m_deepseekScaleAq1);
                                 rv.back().setDeepseekScaleBq0(m_deepseekScaleBq0);
                                 rv.back().setDeepseekScaleBq1(m_deepseekScaleBq1);
-                                rv.back().setUsePartialRMS(m_usePartialRMS);
-                                rv.back().setPartialRMSResidualAdd(m_partialRMSResidualAdd);
+                                rv.back().setRMSEpilogue(m_rmsEpilogue);
                                 rv.back().setKernelLanguage(m_kernelLanguage);
                                 rv.back().setPerformanceMetric(m_performanceMetric);
                                 rv.back().setDeterministicMode(m_deterministicMode);
@@ -532,58 +506,53 @@ namespace TensileLite
                                     rv.back().setSynchronizer(
                                         m_constantTypes[ContractionProblemGemm::CONST::ALPHA], 409600);
                                 }
-                                if(m_usePartialRMS)
+                                if(m_rmsEpilogue)
                                 {
-                                    // PartialRMSAxis=0: free0=N_hidden tiles with MT0,
-                                    // free1=M_tokens padded with MT1.
-                                    // d.sizes()[0]=N_hidden (free0), d.sizes()[1]=M_tokens (free1).
+                                    // RMSEpilogue (fused RMSNorm K1 producer):
+                                    //   free0 = N_hidden, free1 = M_tokens.
                                     // partialBuf[token, t_free0]: shape [M_tokens_padded, n_d].
-                                    size_t nHidden  = rv.back().d().sizes()[0];  // free0
-                                    size_t mTokens  = rv.back().d().sizes()[1];  // free1
+                                    size_t nHidden = rv.back().d().sizes()[0];  // free0
+                                    size_t mTokens = rv.back().d().sizes()[1];  // free1
 
-                                    int mt0      = m_partialRMSMT0Override > 0 ? m_partialRMSMT0Override : 16;
-                                    int mt1      = m_partialRMSMT1Override > 0 ? m_partialRMSMT1Override : 16;
-                                    // A benchmark group may mix solutions with different MT1, each
-                                    // writing ceil(M_tokens/MT1)*MT1 padded token rows into the shared
-                                    // partialBuf. Size the row count for the worst case by assuming a
-                                    // maximum macro tile of 512, which upper-bounds any real MT1's
-                                    // padding (ceil(M/MT1)*MT1 < M + MT1 <= M + 512).
+                                    // Use a fixed MT0/MT1=16 for buffer sizing; the actual
+                                    // macro-tile is selected by the kernel, but the conservative
+                                    // bound with maxMacroTile=512 covers any real MT1 padding.
+                                    int    mt0          = 16;
+                                    int    mt1          = 16;
                                     size_t maxMacroTile = 512;
-                                    size_t mPadded  = ((mTokens + maxMacroTile - 1) / maxMacroTile) * maxMacroTile + maxMacroTile;
-                                    size_t nTilesN  = (nHidden   + static_cast<size_t>(mt0) - 1) / static_cast<size_t>(mt0);
+                                    size_t mPadded
+                                        = ((mTokens + maxMacroTile - 1) / maxMacroTile) * maxMacroTile
+                                          + maxMacroTile;
+                                    size_t nTilesN = (nHidden + static_cast<size_t>(mt0) - 1)
+                                                     / static_cast<size_t>(mt0);
 
-                                    rv.back().setPartialRMSMT0(mt0);
-                                    rv.back().setPartialRMSMT1(mt1);
-                                    rv.back().setRMSGamma(m_partialRMSGammaType, nHidden);
-                                    rv.back().setPartialRMSQuant(m_partialRMSQuant);
-                                    // Mirror the store-bf16-d flag onto the problem so the
-                                    // UsePartialRMSStoreBf16D solution predicate matches.
-                                    rv.back().setPartialRMSStoreBf16D(m_partialRMSStoreBf16D);
-                                    // Double the row count so both halves fit: first half = Σx²,
-                                    // second half = amax(|D|)/448.
-                                    size_t pbRows = m_partialRMSQuant ? 2 * mPadded : mPadded;
+                                    // rmsEpilogue always needs gamma, partialBuf, residual, and
+                                    // residualOut; MXFP8 quant (derived from F8 dest) doubles
+                                    // the partialBuf row count.
+                                    bool useMxfp8
+                                        = m_rmsEpilogue
+                                          && rv.back().d().dataType() == rocisa::DataType::Float8;
+                                    size_t pbRows = useMxfp8 ? 2 * mPadded : mPadded;
+
+                                    rv.back().setRMSGamma(m_rmsEpilogueGammaType, nHidden);
                                     rv.back().setPartialBuf(pbRows, nTilesN);
-                                    rv.back().setPartialRMSResidualAdd(m_partialRMSResidualAdd);
-                                    if(m_partialRMSResidualAdd)
-                                        rv.back().setResidual(m_partialRMSResidualType, mTokens, nHidden);
-                                    if(m_partialRMSStoreBf16D)
-                                    {
-                                        // ResidualOut: same shape as D (fp8 output), bf16 elements.
-                                        auto const& dSizes   = rv.back().d().sizes();
-                                        auto const& dStrides = rv.back().d().strides();
-                                        rv.back().setResidualOut(rocisa::DataType::BFloat16,
-                                                                 dSizes, dStrides);
-                                    }
+                                    rv.back().setResidual(m_rmsEpilogueResidualType, mTokens, nHidden);
+                                    // ResidualOut: same shape as D, bf16 elements.
+                                    auto const& dSizes   = rv.back().d().sizes();
+                                    auto const& dStrides = rv.back().d().strides();
+                                    rv.back().setResidualOut(rocisa::DataType::BFloat16,
+                                                             dSizes, dStrides);
+                                    static_cast<void>(mt1); // mt1 reserved for future use.
                                 }
-                                if(m_dquantType != DQuantType::None)
+                                // Set the MXFP8 scale tensor dimensions when rmsEpilogue + F8 dest
+                                // (block shape is always 32x1; q0=32, q1=1).
+                                if(m_rmsEpilogue
+                                   && rv.back().d().dataType() == rocisa::DataType::Float8)
                                 {
                                     size_t M  = rv.back().d().sizes()[0];
                                     size_t N  = rv.back().d().sizes()[1];
-                                    int    q0 = m_dquantSize0Override > 0 ? m_dquantSize0Override : static_cast<int>(M);
-                                    int    q1 = m_dquantSize1Override > 0 ? m_dquantSize1Override : static_cast<int>(N);
-                                    rv.back().setDquantSize0(q0);
-                                    rv.back().setDquantSize1(q1);
-                                    rv.back().setQuantScale((M + q0 - 1) / q0, (N + q1 - 1) / q1);
+                                    int    q0 = 32;
+                                    int    q1 = 1;
                                     rv.back().setMxScale((N + q1 - 1) / q1, (M + q0 - 1) / q0);
                                 }
                                 if(m_useDeepseekScaleA)

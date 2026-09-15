@@ -1,0 +1,300 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Baseline sweep for RMSEpilogue-vs-beta cost analysis. One run, four groups:
+#   1) RMSEpilogue (RMSE1) over 38 tiles  2) no-epi (BBS_H) over 38 tiles
+#   3) RMSEpilogue fused epilogue at winner tile  4) beta*C at winner tile
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  ExitOnFails: 0
+  PrintSolutionRejectionReason: True
+  NumBenchmarks: 10
+  KernelTime: True
+  KeepBuildTmp: True
+  DataInitTypeBeta: 1
+
+BenchmarkProblems:
+
+  ########## GROUP 1: RMSEpilogue (RMSE1), 38 tiles ##########
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseRMSEpilogue: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 32, 1,  1, 12, 8, 2, 2]  # MT 384x256 (winner)
+          - [16, 16, 32, 1,  1, 10, 10, 2, 2] # MT 320x320
+          - [16, 16, 32, 1,  1, 8, 12, 2, 2]  # MT 256x384
+          - [16, 16, 32, 1,  1, 14, 6, 2, 2]  # MT 448x192
+          - [16, 16, 32, 1,  1, 6, 14, 2, 2]  # MT 192x448
+          - [16, 16, 32, 1,  1, 16, 4, 2, 2]  # MT 512x128
+          - [16, 16, 32, 1,  1, 4, 16, 2, 2]  # MT 128x512
+          - [16, 16, 32, 1,  1, 9, 11, 2, 2]  # MT 288x352
+          - [16, 16, 32, 1,  1, 11, 9, 2, 2]  # MT 352x288
+          - [16, 16, 32, 1,  1, 9, 9, 2, 2]   # MT 288x288
+          - [16, 16, 32, 1,  1, 14, 4, 2, 2]  # MT 448x128
+          - [16, 16, 32, 1,  1, 12, 6, 2, 2]  # MT 384x192
+          - [16, 16, 32, 1,  1, 13, 5,  2, 2] # MT 416x160
+          - [16, 16, 32, 1,  1, 5, 13,  2, 2] # MT 160x416
+          - [16, 16, 32, 1,  1, 13, 7,  2, 2] # MT 416x224
+          - [16, 16, 32, 1,  1, 7, 13,  2, 2] # MT 224x416
+          - [16, 16, 32, 1,  1, 15, 4,  2, 2] # MT 480x128
+          - [16, 16, 32, 1,  1, 4, 15,  2, 2] # MT 128x480
+          - [16, 16, 32, 1,  1, 8, 6,  2, 2]  # MT 256x192
+          - [16, 16, 32, 1,  1, 8, 8,  4, 1]  # MT 512x128
+          - [16, 16, 32, 1,  1, 7, 12, 4, 1]  # MT 448x192
+          - [16, 16, 32, 1,  1, 6, 16, 4, 1]  # MT 384x256
+          - [16, 16, 32, 1,  1, 9, 4,  4, 1]  # MT 576x64
+          - [16, 16, 32, 1,  1, 5, 20, 4, 1]  # MT 320x320
+          - [16, 16, 32, 1,  1, 4, 23, 4, 1]  # MT 256x368
+          - [16, 16, 32, 1,  1, 2, 24, 4, 1]  # MT 128x384
+          - [16, 16, 32, 1,  1, 8, 8,  1, 4]  # MT 128x512
+          - [16, 16, 32, 1,  1, 12, 7, 1, 4]  # MT 192x448
+          - [16, 16, 32, 1,  1, 16, 6, 1, 4]  # MT 256x384
+          - [16, 16, 32, 1,  1, 13, 6, 1, 4]  # MT 208x384
+          - [16, 16, 32, 1,  1, 17, 5, 1, 4]  # MT 272x320
+          - [16, 16, 32, 1,  1, 19, 5, 1, 4]  # MT 304x320
+          - [16, 16, 32, 1,  1, 20, 5, 1, 4]  # MT 320x320
+          - [16, 16, 32, 1,  1, 21, 4, 1, 4]  # MT 336x256
+          - [16, 16, 32, 1,  1, 23, 4, 1, 4]  # MT 368x256
+          - [16, 16, 32, 1,  1, 24, 4, 1, 4]  # MT 384x256
+          - [16, 16, 32, 1,  1, 32, 2, 1, 4]  # MT 512x128
+        - RMSEpilogue: [True]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [8192, 8192, 1, 8192]
+
+  ########## GROUP 2: no-epilogue (BBS_H), same 38 tiles ##########
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 32, 1,  1, 12, 8, 2, 2]  # MT 384x256 (winner)
+          - [16, 16, 32, 1,  1, 10, 10, 2, 2] # MT 320x320
+          - [16, 16, 32, 1,  1, 8, 12, 2, 2]  # MT 256x384
+          - [16, 16, 32, 1,  1, 14, 6, 2, 2]  # MT 448x192
+          - [16, 16, 32, 1,  1, 6, 14, 2, 2]  # MT 192x448
+          - [16, 16, 32, 1,  1, 16, 4, 2, 2]  # MT 512x128
+          - [16, 16, 32, 1,  1, 4, 16, 2, 2]  # MT 128x512
+          - [16, 16, 32, 1,  1, 9, 11, 2, 2]  # MT 288x352
+          - [16, 16, 32, 1,  1, 11, 9, 2, 2]  # MT 352x288
+          - [16, 16, 32, 1,  1, 9, 9, 2, 2]   # MT 288x288
+          - [16, 16, 32, 1,  1, 14, 4, 2, 2]  # MT 448x128
+          - [16, 16, 32, 1,  1, 12, 6, 2, 2]  # MT 384x192
+          - [16, 16, 32, 1,  1, 13, 5,  2, 2] # MT 416x160
+          - [16, 16, 32, 1,  1, 5, 13,  2, 2] # MT 160x416
+          - [16, 16, 32, 1,  1, 13, 7,  2, 2] # MT 416x224
+          - [16, 16, 32, 1,  1, 7, 13,  2, 2] # MT 224x416
+          - [16, 16, 32, 1,  1, 15, 4,  2, 2] # MT 480x128
+          - [16, 16, 32, 1,  1, 4, 15,  2, 2] # MT 128x480
+          - [16, 16, 32, 1,  1, 8, 6,  2, 2]  # MT 256x192
+          - [16, 16, 32, 1,  1, 8, 8,  4, 1]  # MT 512x128
+          - [16, 16, 32, 1,  1, 7, 12, 4, 1]  # MT 448x192
+          - [16, 16, 32, 1,  1, 6, 16, 4, 1]  # MT 384x256
+          - [16, 16, 32, 1,  1, 9, 4,  4, 1]  # MT 576x64
+          - [16, 16, 32, 1,  1, 5, 20, 4, 1]  # MT 320x320
+          - [16, 16, 32, 1,  1, 4, 23, 4, 1]  # MT 256x368
+          - [16, 16, 32, 1,  1, 2, 24, 4, 1]  # MT 128x384
+          - [16, 16, 32, 1,  1, 8, 8,  1, 4]  # MT 128x512
+          - [16, 16, 32, 1,  1, 12, 7, 1, 4]  # MT 192x448
+          - [16, 16, 32, 1,  1, 16, 6, 1, 4]  # MT 256x384
+          - [16, 16, 32, 1,  1, 13, 6, 1, 4]  # MT 208x384
+          - [16, 16, 32, 1,  1, 17, 5, 1, 4]  # MT 272x320
+          - [16, 16, 32, 1,  1, 19, 5, 1, 4]  # MT 304x320
+          - [16, 16, 32, 1,  1, 20, 5, 1, 4]  # MT 320x320
+          - [16, 16, 32, 1,  1, 21, 4, 1, 4]  # MT 336x256
+          - [16, 16, 32, 1,  1, 23, 4, 1, 4]  # MT 368x256
+          - [16, 16, 32, 1,  1, 24, 4, 1, 4]  # MT 384x256
+          - [16, 16, 32, 1,  1, 32, 2, 1, 4]  # MT 512x128
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - StaggerU: [0]
+        - UseSubtileImpl: [True]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [8192, 8192, 1, 8192]
+
+  ########## GROUP 3: RMSEpilogue fused epilogue (RMSE1, bf16D), winner tile ##########
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseRMSEpilogue: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1,  1, 12, 8, 2, 2]  # MT 384x256 (winner)
+        - RMSEpilogue: [True]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [8192, 8192, 1, 8192]
+
+  ########## GROUP 4: beta*C (BBS_BH, UseBeta=True), winner tile ##########
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1,  1, 12, 8, 2, 2]  # MT 384x256 (winner)
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [8192, 8192, 1, 8192]
+
+LibraryLogic:
+  ScheduleName: "baselines_sweep_bf16_k1"
+  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Prediction"

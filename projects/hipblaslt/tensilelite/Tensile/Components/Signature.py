@@ -440,15 +440,17 @@ class SignatureDefault(Signature):
             userArgumentsInfo.activationSize += userArgumentsInfo.actMaxSize
         userArgumentsInfo.activationSize += 4  # Type size
 
-        if kernel["PartialRMS"]:
-            # PartialRMS (K1) epilogue appends in this order:
+        if kernel["RMSEpilogue"]:
+            # RMSEpilogue (K1) epilogue appends in this order:
             #   RMSNormGamma: global buffer pointer (8 bytes) — per-column gamma weight;
-            #     element type set by PartialRMSGammaType (bf16 by default).
+            #     element type set by RMSEpilogueGammaType (bf16 by default).
             #   PartialBuf:   fp32 global buffer pointer (8 bytes) — output Σx² per (row, N-tile).
+            #   ResidualBuf:  global buffer pointer (8 bytes) — residual-add input.
+            #   AddressResidualOut: bf16 global buffer pointer (8 bytes) — pre-quant output.
             # No RMSNormEps: K2 uses eps, not K1.
             # NTilesN is not a kernarg: the device computes it from SizesFree[1] and the
             # compile-time MT1 constant to avoid consuming a permanent named-SGPR slot.
-            gammaValueType = _partialRMSSideValueType(kernel.get("PartialRMSGammaType"))
+            gammaValueType = _partialRMSSideValueType(kernel.get("RMSEpilogueGammaType"))
             # Advance the kernarg offset to the next 8-byte boundary so the
             # following 64-bit pointer is aligned. The host mirrors this with
             # appendAligned<>() and the device loader with (offset+7)&~7; no
@@ -457,32 +459,22 @@ class SignatureDefault(Signature):
             signature.addArg("RMSNormGamma", SVK.SIG_GLOBALBUFFER, gammaValueType, "generic")
             signature.addArg("PartialBuf",   SVK.SIG_GLOBALBUFFER, "f32",          "generic")
             userArgumentsInfo.rmsNormSize += 8 + 8  # gamma ptr + partialBuf ptr
-            if kernel["PartialRMSResidualAdd"]:
-                resValueType = _partialRMSSideValueType(kernel.get("PartialRMSResidualType"))
-                signature.addArg("ResidualBuf", SVK.SIG_GLOBALBUFFER, resValueType, "generic")
-                userArgumentsInfo.rmsNormSize += 8  # residual ptr
-            if kernel["PartialRMSStoreBf16D"]:
-                # AddressResidualOut: 64-bit ptr for the bf16 pre-quant output.
-                # Advance the kernarg offset to the next 8-byte boundary so the
-                # following 64-bit pointer is aligned. The host mirrors this with
-                # appendAligned<>() and the device loader with (offset+7)&~7; no
-                # named pad kernarg is emitted.
-                userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
-                signature.addArg("AddressResidualOut", SVK.SIG_GLOBALBUFFER, "bf16", "generic")
-                userArgumentsInfo.rmsNormSize += 8  # residualOut ptr
-
-        if kernel["DQuantType"] == "Tile":
-            # TileQuant epilogue appends QuantScale: fp32 global buffer pointer (8 bytes).
+            # ResidualBuf: residual-add is unconditional under RMSEpilogue.
+            resValueType = _partialRMSSideValueType(kernel.get("RMSEpilogueResidualType"))
+            signature.addArg("ResidualBuf", SVK.SIG_GLOBALBUFFER, resValueType, "generic")
+            userArgumentsInfo.rmsNormSize += 8  # residual ptr
+            # AddressResidualOut: bf16 pre-quant output, unconditional under RMSEpilogue.
             # Advance the kernarg offset to the next 8-byte boundary so the
             # following 64-bit pointer is aligned. The host mirrors this with
             # appendAligned<>() and the device loader with (offset+7)&~7; no
             # named pad kernarg is emitted.
             userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
-            signature.addArg("QuantScale", SVK.SIG_GLOBALBUFFER, "f32", "generic")
-            userArgumentsInfo.rmsNormSize += 8  # 8B quantScale ptr
+            signature.addArg("AddressResidualOut", SVK.SIG_GLOBALBUFFER, "bf16", "generic")
+            userArgumentsInfo.rmsNormSize += 8  # residualOut ptr
 
-        if kernel["DQuantType"] == "MXFP8":
-            # MXFP8Quant epilogue appends MXScale: u8 global buffer pointer (8 bytes).
+        # MXScale is appended when MXFP8 quant is active: RMSEpilogue + F8 dest (always 32x1 block).
+        if kernel["RMSEpilogue"] and kernel["ProblemType"]["DestDataType"].isFloat8():
+            # MXFP8 epilogue appends MXScale: u8 global buffer pointer (8 bytes).
             # Advance the kernarg offset to the next 8-byte boundary so the
             # following 64-bit pointer is aligned. The host mirrors this with
             # appendAligned<>() and the device loader with (offset+7)&~7; no

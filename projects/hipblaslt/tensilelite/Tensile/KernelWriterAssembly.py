@@ -8984,7 +8984,7 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("SrdC", 4, 4)
       module.add(RegSet("s", "sgprSrdC", self.sgprs["SrdC"]))
       module.add(RegSet("s", "sgprSrdD", self.sgprs["SrdD"]))
-      if kernel["PartialRMSStoreBf16D"]:
+      if kernel["RMSEpilogue"]:
         if not kernel["ProblemType"]["UseBeta"]:
           # SrdC is unused when beta=0; alias SrdResidualOut to the same physical
           # SGPR range to avoid exceeding the 106-SGPR hardware limit.
@@ -15205,8 +15205,8 @@ class KernelWriterAssembly(KernelWriter):
     # print("len(elements)= ", len(elements_1))
     noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.streamK.requiresWorkspaceReductionStorePath or kernel["StreamKForceDPOnly"]))
     module = Module("notLocalSplitUGlobalWrite")
-    # TileQuant and MXFP8Quant apply alpha and handle beta=0 in their epilogues.
-    ownsEpilogue = kernel.get("DQuantType", "None") != "None"
+    # The MXFP8 epilogue (RMSEpilogue + F8 dest) applies alpha and handles beta=0 itself.
+    ownsEpilogue = kernel["RMSEpilogue"] and kernel["ProblemType"]["DestDataType"].isFloat8()
     applyAlpha = not ownsEpilogue
     betas = [False] if ownsEpilogue else None
 
@@ -15927,22 +15927,10 @@ class KernelWriterAssembly(KernelWriter):
     vgprTiles = self.states.d.tileInfo.vgprTiles
     if not vgprTiles:
       return module
-    if kernel["PartialRMS"]:
-      if kernel["PartialRMSResidualAdd"] or kernel["PartialRMSStoreBf16D"]:
-        from .Components.Subtile.SubtileResidualAddEmit import SubtileResidualAddEmitter
-        module.addComment1("ResidualAdd: load residual, H = GEMM + residual, store ResidualOut bf16.")
-        module.add(SubtileResidualAddEmitter(self, kernel).emit(vgprTiles))
-      from .Components.Subtile.SubtilePartialRMSEmit import SubtilePartialRMSEmitter
-      module.addComment1("PartialRMS: fused partial sum-of-squares + gamma epilogue.")
-      module.add(SubtilePartialRMSEmitter(self, kernel).emit(vgprTiles))
-    if kernel["DQuantType"] == "Tile":
-      from .Components.Subtile.SubtileDynamicQuant import SubtileTileQuantEmitter
-      module.addComment1("TileQuant: per-tile amax pre-scale for fp8 D output.")
-      module.add(SubtileTileQuantEmitter(self, kernel).emit(vgprTiles))
-    if kernel["DQuantType"] == "MXFP8":
-      from .Components.Subtile.SubtileDynamicQuant import SubtileMXFP8QuantEmitter
-      module.addComment1("MXFP8Quant: per-block e8m0 dynamic quant for fp8 D output.")
-      module.add(SubtileMXFP8QuantEmitter(self, kernel).emit(vgprTiles))
+    if kernel["RMSEpilogue"]:
+      from .Components.Subtile.SubtileMegaFusedEmit import SubtileMegaFusedEmitter
+      module.add(SubtileMegaFusedEmitter(self, kernel).emit(vgprTiles))
+      return module
     return module
 
   def globalWriteElements(self, kernel, tPA, tPB, vectorWidths_2, vectorWidths_1, elements_2, elements_1,
@@ -16169,7 +16157,7 @@ class KernelWriterAssembly(KernelWriter):
             module.add(self.allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr("SizeI")))
           module.add(SMulI32(dst=sgpr("SrdScaleAlphaVec+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleAlphaVec+2"), comment="ScaleAlphaVec scaled by BPE"))# scaled by BPE
         for d in range(len(factorDims)):
-          vectorDataTypes.scaleAlpha(d).dataType = kernel["ProblemType"]["ComputeDataType"]
+          vectorDataTypes.scaleAlpha(factorDims[d]).dataType = kernel["ProblemType"]["ComputeDataType"]
 
       # Add ScaleABVec support here
       # Issue read scale A/B vector value for later use

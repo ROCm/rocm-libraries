@@ -402,12 +402,7 @@ namespace TensileLite
         // kernels (e.g. rejecting them for small K).
         bool useSubtileImpl = false;
 
-        bool       partialRMS            = false;
-        bool       partialRMSResidualAdd = false;
-        bool       partialRMSStoreBf16D  = false;
-        DQuantType dquantType            = DQuantType::None;
-        int        dquantSize0           = 0;
-        int  dquantSize1           = 0;
+        bool       rmsEpilogue = false;
         bool deepseekScaleA        = false;
         bool deepseekScaleB        = false;
 
@@ -904,7 +899,7 @@ namespace TensileLite
                                         size_t          gsu) const;
 
         // Bytes of transient scratch the fused-RMSNorm K1 producer needs for its per-tile
-        // partial-sum-of-squares buffer (0 unless sizeMapping.partialRMS). Sized from the
+        // partial-sum-of-squares buffer (0 unless sizeMapping.rmsEpilogue). Sized from the
         // solution's macro tile: ceil(M/MT0)*MT0 * ceil(N/MT1) * batch * sizeof(float).
         size_t partialRMSPartialBufBytes(Problem const& problem) const;
         size_t requiredWorkspaceSizeGroupedGemm(std::vector<Problem> const& problems,
@@ -1282,11 +1277,7 @@ namespace TensileLite
             // apply the K-dimension swizzle on the MX scale tensor before upload.
             int mxScaleFormat = 0;
 
-            bool usePartialRMS         = false;
-            bool partialRMSResidualAdd = false;
-            bool partialRMSQuant       = false;
-            bool partialRMSStoreBf16D  = false;
-            DQuantType dquantType      = DQuantType::None;
+            bool useRMSEpilogue   = false;
             bool useDeepseekScaleA     = false;
             bool useDeepseekScaleB     = false;
             // Block-scale tile dims serialized by the library writer; read so the

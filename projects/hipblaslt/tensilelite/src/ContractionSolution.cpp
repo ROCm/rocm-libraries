@@ -1860,22 +1860,19 @@ namespace TensileLite
                 args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
                                                hasGate ? gate.strides()[i] : 0);
         }
-        if(sizeMapping.partialRMS)
+        if(sizeMapping.rmsEpilogue)
         {
-            // RMSNormGamma is the first 64-bit pointer of the PartialRMS block and
+            // RMSNormGamma is the first 64-bit pointer of the RMSEpilogue block and
             // must land on an 8-byte kernarg boundary. The device reserves an implicit
             // 4-byte alignment gap (no named kernarg) before the pointer; align here
             // so the host and device layouts agree.
             args.template appendAligned<void const*>("RMSNormGamma", inputs.rmsGamma);
-            args.template append<void*>      ("PartialBuf",   inputs.partialBuf);
-            if(sizeMapping.partialRMSResidualAdd)
-                args.template append<void const*>("ResidualBuf", inputs.residual);
-            if(sizeMapping.partialRMSStoreBf16D)
-                args.template appendAligned<void*>("AddressResidualOut", inputs.residualOut);
+            args.template append<void*>      ("PartialBuf",           inputs.partialBuf);
+            args.template append<void const*>("ResidualBuf",          inputs.residual);
+            args.template appendAligned<void*>("AddressResidualOut",  inputs.residualOut);
         }
-        if(sizeMapping.dquantType == DQuantType::Tile)
-            args.template appendAligned<void*>("QuantScale", inputs.quantScale);
-        if(sizeMapping.dquantType == DQuantType::MXFP8)
+        // MXFP8 quant is derived: rmsEpilogue active + D output is OCP fp8 e4m3.
+        if(sizeMapping.rmsEpilogue && problem.d().dataType() == rocisa::DataType::Float8)
             args.template appendAligned<void*>("MXScale", inputs.mxScale);
     }
 
@@ -5545,9 +5542,9 @@ namespace TensileLite
         // Fused RMSNorm (full flow): the K1 producer writes a transient per-tile
         // partial-sum-of-squares buffer that the reduce-and-apply Kernel 2 consumes. It is
         // carved from the tail of the workspace (after any GSU/StreamK region), so account
-        // for it here; the launch path uses partialRMSPartialBufBytes() to locate the offset
+        // for it here; the launch path uses partialRMSPartialBufBytes() to find the offset
         // as (requiredWorkspaceSize - partialBufBytes).
-        if(sizeMapping.partialRMS)
+        if(sizeMapping.rmsEpilogue)
             size += partialRMSPartialBufBytes(problem);
 
         return size;
@@ -5555,7 +5552,7 @@ namespace TensileLite
 
     size_t ContractionSolution::partialRMSPartialBufBytes(Problem const& problem) const
     {
-        if(!sizeMapping.partialRMS)
+        if(!sizeMapping.rmsEpilogue)
             return 0;
 
         const size_t mt0 = sizeMapping.macroTile.x;
