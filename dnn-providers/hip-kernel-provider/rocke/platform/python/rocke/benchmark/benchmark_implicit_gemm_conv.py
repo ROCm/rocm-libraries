@@ -1191,13 +1191,12 @@ def main() -> int:
                     is_valid_wgrad_spec=is_valid_wgrad_spec,
                 )
             elif direction == "dgrad":
-                rc = _run_dgrad_sweep(
+                rc, rocke_results = _run_dgrad_sweep(
                     **_common,
                     DgradConvSpec=DgradConvSpec,
                     build_implicit_gemm_conv_dgrad=build_implicit_gemm_conv_dgrad,
                     is_valid_dgrad_spec=is_valid_dgrad_spec,
                 )
-                rocke_results = None
             else:
                 rc, rocke_results = _run_sweep(
                     **_common,
@@ -1520,6 +1519,19 @@ def _build_wgrad_two_stage_one(args_tuple):
         epilogue=epilogue,
         split_k=resolved_split_k,
         two_stage=True,
+        # Same per-combo K-outer gate the single-stage leg uses
+        # (_build_wgrad_one). Without it the two-stage leg builds M-outer
+        # kernels while the atomic leg builds K-outer ones, so the two sets of
+        # timings the driver prints side by side are not comparable and the
+        # K-outer win is never measured on the deterministic path.
+        lds_k_outer=WgradConvSpec.default_lds_k_outer(
+            arch=arch,
+            dtype_a=dtype,
+            dtype_b=dtype,
+            warp_tile_m=warp_tile_mn,
+            warp_tile_n=warp_tile_mn,
+            wave_size=target.wave_size,
+        ),
     )
     ok, _ = is_valid_wgrad_spec(spec, arch)
     if not ok:
@@ -1614,6 +1626,7 @@ def _build_dgrad_one(args_tuple):
             warp_tile_n=warp_tile_mn,
             cpg=problem.cpg,
             wave_size=target.wave_size,
+            pipeline=pipeline,
         ),
         name="rocke_bench_igemm_dgrad",
         data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
@@ -3050,7 +3063,7 @@ def _run_dgrad_sweep(
 
     if not results:
         print("No valid dgrad configurations found.", file=sys.stderr)
-        return 1
+        return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
     top_n = min(args.top, len(results))
@@ -3074,7 +3087,7 @@ def _run_dgrad_sweep(
 
     best = results[0]
     print(f"\nBest: {best.tflops:.1f} TFLOPS -- {best.kernel_name}")
-    return 0
+    return 0, results
 
 
 if __name__ == "__main__":
