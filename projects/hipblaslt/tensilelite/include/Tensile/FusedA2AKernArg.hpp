@@ -99,6 +99,13 @@ namespace TensileLite
         uint32_t                               am,
         uint32_t                               numCu)
     {
+        if(!fusedA2AWorldSizeValid((int)worldSize))
+        {
+            throw std::runtime_error("[fused-a2a] worldSize " + std::to_string(worldSize)
+                                     + " outside [1, " + std::to_string(FUSED_A2A_MAX_RANKS)
+                                     + "]");
+        }
+
         size_t before = args.size();
 
         static const FusedA2APeerFields kAbsent{};
