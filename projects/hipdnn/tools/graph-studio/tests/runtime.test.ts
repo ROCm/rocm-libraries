@@ -10,11 +10,15 @@ const { resolve, runtimeEnvironment } = require("../electron/paths.cjs");
 const temporary: string[] = [];
 afterEach(() => temporary.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
+// resolve() reports every path with forward slashes, so build expectations in
+// that shape; node's join() uses backslashes on Windows.
+const at = (...segments: string[]) => join(...segments).replace(/\\/g, "/");
+
 function installation() {
-  const directory = mkdtempSync(join(tmpdir(), "studio installed "));
+  const directory = at(mkdtempSync(join(tmpdir(), "studio installed ")));
   temporary.push(directory);
-  const prefix = join(directory, "application");
-  const app = join(prefix, "share", "hipdnn", "graph-studio");
+  const prefix = at(directory, "application");
+  const app = at(prefix, "share", "hipdnn", "graph-studio");
   mkdirSync(app, { recursive: true });
   const config = {
     mode: "installed",
@@ -24,12 +28,12 @@ function installation() {
     addonPath: "native/hipdnn_engine.node",
     backendLibrary: "../../../lib/libhipdnn_backend.so",
     pluginDir: "../../../lib/hipdnn_plugins/engines",
-    pythonExecutable: join(directory, "python environment", "bin", "python"),
+    pythonExecutable: at(directory, "python environment", "bin", "python"),
     electronExecutable: "../../../libexec/hipdnn-graph-studio/electron",
-    runtimeDirs: ["../../../lib", join(directory, "wheel", "lib")],
-    binDirs: ["../../../bin", join(directory, "python environment", "bin")],
+    runtimeDirs: ["../../../lib", at(directory, "wheel", "lib")],
+    binDirs: ["../../../bin", at(directory, "python environment", "bin")],
   };
-  const configFile = join(app, "runtime-config.json");
+  const configFile = at(app, "runtime-config.json");
   writeFileSync(configFile, JSON.stringify(config));
   return { directory, prefix, configFile };
 }
@@ -37,36 +41,36 @@ function installation() {
 describe("installed runtime selection", () => {
   test("rebases application artifacts after moving the install prefix", () => {
     const { directory, prefix } = installation();
-    const moved = join(directory, "moved application");
+    const moved = at(directory, "moved application");
     renameSync(prefix, moved);
     const paths = resolve({
-      HIPDNN_BUILD_CONFIG: join(moved, "share/hipdnn/graph-studio/runtime-config.json"),
-      GRAPH_STUDIO_OUT_DIR: join(directory, "obsolete build"),
+      HIPDNN_BUILD_CONFIG: at(moved, "share/hipdnn/graph-studio/runtime-config.json"),
+      GRAPH_STUDIO_OUT_DIR: at(directory, "obsolete build"),
     });
     expect(paths.root).toBe(moved);
-    expect(paths.addonPath).toBe(join(moved, "share/hipdnn/graph-studio/native/hipdnn_engine.node"));
-    expect(paths.pluginDir).toBe(join(moved, "lib/hipdnn_plugins/engines"));
-    expect(paths.pythonExecutable).toBe(join(directory, "python environment/bin/python"));
+    expect(paths.addonPath).toBe(at(moved, "share/hipdnn/graph-studio/native/hipdnn_engine.node"));
+    expect(paths.pluginDir).toBe(at(moved, "lib/hipdnn_plugins/engines"));
+    expect(paths.pythonExecutable).toBe(at(directory, "python environment/bin/python"));
   });
 
   test.skipIf(process.platform === "win32")("installed commands beat inherited SDK executables", () => {
     const { directory, prefix, configFile } = installation();
-    const oldBin = join(directory, "old sdk", "bin");
-    for (const [bin, label] of [[join(prefix, "bin"), "installed"], [oldBin, "old-sdk"]]) {
+    const oldBin = at(directory, "old sdk", "bin");
+    for (const [bin, label] of [[at(prefix, "bin"), "installed"], [oldBin, "old-sdk"]]) {
       mkdirSync(bin, { recursive: true });
-      writeFileSync(join(bin, "selected-tool"), `#!/bin/sh\nprintf '${label}'\n`, { mode: 0o755 });
+      writeFileSync(at(bin, "selected-tool"), `#!/bin/sh\nprintf '${label}'\n`, { mode: 0o755 });
     }
     const paths = resolve({ HIPDNN_BUILD_CONFIG: configFile });
     const environment = runtimeEnvironment(paths, {
       PATH: [oldBin, "/usr/bin", "/bin"].join(delimiter),
-      LD_LIBRARY_PATH: join(directory, "old sdk", "lib"),
-      HIPDNN_SDK: join(directory, "old sdk"),
+      LD_LIBRARY_PATH: at(directory, "old sdk", "lib"),
+      HIPDNN_SDK: at(directory, "old sdk"),
       VITE_DEV_SERVER_URL: "http://obsolete-development-server",
     });
     const child = spawnSync("selected-tool", [], { env: environment, cwd: directory, encoding: "utf8" });
     expect(child.status).toBe(0);
     expect(child.stdout).toBe("installed");
-    expect(environment.LD_LIBRARY_PATH.split(delimiter)[0]).toBe(join(prefix, "lib"));
+    expect(environment.LD_LIBRARY_PATH.split(delimiter)[0]).toBe(at(prefix, "lib"));
     expect(environment.HIPDNN_SDK).toBe(prefix);
     expect(environment.VITE_DEV_SERVER_URL).toBeUndefined();
   });
