@@ -16,6 +16,7 @@
     "electron:pack": "bun run build && bunx electron-builder"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@xyflow/react": "^12.11.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
