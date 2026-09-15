@@ -603,6 +603,7 @@ Arguments:
   - ldc: c_int64*32
   - ldd: c_int64*32
   - lde: c_int64*32
+  - a2a_extent: c_int64
   - batch_count: c_int32
   - batch_mode: c_int32
   - batch_offset_a: c_int64
@@ -641,6 +642,7 @@ Arguments:
   - threads: c_uint16
   - streams: c_uint16
   - devices: c_uint8
+  - a2a_world: c_uint8
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
@@ -745,6 +747,8 @@ Defaults:
   threads: 0
   streams: 0
   devices: 0
+  a2a_world: 1
+  a2a_extent: 0
   gpu_arch: ''
   gpu_arch_exclude: ''
   norm_check: 0

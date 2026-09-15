@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "benchmark_collective.hpp" // CollectiveAgreement, agree_value, agree_flag, AgreeOp
 #include "benchmark_stats.hpp" // TimingConfig, TimingResult
 #include "hipblaslt_test.hpp" // CHECK_HIP_ERROR
 #include "utility.hpp" // get_time_us_sync
@@ -263,7 +264,8 @@ namespace hipblaslt_bench
                                 hipEvent_t                   event_stop,
                                 hipStream_t                  stream,
                                 TimingResult&                out,
-                                const std::function<bool()>& should_abort = {})
+                                const std::function<bool()>& should_abort = {},
+                                const CollectiveAgreement&   agreement    = {})
     {
         const detail::event_context events{event_start, event_stop, stream};
         int64_t                     global_index = 0;
@@ -306,11 +308,12 @@ namespace hipblaslt_bench
                                cfg.use_gpu_timer,
                                events,
                                probe_us); // cold probe, discarded
-            per_iter_est             = probe_us;
+            per_iter_est             = agree_value(agreement, probe_us, AgreeOp::Max);
             const double warm_min_us = static_cast<double>(cfg.warmup_time) * 1000.0;
             double       warm_us     = 0.0; // exclude the cold probe from the warmup budget
             int32_t      chunk       = detail::batch_size(cfg, per_iter_est, cap);
-            while(warm_us < warm_min_us && !detail::aborted(should_abort))
+            while(agree_value(agreement, warm_us, AgreeOp::Min) < warm_min_us
+                  && !agree_flag(agreement, detail::aborted(should_abort), AgreeOp::Any))
             {
                 double chunk_us = 0.0;
                 detail::time_batch(
@@ -319,9 +322,10 @@ namespace hipblaslt_bench
                 // Refine the estimate from each chunk. A chunk below timer resolution
                 // (chunk_us == 0) can't advance warm_us, so grow the batch instead; give up if
                 // even the max batch still reads as zero.
-                if(chunk_us > 0.0)
+                const double reduced_chunk_us = agree_value(agreement, chunk_us, AgreeOp::Max);
+                if(reduced_chunk_us > 0.0)
                 {
-                    per_iter_est = chunk_us / chunk;
+                    per_iter_est = reduced_chunk_us / chunk;
                     chunk        = detail::batch_size(cfg, per_iter_est, cap);
                 }
                 else if(chunk < cap)
@@ -330,7 +334,7 @@ namespace hipblaslt_bench
                     break;
             }
         }
-        if(detail::aborted(should_abort))
+        if(agree_flag(agreement, detail::aborted(should_abort), AgreeOp::Any))
             return; // out left default-zeroed; caller (e.g. gtest) already failed
 
         const int32_t batch = detail::batch_size(cfg, per_iter_est, cap);
@@ -350,7 +354,7 @@ namespace hipblaslt_bench
         bool                  stable      = false;
 
         global_index = 0; // restart rotation for the timed phase
-        while(!detail::aborted(should_abort))
+        while(!agree_flag(agreement, detail::aborted(should_abort), AgreeOp::Any))
         {
             double batch_us = 0.0;
             detail::time_batch(launch, batch, global_index, cfg.use_gpu_timer, events, batch_us);
@@ -359,15 +363,16 @@ namespace hipblaslt_bench
             stats.add(per_iter);
             total_us += batch_us;
             total_iters += batch;
-            if(detail::reached_target(cfg,
-                                      samples,
-                                      stats,
-                                      iqr_history,
-                                      total_iters,
-                                      total_us,
-                                      bounds,
-                                      converged,
-                                      stable))
+            const bool local_done = detail::reached_target(cfg,
+                                                            samples,
+                                                            stats,
+                                                            iqr_history,
+                                                            total_iters,
+                                                            total_us,
+                                                            bounds,
+                                                            converged,
+                                                            stable);
+            if(agree_flag(agreement, local_done, AgreeOp::All))
                 break;
         }
 
