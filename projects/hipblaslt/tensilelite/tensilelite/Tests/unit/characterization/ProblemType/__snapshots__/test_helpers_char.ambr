@@ -27,6 +27,8 @@
     'IndexAssignmentsLD',
     'MXBlockA',
     'MXBlockB',
+    'MXBlockFreeA',
+    'MXBlockFreeB',
     'MacDataTypeA',
     'MacDataTypeB',
     'MetadataLayout',
@@ -143,6 +145,12 @@
       'int',
     ]),
     'MXBlockB': list([
+      'int',
+    ]),
+    'MXBlockFreeA': list([
+      'int',
+    ]),
+    'MXBlockFreeB': list([
       'int',
     ]),
     'MacDataTypeA': list([
