@@ -49,4 +49,4 @@ Target convertScalar(Source source, const ScalarConversionOptions& options) {
 }  // namespace roc::host_numerics
 
 // Scalar conversion and encoded storage are header-only.
-#include <roc/host_numerics/scalar_codec.hpp>
+#include <roc/host_numerics/scalar_storage.hpp>

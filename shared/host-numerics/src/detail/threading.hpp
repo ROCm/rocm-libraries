@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "tensor_storage.hpp"
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif

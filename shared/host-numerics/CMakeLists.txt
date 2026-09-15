@@ -61,11 +61,18 @@ function(
     )
 endfunction()
 
-add_library(host-numerics-core INTERFACE)
+add_library(host-numerics-core STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/tensor.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/tensor_transformations.cpp"
+)
 add_library(roc::host-numerics-core ALIAS host-numerics-core)
 
 add_library(host-numerics-amd-gpu-layout STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/gfx1250_mx_layout.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/gfx950_mx_layout.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx_layout_common.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/pre_swizzle.cpp"
 )
 add_library(
     roc::host-numerics-amd-gpu-layout
@@ -74,27 +81,38 @@ add_library(
 
 add_library(host-numerics STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/tensor_operations.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison_accumulator.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison_common.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison_iteration.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/comparison_metrics.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/epilogue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/generation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generation_recipe_access.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/generation_values.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/layer_norm.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/mx.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mx_generation.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mx_packing.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/reference_validation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/reduction.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/softmax.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/structured_sparsity.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/structured_sparsity_plan.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/two_of_four_metadata.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/blocked.cpp"
 )
 add_library(roc::host-numerics ALIAS host-numerics)
 
-target_compile_features(host-numerics-core INTERFACE cxx_std_20)
+target_compile_features(host-numerics-core PUBLIC cxx_std_20)
 target_include_directories(host-numerics-core
-    INTERFACE
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_sources(host-numerics-core
-    INTERFACE
+    PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
@@ -109,6 +127,12 @@ target_sources(host-numerics-core
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/shape.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/tensor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/tensor_transformations.hpp"
+)
+set_target_properties(host-numerics-core
+    PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN ON
 )
 
 target_compile_features(host-numerics-amd-gpu-layout PUBLIC cxx_std_17)
