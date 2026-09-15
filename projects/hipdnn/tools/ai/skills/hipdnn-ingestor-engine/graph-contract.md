@@ -53,6 +53,18 @@ establish reference support. `auto` may exhaust golden/GPU/CPU choices and skip;
 that validates nothing. Missing capable independent numerics blocks the feature.
 Do not fabricate golden data or copy the implementation into a private reference.
 
+**Derive the mode from capability, not from a default.** Resolve which reference
+executors implement the operation under test before selecting one. The GPU reference
+implements a plan builder per op family; which families those are today, the headers
+that are their source of truth, and the gpu/cpu/never-`auto` decision table are owned
+by [hipdnn-kernel-integration](../hipdnn-kernel-integration/RUNBOOK.md) and are
+maintained there as one copy — link to it rather than restating the list, so an added
+family does not have to be added in two places. A reference that does not implement
+the operation declines every case and can still exit zero, reporting a pass in which
+nothing was verified. **Zero selected, or every case declined, is a failure regardless
+of exit status**, and selected, served, declined and failed are four counts to be
+recorded separately, never one.
+
 Paged KV (block-table indirection), lengths inside padded buffers and offset-based
 ragged storage are distinct. A name such as `seq_lens_ptr`, dense approximation or
 unavailable reference cannot discharge their semantics. Before declaring a schema
