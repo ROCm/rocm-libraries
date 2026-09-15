@@ -372,7 +372,6 @@ def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
 
 # ------------------------------------------------------- engines that own no descriptors
 
-
 def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1"):
     """A model for an engine with no UED: trained against a selector revision only."""
     provenance = {"selector_revision": revision}

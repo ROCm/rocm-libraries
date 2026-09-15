@@ -187,9 +187,8 @@ Only the first runs before applicability is settled; the other two run after it
 ([Section 10](#10-applicability-flow)). Each role is **independently optional**, and each value is an
 **arch → UHD id** map resolved by exact `gcnArchName`, then a `default` entry, then unavailable
 ([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
-concerns `sort_kernel_catalog`; where a statement is specific to another role it says so. The authored
-`knobs` list must cover that role's `$kernel.*` feature axes, not the other roles' inputs
-([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
+concerns `sort_kernel_catalog`; where a statement is specific to another role it says so. `knobs` derives
+from `sort_kernel_catalog`'s `$kernel.*` feature axes and no other ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
 
 Three named fields, rather than a single id or an ordered list, keep each role independently optional
 and independently versioned, let a loader resolve exactly the role a request needs without walking a
@@ -205,88 +204,81 @@ There is **one** space of variant fields, not two.
 fields** (name, type, optional default), each UKD's `metadata` fills them, and a **knob is a KMD field
 the engine exposes to the user** — a *name*, nothing more.
 
-**The exposed set is not arbitrary. `UED.knobs` must cover every KMD field the UHD ranks on.**
+**The exposed set is not arbitrary. `UED.knobs` is the engine's public tuning surface, and the UHD's
+kernel-side feature axes are a subset of it.**
 
 | Concept | Where | What it is |
 |---|---|---|
 | **KMD fields** | **KMD** `fields`, filled by each UKD's `metadata` | The engine's full variant space (`tile_m`, `warp_n`, `split_k`, `dtype`, plus any dispatch-only fields a UDD consumes). |
-| **Knobs** | **UED** `knobs`: a list of **field names** | The authored, user-settable KMD fields. They include every `$kernel.*` feature axis; a model may use only a subset. |
+| **Knobs** | **UED** `knobs`: a list of **field names** | The KMD fields the engine exposes for a caller to pin. Authored by the engine, and a superset of the `$kernel.*` fields the UHD reads. |
 
 **This governs `$kernel.*` only.** A UHD's feature vector also draws on the problem (`$q.*`,
 `$<node>.*`) and the device (`$device.*`), and computes values over all three inline
 ([Section 6.1](#61-feature-sources)). None of those are knobs, and none should be: a knob is something a
 caller can *set*, and nobody sets the sequence length or the CU count as a way of picking a kernel. The
-rule concerns the one namespace where a feature axis and a user-settable choice are the same thing.
+rule concerns the one namespace where a feature axis and a user-settable choice can be the same thing.
 
-Within that namespace the knob list and the model's feature axes are drawn from one space, but the knob
-list is **authored**, not derived. Generation produces the model, and the kernel fields that model uses
-must all be knobs — the reverse is not required. A knob list regenerated from each training run would
-make the engine's public surface a function of whichever columns the last corpus happened to vary, so a
-UMD's binding could disappear because a sweep was narrow.
+Within that namespace the containment runs one way, and the asymmetry is the whole rule:
 
-The consequences:
-
-- **The settable surface covers every kernel axis the heuristic ranks on.** There is no kernel field the
-  heuristic uses that a caller cannot reach. The converse does not hold: a knob may exist that the
-  current model ignores, because `UED.knobs` is the engine's public surface — its UMDs and its callers
-  read it — and a training run must not reshape it.
-- **Load-time validation is directional.** Assert
-  `set($kernel.* fields reachable from UHD.features_signature) ⊆ set(UED.knobs)`. An axis with no knob is
-  a load error: the model would rank on something the API never lets anyone vary. A knob no axis reads
-  is a **warning**, not an error.
-
-  This was specified as equality, on the premise that the generation tool derives the knob list *from*
-  the trained feature set. It cannot. Training drops a column that carries one value, because a constant
-  cannot separate candidates — so equality made every engine declaring a constant knob unable to load its
-  own model, degrading to declared order while reporting a successful promotion. The gfx942 attention
-  engine shipped in exactly that state.
-
-  Removing a knob the data shows is worthless is the **kernel author's** decision, informed by the knob
-  report ([Section 13](#13-model-generation-pipeline)), not a side effect of retraining. Note *reachable*:
-  `$kernel.*` references nested inside a computed feature count too, so
-  `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` makes `tile_m0` an axis even though the signature
-  never names it on its own ([Section 6.2](#62-the-features_signature)).
+- **Every axis the model ranks on is reachable by the caller.** A model splitting on a field the UED
+  does not expose is a load error. Selection would then depend on something no caller can vary — a dial
+  hidden behind the result, which is worse than no dial at all. Note *reachable*: `$kernel.*` references
+  nested inside a computed feature count too, so `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}`
+  requires `tile_m0` to be exposed even though the signature never names it on its own
+  ([Section 6.2](#62-the-features_signature)).
+- **A knob the model does not read stays exposed.** Training has no standing to withdraw it. The knob
+  list is read by the engine's UMDs and by callers who tune, so it is the engine's to author and the
+  engine's to change; a knob whose training column carried one value is simply a dial the current model
+  cannot use. This is **reported at load**, so an unread dial is visible and the author can decide,
+  never fatal.
 - **Non-knob KMD fields are dispatch-only, and invisible to selection.** `UHD features ⊆ KMD fields`
   still holds; what is new is that the *complement* has a defined role — launch geometry and workspace
   detail a UDD reads ([Section 3.3](#33-coupling-rules)). The heuristic cannot rank on them.
-- **Two kernels differing only in non-knob fields are indistinguishable to the model,** so they score
-  identically and the deterministic `priority`-then-`id` tie-break decides
+- **Two kernels differing only in fields the model does not read are indistinguishable to it,** so they
+  score identically and the deterministic `priority`-then-`id` tie-break decides
   ([Section 5](#5-selection-flow)). The loader emits a **warning** in this case: a pack carrying kernels
   the heuristic cannot choose between indicates either a missing feature or a redundant variant. Which of
-  the three remedies applies — expose the distinguishing field as a knob, move the variants to a separate
-  **engine**, or drop them — is the kernel author's judgement, and this RFC sets no rule for it. A
-  separate *pack* is not among them: the catalog is engine-scoped, so a new KDP joining the same engine
+  the three remedies applies — expose the distinguishing field and retrain on it, move the variants to a
+  separate **engine**, or drop them — is the kernel author's judgement, and this RFC sets no rule for it.
+  A separate *pack* is not among them: the catalog is engine-scoped, so a new KDP joining the same engine
   contributes to the same catalog under the same heuristic and separates nothing. The
   considerations that bear on it: **variant explosion**, since every added knob multiplies the space the
   generation pipeline must cover ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)); whether the
   variants differ in **function** rather than only in performance, which argues for a separate engine
   ([Section 3.3](#33-coupling-rules)); and whether a candidate knob **changes the meaning of other knobs**,
   which makes the feature space conditional and is poorly modelled by a single flat ranker.
-- **Removing a feature axis from the knob set requires a model change.** Adding an unused knob or
-  dropping a feature from a model does not require changing the other descriptor. Removing or renaming
-  a public knob remains a caller-visible breaking change
+- **A knob change is an engine change; a feature change is not.** Adding, removing, or renaming a knob
+  is authored, and moves the UED's content revision. Retraining moves the UHD alone, as long as the new
+  feature set still fits inside the declared knobs
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
 
-**Benchmark wide, preserve the authored surface.** Generation can expose every KMD field on a
-*generation* UED so every kernel is individually addressable and timeable
-([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). Feature selection may prune model inputs, but
-promotion preserves the shipping UED's knobs unless the author explicitly requests a surface change.
-The knob-reduction report ([Section 14.4](#144-pipeline-knob-reduction-hipdnn-jit-case)) informs that
-decision; it does not make it.
+**Benchmark wide, expose what the caller needs.** Generation still sweeps the full space — every
+addressable KMD field is exposed on the *generation* UED so every kernel is individually addressable and
+timeable ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). Feature selection then prunes the axes
+that do not earn their place **in the model**. The **emitted** UED keeps the engine's authored knobs,
+and the surviving feature set is checked to be contained in them.
 
-An engine with no UHD still exposes its authored knobs. Removing a knob requires a **major** UED
-version bump and, if a model reads that field, a compatible replacement model. A narrow training corpus
-is not evidence that the knob should disappear.
+**Consequence: the public knob list is stable under retraining.** A retrain that drops `split_k` as a
+feature does not remove it as a knob, so a caller pinning it keeps working and the engine's UMDs keep
+reading a list that did not move underneath them. What the retrain produces is a **warning** — a dial
+the heuristic no longer reads — and the engine's author decides whether to withdraw it. That withdrawal
+is a deliberate engine change and a **breaking content-revision** bump on the UED
+([Section 8.1](#81-descriptor-versions-and-uhd-coupling)), which disables a stale model and marks the
+API break without moving the file-format version that would orphan the descriptor outright.
+
+This also settles what an engine with **no UHD** exposes: its authored knobs, exactly as one with a UHD
+does. A caller can pin a kernel on a pack that has never been benchmarked, which would be impossible if
+the knob list were a product of training.
 
 - **A knob's legal values come from the *catalog*, not the schema** — the values the field actually takes
   among the kernels matching *this* graph, never the KMD's theoretical range. Critically, the API reports
   each knob's values **independently**, so **the cross-product of legal knob values is not the set of
   legal kernels.** Given kernels `(split_k, tile_m) ∈ {(0,0), (1,1)}`, both knobs report the range
   `{0,1}` and the cross-product suggests four combinations — but `(0,1)` and `(1,0)` match no kernel.
-  Nothing in the API today expresses which *combinations* are valid, and for a sparse catalog over many
-  knobs the valid set is a vanishing fraction of the cross-product. This is a real gap with consequences
-  for enumeration and for the generation pipeline — see
-  [Section 13.2](#132-benchmarking-via-hipdnn-autotune) and [Open Question 12](#operational).
+  Nothing in the knob-range report expresses which *combinations* are valid, and for a sparse catalog
+  over many knobs the valid set is a vanishing fraction of the cross-product. Generation therefore never
+  reconstructs candidates from knob ranges: it enumerates the applicable catalog directly and enrolls
+  what it finds ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)).
 - **A knob's default is the UHD's choice.** Whatever the heuristic ranks first is the reported default, so
   leaving knobs alone reproduces the out-of-the-box selection. **This is one of the demand triggers that
   loads the UHD:** answering a knob query means ranking that engine's catalog — see
@@ -296,14 +288,19 @@ is not evidence that the knob should disappear.
 descriptor should carry `[min, max, step]` rather than bare bounds, so a consumer can enumerate the axis
 without guessing the increment. At runtime the reported range narrows to what the applicable catalog
 actually contains, but the step is forwarded unchanged. **OPEN:** whether the step lives on the KMD field
-(a property of the variant axis) or on the UED knob (a property of the exposure) —
-[Open Question 12](#operational).
+(a property of the variant axis) or on the UED knob (a property of the exposure).
 
 Filtering and ranking **commute**: setting `split_k = 4` keeps only kernels whose `split_k` is 4 and the
 UHD ranks those. That holds only because **`sort_kernel_catalog` scores each kernel on its own metadata
 and the problem, never relative to the rest of the catalog** — a hard requirement on any adapter serving
 that role ([Section 5](#5-selection-flow)), not an assumption. A scorer that normalizes across the
 candidate set is out of scope for it.
+
+Two conditions carry that property, not one. Per-candidate scoring makes the *successful* path commute.
+The failure path commutes because the decision to use the model at all is made once, over the full
+applicable catalog, before any filter narrows it ([Section 5](#5-selection-flow) step 8) — a fallback
+chosen per subset would let the same inputs produce different winners depending on whether the filter or
+the ranking ran first. Both the scoring rule and the fallback's granularity are part of the contract.
 
 The constraint is scoped to that role deliberately. `predict_engine_tflops` takes no candidate at all, and
 `predict_applicable_kernels` *produces* a candidate set rather than scoring one
@@ -347,10 +344,10 @@ This gives the UHD a firm, checkable contract:
   and the kernel vector); the **UHD and KMD belong to the UED (engine)**, shared by every pack that joins
   it. `arch` is a KDP property, so one engine — and its UHDs/KMD — spans arches, with per-arch model
   selection handled by the UED's arch-keyed heuristic maps ([Section 3.1](#31-descriptor-relationships)).
-- **The UHD's `$kernel.*` references must be subsets of both the KMD fields and the UED's knobs** —
-  a two-part load-time check ([Section 6.3](#63-contract-enforcement)). The KMD is the authority on
-  *what fields exist*; the UHD picks which subset it ranks on and how it derives from them. Unused
-  public knobs are allowed, with a warning; non-knob fields remain unavailable to the ranker.
+- **The UHD's `$kernel.*` references must be a subset of the KMD fields, and must equal the UED's
+  knobs** — a two-part load-time check ([Section 6.3](#63-contract-enforcement)). The KMD is the
+  authority on *what fields exist*; the UHD picks *which subset* it ranks on and how it derives from
+  them; the UED's `knobs` must then name exactly that subset. The fields left over serve the UDD.
 
 **Engine-scoped, never per-pack.** Many KDPs may join the same engine and share its heuristics. A UHD
 is never inlined per kernel or per pack; the UED names one per role, and one per arch within a role
@@ -402,11 +399,11 @@ identity, versioning, and the feature contract without understanding the ranking
   "categorical_encoding": { … },                       // string → code maps, generated (Section 6.5)
   "features_hash": "sha256:…",                         // contract guard: signature + encoding
 
-  // the descriptor versions this heuristic was generated against (Section 8.1)
+  // the descriptor content revisions this heuristic was generated against (Section 8.1)
   "trained_against": {
-    "ued": {"id": "5a1c0000-0000-4000-8000-000000000003", "revision": "1.3"},
-    "kmd": {"id": "5a1c0000-0000-4000-8000-000000000001", "revision": "2.1"},
-    "umd": [{"id": "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe", "revision": "1.0"}]
+    "kmd": {"id": "5a1c0000-…", "revision": "2.1"},
+    "ued": {"id": "7f30b911-…", "revision": "1.3"},
+    "umd": [{"id": "1a7f52c8-…", "revision": "1.0"}] // one entry per matcher
   },
 
   "objective": "max",                                  // higher predicted score wins
@@ -459,33 +456,12 @@ The normative header. A loader can validate every row here without instantiating
 | `adapter` | yes | enum | Ranking mechanism, and the **key of the body object** ([Section 7](#7-model-adapters)). |
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
-| `features_hash` | if `features_signature` | `sha256:…` | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding` ([Section 6.3](#63-contract-enforcement)). |
-| `trained_against` | if the adapter features | object; see below | What the model was generated against, and nothing else. |
-| `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score. The UHD's author chooses it, because only they know what their model predicts: a model trained on TFLOPS ranks descending, one trained on latency ranks ascending. Both are ordinary; neither is a fallback. |
-| `score` | no | object | `units`, `calibrated`, `transform` — lets a consumer recover real TFLOPS ([Section 11.3](#113-cross-engine-comparison)). |
-| `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. Keys inside it are the adapter's concern, not the loader's. |
-
-`trained_against` names one of two things, whichever applies to the engine that will bind the model.
-It never names an engine — the binding is the UED role map or the provider-declared UUID, both of which
-live in compiled code ([Open Question 7](#structural)).
-
-| Member | Required | Type | Meaning |
-|---|---|---|---|
-| `ued`, `kmd`, `umd` | all three, or none | dependency, dependency, dependency array | Identity and semantic revision of every descriptor used for collection ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Two thirds of a descriptor set is not a weaker claim, it is an unverifiable one. |
-| `selector_revision` | for a model bound by a provider-declared UUID | string | The provider build whose behaviour was measured — the same opaque string that build reports as its selector revision. An engine with no UED has no descriptor set to be trained against; what decides its throughput is the vendor library it wraps, and this is the only thing there is to record. |
-
-**A recorded `selector_revision` that is not the one the provider reports means the model is not used.**
-The loader refuses it: the model is ignored, the engine stays fully applicable, and the prediction
-reports UNAVAILABLE with a reason naming both revisions. Refusal rather than a warning, because L1 is
-the one score compared *across* engines ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)) —
-a stale estimate does not merely misreport a number, it changes which engine is selected. It is also the
-reversible direction: relaxing to warn-and-use later is a small change, while tightening later would
-break deployments that had come to rely on the looser rule. A model bound by a provider-declared UUID
-that records no `selector_revision` at all cannot be matched to any build and is refused the same way.
-
-This is **not** a `trained_against.engine {name, version}` in disguise. It carries no engine identity and
-no engine name, nothing resolves a model *from* it, and it is read only after a declared UUID has already
-selected the model. Its only job is to answer "which build of the vendor library was measured".
+| `features_hash` | if `features_signature` | `sha256:` + 16 hex | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding`, truncated to 64 bits ([Section 6.3](#63-contract-enforcement)). |
+| `trained_against` | if the adapter features | descriptor refs, or `selector_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, or — for an engine that has no descriptor set — the opaque provider revision whose behaviour was measured ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
+| `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score, applied when the ranking is ordered. An adapter returns its model's raw value; the sign is the consumer's to apply, so a `min` model needs no trainer-side negation ([Section 5](#5-selection-flow)). |
+| `score` | no | object | `units`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover real TFLOPS ([Section 11.3](#113-cross-engine-comparison)). A `calibrated` score requires `objective: max`: a calibrated number is a throughput, and throughput is maximized. |
+| `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file may also carry that file's `hash` ([Section 7.2](#72-default-tree_data)). |
+| `x-…`, `_…` | no | any | Author-reserved extension namespaces, ignored by the loader ([Section 4.1](#41-field-reference-normative)). |
 
 Two header rules govern the split:
 
@@ -496,20 +472,223 @@ Two header rules govern the split:
   provider does not implement produces a diagnosable "unsupported adapter" error rather than a parse
   failure, so a newer pack landing next to an older provider degrades predictably.
 
-The canonical **Draft 7** schema for the `1.0` contract is
-[`plugin_sdk/schemas/uhd.schema.json`](../../plugin_sdk/schemas/uhd.schema.json).
-Tooling and packaging consume that file rather than maintaining another schema here.
+Each `major.minor` is a standalone JSON Schema **file** in the repository; the inline copy below
+mirrors the authoritative `uhd/1.0.json`, and a CI check verifies the match. The schema targets
+**Draft 7**, matching [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema), so one
+file drives both the build-time and runtime checks.
 
-`additionalProperties: false` rejects unknown members. The `oneOf` requires exactly one adapter body;
-the `allOf` conditionals require that body to match `adapter` and require the feature, provenance, and
-score fields described in the table. Declaring every adapter body as a known property is not itself
-enough to exclude bodies belonging to other adapters.
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "uhd/1.0.json",
+  "title": "hipdnn.uhd version 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": { "^(x-|_)": {} },
+  "required": ["version", "id", "name", "adapter"],
 
-Training emits identity-aware provenance, and promotion checks it before writing.
-The runtime separately checks model compatibility and engine validity: an incompatible
-model does not remove an otherwise valid engine. Native dynamic bindings require
-representative samples for shipping validation; structural schema acceptance alone
-does not prove that those bindings resolve or that native code executes correctly.
+  "definitions": {
+    "guid":     { "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+    "revision": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "descriptor_ref": {
+      "description": "Which descriptor, and which content revision of it (section 8.1).",
+      "type": "object", "additionalProperties": false,
+      "patternProperties": { "^(x-|_)": {} },
+      "required": ["id", "revision"],
+      "properties": { "id":       { "$ref": "#/definitions/guid" },
+                      "revision": { "$ref": "#/definitions/revision" } }
+    },
+    "artifact": {
+      "description": "A model file beside the descriptor, optionally content-addressed (section 7.2).",
+      "type": "object", "additionalProperties": false,
+      "patternProperties": { "^(x-|_)": {} },
+      "required": ["artifact"],
+      "properties": { "artifact": { "type": "string", "minLength": 1 },
+                      "hash":     { "type": "string", "minLength": 1 } }
+    }
+  },
+
+  "properties": {
+    "version":    { "type": "string", "const": "1.0" },
+    "id":         { "$ref": "#/definitions/guid" },
+    "name":       { "type": "string", "minLength": 1 },
+    "adapter":    { "enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"] },
+    "provenance": { "description": "Free-form authoring notes; never read by the loader." },
+
+    "features_signature": {
+      "description": "Ordered model inputs. A string is a $-reference; an object is an expression.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "string", "pattern": "^\\$." },
+          { "type": "object", "minProperties": 1, "maxProperties": 1 }
+        ]
+      }
+    },
+    "categorical_encoding": {
+      "description": "Per-field value->code maps for string-valued features (section 6.5).",
+      "type": "object",
+      "propertyNames": { "pattern": "^\\$." },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "integer" },
+        "minProperties": 1
+      }
+    },
+    "features_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{16}$" },
+    "trained_against": {
+      "description": "What this heuristic was generated against (section 8.1).",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": { "^(x-|_)": {} },
+      "anyOf": [
+        { "required": ["ued", "kmd", "umd"] },
+        { "required": ["selector_revision"] }
+      ],
+      "dependencies": {
+        "ued": ["kmd", "umd"],
+        "kmd": ["ued", "umd"],
+        "umd": ["ued", "kmd"]
+      },
+      "properties": {
+        "ued": { "$ref": "#/definitions/descriptor_ref" },
+        "kmd": { "$ref": "#/definitions/descriptor_ref" },
+        "umd": { "description": "One entry per matcher; empty records that none narrowed the catalog.",
+                 "type": "array", "uniqueItems": true,
+                 "items": { "$ref": "#/definitions/descriptor_ref" } },
+        "selector_revision": { "type": "string", "minLength": 1 }
+      }
+    },
+    "objective": { "enum": ["max", "min"] },
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": { "^(x-|_)": {} },
+      "properties": {
+        "units":      { "type": "string", "minLength": 1 },
+        "calibrated": { "type": "boolean" },
+        "transform":  { "enum": ["identity", "log1p", "log", "exp", "sqrt"] }
+      }
+    },
+
+    "static_order":   { "type": "object", "additionalProperties": false,
+                        "patternProperties": { "^(x-|_)": {} },
+                        "properties": { "order": { "type": "array", "items": { "type": "string" } } } },
+    "native":         { "type": "object", "additionalProperties": false,
+                        "patternProperties": { "^(x-|_)": {} },
+                        "required": ["symbol"],
+                        "properties": { "symbol": { "type": "string", "minLength": 1 } } },
+    "table":          { "$ref": "#/definitions/artifact" },
+    "tree_data":      { "$ref": "#/definitions/artifact" },
+    "onnx":           { "$ref": "#/definitions/artifact" },
+    "custom_library": { "type": "object", "additionalProperties": false,
+                        "patternProperties": { "^(x-|_)": {} },
+                        "required": ["library", "symbol"],
+                        "properties": { "library": { "type": "string", "minLength": 1 },
+                                        "symbol":  { "type": "string", "minLength": 1 },
+                                        "hash":    { "type": "string", "minLength": 1 },
+                                        "config":  { "type": "object" } } }
+  },
+
+  "allOf": [
+    { "if":   { "properties": { "adapter": { "const": "static_order" } } },
+      "then": { "required": ["static_order"] } },
+    { "if":   { "properties": { "adapter": { "const": "native" } } },
+      "then": { "required": ["native", "objective"] } },
+    { "if":   { "properties": { "adapter": { "const": "table" } } },
+      "then": { "required": ["table", "objective",
+                             "features_signature", "features_hash", "trained_against"] } },
+    { "if":   { "properties": { "adapter": { "const": "tree_data" } } },
+      "then": { "required": ["tree_data", "objective",
+                             "features_signature", "features_hash", "trained_against"] } },
+    { "if":   { "properties": { "adapter": { "const": "onnx" } } },
+      "then": { "required": ["onnx", "objective",
+                             "features_signature", "features_hash", "trained_against"] } },
+    { "if":   { "properties": { "adapter": { "const": "custom_library" } } },
+      "then": { "required": ["custom_library", "objective"] } },
+
+    { "if": { "required": ["static_order"] },
+      "then": { "properties": { "adapter": { "const": "static_order" } } } },
+    { "if": { "required": ["native"] },
+      "then": { "properties": { "adapter": { "const": "native" } } } },
+    { "if": { "required": ["table"] },
+      "then": { "properties": { "adapter": { "const": "table" } } } },
+    { "if": { "required": ["tree_data"] },
+      "then": { "properties": { "adapter": { "const": "tree_data" } } } },
+    { "if": { "required": ["onnx"] },
+      "then": { "properties": { "adapter": { "const": "onnx" } } } },
+    { "if": { "required": ["custom_library"] },
+      "then": { "properties": { "adapter": { "const": "custom_library" } } } },
+
+    { "if":   { "required": ["features_signature"] },
+      "then": { "required": ["features_hash"] } },
+    { "if":   { "required": ["categorical_encoding"] },
+      "then": { "required": ["features_signature"] } },
+    { "if":   { "properties": { "score": { "required": ["calibrated"],
+                                           "properties": { "calibrated": { "const": true } } } },
+                "required": ["score"] },
+      "then": { "properties": { "objective": { "const": "max" } }, "required": ["objective"] } }
+  ]
+}
+```
+
+**The schema enforces the header rules; it does not merely accompany them.** Three of them are worth
+naming, because each needs an explicit construct rather than falling out of the document shape:
+
+- **Exactly one body, and it is the named one.** `additionalProperties: false` is not what delivers
+  this. That keyword rejects *undeclared* property names, and every adapter body is declared — a
+  `native` descriptor carrying an `onnx` body alongside it uses only names the schema knows, so the
+  keyword has nothing to object to. Exclusivity comes from the second block of conditionals: each body,
+  *if present*, constrains `adapter` to its own name. Paired with the first block (each `adapter` value
+  requires its body), the discriminant and the body imply each other in both directions, and a second
+  body of any kind is unsatisfiable.
+- **A body is required, including `static_order`'s.** The body is a required member for every adapter
+  ([Section 4.1](#41-field-reference-normative)), so `static_order` is conditioned like the rest rather
+  than left as the one adapter whose absent body validates.
+- **The scoring and training fields are conditioned, and their subfields are reachable.** A model
+  adapter requires `objective`, the feature contract, and `trained_against`. `trained_against` in turn
+  admits exactly two shapes — all three descriptor entries, or a `selector_revision` — through an
+  `anyOf` paired with `dependencies` that make partial descriptor provenance unsatisfiable. Each
+  descriptor entry requires both `id` and `revision`. An empty `trained_against`, a `umd` scalar, a
+  `umd` entry with no revision, and a document claiming one descriptor's revision while omitting the
+  others are all rejected at the point they would otherwise pass as "present". An empty `umd` **array**
+  is accepted, because it is a claim rather than an omission
+  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
+- **Calibration is tied to direction.** A `score` declaring `calibrated: true` requires
+  `objective: "max"`. A calibrated score is a throughput in declared units, and a throughput is
+  maximized; the pairing is checked here rather than discovered when an engine's estimate sorts
+  backwards ([Section 11.3](#113-cross-engine-comparison)).
+- **`transform` is a closed, invertible vocabulary.** A consumer recovering real TFLOPS has to invert
+  whatever the trainer applied, so the set is the one the runtime can invert rather than free text. An
+  unrecognised transform is refused at load rather than silently treated as `identity`.
+
+**Extension keys are reserved, everywhere.** Any member whose name begins with `x-` or `_` is accepted
+and ignored, at the document root and inside every nested object, as is a top-level `provenance` block.
+This is not a relaxation of the closed-schema rule but the mechanism that makes it affordable: authors
+and build systems need somewhere to record their own metadata, and without a reserved namespace they
+record it in fields the loader does read. A genuinely unknown name — one matching no declared property
+and neither reserved prefix — is still a hard rejection.
+
+The principle behind all of it: **a producer validating against the published schema must not be able to
+emit a descriptor the prose requires a loader to reject.** Where the two could diverge, the schema is
+the side that gets tightened.
+
+**Validated against shipping descriptors.** The schema above accepts every `version: "1.0"` UHD in the
+tree — `native` selectors, `tree_data` catalog rankers, and `tree_data` engine estimates, with and
+without `categorical_encoding`, under both provenance forms — and rejects each malformed shape the
+header rules describe: a missing or duplicated adapter body, a model adapter with no `objective` or
+`trained_against`, an empty or partial `trained_against`, a mixture of the two provenance forms, a
+scalar `umd`, a `umd` entry carrying no revision, an unrecognised transform, a calibrated score with
+`objective: min`, and an untruncated digest. Descriptors at earlier versions, such as the `0.1`
+packaging-test fixtures with placeholder ids, are rejected by the `version` constraint, which is the
+accept rule working as intended rather than a gap.
+
+**OPEN — remaining schema work.** The block above covers the header and the adapter bodies as they exist
+today. Still outstanding: publishing it as the standalone per-version `uhd/1.0.json` file with the CI
+parity check RFC 0020 §4.2 describes, and extending it as each further adapter lands, so validation is
+generated rather than hand-written. *(See [Open Question 13](#operational).)*
 
 ### 4.2 Adapter Summary
 
@@ -522,7 +701,7 @@ new model family) is one more `adapter` value — the single discriminant is wha
 |-----------|------------|---------|----------------|
 | `static_order` | A fixed precedence with no learned model | Declared criteria / UKD `priority` | none |
 | `native` | A scorer compiled into the engine, resolved by symbol name — **first to land** | Whatever the function returns | none (code, not data) |
-| `table` | A CSV/lookup keyed by coarse problem buckets | Table lookup, then tie-break | with engine |
+| `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
 | `onnx` | An ONNX graph via a gated runtime | Score each candidate, argmax | with engine |
 | `custom_library` | An author-shipped `.so` behind a small C ABI (drop-in escape hatch) | Whatever the library returns | with engine |
@@ -646,6 +825,23 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    packs in CI and fails the build there rather than degrading silently in the field
    ([Section 12](#12-observability), [Open Question 14](#operational)).
 
+   **Scorer failure is model-global, and is decided over the full applicable catalog.** The fallback in
+   the first bullet switches the whole ranking rather than one entry, so where it is evaluated is part of
+   the contract. A scorer error is resolved against the **canonical candidate set** — every kernel the
+   matchers admitted for this graph, before any knob filter narrows it — and disables the model for that
+   request and for the lifetime of the ranking it caches ([Section 9.2](#92-loading-and-caching)). Knob
+   filtering then applies to the resulting order.
+
+   Fixing the basis this way is what keeps filtering and ranking commutative
+   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). A per-subset decision would
+   not: if scoring fails on one candidate, ranking the full catalog first would fall back for everything,
+   while a knob pin that happened to exclude that candidate would score normally, and the two paths would
+   disagree on the winner from the same inputs. The cached ranked order is the full catalog's
+   ([Section 9.2](#92-loading-and-caching)) and would disagree with a freshly ranked subset in exactly
+   the same way. Evaluating the model's usability once, over the whole catalog, leaves both paths
+   starting from the same basis; `static_order` is itself per-candidate — `priority` then stable `id` —
+   so a fallback order restricts to any subset unchanged.
+
 **The output is the ranked catalog, not just a winner.** Selection returns the candidates in score order;
 the winner is simply its first element. Callers need the ordering, not only the argmax — a knob query
 reports the top-ranked value as the default, autotune walks the ranked list, and engine selection reads
@@ -722,13 +918,31 @@ defines. Kernel features are the compilation knobs the engine's KMD declares
 ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)); these distinguish candidates
 and are what make argmax meaningful.
 
-> **Implementation note — `$device.*` fields.** The device namespace exposes what rocminfo (or equivalent
-> HIP runtime queries) provides and what proves predictive for kernel selection. Expected fields include
-> `cu_count`, `lds_size`, `warp_size`, `sgpr_count`, `vgpr_count`, `max_waves_per_cu`, `memory_clock_mhz`,
-> `memory_bus_width`, and `peak_bandwidth_gbps`; the set is extended additively as the checks that need it
-> land. **Architecture is not among them for an AOT engine:** `arch` is a KDP property gated at selection
+**The graph namespace carries whole-graph facts and indexed node access.** `$graph.node_count` and
+`$graph.tensor_count` describe the shape of the graph itself; `$graph.flops` and per-node
+`$graph.nodes[i].flops` carry the op-intrinsic work counts a physics feature divides
+([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)). A node's tensors are reachable
+positionally through the same namespace, so a signature can read a shape without the engine's pattern
+having named that tensor as a top-level variable. The two spellings coexist deliberately: a pattern
+variable is the readable form for an engine whose pattern names its tensors, and indexed node access is
+what an engine reaching across a multi-node graph has.
+
+**Two `$kernel.*` entries are not KMD fields.** `$kernel.priority` is bound, because a kernel's declared
+priority is a fact about the candidate that a model may legitimately weigh. `$kernel.id` is not bound: a
+kernel id is a UUID, and a feature splitting on its bytes would be ranking by authoring accident. The id
+already decides ties ([Section 5](#5-selection-flow)), which is the only role it should have in an order.
+
+> **Implementation note — `$device.*` fields.** The device namespace publishes what the HIP runtime
+> resolves and what proves predictive for kernel selection: `cu_count`, `multi_processor_count`,
+> `warp_size`, `lds_size`, `total_global_mem`, `memory_bus_width`, `memory_clock_rate`, and
+> `peak_memory_bandwidth`. The set is closed at any moment and extended additively; a field is published
+> in the unit the runtime reports it in rather than a rescaled one, and `peak_memory_bandwidth` is the
+> one derived entry, computed from the clock and bus width so a model need not rebuild it inline.
+> **Architecture is not among them for an AOT engine:** `arch` is a KDP property gated at selection
 > ([Section 3.3](#33-coupling-rules)), and per-arch model choice is the UED's arch-keyed heuristic maps
 > ([Section 3.1](#31-descriptor-relationships)), so a `features_signature` does not read `$device.arch`.
+> Architecture coverage is checked against the model's own training provenance instead
+> ([Section 8.3](#83-out-of-distribution-inputs)).
 
 ### 6.2 The `features_signature`
 
@@ -770,8 +984,17 @@ dispatch formula. One parser, validator, and interpreter serve all three.
 
 The operator set covers the computed features required here; no extension is needed:
 
-> `and or !` · `== != < <= > >=` · `in` · `all` · `+ - * / %` · `shape rank divisible value_or_default` ·
-> `if` · `ceil_div min max abs pow log2 rsqrt`
+> `and or !` · `== != < <= > >=` · `in` · `all` · `+ - * / %` · `divisible value_or_default` ·
+> `present not_present` · `if` · `ceil_div min max abs pow log2 rsqrt`
+
+`present` and `not_present` test whether a binding exists at all, which a comparison cannot: a signature
+that must tolerate an optional tensor needs to distinguish "absent" from "zero" before it computes with
+the value. They pair with `value_or_default`, which supplies the value once absence has been handled.
+
+`shape` and `rank` are part of the written language but not of the evaluator: both are resolved when the
+signature is compiled, into the positional `dims[i]` and `rank` bindings
+([Section 6.1](#61-feature-sources)). A shape is known once the graph is bound, so recomputing it per
+candidate would be work with a constant answer.
 
 Log-scale sizes, aspect ratios, tile/wave quantization, and intensity are all expressible with this set.
 Evaluation is a bounded interpreter: it fails closed on an unknown symbol, a type error, or an invalid
@@ -858,25 +1081,42 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    reachable from the `features_signature`, including those nested inside computed (expression) entries:
    - `F ⊆ KMD.fields` — a feature can never read a variant field the kernels don't carry.
    - `F ⊆ set(UED.knobs)` — every axis the model ranks on is a knob the engine exposes
-     ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). A feature with no knob is a
-     load error: it hides a performance-relevant axis from the caller, who cannot vary what selection
-     depends on.
-   - A knob in `UED.knobs` that no axis in `F` reads is a **warning**. The caller can turn a dial
-     selection ignores, which is worth saying, but it is not a broken contract: `UED.knobs` is the
-     engine's public surface, read by its UMDs and its callers, and training legitimately drops a column
-     that carries one value because a constant cannot separate candidates. Requiring equality here made
-     an engine unable to load its own model for declaring a constant knob — silently, since a degraded
-     ranking is a legal one.
+     ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
+
+   **The second assertion is one-directional, and deliberately so.** A model ranking on an axis the UED
+   never exposed is a **load error**: selection would depend on something the caller has no way to vary,
+   which is a dial hidden behind a result. The converse is legal and expected. `UED.knobs` is the
+   engine's public tuning surface — its UMDs read it, and so do callers who pin — so a training run has
+   no standing to shrink it. A knob whose training column carried a single value cannot separate
+   candidates, so feature selection drops it from the signature while the engine goes on declaring it.
+   That case is **reported, never fatal**: an unread dial is worth surfacing so the engine's author can
+   decide whether it still earns its place, and that decision is theirs rather than the trainer's.
 
    The UED owns the KMD and the UHD, so this is an intra-engine check the pipeline enforces when it
-   emits the engine and the loader re-checks. The containment does *not* hold by construction: the knob
-   list is authored and the feature set is trained, so the two can disagree. The check exists to catch a
-   model ranking on an axis the engine never exposed — a UED and UHD regenerated out of step, or
-   hand-edited — and to report the benign direction rather than fail it.
+   emits the engine and the loader re-checks — catching a UED and UHD regenerated out of step, or
+   hand-edited.
 3. **Signature → model.** The UHD carries `features_hash`; the model artifact embeds the hash it was
-   trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). At load, assert
-   `model.trained_hash == UHD.features_hash`. This check works for every model adapter because it
-   fingerprints the *input contract*, not the model internals.
+   trained against (tree-table metadata, ONNX `metadata_props`, or a sidecar). At load the checker
+   **recomputes the digest from the feature contract it actually loaded** and requires a three-way
+   identity:
+
+   ```
+   hash(canonical(features_signature, categorical_encoding))
+       == UHD.features_hash
+       == model.trained_hash
+   ```
+
+   This check works for every model adapter because it fingerprints the *input contract*, not the model
+   internals.
+
+   **Recomputing is the whole check; comparing the two stored digests is not.** A model is a function
+   over a vector, and a vector is positions, not names — the artifact knows that column 3 splits at 64,
+   never that column 3 *is* `tile_m`. Transposing two `features_signature` entries, or editing one code
+   in `categorical_encoding`, therefore rewrites what every affected column means while leaving both
+   stored digests untouched. Every other check in this list survives that edit: check 1 resolves the
+   same symbols, check 2 compares *sets* and cannot see order, check 4 counts the same number of
+   columns. Only a digest taken over the loaded contract detects it, which is why the stored values are
+   compared against a recomputed one rather than against each other.
 
    `features_hash` covers the signature and the categorical encoding. Because computed features are
    written inline rather than referenced by name ([Section 6.4](#64-computed-features)), the signature is
@@ -885,8 +1125,19 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
    meaning while every signature string stays byte-identical, and the hash would have to substitute the
    definitions back in to detect the change. The categorical encoding is folded in for the same reason,
    as [Section 6.5](#65-categorical-encoding) changes value semantics without changing feature names.
-   The input is canonicalized before hashing so that whitespace and key order do not produce spurious
-   mismatches.
+
+   **The canonical form is normative and shared.** `canonical()` serializes the signature compactly,
+   in the order written, with object keys in a fixed order and numbers and strings in a fixed
+   representation, so that whitespace and key order do not produce spurious mismatches. The categorical
+   encoding is appended under a separator when the descriptor carries one, and omitted entirely when it
+   does not — so adding an empty encoding to a descriptor is not a contract change. The digest is
+   truncated to its leading 64 bits: the threat is a stale or mis-paired contract, not a forged one, and
+   64 bits is far past the point where accidental collision is a plausible failure while keeping the
+   field short enough to read in a diagnostic. Generation stamps `features_hash` and the artifact's
+   `trained_hash` with the same routine the loader verifies with
+   ([Section 13.4](#134-new-stage-package-stage-p)); a producer and consumer that disagree on the
+   canonical form would turn every load into a false mismatch, so the routine has one definition and
+   both sides call it.
 4. **Vector → input.** Each adapter verifies its artifact accepts the resolved vector: `tree_data`
    checks feature count, `onnx` checks input arity/shape.
 
@@ -1024,7 +1275,7 @@ Everything else is either `$device.*` (hardware) or an inline computation over t
 
 | rocKE feature | RFC inline expression (schematic) |
 |---|---|
-| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` **for an unmasked problem** and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature). Under a mask, `$sdpa_fwd.flops` counts the effective work instead, which is about half this for square causal ([Section 13.6](#136-auto-deriving-a-first-pass-features_signature)) |
+| `arithmetic_intensity` | `ops / mem`, where `ops = 2·batch·nhead_q·seqlen_q·seqlen_k·(hdim_q+hdim_v)` and `mem` sums Q/K/V/O bytes — the `{"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}` of [Section 13.6](#136-auto-deriving-a-first-pass-features_signature) |
 | `num_tiles_m` = ⌈seqlen_q/tile_m0⌉ | `{"ceil_div": ["$q.dims[2]", "$kernel.tile_m0"]}` |
 | `num_tiles_k` = ⌈seqlen_k/tile_n0⌉ | `{"ceil_div": ["$k.dims[2]", "$kernel.tile_n0"]}` |
 | `total_tiles` = batch·nhead_q·num_tiles_m·num_tiles_k | product of the above with `$q.*` |
@@ -1085,9 +1336,9 @@ loadable artifact rather than baked into `libhipdnn_provider.so`.
 | Adapter | Runtime dependency | Standalone drop-in? | Notes |
 |---------|-------------------|---------------------|-------|
 | *(none named)* | none | n/a | **A UHD is optional.** No heuristic → deterministic `priority`/`id` order plus a warning ([Section 5](#5-selection-flow) step 6) |
-| `static_order` | none | Yes (always available) | The same behavior, stated explicitly rather than inferred |
+| `static_order` | none | Yes (always available) | The same behavior, stated explicitly rather than inferred. Not a scorer: it names ordering criteria, so it resolves to a comparator rather than to an adapter instance |
 | `native` | none | **No — compiled into the engine** | Scorer function resolved by symbol name; the bootstrap path |
-| `table` | none | Yes | CSV lookup by coarse problem buckets |
+| `table` | none | Yes | Bucketed lookup over quantized feature ranges, carried as a FlatBuffer beside the descriptor |
 | `tree_data` | none | **Yes — default shipping path** | GBDT tree table + in-tree walker |
 | `onnx` | ONNX runtime | Yes, if dep present | Opt-in, dependency-gated |
 | `custom_library` | none on provider | Yes | Engine ships its own `.so`, `dlopen`'d through a tiny C ABI |
@@ -1127,24 +1378,40 @@ structure. The adapter has zero runtime dependency, is fully standalone, and is 
 hsaco-equivalent for heuristics. Its one constraint: the provider must already support the model *family*
 (a new family is a provider change).
 
-**Artifact format:** a FlatBuffer tree schema (recommended) — consistent with data-SDK serialization,
-`Verifier`-gated, with additive evolution. The alternative is parsing LightGBM `model.txt` at load, which
-lowers author friction but requires a bespoke parser to harden. **OPEN:** See
-[Open Question 3](#schema-and-training).
+**Artifact format.** A FlatBuffer carrying the ensemble, read through the generated accessors and
+`Verifier`-gated before a single node is walked. Each tree is stored as **parallel per-node arrays** —
+split feature index, threshold, left and right child, leaf value, missing-value direction, and
+comparison sense — rather than as a node struct, so traversal walks contiguous memory and a leaf is
+named by a negative child index rather than by a tag. The model carries `num_features`, the
+`features_hash` its signature must match ([Section 6.3](#63-contract-enforcement)), a base score, and
+its training provenance ([Section 8.3](#83-out-of-distribution-inputs)). Prediction is the base score
+plus the sum of the leaves reached; any shrinkage the trainer applied is already folded into the leaf
+values and is never re-applied at inference.
 
-**Runtime preparation:** the artifact's storage layout need not be the scoring layout.
-`TreeDataAdapter` validates required arrays, split-feature and child indices, leaf predictions, and
-acyclicity at load time, then builds contiguous in-memory nodes with optional-field defaults resolved.
-Malformed trees disable the model at load rather than failing during scoring. Traversal allocates
-nothing and preserves `<` versus `<=`, NaN/short-input default directions, tree accumulation order,
-and bias addition after the tree sum. The on-disk format and drop-in deployment remain unchanged;
-preparation generates no executable code.
+**The verifier is necessary and not sufficient.** It proves the buffer is structurally readable — that
+offsets and vector lengths are in bounds — and cannot prove anything that spans vectors. The adapter
+therefore checks what the verifier structurally cannot before accepting a model: that the parallel
+arrays agree in length, that every child index is in range, that every feature index is below
+`num_features`, that thresholds and leaf values are finite, and that the child graph is **acyclic**. A
+cycle in a tree is not a malformed buffer; it is a buffer that verifies cleanly and then does not
+terminate.
+
+**A model artifact may be content-addressed.** The body naming the artifact may also carry the digest
+of its bytes, which the adapter recomputes before parsing and refuses on mismatch. `features_hash`
+fingerprints the model's *input contract*; this fingerprints the *model*, and the two answer different
+questions — a retrained model over an unchanged signature has the same feature hash and different
+content. The size a model may occupy is bounded before any of it is parsed, so a malformed or hostile
+length cannot be turned into an allocation.
 
 ### 7.3 Escape Hatch: `custom_library`
 
-For a model the in-tree walker does not cover, the engine ships its own compiled scorer `.so`, `dlopen`'d
-through a small C ABI (`score(const double* feats, ...) -> double`). Treelite generates such a `.so` from
-a tree model. Any model family is supported, under the author-native-code trust class of
+For a model the in-tree walker does not cover, the engine ships its own compiled scorer as a loadable
+library, resolved through the platform's own dynamic loader on every supported host rather than through
+a POSIX-only path, and called through a small C ABI (`score(const double* feats, size_t n) -> double`).
+That ABI is deliberately the same one a `native` scorer implements, so a single scorer implementation
+serves either delivery route and moving between them is a packaging decision rather than a rewrite.
+Treelite generates such a library from a tree model. Any model family is supported, under the
+author-native-code trust class of
 [RFC 0017 §12](0017_UniversalKernelDescriptor.md#12-packaging-and-delivery).
 
 The constraint is on linkage, not compilation. Compiling a model *into* the provider makes it
@@ -1166,7 +1433,7 @@ covers. They sit at opposite ends of the same tradeoff, which is why `native` la
 
 The initial adapters are **`static_order`, then `native`, then `tree_data`**. `static_order` is trivial
 and always available; `native` proves the seam with a compiled function and needs no new format;
-`tree_data` is the data-driven shipping path. CSV `table` is a low-cost addition for coarse bucketed
+`tree_data` is the data-driven shipping path. `table` is a low-cost addition for coarse bucketed
 heuristics. `onnx` and `custom_library` are added when a concrete need appears, the latter gated on the
 trust audit.
 
@@ -1206,42 +1473,109 @@ others change what a trained model reads:
 | Descriptor | Why a change can invalidate the model |
 |---|---|
 | **KMD** | Defines the `$kernel.*` fields. Removing or reinterpreting one breaks the feature space directly. |
-| **UED** | Its authored `knobs` must cover the model's `$kernel.*` feature axes ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)); removing an axis breaks that contract, while adding an unused knob does not. It also owns `graph_match`, which **publishes the symbol table** the features read ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)) — so a pattern change can alter what a bound token *means*. Engine identity and op scope changes land here too. |
+| **UED** | Two ways. Its `knobs` **are** the model's `$kernel.*` feature axes ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), so a knob-set change and a model change are the same event. It also owns `graph_match`, which **publishes the symbol table** the features read ([RFC 0020 §6](0020_UniversalEngineDescriptor.md#6-symbol-binding-what-the-pattern-publishes)) — so a pattern change can alter what a bound token *means*. Engine identity and op scope changes land here too. |
 | **UMD** | Narrows the catalog. A pack's criteria decide which kernels survive for a graph, so a matcher change alters the candidate set the model was trained to rank — invisible to a feature-name check. The UMD *reads* the binding; it does not produce it ([RFC 0018 §2](0018_UniversalMatchDescriptor.md#2-the-symbol-table-criteria-read)). |
 
-The UHD records the resolved UED and KMD plus every relevant UMD, by identity and
-semantic revision. An architecture-specific model records that architecture's
-matcher set; a default model records the union. This is captured before fitting:
+The UHD records all three. What it records is each descriptor's **content revision**, which is a
+different axis from the `version` field that governs file-format compatibility:
+
+- **`version` answers "can this provider parse this file?"** It gates the accept rule each descriptor
+  type defines for itself ([RFC 0020 §14.1](0020_UniversalEngineDescriptor.md#141-the-accept-rule)),
+  where a major mismatch orphans the file outright — the runtime supports exactly one major at a time.
+  It moves only when the file *grammar* moves: a field removed, renamed, retyped, made required, or
+  given a new meaning.
+- **`revision` answers "is this still the content the model was trained on?"** It moves when a
+  descriptor's *values* move within an unchanged grammar — a KMD field dropped, a UED's `knobs` list
+  rewritten by feature selection, a pack's criteria tightened.
+
+Keeping the two apart is what makes a retrain shippable as data. Feature selection dropping `split_k`
+rewrites an existing `knobs` array and leaves the JSON grammar byte-identical, so it is not a format
+event. Stamping it as one would orphan that engine on every deployed provider of the current major, and
+re-stamping providers to match would orphan every unrelated descriptor of the old major — one engine's
+routine retrain becomes a fleet-wide migration, which is the opposite of the data-only update this
+design exists to deliver. **A model update costs a revision, never a migration.**
+
+`revision` is itself `<breaking>.<additive>`, mirroring the change classes above: the additive component
+moves when a descriptor gains something a trained model can ignore, the breaking component when it
+removes or reinterprets something a model may have read.
 
 ```jsonc
 "trained_against": {
-  "ued": {"id": "5a1c0000-0000-4000-8000-000000000003", "revision": "1.3"},
-  "kmd": {"id": "5a1c0000-0000-4000-8000-000000000001", "revision": "2.1"},
-  "umd": [{"id": "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe", "revision": "1.0"}]
+  "kmd": {"id": "5a1c0000-…", "revision": "2.4"},
+  "ued": {"id": "7f30b911-…", "revision": "3.1"},
+  "umd": [{"id": "1a7f52c8-…", "revision": "1.0"},   // one entry per matcher
+          {"id": "be019c8c-…", "revision": "1.2"}]
 }
 ```
 
-**Enforcement — the concrete rule.** Descriptor `revision` records authored semantics
-and defaults to `1.0`. It is separate from the JSON-format `version` and the graph-schema
-`sdk_version`. Resolve every recorded dependency by kind and UUID, then require:
+Each entry names the descriptor as well as its revision. The id is what makes the check attributable:
+a diagnostic can say *which* descriptor regressed rather than that something did, and a descriptor
+present at load but absent from `trained_against` is distinguishable from one that merely moved.
+
+**The UMD entry is a list because the dependency is plural.** A UHD is engine-scoped and many packs may
+join one engine, so one `sort_kernel_catalog` ranks the union of their catalogs
+([Section 5](#5-selection-flow)) and is trained against a *set* of independently revised matchers rather
+than one. A scalar cannot express that set: recording the highest revision rejects every matcher below
+it, recording the lowest lets any of the others regress unnoticed, and recording one leaves the rest
+unchecked. A list of `{id, revision}` pairs checks each dependency against the matcher it belongs to. A
+matcher loaded but absent from the list was not part of the training set and is reported as such — it
+narrows a catalog the model never saw.
+
+An empty `umd` list is meaningful rather than missing: it records that no matcher narrowed the catalog
+the model was trained on. An engine whose packs carry no criteria is legal
+([RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema)), and for one the honest
+provenance is an empty set — distinct from omitting `umd`, which claims nothing about matchers at all
+and is rejected.
+
+**Provenance takes a second form, for an engine that has no descriptor set to be trained against.** A
+model may be bound to an engine whose behaviour is not described by a UED, KMD, and UMDs — an engine
+that wraps a vendor library, or one whose selection is compiled in and whose UHD is attached by a
+provider-declared binding rather than by a role map. There is no descriptor revision to record, because
+no descriptor decides what that engine does. What decides it is the provider build itself, so that is
+what the model records:
+
+```jsonc
+"trained_against": {"selector_revision": "hip-kernel-provider/0.2.0/asm-sdpa-untuned-v1"}
+```
+
+`selector_revision` is an opaque string, compared for **exact equality** against the revision the
+running provider reports. A model whose recorded string differs is not used; one that records no
+provenance at all cannot be matched to any build and is refused the same way.
+
+The two forms are exclusive and exhaustive: a `trained_against` carries either all three descriptor
+entries or a `selector_revision`, never a mixture and never neither. Partial descriptor provenance is
+the failure mode both forms exist to prevent — it would let a model claim a dependency on the one
+descriptor that did not move.
+
+The string is opaque **by construction, not by omission**. It names the thing whose behaviour was
+measured, at the granularity at which that behaviour changes. A provider build hash is the wrong
+granularity: it would expire every model on every commit to the repository, including commits that
+cannot affect the engine in question, and no model could ever ship alongside the source that produced
+it. The revision an engine reports moves when what it wraps moves, which is the event a retrain is
+actually coupled to.
+
+**Enforcement — the concrete rule.** At load, for every revision recorded in `trained_against`:
 
 ```
-compatible  ⇔  trained.revision.major == actual.revision.major
-           &&  trained.revision.minor <= actual.revision.minor
+compatible  ⇔  trained_against.<d>.breaking == <d>.revision.breaking
+           &&  trained_against.<d>.additive <= <d>.revision.additive
 ```
 
-Major bump = breaking, disable the model. Minor bump = additive, still compatible. A UHD newer than the
-descriptor it names (`trained_against.minor > actual.minor`) is also incompatible — it may reference
-something that descriptor does not yet declare, which catches a half-updated descriptor set.
+Breaking bump = disable the model. Additive bump = still compatible. A UHD newer than the descriptor it
+names (`trained_against.additive > actual.additive`) is also incompatible — it may reference something
+that descriptor does not yet declare, which catches a half-updated descriptor set. The check runs per
+entry, so one regressed matcher disables the model on its own evidence without implicating the others.
 
-For the KMD this maps onto the change classes above exactly as intended:
+This maps onto the change classes above exactly as intended:
 
-| Descriptor change | Version bump | Effect on an existing UHD |
-|---|---|---|
-| Add a field, or add legal values to one | **minor** | Still compatible — `UHD.minor <= KMD.minor` holds. The model keeps ranking on the fields it knows. |
-| Remove, rename, or reinterpret a field | **major** | Incompatible — the model is disabled until retrained and restamped. |
-| Add a UED knob without changing existing semantics | **minor** | Still compatible; an unused knob warns but does not disable ranking. |
-| Remove, rename, or reinterpret a UED knob | **major** | Caller-visible API break. A model reading the removed axis fails the [Section 6.3](#63-contract-enforcement) containment check; the version gate also requires regeneration and restamping. |
+| Descriptor change | `revision` bump | File-format `version` | Effect on an existing UHD |
+|---|---|---|---|
+| KMD adds a field, or adds legal values to one | **additive** | unchanged | Still compatible — `UHD.additive <= KMD.additive` holds. The model keeps ranking on the fields it knows. |
+| KMD removes, renames, or reinterprets a field | **breaking** | unchanged | Incompatible — the model is disabled until retrained and restamped. |
+| UED **removes** a knob | **breaking** | unchanged | The engine withdrew a dial a caller could set. A model still reading it fails the [Section 6.3](#63-contract-enforcement) containment check and is disabled; the removal is additionally a caller-visible API break, which is a release-policy obligation on the engine rather than a loader one. |
+| UED **adds** a knob | **additive** | unchanged | The public surface grew. An existing model reads a subset of a larger set, which is the normal steady state, so no retrain is forced — though a knob no model ranks on is reported until one does. |
+| A pack's criteria narrow or widen the catalog | **breaking** on that UMD | unchanged | The candidate set the model was trained to rank has changed, which no feature-name check can see. |
+| A descriptor's JSON grammar changes | — | **major or minor**, per that type's own rule | Independent of any model. A UHD is not restamped for a grammar change that leaves content untouched. |
 
 A mismatch is a contract violation and takes the [Section 6.3](#63-contract-enforcement) path — the model
 is disabled, an error is logged, ranking falls back to `static_order`; the request never fails. The same
@@ -1249,20 +1583,42 @@ applies to any `features_signature` reference to a field the KMD no longer decla
 training-coverage warning when the catalog spans a field value outside what the model was trained on
 ([Section 8.3](#83-out-of-distribution-inputs)).
 
-A missing recorded dependency disables the affected role/architecture model.
-Additional current UMDs warn without invalidating otherwise compatible dependencies.
-All role/architecture references are checked, including models normally loaded lazily.
-An explicitly invalid architecture entry does not silently select a default model.
+> **Not yet in the layout.** None of the three descriptors carries either field today
+> ([PR #10606](https://github.com/ROCm/rocm-libraries/pull/10606)); `EngineDescriptor::sdkVersion` is the
+> *graph schema* axis and is a different thing. Both are cheap to add now and awkward once descriptor
+> sets ship. `revision` is the newer of the two obligations — RFC 0020 §14 already specifies `version`
+> for the UED — and this section asks each of the three types to carry a content revision beside it.
 
 ### 8.2 Model Updates
 
-Models ship as data artifacts. Update path:
+Models ship as data artifacts, so a heuristic update is a file swap and a restart. The update
+**replaces** the engine's descriptor set; it is not installed beside it:
 
-1. Drop new engine descriptor set (UED + UHD + model) alongside existing
-2. Provider loads new descriptors on next initialization
-3. Rollback: restore previous descriptor set
+1. Stage the new set (UED + UHD + model artifact) outside the directory the provider scans.
+2. Swap it into place over the old set — atomically where the filesystem allows, so no scan can observe
+   a half-written set — retaining the previous set outside the scanned inventory.
+3. The provider loads the new descriptors on next initialization.
+4. Rollback: swap the retained set back the same way.
 
-No provider recompile required.
+No provider recompile is required.
+
+**Why replacement rather than coexistence.** An updated engine keeps its identity — same UED `id`, same
+`name` — and changes only which UHD its heuristic role references. Leaving the previous set discoverable
+therefore hands the loader two UEDs that share an identity and differ in content, which is a collision
+rather than a version choice:
+[RFC 0020 §13.2.1](0020_UniversalEngineDescriptor.md#1321-duplicate-detection-descriptor-id-and-name)
+unloads **all** participants in an `id` or `name` collision instead of keeping the first, because
+descriptor load order is not deterministic. The content-identical exception does not apply, since the
+heuristic reference is exactly what changed; and a fresh UED `id` does not evade it, because the two
+still collide on `name` and the `name` invariant has no identical-content exception. An update dropped in
+beside its predecessor removes the engine instead of improving it.
+
+Rollback copies stay outside the scanned inventory for the same reason. Retaining a previous set on disk
+is sound practice; retaining it where the loader can see it is a collision waiting for the next restart.
+
+This is the restart-time path. Reloading a model into a running provider is a separate problem — the
+model cache is a sibling of the heuristic on the engine and fixed for that engine's lifetime
+([Section 9.2](#92-loading-and-caching)) — and is not specified here.
 
 ### 8.3 Out-of-Distribution Inputs
 
@@ -1273,8 +1629,8 @@ exposed to selection all produce the same failure — the model returns a value,
 basis for it. Tree models are especially prone, extrapolating by returning the leaf value of the nearest
 region seen in training, which can be arbitrarily wrong for a distant input.
 
-This is an unmitigated gap in v1, and it is distinct from a contract violation: the contract holds, every
-field resolves, and the hash matches. Only the values are new. Two approaches apply, with a real tradeoff:
+This is distinct from a contract violation: the contract holds, every field resolves, and the hash
+matches. Only the values are new. Two approaches apply, with a real tradeoff:
 
 - **(a) Accept it and manage it by versioning.** Treat out-of-distribution input as a known error class
   and prevent it procedurally: track which arches and value ranges a model was trained on, and require a
@@ -1296,20 +1652,29 @@ of models. The constraint this places on the `features_signature` — raw device
 features only where the sweep varied them — is enforced by the generation tool
 ([Section 13.5](#135-sweep-space-grid-vs-constraint)) rather than detected at load.
 
-This RFC specifies **(a) for v1, with two exact-match exceptions.** Both are discrete lookups rather than
-per-feature range checks, so they cost little and catch the highest-impact cases:
+This RFC specifies **(a), with three exact-match exceptions.** All three are discrete lookups rather
+than per-feature range checks, so they cost little and catch the highest-impact cases:
 
-- **Arch** — compare the device's GFX name against the arch set in the model's training metadata. This is
-  a **loader-side** check against a resolved device fact, not a `features_signature` read: `arch` is a KDP
-  property gated at selection and is not a token an AOT signature may reference
-  ([Section 6.1](#61-feature-sources)). The GFX name is already resolved for the pack-level arch gate and
-  for selecting the arch-keyed heuristic ([Section 3.1](#31-descriptor-relationships)), so it costs
-  nothing additional.
+- **Arch** — the model artifact carries the set of architectures its training corpus covered, and the
+  runtime compares the resolved device against it. This is a **loader-side** check against a resolved
+  device fact, not a `features_signature` read: `arch` is a KDP property gated at selection and is not a
+  token an AOT signature may reference ([Section 6.1](#61-feature-sources)). The GFX name is already
+  resolved for the pack-level arch gate and for selecting the arch-keyed heuristic
+  ([Section 3.1](#31-descriptor-relationships)), so it costs nothing additional. An unseen architecture
+  withholds the engine estimate rather than supplying an unfounded one.
 - **Categorical values** — a string outside the UHD's `categorical_encoding`
   ([Section 6.5](#65-categorical-encoding)) is an exact-lookup miss, and therefore free.
+- **Score range** — a recovered score that is not finite and positive is not a usable prediction. Such a
+  candidate is distrusted **individually**: it orders last and is reported as 0, while the rest of the
+  ranking stands. One diagnostic per request carries the affected and total counts, so a model going
+  wrong everywhere reads differently from one candidate falling off the end of its trained region.
 
-The artifact format keeps per-feature coverage metadata additive, so (b) remains available without a
-format break. In every case the degradation is the [Section 5](#5-selection-flow) one: fall back to
+Carrying the arch set in the artifact rather than in the descriptor is deliberate: it is a property of
+the corpus a model was fitted to, not of the document that names the model, and keeping the two together
+means a model cannot be re-pointed at a new architecture by editing JSON. The same artifact-side slot
+keeps per-feature coverage metadata additive, so (b) remains available without a format break.
+
+Where the degradation is not per-candidate, it is the [Section 5](#5-selection-flow) one: fall back to
 `static_order`, log, and never fail. **OPEN:** See [Open Question 16](#operational).
 
 ---
@@ -1366,6 +1731,13 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   the engine id is *implicit* in the cache's location rather than absent from the key. In practice this
   is the **catalog cache** that foundation maintains: the ranked order rides along with the catalog it
   ranks rather than living in a second structure.
+
+  **What is cached is the full applicable catalog's order**, which is why no knob filter appears in the
+  key. A pin narrows the candidate set but not the ranking: a filtered request restricts the cached
+  order rather than producing its own, which is the commuting property ([Section 5](#5-selection-flow)
+  step 8) doing the work that a per-filter cache key would otherwise have to. Adding the pinned settings
+  to the key would multiply entries by the knob cross-product to store orders that are already
+  derivable.
 
 - **In-memory: the UHD needs no place in the key.** A heuristic can be replaced independently of the
   kernels it ranks ([Section 8.2](#82-model-updates)), which raises the obvious worry that a cached
@@ -1539,17 +1911,38 @@ and for **opaque engines** that cannot expose a per-candidate catalog to rank at
 **the full ranking is the stopgap**: an engine reports `sort_kernel_catalog`'s best predicted score as
 its estimate, accepting the enumeration cost.
 
-**Distinct model vs. derived from the ranker.** If `predict_engine_tflops` is a distinct trained model,
-the quick policy can rank engines without enumerating candidates — cheaper at selection time. If it is
-derived from `sort_kernel_catalog` (max predicted score over candidates), there's one fewer model to
-train and maintain, but the quick policy must evaluate the full ranker to get the estimate. The tradeoff
-is selection-time cost vs. training/maintenance complexity. **OPEN:** See [Open Question 6](#structural).
+**Distinct model and derived stopgap, in that order of preference.** Both forms exist, and which one an
+engine uses is a property of that engine rather than a decision this format makes. A distinct
+`predict_engine_tflops` model is what gives the quick policy its value: only the winning engine runs the
+full `sort_kernel_catalog`, and losers never enumerate candidates. Where an engine ships no such model,
+the ranker's top calibrated score stands in, at the cost of enumerating that engine's catalog to produce
+it. The "cheap (no catalog enumeration)" property belongs to the distinct model alone, and it holds only
+because that model is trained on `f(graph)`.
 
-A distinct estimate model is what gives the quick policy its value: only the winning engine runs the full
-`sort_kernel_catalog`, and losers never enumerate candidates. If the estimate is derived from the ranker,
-every engine runs the ranker to produce it, collapsing the quick and thorough policies into one operation.
-The "cheap (no catalog enumeration)" property depends on `predict_engine_tflops` being trained on
-`f(graph)` alone, not `f(graph, candidates)`. See [Open Question 6](#structural).
+**An estimate model may not read the catalog.** A UHD bound to `predict_engine_tflops` is refused if its
+`features_signature` reaches any `$kernel.*` field, or if its `categorical_encoding` encodes one. The
+role's whole value is answering before candidates are enumerated; a kernel feature would make that
+impossible while leaving the descriptor superficially valid.
+
+**An estimate must be comparable, not merely ordered.** Engine selection compares these numbers across
+engines, so a UHD in this role is bound only when it declares `units: "tflops"`, `calibrated: true`,
+`objective: "max"`, and a transform this runtime can invert ([Section 11.3](#113-cross-engine-comparison)).
+A within-engine ranker that happens to be accurate is not admissible here: its score orders one catalog
+correctly and says nothing about another engine. The adapter set is correspondingly narrower than the
+ranker's — an estimate is served by a compiled scorer or a trained model, not by a bucketed table, whose
+resolution is chosen for separating candidates rather than for absolute accuracy.
+
+**A model that binds is not the same as a model that answers.** Binding resolves to one of three
+outcomes, and consumers distinguish them: *available* (an estimate this request can use), *unavailable*
+(the engine declares no estimate for this architecture — absence, ordered by the static rules), and
+*invalid* (an estimate was declared and could not be trusted — the zero-claim of
+[Section 11.2](#112-two-engine-selection-policies-rfc-0007)). Collapsing the last two loses exactly the
+distinction that section depends on.
+
+**An estimate is attached by the engine, never claimed by the descriptor.** The engine, role, and
+architecture a UHD serves come from the UED's role map; a document that names them itself is checked
+against the binding it was resolved through and refused on disagreement. Otherwise a dropped-in
+descriptor could attach itself to an engine that never referenced it.
 
 ### 11.2 Two Engine-Selection Policies (RFC 0007)
 
@@ -1559,9 +1952,8 @@ Shorthand in this section: **A** = `predict_engine_tflops`, **B** = `sort_kernel
 - **Quick policy.** Rank applicable engines by A (expected performance); pick the winner; if the winner
   has a config UHD (B), run it to pick the kernel. Only the winner drills down, so losers are never
   scored at the kernel level. Engines with no descriptor layer (e.g. MIOpen) contribute their high-level
-  estimate for the ranking and, if they win, use their own internal kernel selection. An engine that
-  ships no UED reaches A by declaring its UHD's UUID in provider code
-  ([Open Question 7](#structural), RESOLVED), so "no descriptor layer" no longer implies "no estimate".
+  estimate for the ranking and, if they win, use their own internal kernel selection.
+  **OPEN:** See [Open Question 7](#structural) (non-descriptor engine estimates).
 - **Thorough policy.** Run B for every applicable engine that has it (best config + its predicted perf),
   fall back to A for engines that don't, then compare the predicted performance across engines and pick
   the global best (engine + config). More work, more accurate.
@@ -1582,12 +1974,7 @@ policy therefore has to treat a missing estimate as a normal outcome rather than
 | A and B | Rank by A; winner runs B | Run B; compare its top score |
 | B only | Rank by B's top score (pays enumeration) | Run B; compare its top score |
 | A only (opaque) | Rank by A; engine does its own kernel selection | Compare A against others' B |
-| No declared model | Falls back to static ordering; contributes no score | Same |
-
-The last row is about a **declaration**, not about a descriptor layer. An engine with no UED can still
-declare A ([Open Question 7](#structural)), and a descriptor-backed engine whose UED names no
-`predict_engine_tflops` model has no A either. What puts an engine in that row is that nothing in
-compiled code binds a model to it — or that the model it binds is not deployed on this machine.
+| Neither | Falls back to static ordering; contributes no score | Same |
 
 **A missing estimate and a distrusted one are different signals.** An engine that supplies no estimate
 reports nothing and is ordered by the existing static rules; an engine whose heuristic failed its
@@ -1596,8 +1983,8 @@ claim rather than a silence — it says *do not pick me* and lets any engine wit
 it. Absence means "I do not answer this question"; zero means "I answer, and the answer is bad."
 
 An engine that supplies no estimate is ordered by the existing static rules and simply does not
-participate in performance-based comparison — the mixed case still has to work, since not every
-engine will have a trained model at the same time.
+participate in performance-based comparison — the mixed case has to work, since it is the near-term
+reality for every non-descriptor engine.
 
 ### 11.3 Cross-Engine Comparison
 
@@ -1665,7 +2052,7 @@ Because selection is data-driven, it must be inspectable — consistent with
 - **Selection trace:** Candidates, scores, the ranked order, winner, and whether the model or a fallback
   decided
 - **Model provenance:** UHD id, adapter, model artifact version, `features_hash`,
-  `trained_against` (UED/UMD/KMD versions), training provenance
+  `trained_against` (UED/UMD/KMD content revisions, each named by id), training provenance
 - **Contract diagnostics:** A clear **error** (not a warning) naming which of the three checks failed and
   why, plus the fact that ranking degraded to `static_order` and the estimate was reported as 0
 - **Coverage warnings:** When a scored candidate or device falls outside what the model was trained on
@@ -1695,23 +2082,16 @@ provider-specific service.
    **through a UED exposing every KMD field** ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)),
    times its kernels across a corpus of problem shapes, trains a model, and emits an updated UED/UHD —
    now `adapter: tree_data` pointing at an exported model, with the categorical encoding and
-   `trained_against` versions it was built from. Dropping that updated engine descriptor set back in
-   upgrades the pack in place. The emitted UED preserves its authored `knobs`; the trained kernel-side
-   features must be a subset ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
-   Pruning the public surface is a separate, explicit author decision.
+   `trained_against` revisions it was built from. Dropping that updated engine descriptor set back in
+   upgrades the pack in place. The emitted UED's `knobs` are **derived from the trained feature set** —
+   the axes that survived feature selection ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)),
+   which is normally fewer than the generation UED exposed.
    **OPEN:** See [Open Question 10](#operational) (shape corpus location).
 
 Because the shipped and generated heuristics are the same descriptor kind differing only in `adapter`
 and fields, the tool only rewrites data; it never introduces a new interface. The tool runs over
 hipDNN's public API — it adds no code to hipDNN and touches no provider internals — so it works for
 any provider's pack.
-
-> **Current E2E boundary.** The SDPA path collects through the ingestor's benchmarking plan, exports
-> its candidate log, then runs `train`, `evaluate`, and `promote`. This proves the catalog-ranker path,
-> not the entire provider-agnostic generation pipeline. The runtime accepts role-scoped arch maps, but
-> `promote` still writes the legacy `heuristic` field; given a UED already carrying
-> `sort_kernel_catalog`, it emits both keys and the runtime rejects the result. Role-aware promotion
-> must be completed before that path satisfies this section.
 
 ### 13.1.1 What the Author Supplies, and When
 
@@ -1760,8 +2140,13 @@ What changed?
 
 Two properties of this table are worth stating directly, because they are what make regeneration cheap.
 **Narrowing never needs new data:** pruning knobs refits from timings already collected, and dropping
-kernels needs no refit at all. **Widening always does:** a candidate, a cohort, or a device the sweep
-never saw has no evidence behind it, and no amount of refitting manufactures any.
+kernels needs no refit of the per-candidate ranker at all. The engine estimate is the exception, and
+scopes that claim: `predict_engine_tflops` predicts the engine's achievable throughput rather than any
+one candidate's, so removing the kernel that *was* the winner for a cohort invalidates it even though
+`sort_kernel_catalog` still ranks the survivors correctly
+([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). **Widening always does:** a
+candidate, a cohort, or a device the sweep never saw has no evidence behind it, and no amount of
+refitting manufactures any.
 
 ### 13.2 Benchmarking via hipDNN Autotune
 
@@ -1771,14 +2156,21 @@ pack exactly as it would any other engine. **The UHD itself never runs kernels**
 The generation tool is a separate program that wraps hipDNN, drives the timing, logs the results, and
 trains the model; it reaches the engine only through the public Graph API:
 
-- `get_engine_configs()` — enumerate applicable engines and their knobs for a graph
-- `add_engine_variants()` — enroll explicit `(engineId, knobSettings)` tuples as plan specs
-- `add_engine_sweep()` — enroll the Cartesian product of knob axes plus fixed settings
-- `autotune(mode = EXHAUSTIVE, strategy = RUN_UNTIL_STABLE)` — compile and time each enrolled spec,
-  iterating until the trailing-window coefficient of variation converges
-- `AutotuneResult[]` — per-spec `engineId`, `knobSettings`, `minTimeMs` / `avgTimeMs` / `stddevMs`,
-  `iterationsRun`, `workspaceSize`, persisted to JSON. That JSON, joined with the feature row, is the
-  training dataset.
+- **Enumerate the applicable catalog** for a graph, paged and with a total count, so a large catalog is
+  walked in bounded requests rather than held whole. Each entry arrives with its full knob tuple, which
+  is the identity a timing is attributed to.
+- **Enroll one enumerated candidate per timed run**, by its complete knob tuple. Complete settings
+  replace collection pins rather than combining with them: one enrolled tuple times exactly one
+  candidate, so a measurement is never attributed to a set.
+- **Time each enrolled candidate** to convergence, iterating until the trailing-window coefficient of
+  variation settles rather than for a fixed iteration count.
+- **Record per-candidate results** — the engine, the knob tuple, min / mean / robust-mean / stddev
+  timings, iteration count, and workspace size — persisted as JSON. That JSON, joined with the feature
+  row, is the training dataset.
+
+Enrolling enumerated candidates one at a time, rather than sweeping a Cartesian product of knob axes, is
+what makes the pipeline viable on a sparse catalog: cost scales with the number of kernels that exist,
+not with the product of the ranges they span.
 
 **A timing is only a training label once the candidate is known correct.** The tool validates each
 candidate's numerical output against a reference before accepting its measurement, and records the
@@ -1793,57 +2185,54 @@ not symmetric:
 - **A missing candidate is a coverage gap, not a corruption.** A kernel wrongly excluded by a matcher
   never appears, so the model simply never learns it — the trained ranking is intact but incomplete.
 
-Invalid candidates are recorded rather than dropped from the collected corpus. A candidate that builds
-and runs but fails validation is written with its measurement suppressed and an explicit invalid marker,
-preserving evidence of the failure surface without training the performance ranker on an invalid time.
-A candidate that never became applicable is absent by construction and is visible only as thin coverage
-for that problem ([Section 13.5](#135-sweep-space-grid-vs-constraint)).
+Both are recorded rather than dropped. A candidate that builds and runs but fails validation is written
+with its measurement suppressed and an explicit invalid marker, so the model learns the failure surface
+instead of inferring one from absence; a candidate that never became applicable is absent by
+construction and is visible only as thin coverage for that problem
+([Section 13.5](#135-sweep-space-grid-vs-constraint)).
+
+**Recording an invalid candidate is diagnosis, not remedy.** A suppressed timing protects the training
+labels; it does not stop the kernel from running. The scorer cannot exclude a candidate
+([Section 5](#5-selection-flow)), so a kernel that is applicable and incorrect stays selectable through
+every path that does not consult the model: a knob pin that filters the correct candidates away, a
+winning candidate that fails to build and is skipped (step 7), or any `static_order` fallback. A learned
+demotion is a preference, and preference is not a correctness gate — the ranking that demotes it is
+precisely the thing each of those paths bypasses.
+
+A correctness defect is therefore resolved where correctness is decided, in the matcher or the kernel:
+**package emission fails while any candidate carries an unresolved invalid marker**
+([Section 13.4](#134-new-stage-package-stage-p)). The author narrows the pack's UMD so the kernel is no
+longer applicable for those problems, or withdraws the UKD; generation re-runs and the marker clears.
+The invalid rows stay in the dataset for diagnostics either way, so the model still learns the failure
+surface — it is simply no longer the only thing standing between a wrong kernel and a result.
 
 Because applicability decides which candidates are ever timed, an incorrect matcher biases the dataset
 before any model sees it. **OPEN:** what reference the tool validates against per op, and whether
 generation additionally checks matcher coverage — that a problem's candidate set is plausible rather
 than merely non-empty — see [Open Question 19](#operational).
 
-> **Current collection gap.** `BenchmarkPlan::sampleCandidate` records `status: ok` after timed
-> execution, and `benchmark_log.py` maps that directly to `is_valid: True`. That is a timing-success
-> verdict, not a per-candidate reference comparison. Validation of the final selected output does not
-> certify every timed candidate; the collector must carry each candidate's numerical verdict before
-> these rows can be treated as the validated labels specified here.
-
 The tool times the **shipped** kernels — it does not re-build a variant grid. The pack is the authority
 on which variants exist; autotune is the authority on how fast each one runs.
 
-**Generate against a fully-exposed UED; preserve the shipping UED's authored knobs.** These APIs address
-kernels *only* through exposed knob settings, so a kernel the tool cannot name is a kernel it cannot
-time, and therefore cannot train on. Hence the generation UED exposes **every** KMD field, making the
-knob tuple equal to the metadata tuple and every catalog entry individually addressable. Feature
-selection may reduce the model's inputs, but must not silently remove public knobs. Before promotion,
-every retained `$kernel.*` axis must be exposed by the shipping UED
-([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
+**Generate against a fully-addressable UED; ship the engine's authored knobs.** The generation path
+addresses kernels through knob settings, so a kernel the tool cannot name is a kernel it cannot time.
+The generation UED therefore exposes every addressable KMD field, making the knob tuple equal to the
+metadata tuple and every catalog entry individually reachable. A field the exposure cannot carry leaves
+its kernels sharing a tuple, and generation stops on that collision rather than timing an ambiguous
+candidate ([Section 13.3](#133-one-source-of-truth-translated-once)).
 
-Full exposure makes each entry *addressable*. **It does not make the catalog efficiently enumerable**,
-and the current API has no good answer for that — indeed full exposure makes it harder, since it
-maximizes the number of knob axes:
+Feature selection then prunes the axes that do not earn their place **in the model**. It does not prune
+the engine's knobs. The emitted UED keeps its authored `knobs` — that list is the engine's public tuning
+surface, read by its UMDs and by callers who pin
+([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)) — and the trained feature set is
+checked to be contained in it ([Section 6.3](#63-contract-enforcement)). A knob the model stopped
+reading is reported so the engine's author can decide whether it still earns its place; withdrawing it
+is their call and a deliberate engine change, not a side effect of a training run. Benchmark wide, and
+let the model keep what it can use.
 
-- Knob ranges are reported **per knob, independently**, so a sweep can only be expressed as a Cartesian
-  product. For a sparse catalog most of that product names no kernel — the tool enrolls combinations
-  that cannot be satisfied and discovers this only by trying them.
-- Cost scales with the product, not with the catalog. Many knobs over a handful of real kernels makes
-  enumeration slow at best; for a large enough space with few valid points, **enumeration by sweeping is
-  not viable at all**. (`add_engine_sweep()` caps the product at 10,000 combinations, which bounds the
-  damage but does not solve the problem — it just turns an intractable sweep into a rejected one.)
-- Nothing expresses *which combinations are valid*, so neither the tool nor a user can ask for "the
-  catalog" directly.
-
-This is answered by [Open Question 12](#operational): the applicable catalog is enumerated directly off
-the engine descriptor — set `HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT` /
-`HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT` (and optionally the
-`HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT` knob-choice array) before finalizing the engine, then read
-`HIPDNN_ATTR_ENGINE_CANDIDATES_EXT`. Pages carry real knob tuples with `offset`/`total_count`, so the
-generation pipeline no longer probes a cross-product and is practical for large sparse knob spaces.
-It is a generation-tool surface, not a consumer API; an engine that cannot enumerate its catalog
-reports `HIPDNN_STATUS_NOT_SUPPORTED` rather than an empty page, and such engines still fall back to
-the cross-product sweep with its 10,000-combination cap.
+The generation manifest records both sets — the knobs the collection UED exposed and the knobs the
+shipping UED declares — so the difference between what was addressable and what is tunable stays
+visible rather than being inferred from a diff.
 
 ### 13.3 One Source of Truth, Translated Once
 
@@ -1871,8 +2260,8 @@ The tool freezes and emits two contracts:
    - **A collision during generation is a dataset error, and means exposure is incomplete.** If two
      enrolled candidates share a tuple, timings cannot be attributed to a kernel. Under full exposure
      this cannot happen, so it indicates the generation UED did not expose every KMD field — fail loudly
-     rather than train on an ambiguous join. (At *runtime*, two kernels differing solely in non-knob,
-     dispatch-only fields share a knob tuple and are invisible to the model; they
+     rather than train on an ambiguous join. (At *runtime*, once the emitted UED exposes only the model's
+     feature axes, two kernels differing solely in dispatch-only fields will share a knob tuple; they
      score identically and the tie-break separates them, with a load-time warning —
      [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes).)
 
@@ -1898,19 +2287,25 @@ updates) the engine's descriptor set:
   pack does not already carry one; its fields are the `$kernel.*` metadata the UKDs fill
   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)) — one KMD per engine, owned by
   the UED;
-- **the UED** — updated to reference the new UHDs, preserving its authored `knobs` and checking that they
-  cover the ranker's `$kernel.*` feature axes
+- **the UED** — updated to reference the new UHDs in the role map for this architecture. Its `knobs`
+  are authored by the engine and are not rewritten by generation
   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
 
-The UMDs, UDD, and child UKDs are not regenerated; only the heuristic side changes. This is the intent of
-the two-stage design: the expensive artifacts (compiled kernels) ship once, and the heuristics are
-layered on afterward as data.
+Only the heuristic side changes in the ordinary case: the UMDs, UDD, and child UKDs are not regenerated.
+This is the intent of the two-stage design — the expensive artifacts (compiled kernels) ship once, and
+the heuristics are layered on afterward as data.
+
+The one case that reaches back into the pack is a correctness defect the timing run exposed
+([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). Emission is gated on none being outstanding,
+and clearing one is a matcher or kernel change rather than a heuristic change. That is a deliberate
+exception to the layering, not a hole in it: the stage that discovers an incorrect kernel is the only
+stage positioned to refuse to ship it.
 
 ### 13.5 Sweep Space: Grid vs. Constraint
 
 The generation tool sweeps two things: the **problem-shape corpus** (batch, seqlen, heads, and the like —
 supplied by the author as representative shapes, or a per-op default) and optionally the **exposed knobs**
-(the KMD fields the engine lets a user set, via `add_engine_variants` knob settings). A knob setting only
+(the KMD fields the engine lets a user set, enrolled as explicit knob settings). A knob setting only
 *filters* the catalog ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), so
 sweeping knobs explores user-visible restrictions, not new kernels. The variant space is fixed: it is the
 pack's existing child UKDs, so the tool does not enumerate or build variants but enrolls the shipped ones
@@ -2004,35 +2399,22 @@ byte counts fit that mechanism, as per-op precomputed fields:
 
 ```jsonc
 // available wherever an sdpa_fwd node is bound — no descriptor declares these
-"$sdpa_fwd.flops"        // causal-effective; see the convention note below
+"$sdpa_fwd.flops"        // 4·B·H·Sq·Sk·D for SDPA forward
 "$sdpa_fwd.bytes"        // sum over Q/K/V/O of element_count × that tensor's dtype size
 
 // so a features_signature entry just divides them
 "arithmetic_intensity": {"/": ["$sdpa_fwd.flops", "$sdpa_fwd.bytes"]}
 ```
 
-**The counting convention is settled: effective, not dense.** A FLOP count is a choice, not a
-measurement, and the choice must be made once because it is the denominator of every TFLOPS number
-the project will ever publish — changing it later reprices every stored measurement.
-
-For masked attention, count the work the mask leaves, not the dense rectangle. With a contiguous
-query suffix the average effective KV length per query is `kv_len - q_len + (q_len + 1) / 2`, so a
-square causal problem does about **half** the dense `4·B·H·Sq·Sk·D`. The reference implementation is
-`attention_flops` in rocKE's `_ua_shape_utils.py`, and it is the convention aiter and Triton use —
-which is the reason to adopt it. A number that means the same thing outside AMD is worth more than
-one that flatters a kernel by crediting it for arithmetic the mask discarded.
-
-This supersedes the dense `4·B·H·Sq·Sk·D` written elsewhere in this document
-([Section 11.2](#112-what-to-measure)); that formula remains correct for an unmasked problem, which
-is the case where the two agree.
-
 These are **not** authored as expression strings in table-level `.fbs` annotations. Embedding an
 expression language inside the schema file is awkward, and changing an `.fbs` requires codegen plus a
 recompile regardless — so a schema annotation buys none of the data-driven flexibility that would
 justify it. What needs a rebuild to change belongs in code, as a precomputed binding field.
 
-Because they are **op-intrinsic** (SDPA does `4·B·H·Sq·Sk·D` FLOPs regardless of engine or package),
-these fields live at Layer 1 and are shared by every package of that op — defined once per op-family.
+Because they are **op-intrinsic** (SDPA's two GEMMs do `2·B·H·Sq·Sk·(hdim_q + hdim_v)` FLOPs regardless
+of engine or package — the familiar `4·B·H·Sq·Sk·D` is the specialization where the Q and V head
+dimensions are equal, which the frontend does not require), these fields live at Layer 1 and are shared
+by every package of that op — defined once per op-family.
 A `features_signature` then references intensity *identically* to a raw dim like `$q.dims[2]`, and the
 Tier-3 "physics" distinction disappears at the point of use.
 
@@ -2152,18 +2534,20 @@ generation/execution loop can actually run.
 3. **Generate heuristics** from the results ([Section 13](#13-model-generation-pipeline)).
 4. **Backwards-evaluate the heuristics** to find the weakest knobs — the axes the trained model barely
    uses.
-5. **Explicitly approve the public-surface reduction**, then regenerate the UED with the reduced knob set.
+5. **Regenerate the UED** with the reduced knob set.
 6. **Regenerate the AOT kernels** from the reduced knobs, or run the AOT-selection pipeline
    ([Section 14.2](#142-pipeline-aot-selection)).
 
-Step 4 may use feature importance to propose reductions, but importance alone does not establish the
-cost of pinning a knob. Evaluate the resulting selection regret and coverage: a field constant within
-each problem may be matcher-bound or generator-pinned rather than a measured tuning choice.
+Step 4 is the same signal as the feature-importance pruning noted in
+[Section 13.6](#136-auto-deriving-a-first-pass-features_signature) — there it trims a bloated
+`features_signature`; here it trims the **knob space itself**. A knob the model never splits on is a knob
+whose variants are not earning their package size.
 
-**Steps 4–5 are separate decisions.** Pruning a model input preserves the authored knob by default
-([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). An approved knob removal must
-also remove any model dependency on it, obey the [Section 6.3](#63-contract-enforcement) containment
-check, and be versioned as a public API change. A retrain alone must not shrink that API.
+**Steps 4–5 collapse into one action.** Because `UED.knobs` *is* the model's feature set
+([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), pruning a weak feature and dropping a
+knob are the same edit rather than two that have to be kept consistent by hand. Emitting the pruned UHD
+emits the reduced UED with it, and the [Section 6.3](#63-contract-enforcement) equality check guarantees
+they cannot drift apart.
 
 Step 6 then closes the loop: a smaller knob set means fewer variant axes worth compiling, which shrinks
 the AOT explosion, which changes what the next model sees.
@@ -2225,8 +2609,8 @@ pipeline built on top of it.
 | 2 | `native` adapter | Scorer compiled into the engine, named by symbol ([Section 7.1](#71-first-native)). Exercises real ranking, `objective`/`score`, and the ranked-catalog output with no new format. Establishes the performance baseline everything later is measured against. |
 | 3 | `tree_data` (escape-hatched) | The tree-table format and the **new in-tree GBDT walker written for this work** — a bounded parser and evaluator with no external dependency — behind a hand-written featurizer rather than the generic extractor. Lands the real FMHA-fwd model. Adds lazy load + per-engine model cache. |
 | 4 | `features_signature` + generic extractor | Replaces the hand-written featurizer: inline signature with computed entries, one extractor over the shared namespaces, subexpression hash-consing, `features_hash` over signature + encoding, training↔runtime parity test. |
-| 5 | Generation tool | Standalone tool wrapping hipDNN: drives autotune over a shape corpus and the knob space, logs results, trains, emits updated UED/UHD + model. Sparse knob spaces are paged through the `HIPDNN_ATTR_ENGINE_CANDIDATE_*` engine-descriptor attributes ([Open Question 12](#operational)). |
-| 6 | `table` / CSV | Cheap bucketed heuristics for ops that don't warrant a model. |
+| 5 | Generation tool | Standalone tool wrapping hipDNN: enumerates each graph's applicable catalog, times every enrolled candidate, logs results, trains, and emits an updated UHD + model alongside the engine's UED role map. |
+| 6 | `table` | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 7 | Engine-selection integration | Score-only mode, the A/B plugin-query surface, engine-selection policies. Introduces the engine estimate (A) — not needed before competing or opaque engines exist ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). Co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). |
 | 8 | `custom_library` | Author-shipped scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated ([Open Question 11](#operational)). |
 | 9 | AOT selection ([Section 14.2](#142-pipeline-aot-selection)) | Benchmark an all-knobs KDP, prioritize by frequency / cost-of-poor-selection, emit the AOT kernel set. Needed first for **non-JIT** engines (rocKE today, CK), where it is filtering rather than selection. Depends on phase 5. |
@@ -2246,11 +2630,11 @@ dependency-gated and land only when a concrete need appears.
 | Risk | Description | Mitigation |
 |------|-------------|------------|
 | **Feature-contract drift** | Training and inference feature vectors diverge | Single `features_signature` drives both sides via one generic extractor; four-part load-time check ([Section 6.3](#63-contract-enforcement)); computed features are **inline**, so the signature *is* the computation and `features_hash` cannot miss a redefinition ([Section 6.4](#64-computed-features)) |
-| **Catalog not enumerable** | Knobs are reported independently, so the valid set is a sparse subset of the cross-product; a large knob space cannot be swept, so no training data can be gathered | Generation exposes every KMD field, so every kernel is addressable; the valid catalog is enumerated directly through the `HIPDNN_ATTR_ENGINE_CANDIDATE_*` engine-descriptor attributes ([Open Question 12](#operational)), so a sparse space is paged rather than swept. An engine that declines enumeration falls back to the capped cross-product |
-| **Knob-set churn** | Automatically pruning a public knob during retraining breaks callers | Preserve authored knobs; require model axes to be a subset at load. Explicit knob removal is a **major** UED version bump ([Open Question 18](#operational)) |
+| **Catalog not enumerable** | Reconstructing candidates from independently reported knob ranges yields a cross-product a sparse catalog barely intersects, so a large knob space cannot be swept | Generation enumerates the applicable catalog directly, paged, and enrolls one complete candidate per timed run, so cost is linear in the catalog rather than in the cross-product ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)) |
+| **Knob-set churn** | A retrain drops a feature and takes a caller's knob with it | Cannot happen: `UED.knobs` is the engine's authored public surface and the model's feature set is a subset of it, so feature selection never withdraws a knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement)). Removing a knob is a deliberate engine-authoring change, stamped as a breaking content revision ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); an unread knob is reported so the author can decide |
 | **Kernel-identity drift** | Timed candidate doesn't match emitted UKD | Generation runs fully exposed, so the join key is the full metadata tuple; verify `knobSettings` round-trips; a collision during generation fails loudly ([Section 13.3](#133-one-source-of-truth-translated-once)) |
-| **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model | Explicit semver rule at load (`major ==`, `minor <=`); additive changes need no retrain until exposed ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); model disabled (not request failed) on mismatch |
-| **Out-of-distribution input** | New arch, or a dropped-in pack whose values the model never saw; the contract still passes, only the values are new | Arch check against training metadata; degrade to `static_order` and log; per-feature coverage metadata kept additive as a later option ([Section 8.3](#83-out-of-distribution-inputs)) |
+| **KMD↔UHD coupling** | a *breaking* KMD change (removed/reinterpreted field) invalidates the trained model | Explicit revision rule at load (breaking `==`, additive `<=`) over the KMD's content revision, which is a separate axis from its file-format `version`; additive changes need no retrain until exposed ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)); model disabled (not request failed) on mismatch |
+| **Out-of-distribution input** | New arch, or a dropped-in pack whose values the model never saw; the contract still passes, only the values are new | The model artifact declares the architectures it was trained on and the runtime refuses an estimate for an unseen one; a candidate whose recovered score is non-finite or non-positive is distrusted individually and reported as 0; per-feature range coverage kept additive as a later option ([Section 8.3](#83-out-of-distribution-inputs)) |
 | **Dependency creep** | Pressure to link `liblightgbm` at runtime | In-tree `tree_data` default; runtime deps stay opt-in only |
 | **Bad/stale model** | Model picks worse than first-match | Degrade to `static_order`; parity gate against the `native` baseline; model provenance in trace |
 | **Malformed drop-in heuristic** | Third-party UHD with a broken feature contract reaches a customer | Never fails the request — model disabled, error logged, estimate reported as 0 ([Section 5](#5-selection-flow) step 8); CI validation over shipped packs is the primary gate ([Open Question 14](#operational)) |
@@ -2281,11 +2665,12 @@ dependency-gated and land only when a concrete need appears.
    arch/dtype). Decide the default split against real cross-arch accuracy data.
    *(Impacts [Section 3](#3-ownership-model).)*
 
-3. **`tree_data` artifact format.** A data-SDK FlatBuffer tree schema (recommended) — consistent with
-   graph/device-props serialization, `Verifier`-gated, additive evolution, needs a convert step at
-   build. Alternative: parse LightGBM `model.txt` at load — lowest author friction (no conversion) but
-   a bespoke parser to write and harden against hostile input. Decide alongside
-   [Open Question 16](#operational) — whether coverage metadata rides in the artifact affects the format.
+3. **`tree_data` artifact format — RESOLVED.** The artifact is a FlatBuffer carrying the GBDT ensemble,
+   `Verifier`-gated and additively evolvable, with a convert step at build rather than a `model.txt`
+   parser hardened against hostile input ([Section 7.2](#72-default-tree_data)). The schema stores each
+   tree as parallel per-node arrays and carries the model's feature contract, its base score, and its
+   training provenance, so coverage metadata rides in the artifact as
+   [Open Question 16](#operational) required rather than forcing a later format change.
    *(Impacts [Section 7.2](#72-default-tree_data).)*
 
 4. **Derived feature set.** Arithmetic intensity, tile quantization, aspect ratios, occupancy,
@@ -2321,40 +2706,18 @@ dependency-gated and land only when a concrete need appears.
    trained to rank.
    *(Impacts [Section 5](#5-selection-flow), [Section 8.2](#82-model-updates), [Section 16](#16-risks).)*
 
-6. **Engine estimate (A) vs. config UHD (B).** Is A a distinct trained model, or derived from B as
-   max predicted score over candidates? Distinct is cheaper for the quick policy (skips enumeration);
-   derived is one fewer model to train.
+6. **Engine estimate (A) vs. config UHD (B) — RESOLVED.** Both forms exist and are not alternatives:
+   an engine that ships a distinct `predict_engine_tflops` model answers the quick policy without
+   enumerating its catalog, and one that does not falls back to B's top calibrated score and pays the
+   enumeration ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). What the format
+   fixes is the contract a distinct model must meet — graph-only features, calibrated TFLOPS, an
+   invertible transform, and a binding the engine grants rather than the descriptor claims — so that the
+   two forms produce numbers that mean the same thing to a consumer.
    *(Impacts [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker).)*
 
-7. **Non-descriptor engine estimates.** **RESOLVED.** An engine that ships no UED binds its A-level
-   model by **declaring that UHD's UUID in its provider's own engine definition**. The loader resolves
-   the id out of the descriptor catalog it already parses
-   (`resolveDeclaredEnginePredictions` in `DescriptorLoader.hpp`) and gives it the same pre-flight a
-   UED role reference gets: the provenance rule of [Section 8.1](#81-descriptor-versioning-and-provenance),
-   the native-symbol and artifact-containment checks of
-   [Section 11.2](#112-two-engine-selection-policies-rfc-0007), and the same per-engine compiled-model
-   cache. `predict_engine_tflops`, `engine` and `arch` are backfilled from the declaration, exactly as
-   [Section 3.1](#31-descriptor-relationships) backfills them from a role map.
-
-   **What this preserves: a UHD never describes itself.** The document keeps
-   [Section 4.1](#41-field-reference-normative)'s shape — no `engine`, `role` or `arch` member, no
-   `trained_against` variant that names an engine — and the parser still rejects those as unknown
-   keys. There is no filesystem scan keyed on a document's own claims and no self-attachment: the
-   binding identity is compiled-in provider code in both cases, and the only difference is whether that
-   code is a UED read off disk or an engine definition read out of the provider binary. A model an
-   engine did not declare is unreachable, so dropping a UHD into a descriptor root cannot make an
-   engine start answering with it.
-
-   Such an engine has no UED, KMD or UMD, so a `trained_against` naming a descriptor set has nothing to
-   be compatible with and is refused — the same
-   [Section 8.1](#81-descriptor-versioning-and-provenance) rule, not an exemption from it. What its
-   model records instead is `trained_against.selector_revision`
-   ([Section 4.1](#41-field-reference-normative)): the provider build that was measured. The loader
-   refuses a model that records a different one, or none — the model is ignored, the engine stays fully
-   applicable, and the prediction reports UNAVAILABLE naming both revisions. That member carries no
-   engine identity and nothing resolves a model from it, so it does not reopen self-attachment; it is
-   read only after a declared UUID has already selected the model. An id nothing deploys resolves to
-   nothing and the engine reports UNAVAILABLE, which is what it reported before it declared anything.
+7. **Non-descriptor engine estimates.** How does a non-descriptor engine (e.g. MIOpen) report an
+   A-level estimate through the plugin-query surface? If it cannot, the quick policy falls back to
+   static ordering for it — acceptable for v1, but limits performance-based engine ranking.
    *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007).)*
 
 8. **The `predict_applicable_kernels` output contract.** The UED already reserves the field
@@ -2395,42 +2758,24 @@ dependency-gated and land only when a concrete need appears.
     latter gates the `custom_library` drop-in path.
     *(Impacts [Section 7](#7-model-adapters), [Section 9.1](#91-dependencies).)*
 
-12. **Enumerating the valid catalog — RESOLVED.** Knob values are reported per knob and
-    independently, so the Cartesian product of knob ranges addresses a vanishing fraction of a
-    sparse catalog ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)), which made generation
-    slow for moderate knob spaces and infeasible for large sparse ones. The catalog is now
-    enumerated directly, off the **engine descriptor**, which is where per-engine inspection lives.
-    The transport is `hipdnnEnginePluginEnumerateCandidates`, an **optional** engine-plugin export an
-    engine may decline, owned by the plugin SDK ([Section 11.3](#113-cross-engine-comparison)) and
-    named as one of the ABI additions by
-    [RFC 0017 §3](0017_UniversalKernelDescriptor.md#3-how-it-works) — the clause that until this
-    resolution asserted no engine or plugin-ABI interface was introduced at all, and was amended for
-    it rather than cited against itself. A caller sets
-    `HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT`, `HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT` and the
-    optional `HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT` knob-choice array before finalizing the
-    engine, then reads `HIPDNN_ATTR_ENGINE_CANDIDATES_EXT` with `hipdnnBackendGetAttribute`.
-    Answers to the sub-questions:
-    - **Knob tuples, plus ids.** Each entry carries its complete enrolled knob tuple, a stable
-      candidate id, and its published `$kernel.*` feature map — not an opaque handle. The tuple is
-      what `add_engine_variants()` enrolls, so enumeration and timing name the same kernel.
-    - **Bounded and paged.** `limit` is in `[1, 10000]`; the page states its `offset` and the
-      catalog's `total_count`, so a walk terminates and identity is checkable across pages. An
-      offset beyond `total_count` is invalid rather than silently truncated.
-    - **Generation-tool-only.** No consumer-facing `Graph` method exists, and none should: a
-      consumer selects engines through the heuristic descriptor, and a kernel-by-kernel consumer
-      surface was rejected in [RFC 0017 §2](0017_UniversalKernelDescriptor.md). The frontend keeps
-      `hipdnn_frontend::detail::getEngineCandidates()` for tools, and `hipdnn_bench enumerate`
-      drives it. An engine that cannot enumerate returns `HIPDNN_STATUS_NOT_SUPPORTED`, which is
-      distinct from an empty catalog.
-    - **`[min, max, step]` placement is still open** — KMD field or UED knob
-      ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). Enumeration does not
-      depend on it: the catalog is returned as real tuples, not as ranges the caller must expand.
+12. **Enumerating the valid catalog — RESOLVED.** The generation path enumerates the applicable catalog
+    directly, paged, with a total count, and enrolls one complete candidate per timed run rather than
+    reconstructing candidates from a Cartesian product of knob ranges
+    ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)). Enumeration returns candidates with their
+    full knob tuple, so the identity a timing is attributed to is the one the catalog published, and a
+    tuple collision during enumeration is a hard error rather than a silent join
+    ([Section 13.3](#133-one-source-of-truth-translated-once)). This removes the sparse-catalog
+    infeasibility outright: cost is now linear in the catalog rather than in the cross-product. What
+    stays open is narrower and belongs to the hipDNN API rather than to this document — whether the
+    enumeration is public or generation-only, and whether `[min, max, step]` lives on the KMD field or
+    the UED knob ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
     *(Impacts [Section 13.2](#132-benchmarking-via-hipdnn-autotune), [Section 15](#15-phased-delivery) phase 5.)*
 
-13. **Publishing the schema file.** [Section 4.1](#41-field-reference-normative) carries the normative
-    Draft-7 target. What remains is the descriptor/provenance cutover, publishing the canonical provider
-    schema with the parity check [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema)
-    describes, deciding where it lives relative to the UED's, and extending it as adapters evolve.
+13. **Publishing the schema file.** [Section 4.1](#41-field-reference-normative) now carries a normative Draft-7
+    block, validated against every shipping `version: "1.0"` descriptor. What remains is packaging it as
+    the standalone per-version `uhd/1.0.json` with the CI parity check
+    [RFC 0020 §4.2](0020_UniversalEngineDescriptor.md#42-normative-schema) defines, deciding where that
+    file lives relative to the UED's, and extending it as `table`, `onnx`, and `custom_library` land.
     *(Impacts [Section 4](#4-uhd-schema).)*
 
 14. **CI validation of shipped descriptor sets.** Because a broken feature contract degrades rather
@@ -2448,15 +2793,15 @@ dependency-gated and land only when a concrete need appears.
     ([Section 7](#7-model-adapters)). Until then, the operator set recapped here is the working contract.
     *(Impacts [Section 6.2](#62-the-features_signature), [Section 7](#7-model-adapters).)*
 
-16. **Out-of-distribution detection.** Ship per-feature training-coverage metadata and check the
-    resolved row at runtime, or manage it purely by versioning discipline
-    ([Section 8.3](#83-out-of-distribution-inputs))? Recommendation: versioning plus the cheap discrete
-    arch check for v1, with the artifact format leaving coverage metadata additive. Decide before the
-    `tree_data` format freezes, since retrofitting it later is a format change. A second axis rides on
-    the same decision: whether an out-of-distribution verdict applies **per candidate**, distrusting one
-    row whose features fall outside the trained range, or **per model**, disabling the whole heuristic.
-    Per-candidate is the finer answer and the one [Section 5](#5-selection-flow) assumes when it routes a
-    low-confidence candidate here rather than to a scorer sentinel.
+16. **Out-of-distribution detection — partially resolved.** Training-arch coverage now rides in the
+    model artifact and is checked at runtime: a model declares the architectures it was trained on, and
+    an unseen one withholds the estimate and degrades the ranking
+    ([Section 8.3](#83-out-of-distribution-inputs)). The per-candidate axis is resolved the same way
+    [Section 5](#5-selection-flow) assumes — a candidate whose recovered score is non-finite or
+    non-positive is distrusted individually, ordered last, and reported as 0, with one diagnostic
+    carrying the affected and total counts for the request. What remains open is the *continuous* case:
+    whether per-feature training ranges ship alongside the arch list, and what a row outside them costs.
+    Deciding that before more artifact fields land keeps it additive.
     *(Impacts [Section 8.3](#83-out-of-distribution-inputs), [Section 7.2](#72-default-tree_data).)*
 
 17. **Categorical ordering semantics.** Integer codes imply an order a tree model will split on
@@ -2466,11 +2811,19 @@ dependency-gated and land only when a concrete need appears.
     declare which. Decide before the first real model, since changing it later is a retrain.
     *(Impacts [Section 6.5](#65-categorical-encoding).)*
 
-18. **Knob-set stability vs. model churn — resolved for the E2E contract.** `UED.knobs` is authored and
-    may be a superset of the catalog ranker's `$kernel.*` fields. A model axis without a knob is a load
-    error; an unused knob warns and remains a usable filter. An engine without a UHD still exposes its
-    authored knobs. Retraining preserves that surface unless the author explicitly removes or renames
-    a knob, which is a major UED version bump.
+18. **Knob-set stability vs. model churn — RESOLVED.** `UED.knobs` is the engine's **public tuning
+    surface**, authored by the engine, and the UHD's `$kernel.*` feature set is a subset of it
+    ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes),
+    [Section 6.3](#63-contract-enforcement)). A training run does not reshape it: a retrain that drops
+    `split_k` as a feature leaves the knob declared, because the engine's UMDs and its callers read that
+    list and a model has no standing to withdraw a dial from them. The asymmetry is the whole content of
+    the rule — a model ranking on an axis the UED never exposed is a load error, because the caller
+    cannot vary what selection depends on; a knob no model reads is a warning, and is the expected state
+    for a knob whose training column carried one value. Removing a knob is therefore an engine-authoring
+    decision, taken deliberately and stamped as a breaking content revision
+    ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)), not a side effect of feature selection.
+    Sub-question (b) resolves with it: an engine with no UHD exposes its authored `knobs` exactly as one
+    with a UHD does, and a caller can pin a kernel on a pack that has never been benchmarked.
     *(Impacts [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes), [Section 6.3](#63-contract-enforcement), [Section 8.1](#81-descriptor-versions-and-uhd-coupling).)*
 
 19. **Validating the training oracle.** A timing becomes a training label only after the candidate is
@@ -2522,25 +2875,28 @@ dependency-gated and land only when a concrete need appears.
   [RFC 0020 §5](0020_UniversalEngineDescriptor.md) it is **separate from** the UED's `knobs` list and the
   two do not overlap — so `global.` knobs are not KMD fields and are not part of the UHD's feature space.
 
-- **Knob:** An authored, user-settable **KMD field**, named in the UED's `knobs` (the KMD already
-  declares its type and default). Every `$kernel.*` field the catalog ranker reads must be a knob;
-  the converse is not required. A knob's legal values come from the *catalog* for this graph, and its
-  **default is whatever the ranker ranks first**, including deterministic fallback when no UHD is
-  available. Knobs *filter* the catalog; ranking then orders what survives
+- **Knob:** A **KMD field the engine exposes for a caller to pin**, named in the UED's `knobs` (the KMD
+  already declares its type and default). `UED.knobs` is the engine's public tuning surface and a
+  **superset** of the `$kernel.*` fields the UHD reads: every axis the model ranks on must be exposed,
+  and a knob the model does not read stays declared because callers and the engine's UMDs depend on it.
+  A knob's legal values come from the *catalog* for this graph, and its **default is whatever the UHD
+  ranks first**. Knobs *filter* the catalog; the UHD then ranks what survives
   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
 
-- **Knob tuple:** The values of an engine's authored knobs for one kernel — what an outside caller can
-  name, which may cover more fields than the model reads. Narrower than the **metadata tuple**, which
-  covers every KMD field and is unique engine-wide. Two kernels differing only in **dispatch-only**
-  fields (KMD fields that are not knobs, read by a UDD) share a knob tuple, score identically, and are
-  separated by the deterministic tie-break — legal, but warned about at load
-  ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). Note also that the *cross-product* of
-  legal knob values is not the set of legal tuples: most combinations may match no kernel, which is the
-  enumeration gap of [Open Question 12](#operational).
+- **Knob tuple:** The values of an engine's knobs for one kernel — the kernel's projection onto the
+  axes an outside caller can name. Narrower than the **metadata tuple**, which covers every KMD field
+  and is unique engine-wide. Two kernels differing only in **dispatch-only** fields (KMD fields that
+  are not knobs, read by a UDD) share a knob tuple, score identically, and are separated by the
+  deterministic tie-break — legal, but warned about at load
+  ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)). Note also that the
+  *cross-product* of legal knob values is not the set of legal tuples: most combinations match no
+  kernel, which is why the catalog is enumerated directly rather than reconstructed from knob ranges
+  ([Section 13.2](#132-benchmarking-via-hipdnn-autotune)).
 
-- **Benchmark wide, preserve the authored surface:** Generate against a UED exposing every KMD field
-  so every kernel is addressable and individually timeable. Feature selection may reduce model inputs;
-  reducing the shipping UED's knobs requires an explicit author decision and compatibility checks
+- **Benchmark wide, expose what the caller needs:** Generate against a UED exposing every addressable
+  KMD field — so every kernel is individually timeable — then let feature selection prune the axes that
+  do not earn their place in the *model*. The emitted UED's `knobs` are the engine's authored public
+  surface, which the trained feature set must be contained in rather than replace
   ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes),
   [Section 14.4](#144-pipeline-knob-reduction-hipdnn-jit-case)).
 
@@ -2549,10 +2905,11 @@ dependency-gated and land only when a concrete need appears.
   feature contract, so `features_hash` covers it; an unseen value at runtime is an out-of-distribution
   signal, not an error ([Section 6.5](#65-categorical-encoding)).
 
-- **`trained_against`:** What a heuristic was generated against: the UED, UMD, and KMD semantic
-  versions for a model a UED role map binds, or `selector_revision` -- the provider build that was
-  measured -- for a model an engine with no UED binds by provider-declared UUID.
-  Checked at load (`major ==`, `minor <=`) to disable a model whose descriptors have moved under it
+- **`trained_against`:** The UED, UMD, and KMD **content revisions** a heuristic was generated against,
+  each recorded as `{id, revision}` and the UMD entry as a list, since an engine's catalog can span
+  several independently revised matchers. Checked at load (breaking `==`, additive `<=`) to disable a
+  model whose descriptors have moved under it. A content revision is a separate axis from the
+  file-format `version` the accept rule gates on
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
 
 - **Dispatch-only field:** A KMD field that is *not* a knob, and therefore not in the UHD's feature set —

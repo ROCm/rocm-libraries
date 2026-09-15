@@ -123,6 +123,14 @@ done
 
 if [ "${UHD_COMPOSE_FLYDSL:-0}" = "1" ]; then
     step "compose the flyDSL pack into the descriptor tree"
+    # Checked rather than assumed, because `cp -r` of a missing source composes a tree with
+    # no flyDSL in it and the run then reports "no engine UHD is deployed" several minutes
+    # later, far from this cause. The POC tree lives on this branch only; a checkout that
+    # does not carry it must fail here rather than mid-collection.
+    [ -d "$SRC/flydsl_poc_scratch/flydsl_descriptors_attention" ] || {
+        echo "FATAL: UHD_COMPOSE_FLYDSL=1 but $SRC/flydsl_poc_scratch is not in this checkout"
+        exit 1
+    }
     # flyDSL's 21 HSACOs are not committed (REPLICATE_ATTENTION.md) and its pack lives in
     # flydsl_poc_scratch, outside arch_content. HIPDNN_DESCRIPTOR_DIR replaces the search
     # roots, so the only way to have rocKE and flyDSL loaded at once is one composed tree.

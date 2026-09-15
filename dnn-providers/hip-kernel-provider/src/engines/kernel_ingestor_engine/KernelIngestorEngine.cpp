@@ -37,16 +37,15 @@ std::filesystem::path descriptorSearchDirectory()
         return replacement;
     }
 
-    // 2. Where this plugin was actually loaded from. HIPDNN_DESCRIPTOR_INSTALL_DIR bakes in
-    //    the configure-time prefix, which a relocated or repackaged install invalidates;
-    //    measuring from the loaded module is correct wherever it lands. Keyed on this
+    // 2. Where this plugin was actually loaded from.
+    //    Measuring from the loaded module is correct wherever it lands. Keyed on this
     //    function's own address rather than a symbol name, since a name lookup can resolve
     //    to a different module when every provider exports the same plugin entry points.
     try
     {
         const auto candidate = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
                                    reinterpret_cast<const void*>(&descriptorSearchDirectory))
-                               / HIPDNN_DESCRIPTOR_SUBDIR;
+                               / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR;
         std::error_code notFound;
         if(std::filesystem::is_directory(candidate, notFound))
         {
@@ -63,7 +62,7 @@ std::filesystem::path descriptorSearchDirectory()
     }
 
     // 3. The configure-time prefix. Right for an install that never moved.
-    return HIPDNN_DESCRIPTOR_INSTALL_DIR;
+    return HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR;
 }
 
 std::vector<std::filesystem::path> descriptorSearchDirectories()

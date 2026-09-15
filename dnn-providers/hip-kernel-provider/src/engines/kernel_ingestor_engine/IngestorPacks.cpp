@@ -14,12 +14,13 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, true, &resetPointwiseModuleCache},
-        // No kpack archive: its kernels are embedded_source, so there is no module to
-        // drop and nothing for a reset to do.
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, false, nullptr},
+        // Packaged/kpack since the conv pack moved to lowered rocKE builders: it owns a
+        // module cache (ConvNative.cpp's convFwdKpackModuleCache), so the reset sweep must
+        // reach it.
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, true, &resetConvFwdModuleCache},
         // THROWAWAY POC. Its dispatch raw-loads a build-time flyDSL->HSACO code object
         // (hipModuleLoadData), never touching buildIngestorKernelCode/kpack, so there is
-        // no module cache to reset -- same {false, nullptr} shape as ConvFwd above.
+        // no module cache to reset -- the {false, nullptr} shape ConvFwd used to have.
         {"hipkernel:Flydsl", &registerFlydslSymbols, false, nullptr},
         // THROWAWAY POC. Family variant of the above: one flyDSL->HSACO per hidden size N,
         // raw-loaded (hipModuleLoadData) by the dispatch from the matched instance's baked
