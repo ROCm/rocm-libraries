@@ -71,7 +71,8 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
 
     if(ctx->is_wmma)
     {
-        rocke_gemm_emit_wmma_phase(ctx, A_src, B_src, iter_vars, num_iter_vars, out_accs);
+        rocke_gemm_emit_wmma_phase(
+            ctx, A_src, B_src, iter_vars, num_iter_vars, parity_imm, parity_v, out_accs);
         return;
     }
 
@@ -358,6 +359,20 @@ void rocke_gemm_emit_kloop_simple(rocke_gemm_build_ctx_t* ctx)
  *  _emit_kloop_prefetch: DTLA ping-pong software-pipelined K-loop. Falls
  *  back to _simple when loads_per_tile > 63 (vmcnt is 6 bits on gfx950).
  * ===================================================================== */
+static void rocke_gemm_drain_prefetch_and_sync(rocke_gemm_build_ctx_t* ctx)
+{
+    if(strcmp(ctx->arch, "gfx1250") == 0)
+    {
+        rocke_b_s_wait_asynccnt(ctx->b, 0);
+        rocke_b_sync_lds_only(ctx->b);
+    }
+    else
+    {
+        rocke_b_s_waitcnt(ctx->b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
+        rocke_b_s_barrier_bare(ctx->b);
+    }
+}
+
 void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -370,7 +385,7 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
     int i;
 
     loads_per_tile = ctx->dtl_a_passes + ctx->dtl_b_passes;
-    if(loads_per_tile > 63)
+    if(strcmp(ctx->arch, "gfx1250") != 0 && loads_per_tile > 63)
     {
         rocke_gemm_emit_kloop_simple(ctx);
         return;
@@ -411,9 +426,8 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         rocke_value_t* new_accs[ROCKE_GEMM_MAX_ACCS];
         rocke_value_t* yield_vals[1 + ROCKE_GEMM_MAX_ACCS];
 
-        /* Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier. */
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        /* Drain the current tile and rendezvous before reusing the other half. */
+        rocke_gemm_drain_prefetch_and_sync(ctx);
         rocke_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, k_next, 0, next_parity);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, acc_iter, num_acc_iter, 0, parity, new_accs);
@@ -432,8 +446,7 @@ void rocke_gemm_emit_kloop_prefetch(rocke_gemm_build_ctx_t* ctx)
         int num_tail = for_op.op->num_results - 1;
         rocke_value_t* epi_accs[ROCKE_GEMM_MAX_ACCS];
 
-        rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
-        rocke_b_s_barrier_bare(b);
+        rocke_gemm_drain_prefetch_and_sync(ctx);
         rocke_gemm_emit_mfma_phase(
             ctx, ctx->A_smem, ctx->B_smem, tail_accs, num_tail, 0, final_parity, epi_accs);
 
