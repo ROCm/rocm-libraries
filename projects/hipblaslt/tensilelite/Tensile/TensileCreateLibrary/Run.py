@@ -892,8 +892,14 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     parsedLibraries = ParallelMap2(
         LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
     )
+    skippedGemmA2AFusion = 0
     for library in parsedLibraries:
-        scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
+        scheduleName, architectureName, problemType, _, _, newLibrary, typeMismatches = library
+        if not _includeGemmA2AFusionProblemType(
+            problemType, args.get("EnableGemmA2AFusion", False)
+        ):
+            skippedGemmA2AFusion += 1
+            continue
         mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
         if architectureName == "":
@@ -921,6 +927,9 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         else:
             masterLibraries[architectureName] = newLibrary
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
+
+    if skippedGemmA2AFusion:
+        print1(f"# GEMM+A2A fusion: disabled; filtered {skippedGemmA2AFusion} logic files")
 
     # After all YAML files have been parsed and Solution objects created,
     # fail on any type mismatches that were collected.
@@ -999,6 +1008,17 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     print1(f"Number of unique solutions: {len(solutions)}")
 
     return solutions, masterLibraries, codeObjectFilesIndex
+
+
+def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
+    """Return whether this build admits one library logic's GEMM+A2A solutions.
+
+    Only an explicit True excludes one: a missing key, or no problem type at all,
+    names a logic file that is not fused. Erring this way keeps a problem type that
+    cannot answer the question from emptying the library, which fails far more
+    quietly than building the solutions the gate meant to skip.
+    """
+    return enabled or (problemType or {}).get("FusedGemmA2A", False) is not True
 
 
 ################################################################################
