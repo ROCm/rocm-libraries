@@ -120,6 +120,20 @@ class TestMetric(unittest.TestCase):
         self.assertEqual(which, schema.FALLBACK_METRIC)
         self.assertEqual(val, 5.0)
 
+    def test_falls_back_to_profiled_duration_last(self):
+        rec = _rec()  # no counters, no wall (launcher printed no PerfJSON)
+        rec["profiled"] = {"ms_median": 3.0}
+        val, which = schema.metric(rec)
+        self.assertEqual(which, schema.PROFILED_METRIC)
+        self.assertEqual(val, 3.0)
+
+    def test_wall_preferred_over_profiled(self):
+        rec = _rec(ms=5.0)
+        rec["profiled"] = {"ms_median": 6.0}  # same run, plus profiler overhead
+        val, which = schema.metric(rec)
+        self.assertEqual(which, schema.FALLBACK_METRIC)
+        self.assertEqual(val, 5.0)
+
     def test_none_when_neither(self):
         val, which = schema.metric(_rec())
         self.assertIsNone(val)
