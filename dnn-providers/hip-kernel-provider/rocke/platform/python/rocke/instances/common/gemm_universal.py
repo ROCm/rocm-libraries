@@ -431,7 +431,14 @@ def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
     from ...core.arch import ArchTarget
 
     t = spec.tile
-    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * 2
+    # Row stride carries ``lds_k_pad`` wherever the emitter applies it (see
+    # ``_lds_pad`` in :func:`build_universal_gemm`): always on the VGPR-staged
+    # path, and on direct-to-LDS only for gfx1250's per-lane async instruction.
+    # The gfx9 ``buffer_load_lds`` family writes wave-contiguous bytes and
+    # stays unpadded.
+    lds_pad = 0 if (spec.trait.direct_to_lds and arch != "gfx1250") else spec.trait.lds_k_pad
+    lds_k = t.tile_k + lds_pad
+    ab_single = ((t.tile_m * lds_k) + (t.tile_n * lds_k)) * 2
     lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
     db_fits_2wg = (2 * ab_single) * 2 <= lds_cap
     db = (
@@ -538,8 +545,12 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         if spec.trait.direct_to_lds:
             if arch != "gfx1250":
                 return False, f"WMMA path does not support direct_to_lds on {arch}"
-            if spec.trait.lds_k_pad:
-                return False, "gfx1250 WMMA direct_to_lds does not support lds_k_pad"
+            # ``lds_k_pad`` IS supported here: gfx1250's
+            # ``global_load_async_to_lds`` is per-lane addressed, so a padded
+            # LDS row stride costs nothing (see the _lds_pad comment below).
+            # ``lds_swizzle`` still is not -- it XORs the *global* column so the
+            # LDS destination can stay wave-contiguous, which is a gfx9-shaped
+            # assumption that does not carry over.
             if spec.trait.lds_swizzle:
                 return False, "gfx1250 WMMA direct_to_lds does not support lds_swizzle"
 
@@ -1150,11 +1161,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         _nbuf = 2 if _two_buf else 1
     _A_LDS_M = _nbuf * block_m
     _B_LDS_N = _nbuf * block_n
-    # LDS K-padding (non-DTL only): widen each row's stride to break the
-    # bank-conflict alias. The logical column range stays [0, block_k); only
-    # the row stride grows, so the read GEP (alloc shape[1]) and the
-    # store_vec TensorView (with_strides below) both pick up the padded stride.
-    _lds_pad = spec.trait.lds_k_pad if not spec.trait.direct_to_lds else 0
+    # LDS K-padding: widen each row's stride to break the bank-conflict alias.
+    # The logical column range stays [0, block_k); only the row stride grows,
+    # so the read GEP (alloc shape[1]) and the store_vec TensorView
+    # (with_strides below) both pick up the padded stride.
+    #
+    # Available on the VGPR-staged path and on the gfx1250 direct-to-LDS path:
+    # ``global_load_async_to_lds`` gives every lane its own LDS address, which
+    # lowers to a typed GEP into this allocation, so the padded stride is
+    # applied for free. NOT available on the gfx9 ``buffer_load_lds`` family,
+    # which is wave-level and writes ``wave_size * BYTES_PER_LANE``
+    # *contiguous* bytes from a single wave-uniform base -- there is nowhere to
+    # insert a per-row gap, so that path stays unpadded.
+    _dtl_lane_addressed = arch == "gfx1250"
+    _lds_pad = (
+        0
+        if (spec.trait.direct_to_lds and not _dtl_lane_addressed)
+        else spec.trait.lds_k_pad
+    )
     _lds_k = block_k + _lds_pad
     A_smem = b.smem_alloc(storage_dtype, [_A_LDS_M, _lds_k], name_hint="A_smem")
     B_smem = b.smem_alloc(storage_dtype, [_B_LDS_N, _lds_k], name_hint="B_smem")
