@@ -41,17 +41,17 @@ pytest -m unit tensilelite/Tests/unit
 
 ### Coverage is path-mode
 
-Always measure coverage with `--cov=Tensile` — a **filesystem path**, never a dotted module name — combined across `-n4` xdist workers:
+Always measure coverage with `--cov=tensilelite` — a **filesystem path**, never a dotted module name — combined across `-n4` xdist workers:
 
 ```bash
-pytest -m unit -n4 --cov=Tensile --cov-config=pyproject.toml \
+pytest -m unit -n4 --cov=tensilelite --cov-config=pyproject.toml \
   --cov-report=term-missing tensilelite/Tests/unit
 ```
 
 A dotted `--cov` target (e.g. `--cov=tensilelite.Common.DataType`) re-imports `rocisa` and SIGABRTs on duplicate nanobind registration. To read a single module's row, grep the term-missing output (the single-file path prefix does not filter the report):
 
 ```bash
-pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+pytest -m unit --cov=tensilelite --cov-config=pyproject.toml \
   --cov-report=term-missing tensilelite/Tests/unit | grep "Common/DataType.py"
 ```
 
@@ -216,7 +216,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    ```bash
    python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py update \
        --current coverage.json \
-       --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
+       --allow-lower=tensilelite/Components/Subtile/SubtileGREmit.py
    ```
 
    One `--allow-lower` per file, and it lowers only the files named. That is what keeps a run made

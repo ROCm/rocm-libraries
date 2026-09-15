@@ -6,7 +6,7 @@
 Characterisation test — branch_id aabf0d22ae0a02d4ae31ab4f43e838b29f28f582
 
 Predicate : kernel["EdgeType"] == "ShiftPtr" and enableEdge
-Site      : Tensile/KernelWriterAssembly.py:16798  (function writeBiasToGlobal)
+Site      : tensilelite/KernelWriterAssembly.py:16798  (function writeBiasToGlobal)
 Solver    : z3 4.16.0  — SAT  (fully-static; two independent witnesses)
 
 Background

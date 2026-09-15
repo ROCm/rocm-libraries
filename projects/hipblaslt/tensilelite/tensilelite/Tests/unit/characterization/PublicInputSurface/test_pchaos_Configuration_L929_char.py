@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 """
-Characterization tests for Tensile/Configuration.py:929
+Characterization tests for tensilelite/Configuration.py:929
     if self.ConstraintsKey in self:   (inside ProjectConfig.checkConstraints)
 
 Branch ID: 5e52e9474f011ad59cd92b98ce1af6cfe93e980b

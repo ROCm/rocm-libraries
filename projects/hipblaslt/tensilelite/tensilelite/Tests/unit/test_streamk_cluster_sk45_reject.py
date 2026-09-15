@@ -40,7 +40,7 @@ _ARCH = "gfx1250"
 
 def _write_variant(tmp_path, name, overrides):
     """Copy _BASE, replacing/appending the given fork parameter values."""
-    from Tensile import LibraryIO
+    from tensilelite import LibraryIO
     import yaml
 
     cfg = copy.deepcopy(LibraryIO.read(_BASE))

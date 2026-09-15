@@ -9,7 +9,7 @@ Drives the activation-sweep Gradient BenchmarkProblems config
 emit harness and asserts every emitted kernel is real gfx942 AMDGCN assembly
 with err==0.
 
-Target: Tensile/Activation.py missing ranges 489-617, 639-718, 727-836, 852-936.
+Target: tensilelite/Activation.py missing ranges 489-617, 639-718, 727-836, 852-936.
 
 Strategy: HHS (fp16/fp16/f32) + Gradient=True uses GRADONLY export type which
 selects only gradient activation functions (dgelu, drelu) for float32 compute.

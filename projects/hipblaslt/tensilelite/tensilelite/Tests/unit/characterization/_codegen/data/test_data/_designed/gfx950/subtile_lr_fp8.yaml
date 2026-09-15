@@ -4,7 +4,7 @@
 ################################################################################
 # P4 DESIGNED subtile LR FP8 config for gfx950.
 #
-# Targets uncovered ranges in Tensile/Components/Subtile/SubtileLREmit.py:
+# Targets uncovered ranges in tensilelite/Components/Subtile/SubtileLREmit.py:
 #   490-535  (_lraTileAssignment_fp8_legacy) — FP8 block-swap swizzle path,
 #             activated when tileInfoA.bpe == 1 (DataType: F8, UseSubtileImpl=1)
 #   613-655  (emitSubtileDsRead, localReadDoSubtile) — called from preLoop when
