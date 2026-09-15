@@ -261,7 +261,7 @@ void testing_csr2hyb(const Arguments& arg)
         rocsparse_hyb_mat ptr  = hyb;
         test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);
 
-        rocsparse_int ell_nnz = dhyb->ell_nnz;
+        int64_t       ell_nnz = dhyb->ell_nnz;
         rocsparse_int coo_nnz = dhyb->coo_nnz;
 
         double gbyte_count = csr2hyb_gbyte_count<T>(M, nnz, ell_nnz, coo_nnz);
