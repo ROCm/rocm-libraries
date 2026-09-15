@@ -530,3 +530,19 @@ def test_a_corpus_can_be_restricted_to_one_mask(tmp_path, sources):
     assert manifest["emitted"] > 0
     assert {row["causal"] for row in manifest["graphs"]} == {False}
     assert manifest["reports"]["sweep"]["filtered"] > 0
+
+
+def test_a_training_corpus_can_hold_out_the_corpus_it_will_be_judged_on(tmp_path, sources):
+    """Two corpora drawn from one declared space overlap by construction -- 47 of 1734 shapes
+    when the AITER training corpus was built beside the comparison corpus. A model judged on
+    graphs it trained on reports its training error as if it were skill, so the hold-out is a
+    set difference over the shape name, done before anything is measured."""
+    first, first_out = _build(tmp_path, sources, count=80, seed=0, name="judged")
+    second, _ = _build(tmp_path, sources, count=80, seed=0, name="trained",
+                       exclude=first_out / "manifest.json")
+
+    judged = {row["name"] for row in first["graphs"]}
+    trained = {row["name"] for row in second["graphs"]}
+    assert judged, "the corpus being held out is not empty"
+    assert not (judged & trained), "a held-out shape reached the training corpus"
+    assert second["reports"]["held_out"]["shapes_removed"] > 0
