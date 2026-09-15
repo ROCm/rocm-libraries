@@ -300,6 +300,32 @@ def _spec(idx: int):
             "gfx950",
         )
 
+    if idx == 13:
+        # gfx1250 wave32 WMMA 16x16x32 K-outer. The shared transpose-read helper
+        # takes its wave32 branch here and lowers to ds_load_tr16_b128 (8 per
+        # lane), so a 16-element fragment is two reads. Configs 11 and 12 are
+        # both wave64, so without this the dgrad wave32 path shipped with no
+        # cross-engine coverage at all.
+        p = _cp(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        return (
+            DgradConvSpec(
+                problem=p,
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="default",
+                lds_k_outer=True,
+            ),
+            "gfx1250",
+        )
+
     raise SystemExit(f"unknown config index {idx}")
 
 
