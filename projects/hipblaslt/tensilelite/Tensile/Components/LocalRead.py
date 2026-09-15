@@ -719,13 +719,20 @@ class LocalReadMFMA(LocalRead):
         regsPerLoad = int(blockWidth)                    # VGPRs per ds_load_b128
         regsPerNtile = numKChunk * regsPerLoad
         swapByteOff = tP["localReadSwapByteOffset"]
+        # HalfPLR splits the per-iteration Valu block into rotating half-block groups (G0/G1/G2);
+        # the WMMA consumer reads through the same getHalfPLRValuStr mapping, so the swizzled reader
+        # must target the group register too (else it fills Valu_X while WMMA reads Valu_G -> garbage).
+        halfPLR = (tP["isA"] or tP["isB"]) and kernel["HalfPLR%c" % tc]
         for nt in range(numNtile):
             for r in range(numKChunk):
                 off = nt * nWaveN * nOStride + r * kOStride + swapByteOff
                 reg = nt * regsPerNtile + r * regsPerLoad
                 offSplit, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, off)
                 ds = DSModifiers(na=1, offset=offSplit)
-                destVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, reg), blockWidth)
+                if halfPLR:
+                    destVgpr = vgpr(writer.getHalfPLRValuStr(writer.states.halfPLRGroups, reg, tc), blockWidth)
+                else:
+                    destVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, reg), blockWidth)
                 localReadCode = imod.add(Module("LocalRead%s swizzledTDM nt%u r%u" % (tc, nt, r)))
                 self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds,
                                   module=localReadCode, comment="swizzledTDM L->Reg nt=%u r=%u" % (nt, r))
