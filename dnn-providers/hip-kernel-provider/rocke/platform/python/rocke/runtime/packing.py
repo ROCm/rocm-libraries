@@ -87,11 +87,14 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
     Returns ``packer(values) -> bytes`` that is **byte-identical** to
     :func:`pack_args` for the same signature, but hoists the invariant
     work (type dispatch, alignment padding, format-string build, and
-    ``struct`` format compile) out of the per-call path. On a hot
-    decode launch loop this removes the dominant Python cost of
-    re-deriving the layout on every single launch. The signature is
-    immutable per kernel, so a launcher can build this once at
-    construction and reuse it.
+    ``struct`` format compile) out of the per-call path, leaving only
+    the per-call work that genuinely varies: reading each value and
+    coercing it by kind. ``struct`` already caches recently used
+    formats, so the saving is the layout reconstruction around that
+    compile rather than the compile itself. The signature is immutable
+    per kernel, so a launcher can build this once at construction and
+    reuse it; the effect is proportionally largest where per-launch
+    host work is smallest.
     """
     _TY_FMT: Mapping[str, Tuple[str, int, int]] = {
         "i32": ("i", 4, 4),

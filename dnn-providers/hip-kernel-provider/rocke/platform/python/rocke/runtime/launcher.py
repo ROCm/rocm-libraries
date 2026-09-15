@@ -421,9 +421,12 @@ class KernelLauncher:
         self._module = rt.load_module(hsaco)
         self._fn = self._module.get_function(kernel_name)
         # Precompiled hot-path kernarg packer (signature is immutable for
-        # the launcher's lifetime). Byte-identical to ``pack_args`` but
-        # hoists the layout/format-compile work out of the per-launch
-        # path -- the dominant Python cost on tiny decode launches.
+        # the launcher's lifetime). Byte-identical to ``pack_args``: it
+        # precomputes the fixed argument layout once here so a launch does
+        # not rebuild the offset table, re-dispatch on argument types, or
+        # re-assemble the format string. Note ``struct`` already caches
+        # recently used formats, so the saving is that surrounding work,
+        # not the format compile itself.
         self._packer = compile_packer(self._signature)
 
     @property
