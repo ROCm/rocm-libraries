@@ -529,6 +529,44 @@ public:
         return _hasDefaultModel ? "model" : "declared_order";
     }
 
+    /// The signature entry the model groups on, `$` stripped, or nothing when it decides in one
+    /// layer. Taken from the adapter's slot rather than from the descriptor's text, so it names
+    /// the field the model is actually reading.
+    std::optional<std::string> groupFeature() const override
+    {
+        // A resolver built by makeArchResolver holds no model of its own. There is no device
+        // here to resolve against, so it answers for its `default` entry -- the same
+        // context-free reading traceDecidedBy() takes.
+        if(!_byArch.empty() || !_unavailableArches.empty())
+        {
+            const auto resolved = resolveForArch({});
+            return resolved ? resolved->groupFeature() : std::nullopt;
+        }
+        if(_adapter == nullptr)
+        {
+            return std::nullopt;
+        }
+        const int slot = _adapter->groupFeatureIndex();
+        if(slot < 0 || static_cast<size_t>(slot) >= _config.featuresSignature.size())
+        {
+            return std::nullopt;
+        }
+        // A signature entry is either a bare reference -- `"$kernel.solver_id"` -- or an inline
+        // expression object. A caller wants the field, so the reference is unwrapped; an
+        // expression has no field to name, and its own text is the closest honest label.
+        const auto& entry = _config.featuresSignature[static_cast<size_t>(slot)];
+        if(!entry.is_string())
+        {
+            return entry.dump();
+        }
+        std::string name = entry.get<std::string>();
+        if(!name.empty() && name.front() == '$')
+        {
+            name.erase(name.begin());
+        }
+        return name;
+    }
+
     std::vector<ScoredKernel> rankScored(const Catalog& catalog,
                                          const MatchContext& context) const override
     {
@@ -650,6 +688,9 @@ private:
     {
         CandidateScore score;
         const KernelDefinition* entry;
+        /// The grouping feature's value for this candidate, NaN where the model decides in
+        /// one layer. See ScoredKernel::group for why NaN rather than a sentinel.
+        double group = std::numeric_limits<double>::quiet_NaN();
     };
 
     std::vector<ScoredKernel> rankWith(const Catalog& catalog, const MatchContext& context) const
@@ -683,10 +724,13 @@ private:
             _timing.prefixNs.fetch_add(elapsedNs(prefixStart), std::memory_order_relaxed);
             _timing.selections.fetch_add(1, std::memory_order_relaxed);
 
-            std::vector<Ranked> scored;
-            scored.reserve(catalog.entries.size());
+            // Rows first, then one scoring call. A grouped model decides which group wins by
+            // comparing candidates against each other, which no per-row call can express; for
+            // a single-layer model the adapter's default scoreBatch is the loop this replaces,
+            // so the per-candidate cost §9.4 budgets is unchanged either way.
             uint64_t tailNs = 0;
-            uint64_t scoreNs = 0;
+            std::vector<std::vector<double>> rows;
+            rows.reserve(catalog.entries.size());
             for(const auto& entry : catalog.entries)
             {
                 const auto tailStart = Clock::now();
@@ -695,21 +739,63 @@ private:
 
                 _extractor->extractKernelInto(ctx, features);
                 tailNs += elapsedNs(tailStart);
-
-                const auto scoreStart = Clock::now();
-                auto score = scoreCandidate(features.values);
-                scoreNs += elapsedNs(scoreStart);
-                scored.push_back({score, &entry});
+                rows.push_back(features.values);
             }
+
+            const auto scoreStart = Clock::now();
+            const auto raw = _adapter->scoreBatch(rows);
+            const auto scoreNs = elapsedNs(scoreStart);
+
+            // The slot the model grouped on, read from the row the model was handed rather
+            // than re-derived from the candidate's metadata: a derived value or a categorical
+            // encoding could make the two disagree, and the reported answer would then name a
+            // group that did not decide.
+            const int groupSlot = _adapter->groupFeatureIndex();
+            const auto groupOf = [&](const std::vector<double>& row) {
+                return groupSlot >= 0 && static_cast<size_t>(groupSlot) < row.size()
+                           ? row[static_cast<size_t>(groupSlot)]
+                           : std::numeric_limits<double>::quiet_NaN();
+            };
+
+            std::vector<Ranked> scored;
+            scored.reserve(catalog.entries.size());
+            for(size_t index = 0; index < catalog.entries.size(); ++index)
+            {
+                scored.push_back(
+                    {scoreFromRaw(raw[index]), &catalog.entries[index], groupOf(rows[index])});
+            }
+
             _timing.tailNs.fetch_add(tailNs, std::memory_order_relaxed);
             _timing.scoreNs.fetch_add(scoreNs, std::memory_order_relaxed);
             _timing.candidates.fetch_add(scored.size(), std::memory_order_relaxed);
 
-            const auto outOfRange = static_cast<size_t>(
-                std::count_if(scored.begin(), scored.end(), [](const Ranked& candidate) {
-                    return !std::isfinite(candidate.score.ordering);
-                }));
-            reportOutOfRangeOnce(outOfRange, scored.size());
+            // Two different things arrive as -infinity here, and reporting them alike turns
+            // §12's loudest diagnostic into noise.
+            //
+            // The adapter returns -infinity for a candidate it declines to score: a grouped
+            // model excludes every group but the one layer 1 chose. That is a decision the
+            // model made, and counting it would report "predicted a score its target cannot
+            // take" on every grouped ranking -- an error message about a training defect,
+            // emitted for the design working exactly as intended.
+            //
+            // A finite raw score that fails the range check is the real thing that error is
+            // for. Only those are counted, and only the candidates the model actually scored
+            // are the population it is counted against, so "every candidate was affected"
+            // keeps meaning "the model contributed nothing".
+            size_t declined = 0;
+            size_t outOfRange = 0;
+            for(size_t index = 0; index < scored.size(); ++index)
+            {
+                if(raw[index] == -std::numeric_limits<double>::infinity())
+                {
+                    ++declined;
+                }
+                else if(!std::isfinite(scored[index].score.ordering))
+                {
+                    ++outOfRange;
+                }
+            }
+            reportOutOfRangeOnce(outOfRange, scored.size() - declined);
 
             // scoreCandidate already replaced any non-finite value with -infinity, so the
             // comparator sees only real numbers. That matters beyond tidiness: NaN compares
@@ -732,7 +818,8 @@ private:
             ordered.reserve(scored.size());
             for(const auto& candidate : scored)
             {
-                ordered.push_back({candidate.entry->kernelId, candidate.score.reported});
+                ordered.push_back(
+                    {candidate.entry->kernelId, candidate.score.reported, candidate.group});
             }
 
             traceSelection(scored, context);
@@ -795,10 +882,19 @@ private:
                        << scored[i].score.reported;
         }
 
+        // §12 asks for "whether the model or a fallback decided". Where the model decides in two
+        // layers, half of what it decided is the group, and a trace naming only the winning
+        // kernel would not record it.
+        std::ostringstream group;
+        if(const auto feature = groupFeature())
+        {
+            group << " group=" << *feature << "=" << scored.front().group;
+        }
+
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: "
                                << _describedBy << " decided_by=" << traceDecidedBy()
                                << " winner=" << toString(scored.front().entry->kernelId)
-                               << " candidates=" << scored.size()
+                               << group.str() << " candidates=" << scored.size()
                                << " arch=" << context.deviceProperties.gcnArchName
                                << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
                                << " objective=" << _config.objective
@@ -867,7 +963,14 @@ private:
     /// score is not a positive measurement -- so estimateTflops reports 0 for this case too.
     CandidateScore scoreCandidate(const std::vector<double>& row) const
     {
-        const double raw = _adapter->score(row);
+        return scoreFromRaw(_adapter->score(row));
+    }
+
+    /// The half of scoring that does not touch the adapter: transform inversion, the range
+    /// check, orientation. Split out so a batched ranking applies exactly the same rules to
+    /// a score the adapter produced for a whole catalog at once.
+    CandidateScore scoreFromRaw(const double raw) const
+    {
         const double recovered = uhd::score_transform::applyInverse(raw, _config.scoreTransform);
 
         // `recovered` is a physical quantity before any orientation is applied: throughput for

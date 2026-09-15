@@ -59,6 +59,19 @@ public:
 
     double score(const std::vector<double>& features) const override;
 
+    /// Score a whole catalog at once, which is what a grouped model needs.
+    ///
+    /// A single-layer model answers per row, so the base implementation's loop is right for
+    /// it and this override reduces to that. A grouped model cannot: picking the group is a
+    /// decision across rows, and no per-row call can express it.
+    std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const override;
+
+    /// The slot `scoreBatch` groups on, so a ranker reports the same group the model used.
+    int groupFeatureIndex() const override
+    {
+        return _groupFeatureIndex;
+    }
+
     UhdAdapterType type() const override
     {
         return UhdAdapterType::TREE_DATA;
@@ -109,23 +122,56 @@ private:
         bool useLte;
     };
 
+    /// One group's layer-2 ensemble. Its roots index `_nodes` alongside layer 1's, so a
+    /// grouped model is one allocation and one preparation path rather than a second kind
+    /// of tree store that could validate differently from the first.
+    struct Group
+    {
+        double value; // The grouping feature's value that selects this ensemble.
+        std::vector<uint32_t> roots;
+    };
+
     TreeDataAdapter(std::vector<Node> nodes,
                     std::vector<uint32_t> roots,
+                    std::vector<Group> groups,
+                    int groupFeatureIndex,
                     std::string featuresHash,
                     size_t numFeatures,
                     double baseScore,
                     std::vector<std::string> trainingArches,
                     std::string modelVersion);
 
-    static bool prepareTrees(const hipdnn_flatbuffers_sdk::data_objects::GbdtModel& model,
-                             std::vector<Node>& nodes,
-                             std::vector<uint32_t>& roots);
+    /// Prepare one ensemble. Takes the tree vector rather than the model so that a group's
+    /// trees go through exactly the validation layer 1's do -- a group whose trees were
+    /// trusted where layer 1's were checked would be the one path into the walker that can
+    /// index outside a row.
+    static bool
+        prepareTrees(const flatbuffers::Vector<
+                         flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>* trees,
+                     int32_t numFeatures,
+                     std::vector<Node>& nodes,
+                     std::vector<uint32_t>& roots);
 
     template <bool CheckFeatureCount>
-    double scorePrepared(const std::vector<double>& features) const;
+    double scorePrepared(const std::vector<double>& features,
+                         const std::vector<uint32_t>& roots) const;
+
+    /// Sum one ensemble over a row, choosing the short-row path the same way `score` does.
+    double scoreRoots(const std::vector<double>& features,
+                      const std::vector<uint32_t>& roots) const
+    {
+        if(roots.empty())
+        {
+            return _baseScore;
+        }
+        return features.size() >= _numFeatures ? scorePrepared<false>(features, roots)
+                                               : scorePrepared<true>(features, roots);
+    }
 
     std::vector<Node> _nodes;
     std::vector<uint32_t> _roots;
+    std::vector<Group> _groups;
+    int _groupFeatureIndex;
     std::string _featuresHash;
     size_t _numFeatures;
     double _baseScore;
@@ -242,9 +288,46 @@ inline std::unique_ptr<TreeDataAdapter>
 
     std::vector<Node> nodes;
     std::vector<uint32_t> roots;
-    if(!prepareTrees(*model, nodes, roots))
+    if(!prepareTrees(model->trees(), model->num_features(), nodes, roots))
     {
         return nullptr;
+    }
+
+    // A grouped model (RFC 0019 two-layer) decides twice: layer 1 picks the group, layer 2
+    // orders within it. Both layers are prepared here so a malformed group is rejected at
+    // load like a malformed ensemble, rather than at the first ranking that happens to
+    // choose that group.
+    std::vector<Group> groups;
+    int groupFeatureIndex = -1;
+    if(model->groups() != nullptr && !model->groups()->empty())
+    {
+        groupFeatureIndex = model->group_by_feature_index();
+        // The walker reads the group from this slot of the feature row, so an index outside
+        // the row is the same defect as a split feature outside it -- and unlike a split, it
+        // would be read for every candidate of every ranking.
+        if(groupFeatureIndex < 0 || groupFeatureIndex >= model->num_features())
+        {
+            HIPDNN_SDK_LOG_ERROR(
+                "TreeDataAdapter: grouped model's group_by_feature_index "
+                << groupFeatureIndex << " is outside the declared feature count "
+                << model->num_features());
+            return nullptr;
+        }
+        groups.reserve(model->groups()->size());
+        for(const auto* group : *model->groups())
+        {
+            if(group == nullptr)
+            {
+                HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: null group");
+                return nullptr;
+            }
+            std::vector<uint32_t> groupRoots;
+            if(!prepareTrees(group->trees(), model->num_features(), nodes, groupRoots))
+            {
+                return nullptr;
+            }
+            groups.push_back({group->value(), std::move(groupRoots)});
+        }
     }
 
     const auto numFeatures = static_cast<size_t>(model->num_features());
@@ -269,6 +352,8 @@ inline std::unique_ptr<TreeDataAdapter>
 
     return std::unique_ptr<TreeDataAdapter>(new TreeDataAdapter(std::move(nodes),
                                                                 std::move(roots),
+                                                                std::move(groups),
+                                                                groupFeatureIndex,
                                                                 modelHash,
                                                                 numFeatures,
                                                                 baseScore,
@@ -278,6 +363,8 @@ inline std::unique_ptr<TreeDataAdapter>
 
 inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
                                         std::vector<uint32_t> roots,
+                                        std::vector<Group> groups,
+                                        int groupFeatureIndex,
                                         std::string featuresHash,
                                         size_t numFeatures,
                                         double baseScore,
@@ -285,6 +372,8 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
                                         std::string modelVersion)
     : _nodes(std::move(nodes))
     , _roots(std::move(roots))
+    , _groups(std::move(groups))
+    , _groupFeatureIndex(groupFeatureIndex)
     , _featuresHash(std::move(featuresHash))
     , _numFeatures(numFeatures)
     , _baseScore(baseScore)
@@ -293,11 +382,12 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
 {
 }
 
-inline bool TreeDataAdapter::prepareTrees(const fb::GbdtModel& model,
-                                          std::vector<Node>& nodes,
-                                          std::vector<uint32_t>& roots)
+inline bool TreeDataAdapter::prepareTrees(
+    const flatbuffers::Vector<flatbuffers::Offset<fb::GbdtTree>>* trees,
+    int32_t numFeatures,
+    std::vector<Node>& nodes,
+    std::vector<uint32_t>& roots)
 {
-    const auto* trees = model.trees();
     if(trees == nullptr)
     {
         return true;
@@ -310,7 +400,10 @@ inline bool TreeDataAdapter::prepareTrees(const fb::GbdtModel& model,
 
     // FlatBuffers verifies each vector, not the relationships between vectors.
     // Check their sizes before reserving or indexing the prepared representation.
-    size_t totalNodes = 0;
+    // Counted from what `nodes` already holds, not from zero: a grouped model prepares every
+    // layer into one store, and children are absolute indices into it, so the range that must
+    // not overflow is the whole store rather than this ensemble's share of it.
+    size_t totalNodes = nodes.size();
     for(flatbuffers::uoffset_t t = 0; t < trees->size(); ++t)
     {
         const auto* tree = trees->Get(t);
@@ -333,7 +426,7 @@ inline bool TreeDataAdapter::prepareTrees(const fb::GbdtModel& model,
         totalNodes += count;
     }
     nodes.reserve(totalNodes);
-    roots.reserve(trees->size());
+    roots.reserve(roots.size() + trees->size());
 
     // Kahn's algorithm checks all nodes, including branches not reached by a
     // particular feature row. Iterative validation also supports very deep trees.
@@ -380,7 +473,7 @@ inline bool TreeDataAdapter::prepareTrees(const fb::GbdtModel& model,
                 return reject(t, "split threshold is not finite");
             }
             const int32_t feature = tree->feature_indices()->Get(i);
-            if(feature < 0 || feature >= model.num_features())
+            if(feature < 0 || feature >= numFeatures)
             {
                 return reject(t, "split feature outside the declared feature count");
             }
@@ -428,22 +521,82 @@ inline bool TreeDataAdapter::prepareTrees(const fb::GbdtModel& model,
 
 inline double TreeDataAdapter::score(const std::vector<double>& features) const
 {
-    if(_roots.empty())
-    {
-        return _baseScore;
-    }
     // Validated splits are in range for a full-width row. Keep the existing
     // missing-feature behavior for short rows without burdening the usual path.
-    return features.size() >= _numFeatures ? scorePrepared<false>(features)
-                                           : scorePrepared<true>(features);
+    return scoreRoots(features, _roots);
+}
+
+inline std::vector<double>
+    TreeDataAdapter::scoreBatch(const std::vector<std::vector<double>>& batch) const
+{
+    if(_groupFeatureIndex < 0 || _groups.empty())
+    {
+        return IUhdAdapter::scoreBatch(batch);
+    }
+
+    // Layer 1 ranks the groups. Its score for a row stands for the group that row belongs
+    // to, so the group's standing is the best its members achieve -- the same "achievable
+    // when tuned" quantity layer 1 was trained on.
+    const auto slot = static_cast<size_t>(_groupFeatureIndex);
+    double bestGroupScore = -std::numeric_limits<double>::infinity();
+    double chosenGroup = 0.0;
+    bool chosen = false;
+    for(const auto& row : batch)
+    {
+        if(slot >= row.size())
+        {
+            continue;
+        }
+        const double groupScore = score(row);
+        if(!chosen || groupScore > bestGroupScore)
+        {
+            bestGroupScore = groupScore;
+            chosenGroup = row[slot];
+            chosen = true;
+        }
+    }
+
+    std::vector<double> scores(batch.size(), -std::numeric_limits<double>::infinity());
+    if(!chosen)
+    {
+        return scores;
+    }
+
+    // Layer 2 ranks within the chosen group. Everything outside it keeps -infinity, which
+    // rankScored already treats as unusable, so a rejected group sorts last without needing
+    // a new concept -- and cannot be picked by a tie.
+    const Group* within = nullptr;
+    for(const auto& candidate : _groups)
+    {
+        if(candidate.value == chosenGroup)
+        {
+            within = &candidate;
+            break;
+        }
+    }
+
+    for(size_t i = 0; i < batch.size(); ++i)
+    {
+        if(slot >= batch[i].size() || batch[i][slot] != chosenGroup)
+        {
+            continue;
+        }
+        // A group layer 1 picked but layer 2 does not describe: rank it by layer 1 rather
+        // than discarding it, so a partially trained artifact degrades instead of refusing
+        // the only group it chose.
+        scores[i] = within == nullptr || within->roots.empty() ? score(batch[i])
+                                                               : scoreRoots(batch[i], within->roots);
+    }
+    return scores;
 }
 
 template <bool CheckFeatureCount>
-inline double TreeDataAdapter::scorePrepared(const std::vector<double>& features) const
+inline double TreeDataAdapter::scorePrepared(const std::vector<double>& features,
+                                             const std::vector<uint32_t>& roots) const
 {
     double sum = 0.0;
     const auto* nodes = _nodes.data();
-    for(const auto root : _roots)
+    for(const auto root : roots)
     {
         const auto* node = nodes + root;
         while(node->featureIndex >= 0)
