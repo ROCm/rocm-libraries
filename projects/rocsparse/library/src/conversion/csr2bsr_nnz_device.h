@@ -58,10 +58,8 @@ namespace rocsparse
         __shared__ bool found[BLOCKSIZE / WFSIZE];
         __shared__ J    nnzb_per_row[BLOCKSIZE / WFSIZE];
 
-        // Grid-stride loop over block rows so the grid can be clamped below the
-        // number of block rows (which can exceed the 32-bit grid limit). The loop
-        // trip count is uniform across the block, so the __syncthreads() below
-        // stays convergent.
+        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
+        // The bound must stay block-uniform so the __syncthreads() below stay convergent.
         for(J bid = hipBlockIdx_x; (BLOCKSIZE / WFSIZE) * bid < mb; bid += hipGridDim_x)
         {
             J row = (BLOCKSIZE / WFSIZE) * block_dim * bid + block_dim * wid + r;
@@ -163,10 +161,8 @@ namespace rocsparse
         __shared__ J    nnzb_per_row;
         __shared__ J    shared[BLOCKSIZE];
 
-        // Grid-stride loop over block rows so the grid can be clamped below the
-        // number of block rows (which can exceed the 32-bit grid limit). The loop
-        // trip count is uniform across the block, so the __syncthreads() below
-        // stay convergent.
+        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
+        // The bound must stay block-uniform so the __syncthreads() below stay convergent.
         for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
             J row = block_dim * bid + wid;
@@ -258,8 +254,9 @@ namespace rocsparse
                       "BLOCKSIZE must be a power of two.");
         J lane_id = hipThreadIdx_x;
 
-        // temp array used as global scratch pad; partitioned by the physical block
-        // index so the grid can be clamped below the number of block rows.
+        // temp array used as global scratch pad, partitioned by physical block index
+        // rather than by block row so that a clamped grid still gives each block its
+        // own slice.
         J  phys = hipBlockIdx_x;
         I* row_start
             = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;

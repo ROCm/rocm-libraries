@@ -67,10 +67,7 @@ namespace rocsparse
         __shared__ bool table[BLOCKSIZE / WFSIZE];
         __shared__ T    data[(BLOCKSIZE / WFSIZE) * BLOCKDIM * BLOCKDIM];
 
-        // Grid-stride loop over block rows so the grid can be clamped below the
-        // number of block rows (which can exceed the 32-bit grid limit). Each
-        // wavefront handles one block row per iteration; there are no block-wide
-        // barriers, so per-iteration divergence is safe.
+        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
         for(J bid = hipBlockIdx_x; (BLOCKSIZE / WFSIZE) * bid < mb; bid += hipGridDim_x)
         {
             J block_row = (BLOCKSIZE / WFSIZE) * bid + wid;
@@ -199,10 +196,8 @@ namespace rocsparse
         __shared__ bool table;
         __shared__ T    data[BLOCKDIM * BLOCKDIM];
 
-        // Grid-stride loop over block rows so the grid can be clamped below the
-        // number of block rows (which can exceed the 32-bit grid limit). The loop
-        // trip count is uniform across the block, so the __syncthreads() below
-        // stay convergent.
+        // Grid-stride loop over block rows (block rows can exceed the 32-bit grid limit).
+        // The bound must stay block-uniform so the __syncthreads() below stay convergent.
         for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
             J block_row = bid;
@@ -328,8 +323,9 @@ namespace rocsparse
                       "BLOCKSIZE must be a power of two.");
         J lane_id = hipThreadIdx_x;
 
-        // temp arrays used as global scratch pad; partitioned by the physical
-        // block index so the grid can be clamped below the number of block rows.
+        // temp arrays used as global scratch pad, partitioned by physical block index
+        // rather than by block row so that a clamped grid still gives each block its
+        // own slice.
         J  phys = hipBlockIdx_x;
         I* row_start
             = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
