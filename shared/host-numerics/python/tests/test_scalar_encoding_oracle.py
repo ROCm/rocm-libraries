@@ -11,6 +11,7 @@ from typing import Optional
 import numpy as np
 
 import roc_host_numerics as hv
+from _numeric_oracle_support import pack_little_endian
 
 
 @dataclass(frozen=True)
@@ -191,17 +192,6 @@ def unpack_little_endian(storage, count, bits_per_value):
             value |= ((storage[absolute_bit // 8] >> (absolute_bit % 8)) & 1) << bit
         values.append(value)
     return values
-
-
-def pack_little_endian(codes, bits_per_value):
-    storage = bytearray((len(codes) * bits_per_value + 7) // 8)
-    for index, code in enumerate(codes):
-        bit_offset = index * bits_per_value
-        for bit in range(bits_per_value):
-            if (code >> bit) & 1:
-                absolute_bit = bit_offset + bit
-                storage[absolute_bit // 8] |= 1 << (absolute_bit % 8)
-    return bytes(storage)
 
 
 def encode_codes(format_spec, values):

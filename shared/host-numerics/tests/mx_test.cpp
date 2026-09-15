@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "test_support.hpp"
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -19,6 +21,8 @@
 using namespace roc::host_numerics;
 
 namespace {
+using roc::host_numerics::test::require;
+
 struct MxCase : MxGenerationOptions {
     MxCase(Shape inputShape, MxDataGeneration generation)
         : shape(std::move(inputShape)), data(std::move(generation)) {}
@@ -29,10 +33,6 @@ struct MxCase : MxGenerationOptions {
 
 MxTensor generateMx(const MxCase& testCase) {
     return roc::host_numerics::generateMx(testCase.shape, testCase.data, testCase);
-}
-
-void require(bool condition, const char* message) {
-    if (!condition) throw std::runtime_error(message);
 }
 
 bool sameStorage(const Tensor& first, const Tensor& second) {

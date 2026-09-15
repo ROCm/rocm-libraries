@@ -99,9 +99,16 @@ target_sources(host-numerics-core
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/index_order.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/layout.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/scalar.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/scalar_binary_float.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/scalar_codec.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/scalar_conversion.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/scalar_storage.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/scalar_type.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/shape.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/tensor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_numerics/tensor_transformations.hpp"
 )
 
 target_compile_features(host-numerics-amd-gpu-layout PUBLIC cxx_std_17)

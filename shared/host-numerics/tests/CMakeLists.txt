@@ -18,7 +18,23 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-add_executable(host-numerics-tests host_numerics_test.cpp)
+add_executable(
+    host-numerics-tests
+    comparison_test.cpp
+    comparison_metrics_test.cpp
+    epilogue_test.cpp
+    generation_comparison_test.cpp
+    generation_test.cpp
+    host_numerics_test.cpp
+    operation_aliasing_test.cpp
+    output_selection_test.cpp
+    reduction_test.cpp
+    reference_gemm_test.cpp
+    softmax_layer_norm_test.cpp
+    strided_views_test.cpp
+    structured_sparsity_test.cpp
+    tensor_operations_test.cpp
+)
 target_link_libraries(host-numerics-tests PRIVATE roc::host-numerics)
 if(TARGET OpenMP::OpenMP_CXX)
     target_link_libraries(host-numerics-tests PRIVATE OpenMP::OpenMP_CXX)
@@ -52,7 +68,16 @@ add_test(
     COMMAND host-numerics-generation-recipe-tests
 )
 
-add_executable(host-numerics-blocked-tests blocked_backend_test.cpp)
+add_executable(
+    host-numerics-blocked-tests
+    blocked_accumulation_test.cpp
+    blocked_aliasing_test.cpp
+    blocked_backend_test.cpp
+    blocked_execution_test.cpp
+    blocked_parallel_test.cpp
+    blocked_scaling_test.cpp
+    blocked_selection_plan_test.cpp
+)
 target_link_libraries(host-numerics-blocked-tests PRIVATE roc::host-numerics)
 add_test(NAME host-numerics-blocked-tests COMMAND host-numerics-blocked-tests)
 add_test(
@@ -66,11 +91,30 @@ set_tests_properties(
         PROCESSORS 4
 )
 
-add_executable(host-numerics-core-tests tensor_core_test.cpp)
+add_executable(
+    host-numerics-core-tests
+    layout_test.cpp
+    shape_test.cpp
+    tensor_basics_test.cpp
+    tensor_conversion_test.cpp
+    tensor_core_test.cpp
+    tensor_encoded_copy_test.cpp
+    tensor_layout_storage_test.cpp
+    tensor_storage_test.cpp
+    tensor_transformations_test.cpp
+)
 target_link_libraries(host-numerics-core-tests PRIVATE roc::host-numerics-core)
 add_test(NAME host-numerics-core-tests COMMAND host-numerics-core-tests)
 
-add_executable(host-numerics-scalar-codec-tests scalar_codec_test.cpp)
+add_executable(
+    host-numerics-scalar-codec-tests
+    binary_float_test.cpp
+    scalar_codec_test.cpp
+    scalar_conversion_test.cpp
+    scalar_integer_codec_test.cpp
+    scalar_rounding_test.cpp
+    scalar_type_test.cpp
+)
 target_link_libraries(host-numerics-scalar-codec-tests PRIVATE roc::host-numerics-core)
 add_test(NAME host-numerics-scalar-codec-tests COMMAND host-numerics-scalar-codec-tests)
 
@@ -137,7 +181,13 @@ if(TARGET OpenMP::OpenMP_CXX)
 endif()
 add_test(NAME host-numerics-mx-tests COMMAND host-numerics-mx-tests)
 
-add_executable(host-numerics-amd-gpu-layout-tests amd_gpu_layout_test.cpp)
+add_executable(
+    host-numerics-amd-gpu-layout-tests
+    amd_gpu_gfx1250_layout_test.cpp
+    amd_gpu_gfx950_layout_test.cpp
+    amd_gpu_layout_dispatch_test.cpp
+    amd_gpu_pre_swizzle_test.cpp
+)
 target_link_libraries(
     host-numerics-amd-gpu-layout-tests
     PRIVATE
