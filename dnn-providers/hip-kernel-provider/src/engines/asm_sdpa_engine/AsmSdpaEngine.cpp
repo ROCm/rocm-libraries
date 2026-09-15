@@ -31,19 +31,30 @@ namespace
 
 /// What this build of the engine was, for a model that claims to have measured it.
 ///
-/// `<provider>/<provider version>/<selector>`. There is no separate library version to
+/// `<provider>/<provider release>/<selector>`. There is no separate library version to
 /// name: the ASM kernels are vendored inside this provider rather than linked from an
 /// independently versioned library, so the provider version IS the kernel-snapshot
 /// version. Bump the trailing selector segment when what this engine does with those
 /// kernels changes without the provider version moving -- a different dispatch choice
 /// invalidates a trained estimate just as a different kernel would.
 ///
-/// A deployed L1 model records this exact string as RFC 0019 §4.1's
-/// `trained_against.selector_revision`, and the loader refuses one that does not match:
-/// L1 is the score compared across engines, so a stale estimate changes which engine is
-/// selected rather than merely misreporting a number.
+/// The RELEASE version, deliberately, and not HIP_KERNEL_PROVIDER_VERSION_STRING, which
+/// appends the build's git hash. A deployed L1 model records this exact string as RFC 0019
+/// §4.1's `trained_against.selector_revision` and the loader refuses one that does not
+/// match -- so naming the hash would expire every model on every commit to the repository,
+/// including commits that cannot touch this engine, and no model could ever be shipped
+/// alongside the source that produced it. What changes these measurements is the vendored
+/// kernel snapshot and this engine's dispatch, and both move the version or the selector
+/// segment; a hash names the build, which is not the same claim.
+///
+/// The refusal itself stays: L1 is the score compared across engines, so a stale estimate
+/// changes which engine is selected rather than merely misreporting a number.
+#define HKP_STRINGIFY_INNER(value) #value
+#define HKP_STRINGIFY(value) HKP_STRINGIFY_INNER(value)
 constexpr const char* SELECTOR_REVISION
-    = "hip-kernel-provider/" HIP_KERNEL_PROVIDER_VERSION_STRING "/asm-sdpa-untuned-v1";
+    = "hip-kernel-provider/" HKP_STRINGIFY(HIP_KERNEL_PROVIDER_VERSION_MAJOR) "." HKP_STRINGIFY(
+        HIP_KERNEL_PROVIDER_VERSION_MINOR) "." HKP_STRINGIFY(HIP_KERNEL_PROVIDER_VERSION_PATCH)
+      "/asm-sdpa-untuned-v1";
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Resolves AsmSdpaEngine::L1_MODEL_IDS through the descriptor catalog the provider has
