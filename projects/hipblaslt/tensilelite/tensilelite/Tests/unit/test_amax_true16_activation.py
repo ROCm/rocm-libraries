@@ -42,7 +42,7 @@ from gpu_test_helpers import init_rocisa  # noqa: E402
 from tensilelite.Common.Architectures import gfxToIsa  # noqa: E402
 from tensilelite.Common.DataType import DataType  # noqa: E402
 
-import AMaxGenerator  # noqa: E402
+from tensilelite._extops import AMaxGenerator  # noqa: E402
 
 
 # gfx11 family covered by the NoSDWA arch cap (checkInList(isaVersion[0], {11, 12})).

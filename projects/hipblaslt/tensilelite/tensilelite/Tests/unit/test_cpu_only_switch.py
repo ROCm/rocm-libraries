@@ -46,7 +46,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import tensilelite
 from tensilelite.Common.GlobalParameters import (
     globalParameters,
     restoreDefaultGlobalParameters,
@@ -222,7 +222,7 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 
 
 def _run_freq_block(device_id=0):
-    """Replay the guarded frequency-probe block from tensilelite.Tensile() exactly.
+    """Replay the guarded frequency-probe block from tensilelite.tensilelite() exactly.
 
     The gating predicate mirrors tensilelite.py:601 verbatim:
         'LibraryLogic' in config and UseEffLike and not buildOnly
@@ -453,7 +453,7 @@ _E2E_CONFIG = Path(__file__).parent / "test_data" / "cpu_only.yaml"
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
 def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, arch):
     """T9: drive the full benchmark flow GPU-less via
-    tensilelite.Tensile([cfg, out, *tensile_args, "--cpu-only", "--gpu-targets", arch]).
+    tensilelite.tensilelite([cfg, out, *tensile_args, "--cpu-only", "--gpu-targets", arch]).
 
     Mirrors test_keep_build_tmp.py, but exercises the BENCHMARK path (no --build-only):
     codegen -> cross-compile -> stubbed client launch -> deterministic synthetic results
@@ -484,7 +484,7 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
         arch,
     ]
 
-    tensilelite.Tensile(args)
+    tensilelite.tensilelite(args)
 
     # A results CSV was produced (the synthetic stub wrote it; the real device never ran).
     results_csvs = list(output_dir.rglob("*.csv"))

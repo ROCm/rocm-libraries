@@ -15,11 +15,11 @@ from unittest.mock import patch
 
 import pytest
 
-# Importing tensilelite.Tensile pulls in the full code-generation toolchain
+# Importing tensilelite.tensilelite pulls in the full code-generation toolchain
 # (rocisa bindings, etc.). If that chain is unavailable in the current
 # environment, skip rather than error at collection time.
 try:
-    from tensilelite.Tensile import get_gpu_max_frequency_smi
+    from tensilelite.tensilelite import get_gpu_max_frequency_smi
     _IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - environment dependent
     get_gpu_max_frequency_smi = None
@@ -29,7 +29,7 @@ pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(
         get_gpu_max_frequency_smi is None,
-        reason=f"tensilelite.Tensile import unavailable: {_IMPORT_ERROR}",
+        reason=f"tensilelite.tensilelite import unavailable: {_IMPORT_ERROR}",
     ),
 ]
 
