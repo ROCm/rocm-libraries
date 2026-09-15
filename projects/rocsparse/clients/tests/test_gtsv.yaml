@@ -196,3 +196,61 @@ Tests:
   N: [3, 7]
   denseld: [300000, 500000, 900000]
   matrix: [rocsparse_matrix_random]
+
+# AISPARSE-689 regression: the number of right-hand sides n is mapped straight onto
+# grid.y, which the hardware caps at 65535. Before the fix rocsparse_Xgtsv failed with
+# hipErrorInvalidConfiguration at n = 65536 against a system as small as two rows. The
+# launches now clamp grid.y and every kernel grid-strides over the right-hand sides.
+#
+# These cases are deliberately small (denseld = m, single precision) so none of them
+# needs a device_memory_gb guard and all of them really execute. The harness residual
+# check covers every one of the ldb * n entries, so the right-hand sides beyond the
+# clamp - reachable only through the new grid-stride loop - are verified numerically
+# rather than by asserting that the launch returned success.
+
+# n = 65537 is odd, so gtsv_LBM_rhs_kernel is instantiated with COLS = 1 and every
+# grid.y in the solver is n itself, exceeding the cap by two.
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_precision
+  M: [2]
+  N: [65537]
+  denseld: [2]
+  matrix: [rocsparse_matrix_random]
+
+# m = 513 pads to m_pad = 1024, which yields gridsize = 2: the only way to reach
+# gtsv_solve_spike_grid_level_kernel, the kernel behind the nine dim3(1, n) spike
+# stages.
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_precision
+  M: [513]
+  N: [65537]
+  denseld: [513]
+  matrix: [rocsparse_matrix_random]
+
+# The vectorised gtsv_LBM_rhs_kernel launches size grid.y as n / COLS, so they only
+# cross the cap at much larger n. n = 131074 = 2 * 65537 selects COLS = 2 and asks for
+# 65537 panels.
+- name: gtsv
+  category: quick
+  function: gtsv
+  precision: *single_precision
+  M: [2]
+  N: [131074]
+  denseld: [2]
+  matrix: [rocsparse_matrix_random]
+
+# n = 262148 = 4 * 65537 selects COLS = 4 (65537 panels) and n = 524288 = 8 * 65536
+# selects COLS = 8 (65536 panels). Both are past the cap; the padded right-hand side
+# buffer is 0.5 GB and 1 GB respectively, which is why they sit in pre_checkin.
+- name: gtsv
+  category: pre_checkin
+  function: gtsv
+  precision: *single_precision
+  M: [2]
+  N: [262148, 524288]
+  denseld: [2]
+  matrix: [rocsparse_matrix_random]

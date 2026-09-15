@@ -138,20 +138,25 @@ namespace rocsparse
     // |0   w21 1   0||v13'|   |0|
     // |0   w22 0   1||v14'|   |1|
 
+    // bidy is the right-hand side handled by this call. The kernel wrapper drives it
+    // from a grid-stride loop so that a grid.y clamped to the hardware maximum still
+    // covers every right-hand side. It is 64 bit because it now ranges over the full
+    // right-hand side count instead of the clamped grid extent, and it scales the
+    // stride and m_pad column offsets.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_transpose_and_pad_array_shared_kernel(rocsparse_int m,
-                                                    rocsparse_int m_pad,
-                                                    rocsparse_int stride,
-                                                    const T* __restrict__ input,
-                                                    T* __restrict__ output,
-                                                    T pad_value)
+    ROCSPARSE_DEVICE_ILF void
+        gtsv_transpose_and_pad_array_shared_device(int64_t       bidy,
+                                                   rocsparse_int m,
+                                                   rocsparse_int m_pad,
+                                                   rocsparse_int stride,
+                                                   const T* __restrict__ input,
+                                                   T* __restrict__ output,
+                                                   T pad_value)
     {
         __shared__ T stile[BLOCKSIZE];
 
         rocsparse_int tidx = hipThreadIdx_x;
         rocsparse_int bidx = hipBlockIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
         rocsparse_int gidx = tidx + BLOCKSIZE * bidx;
 
         rocsparse_int wid = tidx / (BLOCKSIZE / BLOCKDIM);
@@ -174,6 +179,31 @@ namespace rocsparse
         if(k < m_pad)
         {
             output[k + bidy * m_pad] = stile[BLOCKDIM * lid + wid];
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_transpose_and_pad_array_shared_kernel(rocsparse_int m,
+                                                    rocsparse_int m_pad,
+                                                    rocsparse_int n,
+                                                    rocsparse_int stride,
+                                                    const T* __restrict__ input,
+                                                    T* __restrict__ output,
+                                                    T pad_value)
+    {
+        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
+        // so grid-stride over them. The bound depends only on n, hipBlockIdx_y and
+        // hipGridDim_y, all block uniform, so every thread of a block runs the same
+        // number of iterations and stays convergent at the barrier below.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_transpose_and_pad_array_shared_device<BLOCKSIZE, BLOCKDIM>(
+                bidy, m, m_pad, stride, input, output, pad_value);
+
+            // The shared tile is still being read when the device function returns;
+            // synchronise before the next right-hand side overwrites it.
+            __syncthreads();
         }
     }
 
@@ -206,17 +236,19 @@ namespace rocsparse
         }
     }
 
+    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
+    // from a grid-stride loop, and 64 bit because it scales the stride and m_pad
+    // column offsets over the full right-hand side count.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_transpose_back_array_kernel(rocsparse_int m,
-                                          rocsparse_int m_pad,
-                                          rocsparse_int stride,
-                                          const T* __restrict__ input,
-                                          T* __restrict__ output)
+    ROCSPARSE_DEVICE_ILF void gtsv_transpose_back_array_device(int64_t       bidy,
+                                                               rocsparse_int m,
+                                                               rocsparse_int m_pad,
+                                                               rocsparse_int stride,
+                                                               const T* __restrict__ input,
+                                                               T* __restrict__ output)
     {
         rocsparse_int tidx = hipThreadIdx_x;
         rocsparse_int bidx = hipBlockIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
 
         rocsparse_int gidx = tidx + BLOCKSIZE * bidx;
 
@@ -227,6 +259,25 @@ namespace rocsparse
         if(k < m)
         {
             output[k + bidy * stride] = input[gidx + bidy * m_pad];
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_transpose_back_array_kernel(rocsparse_int m,
+                                          rocsparse_int m_pad,
+                                          rocsparse_int n,
+                                          rocsparse_int stride,
+                                          const T* __restrict__ input,
+                                          T* __restrict__ output)
+    {
+        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
+        // so grid-stride over them. The bound is block uniform and this kernel has no
+        // shared state, so no extra barrier is needed.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_transpose_back_array_device<BLOCKSIZE, BLOCKDIM>(
+                bidy, m, m_pad, stride, input, output);
         }
     }
 
@@ -378,21 +429,25 @@ namespace rocsparse
         }
     }
 
+    // bidy is the index of the panel of COLS right-hand sides handled by this call.
+    // The kernel wrapper drives it from a grid-stride loop so that a grid.y clamped
+    // to the hardware maximum still covers every panel. It is 64 bit because it now
+    // ranges over the full panel count instead of the clamped grid extent, and it
+    // scales the m_pad stride into rhs.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, uint32_t COLS, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_LBM_rhs_kernel(rocsparse_int m_pad,
-                             rocsparse_int n,
-                             rocsparse_int ldb,
-                             const T* __restrict__ a,
-                             const T* __restrict__ b,
-                             const T* __restrict__ c,
-                             T* __restrict__ rhs,
-                             const T* __restrict__ mt,
-                             const rocsparse_int* __restrict__ pivot)
+    ROCSPARSE_DEVICE_ILF void gtsv_LBM_rhs_device(int64_t       bidy,
+                                                  rocsparse_int m_pad,
+                                                  rocsparse_int n,
+                                                  rocsparse_int ldb,
+                                                  const T* __restrict__ a,
+                                                  const T* __restrict__ b,
+                                                  const T* __restrict__ c,
+                                                  T* __restrict__ rhs,
+                                                  const T* __restrict__ mt,
+                                                  const rocsparse_int* __restrict__ pivot)
     {
         rocsparse_int tidx = hipThreadIdx_x;
         rocsparse_int bidx = hipBlockIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
         rocsparse_int gid  = tidx + BLOCKSIZE * bidx;
 
         rocsparse_int nblocks = m_pad / BLOCKDIM;
@@ -907,23 +962,55 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, uint32_t COLS, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_spike_block_level_kernel(rocsparse_int m_pad,
-                                       rocsparse_int n,
-                                       rocsparse_int ldb,
-                                       T* __restrict__ rhs,
-                                       const T* __restrict__ w,
-                                       const T* __restrict__ v,
-                                       T* __restrict__ w2,
-                                       T* __restrict__ v2,
-                                       T* __restrict__ rhs_scratch,
-                                       T* __restrict__ w_scratch,
-                                       T* __restrict__ v_scratch)
+    void gtsv_LBM_rhs_kernel(rocsparse_int m_pad,
+                             rocsparse_int n,
+                             rocsparse_int ldb,
+                             const T* __restrict__ a,
+                             const T* __restrict__ b,
+                             const T* __restrict__ c,
+                             T* __restrict__ rhs,
+                             const T* __restrict__ mt,
+                             const rocsparse_int* __restrict__ pivot)
+    {
+        // grid.y indexes panels of COLS right-hand sides and is clamped to the
+        // hardware maximum, so grid-stride over the panels: advancing the panel index
+        // by one advances the right-hand side base by the vector width COLS. The
+        // launch sites only pick COLS > 1 when n is an exact multiple of COLS, so
+        // n / COLS is the exact panel count. The bound depends only on n, COLS,
+        // hipBlockIdx_y and hipGridDim_y, all block uniform, so every thread of a
+        // block runs the same number of iterations.
+        // Evaluated in 64 bit: COLS is an unsigned template parameter, so a plain
+        // n / COLS would promote n to unsigned.
+        const int64_t npanels = static_cast<int64_t>(n) / COLS;
+
+        for(int64_t bidy = hipBlockIdx_y; bidy < npanels; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_LBM_rhs_device<BLOCKSIZE, BLOCKDIM, COLS>(
+                bidy, m_pad, n, ldb, a, b, c, rhs, mt, pivot);
+        }
+    }
+
+    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
+    // from a grid-stride loop, and 64 bit because it scales the m_pad and
+    // 2 * hipGridDim_x column offsets over the full right-hand side count.
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    ROCSPARSE_DEVICE_ILF void gtsv_spike_block_level_device(int64_t       bidy,
+                                                            rocsparse_int m_pad,
+                                                            rocsparse_int n,
+                                                            rocsparse_int ldb,
+                                                            T* __restrict__ rhs,
+                                                            const T* __restrict__ w,
+                                                            const T* __restrict__ v,
+                                                            T* __restrict__ w2,
+                                                            T* __restrict__ v2,
+                                                            T* __restrict__ rhs_scratch,
+                                                            T* __restrict__ w_scratch,
+                                                            T* __restrict__ v_scratch)
     {
         rocsparse_int tidx = hipThreadIdx_x;
         rocsparse_int bidx = hipBlockIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
         rocsparse_int gid  = tidx + BLOCKSIZE * bidx;
 
         rocsparse_int nblocks = m_pad / BLOCKDIM;
@@ -1016,17 +1103,49 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_solve_spike_grid_level_kernel(rocsparse_int m_pad,
-                                            rocsparse_int n,
-                                            rocsparse_int ldb,
-                                            T* __restrict__ rhs_scratch,
-                                            const T* __restrict__ w_scratch,
-                                            const T* __restrict__ v_scratch)
+    void gtsv_spike_block_level_kernel(rocsparse_int m_pad,
+                                       rocsparse_int n,
+                                       rocsparse_int ldb,
+                                       T* __restrict__ rhs,
+                                       const T* __restrict__ w,
+                                       const T* __restrict__ v,
+                                       T* __restrict__ w2,
+                                       T* __restrict__ v2,
+                                       T* __restrict__ rhs_scratch,
+                                       T* __restrict__ w_scratch,
+                                       T* __restrict__ v_scratch)
+    {
+        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
+        // so grid-stride over them. The bound depends only on n, hipBlockIdx_y and
+        // hipGridDim_y, all block uniform, so every thread of a block runs the same
+        // number of iterations and the barriers inside the device function stay
+        // convergent.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_spike_block_level_device<BLOCKSIZE, BLOCKDIM>(
+                bidy, m_pad, n, ldb, rhs, w, v, w2, v2, rhs_scratch, w_scratch, v_scratch);
+
+            // The shared spike tiles are still being read when the device function
+            // returns; synchronise before the next right-hand side reloads them.
+            __syncthreads();
+        }
+    }
+
+    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
+    // from a grid-stride loop, and 64 bit because it scales the 2 * BLOCKSIZE scratch
+    // offset over the full right-hand side count.
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_DEVICE_ILF void gtsv_solve_spike_grid_level_device(int64_t       bidy,
+                                                                 rocsparse_int m_pad,
+                                                                 rocsparse_int n,
+                                                                 rocsparse_int ldb,
+                                                                 T* __restrict__ rhs_scratch,
+                                                                 const T* __restrict__ w_scratch,
+                                                                 const T* __restrict__ v_scratch)
     {
         rocsparse_int tidx = hipThreadIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
 
         __shared__ T sw[2 * BLOCKSIZE];
         __shared__ T sv[2 * BLOCKSIZE];
@@ -1111,19 +1230,48 @@ namespace rocsparse
         rhs_scratch[tidx + BLOCKSIZE + 2 * BLOCKSIZE * bidy] = srhs[tidx + BLOCKSIZE];
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_solve_spike_propagate_kernel(rocsparse_int m_pad,
-                                           rocsparse_int n,
-                                           rocsparse_int ldb,
-                                           T* __restrict__ rhs,
-                                           const T* __restrict__ w,
-                                           const T* __restrict__ v,
-                                           const T* __restrict__ rhs_scratch)
+    void gtsv_solve_spike_grid_level_kernel(rocsparse_int m_pad,
+                                            rocsparse_int n,
+                                            rocsparse_int ldb,
+                                            T* __restrict__ rhs_scratch,
+                                            const T* __restrict__ w_scratch,
+                                            const T* __restrict__ v_scratch)
+    {
+        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
+        // so grid-stride over them. This is the single kernel behind all nine spike
+        // stage launches (grid.x is fixed at 1 and only the block size differs), so one
+        // loop covers all of them. The bound depends only on n, hipBlockIdx_y and
+        // hipGridDim_y, all block uniform, so every thread of a block runs the same
+        // number of iterations and the barriers inside the device function stay
+        // convergent.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_solve_spike_grid_level_device<BLOCKSIZE>(
+                bidy, m_pad, n, ldb, rhs_scratch, w_scratch, v_scratch);
+
+            // The shared spike tiles are still being read when the device function
+            // returns; synchronise before the next right-hand side reloads them.
+            __syncthreads();
+        }
+    }
+
+    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
+    // from a grid-stride loop, and 64 bit because it scales the m_pad and
+    // 2 * hipGridDim_x column offsets over the full right-hand side count.
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    ROCSPARSE_DEVICE_ILF void gtsv_solve_spike_propagate_device(int64_t       bidy,
+                                                                rocsparse_int m_pad,
+                                                                rocsparse_int n,
+                                                                rocsparse_int ldb,
+                                                                T* __restrict__ rhs,
+                                                                const T* __restrict__ w,
+                                                                const T* __restrict__ v,
+                                                                const T* __restrict__ rhs_scratch)
     {
         rocsparse_int tidx = hipThreadIdx_x;
         rocsparse_int bidx = hipBlockIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
         rocsparse_int gid  = tidx + BLOCKSIZE * bidx;
 
         rocsparse_int nblocks = m_pad / BLOCKDIM;
@@ -1194,16 +1342,44 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_spike_backward_substitution_kernel(rocsparse_int m_pad,
-                                                 rocsparse_int n,
-                                                 rocsparse_int ldb,
-                                                 T* __restrict__ rhs,
-                                                 const T* __restrict__ w,
-                                                 const T* __restrict__ v)
+    void gtsv_solve_spike_propagate_kernel(rocsparse_int m_pad,
+                                           rocsparse_int n,
+                                           rocsparse_int ldb,
+                                           T* __restrict__ rhs,
+                                           const T* __restrict__ w,
+                                           const T* __restrict__ v,
+                                           const T* __restrict__ rhs_scratch)
+    {
+        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
+        // so grid-stride over them. The bound depends only on n, hipBlockIdx_y and
+        // hipGridDim_y, all block uniform, so every thread of a block runs the same
+        // number of iterations and the barriers inside the device function stay
+        // convergent.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_solve_spike_propagate_device<BLOCKSIZE, BLOCKDIM>(
+                bidy, m_pad, n, ldb, rhs, w, v, rhs_scratch);
+
+            // The shared spike tiles are still being read when the device function
+            // returns; synchronise before the next right-hand side reloads them.
+            __syncthreads();
+        }
+    }
+
+    // bidy is the right-hand side handled by this call, supplied by the kernel wrapper
+    // from a grid-stride loop, and 64 bit because it scales the m_pad column offset
+    // over the full right-hand side count.
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    ROCSPARSE_DEVICE_ILF void gtsv_spike_backward_substitution_device(int64_t       bidy,
+                                                                      rocsparse_int m_pad,
+                                                                      rocsparse_int n,
+                                                                      rocsparse_int ldb,
+                                                                      T* __restrict__ rhs,
+                                                                      const T* __restrict__ w,
+                                                                      const T* __restrict__ v)
     {
         rocsparse_int tidx = hipThreadIdx_x;
         rocsparse_int bidx = hipBlockIdx_x;
-        rocsparse_int bidy = hipBlockIdx_y;
         rocsparse_int gid  = tidx + BLOCKSIZE * bidx;
 
         rocsparse_int nblocks = m_pad / BLOCKDIM;
@@ -1223,6 +1399,25 @@ namespace rocsparse
                 = rhs[gid + i * nblocks + m_pad * bidy] - w[gid + i * nblocks] * tmp1;
             rhs[gid + i * nblocks + m_pad * bidy]
                 = rhs[gid + i * nblocks + m_pad * bidy] - v[gid + i * nblocks] * tmp2;
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_spike_backward_substitution_kernel(rocsparse_int m_pad,
+                                                 rocsparse_int n,
+                                                 rocsparse_int ldb,
+                                                 T* __restrict__ rhs,
+                                                 const T* __restrict__ w,
+                                                 const T* __restrict__ v)
+    {
+        // grid.y indexes the right-hand sides and is clamped to the hardware maximum,
+        // so grid-stride over them. The bound is block uniform and this kernel has no
+        // shared state, so no extra barrier is needed.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_spike_backward_substitution_device<BLOCKSIZE, BLOCKDIM>(
+                bidy, m_pad, n, ldb, rhs, w, v);
         }
     }
 }
