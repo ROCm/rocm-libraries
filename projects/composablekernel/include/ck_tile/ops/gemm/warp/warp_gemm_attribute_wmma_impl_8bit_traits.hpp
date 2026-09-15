@@ -821,7 +821,7 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
     {
-#ifdef __gfx125__
+#ifdef __gfx1250__
         return __builtin_amdgcn_wmma_f32_32x16x128_f4(
             bit_cast<int32x16_t>(a_vec), bit_cast<int32x8_t>(b_vec), 0, bit_cast<fp32x16_t>(c_vec));
 #else
@@ -1095,11 +1095,13 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128>
     }
 };
 
-template <typename AType, typename BType>
-struct WmmaTraits<gfx125_t, AType, BType, float, 32, 32, 128>
-    : WmmaTraitsBase<gfx12_t, AType, BType, float, 128, true, 32, 32>
+// Strict uses the supported 16x16 f8f6f4 instructions for FP4 as well.
+template <typename AType, typename BType, index_t N>
+struct WmmaTraits<gfx125_t, AType, BType, float, 32, N, 128>
+    : WmmaTraitsBase<gfx12_t, AType, BType, float, 128, true, 32, N>
 {
-    using Base     = WmmaTraitsBase<gfx12_t, AType, BType, float, 128, true, 32, 32>;
+    static_assert(N == 16 || N == 32);
+    using Base     = WmmaTraitsBase<gfx12_t, AType, BType, float, 128, true, 32, N>;
     using ArchType = gfx125_t;
 
     using AVecType = typename Base::AVecType;

@@ -33,7 +33,7 @@ struct BaseGemmPipelineAgBgCrCompV3
     // operator() and the grouped/persistent kernel launchers), and TailHandler's
     // scenarios[] compiles in the same device pass, so this __gfx1250__/__GFX12__
     // guard is host/device consistent.
-#if defined(__gfx1250__) || defined(__GFX12__)
+#if defined(__gfx125__) || defined(__GFX12__)
     static constexpr bool Use8WarpSchedule = false;
 #else
     static constexpr bool Use8WarpSchedule = (Problem::BlockGemmShape::NumWarps == 8);
