@@ -79,7 +79,9 @@ def _arguments(name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
     supplied = dict(arguments or {})
     declared = tool["inputSchema"].get("properties", {})
     unknown = sorted(set(supplied) - set(declared))
-    missing = [key for key in tool["inputSchema"].get("required", []) if key not in supplied]
+    missing = [
+        key for key in tool["inputSchema"].get("required", []) if key not in supplied
+    ]
     if unknown or missing:
         detail = ", ".join(
             [f"unknown argument {key!r}" for key in unknown]
@@ -160,7 +162,9 @@ def build_server(supervisor: Supervisor) -> Server:
             # Operational failures are results, not protocol errors: the caller
             # named a flow that will not load, or hit the concurrency cap.
             raise ValueError(str(failure)) from None
-        return [types.TextContent(type="text", text=json.dumps(result, indent=2))], result
+        return [
+            types.TextContent(type="text", text=json.dumps(result, indent=2))
+        ], result
 
     @server.list_resources()
     async def list_resources() -> list[types.Resource]:
@@ -220,9 +224,7 @@ def build_server(supervisor: Supervisor) -> Server:
     return server
 
 
-def _invoke(
-    supervisor: Supervisor, name: str, args: dict[str, Any]
-) -> dict[str, Any]:
+def _invoke(supervisor: Supervisor, name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "flow_list":
         return supervisor.list_flows()
     if name == "flow_inputs":
