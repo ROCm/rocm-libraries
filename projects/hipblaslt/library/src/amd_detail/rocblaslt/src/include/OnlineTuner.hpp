@@ -22,7 +22,10 @@ namespace rocblaslt
  * Timing is deferred-read. beginMeasurement() hands back an event pair for the
  * caller to wrap the launch with, and the elapsed time is only read on a later
  * visit to the same problem, once hipEventQuery() reports the stop event
- * complete. No entry point here ever waits on the GPU.
+ * complete. A whole exploration may be outstanding at once, so a caller that
+ * enqueues the same problem back to back without synchronising still explores
+ * at dispatch rate rather than at queue-drain rate. No entry point here ever
+ * waits on the GPU.
  *
  * Every entry point is a branch on a member flag when
  * HIPBLASLT_ORIGAMI_ONLINE_TUNE_TOP_K is unset, so the feature costs nothing
@@ -73,8 +76,8 @@ namespace rocblaslt
         }
 
         /**
-     * @brief Read back the problem's outstanding measurement, if the GPU has
-     * finished it. Leaves it outstanding otherwise.
+     * @brief Read back every outstanding measurement the GPU has finished.
+     * Leaves the unfinished ones outstanding.
      */
         void harvestPending(size_t problemKey)
         {
@@ -104,17 +107,30 @@ namespace rocblaslt
         }
 
     private:
+        // One launch the GPU has not been observed to finish yet.
+        struct PendingMeasurement
+        {
+            hipEvent_t m_start     = nullptr;
+            hipEvent_t m_stop      = nullptr;
+            int        m_candidate = -1;
+        };
+
+        // m_pending holds the outstanding measurements in launch order, capped
+        // at inFlightCap(). m_gaveUp means exploration ran past its visit
+        // budget: no further launch is measured, but m_pending is still drained
+        // before a winner is picked, so samples already paid for are not thrown
+        // away. m_declined counts launches refused because the cap was full.
         struct ProblemState
         {
             std::vector<int>                m_candidates;
             std::vector<std::vector<float>> m_samples;
             std::vector<int>                m_issued;
-            int                             m_calls            = 0;
-            int                             m_pendingCandidate = -1;
-            hipEvent_t                      m_pendingStart     = nullptr;
-            hipEvent_t                      m_pendingStop      = nullptr;
-            int                             m_winner           = -1;
-            bool                            m_resolved         = false;
+            std::vector<PendingMeasurement> m_pending;
+            int                             m_calls    = 0;
+            int                             m_declined = 0;
+            int                             m_winner   = -1;
+            bool                            m_gaveUp   = false;
+            bool                            m_resolved = false;
         };
 
         OnlineTuner();
@@ -134,6 +150,7 @@ namespace rocblaslt
                              const std::vector<int>& rankedSolutionIndices);
         int  nextCandidate(const ProblemState& state) const;
         int  measurableCandidate(const ProblemState& state, int solutionIndex) const;
+        int  inFlightCap(const ProblemState& state) const;
         int  visitBudget(const ProblemState& state) const;
         void resolve(size_t problemKey, ProblemState& state);
         bool acquireEvents(hipEvent_t& start, hipEvent_t& stop);
