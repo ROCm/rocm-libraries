@@ -209,7 +209,7 @@ def run(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation. Used both
-            for the Tensile binary and to add tensilelite to PYTHONPATH.
+            for the TensileLite binary and to add tensilelite to PYTHONPATH.
         tuning_dir (str | Path): Directory containing per-GEMM optimization
             YAML configs (see configure).
         devices (Sequence[int], optional): GPU device IDs used by the load
