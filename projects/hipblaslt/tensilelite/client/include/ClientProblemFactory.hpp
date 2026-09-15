@@ -113,6 +113,10 @@ namespace TensileLite
             bool                             m_swizzleTensorB;
             bool                             m_fusedGemmA2A;
             int                              m_metadataLayout;
+            int                              m_scaleBlockSizeA;
+            rocisa::DataType                 m_scaleTypeA;
+            bool                             m_scaleZeroPointA;
+            ContractionProblemGemm::Int4Encoding m_int4EncodingA;
             int                              m_mxBlockA;
             int                              m_mxBlockB;
             bool                             m_padMXScaleTensorFreeDim;

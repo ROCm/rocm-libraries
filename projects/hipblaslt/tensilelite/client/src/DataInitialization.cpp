@@ -2442,6 +2442,8 @@ namespace TensileLite
                     case rocisa::DataType::BFloat8Float8:
                     case rocisa::DataType::Float8BFloat8_fnuz:
                     case rocisa::DataType::BFloat8Float8_fnuz:
+                    // int4 is never an alpha/beta constant.
+                    case rocisa::DataType::Int4:
 #ifdef _WIN32
                     case rocisa::DataType::Float6:
                     case rocisa::DataType::BFloat6:
@@ -2980,6 +2982,7 @@ namespace TensileLite
             inputs->scaleC        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEC];
             inputs->scaleD        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALED];
             inputs->scaleAlphaVec = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEALPHAVEC];
+            inputs->scaleZeroA    = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEZEROA];
             inputs->mxsa          = (void*)ptrs[ContractionProblemGemm::TENSOR::MXSA];
             inputs->mxsb          = (void*)ptrs[ContractionProblemGemm::TENSOR::MXSB];
             inputs->metadata      = (unsigned char*)ptrs[ContractionProblemGemm::TENSOR::METADATA];
