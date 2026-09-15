@@ -31,6 +31,7 @@ from __future__ import annotations
 from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
+from ..scaled_wmma import scale_formats
 
 
 class ISABackend:
@@ -647,6 +648,12 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         if len(op.operands) != 5:
             raise ValueError(f"{op.name} expects 5 operands, got {len(op.operands)}")
         decl_key, intrinsic, scale_ty, fmt = spec
+        sa, sb = scale_formats(
+            fmt,
+            fmt,
+            op.attrs.get("scale_dtype_a", "e8m0"),
+            op.attrs.get("scale_dtype_b", "e8m0"),
+        )
         a, b, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(
@@ -659,8 +666,8 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             f"i32 {fmt}, <16 x i32> {lowerer._operand(a)}, "
             f"i32 {fmt}, <16 x i32> {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i32 0, i32 0, {scale_ty} {lowerer._operand(a_scale)}, "
-            f"i32 0, i32 0, {scale_ty} {lowerer._operand(b_scale)}, "
+            f"i32 0, i32 {sa}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 {sb}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 

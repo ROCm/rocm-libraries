@@ -30,6 +30,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/scaled_wmma_internal.h"
 
 #include <stdio.h> /* snprintf */
 #include <stdlib.h> /* atoi     */
@@ -84,6 +85,12 @@ static rocke_status_t
     {
         op_id = scale16 ? "wmma_scale16_f32_16x16x128_fp4_fp4" : "wmma_scale_f32_16x16x128_fp4_fp4";
     }
+    int sa = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_a"));
+    int sb = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_b"));
+    if(const char* error = rocke_wmma_scale_error(fmt, fmt, sa, sb))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
     if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
@@ -100,7 +107,7 @@ static rocke_status_t
     }
     rocke_h_emitf(lw,
                   "f32x8 %s = %s(%d, %s, %d, %s, (int16_t)0, %s, "
-                  "0, 0, %s, 0, 0, %s, false, false);",
+                  "0, %d, %s, 0, %d, %s, false, false);",
                   rocke_h_name(lw, op->results[0]),
                   builtin,
                   fmt,
@@ -108,7 +115,9 @@ static rocke_status_t
                   fmt,
                   rocke_h_name(lw, op->operands[1]),
                   rocke_h_name(lw, op->operands[2]),
+                  sa,
                   rocke_h_name(lw, op->operands[3]),
+                  sb,
                   rocke_h_name(lw, op->operands[4]));
     return lw->status;
 }

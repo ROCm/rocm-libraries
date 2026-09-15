@@ -163,3 +163,7 @@ as described in the notes.
 - gfx942/gfx950 cells use a portable f16 16x16x16 config; an instance marked ❌
   for a CDNA arch lacks the specific atom that config selects (e.g. `mfma_gemm`
   and `direct_conv_16c` need the CDNA4 16x16x32 atom absent on gfx942).
+
+The gfx1250 `NvFp4GemmSpec` builder consumes packed E2M1 with K=16 E4M3
+block scales and runtime FP32 tensor scales, producing BF16 or FP16 output.
+See [the NVFP4 input contract](../examples/gfx1250/gemm/NVFP4.md).
