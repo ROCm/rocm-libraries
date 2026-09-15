@@ -36,6 +36,10 @@ When a user asks for a workflow covered by a project skill, tell them the projec
   - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
   - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
 
+- `tools/ai/skills/hipdnn-benchmark/SKILL.md`
+  - Uses `dnn-benchmarking` as hipDNN's interface for graph benchmarking, engine comparison, and reference validation. It prefers released wheels and defers current setup and usage details to the dnn-benchmarking agent instructions.
+  - Suggest this skill when the user asks to benchmark hipDNN graphs or compare provider performance or correctness.
+
 ## Commit & PR Conventions
 
 Commit messages and PR titles follow the rules enforced by the **Libraries PR Bot**, the authoritative gate every PR must clear before it can be reviewed (a [Conventional Commits](https://www.conventionalcommits.org/) title, a tracking reference in the body, an accompanying test for code changes, and more). Don't rely on a copy of those rules here — they change over time, and a duplicate goes stale. Read the bot's live policy and FAQ in the rocm-libraries repo for the current specifics, and use the `hipdnn-pr-quality` skill to draft conforming PR titles and bodies.
