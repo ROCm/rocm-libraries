@@ -25,6 +25,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
@@ -51,6 +52,64 @@ namespace detail
 inline nlohmann::json metadataValueToJson(const MetadataValue& value)
 {
     return std::visit([](const auto& held) { return nlohmann::json(held); }, value);
+}
+
+/// Every feature value that describes one benchmarked (problem, kernel) pair: the
+/// tokens graph matching bound for the problem, and the kernel's own KMD metadata.
+///
+/// This is where the knowledge lives -- BenchmarkPlan holds the MatchContext and the
+/// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
+/// the opacity its benchmarkId comment exists to protect.
+///
+/// Keys mirror how FeatureExtractor will bind the same values, so a logged column and
+/// a `features_signature` entry are the same string minus the `$`. Both roots come
+/// from `bindNamespace`: bound tokens land under `q` (`bindQueryVars`) and KMD
+/// metadata under `kernel` (`bindKernelVars`). Dropping either prefix here would name
+/// a column no signature can reference.
+///
+/// Note this makes `q` a namespace meaning "the problem", which is NOT what RFC 0020
+/// §6.1 means by it -- there `$q` is a pattern variable naming the query tensor. The
+/// divergence is FeatureExtractor's, not this function's; mirroring it is the only way
+/// the two sides agree today. Reconciling them is the pattern-driven path's to do.
+///
+/// Built for every sweep, whatever the engine ships. Gating this on a UHD being
+/// present would make the corpus collectable only by a build that already has the
+/// model the corpus exists to train.
+///
+/// The third root is `device`, and it is not optional: RFC 0019.13 §8.3 requires a
+/// corpus to identify its device, and `tools/results_import` REJECTS one that carries
+/// no `device.*` column rather than importing a dataset that cannot say which GPU it
+/// describes. The dotless `device` envelope column BenchmarkPlan adds is the problem
+/// half of the identity; these are the properties a model may actually rank on.
+///
+/// The three spellings are `UhdKernelHeuristic`'s `deviceVarsFrom()`, restated rather
+/// than shared because that header is the runtime's and this is the corpus's. They
+/// must stay identical -- a logged column and a `features_signature` entry are the
+/// same string minus the `$`, so a rename on one side alone trains a model on a
+/// column the runtime will never bind, and the contract check that would have caught
+/// it only fails at load time, on a customer's machine.
+inline nlohmann::json candidateFeatures(const BoundTokens& bound,
+                                        const KernelDefinition& kernel,
+                                        const DeviceProperties& deviceProperties)
+{
+    nlohmann::json features = nlohmann::json::object();
+    for(const auto& [token, value] : bound)
+    {
+        features["q." + token] = metadataValueToJson(value);
+    }
+    for(const auto& [field, value] : kernel.metadata)
+    {
+        features["kernel." + field] = metadataValueToJson(value);
+    }
+    // `cu_count` and `multi_processor_count` name the same quantity under both
+    // spellings, exactly as deviceVarsFrom() binds them; a signature written against
+    // either one resolves.
+    features["device.cu_count"]
+        = static_cast<int64_t>(deviceProperties.multiProcessorCount);
+    features["device.multi_processor_count"]
+        = static_cast<int64_t>(deviceProperties.multiProcessorCount);
+    features["device.warp_size"] = static_cast<int64_t>(deviceProperties.warpSize);
+    return features;
 }
 
 } // namespace detail
@@ -335,7 +394,7 @@ public:
                          _stateManager.getDispatchDetails(kernel), context, catalog.bound),
                      kernel.packId,
                      kernel.dispatchId,
-                     candidateFeatures(catalog.bound, kernel)});
+                     detail::candidateFeatures(catalog.bound, kernel, context.deviceProperties)});
             }
             catch(const std::exception& error)
             {
@@ -436,42 +495,6 @@ public:
     }
 
 private:
-    /// Every feature value that describes one benchmarked (problem, kernel) pair: the
-    /// tokens graph matching bound for the problem, and the kernel's own KMD metadata.
-    ///
-    /// This is where the knowledge lives -- BenchmarkPlan holds the MatchContext and the
-    /// KernelDefinition for nothing, and teaching it to reach into a graph would cost it
-    /// the opacity its benchmarkId comment exists to protect.
-    ///
-    /// Keys mirror how FeatureExtractor will bind the same values, so a logged column and
-    /// a `features_signature` entry are the same string minus the `$`. Both roots come
-    /// from `bindNamespace`: bound tokens land under `q` (`bindQueryVars`) and KMD
-    /// metadata under `kernel` (`bindKernelVars`). Dropping either prefix here would name
-    /// a column no signature can reference.
-    ///
-    /// Note this makes `q` a namespace meaning "the problem", which is NOT what RFC 0020
-    /// §6.1 means by it -- there `$q` is a pattern variable naming the query tensor. The
-    /// divergence is FeatureExtractor's, not this function's; mirroring it is the only way
-    /// the two sides agree today. Reconciling them is the pattern-driven path's to do.
-    ///
-    /// Built for every sweep, whatever the engine ships. Gating this on a UHD being
-    /// present would make the corpus collectable only by a build that already has the
-    /// model the corpus exists to train.
-    static nlohmann::json candidateFeatures(const BoundTokens& bound,
-                                            const KernelDefinition& kernel)
-    {
-        nlohmann::json features = nlohmann::json::object();
-        for(const auto& [token, value] : bound)
-        {
-            features["q." + token] = detail::metadataValueToJson(value);
-        }
-        for(const auto& [field, value] : kernel.metadata)
-        {
-            features["kernel." + field] = detail::metadataValueToJson(value);
-        }
-        return features;
-    }
-
     /// The seam for a deterministic test timer is the constructor's `timer` parameter,
     /// not this factory: tests exercise this exact code path rather than overriding it.
     std::unique_ptr<IPlan<THandle>>

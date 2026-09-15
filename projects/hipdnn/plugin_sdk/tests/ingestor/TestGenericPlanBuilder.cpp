@@ -34,6 +34,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -2099,6 +2100,105 @@ TEST(TestIngestorGenericPlanBuilder,
            "just kernel_128 the narrow record held";
     EXPECT_EQ(stored->size(), 3U)
         << "the superset write-back must carry all three benchmarked candidates";
+}
+
+
+// ---------------------------------------------------------------------------
+// candidateFeatures: the corpus columns and the runtime's feature bindings
+// ---------------------------------------------------------------------------
+
+/// A DeviceProperties whose two numbers differ, so a field populated from the wrong one
+/// cannot pass by coincidence.
+DeviceProperties distinctDeviceProperties()
+{
+    DeviceProperties properties = testDeviceProperties();
+    properties.warpSize = 64;
+    properties.multiProcessorCount = 304;
+    return properties;
+}
+
+/// One uhd variable value as the JSON candidateFeatures would have logged it, so the two
+/// sides are comparable without either learning the other's type.
+nlohmann::json asJson(const uhd::VariableContext::ValueType& value)
+{
+    return std::visit([](const auto& held) { return nlohmann::json(held); }, value);
+}
+
+TEST(TestIngestorGenericPlanBuilder, CandidateFeaturesNamesTheThreeUhdRoots)
+{
+    KernelDefinition kernel;
+    kernel.metadata = MetadataValues{{"block_m", int64_t{128}}, {"dtype", std::string("bf16")}};
+    const BoundTokens bound{{"seqlen_q", int64_t{512}}};
+
+    const auto features
+        = detail::candidateFeatures(bound, kernel, distinctDeviceProperties());
+
+    EXPECT_EQ(features["q.seqlen_q"].get<int64_t>(), 512);
+    EXPECT_EQ(features["kernel.block_m"].get<int64_t>(), 128);
+    EXPECT_EQ(features["kernel.dtype"].get<std::string>(), "bf16");
+    EXPECT_TRUE(features.contains("device.cu_count"))
+        << "results_import rejects a corpus with no device.* column outright: without "
+           "this root the sweep produces a dataset that cannot be imported at all";
+}
+
+/// The invariant the whole corpus rests on: every `device.*` column this logs is a name
+/// the runtime will actually bind, and vice versa.
+///
+/// The two lists are written in different headers on purpose -- deviceVarsFrom() is the
+/// runtime's and candidateFeatures() is the corpus's -- so nothing but this test stops
+/// one being renamed without the other. A drift there trains a model on a column that
+/// resolves to nothing at inference time, and RFC 0019 §6.3's contract check only catches
+/// it when the model is loaded, which is on a customer's machine.
+TEST(TestIngestorGenericPlanBuilder, CandidateFeaturesDeviceKeysMatchDeviceVarsFrom)
+{
+    const auto properties = distinctDeviceProperties();
+    const KernelDefinition kernel{};
+
+    const auto features = detail::candidateFeatures(BoundTokens{}, kernel, properties);
+    const auto runtimeVars = detail::deviceVarsFrom(properties);
+
+    std::vector<std::string> logged;
+    for(const auto& [key, value] : features.items())
+    {
+        if(key.rfind("device.", 0) == 0)
+        {
+            logged.push_back(key.substr(std::string("device.").size()));
+            EXPECT_EQ(value, asJson(runtimeVars.at(logged.back())))
+                << "column device." << logged.back()
+                << " carries a different value than the runtime binds for $device."
+                << logged.back();
+        }
+    }
+
+    std::vector<std::string> bound;
+    bound.reserve(runtimeVars.size());
+    for(const auto& [name, unused] : runtimeVars)
+    {
+        static_cast<void>(unused);
+        bound.push_back(name);
+    }
+
+    EXPECT_THAT(logged, ::testing::UnorderedElementsAreArray(bound))
+        << "a logged column and a features_signature entry are the same string minus the "
+           "'$'; a name on one side only is either an untrainable binding or an "
+           "unbindable column";
+}
+
+/// `cu_count` and `multi_processor_count` are the same quantity under two spellings, and
+/// both must carry the same number: a signature authored against either one has to
+/// resolve, and resolving to a different value depending on the spelling is worse than
+/// not resolving at all.
+TEST(TestIngestorGenericPlanBuilder, CandidateFeaturesSpellsCuCountBothWays)
+{
+    const auto properties = distinctDeviceProperties();
+    const KernelDefinition kernel{};
+
+    const auto features = detail::candidateFeatures(BoundTokens{}, kernel, properties);
+
+    EXPECT_EQ(features["device.cu_count"].get<int64_t>(), properties.multiProcessorCount);
+    EXPECT_EQ(features["device.multi_processor_count"].get<int64_t>(),
+              properties.multiProcessorCount);
+    EXPECT_EQ(features["device.warp_size"].get<int64_t>(), properties.warpSize);
 }
 
 } // namespace
