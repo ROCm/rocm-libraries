@@ -14,8 +14,7 @@ geometry is fine -- because the same predicates drive the stack-height backoff
 ladder and produce the message the caller rejects with.
 
 Public entry points: :func:`subtileStackForTLU1`, :func:`subtileTLU1StackReason`,
-:func:`validateSubtileGRKPartition`, and the per-dtype stack-geometry tables
-``SUBTILE_TLU1_B4_STACKS`` / ``SUBTILE_TLU1_B16_STACKS``.
+and :func:`validateSubtileGRKPartition`.
 """
 
 from ..Utilities import reject
@@ -60,20 +59,6 @@ def _subtilePerWaveMTiles(mtTiles, stack, wgSize):
 # full line.
 _SUBTILE_STACK_MIN = 2
 _SUBTILE_LINE_BYTES = 128
-
-
-# TLU=1 subtile geometry per free-dim stack height, keyed by dtype family.  bf16
-# fills a cache line at 4 tiles, so it needs no taller stacks than that.
-SUBTILE_TLU1_B4_STACKS = {
-  2:  "AB_B4_TLU1",
-  4:  "AB_B4_TLU1_4x1",
-  8:  "AB_B4_TLU1_8x1",
-  16: "AB_B4_TLU1_16x1",
-}
-SUBTILE_TLU1_B16_STACKS = {
-  2: "AB_B16_TLU1",
-  4: "AB_B16_TLU1_4x1",
-}
 
 
 def _subtileStackFullLine(instM, bpe):
@@ -121,8 +106,8 @@ _SUBTILE_STRIP_SHARING_ISA = (9, 5, 0)
 def _subtileStripSharingReason(state, tc, mtTiles, stack):
   """Why tensor tc's waves cannot share a strip of `stack`, or None when they can.
 
-  These two rules hold for every subtile geometry, not just TLU=1 fp4, so they
-  stay separate from the fp4-only layout rules below.
+  These two rules hold for every subtile geometry, not just TLU=1, so they stay
+  separate from the TLU=1 layout rules below.
   """
   wgSize = state["MIWaveGroup"][0 if tc == 'A' else 1]
   perWaveMTiles = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
@@ -178,10 +163,9 @@ def subtileTLU1StackReason(state, tc, mtTiles, stack, bpe):
   # made, so the operand comes off memory more than once.  Test the slots, not
   # the tile shape -- a wide wavefront or a shallow DepthU reaches the same
   # shortage.
-  wgSize     = state["MIWaveGroup"][0 if tc == 'A' else 1]
   numWaves   = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
-  otherWaves = max(1, numWaves // wgSize)
-  perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
+  otherWaves = max(1, numWaves // axisWaves)
+  perWave    = _subtilePerWaveMTiles(mtTiles, stack, axisWaves)
   fetchGroup = max(1, stack // perWave) * otherWaves
   stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * float(bpe)
   slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \

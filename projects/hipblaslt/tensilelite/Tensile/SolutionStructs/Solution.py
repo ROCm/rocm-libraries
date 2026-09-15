@@ -67,8 +67,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from .Validators.Subtile import (SUBTILE_TLU1_B4_STACKS, SUBTILE_TLU1_B16_STACKS,
-                                 subtileStackForTLU1, subtileTLU1StackReason,
+from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 
 
@@ -1139,7 +1138,7 @@ class Solution(collections.abc.Mapping):
         tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
-            bpeTLU, stackGeometries = 2.0, SUBTILE_TLU1_B16_STACKS
+            bpeTLU = 2.0
           elif dtype.isFloat4():
             # Two fp4 share a byte, so an odd free-dim extent leaves the K
             # stride on a half byte and the elements-to-bytes shift truncates
@@ -1154,10 +1153,15 @@ class Solution(collections.abc.Mapping):
             state[key] = max(state[key], 32)
             # fp4 only: 6-bit shares this geometry's 0.5 bpe but neither
             # bank-conflict layout covers it, so it falls to the reject below.
-            bpeTLU, stackGeometries = 0.5, SUBTILE_TLU1_B4_STACKS
+            bpeTLU = 0.5
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
+
+          # Lazy import for the same reason as validateSubtileGRKPartition:
+          # Components/Subtile at module scope deadlocks the package load.
+          from Tensile.Components.Subtile.Kernel import AB_TLU1_STACK_NAMES
+          stackGeometries = AB_TLU1_STACK_NAMES.get(bpeTLU, {})
 
           mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
           mtTiles = mtFree // state["MatrixInstM"]

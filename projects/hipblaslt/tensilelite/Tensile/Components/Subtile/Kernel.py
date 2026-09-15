@@ -313,9 +313,10 @@ AB_B16_2x2 = ABTilePair(
 )
 
 # Column-major A/B (TLU=1): GR and LR contiguous along M.  The MFMA-K layout is
-# recovered on the LDS read via ds_load_tr16_b128, which fills the whole 4-VGPR
-# bf16 operand in a single read.  A bf16 strip already covers a 128 B cache line
-# at 4 MFMA-M tiles, so no taller stack is wired.
+# recovered on the LDS read via ds_read_b64_tr_b16; gfx950 has no 128-bit
+# transpose-16 form, so two reads fill the 4-VGPR bf16 operand.  A bf16 strip
+# already covers a 128 B cache line at 4 MFMA-M tiles, so no taller stack is
+# wired.
 AB_B16_TLU1 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(2, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),  # 2 MFMA-M tiles = 32 bf16 = 64 B contiguous along M
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(2, 1), loadShape=LoadShape(m=8, k=1)),                                   # 128-bit LR: 8 bf16 along M
@@ -387,6 +388,22 @@ AB_GEOMETRY_MAP = {
   "AB_B16_W32":  AB_B16_W32,
   **{abB4Tlu1Name(stack): _abB4Tlu1(stack) for stack in AB_B4_TLU1_STACKS},
 }
+
+
+def _abTlu1StackNames() -> dict:
+  names = {}
+  for name, pair in AB_GEOMETRY_MAP.items():
+    if pair.gr.tlu:
+      names.setdefault(float(pair.gr.bpe), {})[int(pair.gr.subtileShape[0])] = name
+  return names
+
+
+# Stack height -> AB_GEOMETRY_MAP key for the TLU=1 geometries, keyed by bytes
+# per element.  Solution.py picks a stack and needs the name for it; deriving
+# that from the map itself keeps the two from drifting apart, a failure that
+# surfaces as a silently dropped solution rather than an error.
+AB_TLU1_STACK_NAMES = _abTlu1StackNames()
+
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
   """Return the ABTilePair selected by Solution.py for tc ('A' or 'B')."""
