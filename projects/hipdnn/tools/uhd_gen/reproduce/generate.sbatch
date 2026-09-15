@@ -35,6 +35,12 @@ SHARDS=${UHD_SHARDS:-1}
 SHARD=${UHD_SHARD:-0}
 ARCH=${UHD_ARCH:-gfx942}
 KEEP=${UHD_KEEP:-/exchange/uhd-gen-${SLURM_JOB_ID:-manual}}
+# sbatch's --output lands in the job's OWN view of the submit directory, which inside a
+# --container-remap-root container is thrown away with the container: a job that dies
+# before it copies anything into $KEEP leaves nothing to read, and every diagnosis costs
+# another full run. Tee from here, before anything can fail.
+mkdir -p "$KEEP"
+exec > >(tee "$KEEP/job-${SLURM_JOB_ID:-manual}.log") 2>&1
 step() { echo; echo "===== $* ====="; date -Is; }
 
 step "node"
@@ -47,8 +53,13 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq 2>&1 | tail -1
 apt-get install -y -qq git cmake ninja-build python3.12-venv python3-dev 2>&1 | tail -2
 export PIP_CACHE_DIR=/tmp/pipcache
+# pytest is a CONFIGURE-time dependency of the provider since the descriptor-packaging
+# restructure: hkp_register_tests refuses to configure when the interpreter cannot import
+# it (HkpPackaging.cmake:1232). Installed here rather than disabling the tests, because a
+# build that silently drops its packaging tests is how a staging defect reaches a
+# collection run.
 python3 -m pip install --quiet --break-system-packages "zstandard>=0.20.0" msgpack \
-    lightgbm pandas "scikit-learn>=1.3.0" pyarrow flatbuffers numpy 2>&1 | tail -1
+    lightgbm pandas "scikit-learn>=1.3.0" pyarrow flatbuffers numpy pytest 2>&1 | tail -1
 for c in git cmake ninja python3; do
     printf '%-8s ' "$c"; command -v "$c" >/dev/null && "$c" --version 2>&1 | head -1 || echo MISSING
 done
