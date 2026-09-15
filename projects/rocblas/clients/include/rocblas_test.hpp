@@ -199,20 +199,20 @@ bool match_test_category(const Arguments& arg, const char* category);
 // INSTANTIATE_TEST_CATEGORY(testclass, known_bug)
 
 // Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression.
-// YAML threads>1, devices>1 (except repeatability_check, which loops GPUs in testing_*.hpp),
-// or HMM:true require RUN_TEST_ON_THREADS_STREAMS in TEST_P; this path ignores those fields
-// (including the HMM managed-memory skip).
+// YAML threads>1, devices>1 (except harness-owned GPU loops: repeatability_check
+// and multiheaded), or HMM:true require RUN_TEST_ON_THREADS_STREAMS in TEST_P;
+// this path ignores those fields (including the HMM managed-memory skip).
 #define CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(test)                                           \
     do                                                                                           \
     {                                                                                            \
         const auto& arg = GetParam();                                                            \
         ASSERT_LE(arg.threads, 1)                                                                \
             << "YAML threads>1 requires RUN_TEST_ON_THREADS_STREAMS in TEST_P";                  \
-        if(!arg.repeatability_check)                                                             \
+        if(!arg.repeatability_check && strcmp(arg.function, "multiheaded") != 0)                 \
         {                                                                                        \
             ASSERT_LE(arg.devices, 1)                                                            \
                 << "YAML devices>1 requires RUN_TEST_ON_THREADS_STREAMS in TEST_P "              \
-                   "(repeatability_check may set devices without that dispatch)";                \
+                   "(repeatability_check and multiheaded loop devices in the harness)";          \
         }                                                                                        \
         ASSERT_FALSE(arg.HMM) << "YAML HMM:true requires RUN_TEST_ON_THREADS_STREAMS in TEST_P " \
                                  "(managed-memory skip is only in that dispatch)";               \

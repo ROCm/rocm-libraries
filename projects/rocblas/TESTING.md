@@ -154,7 +154,7 @@ YAML can request extra devices, host threads, extra streams, or HMM allocations.
 
 | `TEST_P` wrapper | What YAML can do | Typical use |
 |------------------|------------------|-------------|
-| `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(...)` | Single current HIP device, one invocation. Asserts unless `threads <= 1`, (`devices <= 1` or `repeatability_check`), and `HMM` is false. | Default for most BLAS2/3 suites |
+| `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(...)` | Single current HIP device, one invocation. Asserts unless `threads <= 1`, (`devices <= 1` or harness-owned GPU loop: `repeatability_check` / `multiheaded`), and `HMM` is false. | Default for most BLAS2/3 suites |
 | `RUN_TEST_ON_THREADS_STREAMS(...)` | Honors `devices` (multi-GPU loop + skip if too few GPUs), `streams` (stream pool), `threads` (host thread pool + OpenMP manager), and `HMM` (skip if `hipDeviceAttributeManagedMemory` is false on those devices). | BLAS1 suites (`axpy_gtest.cpp` and friends), GEMM, and any suite with `category: multi_gpu`, `threads:`, or `HMM: true` |
 
 Defaults in `rocblas_common.yaml` are `threads: 0`, `streams: 0`, `devices: 0`. `RUN_TEST_ON_THREADS_STREAMS` treats `0` as `1` (one device / one stream / one thread). Set `devices: 4` or `devices: [0, 2, 4]` only when that `TEST_P` uses `RUN_TEST_ON_THREADS_STREAMS`; otherwise the extra YAML cases still instantiate as Google Tests but never switch devices.
