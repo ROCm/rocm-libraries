@@ -11,6 +11,8 @@
 
 #include <spdlog/fmt/fmt.h>
 
+#include <cmath>
+
 namespace hipdnn_backend
 {
 
@@ -56,6 +58,22 @@ void ProfilingControlDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "ProfilingControlDescriptor::finalize() failed: Already finalized.");
 
+    // An armed gate holds the stop event unsignalled, so any precondition check below
+    // that throws would otherwise abandon the stream stalled forever (watchdog aside).
+    // Released before every other check -- including "handle not set" and "start/stop
+    // not recorded" -- so a caller's own lifecycle error still leaves a live stream.
+    // Absent when nothing ever armed.
+    if(_stallGate.has_value())
+    {
+        _stallGate->release();
+    }
+    // If finalize is premature, a later corrected attempt runs after this release and
+    // therefore is not a stalled measurement.
+    if(_startEvent == nullptr || !_startRecorded || !_stopRecorded)
+    {
+        _stallUsed = false;
+    }
+
     THROW_IF_FALSE(_startEvent != nullptr,
                    HIPDNN_STATUS_BAD_PARAM,
                    "ProfilingControlDescriptor::finalize() failed: "
@@ -71,13 +89,6 @@ void ProfilingControlDescriptor::finalize()
                    "ProfilingControlDescriptor::finalize() failed: "
                    "Stop event was not recorded.");
 
-    // An armed gate holds the stop event unsignalled, so hipEventSynchronize below would
-    // hang forever if the caller armed but never released. Absent when nothing ever armed.
-    if(_stallGate.has_value())
-    {
-        _stallGate->release();
-    }
-
     auto status = hipEventSynchronize(_stopEvent.get());
     THROW_IF_NE(status,
                 hipSuccess,
@@ -92,7 +103,17 @@ void ProfilingControlDescriptor::finalize()
                 "ProfilingControlDescriptor::finalize() failed: "
                 "hipEventElapsedTime failed.");
 
-    if(_stallGate.has_value() && _stallGate->timedOut())
+    const bool timedOut = _stallGate.has_value() && _stallGate->timedOut();
+    // A watchdog-broken span is already explicitly invalid and remains readable only so
+    // callers can inspect STALL_TIMED_OUT_EXT. For a healthy measurement, HIP success
+    // does not guarantee a sane value: reject NaN, Inf, and negative spans before the
+    // descriptor becomes finalized. Zero is valid for back-to-back events.
+    THROW_IF_TRUE(!timedOut && (!std::isfinite(_elapsedMs) || _elapsedMs < 0.0F),
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "ProfilingControlDescriptor::finalize() failed: "
+                  "hipEventElapsedTime returned a non-finite or negative value.");
+
+    if(timedOut)
     {
         // Loud, because the number below is not a measurement: the watchdog had to
         // break a deadlock caused by the timed region blocking the host on the stalled
@@ -101,7 +122,7 @@ void ProfilingControlDescriptor::finalize()
             "ProfilingControlDescriptor: stall watchdog fired; the timed region blocked the "
             "host on its own stream. Elapsed time {} ms is invalid and must be discarded "
             "(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT). Stalling is now disabled for this "
-            "component, so later measurements include host submission overhead.",
+            "component, so later measurements are unstalled.",
             _elapsedMs);
     }
 
@@ -246,6 +267,14 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                        HIPDNN_STATUS_BAD_PARAM,
                        "ProfilingControlDescriptor::setAttribute(STALL_ARM): "
                        "Handle must be set before arming the stall.");
+        THROW_IF_TRUE(_stallUsed,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "ProfilingControlDescriptor::setAttribute(STALL_ARM): "
+                      "Stall is already armed for this measurement.");
+        THROW_IF_TRUE(_startRecorded,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "ProfilingControlDescriptor::setAttribute(STALL_ARM): "
+                      "Stall must be armed before start is recorded.");
 
         // The boolean value passed via arrayOfElements is intentionally unused: the
         // setAttribute call itself is the trigger, as it is for DEVICE_SYNC above.
@@ -257,15 +286,14 @@ void ProfilingControlDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
             _stallGate.emplace();
         }
 
-        // A false return is success, not an error. On a device without
-        // hipStreamWaitValue32 support the descriptor degrades to the unstalled
-        // behavior, which still measures, just with host submission included.
+        // A false return is success, not an error. When stalling is unavailable the
+        // descriptor still measures, but reports that the measurement was unstalled.
         _stallUsed = _stallGate->arm(_stream);
         if(!_stallUsed)
         {
             HIPDNN_BACKEND_LOG_INFO(
-                "ProfilingControlDescriptor: stall gate unavailable ({}); timing includes "
-                "host submission overhead",
+                "ProfilingControlDescriptor: stall gate unavailable ({}); measurement is "
+                "unstalled",
                 _stallGate->lastOperation() == nullptr ? "unknown" : _stallGate->lastOperation());
         }
         break;

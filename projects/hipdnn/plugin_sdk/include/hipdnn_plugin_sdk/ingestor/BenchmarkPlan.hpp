@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -314,7 +315,7 @@ private:
 
             HIPDNN_PLUGIN_LOG_WARN(
                 "ingestor: a stall watchdog timeout ended device-only timing partway through "
-                "benchmarking, so this pass mixed device-only and host-included measurements. "
+                "benchmarking, so this pass mixed device-only and unstalled measurements. "
                 "Discarding it and re-measuring every candidate unstalled.");
             stalledPass = false;
         }
@@ -398,6 +399,19 @@ private:
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                            << toString(candidate.kernelId)
                                            << "' failed to time a launch; scored unusable");
+                    return std::nullopt;
+                }
+                // A malformed sample from either the default HIP-event timer or an
+                // injected one must not enter the reduction, ranking, or cache: dropping
+                // the whole candidate scores it unusable rather than letting a bogus
+                // negative/NaN/infinite value win or corrupt robustMean(). Zero is a
+                // valid sample (an unmeasurably fast launch).
+                if(!std::isfinite(*sampleMs) || *sampleMs < 0.0)
+                {
+                    HIPDNN_PLUGIN_LOG_WARN(
+                        "ingestor: benchmarking candidate '"
+                        << toString(candidate.kernelId)
+                        << "' reported a non-finite or negative elapsed time; scored unusable");
                     return std::nullopt;
                 }
                 samples.push_back(*sampleMs);

@@ -87,10 +87,10 @@ TEST_F(IntegrationGpuTimedExecute, ReportsTimingFromActivePlan)
     // Other tests may have disabled stalling after a watchdog timeout. Device support
     // alone does not prove that this call armed the gate; both valid modes are allowed.
     EXPECT_TRUE(timing.quality == TimingQuality::DEVICE_ONLY
-                || timing.quality == TimingQuality::HOST_INCLUDED);
+                || timing.quality == TimingQuality::UNSTALLED);
     GTEST_LOG_(INFO) << "timed execute: " << *timing.elapsedMs << " ms, "
                      << (timing.quality == TimingQuality::DEVICE_ONLY ? "device-only"
-                                                                      : "host-included");
+                                                                      : "unstalled");
 }
 
 // Per-strategy GPU smoke tests. These assert only invariants that
@@ -191,31 +191,37 @@ TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStableMaxEqualsWindow)
 }
 
 // Regression test for the mixed-timing-mode recovery in Graph::autotune()
-// (Graph.hpp, the sweepStalled / sawDeviceOnly / sawHostIncluded loop). The
+// (Graph.hpp, the sweepStalled / sawDeviceOnly / sawUnstalled loop). The
 // test_autotune_plugin's AutotunePluginEngineHostSyncs engine calls
 // hipStreamSynchronize on the plugin's own stream from inside executeOpGraph,
 // so once the autotune stall gate has armed that stream for the timed
 // measurement, the engine deadlocks itself and only the stall watchdog can
 // release it. That is the exact scenario the recovery exists for: engines
 // benchmarked before the timeout are DEVICE_ONLY, engines benchmarked after
-// it (including the retried host-syncing one) are HOST_INCLUDED, and ranking
+// it (including the retried host-syncing one) are UNSTALLED, and ranking
 // the two populations against each other could hand the win to a slower
 // engine.
 //
 // Before the recovery existed, this failed: the first sweep pass was kept
 // as-is, so the earlier engines' DEVICE_ONLY times were ranked directly
-// against the host-syncing engine's HOST_INCLUDED time instead of the whole
+// against the host-syncing engine's UNSTALLED time instead of the whole
 // pass being discarded and re-measured unstalled.
 class IntegrationAutotuneStallRecovery : public hipdnn_tests::AutotuneIntegrationFixture
 {
 protected:
-    // Mirrors TestProfilingControlDescriptor's stallGateAvailable(): a device
-    // without hipStreamWaitValue32 support never arms, so the mixed-mode path
-    // this test targets cannot occur and the smoke value stays outside its scope.
+    // This recovery path requires a usable stall gate. Fail constructor errors loudly;
+    // skip only when the capability query succeeds and reports no support.
     static bool stallGateAvailable()
     {
         const hipdnn_data_sdk::utilities::StallGate gate;
-        return gate.isUsable();
+        if(gate.isUsable())
+        {
+            return true;
+        }
+        EXPECT_EQ(gate.lastError(), hipSuccess)
+            << "StallGate construction failed: " << gate.lastOperation() << " returned "
+            << hipGetErrorString(gate.lastError());
+        return false;
     }
 
     // libhipdnn_backend.so (the ProfilingControlDescriptor / StallGate that actually
@@ -345,8 +351,8 @@ protected:
                "run did not exercise the mixed-timing-mode recovery";
 
         // Every succeeded engine must carry the SAME timing quality: a discarded,
-        // re-measured sweep is uniformly HOST_INCLUDED, never a mix of
-        // DEVICE_ONLY and HOST_INCLUDED results.
+        // re-measured sweep is uniformly UNSTALLED, never a mix of
+        // DEVICE_ONLY and UNSTALLED results.
         std::optional<TimingQuality> commonQuality;
         bool checkedAnySucceeded = false;
         for(const auto& r : results)
@@ -367,7 +373,7 @@ protected:
         }
         ASSERT_TRUE(checkedAnySucceeded) << "No engine succeeded during autotune";
         ASSERT_TRUE(commonQuality.has_value());
-        EXPECT_EQ(*commonQuality, TimingQuality::HOST_INCLUDED)
+        EXPECT_EQ(*commonQuality, TimingQuality::UNSTALLED)
             << "results were not re-measured unstalled after the mixed pass";
 
         // The winner must come from that same uniformly-measured, re-run pass.
@@ -376,7 +382,7 @@ protected:
                   return r.succeeded && r.rank == 0;
               });
         ASSERT_NE(winner, results.end()) << "No winner selected";
-        EXPECT_EQ(winner->timingQuality, TimingQuality::HOST_INCLUDED)
+        EXPECT_EQ(winner->timingQuality, TimingQuality::UNSTALLED)
             << "winner was not one of the uniformly-measured results";
     }
 };

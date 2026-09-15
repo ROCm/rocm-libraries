@@ -202,7 +202,7 @@ void typesBindings(nb::module_& m)
     // simultaneously-good Error, since the execution itself still completed.
     nb::enum_<TimingQuality>(m, "TimingQuality")
         .value("DEVICE_ONLY", TimingQuality::DEVICE_ONLY)
-        .value("HOST_INCLUDED", TimingQuality::HOST_INCLUDED)
+        .value("UNSTALLED", TimingQuality::UNSTALLED)
         .value("INVALID", TimingQuality::INVALID);
 
     nb::class_<ExecutionTiming>(m, "ExecutionTiming")

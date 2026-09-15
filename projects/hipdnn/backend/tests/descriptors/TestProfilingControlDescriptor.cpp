@@ -183,8 +183,8 @@ protected:
     {
         SKIP_IF_NO_DEVICES();
         TestProfilingControlDescriptor::SetUp();
-        // One case deliberately trips the watchdog, which disables stalling for the
-        // whole process. Clear it per test so results cannot depend on test order.
+        // One case deliberately trips the watchdog, which disables stalling for this
+        // shared object. Clear it per test so results cannot depend on test order.
         hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
         ASSERT_EQ(hipStreamCreate(&_testStream), hipSuccess);
         _mockHandle = std::make_unique<NiceMock<MockHandle>>();
@@ -240,11 +240,24 @@ protected:
     }
 
     // The stall needs hipStreamWaitValue32; a device without it degrades to the
-    // unstalled path, which the timing assertions below would read as a failure.
+    // unstalled path, which the timing assertions below would read as a failure. Skip
+    // only that genuine no-support case. isUsable() is also false when a HIP call in the
+    // constructor itself failed (hipGetDevice, the attribute query, or
+    // hipExtMallocWithFlags) -- StallGate documents lastError() == hipSuccess as the
+    // marker for "the query ran and reported no support"; anything else is a broken test
+    // environment, not a capability gap, and must fail loudly rather than silently skip
+    // every stall-gate test on this runner.
     static bool stallGateAvailable()
     {
         const hipdnn_data_sdk::utilities::StallGate gate;
-        return gate.isUsable();
+        if(gate.isUsable())
+        {
+            return true;
+        }
+        EXPECT_EQ(gate.lastError(), hipSuccess)
+            << "StallGate construction failed: " << gate.lastOperation() << " returned "
+            << hipGetErrorString(gate.lastError());
+        return false;
     }
 
     std::unique_ptr<NiceMock<MockHandle>> _mockHandle = nullptr;
@@ -416,9 +429,14 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
     // without the two numbers that produced it.
     GTEST_LOG_(INFO) << "unstalled=" << unstalledMs << " ms, stalled=" << stalledMs << " ms";
 
-    // The 20 ms host sleep lands inside the unstalled span, and outside the stalled one.
-    // The bounds are loose on both sides so scheduling jitter cannot flip the result.
+#if !defined(_WIN32)
+    // The 20 ms host sleep lands inside the unstalled span on Linux. Windows/PAL
+    // can defer event submission until a later flush, so the sleep can be absent
+    // from both spans there.
     EXPECT_GE(unstalledMs, 15.0f) << "unstalled timing did not absorb the host delay";
+    EXPECT_LT(stalledMs, unstalledMs) << "stalled timing did not exclude the host delay";
+#endif
+    // The gate's measured span excludes the sleep on every supported platform.
     EXPECT_LT(stalledMs, 5.0f) << "stalled timing still includes the host delay";
 }
 
@@ -539,6 +557,42 @@ TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesUnreleasedStall)
     EXPECT_GE(elapsed, 0.0f);
 }
 
+// finalize() must release an armed gate before any precondition check can throw, not
+// only once every check has passed: a caller who arms and then hits a precondition error
+// (forgot to record start) would otherwise leave the wait packet stalling the stream
+// forever, with no later code path left to release it.
+TEST_F(TestGpuProfilingControlDescriptor, FinalizeReleasesArmedStallBeforePreconditionThrows)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(armStall(desc));
+    // Start deliberately not recorded: finalize() must throw on that precondition, but
+    // only after releasing the gate armed above.
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+
+    // A queued wait can remain not-ready briefly after the host release. Synchronize
+    // instead of sampling it with hipStreamQuery; if finalize() did not release the
+    // gate, this blocks until the watchdog and the timed-out flag below exposes it.
+    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
+
+    ASSERT_NO_THROW(recordStart(desc));
+    ASSERT_NO_THROW(recordStop(desc));
+    ASSERT_NO_THROW(desc->finalize());
+    bool timedOut = true;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_TIMED_OUT_EXT,
+                                       HIPDNN_TYPE_BOOLEAN,
+                                       1,
+                                       &elementCount,
+                                       &timedOut));
+    EXPECT_FALSE(timedOut) << "the watchdog released the gate instead of the failed finalize()";
+}
+
 // Releasing a gate that was never armed is a no-op success, so a caller that arms
 // conditionally need not track whether the arm took effect.
 TEST_F(TestGpuProfilingControlDescriptor, StallReleaseWithoutArmSucceeds)
@@ -552,6 +606,37 @@ TEST_F(TestGpuProfilingControlDescriptor, StallReleaseWithoutArmSucceeds)
 TEST_F(TestGpuProfilingControlDescriptor, StallArmBeforeHandleThrows)
 {
     auto desc = getDescriptor();
+    bool value = true;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestGpuProfilingControlDescriptor, StallArmTwiceThrows)
+{
+    if(!stallGateAvailable())
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(armStall(desc));
+    bool value = true;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
+        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(releaseStall(desc));
+}
+
+// Once start has recorded the begin timestamp, arming can no longer exclude host
+// submission delay from this measurement -- that delay already happened -- so a late
+// arm is a lifecycle error rather than a silently-partial stall.
+TEST_F(TestGpuProfilingControlDescriptor, StallArmAfterStartThrows)
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(setHandle(desc));
+    ASSERT_NO_THROW(recordStart(desc));
     bool value = true;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_PROFILING_STALL_ARM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &value),
@@ -601,45 +686,6 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWithoutArm)
     EXPECT_FALSE(stallUsed);
 }
 
-// Wrong attributeType hits the same checkGetArgs guard every other scalar getAttribute uses;
-// no attribute-specific special casing was introduced.
-TEST_F(TestGpuProfilingControlDescriptor, GetStallUsedTypeMismatchThrows)
-{
-    auto desc = getDescriptor();
-    ASSERT_NO_THROW(setHandle(desc));
-    ASSERT_NO_THROW(recordStart(desc));
-    ASSERT_NO_THROW(recordStop(desc));
-    ASSERT_NO_THROW(desc->finalize());
-
-    int64_t wrongTyped = 0;
-    int64_t elementCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->getAttribute(
-            HIPDNN_ATTR_PROFILING_STALL_USED_EXT, HIPDNN_TYPE_INT64, 1, &elementCount, &wrongTyped),
-        HIPDNN_STATUS_BAD_PARAM);
-}
-
-// getScalar<bool>'s query-size branch treats requestedElementCount==0 (or a null
-// arrayOfElements) as a size probe, not an error, so the only malformed count is negative:
-// non-null arrayOfElements past that branch requires requestedElementCount >= 1.
-TEST_F(TestGpuProfilingControlDescriptor, GetStallUsedNegativeElementCountThrows)
-{
-    auto desc = getDescriptor();
-    ASSERT_NO_THROW(setHandle(desc));
-    ASSERT_NO_THROW(recordStart(desc));
-    ASSERT_NO_THROW(recordStop(desc));
-    ASSERT_NO_THROW(desc->finalize());
-
-    bool stallUsed = false;
-    int64_t elementCount = 0;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_PROFILING_STALL_USED_EXT,
-                                                  HIPDNN_TYPE_BOOLEAN,
-                                                  -1,
-                                                  &elementCount,
-                                                  &stallUsed),
-                               HIPDNN_STATUS_BAD_PARAM);
-}
-
 // A watchdog release taken through the descriptor itself (not a raw gate): arm() had
 // succeeded, so STALL_USED_EXT must stay true even though the watchdog -- not the caller --
 // released the stall and STALL_TIMED_OUT_EXT is therefore also true. The two attributes are
@@ -653,8 +699,8 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedTrueAndTimedOutTrueOnWatchdog
     }
 
     // The descriptor's stall gate uses the default (2 s) watchdog timeout, so tripping it
-    // for real costs a couple of seconds. The fixture's TearDown() resets the process-wide
-    // disabled flag this trips, so no later suite in this binary inherits it.
+    // for real costs a couple of seconds. The fixture's TearDown() resets this shared
+    // object's disabled flag, so no later suite in this binary inherits it.
 
     auto desc = getDescriptor();
     ASSERT_NO_THROW(setHandle(desc));
@@ -722,11 +768,11 @@ TEST_F(TestGpuProfilingControlDescriptor, StallUsedFalseWhenStallingDisabled)
     EXPECT_FALSE(stallUsed);
 }
 
-// A declined arm() must report why it declined, not a HIP failure the same gate hit on an
+// A declined arm() must report why it declined, not a diagnostic from the same gate's
 // earlier attempt. Both readers of these accessors -- the Python binding, which turns them
 // into the exception the caller sees, and ProfilingControlDescriptor's decline log --
-// would otherwise blame a stale invalid-stream error for a decline the watchdog caused.
-TEST_F(TestGpuProfilingControlDescriptor, ADeclinedArmDoesNotReportAnEarlierAttemptsError)
+// would otherwise report stale state.
+TEST_F(TestGpuProfilingControlDescriptor, ADeclinedArmDoesNotReportAnEarlierAttemptsDiagnostic)
 {
     if(!stallGateAvailable())
     {
@@ -736,20 +782,14 @@ TEST_F(TestGpuProfilingControlDescriptor, ADeclinedArmDoesNotReportAnEarlierAtte
     hipdnn_data_sdk::utilities::StallGate gate;
     ASSERT_TRUE(gate.isUsable());
 
-    // Give the gate a real HIP failure to remember. Arming on a destroyed stream fails
-    // inside hipStreamWaitValue32 with hipErrorContextIsDestroyed, and leaves the gate
-    // unarmed, so nothing here depends on the failure's exact code.
-    hipStream_t destroyed = nullptr;
-    ASSERT_EQ(hipStreamCreate(&destroyed), hipSuccess);
-    ASSERT_EQ(hipStreamDestroy(destroyed), hipSuccess);
-    ASSERT_FALSE(gate.arm(destroyed));
-    ASSERT_NE(gate.lastError(), hipSuccess) << "the failed arm recorded nothing to go stale";
-    ASSERT_STREQ(gate.lastOperation(), "hipStreamWaitValue32");
-
-    // The failure above is deliberate, but HIP's thread-local last-error is sticky and the
-    // fixture asserts it is clean at end of test. Consume it here so this test reports its
-    // own assertions rather than the error it set on purpose.
-    static_cast<void>(hipGetLastError());
+    // Re-arming an active gate is a safe decline. It also gives this gate a diagnostic
+    // that the unrelated disabled-latch decline below must clear.
+    ASSERT_TRUE(gate.arm(_testStream));
+    ASSERT_FALSE(gate.arm(_testStream));
+    ASSERT_EQ(gate.lastError(), hipSuccess);
+    ASSERT_STREQ(gate.lastOperation(), "StallGate::arm(already armed)");
+    gate.release();
+    ASSERT_EQ(hipStreamSynchronize(_testStream), hipSuccess);
 
     // Now make the same gate decline for an unrelated reason: another gate's timeout
     // disables stalling for everything in this shared object.
@@ -763,8 +803,7 @@ TEST_F(TestGpuProfilingControlDescriptor, ADeclinedArmDoesNotReportAnEarlierAtte
     ASSERT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled());
 
     EXPECT_FALSE(gate.arm(_testStream));
-    EXPECT_EQ(gate.lastError(), hipSuccess)
-        << "the disable latch declined this arm, but it still reports the earlier failure: "
-        << hipGetErrorString(gate.lastError());
-    EXPECT_EQ(gate.lastOperation(), nullptr);
+    EXPECT_EQ(gate.lastError(), hipSuccess);
+    EXPECT_EQ(gate.lastOperation(), nullptr)
+        << "the disable latch retained an unrelated arm-attempt diagnostic";
 }

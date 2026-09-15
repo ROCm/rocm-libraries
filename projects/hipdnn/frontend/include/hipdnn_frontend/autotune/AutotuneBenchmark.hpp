@@ -12,6 +12,7 @@
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -36,8 +37,8 @@ namespace hipdnn_frontend::autotune::detail
 // measure an engine must not be allowed to reject it.
 //
 // `quality` reports how the returned time was obtained: DEVICE_ONLY excludes host
-// submission, HOST_INCLUDED does not. The caller must not rank the two against each
-// other; a HOST_INCLUDED result during a stalled pass is the signal to re-measure the
+// submission, UNSTALLED does not necessarily. The caller must not rank the two against
+// each other; an UNSTALLED result during a stalled pass is the signal to re-measure the
 // whole sweep unstalled.
 //
 // Shares the one-shot profiling sequence with Graph::execute_timed_ext() via
@@ -58,6 +59,15 @@ inline Error
         handle, execPlan, variantPackDesc, timing, stalled));
     if(timing.quality != ::hipdnn_frontend::TimingQuality::INVALID)
     {
+        if(!timing.elapsedMs.has_value() || !std::isfinite(*timing.elapsedMs)
+           || *timing.elapsedMs < 0.0f)
+        {
+            elapsedMs = 0.0f;
+            quality = ::hipdnn_frontend::TimingQuality::INVALID;
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "executeWithPlanTimed reported a usable quality without a valid elapsed "
+                    "time"};
+        }
         elapsedMs = *timing.elapsedMs;
         quality = timing.quality;
         return {ErrorCode::OK, ""};
@@ -70,8 +80,18 @@ inline Error
     ::hipdnn_frontend::ExecutionTiming retryTiming;
     HIPDNN_CHECK_ERROR(::hipdnn_frontend::detail::executeWithPlanTimed(
         handle, execPlan, variantPackDesc, retryTiming, /*stalled=*/false));
-    // Unstalled measurements are always HOST_INCLUDED; the retry cannot time out because
-    // nothing was armed.
+    // The retry cannot time out because nothing was armed, so it must come back UNSTALLED
+    // with a valid elapsed time; anything else is a malformed contract from below.
+    if(retryTiming.quality != ::hipdnn_frontend::TimingQuality::UNSTALLED
+       || !retryTiming.elapsedMs.has_value() || !std::isfinite(*retryTiming.elapsedMs)
+       || *retryTiming.elapsedMs < 0.0f)
+    {
+        elapsedMs = 0.0f;
+        quality = ::hipdnn_frontend::TimingQuality::INVALID;
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Unstalled retry after a stall watchdog timeout did not report a valid "
+                "UNSTALLED measurement"};
+    }
     elapsedMs = *retryTiming.elapsedMs;
     quality = retryTiming.quality;
     return {ErrorCode::OK, ""};

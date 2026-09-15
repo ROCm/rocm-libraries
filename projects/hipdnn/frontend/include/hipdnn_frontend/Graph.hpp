@@ -1826,7 +1826,7 @@ private:
             allResults.clear();
             benchmarkCount = 0;
             bool sawDeviceOnly = false;
-            bool sawHostIncluded = false;
+            bool sawUnstalled = false;
 
             for(const auto& info : planBenchmarkDetails)
             {
@@ -1921,9 +1921,9 @@ private:
                     {
                         sawDeviceOnly = true;
                     }
-                    else if(quality == ::hipdnn_frontend::TimingQuality::HOST_INCLUDED)
+                    else if(quality == ::hipdnn_frontend::TimingQuality::UNSTALLED)
                     {
-                        sawHostIncluded = true;
+                        sawUnstalled = true;
                     }
                     return timeErr;
                 };
@@ -2014,14 +2014,14 @@ private:
                 allResults.push_back(std::move(result));
             }
 
-            if(!sawDeviceOnly || !sawHostIncluded)
+            if(!sawDeviceOnly || !sawUnstalled)
             {
                 break;
             }
 
             HIPDNN_FE_LOG_WARN(
                 "autotune: a stall watchdog timeout ended device-only timing partway through "
-                "the sweep, so this pass mixed device-only and host-included measurements. "
+                "the sweep, so this pass mixed device-only and unstalled measurements. "
                 "Discarding it and re-measuring every candidate unstalled.");
             sweepStalled = false;
         }
@@ -4763,9 +4763,10 @@ public:
      * always leaves it at that reset state. Otherwise:
      * - TimingQuality::DEVICE_ONLY: the stream was stalled, so elapsedMs excludes host
      *   submission overhead.
-     * - TimingQuality::HOST_INCLUDED: stalling was declined (unsupported device, or
-     *   disabled for this shared object after an earlier watchdog timeout), so elapsedMs includes
-     *   host submission overhead.
+     * - TimingQuality::UNSTALLED: stalling was not used (unsupported device, or
+     *   disabled for this shared object after an earlier watchdog timeout). The
+     *   measurement was taken without the stall gate, so it may or may not include host
+     *   submission overhead, and must not be ranked against a DEVICE_ONLY measurement.
      * - TimingQuality::INVALID with an OK Error: the stall watchdog fired -- execution
      *   completed, but the measurement did not, so elapsedMs is empty. This call does not
      *   retry unstalled; a caller who needs a comparable-cost measurement despite a

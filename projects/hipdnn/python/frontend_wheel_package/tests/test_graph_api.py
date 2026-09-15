@@ -208,7 +208,7 @@ class TestGraphExecuteTimedExt:
         assert timing.elapsed_ms >= 0.0
         assert timing.quality in (
             hipdnn.TimingQuality.DEVICE_ONLY,
-            hipdnn.TimingQuality.HOST_INCLUDED,
+            hipdnn.TimingQuality.UNSTALLED,
         )
 
         actual = np.frombuffer(out_buf.copy_to_host(), dtype=np.float32)
@@ -218,7 +218,7 @@ class TestGraphExecuteTimedExt:
 def test_execution_timing_types_are_bound():
     """TimingQuality/ExecutionTiming expose the documented enum and read-only fields."""
     assert hipdnn.TimingQuality.DEVICE_ONLY.name == "DEVICE_ONLY"
-    assert hipdnn.TimingQuality.HOST_INCLUDED.name == "HOST_INCLUDED"
+    assert hipdnn.TimingQuality.UNSTALLED.name == "UNSTALLED"
     assert hipdnn.TimingQuality.INVALID.name == "INVALID"
 
     timing = hipdnn.ExecutionTiming()

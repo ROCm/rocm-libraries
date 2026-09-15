@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -538,39 +539,49 @@ TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutRemeasuresEveryCandidateInsteadO
     // and nothing would be proven.
     hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
 
-    hipStream_t stream = nullptr;
-    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-    const BenchmarkTestHandle handle{stream};
+    // Mirrors the mandatory-release-on-exception guard in BenchmarkPlan.hpp's default
+    // timer: resets the latch on every exit path, including an ASSERT_* failure or an
+    // exception thrown out of plan.execute() below, so this test can never leave the
+    // sticky latch tripped for every later test in this binary.
+    struct StallingDisabledResetGuard
+    {
+        ~StallingDisabledResetGuard()
+        {
+            hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
+        }
+    } const resetLatchOnExit;
+
+    hipStream_t rawStream = nullptr;
+    ASSERT_EQ(hipStreamCreate(&rawStream), hipSuccess);
+    // ScopedResource, the same RAII pattern the default HIP-event timer above uses for its
+    // events: destroys the stream on every exit path instead of only the fall-through one.
+    const hipdnn_data_sdk::utilities::ScopedResource<hipStream_t> stream(
+        rawStream, [](hipStream_t s) { static_cast<void>(hipStreamDestroy(s)); });
+    const BenchmarkTestHandle handle{stream.get()};
 
     std::vector<RankedEntry> recorded;
 
-    // Scoped so the plan -- which owns the timer's StallGate -- is destroyed before the
-    // stream is. ~StallGate() synchronizes the stream it armed to keep a pending
-    // stream-wait from outliving the signal memory, which would be a use-after-destroy
-    // on an already-destroyed handle if these ran in declaration order instead.
-    {
-        std::vector<TestBenchmarkPlan::Candidate> candidates;
-        candidates.push_back(
-            {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
-        candidates.push_back(
-            {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
+    // Declared (and so destroyed) after `stream`: this plan owns the timer's StallGate,
+    // and ~StallGate() synchronizes the stream it armed, which must happen before the
+    // stream is destroyed on every exit path, not only normal fall-through.
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back(
+        {testId(0x01), std::make_unique<FakePlan>(64), testId(0xF0), testId(0xD0)});
+    candidates.push_back(
+        {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
 
-        const TestBenchmarkPlan plan(
-            std::move(candidates),
-            handle,
-            TestBenchmarkPlan::Timer{},
-            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+    const TestBenchmarkPlan plan(
+        std::move(candidates),
+        handle,
+        TestBenchmarkPlan::Timer{},
+        [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
 
-        plan.execute(handle, nullptr, 0U, nullptr);
-    }
+    plan.execute(handle, nullptr, 0U, nullptr);
 
     EXPECT_TRUE(hipdnn_data_sdk::utilities::StallGate::isStallingDisabled())
         << "the watchdog never fired, so this case proved nothing";
     EXPECT_EQ(recorded.size(), 2U)
         << "the timed-out candidate was dropped instead of re-measured unstalled";
-
-    hipdnn_data_sdk::utilities::StallGate::resetStallingDisabledForTesting();
-    EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
 }
 
 /// A one-candidate composite still samples before delegating to the only candidate.
@@ -766,6 +777,55 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedSamplingNeverAppearsInTheRan
             << "a known-broken kernel recorded as a fallback would be served ahead of the "
                "normal ranked path on a later run";
     }
+}
+
+/// A malformed sample (negative, NaN, or infinite) from the timer must score the
+/// candidate unusable exactly like a nullopt return, not enter robustMean() or the
+/// ranking. Zero is a valid sample and stays in the ranking.
+TEST(TestIngestorBenchmarkPlan, MalformedTimerSamplesScoreTheCandidateUnusable)
+{
+    constexpr double NEGATIVE = -1.0;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    for(const double malformed : {NEGATIVE, nan})
+    {
+        std::vector<RankedEntry> recorded;
+        const BenchmarkTestHandle handle;
+        // Candidate 1 reports a malformed sample; it must be omitted like a nullopt.
+        const auto plan = makeDeterministicPlan(
+            threeCandidates(),
+            handle,
+            {5.0, malformed, 3.0},
+            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+        plan.execute(handle, nullptr, 0U, nullptr);
+
+        ASSERT_EQ(recorded.size(), 2U);
+        for(const auto& entry : recorded)
+        {
+            EXPECT_NE(entry.kernelId, testId(0x02))
+                << "a malformed measurement recorded as a fallback would be served ahead of "
+                   "the normal ranked path on a later run";
+        }
+    }
+}
+
+/// Zero is a valid measurement (an unmeasurably fast launch): it must win and be cached
+/// like any other real sample, not be treated as malformed.
+TEST(TestIngestorBenchmarkPlan, ZeroTimerSampleIsValidAndCanWin)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, 0.0, 3.0}, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 3U);
+    EXPECT_EQ(recorded.front().kernelId, testId(0x02));
+    EXPECT_EQ(recorded.front().timeMs, 0.0);
 }
 
 TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)

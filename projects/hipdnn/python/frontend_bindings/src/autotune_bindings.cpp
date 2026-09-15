@@ -193,10 +193,8 @@ void autotuneBindings(nb::module_& m)
         .def_ro("ran_exhaustive", &AutotuneResult::ranExhaustive)
         .def_ro("exhaustive_not_run_reason", &AutotuneResult::exhaustiveNotRunReason)
         .def_ro("strategy_used", &AutotuneResult::strategyUsed)
-        // How this candidate's time was measured. Results of differing quality are not
-        // comparable, so a caller that sorts or persists these must check it: a
-        // DEVICE_ONLY time excludes host submission overhead and a HOST_INCLUDED one
-        // does not.
+        // How this candidate's time was measured. DEVICE_ONLY and UNSTALLED use
+        // different event-submission methods, so callers must not compare them.
         .def_ro("timing_quality", &AutotuneResult::timingQuality);
 
     // Bind AutotuneStorageConfig: optional JSON heuristic-config output for Graph.autotune()

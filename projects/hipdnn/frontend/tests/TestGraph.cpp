@@ -24,8 +24,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -8451,7 +8453,7 @@ TEST_F(TestGraph, TimedExecuteReportsDeviceOnlyWhenStallUsed)
     EXPECT_FLOAT_EQ(*timing.elapsedMs, 2.5f);
 }
 
-TEST_F(TestGraph, TimedExecuteReportsHostIncludedWhenStallDeclined)
+TEST_F(TestGraph, TimedExecuteReportsUnstalledWhenStallDeclined)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     GraphTestUtils graph;
@@ -8467,9 +8469,73 @@ TEST_F(TestGraph, TimedExecuteReportsHostIncludedWhenStallDeclined)
     auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
-    ASSERT_EQ(timing.quality, TimingQuality::HOST_INCLUDED);
+    ASSERT_EQ(timing.quality, TimingQuality::UNSTALLED);
     ASSERT_TRUE(timing.elapsedMs.has_value());
     EXPECT_FLOAT_EQ(*timing.elapsedMs, 3.0f);
+}
+
+TEST_F(TestGraph, TimedExecuteAcceptsZeroElapsed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, 0.0f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_EQ(timing.quality, TimingQuality::DEVICE_ONLY);
+    ASSERT_TRUE(timing.elapsedMs.has_value());
+    EXPECT_FLOAT_EQ(*timing.elapsedMs, 0.0f);
+}
+
+TEST_F(TestGraph, TimedExecuteRejectsNegativeElapsed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend, -1.0f, /*stallUsed=*/true, /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
+}
+
+TEST_F(TestGraph, TimedExecuteRejectsNaNElapsed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.injectValidCompiledPlan(1, 0, false);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(1)
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    mockProfilingGetAttributes(_mockBackend,
+                               std::numeric_limits<float>::quiet_NaN(),
+                               /*stallUsed=*/true,
+                               /*timedOut=*/false);
+
+    const std::unordered_map<int64_t, void*> variantPack;
+    ExecutionTiming timing;
+    auto result = graph.execute_timed_ext(_handle, variantPack, nullptr, timing);
+
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(timing.quality, TimingQuality::INVALID);
+    EXPECT_FALSE(timing.elapsedMs.has_value());
 }
 
 TEST_F(TestGraph, TimedExecuteReportsInvalidOnWatchdogTimeoutWithExactlyOneExecution)

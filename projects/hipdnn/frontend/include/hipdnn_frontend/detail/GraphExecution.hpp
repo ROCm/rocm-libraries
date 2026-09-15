@@ -13,6 +13,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -84,7 +85,7 @@ inline Error executeWithPlan(hipdnnHandle_t handle,
 // measurement: quality is INVALID (elapsedMs stays empty) even though the Error
 // is OK, because execution itself completed. STALL_USED_EXT distinguishes an
 // active, healthy stall (DEVICE_ONLY) from a declined/skipped one
-// (HOST_INCLUDED) when no timeout occurred.
+// (UNSTALLED) when no timeout occurred.
 inline Error executeWithPlanTimed(hipdnnHandle_t handle,
                                   const ScopedHipdnnBackendDescriptor& execPlan,
                                   const ScopedHipdnnBackendDescriptor& variantPackDesc,
@@ -198,7 +199,15 @@ inline Error executeWithPlanTimed(hipdnnHandle_t handle,
         return {ErrorCode::OK, ""};
     }
 
-    timing.quality = stallUsed ? TimingQuality::DEVICE_ONLY : TimingQuality::HOST_INCLUDED;
+    if(!std::isfinite(elapsedMs) || elapsedMs < 0.0f)
+    {
+        // A malformed elapsed time from the backend/profiling layer must not be published;
+        // timing stays at its INVALID reset state above. Zero is a valid measurement.
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Backend reported a non-finite or negative profiling elapsed time"};
+    }
+
+    timing.quality = stallUsed ? TimingQuality::DEVICE_ONLY : TimingQuality::UNSTALLED;
     timing.elapsedMs = elapsedMs;
 
     return {ErrorCode::OK, ""};

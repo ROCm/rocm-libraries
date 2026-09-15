@@ -83,8 +83,10 @@ private:
     float _elapsedMs = 0.0F;
     bool _startRecorded = false;
     bool _stopRecorded = false;
-    // True when the most recent STALL_ARM_EXT actually stalled the stream (arm()
-    // succeeded), not the current armed state -- exposed via STALL_USED_EXT.
+    // Latched result of the most recent STALL_ARM_EXT attempt: true only when arm()
+    // actually stalled the stream for this measurement, not the current armed state --
+    // it stays readable after release()/finalize() (both of which always release the
+    // gate). Exposed via STALL_USED_EXT.
     bool _stallUsed = false;
     // Created on the first STALL_ARM_EXT, so a descriptor that only times or only syncs
     // never acquires signal memory or a watchdog thread. Destroyed with the descriptor,

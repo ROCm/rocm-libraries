@@ -706,11 +706,10 @@ class TestAutotuneGpu:
             # never-benchmarked default.
             assert winner.timing_quality in (
                 hipdnn.TimingQuality.DEVICE_ONLY,
-                hipdnn.TimingQuality.HOST_INCLUDED,
+                hipdnn.TimingQuality.UNSTALLED,
             )
-        # One sweep must not mix measurement methods: a DEVICE_ONLY time excludes host
-        # submission overhead and a HOST_INCLUDED one does not, so ranking them against
-        # each other can pick a slower engine. Autotune re-measures the whole sweep
+        # One sweep must not mix measurement methods: DEVICE_ONLY uses the stall
+        # gate and UNSTALLED does not. Autotune re-measures the whole sweep
         # unstalled rather than leave it mixed, which is what this pins.
         assert len({r.timing_quality for r in winners}) == 1
         assert buffers  # keep device allocations alive across the call

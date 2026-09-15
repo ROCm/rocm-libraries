@@ -340,7 +340,7 @@ void graphBindings(nb::module_& m)
             "Blocks until timing completes, with no hidden warmup or retry. "
             "Allocate workspace before the call.\n"
             "On success, quality is DEVICE_ONLY when the stall removed host submission "
-            "overhead, HOST_INCLUDED when stalling was unavailable, or INVALID when the "
+            "overhead, UNSTALLED when the stall was not used, or INVALID when the "
             "watchdog invalidated timing after execution completed. Invalid timing has "
             "elapsed_ms=None.\n"
             "A bad Error reports execution or profiling failure and invalidates timing. "
