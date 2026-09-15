@@ -87,8 +87,11 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    | `HIPKERNELPROVIDER_KPACK_PYTHON_DIR` | unset | Directory **containing** `rocm_kpack/`; this locates a package, not a compiler interpreter. |
    | `Python3_EXECUTABLE` | system | Explicit environment for packaging dependencies such as `msgpack` and `zstandard`; production compilation retains its selected hermetic wheel interpreter. |
 
-   For an ingestor create/extend task, [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md)
-   owns the full sequence. Early device/workspace feasibility has no installation
+   For integrating a kernel — new native symbols, descriptors, registration and graphs —
+   [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) owns the sequence.
+   For production mining and lowering of an existing pack — corpus, sweeps, tuning,
+   packaging — [the ingestor RUNBOOK](../hipdnn-ingestor-engine/RUNBOOK.md) owns it.
+   Early device/workspace feasibility has no installation
    requirement; installed probing follows build and installation. Build production
    packaging as well as provider, validator and applicable tests; a plugin build
    alone does not show that current descriptors were packed.

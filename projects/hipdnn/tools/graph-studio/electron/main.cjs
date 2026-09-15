@@ -25,8 +25,11 @@ const isDev = Boolean(DEV_URL);
 let paths = null;
 let nativeEngine = null;
 let nativeLoadError = "";
+let runtimeEnvironment = { ...process.env };
 try {
   paths = studioPaths.resolve();
+  runtimeEnvironment = studioPaths.runtimeEnvironment(paths);
+  Object.assign(process.env, runtimeEnvironment);
 } catch (err) {
   nativeLoadError = err instanceof Error ? err.message : String(err);
 }
@@ -35,13 +38,9 @@ if (paths) {
   console.log(`hipDNN: ${paths.mode} build at ${paths.root}`);
   try {
     for (const dir of paths.runtimeDirs) {
-      process.env.PATH = `${dir}${path.delimiter}${process.env.PATH ?? ""}`;
       if (process.platform === "win32" && typeof process.addDllDirectory === "function" && existsSync(dir)) {
         process.addDllDirectory(dir);
       }
-    }
-    if (paths.pluginDir && !process.env.HIPDNN_PLUGIN_DIR) {
-      process.env.HIPDNN_PLUGIN_DIR = paths.pluginDir;
     }
     nativeEngine = require(paths.addonPath);
   } catch (err) {
@@ -254,7 +253,11 @@ ipcMain.handle("command:execute", async (event, request) => {
 
     let child;
     try {
-      child = spawn(resolvedCommand, { shell: true, windowsHide: true });
+      child = spawn(resolvedCommand, {
+        shell: true,
+        windowsHide: true,
+        env: runtimeEnvironment,
+      });
     } catch (err) {
       finish({ ok: false, error: errorText(err) });
       return;

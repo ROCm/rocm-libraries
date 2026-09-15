@@ -16,6 +16,15 @@ vars:
   repo_root: D:/develop/omp_workspace/worktrees/rocm-libraries/agent_kernel_integration_poc
   hipdnn_root: "${vars.repo_root}/projects/hipdnn"
   build_dir: "${vars.repo_root}/build"
+  # The ROCm SDK this checkout was configured against (ROCM_PATH in the build cache).
+  # Its bin directory has to be on PATH for anything that links the HIP runtime --
+  # see the comment on integration_tests below.
+  rocm_path: D:/develop/latest_wheels/Lib/site-packages/_rocm_sdk_devel
+  rocm_bin: "${vars.rocm_path}/bin"
+  # The hip-kernel-provider plugin the integration suite and the benchmark load.
+  # Here rather than in a flow because the library suffix is machine-local: a flow
+  # that spelled `.dll` would be a Windows flow.
+  hip_kernel_plugin: "${vars.build_dir}/bin/hipdnn_plugins/engines/hip_kernel_provider.dll"
 
 tools:
   # Claude Code CLI. Verified present at this path on ADDICKIN-WS (2026-09).
@@ -46,9 +55,23 @@ tools:
 
   # The cross-provider integration test binary. Only exists after a superbuild, so
   # `doctor` reports it MISSING until one is built -- that is accurate, not a bug.
-  # path_prepend is load-bearing on Windows: without ROCm's bin directory the Win32
-  # loader cannot find amdhip64_7.dll and the process dies with 0xC0000135 before main.
+  #
+  # path_prepend is load-bearing on Windows, and both entries are needed. Without
+  # ROCm's bin the Win32 loader cannot find amdhip64_7.dll and the process dies with
+  # 0xC0000135 (exit 3221225781) before main -- no output, no diagnostic, and a step
+  # that looks like the binary crashed rather than like a PATH problem. The build's
+  # own bin is there for the app-local amd_comgr.dll, which must outrank the driver's
+  # stale copy in System32.
   integration_tests:
     exe: "${vars.build_dir}/bin/hipdnn_integration_tests${platform.exe_suffix}"
     path_prepend:
       - "${vars.build_dir}/bin"
+      - "${vars.rocm_bin}"
+
+  # Times one graph on one named engine. Same superbuild and the same loader
+  # requirements as integration_tests above.
+  graph_bench:
+    exe: "${vars.build_dir}/bin/hipdnn_graph_bench${platform.exe_suffix}"
+    path_prepend:
+      - "${vars.build_dir}/bin"
+      - "${vars.rocm_bin}"

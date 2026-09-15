@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "case",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "live gpu reference executor",
+        "seed": 0
+      }
+    }
+  ]
+}

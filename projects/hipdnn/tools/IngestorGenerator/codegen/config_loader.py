@@ -17,10 +17,14 @@ import gzip
 import itertools
 import re
 import warnings as _warnings
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
+from .kernel_defines import (
+    KernelDefineError,
+    validate_kernel_define_template,
+)
 from .models import (
     ARCH_BASE_ID_PATTERN,
     DIALECT_DIRECT_LOAD,
@@ -30,6 +34,7 @@ from .models import (
     ENGINE_NAME_PATTERN,
     KERNEL_SOURCE_KIND_EMBEDDED,
     KERNEL_SOURCE_KIND_HIP,
+    KERNEL_SOURCE_KIND_HIPRTC_FILE,
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_HSACO_FILE,
     KERNEL_SOURCE_KIND_KPACK,
@@ -38,6 +43,7 @@ from .models import (
     KERNEL_SOURCE_KINDS,
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
+    NATIVE_SYMBOL_NAMESPACE_PATTERN,
     WORKSPACE_POLICIES,
     EngineSpec,
     GraphMatchSpec,
@@ -89,6 +95,8 @@ def load_config(path: Path) -> IngestorConfig:
         behavior_notes=list(engine_raw.get("behavior_notes", [])),
         knobs=list(engine_raw.get("knobs", [])),
         heuristic=engine_raw.get("heuristic", "native"),
+        native_symbol_namespace=engine_raw.get("native_symbol_namespace", "") or "",
+        pack_discriminates=bool(engine_raw.get("pack_discriminates", False)),
     )
 
     kmd_fields = []
@@ -165,7 +173,7 @@ def load_config(path: Path) -> IngestorConfig:
                 f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
                 f"kernel_source",
             )
-            for key in ("spec", "build"):
+            for key in ("spec", "build", "defines"):
                 if key in kernel_raw["kernel_source"]:
                     _require_mapping(
                         kernel_raw["kernel_source"][key],
@@ -196,6 +204,8 @@ def load_config(path: Path) -> IngestorConfig:
                         kind=ks_raw["kind"],
                         source_file=ks_raw.get("source_file", ""),
                         entry_point=ks_raw.get("entry_point", ""),
+                        bundle=ks_raw.get("bundle", ""),
+                        defines=dict(ks_raw.get("defines", {})),
                         source=ks_raw.get("source", ""),
                         entry=ks_raw.get("entry", ""),
                         build=dict(ks_raw.get("build", {})),
@@ -234,6 +244,11 @@ def load_config(path: Path) -> IngestorConfig:
         delegates_to_existing_plan=bool(raw.get("delegates_to_existing_plan", False)),
         authored_subpath=raw.get("authored_subpath", ""),
         specialization=dict(raw.get("specialization") or {}),
+        # A `hiprtc_file` bundle is authored BESIDE its config and staged from
+        # there. Recorded at load, because nothing downstream is told where the
+        # config came from and a bundle path guessed from the cwd is a path
+        # that works for whoever generated it and nobody else.
+        config_dir=str(Path(path).parent),
     )
 
     _validate_config(config)
@@ -828,6 +843,8 @@ _KNOWN_ENGINE = frozenset(
         "behavior_notes",
         "knobs",
         "heuristic",
+        "native_symbol_namespace",
+        "pack_discriminates",
     }
 )
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
@@ -981,6 +998,17 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"engine.heuristic '{config.engine.heuristic}' must be 'native' "
             f"(emit a UHD) or 'none' (omit it -- legal; the engine falls back "
             f"to priority-then-id ranking)."
+        )
+    override = config.engine.native_symbol_namespace
+    if override and not NATIVE_SYMBOL_NAMESPACE_PATTERN.match(override):
+        raise ConfigError(
+            f"engine.native_symbol_namespace '{override}' must be a dotted "
+            f"symbol prefix of at least two identifier components (e.g. "
+            f"'hipkernel.conv_fwd'). Every native symbol this bundle names is "
+            f"that prefix plus '.graph_match', '.dispatch', '.score' or "
+            f"'.kernel_match', and the loader pre-flights all of them: a "
+            f"prefix no provider registered drops the whole engine at load "
+            f"with one log line."
         )
 
 
@@ -1255,6 +1283,7 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
     """
     required_by_kind = {
         KERNEL_SOURCE_KIND_EMBEDDED: ("source_file", "entry_point"),
+        KERNEL_SOURCE_KIND_HIPRTC_FILE: ("bundle", "source_file", "entry_point"),
         KERNEL_SOURCE_KIND_HIP: ("source", "entry"),
         KERNEL_SOURCE_KIND_ROCKE: ("source", "builder", "spec"),
     }
@@ -1271,6 +1300,71 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     )
             if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
                 raise ConfigError(f"{where}: 'spec' must be a mapping.")
+
+
+def _check_kernel_bundles(config: IngestorConfig) -> None:
+    """A ``hiprtc_file`` bundle names a directory the loader will accept.
+
+    The runtime resolves ``bundle`` relative to the descriptor and refuses
+    anything that escapes the descriptor tree root, the same containment rule
+    ``IngestorKernelCode.hpp`` already applies to a ``.kpack``. An absolute
+    path or a ``..`` component is therefore a bundle that generates cleanly and
+    then drops its pack on the target machine, with a message about a path the
+    author cannot see from the config.
+    """
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            bundle = kernel.kernel_source.bundle
+            if not bundle:
+                continue
+            where = f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source"
+            path = PurePosixPath(bundle)
+            if path.is_absolute() or ".." in path.parts:
+                raise ConfigError(
+                    f"{where}: bundle '{bundle}' must be a relative path with "
+                    f"no '..' component. The loader resolves it against the "
+                    f"descriptor and refuses any source outside the descriptor "
+                    f"tree root, so this bundle would generate and then drop "
+                    f"its pack at load."
+                )
+
+
+def _check_kernel_defines(config: IngestorConfig) -> None:
+    """Every ``defines`` entry is a string pair whose value the runtime
+    substituter would accept for SOME kernel of this engine.
+
+    Same check the loader runs at descriptor-set resolution, run here instead,
+    against the same rules (``codegen/kernel_defines.py`` mirrors
+    ``KernelDefineSubstitution.hpp`` case for case). Getting it wrong at load
+    costs one ``LOG_ERROR`` and a dropped pack on a machine that has no config
+    to look at; getting it wrong here names the pack, the kernel and the key.
+
+    Schema-level, exactly like the runtime's: a kernel may legally omit a field
+    the KMD defaults, and ``completeMetadata`` fills it before any substitution
+    happens, so asking for the authored value would reject a legal kernel.
+    """
+    field_types = {f.name: f.type for f in config.kmd_fields}
+    schema_name = f"{config.engine.local_name} variant fields"
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            for name, value in kernel.kernel_source.defines.items():
+                where = (
+                    f"pack '{pack.name}' kernel '{kernel.name}'"
+                    f".kernel_source.defines['{name}']"
+                )
+                if not isinstance(name, str) or not isinstance(value, str):
+                    raise ConfigError(
+                        f"{where}: defines is a flat string->string map, but "
+                        f"this entry is {type(name).__name__} -> "
+                        f"{type(value).__name__}. Quote the value: the "
+                        f"descriptor ships it verbatim as the text of a "
+                        f"-D<name>=<value> flag, and the loader rejects a "
+                        f"non-string there."
+                    )
+                try:
+                    validate_kernel_define_template(value, field_types, schema_name)
+                except KernelDefineError as e:
+                    raise ConfigError(f"{where}: {e}") from e
 
 
 def _check_specialization_declaration(config: IngestorConfig) -> None:
@@ -1457,8 +1551,22 @@ def _check_workspace_policy(config: IngestorConfig) -> None:
 def _check_pack_discriminators(config: IngestorConfig) -> None:
     """A multi-pack engine needs a discriminator per pack to name its
     operation-scoped matcher symbol; a single-pack engine must not declare
-    one (there is nothing to discriminate -- see the UMD policy)."""
+    one (there is nothing to discriminate -- see the UMD policy).
+
+    ``engine.pack_discriminates`` is the single-pack counterpart and is
+    rejected here on a multi-pack engine for the mirror-image reason: a
+    multi-pack engine states in descriptors what the key would state in prose.
+    """
     if config.is_multi_pack:
+        if config.engine.pack_discriminates:
+            raise ConfigError(
+                f"engine.pack_discriminates is set, but this engine has "
+                f"{len(config.packs)} packs. The key answers a question only a "
+                f"single-pack engine has: whether its one graph_match admits "
+                f"the operation as well as validating it. A multi-pack engine "
+                f"emits an operation-scoped matcher per pack and discriminates "
+                f"in the descriptors, where it is visible. Remove the key."
+            )
         missing = [p.name for p in config.packs if not p.discriminator]
         if missing:
             raise ConfigError(
@@ -1503,6 +1611,38 @@ def _check_pack_discriminators(config: IngestorConfig) -> None:
             raise ConfigError(f"pack '{pack.name}' declares no kernels.")
 
 
+def _check_dropin_kdp_stems(config: IngestorConfig) -> None:
+    """A drop-in emits one KDP per kernel, so two kernels may not reduce to
+    one filename stem.
+
+    Kernel names are NOT unique by construction -- the generator indexes ids
+    by position precisely because they can repeat -- and the stem collapses
+    every non-identifier character, so ``a.b`` and ``a_b`` collide too. Both
+    would write the same ``<stem>.kdp.json``: the second file overwrites the
+    first, and a variant vanishes with no error anywhere. That is the drop-in
+    failure mode in miniature, so it is caught here rather than on the machine
+    that received the tree.
+    """
+    if not config.is_dropin:
+        return
+    by_stem: dict[str, list[str]] = {}
+    for pack in config.packs:
+        for kernel in pack.kernels:
+            by_stem.setdefault(config.dropin_kdp_stem(kernel), []).append(kernel.name)
+    collisions = {stem: names for stem, names in by_stem.items() if len(names) > 1}
+    if collisions:
+        shown = "; ".join(
+            f"'{stem}.kdp.json' <- {names}"
+            for stem, names in sorted(collisions.items())
+        )
+        raise ConfigError(
+            f"this config emits one KDP per kernel (every kernel is "
+            f"'hiprtc_file'), but these kernel names reduce to the same output "
+            f"file: {shown}. The stem keeps [A-Za-z0-9_] and collapses the "
+            f"rest, so rename the kernels to differ in those characters."
+        )
+
+
 def _validate_config(config: IngestorConfig) -> list[str]:
     """Run every pre-mint check, in the order the design lists them.
 
@@ -1522,12 +1662,19 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # not among the five loader-mirroring checks, but still pre-mint.
     _check_kernel_source_kind_implemented(config)
     _check_kernel_source_fields(config)
+    _check_kernel_bundles(config)
+    # After the metadata check (#3), so a defines token naming a field whose
+    # authored VALUE is also wrong is reported as the metadata problem it is.
+    _check_kernel_defines(config)
     # After the kind checks: the declaration's obligations depend on which kinds
     # this config actually builds, so an unrecognized kind is named as a kind
     # problem rather than as a specialization one.
     _check_specialization_declaration(config)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
+    # After the kind checks, which are what decide whether this config is a
+    # drop-in and therefore emits one KDP per kernel at all.
+    _check_dropin_kdp_stems(config)
 
     for note in config.engine.behavior_notes:
         from .models import BEHAVIOR_NOTES

@@ -398,15 +398,16 @@ private:
             for(const auto& kernel : pack.kernels)
             {
                 if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE
-                   && kernel.source.kind != KernelSourceKind::KPACK)
+                   && kernel.source.kind != KernelSourceKind::KPACK
+                   && kernel.source.kind != KernelSourceKind::HIPRTC_FILE)
                 {
                     // Dropped, not thrown: an unadaptable kernel costs only itself, so its
                     // pack keeps serving whichever siblings this build can dispatch.
                     HIPDNN_PLUGIN_LOG_ERROR(
                         "ingestor: " << describeDescriptor("kernel", kernel.name, kernel.id)
                                      << " declares a source kind this build has no adapter for;"
-                                        " only EMBEDDED_SOURCE and KPACK are implemented,"
-                                        " dropping it");
+                                        " only EMBEDDED_SOURCE, KPACK and HIPRTC_FILE are"
+                                        " implemented, dropping it");
                     continue;
                 }
 
