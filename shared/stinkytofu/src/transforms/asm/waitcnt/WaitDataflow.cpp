@@ -259,8 +259,7 @@ std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount
 
 int PerPredQueue::countFrom(StinkyInstruction* op) const {
     if (saturatedOps.find(op) != saturatedOps.end()) return static_cast<int>(kMaxInFlight);
-    auto it = std::find_if(ops.begin(), ops.end(),
-                           [op](const QueuedOp& e) { return e.op == op; });
+    auto it = std::find_if(ops.begin(), ops.end(), [op](const QueuedOp& e) { return e.op == op; });
     if (it == ops.end()) return 0;
     return static_cast<int>(std::distance(it, ops.end()));
 }
