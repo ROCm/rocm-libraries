@@ -72,7 +72,7 @@ name = "tensilelite"
 dynamic = ["version", "dependencies"]
 requires-python = ">=3.10"
 description = "A code generation library for high-performance GEMM and tensor contraction kernels on AMD GPUs."
-license = "MIT"
+license = {text = "MIT"}
 
 [project.scripts]
 Tensile = "tensilelite.tensilelite:main"
