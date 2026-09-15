@@ -1,6 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 # Fused GEMM+A2A (FusedGemmA2A=1) config for gfx950.
+#
+# Build the device library the A2A samples load:
+#
+#     Tensile <this file> <out-dir> --cpu-only --gpu-targets gfx950
+#     TensileCreateLibrary --architecture gfx950 <out-dir>/3_LibraryLogic <lib> HIP
+#
+# Point HIPBLASLT_TENSILE_LIBPATH at <lib>/library/gfx950.
 
 GlobalParameters:
   SyncsPerBenchmark: 0
@@ -55,3 +62,9 @@ BenchmarkProblems:
           # tail. M is the feature (A2A) dim, N the token dim.
           - Exact: [3072, 512, 1, 2048]
           - Exact: [3072, 511, 1, 2048]
+
+LibraryLogic:
+  ScheduleName: "fused_a2a_gfx950"
+  DeviceNames: ["Device 75a0"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Equality"

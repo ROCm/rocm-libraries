@@ -244,7 +244,7 @@ namespace
 
     TEST_F(FusedA2ABuilder_pre_checkin, CompletionModeAcceptsInKernelOnly)
     {
-        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL;
+        hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
         EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
                       fused,
                       HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,
@@ -760,16 +760,6 @@ namespace
         hipblasLtMatrixLayout_t            Bdesc      = nullptr;
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
     };
-
-    // The distinction the whole error table turns on: a request that is merely
-    // unserved by this release reports missing capability, not a bad shape.
-    TEST_F(FusedA2ADispatch_pre_checkin, WellFormedRequestReportsMissingCapability)
-    {
-        registerOneRank();
-        completeAndAttach();
-        makeD();
-        EXPECT_EQ(heuristic(), HIPBLAS_STATUS_NOT_SUPPORTED);
-    }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingCommunicator)
     {
