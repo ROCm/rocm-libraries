@@ -59,7 +59,23 @@ struct BlockFmhaPipelineQRKSVS
     static constexpr index_t kQKHeaddim    = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kSubQKHeaddim = BlockFmhaShape::kSubQKHeaddim;
 
-    static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
+    // Head dims above 256 are supported by this pipeline as long as the Q tile and the f32 O
+    // accumulator (both kM0 x hdim, held in registers because kQLoadOnce) leave the register
+    // file at occupancy 1 usable, i.e. at most 16 rows per warp. At hdim 512 both shipped tiles
+    // (64 rows on 4 warps, 128 rows on 8 warps) sit at that limit and spill a few hundred bytes
+    // per lane on gfx942; that is accepted on purpose, since the 8-warp tile buys parallelism
+    // over long sequences. Shapes beyond 16 rows per warp (e.g. 128 rows on 4 warps) spill much
+    // harder with no upside and are rejected here.
+    static_assert(kSubQKHeaddim <= 512, "hdim bigger than 512 is not suitable for this pipeline!");
+    static_assert(kSubQKHeaddim <= 256 || (kM0 / BlockFmhaShape::NumWarps) <= 16,
+                  "hdim > 256 needs kM0 / NumWarps <= 16 to keep register spills bounded");
+    // Above 256 the P*V gemm must use a K=16 warp tile. With the 16x16x32 warp gemm as the
+    // gemm1 B operand at kN1 = 512, keys 4..7 of every 8 drop out of the P*V sum on gfx942
+    // (seqlen_k = 8 yields outputs at ~half the reference) while the rowsum still counts them.
+    // The same V tile (kK1 = 32) with the 16x16x16 warp gemm is bit-exact. Root cause not yet
+    // isolated; this guards the only validated configuration.
+    static_assert(kSubQKHeaddim <= 256 || BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 16,
+                  "hdim > 256 needs a K=16 gemm1 warp tile (16x16x32 miscomputes P*V)");
 
     static constexpr bool kIsGroupMode        = Problem::kIsGroupMode;
     static constexpr bool kPadSeqLenQ         = Problem::kPadSeqLenQ;

@@ -131,6 +131,48 @@ class TestFmhaCodegen(unittest.TestCase):
         # Constraint-based tile rules allow various bn0 values for h128
         self.assertTrue(result.valid)
 
+    def test_qr_hdim_512_codegen_emits_kernel(self):
+        config = sample_config(
+            signature={"hdim_q": 512, "hdim_v": 512},
+            algorithm={
+                "pipeline": "qr",
+                "tile": [64, 128, 32, 512, 32, 512],
+                "wave": [4, 1, 1, 4, 1, 1, 1, 1, 1],
+                "warp": [16, 16, 32, 16, 16, 16, 16, 16, 16],
+                "hdim_q_alignment": 512,
+                "hdim_v_alignment": 512,
+            },
+        )
+        self.assertTrue(validate_config(config).valid, validate_config(config).errors)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cmd = [
+                sys.executable,
+                str(CODEGEN),
+                "--output-dir",
+                tmpdir,
+                "--gpu-target",
+                "gfx942",
+                "--config-json",
+                json.dumps(config),
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, cwd=str(ROOT / "codegen")
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            generated = list(Path(tmpdir).glob("fmha_*.hpp"))
+            self.assertEqual(len(generated), 1)
+            src = generated[0].read_text()
+            self.assertIn("BlockFmhaPipelineQRKSVS<", src)
+            self.assertNotIn("QRKSVSAsync", src)
+
+    def test_qr_async_hdim_512_rejected(self):
+        config = sample_config(
+            signature={"hdim_q": 512, "hdim_v": 512},
+            algorithm={"tile": [64, 128, 32, 512, 32, 512]},
+        )
+        result = validate_config(config)
+        self.assertFalse(result.valid)
+
     def test_splitkv_combine_requires_bn1_32(self):
         config = sample_config(
             signature={"family": "fwd_splitkv_combine", "lse": True},

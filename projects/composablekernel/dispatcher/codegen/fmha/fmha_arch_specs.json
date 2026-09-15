@@ -46,10 +46,10 @@
   },
 
   "supported_hdims": {
-    "_comment": "hdim_q must satisfy ceil_to_qualified_tile_length() in tile_fmha_shape.hpp. Each entry is [hdim_q, hdim_v].",
-    "fp16":    [[32,32], [64,64], [80,96], [96,128], [128,128], [160,160], [192,128], [192,192], [256,256]],
-    "bf16":    [[32,32], [64,64], [80,96], [96,128], [128,128], [160,160], [192,128], [192,192], [256,256]],
-    "fp32":    [[32,32], [48,48], [64,64], [96,128], [128,128], [192,192], [256,256]],
+    "_comment": "hdim_q must satisfy ceil_to_qualified_tile_length() in tile_fmha_shape.hpp. Each entry is [hdim_q, hdim_v]. Entries above max_hdim_non_fwd_qr are served by the fwd family's qr pipeline only.",
+    "fp16":    [[32,32], [64,64], [80,96], [96,128], [128,128], [160,160], [192,128], [192,192], [256,256], [512,512]],
+    "bf16":    [[32,32], [64,64], [80,96], [96,128], [128,128], [160,160], [192,128], [192,192], [256,256], [512,512]],
+    "fp32":    [[32,32], [48,48], [64,64], [96,128], [128,128], [192,192], [256,256], [512,512]],
     "fp8":     [[64,64], [128,128], [192,128], [256,256]],
     "fp8bf16": [[64,64], [128,128], [192,128], [256,256]],
     "fp8fp32": [[128,128]],
@@ -89,7 +89,7 @@
   "k0max_map": {
     "_comment": "Maps hdim_q -> padded K-tile length. Source: tile_fmha_shape.hpp ceil_to_qualified_tile_length().",
     "32": 32, "48": 48, "64": 64, "80": 96, "96": 128,
-    "128": 128, "160": 256, "192": 192, "256": 256
+    "128": 128, "160": 256, "192": 192, "256": 256, "512": 512
   },
 
   "lds_limits": {
@@ -102,7 +102,12 @@
     "hdim_192_128_no_bias_dropout": true,
     "logits_requires_no_bias": true,
     "group_mode_requires_padding": true,
-    "hdim_divisible_by": 8
+    "hdim_divisible_by": 8,
+    "_max_hdim_non_fwd_qr_comment": "Only block_fmha_pipeline_qr_ks_vs.hpp accepts hdim > 256; every other forward/backward pipeline static-asserts hdim <= 256. Above this, qr also requires bm0 / num_warps <= 16 (Q and the f32 O accumulator live in registers).",
+    "max_hdim_non_fwd_qr": 256,
+    "wide_hdim_max_rows_per_warp": 16,
+    "_wide_hdim_gemm1_warp_k_comment": "P*V warp tile K above 256: the 16x16x32 warp gemm drops keys 4..7 of every 8 from P*V at kN1=512 on gfx942; 16x16x16 is bit-exact.",
+    "wide_hdim_gemm1_warp_k": 16
   },
 
   "defaults": {

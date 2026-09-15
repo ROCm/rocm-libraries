@@ -78,7 +78,7 @@ run_fp16_bf16_tests() {
     for prec in "fp16" "bf16" ; do
     for mode in 1 0 ; do
     for perm in 0 1 ; do
-    for hdim in 32 64 128 256 ; do
+    for hdim in 32 64 128 256 512 ; do
     for lse in 0 1 ; do
     for bias in "n" "e" "a" ; do
     for p_drop in 0.0 0.2 ; do
