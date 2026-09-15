@@ -9,10 +9,10 @@ Before --tune/--search/--bench start dispatching real work, we want to
 confirm the host actually exposes at least as many GPU devices as were
 requested via --devices. Rather than calling into HIP (hip-python's
 hipInit/hipGetDeviceCount, which is blocking and not a geko dependency
-today -- it's test-only scaffolding in tensilelite, see
+today -- it's test-only scaffolding in TensileLite, see
 Tests/unit/occupancy_hip_testutil.py), this shells out to the same
-lightweight device-enumerator CLI tools tensilelite's own build pipeline
-already relies on (Tensile/GpuArch.py, Toolchain/Validators.py):
+lightweight device-enumerator CLI tools TensileLite's own build pipeline
+already relies on (tensilelite/GpuArch.py, Toolchain/Validators.py):
 
 - Linux: amdgpu-arch, falling back to rocm_agent_enumerator, then rocminfo.
 - Windows: hipinfo.

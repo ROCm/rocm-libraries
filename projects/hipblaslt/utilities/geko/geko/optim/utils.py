@@ -323,7 +323,7 @@ def check_progress(tuning_dir: str | Path) -> Tuple[int, int, int]:
         Tuple[int, int, int]: A tuple containing:
             - total_configs: Total number of YAML config files found.
             - completed_configs: Number with successful library output.
-            - failed_configs: Number that failed (have tensilelite logs but no library).
+            - failed_configs: Number that failed (have TensileLite logs but no library).
     """
     tuning_dir = Path(tuning_dir)
     n_completed, n_failed = 0, 0
@@ -341,7 +341,7 @@ def check_progress(tuning_dir: str | Path) -> Tuple[int, int, int]:
 
 
 def estimate_workload(conf_fl: str | Path, pop_size: int = 512) -> float:
-    """Estimate relative optimization workload for a Tensile config YAML.
+    """Estimate relative optimization workload for a TensileLite config YAML.
 
     The estimate is used only for scheduling priority (larger means heavier),
     not as an exact runtime prediction.
