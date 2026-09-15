@@ -66,6 +66,8 @@ CAP_FP4_32X16 = "HasWMMA_f4_32x16"
 # A probed archCap v0 shares with v1 (present in the table, NOT overridden: v0
 # has the same XNACK-replay hazard and keeps the drain).
 CAP_XCNT = "RequiresXCntForVolatileVMEM"
+# Bit position of DISABLE_XDL_ARB_STALL in SCHED_MODE; -1 where the field is absent.
+CAP_ARB_STALL_OFFSET = "WmmaArbStallBitOffset"
 
 FP4_32X16_REASON = "does not support the fp4 32x16 matrix-instruction shape"
 
@@ -340,6 +342,16 @@ def test_xcnt_is_a_really_probed_archcap_v0_inherits(gfx1250_iim):
     (HasTDMMulticast also lives in archCaps but is a fill-missing key, guarded by
     the absent-key test above.)"""
     assert CAP_XCNT in gfx1250_iim[ISA_GFX1250].archCaps
+
+
+def test_wmma_arb_stall_bit_offset_is_declared_per_arch(gfx1250_cxx, gfx1250_iim):
+    """DISABLE_XDL_ARB_STALL sits at a different bit on different arches, so the
+    offset is declared per arch and -1 means the field is absent. rocisa keeps its
+    own table; stinkytofu's copy is pinned separately in test_comgr.py."""
+    assert gfx1250_iim[ISA_GFX1250].archCaps[CAP_ARB_STALL_OFFSET] == 2
+    absent = IsaVersion(12, 0, 0)
+    iim = makeIsaInfoMap([absent], gfx1250_cxx)
+    assert iim[absent].archCaps[CAP_ARB_STALL_OFFSET] == -1
 
 
 @pytest.fixture(scope="module")
