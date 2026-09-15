@@ -30,7 +30,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
 
-from tensilelite import __version__
+from tensilelite import GENERATOR_VERSION as __version__
 
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo

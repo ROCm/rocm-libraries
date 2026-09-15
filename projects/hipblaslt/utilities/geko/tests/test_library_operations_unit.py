@@ -104,18 +104,23 @@ def test_merge_rejects_missing_hipblaslt_path(tmp_path: Path) -> None:
         operations.merge(tmp_path / "missing", "orig", "inc", "out")
 
 
-def test_merge_invokes_tensile_merge_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_merge_invokes_tensilelite_merge_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
+    hip.mkdir()
     called = {}
 
-    def _fake_run(cmd):
-        called["cmd"] = cmd
+    def _fake_merge(*args):
+        called["args"] = args
 
-    monkeypatch.setattr(operations, "run_silent_command", _fake_run)
+    tensilelite_mod = types.ModuleType("tensilelite")
+    merge_library_mod = types.ModuleType("tensilelite.merge_library")
+    merge_library_mod.avoidRegressions = _fake_merge
+    tensilelite_mod.merge_library = merge_library_mod
+    monkeypatch.setitem(sys.modules, "tensilelite", tensilelite_mod)
+    monkeypatch.setitem(sys.modules, "tensilelite.merge_library", merge_library_mod)
+
     operations.merge(hip, "orig", "inc", "out", eff=False, force=True)
-    assert "TensileMergeLibrary" in called["cmd"][0]
-    assert "--no_eff" in called["cmd"]
+    assert called["args"] == ("orig", "inc", "out", True, True)
 
 
 def test_create_rejects_missing_hip_path(tmp_path: Path) -> None:
@@ -132,21 +137,38 @@ def test_create_rejects_empty_library_dir(tmp_path: Path) -> None:
         operations.create(hip, libs, tmp_path / "out")
 
 
-def test_create_invokes_tensile_create_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_create_invokes_tensilelite_create_library(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     hip = tmp_path / "hip"
-    (hip / "tensilelite/tensilelite/bin").mkdir(parents=True)
+    hip.mkdir()
     libs = tmp_path / "libs"
     libs.mkdir()
     _write_library_yaml(libs, "x.yaml")
 
     called = {}
 
-    def _fake_run(cmd):
-        called["cmd"] = cmd
+    def _fake_create(args):
+        called["args"] = args
 
-    monkeypatch.setattr(operations, "run_silent_command", _fake_run)
-    operations.create(hip, libs, tmp_path / "out")
-    assert "TensileCreateLibrary" in called["cmd"][0]
+    tensilelite_mod = types.ModuleType("tensilelite")
+    create_library_mod = types.ModuleType("tensilelite.tensilelite_create_library")
+    create_library_mod.run = _fake_create
+    tensilelite_mod.tensilelite_create_library = create_library_mod
+    monkeypatch.setitem(sys.modules, "tensilelite", tensilelite_mod)
+    monkeypatch.setitem(sys.modules, "tensilelite.tensilelite_create_library", create_library_mod)
+
+    output = tmp_path / "out"
+    operations.create(hip, libs, output)
+    assert called["args"] == [
+        "--code-object-version",
+        "5",
+        "--library-format",
+        "msgpack",
+        "--architecture",
+        "gfx950",
+        str(libs.resolve()),
+        str(output),
+        "HIP",
+    ]
 
 
 def test_from_dataframe_requires_lib_column(tmp_path: Path) -> None:
@@ -581,9 +603,9 @@ def test_prune_library_raises_when_merge_returns_multiple(monkeypatch: pytest.Mo
 # normalize tests
 # ---------------------------------------------------------------------------
 
-def _make_tensile_mocks(calls: dict):
-    """Return (sys.modules patch dict, mock modules) for TensileLite imports."""
-    tensile_mod = types.ModuleType("tensilelite")
+def _make_tensilelite_mocks(calls: dict):
+    """Return (sys.modules patch dict, mock modules) for TensileLiteLite imports."""
+    tensilelite_mod = types.ModuleType("tensilelite")
     library_io_mod = types.ModuleType("tensilelite.LibraryIO")
     custom_yaml_mod = types.ModuleType("tensilelite.CustomYamlLoader")
     merge_lib_mod = types.ModuleType("tensilelite.merge_library")
@@ -606,10 +628,10 @@ def _make_tensile_mocks(calls: dict):
     custom_yaml_mod.load_yaml_stream = _load_yaml_stream
     merge_lib_mod.convertToDict = _convert_to_dict
     merge_lib_mod.normalizeDictLibraryLayout = _normalize_dict
-    tensile_mod.LibraryIO = library_io_mod
+    tensilelite_mod.LibraryIO = library_io_mod
 
     patch = {
-        "tensilelite": tensile_mod,
+        "tensilelite": tensilelite_mod,
         "tensilelite.LibraryIO": library_io_mod,
         "tensilelite.CustomYamlLoader": custom_yaml_mod,
         "tensilelite.merge_library": merge_lib_mod,
@@ -634,7 +656,7 @@ def test_normalize_raises_if_data_not_list(monkeypatch: pytest.MonkeyPatch, tmp_
     lib.touch()
 
     calls: dict = {}
-    mocks = _make_tensile_mocks(calls)
+    mocks = _make_tensilelite_mocks(calls)
     # Override load to return a non-list (dict format is unsupported as input)
     mocks["tensilelite.CustomYamlLoader"].load_yaml_stream = lambda *_a, **_k: {"dict": "format"}
     for mod_name, mod in mocks.items():
@@ -644,13 +666,13 @@ def test_normalize_raises_if_data_not_list(monkeypatch: pytest.MonkeyPatch, tmp_
         operations.normalize(lib, tmp_path / "out.yaml")
 
 
-def test_normalize_calls_tensile_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_normalize_calls_tensilelite_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lib = tmp_path / "lib.yaml"
     yaml.safe_dump([None, None, "gfx950"], lib.open("w"))
     out = tmp_path / "out.yaml"
 
     calls: dict = {}
-    for mod_name, mod in _make_tensile_mocks(calls).items():
+    for mod_name, mod in _make_tensilelite_mocks(calls).items():
         monkeypatch.setitem(sys.modules, mod_name, mod)
 
     operations.normalize(lib, out)
@@ -661,26 +683,21 @@ def test_normalize_calls_tensile_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert calls["write"] == (str(out), {"converted": True})
 
 
-def test_normalize_appends_tensile_to_sys_path_when_hipblaslt_given(
+def test_normalize_does_not_mutate_sys_path_when_hipblaslt_given(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     lib = tmp_path / "lib.yaml"
     lib.touch()
     hip = tmp_path / "hip"
     hip.mkdir()
-    expected = str(hip / "tensilelite")
-
     calls: dict = {}
-    for mod_name, mod in _make_tensile_mocks(calls).items():
+    for mod_name, mod in _make_tensilelite_mocks(calls).items():
         monkeypatch.setitem(sys.modules, mod_name, mod)
 
     original_path = list(sys.path)
     operations.normalize(lib, tmp_path / "out.yaml", hipblaslt_path=hip)
 
-    assert expected in sys.path
-    # cleanup to avoid polluting other tests
-    if expected not in original_path:
-        sys.path.remove(expected)
+    assert sys.path == original_path
 
 
 # ---------------------------------------------------------------------------
