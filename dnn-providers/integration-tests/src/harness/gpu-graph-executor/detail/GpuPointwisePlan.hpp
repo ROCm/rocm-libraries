@@ -11,7 +11,6 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
-#include <limits>
 #include <optional>
 
 #include "IGpuGraphNodePlanBuilder.hpp"
@@ -57,11 +56,17 @@ struct GpuPointwiseBinaryParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& input0Attributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& input1Attributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& outputAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::PointwiseMode pointwiseMode)
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseMode pointwiseMode,
+        const std::optional<float> reluBwdLowerClip,
+        const std::optional<float> reluBwdUpperClip,
+        const std::optional<float> reluBwdLowerSlope)
         : input0Tensor(hipdnn_test_sdk::detail::unpackTensorAttributes(input0Attributes))
         , input1Tensor(hipdnn_test_sdk::detail::unpackTensorAttributes(input1Attributes))
         , outputTensor(hipdnn_test_sdk::detail::unpackTensorAttributes(outputAttributes))
         , pointwiseMode(pointwiseMode)
+        , reluBwdLowerClip(reluBwdLowerClip)
+        , reluBwdUpperClip(reluBwdUpperClip)
+        , reluBwdLowerSlope(reluBwdLowerSlope)
     {
     }
 
@@ -69,6 +74,9 @@ struct GpuPointwiseBinaryParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT input1Tensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT outputTensor;
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode pointwiseMode;
+    std::optional<float> reluBwdLowerClip;
+    std::optional<float> reluBwdUpperClip;
+    std::optional<float> reluBwdLowerSlope;
 };
 
 template <typename Input0DataType,
@@ -97,9 +105,21 @@ public:
             variantPack.at(_params.outputTensor.uid),
             _params.outputTensor.dims,
             _params.outputTensor.strides);
+
+        const float lowerClip = _params.reluBwdLowerClip.value_or(0.0f);
+        const float upperClip
+            = _params.reluBwdUpperClip.value_or(std::numeric_limits<float>::max());
+        const float lowerSlope = _params.reluBwdLowerSlope.value_or(0.0f);
+
         hipdnn_gpu_ref::GpuReferencePointwise::
             pointwiseCompute<OutputDataType, Input0DataType, Input1DataType, ComputeDataType>(
-                _params.pointwiseMode, outputTensor, input0Tensor, input1Tensor);
+                _params.pointwiseMode,
+                outputTensor,
+                input0Tensor,
+                input1Tensor,
+                lowerClip,
+                upperClip,
+                lowerSlope);
     }
 
 private:
@@ -218,7 +238,10 @@ public:
         GpuPointwiseBinaryParams params(*tensorMap.at(nodeAttributes->in_0_tensor_uid()),
                                         *tensorMap.at(nodeAttributes->in_1_tensor_uid().value()),
                                         *tensorMap.at(nodeAttributes->out_0_tensor_uid()),
-                                        nodeAttributes->operation());
+                                        nodeAttributes->operation(),
+                                        nodeAttributes->relu_lower_clip(),
+                                        nodeAttributes->relu_upper_clip(),
+                                        nodeAttributes->relu_lower_clip_slope());
         return std::make_unique<GpuPointwiseBinaryPlan<Input0DataType,
                                                        Input1DataType,
                                                        OutputDataType,
