@@ -106,15 +106,22 @@ namespace rocblaslt
         {
             ++state.m_calls;
 
-            const bool sampled = nextCandidate(state) < 0 && state.m_pendingCandidate < 0;
-            const bool gaveUp  = state.m_calls > visitBudget(state);
+            if(state.m_calls > visitBudget(state))
+                state.m_gaveUp = true;
 
-            if(sampled || gaveUp)
+            const bool allIssued = nextCandidate(state) < 0;
+
+            if((allIssued || state.m_gaveUp) && state.m_pending.empty())
                 resolve(problemKey, state);
         }
 
         if(state.m_resolved)
             return positionOf(rankedSolutionIndices, state.m_winner);
+
+        // Given up but still draining: promoting a candidate nothing is going to
+        // measure would only perturb the caller's own ordering.
+        if(state.m_gaveUp)
+            return -1;
 
         const int candidate = nextCandidate(state);
         if(candidate < 0)
@@ -129,52 +136,67 @@ namespace rocblaslt
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
 
             auto iter = m_problems.find(problemKey);
-            if(iter == m_problems.end() || iter->second.m_pendingCandidate < 0)
+            if(iter == m_problems.end() || iter->second.m_pending.empty())
                 return;
         }
 
         std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
 
         auto iter = m_problems.find(problemKey);
-        if(iter == m_problems.end() || iter->second.m_pendingCandidate < 0)
+        if(iter == m_problems.end() || iter->second.m_pending.empty())
             return;
 
         ProblemState& state = iter->second;
 
-        // Queried under the write lock rather than the shared one: another thread
-        // could otherwise harvest this pair and start a new measurement in
-        // between, and recycling events the GPU is still writing to would corrupt
-        // that measurement.
-        if(hipEventQuery(state.m_pendingStop) != hipSuccess)
-            return;
+        size_t outstanding = 0;
 
-        const int candidate = state.m_pendingCandidate;
-
-        float      milliseconds = 0.0f;
-        const bool timed
-            = hipEventElapsedTime(&milliseconds, state.m_pendingStart, state.m_pendingStop)
-                  == hipSuccess
-              && std::isfinite(milliseconds) && milliseconds > 0.0f;
-
-        releaseEvents(state.m_pendingStart, state.m_pendingStop);
-        state.m_pendingStart     = nullptr;
-        state.m_pendingStop      = nullptr;
-        state.m_pendingCandidate = -1;
-
-        if(timed)
-            state.m_samples[candidate].push_back(milliseconds * 1000.0f);
-
-        if(m_verbose)
+        for(size_t i = 0; i < state.m_pending.size(); ++i)
         {
-            std::ostringstream msg = traceLine(timed ? "sample" : "drop", problemKey);
-            msg << " cand=" << candidate << " sol=" << state.m_candidates[candidate];
+            const PendingMeasurement pending = state.m_pending[i];
+
+            // Queried under the write lock rather than the shared one: another
+            // thread could otherwise harvest this pair and start a new
+            // measurement in between, and recycling events the GPU is still
+            // writing to would corrupt that measurement.
+            //
+            // Records the GPU has not finished are compacted to the front, which
+            // keeps the launch order the rest of this loop reports in.
+            if(hipEventQuery(pending.m_stop) != hipSuccess)
+            {
+                state.m_pending[outstanding++] = pending;
+                continue;
+            }
+
+            // A pair the caller never recorded still queries as complete, and the
+            // pool hands recycled pairs back swapped, so it reads a negative
+            // elapsed time. The sign test is what keeps a missed measurement from
+            // looking like an impossibly fast kernel and winning every median.
+            float      milliseconds = 0.0f;
+            const bool timed
+                = hipEventElapsedTime(&milliseconds, pending.m_start, pending.m_stop) == hipSuccess
+                  && std::isfinite(milliseconds) && milliseconds > 0.0f;
+
+            releaseEvents(pending.m_start, pending.m_stop);
+
             if(timed)
-                msg << " us=" << milliseconds * 1000.0f;
-            msg << "\n";
-            std::cerr << msg.str();
+                state.m_samples[pending.m_candidate].push_back(milliseconds * 1000.0f);
+
+            if(m_verbose)
+            {
+                std::ostringstream msg = traceLine(timed ? "sample" : "drop", problemKey);
+                msg << " cand=" << pending.m_candidate
+                    << " sol=" << state.m_candidates[pending.m_candidate];
+                if(timed)
+                    msg << " us=" << milliseconds * 1000.0f;
+                msg << "\n";
+                std::cerr << msg.str();
+            }
         }
 
-        if(!state.m_resolved && nextCandidate(state) < 0)
+        state.m_pending.resize(outstanding);
+
+        if(!state.m_resolved && state.m_pending.empty()
+           && (state.m_gaveUp || nextCandidate(state) < 0))
             resolve(problemKey, state);
     }
 
@@ -217,12 +239,20 @@ namespace rocblaslt
         if(candidate < 0)
             return false;
 
+        // Checked here rather than in measurableCandidate() so the refusal can be
+        // counted: exploration stalling behind a full in-flight set is the
+        // failure this scheme exists to avoid, and declined= on the winner line
+        // is how a recurrence would show up.
+        if(static_cast<int>(state.m_pending.size()) >= inFlightCap(state))
+        {
+            ++state.m_declined;
+            return false;
+        }
+
         if(!acquireEvents(start, stop))
             return false;
 
-        state.m_pendingCandidate = candidate;
-        state.m_pendingStart     = start;
-        state.m_pendingStop      = stop;
+        state.m_pending.push_back({start, stop, candidate});
         ++state.m_issued[candidate];
 
         return true;
@@ -244,6 +274,8 @@ namespace rocblaslt
         // winner and every later call takes the read-only path.
         if(count < 2)
             state.m_resolved = true;
+        else
+            state.m_pending.reserve(static_cast<size_t>(inFlightCap(state)));
 
         if(m_verbose)
         {
@@ -274,7 +306,7 @@ namespace rocblaslt
 
     int OnlineTuner::measurableCandidate(const ProblemState& state, int solutionIndex) const
     {
-        if(state.m_resolved || state.m_pendingCandidate >= 0)
+        if(state.m_resolved || state.m_gaveUp)
             return -1;
 
         for(size_t i = 0; i < state.m_candidates.size(); ++i)
@@ -282,6 +314,15 @@ namespace rocblaslt
                 return static_cast<int>(i);
 
         return -1;
+    }
+
+    // The rotation issues at most repeats() launches per candidate, so a whole
+    // exploration is also the most that can ever be outstanding at once. Capping
+    // at exactly that lets a caller enqueue every sample before the GPU retires
+    // any of them, which is what stops exploration advancing at queue-drain rate.
+    int OnlineTuner::inFlightCap(const ProblemState& state) const
+    {
+        return static_cast<int>(state.m_candidates.size()) * m_repeats;
     }
 
     int OnlineTuner::visitBudget(const ProblemState& state) const
@@ -318,7 +359,9 @@ namespace rocblaslt
 
             std::ostringstream msg = traceLine("winner", problemKey);
             msg << " cand=" << winnerIndex << " sol=" << winner << " us=" << winnerScore
-                << " samples=" << samples << " calls=" << state.m_calls << "\n";
+                << " samples=" << samples << " calls=" << state.m_calls
+                << " declined=" << state.m_declined
+                << " gaveup=" << (state.m_gaveUp ? 1 : 0) << "\n";
             std::cerr << msg.str();
         }
     }
