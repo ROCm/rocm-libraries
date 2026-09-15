@@ -363,22 +363,18 @@ namespace hipblaslt_ext
                 return RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3;
             case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
                 return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_32_BF16;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_128_BF16;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_ZP_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_32_F16;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_128_F16;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP;
-            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT:
-                return RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_64;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_128;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_ZP;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_ZP_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_64_ZP;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_ZP_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_128_ZP;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(s) << std::endl;
@@ -410,22 +406,18 @@ namespace hipblaslt_ext
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
             case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_ZP_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT;
-            case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
-                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_64:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_128:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_ZP_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_ZP_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_ZP_EXT;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(f) << std::endl;

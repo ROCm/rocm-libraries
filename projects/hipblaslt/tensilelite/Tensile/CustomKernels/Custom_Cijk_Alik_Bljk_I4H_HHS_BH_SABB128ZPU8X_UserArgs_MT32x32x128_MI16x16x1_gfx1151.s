@@ -4,13 +4,13 @@
 /******************************************/
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
-.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
-.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+.protected Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+.globl Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
 .p2align 8
-.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151,@function
+.type Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151,@function
 .section .rodata,#alloc
 .p2align 6
-.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 256 // vgprs
   .amdhsa_next_free_sgpr 86 // sgprs
@@ -45,15 +45,13 @@
 custom.config:
   InternalSupportParams:
     KernArgsVersion: 3
-  LocalReadVectorWidthA: -1
-  LocalReadVectorWidthB: -1
   StaggerU: 0
 amdhsa.version:
   - 1
   - 1
 amdhsa.kernels:
-  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151
-    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151.kd'
+  - .name: Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151
+    .symbol: 'Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151.kd'
     .language:                   OpenCL C
     .language_version:
       - 2
@@ -109,7 +107,7 @@ amdhsa.kernels:
         .size:            8
         .offset:          40
         .value_kind:      global_buffer
-        .value_type:      bf16
+        .value_type:      f16
         .address_space:   generic
       - .name:            strideA0
         .size:            4
@@ -145,13 +143,13 @@ amdhsa.kernels:
         .size:            8
         .offset:          72
         .value_kind:      global_buffer
-        .value_type:      bf16
+        .value_type:      f16
         .address_space:   generic
       - .name:            C
         .size:            8
         .offset:          80
         .value_kind:      global_buffer
-        .value_type:      bf16
+        .value_type:      f16
         .address_space:   generic
       - .name:            strideD0
         .size:            4
@@ -223,7 +221,7 @@ amdhsa.kernels:
     .wavefront_size:             32
 ...
 .end_amdgpu_metadata
-Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128BZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151:
+Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151:
 label_ASM_Start:  /// Main body of the asm kernel
 
 /******************************************/
@@ -1816,321 +1814,201 @@ label_NoBranch_0:
 s_waitcnt vmcnt(0)                                 // wait for global read
 
 /* local write a */
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+0]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+0], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+1]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+1], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+2]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+2], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+3]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+3], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+3], v199, v200        // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+3], v199, v200        // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write b */
@@ -2235,7 +2113,7 @@ ds_load_b128 v[vgprValuB_X0_I0+4:vgprValuB_X0_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->16 */
 /* localReadDoCntA 1 localReadDoCntMXSA 0 localReadDoCntB 1 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=0 numReadsIterA=1 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=0 numReadsIterB=1 skipReadsIterB=0 readsPerIterB=2 */
@@ -2258,7 +2136,7 @@ ds_load_b128 v[vgprValuB_X1_I0+4:vgprValuB_X1_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->32 */
 /* localReadDoCntA 2 localReadDoCntMXSA 0 localReadDoCntB 2 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X1_I0+0+0+0:vgprValuA_X1_I0+0+0+0+7], v[vgprValuB_X1_I0+0+0+0:vgprValuB_X1_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X1_I0+0+0+0:vgprValuA_X1_I0+0+0+0+7], v[vgprValuB_X1_I0+0+0+0:vgprValuB_X1_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=1 numReadsIterA=2 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=1 numReadsIterB=2 skipReadsIterB=0 readsPerIterB=2 */
@@ -2281,7 +2159,7 @@ ds_load_b128 v[vgprValuB_X2_I0+4:vgprValuB_X2_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->48 */
 /* localReadDoCntA 3 localReadDoCntMXSA 0 localReadDoCntB 3 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X2_I0+0+0+0:vgprValuA_X2_I0+0+0+0+7], v[vgprValuB_X2_I0+0+0+0:vgprValuB_X2_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X2_I0+0+0+0:vgprValuA_X2_I0+0+0+0+7], v[vgprValuB_X2_I0+0+0+0:vgprValuB_X2_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=2 numReadsIterA=3 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=2 numReadsIterB=3 skipReadsIterB=0 readsPerIterB=2 */
@@ -2304,7 +2182,7 @@ ds_load_b128 v[vgprValuB_X3_I0+4:vgprValuB_X3_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->64 */
 /* localReadDoCntA 4 localReadDoCntMXSA 0 localReadDoCntB 4 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X3_I0+0+0+0:vgprValuA_X3_I0+0+0+0+7], v[vgprValuB_X3_I0+0+0+0:vgprValuB_X3_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X3_I0+0+0+0:vgprValuA_X3_I0+0+0+0+7], v[vgprValuB_X3_I0+0+0+0:vgprValuB_X3_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=3 numReadsIterA=4 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=3 numReadsIterB=4 skipReadsIterB=0 readsPerIterB=2 */
@@ -2327,7 +2205,7 @@ ds_load_b128 v[vgprValuB_X4_I0+4:vgprValuB_X4_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->80 */
 /* localReadDoCntA 5 localReadDoCntMXSA 0 localReadDoCntB 5 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X4_I0+0+0+0:vgprValuA_X4_I0+0+0+0+7], v[vgprValuB_X4_I0+0+0+0:vgprValuB_X4_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X4_I0+0+0+0:vgprValuA_X4_I0+0+0+0+7], v[vgprValuB_X4_I0+0+0+0:vgprValuB_X4_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=4 numReadsIterA=5 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=4 numReadsIterB=5 skipReadsIterB=0 readsPerIterB=2 */
@@ -2350,7 +2228,7 @@ ds_load_b128 v[vgprValuB_X5_I0+4:vgprValuB_X5_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->96 */
 /* localReadDoCntA 6 localReadDoCntMXSA 0 localReadDoCntB 6 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X5_I0+0+0+0:vgprValuA_X5_I0+0+0+0+7], v[vgprValuB_X5_I0+0+0+0:vgprValuB_X5_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X5_I0+0+0+0:vgprValuA_X5_I0+0+0+0+7], v[vgprValuB_X5_I0+0+0+0:vgprValuB_X5_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=5 numReadsIterA=6 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=5 numReadsIterB=6 skipReadsIterB=0 readsPerIterB=2 */
@@ -2373,7 +2251,7 @@ ds_load_b128 v[vgprValuB_X6_I0+4:vgprValuB_X6_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->112 */
 /* localReadDoCntA 7 localReadDoCntMXSA 0 localReadDoCntB 7 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X6_I0+0+0+0:vgprValuA_X6_I0+0+0+0+7], v[vgprValuB_X6_I0+0+0+0:vgprValuB_X6_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X6_I0+0+0+0:vgprValuA_X6_I0+0+0+0+7], v[vgprValuB_X6_I0+0+0+0:vgprValuB_X6_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=6 numReadsIterA=7 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=6 numReadsIterB=7 skipReadsIterB=0 readsPerIterB=2 */
@@ -2390,321 +2268,201 @@ ds_load_b128 v[vgprValuB_X7_I0+4:vgprValuB_X7_I0+4+3], v[vgprLocalReadAddrB+0] o
 s_waitcnt vmcnt(0)                                 // 1wait for global read
 
 /* local write A */
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+0]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+0], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:32768 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 32768 sync LDS1
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+1]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+1], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:35072 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 35072 sync LDS1
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+2]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+2], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:37376 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 37376 sync LDS1
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+3]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+3], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+3], v199, v200        // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+3], v199, v200        // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:39680 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 39680 sync LDS1
 
 /* local write MXSA */
@@ -2741,7 +2499,7 @@ ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+12:vgprG2LB+12+3] offset:3968
 
 /* localReadInitPointers */
 s_waitcnt lgkmcnt(8)                               // wait for prior local read local write old=0, new=8 newLW=8 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X7_I0+0+0+0:vgprValuA_X7_I0+0+0+0+7], v[vgprValuB_X7_I0+0+0+0:vgprValuB_X7_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X7_I0+0+0+0:vgprValuA_X7_I0+0+0+0+7], v[vgprValuB_X7_I0+0+0+0:vgprValuB_X7_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=7 numReadsIterA=8 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=7 numReadsIterB=8 skipReadsIterB=0 readsPerIterB=2 */
@@ -2834,7 +2592,7 @@ ds_load_b128 v[vgprValuB_X0_I0+4:vgprValuB_X0_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->16 */
 /* localReadDoCntA 9 localReadDoCntMXSA 0 localReadDoCntB 9 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=0 numReadsIterA=1 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=0 numReadsIterB=1 skipReadsIterB=0 readsPerIterB=2 */
@@ -2857,7 +2615,7 @@ ds_load_b128 v[vgprValuB_X1_I0+4:vgprValuB_X1_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->32 */
 /* localReadDoCntA 10 localReadDoCntMXSA 0 localReadDoCntB 10 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X1_I0+0+0+0:vgprValuA_X1_I0+0+0+0+7], v[vgprValuB_X1_I0+0+0+0:vgprValuB_X1_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X1_I0+0+0+0:vgprValuA_X1_I0+0+0+0+7], v[vgprValuB_X1_I0+0+0+0:vgprValuB_X1_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=1 numReadsIterA=2 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=1 numReadsIterB=2 skipReadsIterB=0 readsPerIterB=2 */
@@ -2880,7 +2638,7 @@ ds_load_b128 v[vgprValuB_X2_I0+4:vgprValuB_X2_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->48 */
 /* localReadDoCntA 11 localReadDoCntMXSA 0 localReadDoCntB 11 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X2_I0+0+0+0:vgprValuA_X2_I0+0+0+0+7], v[vgprValuB_X2_I0+0+0+0:vgprValuB_X2_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X2_I0+0+0+0:vgprValuA_X2_I0+0+0+0+7], v[vgprValuB_X2_I0+0+0+0:vgprValuB_X2_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=2 numReadsIterA=3 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=2 numReadsIterB=3 skipReadsIterB=0 readsPerIterB=2 */
@@ -2903,7 +2661,7 @@ ds_load_b128 v[vgprValuB_X3_I0+4:vgprValuB_X3_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->64 */
 /* localReadDoCntA 12 localReadDoCntMXSA 0 localReadDoCntB 12 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X3_I0+0+0+0:vgprValuA_X3_I0+0+0+0+7], v[vgprValuB_X3_I0+0+0+0:vgprValuB_X3_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X3_I0+0+0+0:vgprValuA_X3_I0+0+0+0+7], v[vgprValuB_X3_I0+0+0+0:vgprValuB_X3_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=3 numReadsIterA=4 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=3 numReadsIterB=4 skipReadsIterB=0 readsPerIterB=2 */
@@ -2926,7 +2684,7 @@ ds_load_b128 v[vgprValuB_X4_I0+4:vgprValuB_X4_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->80 */
 /* localReadDoCntA 13 localReadDoCntMXSA 0 localReadDoCntB 13 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X4_I0+0+0+0:vgprValuA_X4_I0+0+0+0+7], v[vgprValuB_X4_I0+0+0+0:vgprValuB_X4_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X4_I0+0+0+0:vgprValuA_X4_I0+0+0+0+7], v[vgprValuB_X4_I0+0+0+0:vgprValuB_X4_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=4 numReadsIterA=5 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=4 numReadsIterB=5 skipReadsIterB=0 readsPerIterB=2 */
@@ -2949,7 +2707,7 @@ ds_load_b128 v[vgprValuB_X5_I0+4:vgprValuB_X5_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->96 */
 /* localReadDoCntA 14 localReadDoCntMXSA 0 localReadDoCntB 14 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X5_I0+0+0+0:vgprValuA_X5_I0+0+0+0+7], v[vgprValuB_X5_I0+0+0+0:vgprValuB_X5_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X5_I0+0+0+0:vgprValuA_X5_I0+0+0+0+7], v[vgprValuB_X5_I0+0+0+0:vgprValuB_X5_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=5 numReadsIterA=6 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=5 numReadsIterB=6 skipReadsIterB=0 readsPerIterB=2 */
@@ -2972,7 +2730,7 @@ ds_load_b128 v[vgprValuB_X6_I0+4:vgprValuB_X6_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->112 */
 /* localReadDoCntA 15 localReadDoCntMXSA 0 localReadDoCntB 15 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X6_I0+0+0+0:vgprValuA_X6_I0+0+0+0+7], v[vgprValuB_X6_I0+0+0+0:vgprValuB_X6_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X6_I0+0+0+0:vgprValuA_X6_I0+0+0+0+7], v[vgprValuB_X6_I0+0+0+0:vgprValuB_X6_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=6 numReadsIterA=7 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=6 numReadsIterB=7 skipReadsIterB=0 readsPerIterB=2 */
@@ -2989,321 +2747,201 @@ ds_load_b128 v[vgprValuB_X7_I0+4:vgprValuB_X7_I0+4+3], v[vgprLocalReadAddrB+0] o
 s_waitcnt vmcnt(0)                                 // 1wait for global read
 
 /* local write A */
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+0]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+0], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+0+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+0+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+1]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+1], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+4+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+4+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+2]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+2], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+0], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+1], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+2], v199, v200         // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+8+3], v199, v200         // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+8+3], v199, v200         // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
-v_mov_b32 v205, 0x7fff                             // w4a16: round-to-nearest-even bias for bf16
-v_mov_b32 v206, 0x7fff0000                         // w4a16: bf16 Nan pattern
-v_lshlrev_b32 v202, 16, v[vgprG2LScaleA+3]         // scaleA: bf16 -> f32
+v_cvt_f32_f16 v202, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
 v_and_b32 v203, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
 v_lshlrev_b32 v203, 2, v203                        // scaleZeroA: -> nibble shift 0 or 4
 v_bfe_u32 v199, v[vgprG2LScaleZeroA+3], v203, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
 v_cvt_f32_i32 v199, v199                           // scaleZeroA: int4 -> f32
+v_add_f32 v199, 0x43000000, v199                   // scaleZeroA: + 128 to cancel the magic bias
 v_mul_f32 v203, v202, v199                         // scaleZeroA: z*s
 v_xor_b32 v203, 0x80000000, v203                   // w4a16: negate -> -z*s
 v_mov_b32 v201, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_bfe_u32 v199, v201, 0x0, 0x4                     // w4a16: zero-extend int4 #0
-v_bfe_u32 v200, v201, 0x4, 0x4                     // w4a16: zero-extend int4 #1
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_and_b32 v200, 0xf000f, v201                      // w4a16: isolate int4 #0 and #1
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x8, 0x4                     // w4a16: zero-extend int4 #2
-v_bfe_u32 v200, v201, 0xc, 0x4                     // w4a16: zero-extend int4 #3
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+0], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x4, v201                      // w4a16: nibble pair 1
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #2 and #3
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x10, 0x4                    // w4a16: zero-extend int4 #4
-v_bfe_u32 v200, v201, 0x14, 0x4                    // w4a16: zero-extend int4 #5
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+1], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0x8, v201                      // w4a16: nibble pair 2
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #4 and #5
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 bf16
-v_bfe_u32 v199, v201, 0x18, 0x4                    // w4a16: zero-extend int4 #6
-v_bfe_u32 v200, v201, 0x1c, 0x4                    // w4a16: zero-extend int4 #7
-v_cvt_f32_i32 v199, v199                           // w4a16: int4 -> f32
-v_cvt_f32_i32 v200, v200                           // w4a16: int4 -> f32
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+2], v199, v200        // w4a16: pack 2 fp16
+v_lshrrev_b32 v200, 0xc, v201                      // w4a16: nibble pair 3
+v_and_b32 v200, 0xf000f, v200                      // w4a16: isolate int4 #6 and #7
+v_or_b32 v200, 0x43004300, v200                    // w4a16: -> two bf16 holding 128+q
+v_lshlrev_b32 v199, 16, v200                       // w4a16: low bf16 -> f32
+v_and_b32 v200, 0xffff0000, v200                   // w4a16: high bf16 -> f32
 v_fma_f32 v199, v199, v202, v203                   // w4a16: q*s - z*s
 v_fma_f32 v200, v200, v202, v203                   // w4a16: q*s - z*s
-v_cmp_u_f32 s8, v199, v199                         // w4a16: check Nan
-v_bfe_u32 v204, v199, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v199, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v199, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v199, 16, v199                       // w4a16: f32 -> bf16
-v_cmp_u_f32 s8, v200, v200                         // w4a16: check Nan
-v_bfe_u32 v204, v200, 16, 1                        // w4a16: lsb of the bf16 mantissa
-v_add3_u32 v204, v200, v204, v205                  // w4a16: add lsb + rounding bias
-v_cndmask_b32 v200, v204, v206, s8                 // w4a16: keep Nan
-v_lshrrev_b32 v200, 16, v200                       // w4a16: f32 -> bf16
-v_pack_b32_f16 v[vgprG2LA+12+3], v199, v200        // w4a16: pack 2 bf16
+v_cvt_f16_f32 v199, v199                           // w4a16: f32 -> fp16
+v_cvt_f16_f32 v200, v200                           // w4a16: f32 -> fp16
+v_pack_b32_f16 v[vgprG2LA+12+3], v199, v200        // w4a16: pack 2 fp16
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write MXSA */
@@ -3340,7 +2978,7 @@ ds_store_b128 v[vgprLocalWriteAddrB+0], v[vgprG2LB+12:vgprG2LB+12+3] offset:6912
 
 /* localReadInitPointers */
 s_waitcnt lgkmcnt(8)                               // wait for prior local read local write old=0, new=8 newLW=8 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X7_I0+0+0+0:vgprValuA_X7_I0+0+0+0+7], v[vgprValuB_X7_I0+0+0+0:vgprValuB_X7_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X7_I0+0+0+0:vgprValuA_X7_I0+0+0+0+7], v[vgprValuB_X7_I0+0+0+0:vgprValuB_X7_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=7 numReadsIterA=8 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=7 numReadsIterB=8 skipReadsIterB=0 readsPerIterB=2 */
@@ -3393,7 +3031,7 @@ ds_load_b128 v[vgprValuB_X0_I0+4:vgprValuB_X0_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->16 */
 /* localReadDoCntA 17 localReadDoCntMXSA 0 localReadDoCntB 17 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+7], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=0 numReadsIterA=1 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=0 numReadsIterB=1 skipReadsIterB=0 readsPerIterB=2 */
@@ -3416,7 +3054,7 @@ ds_load_b128 v[vgprValuB_X1_I0+4:vgprValuB_X1_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->32 */
 /* localReadDoCntA 18 localReadDoCntMXSA 0 localReadDoCntB 18 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X1_I0+0+0+0:vgprValuA_X1_I0+0+0+0+7], v[vgprValuB_X1_I0+0+0+0:vgprValuB_X1_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X1_I0+0+0+0:vgprValuA_X1_I0+0+0+0+7], v[vgprValuB_X1_I0+0+0+0:vgprValuB_X1_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=1 numReadsIterA=2 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=1 numReadsIterB=2 skipReadsIterB=0 readsPerIterB=2 */
@@ -3439,7 +3077,7 @@ ds_load_b128 v[vgprValuB_X2_I0+4:vgprValuB_X2_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->48 */
 /* localReadDoCntA 19 localReadDoCntMXSA 0 localReadDoCntB 19 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X2_I0+0+0+0:vgprValuA_X2_I0+0+0+0+7], v[vgprValuB_X2_I0+0+0+0:vgprValuB_X2_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X2_I0+0+0+0:vgprValuA_X2_I0+0+0+0+7], v[vgprValuB_X2_I0+0+0+0:vgprValuB_X2_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=2 numReadsIterA=3 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=2 numReadsIterB=3 skipReadsIterB=0 readsPerIterB=2 */
@@ -3462,7 +3100,7 @@ ds_load_b128 v[vgprValuB_X3_I0+4:vgprValuB_X3_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->64 */
 /* localReadDoCntA 20 localReadDoCntMXSA 0 localReadDoCntB 20 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X3_I0+0+0+0:vgprValuA_X3_I0+0+0+0+7], v[vgprValuB_X3_I0+0+0+0:vgprValuB_X3_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X3_I0+0+0+0:vgprValuA_X3_I0+0+0+0+7], v[vgprValuB_X3_I0+0+0+0:vgprValuB_X3_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=3 numReadsIterA=4 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=3 numReadsIterB=4 skipReadsIterB=0 readsPerIterB=2 */
@@ -3485,7 +3123,7 @@ ds_load_b128 v[vgprValuB_X4_I0+4:vgprValuB_X4_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->80 */
 /* localReadDoCntA 21 localReadDoCntMXSA 0 localReadDoCntB 21 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X4_I0+0+0+0:vgprValuA_X4_I0+0+0+0+7], v[vgprValuB_X4_I0+0+0+0:vgprValuB_X4_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X4_I0+0+0+0:vgprValuA_X4_I0+0+0+0+7], v[vgprValuB_X4_I0+0+0+0:vgprValuB_X4_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=4 numReadsIterA=5 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=4 numReadsIterB=5 skipReadsIterB=0 readsPerIterB=2 */
@@ -3508,7 +3146,7 @@ ds_load_b128 v[vgprValuB_X5_I0+4:vgprValuB_X5_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->96 */
 /* localReadDoCntA 22 localReadDoCntMXSA 0 localReadDoCntB 22 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X5_I0+0+0+0:vgprValuA_X5_I0+0+0+0+7], v[vgprValuB_X5_I0+0+0+0:vgprValuB_X5_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X5_I0+0+0+0:vgprValuA_X5_I0+0+0+0+7], v[vgprValuB_X5_I0+0+0+0:vgprValuB_X5_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=5 numReadsIterA=6 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=5 numReadsIterB=6 skipReadsIterB=0 readsPerIterB=2 */
@@ -3531,7 +3169,7 @@ ds_load_b128 v[vgprValuB_X6_I0+4:vgprValuB_X6_I0+4+3], v[vgprLocalReadAddrB+0] o
 /* N/A, lro->112 */
 /* localReadDoCntA 23 localReadDoCntMXSA 0 localReadDoCntB 23 localReadDoCntMXSB 0 localReadDoCntM 0 */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X6_I0+0+0+0:vgprValuA_X6_I0+0+0+0+7], v[vgprValuB_X6_I0+0+0+0:vgprValuB_X6_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X6_I0+0+0+0:vgprValuA_X6_I0+0+0+0+7], v[vgprValuB_X6_I0+0+0+0:vgprValuB_X6_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=6 numReadsIterA=7 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=6 numReadsIterB=7 skipReadsIterB=0 readsPerIterB=2 */
@@ -3555,7 +3193,7 @@ s_waitcnt vmcnt(0)                                 // 1wait for global read
 
 /* local write B */
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0
-v_wmma_f32_16x16x16_bf16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X7_I0+0+0+0:vgprValuA_X7_I0+0+0+0+7], v[vgprValuB_X7_I0+0+0+0:vgprValuB_X7_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
+v_wmma_f32_16x16x16_f16 v[vgprValuC+0:vgprValuC+0+7], v[vgprValuA_X7_I0+0+0+0:vgprValuA_X7_I0+0+0+0+7], v[vgprValuB_X7_I0+0+0+0:vgprValuB_X7_I0+0+0+0+7], v[vgprValuC+0:vgprValuC+0+7] // left value = v[0+0:7+0]
 /* numPrefetchIter=0 */
 /* dataAtIterA=7 numReadsIterA=8 skipReadsIterA=0 readsPerIterA=2 */
 /* dataAtIterB=7 numReadsIterB=8 skipReadsIterB=0 readsPerIterB=2 */
@@ -3833,56 +3471,21 @@ v_mul_f32 v[vgprValuC+55], s[sgprAlpha], v[vgprValuC+6] // Multiply MI out reg w
 v_mul_f32 v[vgprValuC+56], s[sgprAlpha], v[vgprValuC+7] // Multiply MI out reg with alpha
 
 /* apply mask, calc new C and issue writes */
-v_mov_b32 v44, 0xffff0000                          // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v45, 0x7fff0000                          // fp32 Nan
-v_mov_b32 v46, 0x7fff                              // rounding bias for bfloat16
-v_cmp_u_f32 s8, v[vgprValuC+49], v[vgprValuC+49]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+49], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+49], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+49], v43, v45, s8
-v_lshrrev_b32 v49, 16, v[vgprValuC+49]             // convert C to bf16
+v_cvt_f16_f32 v49, v[vgprValuC+49]                 // convert C to fp16
 buffer_store_b16 v49, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s8, v[vgprValuC+50], v[vgprValuC+50]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+50], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+50], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+50], v43, v45, s8
-v_lshrrev_b32 v50, 16, v[vgprValuC+50]             // convert C to bf16
+v_cvt_f16_f32 v50, v[vgprValuC+50]                 // convert C to fp16
 buffer_store_b16 v50, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:4 // store D
-v_cmp_u_f32 s8, v[vgprValuC+51], v[vgprValuC+51]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+51], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+51], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+51], v43, v45, s8
-v_lshrrev_b32 v51, 16, v[vgprValuC+51]             // convert C to bf16
+v_cvt_f16_f32 v51, v[vgprValuC+51]                 // convert C to fp16
 buffer_store_b16 v51, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:8 // store D
-v_cmp_u_f32 s8, v[vgprValuC+52], v[vgprValuC+52]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+52], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+52], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+52], v43, v45, s8
-v_lshrrev_b32 v52, 16, v[vgprValuC+52]             // convert C to bf16
+v_cvt_f16_f32 v52, v[vgprValuC+52]                 // convert C to fp16
 buffer_store_b16 v52, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:12 // store D
-v_cmp_u_f32 s8, v[vgprValuC+53], v[vgprValuC+53]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+53], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+53], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+53], v43, v45, s8
-v_lshrrev_b32 v53, 16, v[vgprValuC+53]             // convert C to bf16
+v_cvt_f16_f32 v53, v[vgprValuC+53]                 // convert C to fp16
 buffer_store_b16 v53, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:16 // store D
-v_cmp_u_f32 s8, v[vgprValuC+54], v[vgprValuC+54]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+54], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+54], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+54], v43, v45, s8
-v_lshrrev_b32 v54, 16, v[vgprValuC+54]             // convert C to bf16
+v_cvt_f16_f32 v54, v[vgprValuC+54]                 // convert C to fp16
 buffer_store_b16 v54, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:20 // store D
-v_cmp_u_f32 s8, v[vgprValuC+55], v[vgprValuC+55]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+55], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+55], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+55], v43, v45, s8
-v_lshrrev_b32 v55, 16, v[vgprValuC+55]             // convert C to bf16
+v_cvt_f16_f32 v55, v[vgprValuC+55]                 // convert C to fp16
 buffer_store_b16 v55, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:24 // store D
-v_cmp_u_f32 s8, v[vgprValuC+56], v[vgprValuC+56]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+56], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+56], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+56], v43, v45, s8
-v_lshrrev_b32 v56, 16, v[vgprValuC+56]             // convert C to bf16
+v_cvt_f16_f32 v56, v[vgprValuC+56]                 // convert C to fp16
 buffer_store_b16 v56, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:28 // store D
 s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
 s_branch label_GW_End_1                            // jump to end
@@ -3967,56 +3570,21 @@ v_mul_f32 v[vgprValuC+53], s[sgprAlpha], v[vgprValuC+6] // Multiply MI out reg w
 v_mul_f32 v[vgprValuC+54], s[sgprAlpha], v[vgprValuC+7] // Multiply MI out reg with alpha
 
 /* apply mask, calc new C and issue writes */
-v_mov_b32 v44, 0xffff0000                          // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v45, 0x7fff0000                          // fp32 Nan
-v_mov_b32 v46, 0x7fff                              // rounding bias for bfloat16
-v_cmp_u_f32 s28, v[vgprValuC+47], v[vgprValuC+47]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+47], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+47], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+47], v43, v45, s28
-v_lshrrev_b32 v47, 16, v[vgprValuC+47]             // convert C to bf16
+v_cvt_f16_f32 v47, v[vgprValuC+47]                 // convert C to fp16
 buffer_store_b16 v47, v55, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s28, v[vgprValuC+48], v[vgprValuC+48]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+48], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+48], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+48], v43, v45, s28
-v_lshrrev_b32 v48, 16, v[vgprValuC+48]             // convert C to bf16
+v_cvt_f16_f32 v48, v[vgprValuC+48]                 // convert C to fp16
 buffer_store_b16 v48, v56, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s28, v[vgprValuC+49], v[vgprValuC+49]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+49], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+49], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+49], v43, v45, s28
-v_lshrrev_b32 v49, 16, v[vgprValuC+49]             // convert C to bf16
+v_cvt_f16_f32 v49, v[vgprValuC+49]                 // convert C to fp16
 buffer_store_b16 v49, v57, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s28, v[vgprValuC+50], v[vgprValuC+50]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+50], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+50], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+50], v43, v45, s28
-v_lshrrev_b32 v50, 16, v[vgprValuC+50]             // convert C to bf16
+v_cvt_f16_f32 v50, v[vgprValuC+50]                 // convert C to fp16
 buffer_store_b16 v50, v58, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s28, v[vgprValuC+51], v[vgprValuC+51]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+51], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+51], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+51], v43, v45, s28
-v_lshrrev_b32 v51, 16, v[vgprValuC+51]             // convert C to bf16
+v_cvt_f16_f32 v51, v[vgprValuC+51]                 // convert C to fp16
 buffer_store_b16 v51, v59, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s28, v[vgprValuC+52], v[vgprValuC+52]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+52], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+52], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+52], v43, v45, s28
-v_lshrrev_b32 v52, 16, v[vgprValuC+52]             // convert C to bf16
+v_cvt_f16_f32 v52, v[vgprValuC+52]                 // convert C to fp16
 buffer_store_b16 v52, v60, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s28, v[vgprValuC+53], v[vgprValuC+53]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+53], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+53], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+53], v43, v45, s28
-v_lshrrev_b32 v53, 16, v[vgprValuC+53]             // convert C to bf16
+v_cvt_f16_f32 v53, v[vgprValuC+53]                 // convert C to fp16
 buffer_store_b16 v53, v61, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_cmp_u_f32 s28, v[vgprValuC+54], v[vgprValuC+54]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+54], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+54], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+54], v43, v45, s28
-v_lshrrev_b32 v54, 16, v[vgprValuC+54]             // convert C to bf16
+v_cvt_f16_f32 v54, v[vgprValuC+54]                 // convert C to fp16
 buffer_store_b16 v54, v62, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
 s_branch label_GW_End_1                            // jump to end
@@ -4079,88 +3647,45 @@ v_mul_f32 v[vgprValuC+55], s[sgprAlpha], v[vgprValuC+6] // Multiply MI out reg w
 v_mul_f32 v[vgprValuC+56], s[sgprAlpha], v[vgprValuC+7] // Multiply MI out reg with alpha
 
 /* apply mask, calc new C and issue writes */
-v_mov_b32 v44, 0xffff0000                          // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v45, 0x7fff0000                          // fp32 Nan
-v_mov_b32 v46, 0x7fff                              // rounding bias for bfloat16
 
 s_waitcnt vmcnt(7)                                 // vlcnt(7) = 8 - 1 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v57                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+49], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+49], v[vgprValuC+49]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+49], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+49], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+49], v43, v45, s8
-v_lshrrev_b32 v49, 16, v[vgprValuC+49]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+49], s[sgprBeta], v57, v[vgprValuC+49] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v49, v[vgprValuC+49]                 // convert C to fp16
 buffer_store_b16 v49, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 
 s_waitcnt vmcnt(6)                                 // vlcnt(6) = 8 - 2 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v58                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+50], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+50], v[vgprValuC+50]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+50], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+50], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+50], v43, v45, s8
-v_lshrrev_b32 v50, 16, v[vgprValuC+50]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+50], s[sgprBeta], v58, v[vgprValuC+50] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v50, v[vgprValuC+50]                 // convert C to fp16
 buffer_store_b16 v50, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:4 // store D
 
 s_waitcnt vmcnt(5)                                 // vlcnt(5) = 8 - 3 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v59                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+51], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+51], v[vgprValuC+51]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+51], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+51], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+51], v43, v45, s8
-v_lshrrev_b32 v51, 16, v[vgprValuC+51]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+51], s[sgprBeta], v59, v[vgprValuC+51] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v51, v[vgprValuC+51]                 // convert C to fp16
 buffer_store_b16 v51, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:8 // store D
 
 s_waitcnt vmcnt(4)                                 // vlcnt(4) = 8 - 4 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v60                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+52], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+52], v[vgprValuC+52]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+52], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+52], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+52], v43, v45, s8
-v_lshrrev_b32 v52, 16, v[vgprValuC+52]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+52], s[sgprBeta], v60, v[vgprValuC+52] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v52, v[vgprValuC+52]                 // convert C to fp16
 buffer_store_b16 v52, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:12 // store D
 
 s_waitcnt vmcnt(3)                                 // vlcnt(3) = 8 - 5 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v61                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+53], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+53], v[vgprValuC+53]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+53], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+53], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+53], v43, v45, s8
-v_lshrrev_b32 v53, 16, v[vgprValuC+53]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+53], s[sgprBeta], v61, v[vgprValuC+53] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v53, v[vgprValuC+53]                 // convert C to fp16
 buffer_store_b16 v53, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:16 // store D
 
 s_waitcnt vmcnt(2)                                 // vlcnt(2) = 8 - 6 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v62                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+54], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+54], v[vgprValuC+54]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+54], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+54], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+54], v43, v45, s8
-v_lshrrev_b32 v54, 16, v[vgprValuC+54]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+54], s[sgprBeta], v62, v[vgprValuC+54] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v54, v[vgprValuC+54]                 // convert C to fp16
 buffer_store_b16 v54, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:20 // store D
 
 s_waitcnt vmcnt(1)                                 // vlcnt(1) = 8 - 7 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v63                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+55], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+55], v[vgprValuC+55]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+55], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+55], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+55], v43, v45, s8
-v_lshrrev_b32 v55, 16, v[vgprValuC+55]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+55], s[sgprBeta], v63, v[vgprValuC+55] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v55, v[vgprValuC+55]                 // convert C to fp16
 buffer_store_b16 v55, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:24 // store D
 
 s_waitcnt vmcnt(0)                                 // vlcnt(0) = 8 - 8 (beta) (interleaved)
-v_lshlrev_b32 v40, 16, v64                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+56], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s8, v[vgprValuC+56], v[vgprValuC+56]   // check Nan
-v_bfe_u32 v43, v[vgprValuC+56], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+56], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+56], v43, v45, s8
-v_lshrrev_b32 v56, 16, v[vgprValuC+56]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+56], s[sgprBeta], v64, v[vgprValuC+56] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v56, v[vgprValuC+56]                 // convert C to fp16
 buffer_store_b16 v56, v47, s[sgprSrdD:sgprSrdD+3], 0 offen offset:28 // store D
 s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
 s_branch label_GW_End_1                            // jump to end
@@ -4270,72 +3795,29 @@ v_mul_f32 v[vgprValuC+54], s[sgprAlpha], v[vgprValuC+7] // Multiply MI out reg w
 s_waitcnt vmcnt(0)                                 // wait for Beta
 
 /* apply mask, calc new C and issue writes */
-v_mov_b32 v44, 0xffff0000                          // mask for pack two bfloat16 element to 32bit
-v_mov_b32 v45, 0x7fff0000                          // fp32 Nan
-v_mov_b32 v46, 0x7fff                              // rounding bias for bfloat16
-v_lshlrev_b32 v40, 16, v55                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+47], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+47], v[vgprValuC+47]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+47], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+47], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+47], v43, v45, s28
-v_lshrrev_b32 v47, 16, v[vgprValuC+47]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+47], s[sgprBeta], v55, v[vgprValuC+47] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v47, v[vgprValuC+47]                 // convert C to fp16
 buffer_store_b16 v47, v56, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v40, 16, v57                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+48], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+48], v[vgprValuC+48]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+48], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+48], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+48], v43, v45, s28
-v_lshrrev_b32 v48, 16, v[vgprValuC+48]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+48], s[sgprBeta], v57, v[vgprValuC+48] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v48, v[vgprValuC+48]                 // convert C to fp16
 buffer_store_b16 v48, v58, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v40, 16, v59                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+49], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+49], v[vgprValuC+49]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+49], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+49], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+49], v43, v45, s28
-v_lshrrev_b32 v49, 16, v[vgprValuC+49]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+49], s[sgprBeta], v59, v[vgprValuC+49] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v49, v[vgprValuC+49]                 // convert C to fp16
 buffer_store_b16 v49, v60, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v40, 16, v61                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+50], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+50], v[vgprValuC+50]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+50], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+50], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+50], v43, v45, s28
-v_lshrrev_b32 v50, 16, v[vgprValuC+50]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+50], s[sgprBeta], v61, v[vgprValuC+50] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v50, v[vgprValuC+50]                 // convert C to fp16
 buffer_store_b16 v50, v62, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v40, 16, v63                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+51], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+51], v[vgprValuC+51]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+51], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+51], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+51], v43, v45, s28
-v_lshrrev_b32 v51, 16, v[vgprValuC+51]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+51], s[sgprBeta], v63, v[vgprValuC+51] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v51, v[vgprValuC+51]                 // convert C to fp16
 buffer_store_b16 v51, v64, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v40, 16, v65                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+52], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+52], v[vgprValuC+52]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+52], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+52], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+52], v43, v45, s28
-v_lshrrev_b32 v52, 16, v[vgprValuC+52]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+52], s[sgprBeta], v65, v[vgprValuC+52] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v52, v[vgprValuC+52]                 // convert C to fp16
 buffer_store_b16 v52, v66, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v40, 16, v67                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+53], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+53], v[vgprValuC+53]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+53], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+53], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+53], v43, v45, s28
-v_lshrrev_b32 v53, 16, v[vgprValuC+53]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+53], s[sgprBeta], v67, v[vgprValuC+53] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v53, v[vgprValuC+53]                 // convert C to fp16
 buffer_store_b16 v53, v68, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
-v_lshlrev_b32 v40, 16, v69                         // cvt bf16 to fp32. 
-v_fmac_f32 v[vgprValuC+54], v40, s[sgprBeta]       // finalSum = sum*alpha + C*beta
-v_cmp_u_f32 s28, v[vgprValuC+54], v[vgprValuC+54]  // check Nan
-v_bfe_u32 v43, v[vgprValuC+54], 16, 1              // Non-Nan case: store lsb of bf16
-v_add3_u32 v43, v[vgprValuC+54], v43, v46          // Non-Nan case: add lsb and the increment for rounding
-v_cndmask_b32 v[vgprValuC+54], v43, v45, s28
-v_lshrrev_b32 v54, 16, v[vgprValuC+54]             // convert C to bf16
+v_fma_mix_f32 v[vgprValuC+54], s[sgprBeta], v69, v[vgprValuC+54] op_sel:[0,0,0] op_sel_hi:[0,1,0] // //C*=beta
+v_cvt_f16_f32 v54, v[vgprValuC+54]                 // convert C to fp16
 buffer_store_b16 v54, v70, s[sgprSrdD:sgprSrdD+3], 0 offen offset:0 // store D
 s_nop 0                                            // 1 wait state required when next inst writes vgprs held by previous dwordx4 store inst
 s_branch label_GW_End_1                            // jump to end

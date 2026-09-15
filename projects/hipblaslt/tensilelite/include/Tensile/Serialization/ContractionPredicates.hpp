@@ -139,7 +139,6 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
-                     Base::template Pair<Predicates::Contraction::DataTypeScaleA>(),
                      Base::template Pair<Predicates::Contraction::Int4EncodingA>()});
 
                 auto gmap = Generic::GetSubclasses();
@@ -628,12 +627,7 @@ namespace TensileLite
             : public AutoMappingTraits<Predicates::Contraction::ScaleZeroPointA, IO>
         {
         };
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::DataTypeScaleA, IO>
-            : public AutoMappingTraits<Predicates::Contraction::DataTypeScaleA, IO>
-        {
-        };
-        template <typename IO>
+                template <typename IO>
         struct MappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
             : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSA, IO>
         {

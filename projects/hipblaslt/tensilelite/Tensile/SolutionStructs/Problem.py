@@ -401,10 +401,37 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
+def usesBlockDequantA(problemType):
+    """True when A is quantized in memory (e.g. I4 w4a16 weights) and the kernel
+    must dequantize it into MacDataTypeA using per-group scales taken from the
+    ScaleA tensor, between the global load and the LDS write.
+
+    Accepts either a ProblemType or a plain state dict, so it is usable both
+    before and after ``problemTypeToEnum``."""
+    return problemType["UseScaleAB"] == "Block" and problemType["ScaleBlockSizeA"] != 0
+
+
+def usesBlockDequantZeroPointA(problemType):
+    """True when the block dequantization is asymmetric, i.e. a per-group
+    zero-point is subtracted before scaling."""
+    return usesBlockDequantA(problemType) and bool(problemType["ScaleZeroPointA"])
+
+
 # Encodings the int4 weights in A may use, and the suffix each contributes to
 # the kernel name. See the "Int4EncodingA" entry in defaultProblemType.
 INT4_ENCODINGS_A = ("Signed", "UnsignedBias8", "UnsignedBias8ExLlama")
 _INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8", "UnsignedBias8ExLlama": "U8X"}
+
+
+def blockDequantUnsignedA(problemType):
+    """True when A's nibbles are unsigned with an implicit zero-point of 8
+    (the GPTQ / compressed-tensors checkpoint encoding)."""
+    return usesBlockDequantA(problemType) and problemType["Int4EncodingA"] != "Signed"
+
+
+def blockDequantExLlamaA(problemType):
+    """True when A's nibbles use the ExLlama [0,2,4,6,1,3,5,7] dword shuffle."""
+    return usesBlockDequantA(problemType) and problemType["Int4EncodingA"] == "UnsignedBias8ExLlama"
 
 ################################################################################
 # ProblemType
@@ -436,13 +463,14 @@ _defaultProblemType = {
     "BiasSrc": "D",  # This parameter is used in gradient + bias. Support A, B, D.
     "UseScaleAB": "",  # Support "", "Scalar", "Vector", and "Block"
     # "Block" is the w4a16 group-scale mode: ScaleA points at a dense
-    # [M][ceil(K/ScaleBlockSizeA)] tensor of DataTypeScaleA holding one scale per
-    # ScaleBlockSizeA consecutive K elements of a row of A.  The kernel
-    # dequantizes A (DataTypeA, e.g. I4) into MacDataTypeA with it after the
-    # global load and before the LDS write, so the main loop stays a plain
-    # MacDataTypeA GEMM.  ScaleZeroPointA below makes it asymmetric.
-    "ScaleBlockSizeA": 0,  # 0 = off, else the K-group size (32 or 128)
-    "DataTypeScaleA": 0,  # element type of the block scale tensor; defaults to ComputeDataType
+    # [M][ceil(K/ScaleBlockSizeA)] tensor holding one scale per ScaleBlockSizeA
+    # consecutive K elements of a row of A.  The kernel dequantizes A
+    # (DataTypeA, e.g. I4) into MacDataTypeA with it after the global load and
+    # before the LDS write, so the main loop stays a plain MacDataTypeA GEMM.
+    # The scale has DataTypeB's type -- it is converted with the MAC type's own
+    # widening, so it shares it -- and so needs no parameter of its own.
+    # ScaleZeroPointA below makes it asymmetric.
+    "ScaleBlockSizeA": 0,  # 0 = off, else the K-group size (32, 64 or 128)
     # Asymmetric w4a16: a signed int4 zero-point per group, packed two per byte,
     # in a second region of the same allocation. The kernel computes
     # (q - z) * s instead of q * s.
@@ -762,9 +790,6 @@ def problemTypeToEnum(problemType):
           problemType["DataTypeE"].value
   problemType["DataTypeAmaxD"] = \
           problemType["DataTypeAmaxD"].value
-  if "DataTypeScaleA" in problemType and not isinstance(problemType["DataTypeScaleA"], int):
-      problemType["DataTypeScaleA"] = \
-          problemType["DataTypeScaleA"].value
   problemType["DestDataType"] = \
           problemType["DestDataType"].value
   problemType["ComputeDataType"] = \
@@ -956,17 +981,6 @@ class ProblemType(Mapping):
       self["DataTypeMXSB"] = DataType(config["DataTypeMXSB"])
     else:
       self["DataTypeMXSB"] = DataType(DataTypeEnum.E8)
-
-    # Block (group) scale for A: defaults to ComputeDataType, but w4a16 wants the
-    # activation type (bf16 or fp16).
-    if "DataTypeScaleA" in config:
-      self["DataTypeScaleA"] = DataType(config["DataTypeScaleA"])
-    else:
-      self["DataTypeScaleA"] = self["ComputeDataType"]
-
-    if self["Int4EncodingA"] not in INT4_ENCODINGS_A:
-      raise RuntimeError("Int4EncodingA must be one of %s, got %r"
-                         % (", ".join(INT4_ENCODINGS_A), self["Int4EncodingA"]))
 
     # Just like DataTypeE is DestDataType by default; DataTypeAmaxD if ComputeDataType by default.
     # So far we don't have to set it in config yamls
@@ -1424,10 +1438,9 @@ class ProblemType(Mapping):
     elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
     elif self["UseScaleAB"] == "Block":
-      name.append("SABB%u%s%s%s" % (self["ScaleBlockSizeA"],
-                                    self["DataTypeScaleA"].toChar(),
-                                    "ZP" if self["ScaleZeroPointA"] else "",
-                                    _INT4_ENCODING_CHAR[self["Int4EncodingA"]]))
+      name.append("SABB%u%s%s" % (self["ScaleBlockSizeA"],
+                                  "ZP" if self["ScaleZeroPointA"] else "",
+                                  _INT4_ENCODING_CHAR[self["Int4EncodingA"]]))
     if self["UseScaleCD"]: name.append("SCD")
     if self["UseScaleAlphaVec"]: name.append("SAV")
     if self["UseGateResidual"]:

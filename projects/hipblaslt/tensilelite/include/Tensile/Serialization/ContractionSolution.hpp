@@ -222,7 +222,6 @@ namespace TensileLite
                 iot::mapOptional(io, "f32XdlMathOp", s.f32XdlMathOp);
                 iot::mapOptional(io, "supportDeviceUserArguments", s.supportDeviceUserArguments);
                 iot::mapOptional(io, "scaleBlockSizeA", s.scaleBlockSizeA);
-                iot::mapOptional(io, "scaleTypeA", s.scaleTypeA);
                 iot::mapOptional(io, "scaleZeroPointA", s.scaleZeroPointA);
                 iot::mapOptional(io, "int4EncodingA", s.int4EncodingA);
                 iot::mapOptional(io, "mxBlockA", s.mxBlockA);

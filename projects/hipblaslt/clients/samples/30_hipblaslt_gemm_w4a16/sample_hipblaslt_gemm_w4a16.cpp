@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // w4a16: D = alpha * dequant(A) * B + beta * C, where
-//   A is HIP_R_4I_EXT  -- signed int4 weights, two per byte, element 2n in the
+//   A is HIP_R_4I      -- signed int4 weights, two per byte, element 2n in the
 //                         low nibble of byte n
 //   B is HIP_R_16BF    -- bf16 activations
 //   the A scale is a dense [M][ceil(K/G)] HIP_R_16BF tensor, one scale per G
@@ -106,7 +106,7 @@ int main()
 
     hipblasLtMatrixLayout_t layoutA, layoutB, layoutC, layoutD;
     // A is transposed (TN), so its layout is k x m.
-    CHECK_LT(hipblasLtMatrixLayoutCreate(&layoutA, static_cast<hipDataType>(HIP_R_4I_EXT), k, m, k));
+    CHECK_LT(hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_4I, k, m, k));
     CHECK_LT(hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_16BF, k, n, k));
     CHECK_LT(hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_16BF, m, n, m));
     CHECK_LT(hipblasLtMatrixLayoutCreate(&layoutD, HIP_R_16BF, m, n, m));
@@ -119,9 +119,9 @@ int main()
 
     // The group scale: mode first, then the pointer. Setting the pointer on a
     // descriptor whose A scale mode is still None would default it to Scalar.
-    hipblasLtMatmulMatrixScale_t scaleMode
-        = (groupSize == 32) ? HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT
-                            : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT;
+    hipblasLtMatmulMatrixScale_t scaleMode = (groupSize == 32)
+                                                 ? HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_EXT
+                                                 : HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_EXT;
     CHECK_LT(hipblasLtMatmulDescSetAttribute(
         desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scaleMode, sizeof(scaleMode)));
     CHECK_LT(hipblasLtMatmulDescSetAttribute(

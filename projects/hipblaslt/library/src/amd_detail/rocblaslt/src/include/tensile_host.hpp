@@ -219,12 +219,6 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
  ******************************************************/
 inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
 {
-    // w4a16 weights. HIP_R_4I_EXT is a hipBLASLt extension value, not a
-    // hipDataType enumerator, so it is tested before the switch rather than
-    // written as a (out-of-enum, -Wswitch-warning) case label.
-    if(static_cast<int>(type) == HIP_R_4I_EXT)
-        return rocisa::DataType::Int4;
-
     switch(type)
     {
     case HIP_R_16F:
@@ -258,6 +252,9 @@ inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
         return rocisa::DataType::BFloat6;
     case HIP_R_4F_E2M1:
         return rocisa::DataType::Float4;
+    // w4a16 weights: signed int4, two elements per byte.
+    case HIP_R_4I:
+        return rocisa::DataType::Int4;
     default:
         assert(!"hipDataType_to_tensile_type: non-supported type");
         return rocisa::DataType::None;

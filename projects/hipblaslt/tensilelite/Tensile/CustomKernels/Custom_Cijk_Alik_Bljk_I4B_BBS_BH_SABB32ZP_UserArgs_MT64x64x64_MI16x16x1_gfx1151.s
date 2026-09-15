@@ -4,13 +4,13 @@
 /******************************************/
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
-.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
-.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
 .p2align 8
-.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151,@function
+.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151,@function
 .section .rodata,#alloc
 .p2align 6
-.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 254 // vgprs
   .amdhsa_next_free_sgpr 86 // sgprs
@@ -45,15 +45,13 @@
 custom.config:
   InternalSupportParams:
     KernArgsVersion: 3
-  LocalReadVectorWidthA: -1
-  LocalReadVectorWidthB: -1
   StaggerU: 0
 amdhsa.version:
   - 1
   - 1
 amdhsa.kernels:
-  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
-    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151.kd'
+  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151.kd'
     .language:                   OpenCL C
     .language_version:
       - 2
@@ -223,7 +221,7 @@ amdhsa.kernels:
     .wavefront_size:             32
 ...
 .end_amdgpu_metadata
-Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64BZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151:
+Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151:
 label_ASM_Start:  /// Main body of the asm kernel
 
 /******************************************/
@@ -1265,8 +1263,8 @@ label_StridedBatchedGemmLoadA_End:  /// End Computing the Batch Matrix's base ad
 s_mov_b32 s[sgprSrdA+3], Srd127_96                 // Set bits 127_96 in SRD
 
 /* global read addresses: block-scale A srd */
-s_add_u32 s[sgprStrideScaleA], s[sgprSizeL], 0x3f  // SizeL + G-1
-s_lshr_b32 s[sgprStrideScaleA], s[sgprStrideScaleA], 6 // StrideScaleA = ceil(SizeL/64) scale elements
+s_add_u32 s[sgprStrideScaleA], s[sgprSizeL], 0x1f  // SizeL + G-1
+s_lshr_b32 s[sgprStrideScaleA], s[sgprStrideScaleA], 5 // StrideScaleA = ceil(SizeL/32) scale elements
 s_mul_i32 s16, s[sgprWorkGroup0], 64               // scaleA: workgroup row origin
 s_mul_i32 s16, s16, s[sgprStrideScaleA]            // scaleA: * row stride
 s_mul_i32 s16, s16, 2                              // scaleA: elements -> bytes
@@ -1388,7 +1386,7 @@ s_mov_b32 s[sgprSrdB+3], Srd127_96                 // Set bits 127_96 in SRD
 v_mul_lo_u32 v16, s[sgprStrideA0I], v[6]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+0+0], vcc_lo, v[14], v[16+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+0+0], 0x8, v[vgprGlobalReadOffsetA+0+0] // add prepad for pointer shift
-v_lshrrev_b32 v16, 6, v14                          // scaleA: kGroup = k/64
+v_lshrrev_b32 v16, 5, v14                          // scaleA: kGroup = k/32
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+0], s[sgprStrideScaleA], v6 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+0], v16, v[vgprGlobalReadOffsetScaleA+0] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+0], 1, v[vgprGlobalReadOffsetScaleA+0] // scaleA: elements -> bytes
@@ -1402,7 +1400,7 @@ v_lshrrev_b32 v[vgprGlobalReadOffsetA+0], 1, v[vgprGlobalReadOffsetA+0] //  (mul
 v_mul_lo_u32 v16, s[sgprStrideA0I], v[7]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+1+0], vcc_lo, v[14], v[16+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+1+0], 0x8, v[vgprGlobalReadOffsetA+1+0] // add prepad for pointer shift
-v_lshrrev_b32 v16, 6, v14                          // scaleA: kGroup = k/64
+v_lshrrev_b32 v16, 5, v14                          // scaleA: kGroup = k/32
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+1], s[sgprStrideScaleA], v7 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+1], v16, v[vgprGlobalReadOffsetScaleA+1] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+1], 1, v[vgprGlobalReadOffsetScaleA+1] // scaleA: elements -> bytes
@@ -1416,7 +1414,7 @@ v_lshrrev_b32 v[vgprGlobalReadOffsetA+1], 1, v[vgprGlobalReadOffsetA+1] //  (mul
 v_mul_lo_u32 v16, s[sgprStrideA0I], v[8]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+2+0], vcc_lo, v[14], v[16+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+2+0], 0x8, v[vgprGlobalReadOffsetA+2+0] // add prepad for pointer shift
-v_lshrrev_b32 v16, 6, v14                          // scaleA: kGroup = k/64
+v_lshrrev_b32 v16, 5, v14                          // scaleA: kGroup = k/32
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+2], s[sgprStrideScaleA], v8 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+2], v16, v[vgprGlobalReadOffsetScaleA+2] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+2], 1, v[vgprGlobalReadOffsetScaleA+2] // scaleA: elements -> bytes
@@ -1430,7 +1428,7 @@ v_lshrrev_b32 v[vgprGlobalReadOffsetA+2], 1, v[vgprGlobalReadOffsetA+2] //  (mul
 v_mul_lo_u32 v16, s[sgprStrideA0I], v[9]           // mul d1 lower
 v_add_co_u32 v[vgprGlobalReadOffsetA+3+0], vcc_lo, v[14], v[16+0] // accumulate K lower
 v_add_nc_u32 v[vgprGlobalReadOffsetA+3+0], 0x8, v[vgprGlobalReadOffsetA+3+0] // add prepad for pointer shift
-v_lshrrev_b32 v16, 6, v14                          // scaleA: kGroup = k/64
+v_lshrrev_b32 v16, 5, v14                          // scaleA: kGroup = k/32
 v_mul_lo_u32 v[vgprGlobalReadOffsetScaleA+3], s[sgprStrideScaleA], v9 // scaleA: row * StrideScaleA
 v_add_nc_u32 v[vgprGlobalReadOffsetScaleA+3], v16, v[vgprGlobalReadOffsetScaleA+3] // scaleA: + kGroup
 v_lshlrev_b32 v[vgprGlobalReadOffsetScaleA+3], 1, v[vgprGlobalReadOffsetScaleA+3] // scaleA: elements -> bytes
@@ -1625,13 +1623,13 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s17 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
-/* global read inc block-scale A (2 bytes) */
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x2 // scaleA SRD += inc(lower)
+/* global read inc block-scale A (4 bytes) */
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4 // scaleA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x2 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x1 // scaleZeroA SRD += inc(lower)
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4 // scaleA limit -= inc
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x2 // scaleZeroA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x1 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x2 // scaleZeroA limit -= inc
 
 /* global read inc B loopL */
 s_add_u32 s18, s[sgprLoopCounterL], 1              // remove pf(1)
@@ -2214,13 +2212,13 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s83 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
-/* global read inc block-scale A (2 bytes) */
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x2 // scaleA SRD += inc(lower)
+/* global read inc block-scale A (4 bytes) */
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4 // scaleA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x2 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x1 // scaleZeroA SRD += inc(lower)
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4 // scaleA limit -= inc
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x2 // scaleZeroA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x1 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x2 // scaleZeroA limit -= inc
 
 /* global read inc B loopL */
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?
@@ -2749,13 +2747,13 @@ s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s83 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
-/* global read inc block-scale A (2 bytes) */
-s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x2 // scaleA SRD += inc(lower)
+/* global read inc block-scale A (4 bytes) */
+s_add_u32 s[sgprSrdScaleA+0], s[sgprSrdScaleA+0], 0x4 // scaleA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprSrdScaleA+1], 0 // scaleA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x2 // scaleA limit -= inc
-s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x1 // scaleZeroA SRD += inc(lower)
+s_sub_u32 s[sgprSrdScaleA+2], s[sgprSrdScaleA+2], 0x4 // scaleA limit -= inc
+s_add_u32 s[sgprSrdScaleZeroA+0], s[sgprSrdScaleZeroA+0], 0x2 // scaleZeroA SRD += inc(lower)
 s_addc_u32 s[sgprSrdScaleZeroA+1], s[sgprSrdScaleZeroA+1], 0 // scaleZeroA SRD += inc(upper)
-s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x1 // scaleZeroA limit -= inc
+s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], 0x2 // scaleZeroA limit -= inc
 
 /* global read inc B loopL */
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?

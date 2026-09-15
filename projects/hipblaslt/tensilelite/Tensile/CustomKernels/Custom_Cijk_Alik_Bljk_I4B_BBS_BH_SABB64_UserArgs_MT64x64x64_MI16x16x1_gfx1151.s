@@ -4,13 +4,13 @@
 /******************************************/
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
 .text
-.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151
-.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+.protected Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+.globl Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151
 .p2align 8
-.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151,@function
+.type Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151,@function
 .section .rodata,#alloc
 .p2align 6
-.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+.amdhsa_kernel Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 254 // vgprs
   .amdhsa_next_free_sgpr 80 // sgprs
@@ -45,15 +45,13 @@
 custom.config:
   InternalSupportParams:
     KernArgsVersion: 3
-  LocalReadVectorWidthA: -1
-  LocalReadVectorWidthB: -1
   StaggerU: 0
 amdhsa.version:
   - 1
   - 1
 amdhsa.kernels:
-  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151
-    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151.kd'
+  - .name: Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151
+    .symbol: 'Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151.kd'
     .language:                   OpenCL C
     .language_version:
       - 2
@@ -217,7 +215,7 @@ amdhsa.kernels:
     .wavefront_size:             32
 ...
 .end_amdgpu_metadata
-Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64B_UserArgs_MT64x64x64_MI16x16x1_gfx1151:
+Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151:
 label_ASM_Start:  /// Main body of the asm kernel
 
 /******************************************/

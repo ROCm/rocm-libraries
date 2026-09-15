@@ -3280,40 +3280,6 @@ namespace TensileLite
                 }
             };
 
-            struct DataTypeScaleA
-                : public Predicate_CRTP<DataTypeScaleA, ContractionProblemGemm>
-            {
-                enum
-                {
-                    HasIndex = false,
-                    HasValue = true
-                };
-                rocisa::DataType value;
-
-                DataTypeScaleA() = default;
-                DataTypeScaleA(rocisa::DataType value)
-                    : value(value)
-                {
-                }
-
-                static std::string Type()
-                {
-                    return "DataTypeScaleA";
-                }
-
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    return problem.scaleTypeA() == value;
-                }
-
-                virtual bool debugEval(ContractionProblemGemm const& problem,
-                                       std::ostream&                 stream) const override
-                {
-                    return debugEvalCmp(
-                        problem, stream, "prob", problem.scaleTypeA(), "==", "sol", value);
-                }
-            };
-
             struct DataTypeMXSA
                 : public Predicate_CRTP<DataTypeMXSA, ContractionProblemGemm>
             {

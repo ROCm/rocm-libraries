@@ -22,6 +22,8 @@ Datatypes:
         bf6_r: 32
         f4_r: 33
         e5m3_r: 34
+        # HIP_R_4I: signed int4, two elements per byte (w4a16 weights).
+        i4_r: 16
         hipblaslt_datatype_invalid: 255
   - hipblasComputeType_t:
       bases: [ c_int ]

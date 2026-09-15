@@ -73,7 +73,7 @@ class ProblemType:
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
                  'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A',
-                 'scaleBlockSizeA', 'scaleTypeA', 'scaleZeroPointA', 'int4EncodingA']
+                 'scaleBlockSizeA', 'scaleZeroPointA', 'int4EncodingA']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -265,7 +265,6 @@ class ProblemType:
         # w4a16 group scale (UseScaleAB="Block"): K-group size and scale element
         # type. Zero / compute type when the mode is off.
         rv.scaleBlockSizeA = d.get('ScaleBlockSizeA', 0)
-        rv.scaleTypeA = DataType(d['DataTypeScaleA']) if 'DataTypeScaleA' in d else computeType
         rv.scaleZeroPointA = bool(d.get('ScaleZeroPointA', False))
         rv.int4EncodingA = d.get('Int4EncodingA', 'Signed')
         rv.useScaleCD = False
@@ -429,7 +428,6 @@ class ProblemType:
             predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
             if self.useScaleAB == "Block":
                 predicates.append(ProblemPredicate("ScaleBlockSizeA", value=self.scaleBlockSizeA))
-                predicates.append(ProblemPredicate("DataTypeScaleA", value=self.scaleTypeA))
                 predicates.append(ProblemPredicate("ScaleZeroPointA", value=self.scaleZeroPointA))
                 predicates.append(ProblemPredicate("Int4EncodingA", value=self.int4EncodingA))
             predicates.append(ProblemPredicate("UseScaleCD", value=self.useScaleCD))

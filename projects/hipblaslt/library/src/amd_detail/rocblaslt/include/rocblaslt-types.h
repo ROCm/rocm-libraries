@@ -499,22 +499,15 @@ struct RocblasltContractionProblem
         Block_32_UE5M3,
         Block_16_UE5M3,
         Block_32_UE8M0_32_8_EXT,
-        // w4a16 group scaling: dense [M][ceil(K/G)] bf16 scales, one per G
-        // consecutive K elements of a row. Symmetric (no zero-point).
-        Block_32_BF16,
-        Block_128_BF16,
-        Block_32_BF16_ZP,
-        Block_128_BF16_ZP,
-        // Same, with fp16 scales; the scale element type follows B's type.
-        Block_32_F16,
-        Block_128_F16,
-        Block_32_F16_ZP,
-        Block_128_F16_ZP,
-        // Group size 64, in both scale types.
-        Block_64_BF16,
-        Block_64_BF16_ZP,
-        Block_64_F16,
-        Block_64_F16_ZP,
+        // w4a16 group scaling: dense [M][ceil(K/G)] scales, one per G
+        // consecutive K elements of a row. The scale element type is B's, so it
+        // is not part of the mode. _ZP adds a packed int4 zero-point region.
+        Block_32,
+        Block_64,
+        Block_128,
+        Block_32_ZP,
+        Block_64_ZP,
+        Block_128_ZP,
     };
 
     hipblasOperation_t trans_a;

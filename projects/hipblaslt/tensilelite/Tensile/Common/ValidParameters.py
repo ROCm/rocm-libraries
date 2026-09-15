@@ -1337,7 +1337,6 @@ _skipTypeCheck = {
     "MacDataTypeA", "MacDataTypeB",
     "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
     "DataTypeMXSA", "DataTypeMXSB",
-    "DataTypeScaleA",
     "DestDataType", "ComputeDataType",
     "F32XdlMathOp",  # Also converted to DataType
 }

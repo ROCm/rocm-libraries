@@ -456,12 +456,6 @@ namespace
 
     rocisa::DataType hip2TensileType(hipDataType type)
     {
-        // w4a16 weights. HIP_R_4I_EXT is a hipBLASLt extension value, not a
-        // hipDataType enumerator, so it is tested before the switch rather than
-        // written as a (out-of-enum, -Wswitch-warning) case label.
-        if(static_cast<int>(type) == HIP_R_4I_EXT)
-            return rocisa::DataType::Int4;
-
         switch(type)
         {
         case HIP_R_32F:
@@ -494,6 +488,9 @@ namespace
             return rocisa::DataType::BFloat6;
         case HIP_R_4F_E2M1:
             return rocisa::DataType::Float4;
+        // w4a16 weights: signed int4, two elements per byte.
+        case HIP_R_4I:
+            return rocisa::DataType::Int4;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -535,7 +532,7 @@ namespace
         case rocisa::DataType::Float4:
             return static_cast<hipDataType>(HIP_R_4F_E2M1);
         case rocisa::DataType::Int4:
-            return static_cast<hipDataType>(HIP_R_4I_EXT);
+            return HIP_R_4I;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -628,41 +625,17 @@ namespace
     {
         switch(fmt)
         {
-        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
             return 32;
-        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
             return 64;
-        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
             return 128;
         default:
             return 0;
-        }
-    }
-
-    /// Element type of the w4a16 group scale tensor: it always matches B's
-    /// type, so the mode name carries it.
-    inline rocisa::DataType blockScaleAType(RocblasltContractionProblem::ScalingFormat fmt)
-    {
-        switch(fmt)
-        {
-        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
-            return rocisa::DataType::Half;
-        default:
-            return rocisa::DataType::BFloat16;
         }
     }
 
@@ -683,12 +656,9 @@ namespace
     {
         switch(fmt)
         {
-        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
             return true;
         default:
             return false;
@@ -715,8 +685,9 @@ namespace
             tensileProblem.setUseScaleAB("Block");
             // Dense [M][ceil(K/G)], group dimension innermost. setScaleA later
             // is a no-op once "Block" is set, so ordering is safe.
+            // The scale shares B's element type.
             tensileProblem.setScaleBlockSizeA(gs,
-                                              blockScaleAType(prob.scaleAType),
+                                              hipDataType_to_tensile_type(prob.b_type),
                                               static_cast<size_t>(prob.m),
                                               TensileLite::CeilDivide<size_t>(prob.k, gs),
                                               isBlockScaleAZeroPoint(prob.scaleAType));
@@ -2130,8 +2101,12 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // w4a16 block scales are not MX scales: they travel as the ordinary
         // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
-        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32:
+        case RocblasltContractionProblem::ScalingFormat::Block_64:
+        case RocblasltContractionProblem::ScalingFormat::Block_128:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2162,8 +2137,12 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // w4a16 block scales are not MX scales: they travel as the ordinary
         // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
-        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32:
+        case RocblasltContractionProblem::ScalingFormat::Block_64:
+        case RocblasltContractionProblem::ScalingFormat::Block_128:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2397,8 +2376,12 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // w4a16 block scales are not MX scales: they travel as the ordinary
         // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
-        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32:
+        case RocblasltContractionProblem::ScalingFormat::Block_64:
+        case RocblasltContractionProblem::ScalingFormat::Block_128:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
@@ -2428,8 +2411,12 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Vector:
         // w4a16 block scales are not MX scales: they travel as the ordinary
         // scaleA pointer and are handled by the setUseScaleAB("Block") branch.
-        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
-        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32:
+        case RocblasltContractionProblem::ScalingFormat::Block_64:
+        case RocblasltContractionProblem::ScalingFormat::Block_128:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
