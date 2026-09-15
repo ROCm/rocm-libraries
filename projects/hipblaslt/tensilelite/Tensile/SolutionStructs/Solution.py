@@ -2811,7 +2811,6 @@ class Solution(collections.abc.Mapping):
         return
 
     if state["CompactLoopStore"]:
-      state["CompactLoopStore"] = False
       if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
         reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
         return
