@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -734,7 +734,7 @@ void stedc_getError(const rocblas_handle handle,
         // error is ||hD - hDRes|| / ||hD||
         // using frobenius norm
         err = norm_error('F', 1, n, 1, hD[0], hDRes[0]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         // check eigenvectors if required
         if(evect != rocblas_evect_none)
@@ -749,12 +749,12 @@ void stedc_getError(const rocblas_handle handle,
             // Orthogonal error
             auto OE = C * adjoint(C) - HMatT::Eye(n, n);
             err = OE.max_col_norm();
-            *max_errv = err > *max_err ? err : *max_err;
+            *max_errv = rocblas_max_nan(err, *max_errv);
 
             // Residual error
             auto RE = AorT - C * D * adjoint(C);
             err = RE.norm() / AorT.norm();
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }
@@ -958,8 +958,8 @@ void testing_stedc(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, std::max(max_err, max_errv));
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error", "errorv");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_err, max_errv);
             }
             else
             {
@@ -971,7 +971,7 @@ void testing_stedc(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, std::max(max_err, max_errv));
+                rocsolver_bench_output(gpu_time_used, max_err, max_errv);
             else
                 rocsolver_bench_output(gpu_time_used);
         }
