@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: ``if solution["ProblemType"] != problemType`` at
-``Tensile/BenchmarkProblems.py:302`` (line numbering in this source tree; the
+``tensilelite/BenchmarkProblems.py:302`` (line numbering in this source tree; the
 enclosing function is ``_generateCustomKernelSolutions``).
 
 Branch 0643ca620d99a48ea2d2d60b273d12754ef5c5b9.

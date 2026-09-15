@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: ``if ForceRedoBenchmarkProblems or not exists``
-at ``Tensile/BenchmarkProblems.py:740`` inside ``benchmarkProblemType``.
+at ``tensilelite/BenchmarkProblems.py:740`` inside ``benchmarkProblemType``.
 
 Branch 8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5.
 
