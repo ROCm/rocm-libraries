@@ -22,33 +22,32 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
     const auto chw = args.c * args.hw;
     const auto nhw = args.n * args.hw;
 
-    COMPUTE_TYPE pvscale;
-    COMPUTE_TYPE pvbias;
+    COMPUTE_TYPE pvScale;
+    COMPUTE_TYPE pvBias;
     COMPUTE_TYPE mean;
     COMPUTE_TYPE variance;
     COMPUTE_TYPE invVariance;
 
-    __shared__ COMPUTE_TYPE lcl_bias;
-    __shared__ COMPUTE_TYPE lcl_scale;
-    __shared__ COMPUTE_TYPE lcl_reduce_sum[localSize];
-    __shared__ COMPUTE_TYPE lcl_reduce_sqsum[localSize];
+    __shared__ COMPUTE_TYPE lclBias;
+    __shared__ COMPUTE_TYPE lclScale;
+    __shared__ COMPUTE_TYPE lclReduceSum[localSize];
+    __shared__ COMPUTE_TYPE lclReduceSqSum[localSize];
 
     long long index = 0;
     const long long lid = threadIdx.x;
     const long long grpid = blockIdx.x;
 
+    // Load scale and bias for the channel into shared memory
     if(lid == 0)
     {
-        lcl_scale = toAccum(scale[grpid]);
-        lcl_bias = toAccum(bias[grpid]);
+        lclScale = toAccum(scale[grpid]);
+        lclBias = toAccum(bias[grpid]);
     }
-
     __syncthreads();
 
     // Accumulate sum(x) and sum(x*x) over the N*H*W elements
-    COMPUTE_TYPE local_sum = static_cast<COMPUTE_TYPE>(0);
-    COMPUTE_TYPE local_sqsum = static_cast<COMPUTE_TYPE>(0);
-
+    COMPUTE_TYPE sum = static_cast<COMPUTE_TYPE>(0);
+    COMPUTE_TYPE sqSum = static_cast<COMPUTE_TYPE>(0);
     for(long long i = lid; i < nhw; i += localSize)
     {
         const long long nidx = i / args.hw;
@@ -63,13 +62,12 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
             index = nidx * chw + grpid * args.hw + hwidx;
         }
 
-        const COMPUTE_TYPE xval = toAccum(input[index]);
-        local_sum += xval;
-        local_sqsum += xval * xval;
+        const COMPUTE_TYPE xVal = toAccum(input[index]);
+        sum += xVal;
+        sqSum += xVal * xVal;
     }
-
-    lcl_reduce_sum[lid] = local_sum;
-    lcl_reduce_sqsum[lid] = local_sqsum;
+    lclReduceSum[lid] = sum;
+    lclReduceSqSum[lid] = sqSum;
     __syncthreads();
 
     // Block reduction to compute the total sum and sum of squares for the channel
@@ -77,27 +75,26 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
     {
         if(lid < s)
         {
-            lcl_reduce_sum[lid] += lcl_reduce_sum[lid + s];
-            lcl_reduce_sqsum[lid] += lcl_reduce_sqsum[lid + s];
+            lclReduceSum[lid] += lclReduceSum[lid + s];
+            lclReduceSqSum[lid] += lclReduceSqSum[lid + s];
         }
         __syncthreads();
     }
 
+    // Compute mean, variance and invVariance for the channel
     const COMPUTE_TYPE invNhw = static_cast<COMPUTE_TYPE>(1.0) / static_cast<COMPUTE_TYPE>(nhw);
-
-    mean = lcl_reduce_sum[0] * invNhw;
-    variance = lcl_reduce_sqsum[0] * invNhw - mean * mean;
+    mean = lclReduceSum[0] * invNhw;
+    variance = lclReduceSqSum[0] * invNhw - mean * mean;
     if(variance < static_cast<COMPUTE_TYPE>(0))
     {
         variance = static_cast<COMPUTE_TYPE>(0);
     }
-
     invVariance = rsqrt(variance + toAccum(args.epsilon));
-    pvscale = lcl_scale;
-    pvbias = lcl_bias;
+    pvScale = lclScale;
+    pvBias = lclBias;
     __syncthreads();
 
-    // Normalize each element, apply scale and bias, and write to output
+    // Normalize each element, apply scale and bias and write to output
     for(long long i = lid; i < nhw; i += localSize)
     {
         const long long nidx = i / args.hw;
@@ -112,10 +109,11 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
             index = nidx * chw + grpid * args.hw + hwidx;
         }
 
-        const COMPUTE_TYPE xval = toAccum(input[index]);
-        COMPUTE_TYPE yval = (xval - mean) * invVariance;
-        yval = pvscale * yval + pvbias;
-        output[index] = fromAccum(yval);
+        const COMPUTE_TYPE xVal = toAccum(input[index]);
+        COMPUTE_TYPE yVal = (xVal - mean) * invVariance;
+        yVal = pvScale * yVal + pvBias;
+        OUTPUT_TYPE* tag = nullptr;
+        output[index] = fromAccum(yVal, tag);
     }
 
     if(lid == 0)
@@ -123,11 +121,13 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
         // Write save mean and save inverse variance if requested
         if(args.mean != nullptr && args.invVariance != nullptr)
         {
+            MEAN_VAR_TYPE* tag = nullptr;
+
             auto* saveMean = static_cast<MEAN_VAR_TYPE*>(args.mean);
-            saveMean[grpid] = fromAccum(mean);
+            saveMean[grpid] = fromAccum(mean, tag);
 
             auto* saveInvVar = static_cast<MEAN_VAR_TYPE*>(args.invVariance);
-            saveInvVar[grpid] = fromAccum(invVariance);
+            saveInvVar[grpid] = fromAccum(invVariance, tag);
         }
 
         // Update running mean and variance if requested
@@ -158,8 +158,10 @@ extern "C" __global__ void BatchnormFwdTrainRef(BatchnormFwdTrainArgs args)
                 = (static_cast<COMPUTE_TYPE>(1.0) - expAvgFactor) * prevRunVar
                   + expAvgFactor * adjustedVariance;
 
-            nextRunningMean[grpid] = fromAccum(nextRunMean);
-            nextRunningVariance[grpid] = fromAccum(nextRunVar);
+            MEAN_VAR_TYPE* tag = nullptr;
+
+            nextRunningMean[grpid] = fromAccum(nextRunMean, tag);
+            nextRunningVariance[grpid] = fromAccum(nextRunVar, tag);
         }
     }
 }
