@@ -7,8 +7,8 @@ relative to the repository root.
 ## Shape of the harness
 
 A standalone program, built against an **installed** hipDNN
-(`find_package(hipdnn_frontend)`, `find_package(hipdnn_data_sdk)`), that does five
-things in order:
+(`find_package(hipdnn_frontend)`, `find_package(hipdnn_data_sdk)`,
+`find_package(hipdnn_test_sdk)`), that does five things in order:
 
 1. Builds or deserializes the graph.
 2. Allocates one buffer per non-virtual tensor UID, twice — a reference set and a
@@ -23,7 +23,7 @@ No in-tree program does all five. Each piece exists:
 |---|---|
 | 1, 3, 5 for a fused graph | `projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp:144-207` |
 | 2 (buffers, host/device migration) | `hipdnn_data_sdk` `utilities::Tensor<T>` / `MigratableMemory` — `memory().hostData()`, `memory().deviceData()`, `markHostModified()`, `markDeviceModified()` |
-| 4 (hipRTC compile + module launch) | `projects/hipdnn/samples/example_engine_plugin/src/hip/` — `HipKernelCompiler`, `HipCompiledProgram`, `HipRunnableKernel`; MIT-licensed and self-contained |
+| 4 (hipRTC compile + module launch) | `projects/hipdnn/samples/example_engine_plugin/src/hip/` — `HipKernelCompiler`, `HipCompiledProgram`, `HipRunnableKernel`; MIT-licensed. **Not self-contained — see below.** |
 | 5 (validators) | `hipdnn_test_sdk::utilities::createAllCloseValidator<T>()`, `CpuFpReferenceValidation<T>`, `validateAndReport<T>` |
 
 Copy `example_engine_plugin/src/hip/` rather than re-deriving the hipRTC sequence.
@@ -31,6 +31,23 @@ It is `hiprtcCreateProgram` → `hiprtcCompileProgram` (on failure,
 `hiprtcGetProgramLogSize` / `hiprtcGetProgramLog` — always print it) →
 `hiprtcGetCodeSize` / `hiprtcGetCode` → `hipModuleLoadData` → `hipModuleGetFunction`
 → `hipModuleLaunchKernel`.
+
+**Two things that directory does not give you, and you must supply.** It does not build
+in isolation: `HipCompiledProgram.cpp:8-9` includes `kernel_includes.hpp` and
+`kernel_sources.hpp`, which exist nowhere in the source tree — they are generated at
+build time by the sibling `kernels/` directory. And its `IKernelCompiler`
+(`samples/example_engine_plugin/src/hip/IKernelCompiler.hpp:16-25`) takes an **embedded-table
+kernel file name**, not a source string — `compile(const std::string& kernelFileName, ...)` —
+so a kernel living in `$WORK` cannot be handed to it unmodified. Expect to adapt the
+copied compiler to accept your source text.
+
+**Compile with the production envelope, not this compiler's defaults.** `HipKernelCompiler`
+strips the arch suffixes and resolves headers through the build-time embedded table
+(`HipCompiledProgram.cpp:25-41`). The envelope your kernel must actually satisfy is the
+provider's — `--offload-arch=<raw gcnArchName, suffixes intact>`, the provider's header
+list, no `-O3` — as [device-envelope.md](device-envelope.md) defines it. The two are not
+interchangeable: `sramecc` and `xnack` are code-object target features. The RUNBOOK's
+compile gate means the provider's envelope.
 
 Do **not** build the harness inside the hip-kernel-provider's ingestor path. That
 path is the integration skill's territory, and a kernel proven there is proven
