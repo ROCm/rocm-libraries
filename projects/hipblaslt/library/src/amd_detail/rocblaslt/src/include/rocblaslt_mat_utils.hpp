@@ -461,6 +461,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
         case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_64_F16_ZP:
             blockScaleA = true;
             break;
         default:
@@ -471,7 +475,8 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         {
             log_error(__func__,
                       "w4a16 requires HIP_R_4I_EXT matrix A together with a "
-                      "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,128}_16{BF,F}[_ZP]_EXT A scale mode; "
+                      "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,64,128}_16{BF,F}[_ZP]_EXT A scale "
+                      "mode; "
                       "got a_type=",
                       static_cast<int>(matA->type),
                       " scaleAType=",

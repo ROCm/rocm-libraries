@@ -747,6 +747,39 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
         == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // validate round-trip
     ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // ditto
 
+    // The w4a16 A-scale modes. Every one of them, because the setter is a switch
+    // and the getter an independent if-chain: a mode added to one and not the
+    // other round-trips as some *other* mode rather than failing.
+    const hipblasLtMatmulMatrixScale_t w4a16Modes[] = {
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16BF_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16BF_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT,
+        HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT,
+    };
+    for(auto mode : w4a16Modes)
+    {
+        uint32_t modeSet = mode, modeGot = 0xFFFFFFFFu;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(
+                matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &modeSet, sizeof(uint32_t)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                              HIPBLASLT_MATMUL_DESC_A_SCALE_MODE,
+                                                              &modeGot,
+                                                              sizeof(uint32_t),
+                                                              &sizeWritten),
+                              HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(modeGot == modeSet);
+    }
+
     hipStream_t stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
