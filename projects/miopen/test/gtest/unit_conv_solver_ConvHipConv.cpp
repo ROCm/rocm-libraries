@@ -46,6 +46,24 @@ auto GetConv3dSmokeTestCases(miopenDataType_t datatype, bool tf32 = false)
     };
 }
 
+// The same cases with the depth dimension convolved instead of the spatial ones.
+//
+// Distinct from the above in where the filter's non-unit extent sits: here it is
+// z, which a solver reading only y and x drops. No tf32 instantiation, because
+// hipconv has no kernel for these at fp32.
+auto GetConv3dDepthSmokeTestCases(miopenDataType_t datatype, bool tf32 = false)
+{
+    constexpr auto layout = miopenTensorNDHWC;
+    return std::vector<TestCase>{
+        // clang-format off
+        TestCase{{datatype, layout, {4, 64, 8, 8, 1}}, {datatype, layout, {64,  4, 3, 1, 1}}, datatype, {{1, 0, 0}, {1, 1, 1}, {1, 1, 1}, 16, false, tf32}}, // 4c
+        TestCase{{datatype, layout, {4, 16, 8, 8, 1}}, {datatype, layout, {16,  8, 3, 1, 1}}, datatype, {{1, 0, 0}, {1, 1, 1}, {1, 1, 1},  2, false, tf32}}, // 8c
+        TestCase{{datatype, layout, {4, 32, 8, 8, 1}}, {datatype, layout, {32, 16, 3, 1, 1}}, datatype, {{1, 0, 0}, {1, 1, 1}, {1, 1, 1},  2, false, tf32}}, // 16c
+        TestCase{{datatype, layout, {4, 64, 8, 8, 1}}, {datatype, layout, {64, 32, 3, 1, 1}}, datatype, {{1, 0, 0}, {1, 1, 1}, {1, 1, 1},  2, false, tf32}}, // 32c
+        // clang-format on
+    };
+}
+
 const auto& GetTestParams()
 {
     static const auto params = [] {
@@ -214,6 +232,48 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenFloat,
                                                                                   true))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepth,
+    GPU_UnitTestConvSolverConvHipConvFwd_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepth,
+    GPU_UnitTestConvSolverConvHipConvBwd_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepth,
+    GPU_UnitTestConvSolverConvHipConvWrw_FP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepth,
+    GPU_UnitTestConvSolverConvHipConvFwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepth,
+    GPU_UnitTestConvSolverConvHipConvBwd_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(
+    SmokeConv3dDepth,
+    GPU_UnitTestConvSolverConvHipConvWrw_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConv3dDepthSmokeTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(SmokeConv3d,
                          GPU_UnitTestConvSolverConvHipConvFwd_TF32,

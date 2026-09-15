@@ -283,11 +283,12 @@ static size_t WrwStagingBytes(const ProblemDescription& problem)
         return 0;
     const auto k           = ProblemInterpreter::GetOutputChannelK(problem);
     const auto c           = ProblemInterpreter::GetInputChannelC(problem);
+    const auto z           = ProblemInterpreter::GetFilterDepthZ(problem);
     const auto y           = ProblemInterpreter::GetFilterHeightY(problem);
     const auto x           = ProblemInterpreter::GetFilterWidthX(problem);
     const auto group       = ProblemInterpreter::GetGroupCountG(problem);
     const auto c_per_group = c / group;
-    return static_cast<size_t>(k) * y * x * c_per_group * sizeof(float);
+    return static_cast<size_t>(k) * z * y * x * c_per_group * sizeof(float);
 }
 
 // Offset of the kernel's own scratch within the single workspace MIOpen allocates.
