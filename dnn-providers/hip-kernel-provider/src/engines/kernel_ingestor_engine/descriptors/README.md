@@ -34,6 +34,35 @@ rocKE/gfx942_attention_dense/     six descriptors, kind `rocke`, arch gfx942
 Its kernels lower at pack time through the rocKE wheel's
 `kernels/gfx942/attention_dense.py`, which ships outside this repository.
 
+### The KDP carries 4 kernels, deliberately
+
+The authored set holds 2,733 variants. It is trimmed to 4 here because every variant is
+compiled at pack time, and the full set costs several hundred seconds of comgr work on
+every build that has a production root wired — including CI. The variant set is being
+reauthored, so this subset is a placeholder and is expected to be replaced wholesale
+rather than grown one kernel at a time.
+
+The 4 were chosen by set cover over the tuning knobs, so between them they exhibit every
+value the full set gives to `dtype`, `block_m`, `causal`, `persistent`, `use_exp2_fast`,
+`head_size` and `waves_per_eu` — 15 distinct knob/value pairs, all covered:
+
+| kernel | dtype | block_m | causal | persistent | exp2 | head_size | waves |
+|---|---|---|---|---|---|---|---|
+| `…_sq1024_d128_c0_bm256_bn64_w2_p0_ed` | BF16 | 256 | 0 | 0 | 0 | 128 | 2 |
+| `…full_00091_…_d64_c1_bm128_e1` | BF16 | 128 | 1 | 1 | 1 | 64 | 4 |
+| `…_fp16_…_sq2048_d128_c0_bm64_bn64_w2_p0_e1` | FP16 | 64 | 0 | 0 | 1 | 128 | 2 |
+| `…_sq1024_d128_c0_bm128_bn64_w2_p0_e1` | BF16 | 128 | 0 | 0 | 1 | 128 | 2 |
+
+Four rather than one: the packer only enters its parallel path above a single variant
+(`pipeline.py`, `len(jobs) < 2` returns early), so a one-kernel set would take the
+worker path out of every build. Keeping the metadata tuples distinct also keeps the
+loader's duplicate-name and duplicate-tuple refusals doing real work instead of passing
+vacuously.
+
+There is no config in `IngestorGenerator/configs/` for this set, so it cannot be
+regenerated from the tree — the trim was applied to the KDP directly, and the table above
+is the only record of which variants survived.
+
 ## How this root is selected, and what an empty one does
 
 `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` is a `CACHE PATH` defaulting to this directory.
