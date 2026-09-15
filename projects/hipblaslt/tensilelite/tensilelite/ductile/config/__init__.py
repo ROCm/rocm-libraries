@@ -5,7 +5,6 @@ from types import MappingProxyType
 import yaml
 
 from ...resources import ductile_defaults_text
-from ...Resources import ductile_defaults_text
 
 
 def deep_update(base: dict, override: dict) -> dict:
