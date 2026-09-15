@@ -68,18 +68,22 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
-from rocke.instances import (
-    ConvProblem,
+from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv16cSpec,
     DirectConvProblem,
+    build_direct_conv_4c,
+    build_direct_conv_16c,
+)
+from kernels.common.conv_implicit_gemm import (
+    ConvProblem,
     ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+)
+from rocke.instances import (
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
-    build_direct_conv_4c,
-    build_direct_conv_16c,
-    build_implicit_gemm_conv,
     build_universal_gemm,
 )
 
@@ -676,9 +680,9 @@ class TestHelpers(unittest.TestCase):
         specs build and only fail deep inside the emitter, which the sweep
         drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
         """
-        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
-        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import (
             WgradConvSpec,
             is_valid_wgrad_spec,
         )
@@ -2902,7 +2906,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
     def test_implicit_gemm_conv_chiplet_swizzle_compiles(self):
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
         )
@@ -2950,7 +2954,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         """The async-DMA conv must hoist the per-wave LDS base into
         an SGPR via ``to_sgpr_u32`` (``readfirstlane`` + SGPR-pin asm).
         """
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
         )
@@ -5016,7 +5020,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
 
     def test_16c_kernel_lowers_to_llvm(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv16cSpec,
             DirectConvProblem,
             build_direct_conv_16c,
@@ -5034,7 +5038,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
 
     def test_4c_kernel_lowers_to_llvm(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
             build_direct_conv_4c,
@@ -5265,11 +5269,11 @@ class TestCkTileLowering(unittest.TestCase):
             self.assertIn(line, src)
 
     def test_conv_source_references_grouped_convolution_kernel(self):
-        from rocke.core import lower_spec_to_cktile
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
         )
+        from rocke.core import lower_spec_to_cktile
 
         spec = ImplicitGemmConvSpec(
             problem=ConvProblem(
@@ -5382,13 +5386,12 @@ class TestCkTileLowering(unittest.TestCase):
         """``lower_spec_to_cktile`` must dispatch to gemm vs conv emitters
         based on the spec type without the caller knowing about them.
         """
-        from rocke.core import lower_spec_to_cktile
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
-            TileSpec,
-            UniversalGemmSpec,
         )
+        from rocke.core import lower_spec_to_cktile
+        from rocke.instances import TileSpec, UniversalGemmSpec
 
         gemm = UniversalGemmSpec(
             name="d_gemm",
@@ -5522,7 +5525,7 @@ class TestHipLoweringCoverage(unittest.TestCase):
         )
 
     def test_implicit_gemm_conv_lowers(self):
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
