@@ -185,6 +185,53 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, ZeroVarianceHandling)
     EXPECT_NEAR(static_cast<double>(outputTensor.getHostValue(0, 0, 1, 1)), 0.5, tolerance);
 }
 
+TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, BatchnormFwdInferenceComputeFp32)
+{
+    // Test with 2D tensor (batch, channel)
+    Tensor<half> inputTensor({4, 3});
+    Tensor<half> outputTensor({4, 3});
+    Tensor<half> scaleTensor({1, 3});
+    Tensor<half> biasTensor({1, 3});
+    Tensor<half> meanTensor({1, 3});
+    Tensor<half> varianceTensor({1, 3});
+
+    inputTensor.fillWithValue(safeTestTypeCast<half>(1.0f));
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(safeTestTypeCast<half>(1.0f), 0, i);
+        biasTensor.setHostValue(safeTestTypeCast<half>(0.0f), 0, i);
+        meanTensor.setHostValue(safeTestTypeCast<half>(1.0f), 0, i);
+        varianceTensor.setHostValue(safeTestTypeCast<half>(1.0f), 0, i);
+    }
+
+    CpuFpReferenceBatchnorm::fwdInferenceWithVariance<half, half, half, half, float>(
+        inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+}
+
+TEST(TestCpuFpReferenceBatchnormWithVarianceBfp16, BatchnormFwdInferenceComputeFp32)
+{
+    // Test with 2D tensor (batch, channel)
+    Tensor<bfloat16> inputTensor({4, 3});
+    Tensor<bfloat16> outputTensor({4, 3});
+    Tensor<bfloat16> scaleTensor({1, 3});
+    Tensor<bfloat16> biasTensor({1, 3});
+    Tensor<bfloat16> meanTensor({1, 3});
+    Tensor<bfloat16> varianceTensor({1, 3});
+
+    inputTensor.fillWithValue(safeTestTypeCast<bfloat16>(1.0f));
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, i);
+        biasTensor.setHostValue(safeTestTypeCast<bfloat16>(0.0f), 0, i);
+        meanTensor.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, i);
+        varianceTensor.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, i);
+    }
+
+    CpuFpReferenceBatchnorm::
+        fwdInferenceWithVariance<bfloat16, bfloat16, bfloat16, bfloat16, float>(
+            inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
+}
+
 // ============================================================================
 // Section 2: Epsilon Variation Tests
 // ============================================================================
