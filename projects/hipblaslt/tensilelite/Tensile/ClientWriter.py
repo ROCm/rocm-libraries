@@ -676,9 +676,11 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
+            param('mx-a-free-block', problemType.mxBlockFreeA)
             param('mx-a-type', problemType.mxTypeA.toName())
         if problemType.mxBlockB:
             param('mx-b-block', problemType.mxBlockB)
+            param('mx-b-free-block', problemType.mxBlockFreeB)
             param('mx-b-type', problemType.mxTypeB.toName())
 
         if biasTypeArgs:

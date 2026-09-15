@@ -503,10 +503,18 @@ class MasterSolutionLibrary:
                     else:
                         placeholderName += "_%s"%str(problemType.activationType).upper()
 
+                # '<free>x' is prefixed only for a 2D scaling tile, keeping every
+                # previously generated placeholder name unchanged.
                 if problemType.mxBlockA:
-                    placeholderName += ('_MXA' + str(problemType.mxTypeA) + 'B' + str(problemType.mxBlockA))
+                    tile = str(problemType.mxBlockA)
+                    if problemType.mxBlockFreeA != 1:
+                        tile = str(problemType.mxBlockFreeA) + 'x' + tile
+                    placeholderName += ('_MXA' + str(problemType.mxTypeA) + 'B' + tile)
                 if problemType.mxBlockB:
-                    placeholderName += ('_MXB' + str(problemType.mxTypeB) + 'B' + str(problemType.mxBlockB))
+                    tile = str(problemType.mxBlockB)
+                    if problemType.mxBlockFreeB != 1:
+                        tile = str(problemType.mxBlockFreeB) + 'x' + tile
+                    placeholderName += ('_MXB' + str(problemType.mxTypeB) + 'B' + tile)
 
                 if problemType.swizzleTensorA:
                     placeholderName += '_STA'

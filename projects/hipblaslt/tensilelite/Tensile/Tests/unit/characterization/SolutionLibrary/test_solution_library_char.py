@@ -437,6 +437,8 @@ class _LazyProblemType:
     activationType = _FakeAct()
     mxBlockA = 0
     mxBlockB = 0
+    mxBlockFreeA = 1
+    mxBlockFreeB = 1
     mxTypeA = _FakeType("x")
     mxTypeB = _FakeType("x")
     swizzleTensorA = False
@@ -481,6 +483,8 @@ class _LazyProblemType2:
     activationType = _FakeActAll()           # 'all' -> _A branch
     mxBlockA = 4
     mxBlockB = 4
+    mxBlockFreeA = 2                         # != 1 -> the '<free>x' 2D-tile branch
+    mxBlockFreeB = 2
     mxTypeA = _FakeType("e8")
     mxTypeB = _FakeType("e5")
     swizzleTensorA = True
@@ -521,7 +525,9 @@ def test_from_state_lazy_all_suffix_toggles(monkeypatch):
     )
     name = next(iter(rv.lazyLibraries))
     for frag in ("_A", "_MXA", "_MXB", "_STA", "_STB", "_Bias", "_Grad", "_GG",
-                 "_SAB", "_SCD", "_SAV", "_SPB", "_UA"):
+                 "_SAB", "_SCD", "_SAV", "_SPB", "_UA",
+                 # mxBlockFree{A,B} != 1 prefixes '<free>x' to each MX extent
+                 "_MXAe8B2x4", "_MXBe5B2x4"):
         assert frag in name, frag
 
 

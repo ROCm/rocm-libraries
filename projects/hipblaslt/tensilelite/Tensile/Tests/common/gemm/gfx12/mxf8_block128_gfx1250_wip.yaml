@@ -1,32 +1,45 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# MXF8 with MXBlockA/MXBlockB = 128 (one E8 scale shared by 128 K-elements, 1x128)
-# on gfx1250. Derived from mxf8_gfx1250.yaml, which covers the 1x16 and 1x32 cases.
+# MXF8 with a 128-element MX block on gfx1250, in two groups:
 #
-# STATUS: host-side only. The CPU reference, scale tensor descriptors, data
-# generation and solution parameter derivation all handle a 128-element MX block,
-# but the assembly MAC path still emits the 1x32 scaled WMMA
-# (v_wmma_scale_f32_16x16x128_f8f6f4), so the GPU consumes the wrong number of
-# scales and validation is expected to mismatch. The "_wip" suffix makes
-# config_helpers.configMarks apply a non-strict pytest.mark.xfail, so this config
-# runs but does not gate CI. Once the 1x128 assembly lands the test XPASSes; at
-# that point fold this group into mxf8_gfx1250.yaml and delete this file.
+#   group 1  MXBlockA/B: [128]       -> 1x128:   one E8 scale per (row, 128 K)
+#   group 2  MXBlockA/B: [128, 128]  -> 128x128: one E8 scale per 128x128 tile
 #
-# SCOPE: deliberately one small group (a single solution over four sizes) so the
-# 1x128 assembly work has something fast to iterate against. The parameter sweeps
-# that mxf8_gfx1250.yaml runs for 1x16 / 1x32 -- HalfPLR, TDMIterateMode,
-# PrefetchGlobalRead, GlobalSplitU, and the odd MT256x224 tile -- are NOT
-# replicated here. Widen this alongside the assembly change.
+# The list is the scaling tile written innermost (K) extent last; a bare int is
+# the same as a one-element list. Derived from mxf8_gfx1250.yaml (1x16, 1x32).
 #
-# All K sizes are multiples of 128 because AssertSummationElementMultiple is
-# raised to max(MXBlockA, MXBlockB) during derivation (Solution.py); it is also
-# set explicitly below so this file is self-describing. "tail" means K is a
-# multiple of the MX block but not of DepthU.
+# STATUS: host-side only. Reference, scale descriptors, data generation and
+# solution derivation all handle these shapes, but the assembly MAC path still
+# emits the 1x32 scaled WMMA (v_wmma_scale_f32_16x16x128_f8f6f4), so validation
+# is expected to mismatch. The "_wip" suffix makes config_helpers.configMarks
+# apply a non-strict xfail. Once the assembly lands this XPASSes -- fold both
+# groups into mxf8_gfx1250.yaml and delete this file then, and widen the
+# parameter sweeps (HalfPLR, TDMIterateMode, PrefetchGlobalRead, GlobalSplitU)
+# that mxf8_gfx1250.yaml runs for 1x16 / 1x32 and this file deliberately omits.
+#
+# TILE CHOICE: MT256x256 (MIWaveTile 8x8) does not fit -- 1049 VGPRs against a
+# 1024 budget -- and is a property of the tile, not of MX scaling: the same 8x8
+# at MXBlock 32 needs 1073. Two tiles that do fit, kept as a pair so one
+# rejection can never empty the solution set: MT256x128 is aligned to the
+# 128x128 scaling tile, MT256x224 deliberately is not, which exercises scale
+# indexing across a tile boundary that misses the MacroTile.
+#
+# All K sizes are multiples of 128 because derivation raises
+# AssertSummationElementMultiple to max(MXBlockA, MXBlockB); it is also set
+# explicitly so this file is self-describing. "tail" means K is a multiple of
+# the MX block but not of DepthU.
+#
+# Group 2 additionally needs M / N multiples of 128: the free extent raises
+# AssertFree{0,1}ElementMultiple the same way, since a partial tile would need a
+# scale covering fewer than 128 rows. Hence the edge-m size lives in group 1
+# only -- and even there it must stay a multiple of 8, because derivation also
+# raises AssertFree0ElementMultiple to the global read vector width. A
+# non-multiple is not an error, it is silently DID_NOT_SATISFY_ASSERTS.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
   BoundsCheck: 0
@@ -51,7 +64,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # TN - standard, MXF8SS Block128, E8, MT256x256
+  # TN - standard, MXF8SS 1x128, E8
   #######################################
   -
     - # ProblemType, TN
@@ -67,8 +80,8 @@ BenchmarkProblems:
       Activation: False
       SupportUserArgs: True
       UseBias: 0
-      MXBlockA: 128
-      MXBlockB: 128
+      MXBlockA: [128]
+      MXBlockB: [128]
       DataTypeMXSA: e8
       DataTypeMXSB: e8
 
@@ -80,7 +93,8 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [true]
         - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]  # MT256x128
+          - [16, 16, 128, 1,  1,  8, 7,  2, 2]  # MT256x224
         - HalfPLR: [0]
         - DepthU: [256]
         - TDMInst: [3]
@@ -122,4 +136,85 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 128]  # K = exactly one MX block
           - Exact: [256, 256, 1, 2048]
           - Exact: [256, 256, 1, 2176] # tail
-          - Exact: [257, 256, 1, 2048] # edge-m
+          - Exact: [264, 256, 1, 2048] # edge-m: partial MacroTile, still AF0EM-legal
+
+  #######################################
+  # TN - standard, MXF8SS 128x128, E8
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      # One scale covers 128 free elements (M for A, N for B) as well as 128 K
+      # elements. This is the only difference from group 1.
+      MXBlockA: [128, 128]
+      MXBlockB: [128, 128]
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]  # MT256x128
+          - [16, 16, 128, 1,  1,  8, 7,  2, 2]  # MT256x224
+        - HalfPLR: [0]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [false]
+        - AssertSummationElementMultiple: [ 128 ]
+        # Derivation raises these to max(MXBlockFree{A,B}, ...) anyway; set
+        # explicitly so the alignment requirement is visible in the config.
+        - AssertFree0ElementMultiple: [ 128 ]
+        - AssertFree1ElementMultiple: [ 128 ]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 128]  # K = exactly one MX block
+          - Exact: [256, 256, 1, 2048]
+          - Exact: [256, 256, 1, 2176] # K tail
+          - Exact: [384, 256, 1, 2048] # M = 3 free tiles, not a MacroTile multiple

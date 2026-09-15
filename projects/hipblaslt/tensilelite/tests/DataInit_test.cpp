@@ -59,7 +59,9 @@ namespace
                                        size_t           K = 256,
                                        size_t           batch  = 1,
                                        bool             transA = true,
-                                       bool             transB = false)
+                                       bool             transB = false,
+                                       int              mxBlockFreeA = 1,
+                                       int              mxBlockFreeB = 1)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(
             transA, transB,
@@ -73,8 +75,12 @@ namespace
             M, M * N,                       // ldc, strideC
             M, M * N,                       // ldd, strideD
             0.0);                           // beta
-        if(mxBlockA > 0) problem.setMXScaleA(rocisa::DataType::E8, mxBlockA);
-        if(mxBlockB > 0) problem.setMXScaleB(rocisa::DataType::E8, mxBlockB);
+        if(mxBlockA > 0)
+            problem.setMXScaleA(rocisa::DataType::E8, mxBlockA, {},
+                                /*padScaleTensorFreeDim=*/true, mxBlockFreeA);
+        if(mxBlockB > 0)
+            problem.setMXScaleB(rocisa::DataType::E8, mxBlockB, {},
+                                /*padScaleTensorFreeDim=*/true, mxBlockFreeB);
         return problem;
     }
 } // namespace
@@ -211,6 +217,30 @@ TEST(IsMXProblem, BothFP8Block128)
     EXPECT_TRUE(isMXProblem(p));
     EXPECT_EQ(p.mxBlockA(), 128);
     EXPECT_EQ(p.mxBlockB(), 128);
+}
+TEST(IsMXProblem, BothFP8FreeTile128)
+{
+    // 128x128 block scaling. isMXProblem keys off mxBlock{A,B} only, so adding a
+    // free-dimension extent must not change detection either way.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128,
+                         /*M=*/128, /*N=*/128, /*K=*/256, /*batch=*/1,
+                         /*transA=*/true, /*transB=*/false,
+                         /*mxBlockFreeA=*/128, /*mxBlockFreeB=*/128);
+    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_EQ(p.mxBlockA(), 128);
+    EXPECT_EQ(p.mxBlockB(), 128);
+    EXPECT_EQ(p.mxBlockFreeA(), 128);
+    EXPECT_EQ(p.mxBlockFreeB(), 128);
+}
+TEST(IsMXProblem, FreeTileDefaultsToOne)
+{
+    // Every problem built before MXBlockFree* existed must keep reporting 1,
+    // which is the divide-by-nothing 1xmxBlock layout.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    EXPECT_EQ(p.mxBlockFreeA(), 1);
+    EXPECT_EQ(p.mxBlockFreeB(), 1);
 }
 TEST(IsMXProblem, NeitherIsMX)
 {
@@ -421,6 +451,133 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
                                                scale, data, 0, 0)));
     EXPECT_TRUE(std::isnan(dt::decodeMXElement(rocisa::DataType::Half,
                                                scale, data, 0, 0)));
+}
+
+
+// =============================================================================
+//   Section 5 - downsampleMXScaleFreeDim
+//
+//   mxDataGenerator only tiles scales along one axis, so a 2D MX scaling tile
+//   (MXBlockFree{A,B} > 1) is produced by generating the 1xmxBlock layout and
+//   collapsing every group of mxBlockFree free-dimension entries here. The
+//   representative is the group MAXIMUM for UE8M0 scales (byte order == numeric
+//   order, so a byte-wise max is exact) and the group's first entry otherwise.
+//
+//   Two buffer layouts have to work:
+//     kFast  (bound dim at index 0, TN A / NT B) -> [free][kBlock]
+//     !kFast                                     -> [kBlock][free]
+// =============================================================================
+
+// kFast: src is [free][kBlock] with 4 free rows x 2 K-blocks; a 2-row tile
+// collapses it to [2][2], taking the max down each column of the pair.
+TEST(DownsampleMXScaleFreeDim, KFastTakesGroupMaxPerKBlock)
+{
+    //            kb0   kb1
+    // free 0:     10     1
+    // free 1:      3    20
+    // free 2:      7     7
+    // free 3:      7     8
+    std::vector<uint8_t> src = {10, 1, 3, 20, 7, 7, 7, 8};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 10); // tile 0, kb0: max(10, 3)
+    EXPECT_EQ(dst[1], 20); // tile 0, kb1: max(1, 20)
+    EXPECT_EQ(dst[2],  7); // tile 1, kb0: max(7, 7)
+    EXPECT_EQ(dst[3],  8); // tile 1, kb1: max(7, 8)
+}
+
+// !kFast: src is [kBlock][free], so the free axis is the fast one.
+TEST(DownsampleMXScaleFreeDim, KSlowTakesGroupMaxPerKBlock)
+{
+    // kb0: free 0..3 = 10, 3, 7, 7
+    // kb1: free 0..3 =  1, 20, 7, 8
+    std::vector<uint8_t> src = {10, 3, 7, 7, 1, 20, 7, 8};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/false, /*unsignedExponentScale=*/true);
+
+    // dst is [kBlock][tiledFree] with tiledFree == 2.
+    EXPECT_EQ(dst[0], 10); // kb0, tile 0
+    EXPECT_EQ(dst[1],  7); // kb0, tile 1
+    EXPECT_EQ(dst[2], 20); // kb1, tile 0
+    EXPECT_EQ(dst[3],  8); // kb1, tile 1
+}
+
+// A free dimension that is not a multiple of the tile leaves a short last
+// group; the max must be taken over only the entries that exist.
+TEST(DownsampleMXScaleFreeDim, PartialLastTileStopsAtTheFreeDimension)
+{
+    // 3 free rows x 1 K-block, tile of 2 -> tiles {0,1} and {2}.
+    std::vector<uint8_t> src = {5, 9, 4};
+    std::vector<uint8_t> dst(2, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/3,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 9); // max(5, 9)
+    EXPECT_EQ(dst[1], 4); // the lone survivor, not a read past the buffer
+}
+
+// Without an unsigned-exponent encoding a byte-wise max is meaningless, so the
+// group's first entry is copied verbatim.
+TEST(DownsampleMXScaleFreeDim, NonExponentScaleKeepsFirstOfEachGroup)
+{
+    std::vector<uint8_t> src = {5, 9, 4, 1};
+    std::vector<uint8_t> dst(2, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/false);
+
+    EXPECT_EQ(dst[0], 5);
+    EXPECT_EQ(dst[1], 4);
+}
+
+// mxBlockFree == 1 is the layout every pre-MXBlockFree config uses: the helper
+// must not touch the destination at all, since the caller writes straight into
+// the scale buffer in that case.
+TEST(DownsampleMXScaleFreeDim, TileExtentOneIsANoOp)
+{
+    std::vector<uint8_t> src = {5, 9, 4, 1};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, 1, /*mxBlockFree=*/1, 1,
+                                 true, true);
+    for(auto b : dst)
+        EXPECT_EQ(b, 0xEE);
+
+    // Empty buffers are equally inert.
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/0, 1, 2, 1,
+                                 true, true);
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, /*kBlocks=*/0, 2, 1,
+                                 true, true);
+    for(auto b : dst)
+        EXPECT_EQ(b, 0xEE);
+}
+
+// Multi-byte scale elements are copied whole. elemBytes != 1 also disables the
+// max, since the comparison only inspects the first byte.
+TEST(DownsampleMXScaleFreeDim, MultiByteElementsAreCopiedWhole)
+{
+    // 4 free rows x 1 K-block, 2 bytes per scale, tile of 2.
+    std::vector<uint8_t> src = {0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/2,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 0xAA);
+    EXPECT_EQ(dst[1], 0xBB);
+    EXPECT_EQ(dst[2], 0x11);
+    EXPECT_EQ(dst[3], 0x22);
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR

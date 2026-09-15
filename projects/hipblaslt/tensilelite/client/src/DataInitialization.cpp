@@ -2177,16 +2177,34 @@ namespace TensileLite
                   size_t const compactFree   = dataDesc.sizes()[freeIdx];
                   size_t const scaleElemSize = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                   bool const   kFast         = (boundIdx == 0);
+
+                  // Free-dim extent of one scaling tile. At 1 tiledFree ==
+                  // compactFree and no staging buffer is allocated, so this
+                  // collapses to the original code path.
+                  size_t const mxBlockFree = std::max<size_t>(
+                      1, isMatrixA ? problem.mxBlockFreeA() : problem.mxBlockFreeB());
+                  size_t const tiledFree = (compactFree + mxBlockFree - 1) / mxBlockFree;
+                  bool const   unsignedExponentScale
+                      = (scaleDesc.dataType() == rocisa::DataType::E8);
+
+                  // generateMXInput always emits one scale per (free element,
+                  // K-block), which is larger than the tiled scale tensor, so it
+                  // cannot write straight into scalePtr.
+                  std::vector<uint8_t> mxFreeStaging;
+                  if(mxBlockFree > 1)
+                      mxFreeStaging.assign(compactFree * compactKBlocks * scaleElemSize, 0x00);
+
                   for(size_t b = 0; b < batchCount; b++)
                   {
                       auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
                                       + b * dataBatchStrideBytes;
                       auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
                                        + b * scaleBatchStrideBytes;
+                      auto* genScalePtr = (mxBlockFree > 1) ? mxFreeStaging.data() : scalePtr;
                       generateMXInput(hipDataT,
                                       hipScaleT,
                                       dataPtr,
-                                      scalePtr,
+                                      genScalePtr,
                                       rows,
                                       cols,
                                       stride,
@@ -2199,9 +2217,20 @@ namespace TensileLite
                                       -1.0f,
                                       1.0f,
                                       initModeToMXMethod(scaleInitMode));
+                      // Collapse the free dimension before restriding: restride
+                      // fixes K-block padding, which is the orthogonal axis.
+                      if(mxBlockFree > 1)
+                          downsampleMXScaleFreeDim(scalePtr,
+                                                   genScalePtr,
+                                                   compactFree,
+                                                   compactKBlocks,
+                                                   mxBlockFree,
+                                                   scaleElemSize,
+                                                   kFast,
+                                                   unsignedExponentScale);
                       if(kFast)
                           restrideMXScaleBufferKFast(
-                              scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
+                              scalePtr, tiledFree, compactKBlocks, paddedKBlocks, scaleElemSize);
                   }
 
                   // When the kernel needs a swizzled scale, regenerate it with the
@@ -2209,6 +2238,17 @@ namespace TensileLite
                   // copy stays canonical for the CPU reference.
                   if(swizzleLayout != MXScaleLayout::None && pristineScale.gpuInput.valid)
                   {
+                      // The swizzle happens inside generateMXInput, leaving no seam
+                      // at which to collapse a 2D tile -- and the in-device layout
+                      // of a 2D-tiled scale is defined by the scaled-WMMA path that
+                      // consumes it, which does not exist yet. Refuse loudly rather
+                      // than hand the GPU an unspecified layout.
+                      if(mxBlockFree > 1)
+                          throw std::runtime_error(
+                              "MXScaleFormat pre-swizzle is not supported with "
+                              "MXBlockFree > 1; the in-device layout for a 2D MX "
+                              "scaling tile is not defined yet.");
+
                       size_t const eltSize
                           = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                       size_t const canonicalScaleElems = scaleDesc.totalAllocatedElements();
