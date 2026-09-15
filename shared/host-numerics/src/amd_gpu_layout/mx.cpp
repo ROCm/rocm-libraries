@@ -1,6 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <roc/host_numerics/amd_gpu_layout/mx.hpp>
+
+#include "detail/checked_arithmetic.hpp"
 #include "detail/gfx1250_mx_layout.hpp"
 #include "detail/gfx950_mx_layout.hpp"
 #include "detail/pre_swizzle.hpp"
@@ -21,22 +24,20 @@ MxScaleStorageLayout mxScaleStorageLayoutForArchitectureName(std::string_view ar
 
 MxScaleStoragePlan planMxScaleStorage(std::array<size_t, 2> naturalShape, size_t blockSize,
                                       MxScaleStorageLayout layout) {
-    const size_t naturalByteCount =
-        detail::checkedMultiply(naturalShape[0], naturalShape[1], "MX natural scale storage");
+    const size_t naturalByteCount = ::roc::host_numerics::detail::checkedMultiply(
+        naturalShape[0], naturalShape[1], "MX natural scale storage");
     size_t physicalByteCount = naturalByteCount;
 
     switch (layout) {
         case MxScaleStorageLayout::Natural:
             break;
         case MxScaleStorageLayout::Gfx950:
-            physicalByteCount =
-                detail::makeGFX950ScalePlan(naturalByteCount, {naturalShape[0], naturalShape[1]})
-                    .outputElementCount;
+            physicalByteCount = detail::copyGfx950ScaleStorageBytes(
+                nullptr, naturalByteCount, 1, {naturalShape[0], naturalShape[1]}, nullptr);
             break;
         case MxScaleStorageLayout::Gfx1250:
-            physicalByteCount = detail::makeGFX1250ScalePlan(naturalByteCount, naturalShape[0],
-                                                             naturalShape[1], blockSize)
-                                    .outputElementCount;
+            physicalByteCount = detail::copyGfx1250ScaleStorageBytes(
+                nullptr, naturalByteCount, 1, naturalShape[0], naturalShape[1], blockSize, nullptr);
             break;
         default:
             throw std::invalid_argument("Invalid MX scale storage layout.");
