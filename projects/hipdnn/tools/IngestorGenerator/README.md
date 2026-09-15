@@ -12,9 +12,13 @@ existing IDs and hand-written bodies through addition-only splicing.
 
 Generic generation is toolchain-free and issues **no compiler evidence**. The test
 suite checks generation behavior; a complete integration also needs artifact
-agreement, real native loading and engine-attributed numerical device proof. The
-[ingestor RUNBOOK](../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md) owns the only
-ordered create/extend procedure.
+agreement, real native loading and engine-attributed numerical device proof.
+[hipdnn-kernel-integration](../ai/skills/hipdnn-kernel-integration/RUNBOOK.md) owns
+the ordered procedure for taking a kernel to a landed integration -- descriptors,
+native hooks, registration, tests and graphs. The
+[ingestor RUNBOOK](../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md) owns the
+production-mining workflow around it: corpus and workloads, sweeps and tuning,
+packaging and rocKE.
 
 ## Prerequisites
 
@@ -68,6 +72,11 @@ Exit codes: `0` success; `1` on a `ConfigError` or a template-rendering failure;
     kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
     <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
     <slug>_<pack>.kdp.json          # multi-pack engine: one KDP per pack
+    <kernel_name>.kdp.json          # drop-in (every kernel `hiprtc_file`): one KDP
+                                     # per KERNEL, each with its own uuid, so a
+                                     # variant is staged and withdrawn one file at a
+                                     # time. Non-identifier characters in the kernel
+                                     # name collapse to `_`.
     operation_is_<disc>.umd.json    # multi-pack engine ONLY -- one operation-scoped
                                      # UMD per pack. A single-pack engine emits ZERO of
                                      # these; see "UMD policy" below.
@@ -89,6 +98,16 @@ UMDs that existed only to carry a topology gate. Concretely:
 - A **multi-pack** engine gets **one** graph-scoped operation-matcher UMD per pack
   (each pack's config entry must set a unique `discriminator`), plus the same one
   shared kernel-scoped matcher every pack references.
+
+A single-pack engine is therefore taken at its word that its own `graph_match`
+narrows enough, and that word is not checkable here: the shipped conv pack admits
+the node type and validates it in one pass inside native code this generator cannot
+read, and the shipped pointwise pack does not discriminate at all. So generation
+warns for a single-pack engine unless the config sets `engine.pack_discriminates`.
+The warning names the consequence -- the pack claims every operation its
+`graph_match` admits -- and the remedy: add the installed `operation_is_<op>` UMD
+to the KDP's `matchers`. The rule is stated once, verbatim, in
+`codegen/generator.py`'s `SINGLE_PACK_DISCRIMINATOR_RULE`.
 
 ### Native-symbol stub shape
 
@@ -384,6 +403,14 @@ engine:
   behavior_notes: [runtime_compilation]   # optional, closed vocabulary
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
+  native_symbol_namespace: hipkernel.conv_fwd
+                                  # optional; overrides the namespace derived from
+                                  # `name`, so a set reusing an installed pack's
+                                  # symbols can still carry a name -- and an engine
+                                  # id -- of its own
+  pack_discriminates: false       # optional, single-pack engines only; "my one
+                                  # graph_match admits the operation as well as
+                                  # validating it", which silences the warning below
 
 kmd_fields:                       # the KMD's fields[] -- declared, one per human-
   - name: block_size              # meaningful axis this engine's kernels vary along
@@ -465,10 +492,31 @@ at load: the same rejection costs one `LOG_ERROR` and a dropped pack if it is le
 to the target machine. `tests/test_kernel_defines.py` re-runs the C++ test table
 against the port, naming the `TEST(...)` each row came from.
 
+**What a drop-in emits differently.** When *every* kernel in the config is
+`hiprtc_file`, two emission rules change, both because the unit that gets copied
+into an installed tree is a single descriptor file:
+
+- **One KDP per kernel**, each with its own uuid, named after the kernel. Two KDPs
+  sharing a uuid are one catalog entry to the loader, so staging the second would
+  replace the first rather than add to it. The kernel names must stay distinct once
+  reduced to a filename stem; the loader rejects a config where they do not.
+- **No `provenance` block.** It is an extension the runtime loader does not parse --
+  `extension key 'provenance' ... ignoring it`, once per KDP, in exactly the log an
+  author reads to find the one `LOG_ERROR` that means their set was dropped. It
+  earns that on the packaged and rocKE paths, where the specialization contract is
+  all a receiving machine has; a hipRTC kernel's specialization is the `-D` flags
+  the descriptor already states verbatim in `defines`. A drop-in config therefore
+  needs no top-level `specialization` block.
+
 **Scope.** A dropped-in set reuses an *already-installed* pack's native symbols, and
 its entry point must take the same arguments in the same order as that pack's
 registered dispatch handler launches. A genuinely new native symbol still needs a
-provider rebuild.
+provider rebuild -- that is the create path, and
+[hipdnn-kernel-integration](../ai/skills/hipdnn-kernel-integration/RUNBOOK.md) owns
+it, not this kind. Set `engine.native_symbol_namespace` to the installed pack's
+prefix so that reuse does not also force the installed engine's `name`: the name
+hashes to the engine id, and a drop-in sharing it is indistinguishable from the
+engine it drops in beside.
 
 ## The five pre-mint config-loader checks
 

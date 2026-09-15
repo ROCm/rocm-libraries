@@ -103,6 +103,16 @@ BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
 
 ENGINE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 
+#: Shape of ``engine.native_symbol_namespace``: the dotted prefix every native
+#: symbol of one pack shares, e.g. ``hipkernel.conv_fwd``. At least two
+#: components, each a C identifier, because the runtime resolves
+#: ``<namespace>.graph_match`` and friends against a registry whose keys the
+#: provider wrote in C++. A malformed namespace names symbols nothing
+#: registered, and the whole engine is dropped at load with one log line.
+NATIVE_SYMBOL_NAMESPACE_PATTERN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$"
+)
+
 #: ``DescriptorLoader.hpp``'s ``isPlausibleArchBaseId``: ``gfx`` + lowercase
 #: alnum/``-``/``_``, no feature suffix. This is the *shape* check the loader
 #: itself enforces; a well-formed-but-unrecognized id (``gfx94``) still passes
@@ -137,6 +147,18 @@ def _to_pascal_case(snake: str) -> str:
     """Convert ``snake_case`` or ``kebab-case`` to ``PascalCase``."""
     parts = re.split(r"[_\-]", snake)
     return "".join(p[:1].upper() + p[1:] for p in parts if p)
+
+
+def _to_file_stem(name: str) -> str:
+    """A descriptor name reduced to a filename stem.
+
+    Kernel names carry dots (``conv_fwd_dropin.f32_block128``), which a stem
+    must not: the loader keys on the ``.kdp.json`` suffix, and an interior dot
+    makes the shipped file's type ambiguous to anything splitting on it. Every
+    character outside ``[A-Za-z0-9_]`` collapses to ``_``, so the stem stays a
+    recognisable transcription of the name rather than a hash.
+    """
+    return re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9_]", "_", name)).strip("_")
 
 
 @dataclass
@@ -329,6 +351,29 @@ class EngineSpec:
     #: "native" -> emit a UHD scoring on a symbol; "none" -> omit the UHD
     #: entirely (legal: an engine may ship no ranking model).
     heuristic: str = "native"
+    #: Optional override for the dotted namespace every native symbol of this
+    #: engine lives under. Empty means DERIVE it from ``name``, which is what
+    #: every engine shipping its own native stub wants.
+    #:
+    #: It exists for the one shape the derivation cannot express: a descriptor
+    #: set that REUSES an already-installed pack's registered symbols under an
+    #: engine name of its own. Because the namespace is derived from the name,
+    #: such a set had to author the installed engine's name -- and therefore
+    #: its id -- so the two were indistinguishable at the catalog and the
+    #: emitted UED's ``name`` had to be rewritten by hand afterwards.
+    #: Overriding the namespace frees ``name`` to be the new engine's.
+    native_symbol_namespace: str = ""
+    #: Whether this SINGLE-PACK engine's ``graph_match`` admits the operation
+    #: as well as validating it -- i.e. whether the pack discriminates on its
+    #: own, in native code this generator cannot read.
+    #:
+    #: It cannot be derived: the shipped conv pack self-discriminates inside
+    #: ``convFwdGraphMatches`` and the shipped pointwise pack does not, and
+    #: nothing in either config says which. So the generator asks, and warns
+    #: when the answer is absent (see ``generator.build_operation_umd``).
+    #: Meaningless on a multi-pack engine, which emits a discriminator per
+    #: pack, and rejected there rather than ignored.
+    pack_discriminates: bool = False
 
     @property
     def namespace(self) -> str:
@@ -409,6 +454,28 @@ class IngestorConfig:
         return len(self.packs) > 1
 
     @property
+    def is_dropin(self) -> bool:
+        """Whether every kernel this config emits is a ``hiprtc_file`` one.
+
+        Keyed on what is EMITTED, not on the documentary top-level
+        ``kernel_source_kind``, because two emission rules turn on it and both
+        are about the artifact: one KDP per kernel, so a variant can be staged
+        by copying a single file, and no ``provenance`` block, which the
+        runtime loader has no extension for and WARNs about once per KDP.
+
+        ``all``, not ``any``: the packaged dialect cannot emit ``hiprtc_file``
+        at all, so this can never be true for a rocKE or ``hip`` bundle -- and
+        those are exactly the bundles whose specialization-agreement check
+        reads ``provenance``. A direct-load config mixing ``embedded_source``
+        with ``hiprtc_file`` is not a drop-in and keeps both behaviours.
+        """
+        return bool(self.packs) and all(
+            kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HIPRTC_FILE
+            for pack in self.packs
+            for kernel in pack.kernels
+        )
+
+    @property
     def bundle_names(self) -> list[str]:
         """Every distinct ``kernel_source.bundle`` this config references, in
         first-seen order.
@@ -450,6 +517,22 @@ class IngestorConfig:
             else f"{self.engine.slug}_{pack.name}"
         )
 
+    def dropin_kdp_stem(self, kernel: KernelSpec) -> str:
+        """The KDP file's stem when this config emits one KDP PER KERNEL.
+
+        Derived from the kernel's own name, because the kernel is the unit
+        being staged: a drop-in adds a variant by copying one descriptor in
+        and restarting, so each variant needs a file of its own and that file
+        has to be recognisable as the variant's. The pack's stem cannot do it
+        -- every kernel under a pack shares it.
+
+        The stems must therefore be distinct across the whole config;
+        ``config_loader._check_dropin_kdp_stems`` enforces that before any
+        UUID exists, because two kernels resolving to one stem would have the
+        second file silently overwrite the first.
+        """
+        return _to_file_stem(kernel.name)
+
     @property
     def kmd_field_by_name(self) -> dict:
         return {f.name: f for f in self.kmd_fields}
@@ -464,8 +547,13 @@ class IngestorConfig:
 
         Derived from the engine's scoped name: ``hipkernel:ConvFwd`` walks to
         ``hipkernel.conv_fwd`` -- the exact prefix every symbol in
-        ``ConvNative.cpp`` shares.
+        ``ConvNative.cpp`` shares. ``engine.native_symbol_namespace`` overrides
+        the derivation, which is how a descriptor set reuses an installed
+        pack's registered symbols while carrying an engine name -- and so an
+        engine id -- of its own.
         """
+        if self.engine.native_symbol_namespace:
+            return self.engine.native_symbol_namespace
         local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", self.engine.local_name).lower()
         return f"{self.engine.namespace}.{local_snake}"
 
