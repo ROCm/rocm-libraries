@@ -31,12 +31,12 @@ namespace hipdnn_backend::heuristics
 hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(int deviceId);
 
 /**
- * @brief Query device properties for the device bound to a handle's stream.
+ * @brief Query device properties for the device selected by a handle's stream.
  *
- * Resolves the device id from @p handle's stream via hipStreamGetDevice and
- * delegates to the explicit-id overload. This is the canonical acquisition
- * path inside the backend: device facts must follow the handle's stream, not
- * whatever device happens to be current on the calling thread.
+ * Resolves concrete streams to their owning device via hipStreamGetDevice.
+ * Default stream tokens (nullptr, hipStreamLegacy, hipStreamPerThread) resolve
+ * to the calling thread's live current device via hipGetDevice. Delegates to
+ * the explicit-id overload; this is the canonical acquisition path inside the backend.
  *
  * RFC 0007 Reference: Section 6.2
  *
