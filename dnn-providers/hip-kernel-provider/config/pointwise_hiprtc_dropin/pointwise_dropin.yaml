@@ -1,0 +1,105 @@
+# The drop-in descriptor set the provider's CI smoke gate stages.
+#
+# It is a `hiprtc_file` variant of the installed pointwise pack: the sources ship
+# as a plain directory (the "bundle") beside the descriptors, hipRTC compiles them
+# at prepare(), and the set reaches an already-installed hipDNN by copying files in
+# and restarting. Nothing here is a new native symbol -- every match/dispatch/score
+# symbol below is one the installed `hipkernel:Pointwise` pack already registers.
+#
+# `native_symbol_namespace` is what makes that expressible. The namespace is
+# otherwise derived from `engine.name`, so reusing the installed symbols would
+# force the installed engine's name -- and therefore its id -- and the drop-in
+# would be indistinguishable from the shipped engine at the catalog. Overriding
+# the namespace frees `name` to be the drop-in's own, which is the whole of the
+# smoke gate's A/B: `--test-engine hipkernel:PointwiseHiprtcDropin` serves with
+# this tree staged and is `Engine ... is not loaded` without it.
+#
+# `metadata.dtype` carries the FLATBUFFERS enum spelling -- FLOAT, HALF -- because
+# `pointwiseKernelMatches` compares it to `EnumNameDataType(<the graph's dtype>)`.
+# `float` or `_Float16` matches nothing, silently, with no error at generation, at
+# load or at plan time.
+#
+# The generator warns that this single-pack engine emits no graph-scope
+# discriminator: `pointwiseGraphMatches` admits ADD, MUL and SUB alike and the
+# pack does not discriminate in native code, so the set claims graphs beyond the
+# add kernel the bundle implements. That warning is correct and is left standing
+# -- where a single-pack engine's operation symbol comes from is not settled, and
+# hand-adding the installed `operation_is_add` UMD would make this tree
+# hand-assembled, which is exactly what staging it from the generator avoids.
+#
+# Generated into the build tree by dnn-providers/hip-kernel-provider/src/CMakeLists.txt.
+
+engine:
+  name: hipkernel:PointwiseHiprtcDropin
+  native_symbol_namespace: hipkernel.pointwise
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  knobs: [block_size]
+  heuristic: native
+
+# Exactly the two fields the installed pointwise native symbols read:
+# pointwiseKernelMatches reads dtype, pointwiseScore and PointwiseDispatchHandler
+# read block_size. `operation` is in the shipped KMD but no pointwise symbol reads
+# it -- the operation is decided by the graph-scoped matcher -- so it is not
+# declared here.
+kmd_fields:
+  - name: block_size
+    type: int
+    default_value: 64
+  - name: dtype
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hiprtc_file
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: pointwise_add_dropin
+    arch: [gfx942]
+    kernels:
+      # block_size 512 is strictly above the shipped add pack's highest (256), and
+      # takes workspaceBytes off its ==256 special case.
+      - name: pointwise_add_dropin.f32_block512
+        kernel_source:
+          kind: hiprtc_file
+          bundle: pointwise_dropin_sources
+          source_file: PointwiseDropin.hip
+          entry_point: PointwiseDropin
+          defines:
+            HIPDNN_DROPIN_DTYPE: "$kernel.dtype"
+            HIPDNN_DROPIN_BLOCK: "$kernel.block_size"
+        metadata:
+          block_size: 512
+          dtype: FLOAT
+        priority: 0
+      # The second variant: the block above with a new name and dtype: HALF. Its
+      # kernel_source is byte-identical -- same bundle, same source file, same entry
+      # point, same define templates. The descriptor ships the template; the target
+      # resolves it per kernel.
+      - name: pointwise_add_dropin.f16_block512
+        kernel_source:
+          kind: hiprtc_file
+          bundle: pointwise_dropin_sources
+          source_file: PointwiseDropin.hip
+          entry_point: PointwiseDropin
+          defines:
+            HIPDNN_DROPIN_DTYPE: "$kernel.dtype"
+            HIPDNN_DROPIN_BLOCK: "$kernel.block_size"
+        metadata:
+          block_size: 512
+          dtype: HALF
+        priority: 0
+
+# metadata_fields is empty for the same reason configs/hiprtc_dropin.yaml gives: it
+# means "readable back off a hydrated builder object via a bindings accessor", which
+# the hipRTC path has none of. Both fields DO reach the compiler, verbatim, through
+# `defines`.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [block_size, dtype]
+  bindings: {}
+  vocabulary: {}
