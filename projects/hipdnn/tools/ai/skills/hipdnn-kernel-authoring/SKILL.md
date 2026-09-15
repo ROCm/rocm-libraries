@@ -18,15 +18,20 @@ contracts, not alternate procedures:
 | [prior-art.md](prior-art.md) | Where to mine an algorithm: in-tree, external repositories, HIP/ISA documentation |
 | [device-envelope.md](device-envelope.md) | hipRTC language/header/flag envelope and target-architecture facts, local or remote |
 | [harness.md](harness.md) | Reference oracle, input parity, tolerance, launch, comparison and reporting |
-| [hipdnn-ingestor-engine](../hipdnn-ingestor-engine/SKILL.md) | Everything downstream: descriptors, packaging, dispatch, drop-in install |
+| [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) | Everything downstream: native symbols, descriptors, registration and graph coverage |
+| [hipdnn-ingestor-engine](../hipdnn-ingestor-engine/SKILL.md) | Production mining and lowering once an integration exists: corpus, sweeps, tuning, packaging, rocKE |
 
 ## Position in the flow
 
 `graph → kernel → integrate → optimize`. This skill owns the first arrow only. The
-second is [hipdnn-ingestor-engine](../hipdnn-ingestor-engine/SKILL.md), whose RUNBOOK
-stage 3 consumes exactly what this skill produces. The fourth is measure-driven
-tuning and is **not** in scope here: a kernel that is correct and slow is this
-skill's success, and reporting a speed claim it did not measure is its failure.
+second is [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md), which
+consumes this skill's four handover facts — the entry-point signature, the bundle's file
+set, the macros the source requires bound with their legal values, and the launch
+geometry and workspace the kernel assumes — and owns everything after them: the native
+symbols, the descriptors, registration with the testing system, and the graphs that
+verify it. The fourth is measure-driven tuning and is **not** in scope here: a kernel
+that is correct and slow is this skill's success, and reporting a speed claim it did not
+measure is its failure.
 
 Correctness is the deliverable. Performance observations are optional context and
 must be labelled as unmeasured unless timed.
@@ -40,12 +45,15 @@ Record before authoring, and treat a missing item as a blocked gate, never a def
 | Graph and its form (live `Graph`, JSON, binary blob, sample source) | Determines how nodes/UIDs/strides are enumerated — [graph-analysis.md](graph-analysis.md) |
 | Target architecture(s), and whether one is locally present | Compile flag, ISA availability, and whether device proof needs a scheduler — [device-envelope.md](device-envelope.md) |
 | A capable hipDNN reference for this graph | Without an independent oracle there is nothing to prove against — [harness.md](harness.md) |
-| Integration target's launch ABI, or explicitly "unbound" | A kernel authored against the wrong argument list is diagnosed nowhere downstream |
+| Integration target's launch ABI, or **"unbound" — the normal answer** | A kernel authored against the wrong *bound* argument list is diagnosed nowhere downstream |
 | Dtypes, layouts (derived from strides) and the shape envelope to support | Decides what is a runtime parameter and what is a `-D` specialization |
 
-"Unbound" is a legitimate answer for the ABI: then the kernel's argument list is an
-**output** of this skill and the integration skill must adapt to it or pay a rebuild.
-Do not invent a handler signature.
+**"Unbound" is the normal answer, not a fallback.** The integration writes the dispatch
+handler, so the kernel's argument list is an **output** of this skill and the handler's
+`launch()` is written from it. Only say "bound" when you are genuinely adding a kernel to
+a pack that already exists and already ships a handler — in which case name that pack and
+take the argument list from its `launch()` body, in order, because wrong arity is
+diagnosed nowhere. Do not invent a handler signature either way.
 
 When the request names no target architecture — a generic in-tree sample, say — the
 architecture is whichever device the correctness proof will run on. Name that device

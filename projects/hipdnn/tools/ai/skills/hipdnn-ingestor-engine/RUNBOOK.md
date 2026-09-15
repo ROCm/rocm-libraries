@@ -1,8 +1,18 @@
-# Runbook: create or extend an ingestor engine
+# Runbook: production mining and lowering for an ingestor engine
 
-This is the **only ordered create/extend workflow**. Use [SKILL.md](SKILL.md) for
+This is the **only ordered workflow for production mining and lowering** — corpus and
+baseline approval, packaging, tuning and final corpus proof. It is **not** the create
+path: a plain HIP integration belongs to
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md), whose RUNBOOK owns
+the six-step sequence from a kernel to descriptors, native hooks, registration and
+graphs, and which links back here for the production half. Use [SKILL.md](SKILL.md) for
 entry/completion requirements and the linked domain pages for contracts. Each gate
 requires current evidence; an old install or copied command is not an observation.
+
+**A genuinely new native symbol is a rebuild.** That is true of every dialect, not only
+of a drop-in: it is ordinary engine work through stages 3-5, and the ordered form of it
+is [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md)'s RUNBOOK rather
+than this page. Decide that before you decide a source dialect.
 
 ## Paths and interpreters
 
@@ -42,10 +52,25 @@ machine, device and allocation identities under the workspace's evidence policy.
 ## 1. Entry and early feasibility
 
 Record the entry contract; for extend, inventory the installed baseline according
-to [extend.md](extend.md). Select `direct_load` or `packaged` before staging files,
-and for `direct_load` select `embedded_source` or `hiprtc_file`: the first is embedded
-into the provider at configure time, the second ships as a source bundle beside the
-descriptors and needs no rebuild. See [hiprtc-mining.md](hiprtc-mining.md).
+to [extend.md](extend.md).
+
+**Inventory the packs before you choose a dialect.** Ask, in this order:
+
+1. **Does an ingestor pack already exist for this operation, and is it yours?** Only
+   `ConvNative.cpp` and `PointwiseNative.cpp` exist under
+   `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`;
+   batchnorm, layernorm, RMSnorm and resample are `hip_mlops_engine` plan builders with
+   no ingestor pack. Those two are reference scaffolds — `PointwiseAdd` computes one
+   element (`kernels/PointwiseAdd.cpp:11-12`), `ConvFwd` serves 6 of 1218
+   `ConvolutionFwd` bundle cases — so neither is an extension target for a real kernel.
+2. **If no, this is the create path.** Go to
+   [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) and return here for
+   corpus, sweeps, tuning and packaging once the pack exists.
+3. **Only if yes** — a pack that is genuinely yours — select `direct_load` or
+   `packaged`, and for `direct_load` select `embedded_source` or `hiprtc_file`: the first
+   is embedded into the provider at configure time, the second ships as a source bundle
+   beside the descriptors and needs no rebuild. See [hiprtc-mining.md](hiprtc-mining.md).
+
 Establish that the graph is representable and has a capable independent numerical
 reference using [graph-contract.md](graph-contract.md). A reference's skip is not
 verification; unavailable semantics require an explicit scope/reference decision.
@@ -70,12 +95,30 @@ same arguments in the same order as that pack's registered `IKernelDispatchHandl
 launches. `loadValidatedDescriptorSets` pre-flights those symbols and drops the whole
 engine on any miss with one `LOG_ERROR`, which is indistinguishable from a healthy
 decline at the API. Confirm both against the installed provider's native pack source
-per [hiprtc-mining.md](hiprtc-mining.md). A genuinely new native symbol is a rebuild:
-it is ordinary engine work through stages 3-5, not a drop-in.
+per [hiprtc-mining.md](hiprtc-mining.md). The pack's dispatch handler must additionally
+call `buildIngestorKernelCode`; a handler that compiles `kernel.source.sourceFile`
+directly serves `embedded_source` only and throws at `prepare()`.
 
-**Gate:** feasible target/workspace, representable scope and capable reference; for a
-drop-in, an installed pack whose symbols and launch ABI the new variants reuse. A
-missing dependency blocks its gate; host-only research may continue while a device
+**Gate:** feasible target/workspace, representable scope and capable reference, plus the
+pack-inventory answer from the questions above.
+
+For a **drop-in**: an installed pack whose symbols and launch ABI the new variants reuse,
+and whose handler routes.
+
+For the **create case** — any work adding a native symbol, which arrives here only for
+its production half — each of the four hooks must name both the page that specifies it
+and the artifact you owe for it, and the gate does not pass until every one has both:
+
+| Hook | Specified by | Artifact you must produce |
+|---|---|---|
+| Engine `graph_match` | [native-pack.md](native-pack.md) §Roles, §Matching | The matcher body, plus the admitted-shape envelope it enforces |
+| Kernel- or graph-scoped matcher | [native-pack.md](native-pack.md) §Roles, §Matching | The matcher body, plus the KMD fields it compares |
+| `workspaceBytes` | [native-pack.md](native-pack.md) §Workspace, preparation and launch | The formula and the metadata field it reads, or a stated zero |
+| `IKernelDispatchHandler` | [native-pack.md](native-pack.md) §Workspace, preparation and launch | `prepare()` with its geometry and defines, and `launch()` with its exact argument order |
+| Native score, if declared | [native-pack.md](native-pack.md) §Roles | The ranking axis and its justification, or `heuristic: none` with no score anywhere |
+| Registration | [native-pack.md](native-pack.md) §Registration and inventory proof | The `SymbolScope<Handle>` additions **and** the `IngestorPacks.cpp` row |
+
+A missing dependency blocks its gate; host-only research may continue while a device
 allocation is pending, but cannot discharge device proof.
 
 ## 2. Contracts, corpus and baseline approval

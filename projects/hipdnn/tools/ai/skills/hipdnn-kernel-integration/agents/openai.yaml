@@ -1,0 +1,19 @@
+interface:
+  display_name: "hipDNN Kernel Integration"
+  short_description: "Land a kernel as descriptors, native symbols, registration and graphs"
+  default_prompt: >-
+    Use hipdnn-kernel-integration whenever a kernel has to become a hipDNN
+    integration — a new pack, new native symbols, or a first integration of any
+    kernel. Read SKILL.md for entry/completion requirements, then execute
+    RUNBOOK.md as the only ordered workflow. Do not re-enter
+    hipdnn-ingestor-engine's RUNBOOK for create-path work: that is a
+    production-mining sequence, and following it lands the author back in corpus
+    approval, packaging and tuning. Take the native hook contracts from
+    native-pack.md and the ordering from this skill's RUNBOOK. New symbols are the
+    default; reuse an installed pack's symbols only for another kernel into a pack
+    that is already yours, named, with a reason — never the shipped PointwiseAdd or
+    ConvFwd scaffolds. Report all four deliverables — descriptors, native hooks,
+    registration with the testing system, and tests and graphs — and say plainly
+    that a change producing three of them is not done. Never report a green
+    --test-engine run as coverage: cite passed counts and case names, since an
+    unservable case skips.

@@ -138,5 +138,8 @@ the remainder or reject the shape explicitly, never compute it wrong quietly.
 | `samples/batchnorm/FusedBnInfDReluBnBwd.cpp` | three nodes chained through two virtual tensors, and the in-tree CPU-reference validation pattern |
 
 Larger and more varied real graphs come from the external `ROCm/dnn-benchmarking`
-graph-JSON corpora referenced by the integration skill's
-[workloads.md](../hipdnn-ingestor-engine/workloads.md), not from `samples/`.
+graph-JSON corpora referenced by `hipdnn-ingestor-engine`'s
+[workloads.md](../hipdnn-ingestor-engine/workloads.md), not from `samples/`. Corpus
+identity and coverage accounting are that skill's, not the integration skill's:
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) takes graph coverage
+as bundle cases instead.

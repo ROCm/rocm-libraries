@@ -1,10 +1,18 @@
-# Drop-in hipRTC kernels: `kind: hiprtc_file`
+# Adding a variant to a pack that is already yours: `kind: hiprtc_file`
 
-Descriptors plus a directory of HIP sources, copied into an installed tree and compiled
-at `prepare()`: a new kernel variant with no rebuild. [RUNBOOK.md](RUNBOOK.md) owns
-execution; [rocke-mining.md](rocke-mining.md) owns the kernel contracts assumed here.
+**This page applies when you are adding a kernel variant to a pack you already shipped
+and whose native symbols are already installed.** Descriptors plus a directory of HIP
+sources, copied into an installed tree and compiled at `prepare()`: a new variant with no
+rebuild. **If you are integrating a new kernel, you want
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md)**, whose RUNBOOK owns
+the create path end to end — new symbols, descriptors, registration and graphs. That is
+the normal case; this one is the exception with a rebuild avoided.
 
-## Scope: new variants of an installed pack, never a new pack
+For the reuse case this page covers, [RUNBOOK.md](RUNBOOK.md) §4 owns execution — generate,
+copy the descriptor directory whole, restart — and [rocke-mining.md](rocke-mining.md) owns
+the kernel contracts assumed here.
+
+## Scope: variants over installed symbols only
 
 `loadValidatedDescriptorSets` (`DescriptorLoader.hpp:2052-2106`) pre-flights every
 `match_symbol`, `graph_match`, `dispatch_symbol` and score symbol against the native
@@ -13,8 +21,25 @@ the default log level never shows. At the API that is indistinguishable from a h
 decline, so **read the loader's log before believing anything else.**
 
 A dropped-in set therefore reuses an installed pack's registered symbol strings
-(`PointwiseNative.cpp:57-63`, `:498-507`). A genuinely new symbol needs a provider
-rebuild; no format change fixes that.
+(`PointwiseNative.cpp:57-63`, `PointwiseNative.cpp:498-507`). A genuinely new symbol
+needs a provider rebuild; no format change fixes that, and it is ordinary create-path
+work under [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) rather than
+anything this page can help with.
+
+**Reusing the symbols is necessary and not sufficient.** The pack's dispatch handler must
+also dispatch on `kernel_source.kind`, i.e. call `buildIngestorKernelCode`. Grep the
+handler's `prepare()` for that call before authoring anything: a handler that calls
+`_kernelCompiler.compile(kernel.source.sourceFile, …)` directly serves `embedded_source`
+only, and a `hiprtc_file` descriptor under it throws at `prepare()` no matter how correct
+the descriptor is. As of this writing Pointwise routes
+(`PointwiseNative.cpp:432-433`); ConvFwd does not (`ConvNative.cpp:501-502`). Routing a
+pack is a two-line handler change and a rebuild.
+
+**The two packs whose symbols are installed today are reference scaffolds.**
+`PointwiseAdd` computes one element under `if(blockIdx.x == 0 && threadIdx.x == 0)`
+(`kernels/PointwiseAdd.cpp:11-12`); `ConvFwd` is a naive direct convolution serving 6 of
+1218 `ConvolutionFwd` bundle cases. They exist to exercise this path. If neither is a
+pack *you* shipped, this page is not the one you want.
 
 ### Two drop-in shapes, and only one of them is observable
 
@@ -154,10 +179,31 @@ Literal `$kernel.<field>` replacement, single pass, nothing else
 | `$kernel.` with no field | refused (`:149-154`) | name the field |
 | a `float` or `int_list` field | refused | dispatch handler |
 | a `$` inside a rendered value | not rescanned (`:161-163`) | nesting is not a feature |
+| `$kernel.dtype_t`, with a field named `dtype` | refused: the identifier scan is greedy (`KernelDefineSubstitution.hpp:142-147`), so this binds a field called `dtype_t` and is rejected as undeclared | rename the macro, or move the suffix into the bundle's preprocessor |
 
 A value containing **no** `$` is opaque and passes through byte-identical, so `-DLIMIT=-1`
 stays authorable. Validation is schema-level and runs once at set resolution, so a field
 the descriptor omits and the KMD defaults still validates (`:243-287`).
+
+**A bound token cannot be followed by an identifier character.** The scan runs from
+`$kernel.` to the first character that is not a letter, digit or underscore, so
+`"$kernel.dtype_t"` asks for a field named `dtype_t` rather than for `dtype` followed by
+the text `_t`. **There is no `${kernel.dtype}` brace form**, and adding one is out of
+scope — the substituter does not grow. The workaround is to put the fixed text on the
+other side of the boundary: bind `HIPDNN_MY_DTYPE: "$kernel.dtype"` and let the bundle's
+own `#define`/`##` paste build `MyType_t` from the tag, exactly as the tag-to-type idiom
+below already does. It fails loudly at set resolution, so this is an authoring
+ergonomics gap rather than a wrong answer.
+
+**The operator refusal is a lint over *authored* text only, and does not constrain the
+rendered result.** A `string` metadata value is inserted verbatim and never inspected, so
+binding `"$kernel.expr"` against a metadata value of `2 + 1` really does put `2 + 1` into
+a `-D` flag. That is correct per the rendering table above — `string` → verbatim — and
+the *mechanism* is pinned by two tests, `StringRendersVerbatim`
+(`TestKernelDefineSubstitution.cpp:109-112`) and `ReplacementTextIsNotRescanned`
+(`TestKernelDefineSubstitution.cpp:211-222`). Do not read the refusal as a guarantee that
+no operator reaches the compiler: it guarantees only that you did not *write* one into a
+value that binds a token.
 
 ## The escape hatch and its price
 
@@ -180,26 +226,46 @@ The phase 3 generator cannot express four things a drop-in needs. Each is a hand
 these, reproducibly, as a worked reference:
 
 4. **No "installed symbols, new engine name".** The native symbol namespace is *derived
-   from* the engine name (`models.py:461-478`): `hipkernel:Pointwise` → `hipkernel.pointwise`
-   → `hipkernel.pointwise.{graph_match,score,dispatch,kernel_match}`. Those are the
+   from* the engine name in `IngestorGenerator/codegen/models.py`:
+   `hipkernel:Pointwise` → `hipkernel.pointwise` →
+   `hipkernel.pointwise.{graph_match,score,dispatch,kernel_match}`. Those are the
    installed symbols, so the config must say `engine.name: hipkernel:Pointwise` — which is
    also the installed engine's name, and therefore its id. Author the config with the
-   installed name, then rewrite the emitted UED's `name` field
-   (`assemble-dropin.py:56-58`). Nothing else in the set carries the engine name.
-5. **A single-pack engine gets no graph-scope discriminator.** `build_operation_umd` returns
-   `None` unless the engine is multi-pack (`generator.py:468-482`), so a one-pack pointwise
-   drop-in lists only the kernel-scoped dtype matcher. `pointwiseGraphMatches`
-   (`PointwiseNative.cpp:191-243`) checks shape and arity and says nothing about the
-   operation — the operation is a separate graph-scoped matcher
-   (`:251-270`) — so such a drop-in claims MUL and SUB graphs too **and adds them**. This is
-   a silent wrong answer, not a load error: nothing logs. Add the installed
-   `operation_is_<op>` UMD uuid to the KDP's `matchers`, read out of the installed tree
-   (`assemble-dropin.py:22-27`, `:64-65`).
+   installed name, then rewrite the emitted UED's `name` field. Nothing else in the set
+   carries the engine name.
+5. **Discriminate the operation in your matcher, or emit a graph-scope discriminator
+   UMD.** `build_operation_umd` in `IngestorGenerator/codegen/generator.py` returns `None`
+   unless the engine is multi-pack, so a single-pack engine's KDP lists only its
+   kernel-scoped matchers. Whether that is complete is a property of **your**
+   `graph_match`, not of this path, and the two shipped packs fall on opposite sides of it:
+
+   - `pointwiseGraphMatches` (`PointwiseNative.cpp:191`) checks shape and arity and says
+     nothing about the operation — the operation lives in separate graph-scoped matchers
+     (`PointwiseNative.cpp:251-270`). A single-pack pointwise drop-in therefore claims MUL
+     and SUB graphs too **and adds them**: a silent wrong answer, not a load error.
+   - `convFwdGraphMatches` (`ConvNative.cpp:192`) admits the node type *and* validates it
+     in one pass, so the generator's output is already complete. The shipped
+     `conv_fwd.kdp.json` carries exactly one matcher, and `config_loader` actively
+     **rejects** a discriminator declared for a single-pack engine.
+
+   So: if your `graph_match` is itself the discriminator, check the shipped KDP's
+   `matchers` list and match it — there is no discriminator UMD to hunt for, and inventing
+   one fails generation. If it is not, add the installed `operation_is_<op>` UMD uuid to
+   the KDP's `matchers`, read out of the installed tree.
+
+   The generator cannot tell which case you are in, because the answer lives in native
+   code it never sees. It therefore states the condition and makes you answer:
+
+   > warn whenever a single-pack engine emits no graph-scope discriminator, unless the config carries `engine.pack_discriminates: true`
+
+   Setting that key is you asserting the conv case; leaving it unset and ignoring the
+   warning is how the pointwise case ships broken.
 6. **One KDP per pack**, so both variants land in one file and a drop-in cannot stage one
-   variant at a time. Splitting is a file split plus a fresh KDP uuid
-   (`assemble-dropin.py:67-80`). The obvious alternative — one pack per variant — collides
-   with limitation 5, because two packs sharing a discriminator emit the same
-   `operation_is_<disc>.umd.json` filename.
+   variant at a time. Splitting is a file split plus a fresh KDP uuid. The obvious
+   alternative — one pack per variant — collides with limitation 5 for a pack whose
+   `graph_match` does not discriminate, because two such packs sharing a discriminator
+   emit the same `operation_is_<disc>.umd.json` filename. For a self-discriminating pack
+   there is no such collision, and one pack per variant may work — untested.
 7. **The emitted `provenance` block is dead weight in a drop-in**, and costs one
    `descriptor loader: extension key 'provenance' … ignoring it` WARN per KDP load. Harmless,
    but it is noise in exactly the log you are told to read.
@@ -234,7 +300,7 @@ emit for you (limitation 5).
 **The second variant is that block copied with `dtype: HALF`** and a new `name`;
 `kernel_source` stays identical byte for byte. The descriptor ships the template and the
 target resolves it per kernel — that is the whole feature. Ids are minted fresh per run
-(`generator.py:109-124`, `uuid4`), so uniqueness is automatic, and a regenerated set is a
+(`uuid4`, in `IngestorGenerator/codegen/generator.py`), so uniqueness is automatic, and a
 **replacement** for a dropped one, never an addition beside it. The bundle turns the tag
 into a type, because the substituter evaluates nothing:
 
@@ -257,8 +323,9 @@ extern "C" __global__ void PointwiseDropin(const DropinElement* a,
 
 Guard each bound macro with `#ifndef <NAME> / #error` before using it: an unbound token
 otherwise compiles against whatever the tag happens to mean and fails only in the numbers.
-This block is the one compiled on device, at
-`Results/hiprtc-dropin-kernels/phase5/pointwise_dropin_sources/PointwiseDropinTypes.h:16-34`.
+This block is the one compiled on device; the verified copy is
+`pointwise_dropin_sources/PointwiseDropinTypes.h` under the phase 5 evidence directory in
+the claude-workspace, outside this repository.
 
 **Generate**, from the worktree root:
 
