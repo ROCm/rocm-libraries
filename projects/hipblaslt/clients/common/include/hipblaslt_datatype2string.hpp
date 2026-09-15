@@ -91,6 +91,68 @@ inline hipDataType scaleDataType(hipblaslt_scaling_format s)
     }
 }
 
+// ---------------------------------------------------------------------------
+// w4a16 group scaling (int4 A + one 16-bit float scale per K group of a row).
+// Deliberately NOT part of isBlockScaling(): that predicate selects the MX data
+// generator and the MX scale layouts, neither of which applies here.
+// ---------------------------------------------------------------------------
+
+// K-group size of a w4a16 scale mode, or 0 when `s` is not one.
+inline int w4a16GroupSize(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_16BF:
+    case hipblaslt_scaling_format::Block_32_16BF_ZP:
+    case hipblaslt_scaling_format::Block_32_16F:
+    case hipblaslt_scaling_format::Block_32_16F_ZP:
+        return 32;
+    case hipblaslt_scaling_format::Block_128_16BF:
+    case hipblaslt_scaling_format::Block_128_16BF_ZP:
+    case hipblaslt_scaling_format::Block_128_16F:
+    case hipblaslt_scaling_format::Block_128_16F_ZP:
+        return 128;
+    default:
+        return 0;
+    }
+}
+
+inline bool isW4A16Scaling(hipblaslt_scaling_format s)
+{
+    return w4a16GroupSize(s) != 0;
+}
+
+// True for the asymmetric modes, whose scale allocation carries a packed int4
+// zero-point region after the scales.
+inline bool isW4A16ZeroPoint(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_16BF_ZP:
+    case hipblaslt_scaling_format::Block_128_16BF_ZP:
+    case hipblaslt_scaling_format::Block_32_16F_ZP:
+    case hipblaslt_scaling_format::Block_128_16F_ZP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Element type of the w4a16 scale tensor; it always matches B's type.
+inline hipDataType w4a16ScaleType(hipblaslt_scaling_format s)
+{
+    switch(s)
+    {
+    case hipblaslt_scaling_format::Block_32_16F:
+    case hipblaslt_scaling_format::Block_128_16F:
+    case hipblaslt_scaling_format::Block_32_16F_ZP:
+    case hipblaslt_scaling_format::Block_128_16F_ZP:
+        return HIP_R_16F;
+    default:
+        return HIP_R_16BF;
+    }
+}
+
 inline bool isBlockScaling(hipblaslt_scaling_format s)
 {
     switch(s)

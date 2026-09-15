@@ -44,6 +44,7 @@
 #include "efficiency_monitor.hpp"
 
 #include "testing_matmul.hpp"
+#include "testing_matmul_w4a16.hpp"
 
 using namespace roc; // For emulated program_options
 using namespace std::literals; // For std::string literals of form "str"s
@@ -56,7 +57,13 @@ struct perf_matmul : hipblaslt_test_valid
             throw std::invalid_argument("Invalid combination --function "s + arg.function
                                         + " --a_type "s + hip_datatype_to_string(arg.a_type));
 
-        testing_matmul(arg);
+        // w4a16 has its own driver: int4 A is packed two elements per byte and
+        // its group scale is consumed in the main loop, neither of which the
+        // generic path's element-wise allocation and MX scale layouts model.
+        if(isW4A16Scaling(arg.scaleA))
+            testing_matmul_w4a16(arg);
+        else
+            testing_matmul(arg);
     }
 };
 
@@ -588,7 +595,16 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8. "
+         "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
+         "1006 = VEC32_16BF, 1007 = VEC128_16BF, 1008 = VEC32_16BF_ZP, 1009 = VEC128_16BF_ZP, "
+         "1010 = VEC32_16F, 1011 = VEC128_16F, 1012 = VEC32_16F_ZP, 1013 = VEC128_16F_ZP.")
+
+        ("int4_encoding",
+         value<int32_t>(&arg.int4_encoding)->default_value(0),
+         "w4a16 only: encoding of the int4 weights in A (hipblasLtInt4Encoding_t). "
+         "0 = signed two's complement, 1 = unsigned with an implicit zero-point of 8 (GPTQ), "
+         "2 = as 1 with the ExLlama [0,2,4,6,1,3,5,7] dword shuffle.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
@@ -1144,6 +1160,9 @@ try
             return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
+        if(s >= 1006 && s <= 1013)
+            return static_cast<hipblaslt_scaling_format>(s);
         return hipblaslt_scaling_format::none;
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);
@@ -1205,6 +1224,33 @@ try
         if(arg.d_type != HIP_R_32F && arg.d_type != HIP_R_16F && arg.d_type != HIP_R_16BF)
             throw std::invalid_argument("Invalid d_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.d_type));
+    }
+
+    // w4a16: int4 A, 16-bit activations, and a group A-scale whose element type
+    // matches B's. All three travel together, so reject any partial request here
+    // rather than in the library.
+    {
+        const bool int4A = (static_cast<int>(arg.a_type) == HIP_R_4I_EXT);
+        if(int4A != isW4A16Scaling(arg.scaleA))
+            throw std::invalid_argument(
+                "w4a16 needs --a_type i4_r together with --scaleA 1006..1013; got --a_type "s
+                + hip_datatype_to_string(arg.a_type) + " --scaleA "
+                + std::to_string(static_cast<int>(arg.scaleA)));
+        if(int4A)
+        {
+            if(arg.b_type != HIP_R_16BF && arg.b_type != HIP_R_16F)
+                throw std::invalid_argument("w4a16 requires --b_type bf16_r or f16_r, got "s
+                                            + hip_datatype_to_string(arg.b_type));
+            if(w4a16ScaleType(arg.scaleA) != arg.b_type)
+                throw std::invalid_argument(
+                    "w4a16 scale element type must match --b_type: --scaleA "s
+                    + std::to_string(static_cast<int>(arg.scaleA)) + " implies "
+                    + hip_datatype_to_string(w4a16ScaleType(arg.scaleA)) + ", --b_type is "
+                    + hip_datatype_to_string(arg.b_type));
+            if(arg.int4_encoding < 0 || arg.int4_encoding > 2)
+                throw std::invalid_argument("Invalid --int4_encoding "s
+                                            + std::to_string(arg.int4_encoding));
+        }
     }
 
     if(arg.M[0] < 0)

@@ -445,6 +445,56 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
         }
     }
 
+    // w4a16: int4 A and a 16-bit block A-scale only make sense together. Catching
+    // the mismatch here gives a real diagnostic instead of "no solution found"
+    // out of the heuristic much later.
+    {
+        const bool int4A = (static_cast<int>(matA->type) == HIP_R_4I_EXT);
+        bool       blockScaleA;
+        switch(matmul_descr->scaleAType)
+        {
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_BF16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16:
+        case RocblasltContractionProblem::ScalingFormat::Block_32_F16_ZP:
+        case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
+            blockScaleA = true;
+            break;
+        default:
+            blockScaleA = false;
+            break;
+        }
+        if(int4A != blockScaleA)
+        {
+            log_error(__func__,
+                      "w4a16 requires HIP_R_4I_EXT matrix A together with a "
+                      "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC{32,128}_16{BF,F}[_ZP]_EXT A scale mode; "
+                      "got a_type=",
+                      static_cast<int>(matA->type),
+                      " scaleAType=",
+                      rocblaslt_scaling_format_to_string(matmul_descr->scaleAType));
+            return rocblaslt_status_invalid_value;
+        }
+        if(int4A && matmul_descr->scaleA == nullptr)
+        {
+            log_error(__func__, "w4a16 requires a non-null A scale pointer");
+            return rocblaslt_status_invalid_pointer;
+        }
+        // The group-scale tensor is [M][ceil(K/G)] with no batch dimension, and
+        // neither the kernel's scale SRD nor the reference adds a batch offset,
+        // so a batched problem would silently reuse batch 0's scales for every
+        // batch. Reject rather than compute the wrong answer.
+        if(int4A && num_batches_a > 1)
+        {
+            log_error(__func__, "w4a16 does not support batch_count > 1 yet (got ",
+                      num_batches_a, ")");
+            return rocblaslt_status_not_implemented;
+        }
+    }
+
     auto matmul_status = validateMatmulArgs(m,
                                             n,
                                             k,
