@@ -98,13 +98,19 @@ def stats(samples: Sequence[float]) -> Dict[str, float]:
 
 
 def stepup_check(samples: Sequence[float]) -> Dict[str, Any]:
-    """Back-pressure detector.
+    """ACROSS-chunk drift detector.
 
     Async enqueue is only a valid host clock while the host outruns the device.
-    If the device ever falls behind, the HIP queue fills and the enqueue call
-    starts blocking -- which shows up as the second half of a block being
-    systematically slower than the first. A block that steps up is
-    back-pressured and must be discarded, not averaged through.
+    If the device falls behind, the HIP queue fills and enqueue starts
+    blocking. This catches the case where that condition *develops* over a run:
+    later chunks systematically slower than earlier ones.
+
+    BLIND SPOT, by construction: the queue is drained between chunks, so every
+    chunk starts from the same empty queue. If a chunk is long enough to
+    saturate the queue, EVERY chunk saturates identically and this series is
+    flat -- ratio ~1.0 with substantial blocking inside each chunk. Use
+    :func:`in_chunk_stepup` and :func:`chunk_size_sensitivity` for that case;
+    this check alone must never gate a host-overhead conclusion.
     """
     n = len(samples)
     if n < 6:
@@ -116,6 +122,85 @@ def stepup_check(samples: Sequence[float]) -> Dict[str, Any]:
         "first_half_median_us": a,
         "second_half_median_us": b,
         "ratio": (b / a) if a else float("nan"),
+    }
+
+
+def segment_costs(fn: Callable[[], Any], n: int, segments: int = 4) -> List[float]:
+    """Per-call microseconds for each consecutive segment of ONE undrained run.
+
+    The queue is never drained here, so if enqueue starts blocking part-way
+    through, the later segments carry it.
+    """
+    per = max(1, n // segments)
+    out: List[float] = []
+    for _ in range(segments):
+        t0 = PERF()
+        for _ in range(per):
+            fn()
+        t1 = PERF()
+        out.append((t1 - t0) / per * 1e6)
+    return out
+
+
+def in_chunk_stepup(
+    fn: Callable[[], Any], n: int, segments: int = 4, tol: float = 1.15
+) -> Dict[str, Any]:
+    """Back-pressure detector INSIDE one undrained chunk.
+
+    Where :func:`stepup_check` asks "did the run get slower over time", this
+    asks "does enqueue get slower the longer we go without draining" -- the
+    signature of a queue filling up. A saturated queue produces a flat
+    across-chunk series (every chunk saturates the same way) and a rising
+    within-chunk one, so this is the check that catches it.
+    """
+    seg = segment_costs(fn, n, segments)
+    ratio = (seg[-1] / seg[0]) if seg[0] else float("nan")
+    return {
+        "checked": True,
+        "segments_us": seg,
+        "first_segment_us": seg[0],
+        "last_segment_us": seg[-1],
+        "ratio": ratio,
+        "back_pressured": bool(ratio > tol),
+    }
+
+
+def chunk_size_sensitivity(
+    fn: Callable[[], Any],
+    drain: Callable[[], None],
+    small: int,
+    large: int,
+    tol: float = 1.15,
+) -> Dict[str, Any]:
+    """Does per-launch cost depend on how long we go between drains?
+
+    Pure host work cannot care: enqueueing 300 times costs 300x enqueueing
+    once. If the larger chunk is more expensive per launch, the extra time is
+    the device throttling the queue, and any host-overhead number taken at that
+    chunk size includes device time.
+    """
+
+    def per_launch(count: int) -> float:
+        drain()
+        t0 = PERF()
+        for _ in range(count):
+            fn()
+        t1 = PERF()
+        out = (t1 - t0) / count * 1e6
+        drain()
+        return out
+
+    small_us = per_launch(small)
+    large_us = per_launch(large)
+    ratio = (large_us / small_us) if small_us else float("nan")
+    return {
+        "checked": True,
+        "small_chunk": small,
+        "large_chunk": large,
+        "small_us_per_launch": small_us,
+        "large_us_per_launch": large_us,
+        "ratio": ratio,
+        "back_pressured": bool(ratio > tol),
     }
 
 
@@ -173,10 +258,19 @@ def substitute_share(
 ) -> Dict[str, float]:
     """Packing's share of the launch path, optionally for a DIFFERENT signature.
 
-    The non-packing remainder is `total_armB - pack_armB`. To re-express the
-    share for another signature, only the denominator terms that actually read
-    the signature or the values dict may be swapped -- pass them as
-    `swap=[(measured_here, measured_there), ...]`.
+    Two modes, and the difference matters:
+
+    * **measured** (no `swap`, no `pack_target_*`): each arm's share is
+      computed against *that arm's own measured total*. Nothing is
+      reconstructed.
+    * **model** (`swap` or a `pack_target_*` given): the target signature was
+      never launched, so its total has to be built -- non-packing remainder
+      plus the target's packing cost. The result carries
+      `model_estimate: True`.
+
+    The remainder is taken from arm B (`total_armB - pack_armB`). Only the
+    denominator terms that actually read the signature or the values dict may
+    be swapped -- pass them as `swap=[(measured_here, measured_there), ...]`.
 
     In `KernelLauncher.__call__` there are exactly two such terms:
       * `from_buffer_copy` of the packed blob (kernarg bytes differ), and
@@ -186,15 +280,33 @@ def substitute_share(
     ride as one opaque blob behind BUFFER_POINTER) and is NOT a per-argument
     array. Scaling the numerator without also swapping these would bias the
     substituted share high.
+
+    `remainder_residual_us` is the model's own consistency check: the two arms
+    differ only in their packer, so their non-packing remainders should agree.
+    A residual larger than the run's noise floor means that assumption does not
+    hold and the modelled share should not be quoted.
     """
-    nonpack = total_armB_us - pack_armB_us
-    for here, there in swap:
-        nonpack += there - here
+    remainder_armA = total_armA_us - pack_armA_us
+    remainder_armB = total_armB_us - pack_armB_us
+    modelled = bool(swap) or (
+        pack_target_armA_us is not None or pack_target_armB_us is not None
+    )
     pa = pack_armA_us if pack_target_armA_us is None else pack_target_armA_us
     pb = pack_armB_us if pack_target_armB_us is None else pack_target_armB_us
-    tA, tB = nonpack + pa, nonpack + pb
+    if modelled:
+        nonpack = remainder_armB
+        for here, there in swap:
+            nonpack += there - here
+        tA, tB = nonpack + pa, nonpack + pb
+    else:
+        nonpack = remainder_armB
+        tA, tB = total_armA_us, total_armB_us
     return {
+        "model_estimate": modelled,
         "nonpacking_us": nonpack,
+        "remainder_armA_us": remainder_armA,
+        "remainder_armB_us": remainder_armB,
+        "remainder_residual_us": remainder_armA - remainder_armB,
         "packing_us_armA": pa,
         "packing_us_armB": pb,
         "total_us_armA": tA,
@@ -524,8 +636,45 @@ def main(argv: Sequence[str] = None) -> int:
             acc["Bprime"] += run_arm("B", cfg)
         d = {k: stats(v) for k, v in acc.items()}
         d["stepup"] = {k: stepup_check(v) for k, v in acc.items()}
+        # Back-pressure gate. The across-chunk series above cannot see a queue
+        # that saturates identically inside every chunk (it is drained between
+        # them), so the two checks below probe an UNDRAINED chunk and the
+        # chunk-size dependence directly. Both run on arm B, whose enqueue rate
+        # is the higher of the two and therefore the first to saturate.
+        launcher._packer = packers["B"]
+        drain()
+        d["in_chunk_stepup"] = in_chunk_stepup(
+            lambda: launcher(values, config=cfg), args.chunk_size
+        )
+        drain()
+        d["chunk_size_sensitivity"] = chunk_size_sensitivity(
+            lambda: launcher(values, config=cfg),
+            drain,
+            max(8, args.chunk_size // 8),
+            args.chunk_size,
+        )
+        d["back_pressured"] = bool(
+            d["in_chunk_stepup"]["back_pressured"]
+            or d["chunk_size_sensitivity"]["back_pressured"]
+        )
         d["summary"] = summarize_ab(acc["A"], acc["Aprime"], acc["B"], acc["Bprime"])
         d["primary_estimator"] = "p10_us"
+        if d["back_pressured"]:
+            # Enqueue is blocking, so these samples contain device time and are
+            # not a host-overhead measurement. Say so in the artifact rather
+            # than leaving a reader to find it in a nested field.
+            d["valid"] = False
+            d["invalid_reason"] = (
+                "enqueue back-pressured: the timed region includes device time, "
+                "so these samples do not measure host launch overhead. Re-run "
+                "with a smaller --chunk-size."
+            )
+            for est in d["summary"].values():
+                est["delta_is_quotable"] = False
+        else:
+            d["valid"] = True
+            for est in d["summary"].values():
+                est["delta_is_quotable"] = bool(est["delta_exceeds_noise"])
         wall[dname] = d
         drain()
     R["wall_clock"] = wall

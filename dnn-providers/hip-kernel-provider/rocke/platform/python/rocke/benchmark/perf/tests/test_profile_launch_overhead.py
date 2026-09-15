@@ -102,17 +102,58 @@ class TestSummarizeAB(unittest.TestCase):
 class TestSubstituteShare(unittest.TestCase):
     """Re-expressing a measured share for another signature."""
 
-    def test_share_without_substitution_is_plain_arithmetic(self):
+    def test_share_without_substitution_uses_each_arm_measured_total(self):
         out = ex.substitute_share(
             total_armA_us=10.0,
             total_armB_us=9.0,
             pack_armA_us=2.0,
             pack_armB_us=1.0,
         )
-        self.assertAlmostEqual(out["nonpacking_us"], 8.0)
+        self.assertFalse(out["model_estimate"])
+        self.assertAlmostEqual(out["total_us_armA"], 10.0)
+        self.assertAlmostEqual(out["total_us_armB"], 9.0)
         self.assertAlmostEqual(out["packing_share_armA_pct"], 20.0)
         self.assertAlmostEqual(out["packing_share_armB_pct"], 11.111111, places=5)
         self.assertAlmostEqual(out["saving_us"], 1.0)
+
+    def test_measured_arm_a_total_is_not_discarded(self):
+        """Regression: arm A's share was reconstructed from arm B's remainder,
+        so a measured arm A total could change tenfold without moving the
+        reported number. The measured value must reach the result."""
+        low = ex.substitute_share(
+            total_armA_us=10.0,
+            total_armB_us=9.0,
+            pack_armA_us=2.0,
+            pack_armB_us=1.0,
+        )
+        high = ex.substitute_share(
+            total_armA_us=100.0,
+            total_armB_us=9.0,
+            pack_armA_us=2.0,
+            pack_armB_us=1.0,
+        )
+        self.assertAlmostEqual(high["total_us_armA"], 100.0)
+        self.assertLess(high["packing_share_armA_pct"], low["packing_share_armA_pct"])
+        self.assertAlmostEqual(high["packing_share_armA_pct"], 2.0)
+
+    def test_remainder_residual_exposes_a_broken_model_assumption(self):
+        """The arms differ only in their packer, so their non-packing
+        remainders should agree. The residual is what tells a reader the
+        modelled share rests on an assumption that did not hold."""
+        consistent = ex.substitute_share(
+            total_armA_us=10.0,
+            total_armB_us=9.0,
+            pack_armA_us=2.0,
+            pack_armB_us=1.0,
+        )
+        self.assertAlmostEqual(consistent["remainder_residual_us"], 0.0)
+        skewed = ex.substitute_share(
+            total_armA_us=12.5,
+            total_armB_us=9.0,
+            pack_armA_us=2.0,
+            pack_armB_us=1.0,
+        )
+        self.assertAlmostEqual(skewed["remainder_residual_us"], 2.5)
 
     def test_swapping_a_denominator_term_lowers_the_substituted_share(self):
         # Scaling only the numerator is the bias this argument exists to avoid:
@@ -136,6 +177,58 @@ class TestSubstituteShare(unittest.TestCase):
         self.assertAlmostEqual(
             with_swap["nonpacking_us"], numerator_only["nonpacking_us"] + 0.27
         )
+
+
+class TestBackPressureDetection(unittest.TestCase):
+    """The across-chunk check has a blind spot; these are the checks that cover
+    it. A queue that saturates identically inside every drained chunk produces
+    a perfectly flat across-chunk series, so that check alone can report ~1.0
+    while every launch is blocking on the device."""
+
+    @staticmethod
+    def _saturating(cost_us=8.0, free=50, blocked_us=40.0):
+        """Enqueue is cheap until the queue fills, then it blocks."""
+        state = {"n": 0}
+
+        def fn():
+            state["n"] += 1
+            delay = cost_us if state["n"] <= free else blocked_us
+            end = ex.PERF() + delay * 1e-6
+            while ex.PERF() < end:
+                pass
+
+        return fn, state
+
+    def test_across_chunk_check_is_blind_to_uniform_saturation(self):
+        # Documents the defect the other two checks exist to cover: every chunk
+        # saturates the same way, so the chunk-mean series is flat.
+        per_chunk = [12.0e-6] * 20
+        self.assertLess(abs(ex.stepup_check(per_chunk)["ratio"] - 1.0), 0.01)
+
+    def test_in_chunk_stepup_catches_a_queue_filling_mid_chunk(self):
+        fn, _ = self._saturating()
+        out = ex.in_chunk_stepup(fn, 200, segments=4)
+        self.assertTrue(out["back_pressured"])
+        self.assertGreater(out["ratio"], 1.15)
+
+    def test_in_chunk_stepup_passes_a_uniform_cost_path(self):
+        out = ex.in_chunk_stepup(lambda: None, 400, segments=4)
+        self.assertFalse(out["back_pressured"])
+
+    def test_chunk_size_sensitivity_catches_cost_growing_with_chunk(self):
+        # Pure host work cannot care how long we go between drains; if the
+        # larger chunk costs more per launch, the extra time is the device.
+        fn, state = self._saturating(free=30)
+
+        def reset():
+            state["n"] = 0
+
+        out = ex.chunk_size_sensitivity(fn, reset, 20, 200)
+        self.assertTrue(out["back_pressured"])
+
+    def test_chunk_size_sensitivity_passes_a_drain_independent_path(self):
+        out = ex.chunk_size_sensitivity(lambda: None, lambda: None, 200, 2000)
+        self.assertFalse(out["back_pressured"])
 
 
 class TestStepupCheck(unittest.TestCase):
