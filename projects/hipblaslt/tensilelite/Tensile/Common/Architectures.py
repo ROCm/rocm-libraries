@@ -29,7 +29,7 @@ from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
 from .Types import IsaVersion
 from .Utilities import print1
-from ..GpuArch import detect_gpu_archs
+from ..GpuArch import detect_gpu_archs, restore_steppings
 
 import rocisa
 
@@ -519,8 +519,17 @@ def _detectArchNames(detectionTool) -> List[str]:
     What steppings changed is not the order but what survives the answer: the
     name used to be rebuilt from its ISA, and gfx1250-strict shares (12,5,0)
     with gfx1250, so the rebuild silently reported the wrong stepping.
+
+    The enumerator's answer goes through ``restore_steppings`` because asking it
+    first is not free: as of ROCm 10.2 amdgpu-arch -- the default enumerator --
+    names an A0 gfx1250 part "gfx1250", so the enumerator always answered and
+    the ``detect_gpu_archs`` fallback never ran. Configs that name no ISA get
+    their target from here, so a strict part built and tuned as base, and the
+    only sign was the arch in the artifact path.
     """
-    return _fromEnumerator(detectionTool) or _supportedArchNames(detect_gpu_archs())
+    return restore_steppings(_fromEnumerator(detectionTool)) or _supportedArchNames(
+        detect_gpu_archs()
+    )
 
 
 def _fromEnumerator(detectionTool) -> List[str]:
