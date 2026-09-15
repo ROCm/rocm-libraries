@@ -23,6 +23,7 @@
             ],
             "libraries": ["<@(hipdnn_libraries)"],
             "cflags_cc": ["-std=c++17"],
+            "cflags_cc!": ["-fno-exceptions"],
             "conditions": [
                 [
                     "OS=='win'",
