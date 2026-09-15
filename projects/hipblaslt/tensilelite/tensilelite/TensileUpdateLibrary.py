@@ -125,7 +125,7 @@ def TensileUpdateLibrary(userArgs):
     print1("")
     print1(HR)
     print1("#")
-    print1("#  Tensile Update Library v{}".format(__version__))
+    print1("#  TensileLite Update Library v{}".format(__version__))
 
     # argument parsing and related setup
     argParser = argparse.ArgumentParser()

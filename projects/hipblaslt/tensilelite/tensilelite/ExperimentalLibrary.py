@@ -32,7 +32,7 @@ silently half-built):
              ``validParameters`` registry and inject/override them into the
              config's ForkParameters; stage the result under an
              ``Experimental/<feature>/`` tree.
-  gen-logic  Run the Tensile benchmark+analyze flow to emit ``3_LibraryLogic``
+  gen-logic  Run the TensileLite benchmark+analyze flow to emit ``3_LibraryLogic``
              and classify failures: kernel-generation error vs. all-solutions
              rejected by Solution validation vs. an unedited placeholder
              ``ProblemSizes`` left over from extracting a ``Prediction``-type
@@ -121,7 +121,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-# The Tensile package directory that contains this module. Used to locate the
+# The TensileLite package directory that contains this module. Used to locate the
 # bin/Tensile launcher (``python -m tensilelite.Tensile`` is intentionally disabled
 # upstream).
 _TENSILE_PKG_DIR = Path(__file__).resolve().parent
@@ -142,7 +142,7 @@ class ExperimentalLibraryError(RuntimeError):
 
 
 def default_python() -> str:
-    """Pick the interpreter to drive Tensile subprocesses.
+    """Pick the interpreter to drive TensileLite subprocesses.
 
     Prefers the repo venv under ``projects/hipblaslt/build/venv`` if present,
     otherwise falls back to the interpreter running this tool.
@@ -924,7 +924,7 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
 
     bin_tensile = _TENSILE_PKG_DIR / "bin" / "Tensile"
     if not args.dry_run and not bin_tensile.is_file():
-        raise ExperimentalLibraryError(f"Tensile launcher not found: {bin_tensile}")
+        raise ExperimentalLibraryError(f"TensileLite launcher not found: {bin_tensile}")
 
     cmd = [
         args.python,
@@ -954,7 +954,7 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
     if rc == 0 and logic_files and total_solutions >= 1:
         staging_root = _stage_logic(workdir, args.arch, feature_name)
         print(f"gen-logic OK: {total_solutions} solution(s) across {len(logic_files)} logic file(s).")
-        print(f"Tensile log: {log_path}")
+        print(f"TensileLite log: {log_path}")
         print(f"Staged experimental logic dir (pass to build-lib --logic-dir):\n  {staging_root}")
         return 0
 
@@ -970,11 +970,11 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
                 f"count solutions: {non_empty[0]}\n"
                 "  (clean exit, so this is inconclusive -- not a validation "
                 "rejection; inspect the file and the log)\n"
-                f"  Tensile log: {log_path}"
+                f"  TensileLite log: {log_path}"
             )
         raise ExperimentalLibraryError(
             "gen-logic exited 0 but produced no 3_LibraryLogic.\n"
-            f"  Tensile log: {log_path}"
+            f"  TensileLite log: {log_path}"
         )
 
     # rc != 0 below. Only now consult rejection markers, and only when NO
@@ -990,11 +990,11 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
             "StreamKForceDPOnly requires StreamK==3 and is incompatible with "
             "StreamKAtomic==1).\n"
             f"  produced logic files: {len(logic_files)}; total solutions: {total_solutions}\n"
-            f"  Tensile log: {log_path}"
+            f"  TensileLite log: {log_path}"
         )
 
     raise ExperimentalLibraryError(
-        f"KERNEL GENERATION FAILED (codegen error): Tensile exited rc={rc}. "
+        f"KERNEL GENERATION FAILED (codegen error): TensileLite exited rc={rc}. "
         "This is a codegen error rather than a validation rejection. See the "
         f"captured log:\n  {log_path}"
     )
@@ -1620,7 +1620,7 @@ def _add_global_flags(p: argparse.ArgumentParser, *, include_python: bool = True
         p.add_argument(
             "--python",
             default=None,
-            help="Interpreter to drive Tensile (default: repo venv if present, else current).",
+            help="Interpreter to drive TensileLite (default: repo venv if present, else current).",
         )
     p.add_argument("--dry-run", action="store_true", help="Print commands/env without executing.")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose logging.")
@@ -1721,7 +1721,7 @@ def build_parser() -> argparse.ArgumentParser:
     pg = sub.add_parser("gen-logic", help="Benchmark on the target-arch GPU and validate the produced logic (requires that GPU present).")
     pg.add_argument("--config", required=True, help="Augmented benchmark config yaml.")
     pg.add_argument("--arch", default="gfx950", help="GPU target (default gfx950).")
-    pg.add_argument("--out", required=True, help="Work directory for Tensile output.")
+    pg.add_argument("--out", required=True, help="Work directory for TensileLite output.")
     pg.add_argument("--cu", type=int, default=304, help="CU count pinned via the CU env for the build predicate.")
     pg.add_argument("--feature-name", default=None, help="Feature name for the Experimental dir.")
     _add_global_flags(pg)
