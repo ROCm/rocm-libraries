@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
+import os
 import runpy
 import shutil
 
 from setuptools import setup
 from setuptools.command.build_py import build_py
+from setuptools.command.egg_info import egg_info
 
 _metadata = runpy.run_path(str(Path(__file__).with_name("release_metadata.py")))
 
@@ -25,8 +27,37 @@ class CleanBuildPy(build_py):
         super().run()
 
 
+class BuildEggInfo(egg_info):
+    """Keep generated distribution metadata out of the source root."""
+
+    def finalize_options(self):
+        if self.egg_base is None:
+            egg_base = Path(__file__).with_name("build") / "egg-info"
+            egg_base.mkdir(parents=True, exist_ok=True)
+            self.egg_base = str(egg_base)
+        super().finalize_options()
+def _build_rocm_version() -> str:
+    """
+    Return the ROCm identity encoded in the TensileLite wheel.
+
+    CMake and Invoke pass ``TENSILELITE_ROCM_VERSION`` as the authoritative
+    selected build identity, including TheRock's package identity.
+    Tox needs a narrow bootstrap fallback while it installs the package,
+    so it reads the selected ``ROCM_PATH/.info/version``.
+    Other direct ``setup.py`` calls fail rather than silently tag a wheel
+    from an ambient ROCm installation.
+    """
+    explicit_rocm_version = os.environ.get("TENSILELITE_ROCM_VERSION")
+    if not explicit_rocm_version:
+        raise RuntimeError(
+            "TENSILELITE_ROCM_VERSION=X.Y.Z is required to build a TensileLite wheel. "
+            "Use the CMake or Invoke build frontend, or supply the selected SDK base version explicitly."
+        )
+    return explicit_rocm_version
+
+
 setup(
-    version=_metadata["distribution_version"](),
+    version=_metadata["distribution_version"](_build_rocm_version()),
     install_requires=[
         "packaging",
         "pyyaml",
@@ -35,5 +66,5 @@ setup(
         "filelock",
         "numpy",
     ],
-    cmdclass={"build_py": CleanBuildPy},
+    cmdclass={"build_py": CleanBuildPy, "egg_info": BuildEggInfo},
 )
