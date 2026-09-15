@@ -187,7 +187,22 @@ namespace rocblaslt
             std::shared_lock<std::shared_timed_mutex> lock(m_mutex);
 
             auto iter = m_problems.find(problemKey);
-            if(iter == m_problems.end() || measurableCandidate(iter->second, solutionIndex) < 0)
+            if(iter == m_problems.end())
+            {
+                // A key the selection hook never registered. The two hooks
+                // disagreeing is otherwise indistinguishable from the feature
+                // being switched off, so it gets its own event.
+                if(m_verbose)
+                {
+                    std::ostringstream msg = traceLine("miss", problemKey);
+                    msg << " sol=" << solutionIndex << "\n";
+                    std::cerr << msg.str();
+                }
+
+                return false;
+            }
+
+            if(measurableCandidate(iter->second, solutionIndex) < 0)
                 return false;
         }
 
