@@ -468,13 +468,18 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         The predicate text is kept identical to the gfx950 twin on purpose even
         though ``ragged``/``varlen``/``paged``/``sliding_window`` are inert here: if
         one of those sub-modes is later admitted on gfx942, it lands already excluded
-        rather than silently claiming a cache identity its body does not have."""
+        rather than silently claiming a cache identity its body does not have.
+
+        The :func:`_exp2_fast_is_shape_dependent` term is gfx942-only and has no
+        gfx950 twin -- it is the one leak the shared predicate does not cover. See
+        that function for why it is a genuine per-shape body rather than bookkeeping."""
         return not (
             self.persistent
             or self.ragged
             or self.varlen
             or self.paged
             or self.sliding_window > 0
+            or _exp2_fast_is_shape_dependent(self)
         )
 
     @property
@@ -682,6 +687,37 @@ def _use_exp2_fast(head_size: int, dtype: str, seqlen: int) -> bool:
     if dtype == "bf16" and head_size == 128 and seqlen < 4096:
         return False
     return True
+
+
+def _exp2_fast_is_shape_dependent(spec: "Gfx942AttentionDenseSpec") -> bool:
+    """Whether ``spec``'s resolved exp2_fast decision is a function of ``seqlen_q``.
+
+    This is the one shape leak the arch-shared ``runtime_shape`` predicate does not
+    cover, and it is specific to gfx942: :func:`_use_exp2_fast` carries a
+    short-sequence cut (bf16 D128, ``seqlen < 4096``) that forks the emitted softmax.
+    So at the tri-state default, on that config only, the BODY differs per shape.
+
+    That is a cache collision and not merely a naming one.
+    :func:`_tuning_name_tags` deliberately emits no token when the resolved value
+    equals the policy's -- which is what keeps the shipped names golden-stable -- so
+    two shapes straddling the cut would share a cache key AND a kernel name while
+    lowering to different IR, and ``_DENSE_LAUNCHER_CACHE`` would serve one shape's
+    binary to the other. Exactly the stale-binary bug the tagging scheme exists to
+    prevent, and one the name assert in ``run_attention_dense_torch`` cannot catch,
+    because the names agree.
+
+    Excluding these specs from the runtime path is preferred over widening the cache
+    key or adding an unconditional name token: the premise of the runtime-shape path
+    is that ONE binary serves every shape, and here the body genuinely is not one
+    binary. The cost is bounded -- bf16 D128 at the tri-state default keeps exactly
+    today's per-shape identity; fp16, D64, and any spec that pins ``use_exp2_fast``
+    explicitly (which severs the dependency) all stay on the runtime path.
+
+    If the cut is ever removed from :func:`_use_exp2_fast`, delete this along with it.
+    """
+    if spec.use_exp2_fast is not None:
+        return False
+    return spec.dtype == "bf16" and spec.head_size == 128
 
 
 def _use_cfvst(head_size: int, dtype: str) -> bool:
