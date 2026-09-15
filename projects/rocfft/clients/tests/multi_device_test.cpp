@@ -24,6 +24,10 @@
 // RCCL interface without a separate standalone unit test. Running any case
 // under --gtest_repeat also exercises cached-communicator reuse across
 // sequential plans.
+//
+// Multi-process: build with ROCFFT_RCCL_ENABLE and ROCFFT_MPI_ENABLE and run
+// with --mp_lib mpi. Plans where every rank has one GPU use RCCL for the
+// transpose; multi-GPU-per-rank cases still use MPI P2P.
 
 #include "../../shared/accuracy_test.h"
 #include "../../shared/fft_enums.h"

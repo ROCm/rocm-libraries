@@ -713,45 +713,37 @@ void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
                                     const rocfft_execution_info_internal& info,
                                     size_t                                multiPlanIdx)
 {
-    const auto devices = rccl.get_devices();
+    const auto local_locs = rccl.get_local_locations();
 
     if(LOG_PLAN_ENABLED())
     {
         log_plan("CommRCCLAllToAll: count_per_rank=" + std::to_string(count_per_rank)
-                 + ", ndevices=" + std::to_string(devices.size()) + ", " + precision_name(precision)
-                 + " " + PrintArrayType(arrayType) + "\n");
+                 + ", nworld=" + std::to_string(rccl.num_ranks())
+                 + ", nlocal=" + std::to_string(local_locs.size()) + ", "
+                 + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
     }
 
-    // collect per-rank send/recv pointers. The wrapper requires each
-    // vector to be sized num_ranks() and indexed by RCCL rank; agents[]
-    // is already in that order (see constructor).
-    //
-    // Buffer layout (disjoint send/recv):
-    //   sendBuffer:  slot[dst_rank] at offset dst_rank * count_per_rank
-    //                (populated by the pack step antecedents)
-    //   recvBuffer:  slot[src_rank] at offset src_rank * count_per_rank
-    //                (populated by the collective; read by unpack step)
     std::vector<const void*> send_ptrs(agents.size(), nullptr);
     std::vector<void*>       recv_ptrs(agents.size(), nullptr);
-    for(size_t r = 0; r < agents.size(); ++r)
+    for(const auto& loc : local_locs)
     {
-        rocfft_scoped_device dev(devices[r]);
+        const int            r = rccl.get_rank(loc);
+        rocfft_scoped_device dev(loc.device);
         send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
         recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
     }
 
-    // one call fires the whole collective on the comm-owned streams.
     rccl.alltoall(send_ptrs, recv_ptrs, count_per_rank, precision, arrayType);
 
-    // record a completion event per agent on the same comm stream the
-    // collective was enqueued on, so Wait() can sync on events.
-    for(size_t r = 0; r < agents.size(); ++r)
+    for(const auto& loc : local_locs)
     {
-        rocfft_scoped_device dev(devices[r]);
-        if(agents[r].event
-           && hipEventRecord(agents[r].event, rccl.get_stream(devices[r])) != hipSuccess)
+        const int r = rccl.get_rank(loc);
+        if(!agents[r].event)
+            continue;
+        rocfft_scoped_device dev(loc.device);
+        if(hipEventRecord(agents[r].event, rccl.get_stream(loc.device)) != hipSuccess)
             throw std::runtime_error("hipEventRecord failed for RCCL AllToAll on device "
-                                     + std::to_string(devices[r]));
+                                     + std::to_string(loc.device));
     }
 }
 
@@ -774,7 +766,7 @@ void CommRCCLAllToAll::Wait()
 void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
 {
     const std::string indentStr(indent * 4, ' ');
-    const auto        devices = rccl.get_devices();
+    const auto        world = rccl.get_locations();
 
     os << indentStr << "CommRCCLAllToAll " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":\n";
@@ -782,7 +774,7 @@ void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
     os << indentStr << "  num_ranks: " << agents.size() << "\n";
     for(size_t r = 0; r < agents.size(); ++r)
     {
-        os << indentStr << "  rank " << r << ": device=" << devices[r]
+        os << indentStr << "  rank " << r << ": " << world[r].str()
            << " sendBuf=" << PrintBufferPtrOffset(agents[r].sendBuffer, 0)
            << " recvBuf=" << PrintBufferPtrOffset(agents[r].recvBuffer, 0) << "\n";
     }
@@ -828,14 +820,14 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                                         precision,
                                         arrayType);
 
-            // endpoints are addressed by device id; the wrapper maps
-            // the peer device to its RCCL rank internally
+            // endpoints are addressed by world location; the wrapper
+            // maps the peer to its NCCL rank
             switch(t.op)
             {
             case rccl_op::send:
                 rccl.send(data_ptr,
                           t.count,
-                          t.peer_location.device,
+                          t.peer_location,
                           t.local_location.device,
                           precision,
                           arrayType);
@@ -843,7 +835,7 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
             case rccl_op::recv:
                 rccl.recv(data_ptr,
                           t.count,
-                          t.peer_location.device,
+                          t.peer_location,
                           t.local_location.device,
                           precision,
                           arrayType);

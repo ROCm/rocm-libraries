@@ -2575,11 +2575,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
             + ROCFFT_CURRENT_FUNCTION);
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // single-process multi-device transposes prefer RCCL when a
-    // communicator is available; on any failure (e.g. mismatch
-    // between brick devices and the RCCL device set) fall through
-    // to the P2P / A2A paths below.
-    if(rccl && desc.get_local_comm_size() == 1)
+    // prefer RCCL when a communicator is available; on any failure
+    // (e.g. mismatch between brick locations and the RCCL world) fall
+    // through to the P2P / A2A paths below.
+    if(rccl)
     {
         // GlobalTransposeRCCL appends to multiPlan as it builds,
         // on failure roll back to this size so the fallback path does not
@@ -2663,9 +2662,9 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     // compute all input/output brick intersections and check alltoall eligibility.
     // alltoall eligibility requires:
     //   (a) same brick count on input and output (>= 2),
-    //   (b) one brick per device on both sides (no duplicates),
-    //   (c) input and output cover the same set of devices,
-    //   (d) the RCCL communicator covers exactly that device set,
+    //   (b) one brick per location on both sides (no duplicates),
+    //   (c) input and output cover the same set of locations,
+    //   (d) the RCCL communicator covers exactly that location set,
     //   (e) the intersection pattern is a complete N x N exchange with
     //       a uniform per-pair element count.
     struct IntersectionInfo
@@ -2676,19 +2675,18 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     };
     std::vector<IntersectionInfo> intersections;
 
-    std::set<int> in_devices, out_devices;
+    std::set<rocfft_location_t> in_locs, out_locs;
     for(const auto& brick : input.field.bricks)
-        in_devices.insert(brick.location.device);
+        in_locs.insert(brick.location);
     for(const auto& brick : output.field.bricks)
-        out_devices.insert(brick.location.device);
+        out_locs.insert(brick.location);
 
-    const auto          rccl_devs_vec = rccl.get_devices();
-    const std::set<int> rccl_devices(rccl_devs_vec.begin(), rccl_devs_vec.end());
+    const auto                        world_vec = rccl.get_locations();
+    const std::set<rocfft_location_t> world_set(world_vec.begin(), world_vec.end());
 
     bool alltoall_eligible = (nbricks_in == nbricks_out) && (nbricks_in >= 2)
-                             && (in_devices.size() == nbricks_in)
-                             && (out_devices.size() == nbricks_in) && (in_devices == out_devices)
-                             && (rccl_devices == in_devices);
+                             && (in_locs.size() == nbricks_in) && (out_locs.size() == nbricks_in)
+                             && (in_locs == out_locs) && (world_set == in_locs);
 
     size_t uniform_count      = 0;
     size_t cross_device_count = 0;
@@ -2798,24 +2796,21 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
 
     if(use_alltoall)
     {
-        // a2aSendBufs / a2aRecvBufs are indexed by RCCL rank: entry r
-        // lives on rccl_devs_vec[r], which is the device owning rank r.
+        // a2aSendBufs / a2aRecvBufs are indexed by NCCL rank: entry r
+        // lives on world_vec[r]. Remote ranks get placeholder leases.
         //   a2aSendBufs[r]: slot[dst_rank] at offset dst_rank * uniform_count
-        //                   (written by pack kernels, read by ncclAllToAll)
         //   a2aRecvBufs[r]: slot[src_rank] at offset src_rank * uniform_count
-        //                   (written by ncclAllToAll, read by unpack kernels)
-        const size_t                 nranks = rccl_devs_vec.size();
+        const size_t                 nranks = world_vec.size();
         std::vector<TempBufferLease> a2aSendBufs;
         std::vector<TempBufferLease> a2aRecvBufs;
         a2aSendBufs.reserve(nranks);
         a2aRecvBufs.reserve(nranks);
         for(size_t r = 0; r < nranks; ++r)
         {
-            const rocfft_location_t loc{local_comm_rank, rccl_devs_vec[r]};
             a2aSendBufs.emplace_back(
-                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
+                tempBuffers, local_comm_rank, world_vec[r], nranks * uniform_count * elem_size);
             a2aRecvBufs.emplace_back(
-                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
+                tempBuffers, local_comm_rank, world_vec[r], nranks * uniform_count * elem_size);
         }
 
         std::vector<size_t> packItems;
@@ -2827,8 +2822,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
             if(inBrick.location == outBrick.location)
                 continue;
 
-            const int src_rank = rccl.get_rank(inBrick.location.device);
-            const int dst_rank = rccl.get_rank(outBrick.location.device);
+            const int src_rank = rccl.get_rank(inBrick.location);
+            const int dst_rank = rccl.get_rank(outBrick.location);
 
             auto packIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
@@ -2872,8 +2867,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
             if(inBrick.location == outBrick.location)
                 continue;
 
-            const int src_rank = rccl.get_rank(inBrick.location.device);
-            const int dst_rank = rccl.get_rank(outBrick.location.device);
+            const int src_rank = rccl.get_rank(inBrick.location);
+            const int dst_rank = rccl.get_rank(outBrick.location);
 
             auto unpackIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
@@ -2895,21 +2890,20 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     }
     else
     {
-        // grouped send/recv path (general case).  every brick must live
-        // on a device known to the RCCL communicator; rccl.get_rank()
+        // grouped send/recv path (general case). every brick must live
+        // on a location known to the RCCL communicator; rccl.get_rank()
         // called inside CommRCCLGrouped at execute time would throw
-        // otherwise.  validate up front so any mismatch is a clear
-        // plan-creation-time error rather than a deferred crash.
-        auto validate_brick_device = [&](const rocfft_brick_t& brick, const char* which) {
-            if(rccl_devices.count(brick.location.device) == 0)
+        // otherwise.
+        auto validate_brick_location = [&](const rocfft_brick_t& brick, const char* which) {
+            if(world_set.count(brick.location) == 0)
                 throw std::runtime_error(std::string("GlobalTransposeRCCL grouped: ") + which
-                                         + " brick device " + std::to_string(brick.location.device)
+                                         + " brick location " + brick.location.str()
                                          + " is not in the RCCL communicator");
         };
         for(const auto& brick : input.field.bricks)
-            validate_brick_device(brick, "input");
+            validate_brick_location(brick, "input");
         for(const auto& brick : output.field.bricks)
-            validate_brick_device(brick, "output");
+            validate_brick_location(brick, "output");
 
         auto rcclGrouped   = std::make_unique<CommRCCLGrouped>(rccl, precision, input.array_type);
         rcclGrouped->group = itemGroup;
@@ -2958,7 +2952,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
             packItems.push_back(packIdx);
 
             // send pack -> peer that owns outBrick; recv into recv buffer
-            // from peer that owns inBrick.  brick devices were validated
+            // from peer that owns inBrick. brick locations were validated
             // against the RCCL communicator above.
             rcclGrouped->AddTransfer<rccl_op::send>(outBrick.location,
                                                     inBrick.location,
@@ -3847,35 +3841,72 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
     // any failure here leaves rccl empty so the caller falls back to the P2P / A2A paths
     try
     {
-        // RCCL path is currently single-process multi-GPU, one comm spans the
-        // local devices and the grouped send/recv path uses device ids as
-        // NCCL peer ranks
         if(desc.inFields.empty() || desc.outFields.empty())
-            return;
-        if(desc.get_local_comm_size() != 1)
             return;
 
         const auto local_comm_rank = desc.get_local_comm_rank();
+        const auto local_comm_size = desc.get_local_comm_size();
 
-        std::set<int> device_set;
+        std::set<int> local_devices;
         for(const auto& brick : desc.inFields.front().bricks)
         {
             if(brick.location.comm_rank == local_comm_rank)
-                device_set.insert(brick.location.device);
+                local_devices.insert(brick.location.device);
         }
         for(const auto& brick : desc.outFields.front().bricks)
         {
             if(brick.location.comm_rank == local_comm_rank)
-                device_set.insert(brick.location.device);
+                local_devices.insert(brick.location.device);
         }
 
-        // include the device active at plan creation so it always
-        // participates in the communicator
-        device_set.insert(rocfft_scoped_device::current_device());
-        rccl = rocfft_rccl_comm_t::create(device_set);
+        const bool env_disabled = (rocfft_getenv("ROCFFT_RCCL_DISABLE") == "1");
+
+        if(local_comm_size == 1)
+        {
+            if(env_disabled)
+                return;
+            // single-process: include the device active at plan creation
+            // so it always participates in the communicator
+            local_devices.insert(rocfft_scoped_device::current_device());
+            rccl = rocfft_rccl_comm_t::create(local_devices);
+            return;
+        }
+
+#ifdef ROCFFT_MPI_ENABLE
+        if(desc.comm_type != rocfft_comm_mpi || !desc.mpi_comm)
+            return;
+
+        MPI_Comm comm     = desc.mpi_comm;
+        int      disabled = env_disabled ? 1 : 0;
+        if(MPI_Allreduce(MPI_IN_PLACE, &disabled, 1, MPI_INT, MPI_MAX, comm) != MPI_SUCCESS)
+            return;
+        if(disabled)
+            return;
+
+        // phase 1: every rank must own exactly one GPU. this allgather is
+        // the collective gate so no rank enters ncclCommInitRank alone.
+        int              local_n = static_cast<int>(local_devices.size());
+        std::vector<int> all_n(static_cast<size_t>(local_comm_size));
+        if(MPI_Allgather(&local_n, 1, MPI_INT, all_n.data(), 1, MPI_INT, comm) != MPI_SUCCESS)
+            return;
+        if(std::any_of(all_n.begin(), all_n.end(), [](int n) { return n != 1; }))
+            return;
+
+        const int        local_dev = *local_devices.begin();
+        std::vector<int> all_dev(static_cast<size_t>(local_comm_size));
+        if(MPI_Allgather(&local_dev, 1, MPI_INT, all_dev.data(), 1, MPI_INT, comm) != MPI_SUCCESS)
+            return;
+
+        std::set<rocfft_location_t> world;
+        for(int r = 0; r < local_comm_size; ++r)
+            world.emplace(r, all_dev[static_cast<size_t>(r)]);
+
+        rccl = rocfft_rccl_comm_t::create(comm, local_comm_rank, world);
+#endif
     }
     catch(const std::exception& e)
     {
+        rccl = {};
         if(LOG_PLAN_ENABLED())
             *LogSingleton::GetInstance().GetPlanOS()
                 << "InitRCCLCommunicator failed, proceeding without RCCL: " << e.what()
@@ -3883,6 +3914,7 @@ void rocfft_plan_t::InitRCCLCommunicator() noexcept
     }
     catch(...)
     {
+        rccl = {};
         if(LOG_PLAN_ENABLED())
             *LogSingleton::GetInstance().GetPlanOS()
                 << "InitRCCLCommunicator failed with unknown exception, proceeding without RCCL"
