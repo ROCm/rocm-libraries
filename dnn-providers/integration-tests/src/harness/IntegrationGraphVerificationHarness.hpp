@@ -269,42 +269,38 @@ protected:
     // Registers the comparison for one output tensor. allclose at the resolved
     // tolerance, unless the engine's TOML config names this tensor in a
     // [[validator_overrides]] entry — the only thing that can select a different
-    // validator. See ALMIOPEN-2561.
+    // validator.
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
                            float absoluteTolerance,
                            float relativeTolerance)
     {
-        float finalAtol = absoluteTolerance;
-        float finalRtol = relativeTolerance;
-        applyTomlToleranceOverride(currentTestName(), finalAtol, finalRtol);
-
         const auto testName = currentTestName();
-        _deferredValidators.emplace_back([this, attr, testName, finalAtol, finalRtol]() {
-            const auto sdkDataType
-                = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
-            const auto label = bundle::tensorLabel(attr->get_uid(), attr->get_name());
+        _deferredValidators.emplace_back(
+            [this, attr, testName, absoluteTolerance, relativeTolerance]() {
+                const auto sdkDataType
+                    = hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type());
+                const auto label = bundle::tensorLabel(attr->get_uid(), attr->get_name());
 
-            auto tolerance = bundle::ComparisonTolerance::allClose(finalAtol, finalRtol);
-            if(const auto rmsThreshold = findTomlRmsThreshold(testName, label))
-            {
-                tolerance = bundle::ComparisonTolerance::rms(*rmsThreshold);
-            }
+                // One shared decision site for both harnesses: it picks the check and
+                // logs the one it picked.
+                const auto tolerance
+                    = gradingForTensor(testName, label, absoluteTolerance, relativeTolerance);
 
-            auto selection = bundle::makeValidator(sdkDataType, label, tolerance);
-            auto [it, inserted]
-                = _tensorValidationMap.insert({attr->get_uid(),
-                                               TensorValidationEntry{std::move(selection.validator),
-                                                                     std::move(selection.error),
-                                                                     label,
-                                                                     tolerance,
-                                                                     sdkDataType}});
-            if(!inserted)
-            {
-                ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
-                              << label << "); keeping first registration";
-            }
-            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
-        });
+                auto selection = bundle::makeValidator(sdkDataType, label, tolerance);
+                auto [it, inserted] = _tensorValidationMap.insert(
+                    {attr->get_uid(),
+                     TensorValidationEntry{std::move(selection.validator),
+                                           std::move(selection.error),
+                                           label,
+                                           tolerance,
+                                           sdkDataType}});
+                if(!inserted)
+                {
+                    ADD_FAILURE() << "Duplicate validator for tensor " << attr->get_uid() << " ("
+                                  << label << "); keeping first registration";
+                }
+                _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+            });
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,

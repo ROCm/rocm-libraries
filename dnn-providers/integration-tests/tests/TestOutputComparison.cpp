@@ -220,7 +220,7 @@ TEST(TestOutputComparison, AllOutputsMatchingYieldsNoMismatches)
         {K_UID_A, K_UID_B},
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
-        [](int64_t, const std::string&, auto) { return exact(); },
+        [](const std::string&, auto) { return exact(); },
         "Bundle: b");
 
     EXPECT_TRUE(mismatches.empty());
@@ -246,7 +246,7 @@ TEST(TestOutputComparison, EveryDriftedTensorIsReportedNotJustTheFirst)
         {K_UID_A, K_UID_B},
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
-        [](int64_t, const std::string&, auto) { return exact(); },
+        [](const std::string&, auto) { return exact(); },
         "Bundle: b");
 
     ASSERT_EQ(mismatches.size(), 2u);
@@ -276,7 +276,7 @@ TEST(TestOutputComparison, OnlyTheRequestedUidsAreCompared)
         {K_UID_A},
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
-        [](int64_t, const std::string&, auto) { return exact(); },
+        [](const std::string&, auto) { return exact(); },
         "Bundle: b");
 
     EXPECT_TRUE(mismatches.empty()) << "uid 4 drifted but was not in the list";
@@ -285,7 +285,7 @@ TEST(TestOutputComparison, OnlyTheRequestedUidsAreCompared)
 // ---------------------------------------------------------------------------
 // Validator kind. ALLCLOSE grades each element against its own magnitude; RMS grades
 // the tensor against its largest. The two disagree exactly where reduction outputs
-// live: an element near zero, on a tensor whose scale is large. ALMIOPEN-2561.
+// live: an element near zero, on a tensor whose scale is large.
 // ---------------------------------------------------------------------------
 
 TEST(TestOutputComparison, RmsAcceptsANearZeroElementThatAllcloseRejects)
@@ -373,7 +373,7 @@ TEST(TestOutputComparison, ValidatorKindIsChosenPerTensor)
         {K_UID_A, K_UID_B},
         actual,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
-        [&](int64_t, const std::string& label, auto) {
+        [&](const std::string& label, auto) {
             labelsSeen.push_back(label);
             return label == "uid=4" ? ComparisonTolerance::rms(K_RMS_THRESHOLD)
                                     : ComparisonTolerance::allClose(0.0f, 1e-4f);

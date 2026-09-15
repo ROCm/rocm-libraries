@@ -45,7 +45,7 @@ using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(
 /// which normalises by the tensor's largest magnitude instead of each element's own.
 /// It exists for reduction outputs whose elements can land arbitrarily close to zero
 /// through cancellation — layernorm/RMSNorm backward dscale/dbias — where per-element
-/// relative error is unbounded while the aggregate error is not. See ALMIOPEN-2561.
+/// relative error is unbounded while the aggregate error is not.
 ///
 /// Nothing selects RMS on its own: only an engine's TOML config can, via a
 /// [[validator_overrides]] entry naming the tensor.
@@ -78,12 +78,13 @@ struct ComparisonTolerance
 
 /// Resolves how one output tensor is compared.
 ///
-/// `label` is the tensor's name, or "uid=N" when the graph did not give it one — the
-/// same string the failure report uses, and what a TOML `tensors` glob matches against.
-using ToleranceLookup
-    = std::function<ComparisonTolerance(int64_t uid,
-                                        const std::string& label,
-                                        hipdnn_flatbuffers_sdk::data_objects::DataType dataType)>;
+/// Keyed on the tensor's label — its name, or "uid=N" when the graph did not give it
+/// one. The uid is deliberately not passed: it is not stable between a C++ graph test
+/// and the bundle captured from it, so nothing may key a comparison decision on it.
+/// The label is both what a TOML `tensors` glob matches and what the failure report
+/// prints.
+using ToleranceLookup = std::function<ComparisonTolerance(
+    const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType)>;
 
 /// Compare one tensor. Returns nullopt when it matched.
 ///

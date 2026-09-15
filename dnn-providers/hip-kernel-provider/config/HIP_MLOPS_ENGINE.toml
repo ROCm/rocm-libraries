@@ -41,7 +41,7 @@ version = 1
 # Measured on gfx1151: 22 of 132 fp32/upcast Smoke cases fail under allclose; the atol
 # that would rescue them ranges 0.9x-52x the default depending on reduction length and
 # swings ~2x with the input seed, and applies to dx as well, whose real error is 4-5
-# decades smaller. Relative RMS stays 1e-6..8e-6 across the whole set. ALMIOPEN-2561.
+# decades smaller. Relative RMS stays 1e-6..8e-6 across the whole set.
 [[validator_overrides]]
 filters = ["*LayernormBackward*"]
 tensors = ["*::DSCALE", "*::DBIAS"]

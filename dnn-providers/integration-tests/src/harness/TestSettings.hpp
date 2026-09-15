@@ -92,7 +92,7 @@ struct ValidatorOverride
 // gtest-formatted test name AND a 'tensors' glob matches the output tensor's
 // label (its name, or "uid=N" when the graph did not name it). Later entries
 // take precedence. Absent any match, allclose is used — allclose is the default
-// and nothing else can select a validator. See ALMIOPEN-2561.
+// and nothing else can select a validator.
 // Validator entries are parsed strictly: 'rms' requires a positive 'rms_threshold'
 // and 'allclose' must not carry one, because an entry that does not say exactly
 // what it means is a load error rather than a silent fall-back to allclose.

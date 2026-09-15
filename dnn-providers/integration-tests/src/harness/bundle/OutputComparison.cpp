@@ -159,13 +159,12 @@ std::vector<TensorMismatch>
     for(const int64_t uid : outputUids)
     {
         const auto* attrs = tensorAttrMap.at(uid);
-        auto mismatch
-            = compareTensor(uid,
-                            *attrs,
-                            expectedFor(uid),
-                            *actual.at(uid),
-                            toleranceFor(uid, tensorLabel(uid, *attrs), attrs->data_type()),
-                            contextLine);
+        auto mismatch = compareTensor(uid,
+                                      *attrs,
+                                      expectedFor(uid),
+                                      *actual.at(uid),
+                                      toleranceFor(tensorLabel(uid, *attrs), attrs->data_type()),
+                                      contextLine);
         if(mismatch.has_value())
         {
             mismatches.push_back(*std::move(mismatch));

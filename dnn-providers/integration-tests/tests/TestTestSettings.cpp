@@ -300,7 +300,7 @@ rtol = 5e-2
 //
 // allclose is the default everywhere and this section is the only thing that can
 // change it, so the parser is strict: an entry that does not say exactly what it
-// means is a load error, not a silent fall-back to allclose. ALMIOPEN-2561.
+// means is a load error, not a silent fall-back to allclose.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -479,6 +479,56 @@ filters = ["*LayernormBackward*"]
 tensors = ["*::DSCALE"]
 validator = "allclose"
 rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// An entry with 'tensors' but no 'filters' reads as "apply to every test" to a human,
+// and is one of the likelier hand-edit mistakes. It is a load error instead, because
+// a validator override is scoped to the tests whose numerics justified it.
+TEST(TestSettingsValidatorOverrides, ThrowsOnMissingFilters)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+TEST(TestSettingsValidatorOverrides, ThrowsOnEmptyFilters)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[[validator_overrides]]
+filters = []
+tensors = ["*::DSCALE"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+
+    EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
+}
+
+// A bare value where a table belongs — the shape a mistyped array-of-tables takes.
+// Reading it as "no overrides" would drop the entry and quietly grade with allclose.
+// The key sits above [meta] so it lands at the document root: written below the
+// header it would be a key of [meta] instead, which is a different mistake.
+TEST(TestSettingsValidatorOverrides, ThrowsOnNonTableEntry)
+{
+    const TempTomlFile file(R"(
+validator_overrides = ["*LayernormBackward*"]
+
+[meta]
+version = 1
 )");
 
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);

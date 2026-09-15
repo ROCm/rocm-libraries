@@ -161,9 +161,10 @@ protected:
 
         this->registerValidator(outputs.dx, this->getTolerance(graphObj, outputs.dx));
         // dscale/dbias are reductions over the batch axes: elements land arbitrarily
-        // near zero through cancellation, so allclose is the wrong check for them. The
-        // engine's TOML config selects the RMS validator for those two tensors —
-        // see [[validator_overrides]] in HIP_MLOPS_ENGINE.toml, ALMIOPEN-2561.
+        // near zero through cancellation, so allclose is the wrong check for them.
+        // HIP_MLOPS_ENGINE's TOML selects the RMS validator for these two tensors via
+        // [[validator_overrides]]. The tolerance passed here is the fallback: it is what
+        // grades them on any engine whose config names no validator for them.
         this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
         this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 

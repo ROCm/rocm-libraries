@@ -447,7 +447,7 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   a long reduction (layernorm/RMSNorm backward `dscale`/`dbias`) has elements
   that land arbitrarily near zero through cancellation, so per-element relative
   error is unbounded while the aggregate relative-RMS error is not. Prefer
-  `tolerance_overrides` for everything else. See ALMIOPEN-2561.
+  `tolerance_overrides` for everything else.
 - `test_skips`: the first matching entry wins; `reason` is surfaced in the
   `GTEST_SKIP` message. `archs` (substring match against the raw
   `gcnArchName`) and `platforms` (`"windows"`/`"linux"`) are both optional —
