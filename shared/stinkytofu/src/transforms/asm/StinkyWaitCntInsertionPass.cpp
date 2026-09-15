@@ -73,6 +73,15 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 
         // Tensor counter drains only at barriers or when there is a single wave.
+        //
+        // The barrier drain looks like over-draining on a rotating ring -- the
+        // barrier's own tensor edge names the previous trip's fill on the same
+        // tag, a different buffer -- but it is what makes a cross-wave fill safe.
+        // tensor_load_to_lds is split across waves (even waves fill A, odd fill
+        // B) while every wave reads both, so a fill must land before the LAST
+        // barrier preceding the reads that consume it, in the filling wave. A
+        // per-wave wait at the reads cannot do that. See the cross-wave section
+        // of docs/developer/loop-carried-memory-dependence.md.
         const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
         df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
             return isBarrier(i) || numWaves == 1;

@@ -11123,6 +11123,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     removedCount = 0
     insertedCount = 0
+    annotatedRawCount = 0
 
     # Pass-1: remove existing barriers first.
     modulesToScan = [rootModule]
@@ -11240,9 +11241,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           phase = _accessPhase(access)
           for token in tokens:
             if token not in info:
-              info[token] = [access, phase]  # [firstAccess, tailState]
+              info[token] = [access, phase, False]  # [firstAccess, tailState, wroteInBody]
             else:
-              info[token][1] = phase          # update tail to the last access
+              info[token][1] = phase                # update tail to the last access
+            if access == "write":
+              info[token][2] = True
         headInfo[beginName] = info
       return headInfo
 
@@ -11261,12 +11264,45 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # loop-carried WAR: the aliasing reads ran on the previous trip under the
     # other tag.
     loopEntryCarriedFrom = {}
+    # token -> (writerToken, distance) for a read whose producing fill ran
+    # `distance` trips ago under the tag `writerToken`. The RAW mirror of
+    # loopEntryCarriedFrom, and the reason it needs its own map: WAR resolves in
+    # one back-edge step, RAW does not.
+    loopEntryRawFrom = {}
     loopPendingTokens = set()
     loopHeadInfo = _detectLoopHeadInfo() \
       if kernel["PrefetchGlobalRead"] < 2 or ldsTokenBackEdgeMap else {}
 
+    def _carriedWriterOf(token, writtenTokens):
+      """Tag and trip distance of the fill that produced what `token` reads now.
+
+      A tag names a physical buffer only for its own trip, and the back-edge map
+      renames one trip at a time: buffer(t, k) == buffer(map[t], k-1). So after d
+      steps, map^d(token) is the tag that named this buffer d trips ago, and the
+      first such tag that the body writes is the producing fill.
+
+      Walking more than one step is the whole point. A 3-buffer ring reading at
+      generation 0 and filling at generation 2 puts the fill TWO trips back; the
+      single-step lookup the WAR path uses lands on a tag the body never touches
+      and sees nothing, which is exactly how the RAW went unguarded.
+
+      Only the nearest writer is reported. CK_Tensor retires in order, so a wait
+      for the fill at distance d has already retired every older one.
+      """
+      carried = token
+      for distance in range(1, len(ldsTokenBackEdgeMap) + 1):
+        carried = ldsTokenBackEdgeMap.get(carried)
+        # Ring closed without finding a writer, or the tag does not rotate at
+        # all -- in which case plain token overlap already sees the dependence
+        # and no annotation is needed.
+        if carried is None or carried == token:
+          return None
+        if carried in writtenTokens:
+          return (carried, distance)
+      return None
+
     def _rewriteModuleInOrder(mod: Module):
-      nonlocal insertedCount
+      nonlocal insertedCount, annotatedRawCount
       rewrittenItems = []
       for item in mod.items():
         if hasattr(item, "getLabelName") and not isinstance(item, Instruction):
@@ -11285,7 +11321,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # label) instead of one that re-fires every iteration.
             prologueBarrierTokens = []
             tailStates = {token: info[1] for token, info in loopHeadInfo[labelName].items()}
-            for token, (firstAccess, _) in loopHeadInfo[labelName].items():
+            writtenTokens = {token for token, info in loopHeadInfo[labelName].items() if info[2]}
+            for token, info in loopHeadInfo[labelName].items():
+              firstAccess = info[0]
               # Next iteration this token names the buffer that
               # ldsTokenBackEdgeMap[token] names now, so the phase the back edge
               # carries in is that token's tail phase. Without rotation the map is
@@ -11297,6 +11335,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
               loopEntryOverride[token] = carriedState
               loopEntryCarriedFrom[token] = carriedToken
               loopPendingTokens.add(token)
+              # A read is fed by a fill from an earlier trip under another tag.
+              # The barrier this pass emits orders the waves; naming the fill
+              # lets StinkyTofu make it land.
+              if firstAccess == "read":
+                rawRelation = _carriedWriterOf(token, writtenTokens)
+                if rawRelation is not None:
+                  loopEntryRawFrom[token] = rawRelation
               if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, carriedState):
                 prologueBarrierTokens.append(token)
             if prologueBarrierTokens:
@@ -11325,6 +11370,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Reached the loop back-branch: drop any stale loop-entry overrides.
           loopEntryOverride.clear()
           loopEntryCarriedFrom.clear()
+          loopEntryRawFrom.clear()
           loopPendingTokens.clear()
 
         access = _classifyTokenAccess(item)
@@ -11337,6 +11383,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         barrierTokens = []
         warTokens = []
+        rawByDistance = {}
         for token in tokens:
           carriedFrom = None
           if token in loopPendingTokens:
@@ -11344,6 +11391,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # against the back-edge (loop-tail) state.
             state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
             carriedFrom = loopEntryCarriedFrom.get(token)
+            # The first read of a token is the one that consumes the carried
+            # fill; later reads this trip sit behind it on an in-order counter.
+            if access == "read" and token in loopEntryRawFrom:
+              writerToken, distance = loopEntryRawFrom[token]
+              rawByDistance.setdefault(distance, []).append(writerToken)
             loopPendingTokens.discard(token)
           else:
             state = tokenState.get(token, "standby")
@@ -11369,6 +11421,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
           rewrittenItems.append(barrier)
           insertedCount += 1
 
+        if rawByDistance:
+          # Nearest partner only, and only the tags at that distance: a tag
+          # further back is already covered by the wait for the nearer one.
+          rawDistance = min(rawByDistance)
+          rawTokens = sorted(set(rawByDistance[rawDistance]))
+          memTokenObj = item.getMemToken()
+          item.setMemToken(MemTokenData(list(memTokenObj.tokens),
+                                        list(memTokenObj.warTokens),
+                                        memTokenObj.warDistance,
+                                        rawTokens, rawDistance))
+          annotatedRawCount += 1
+
         nextState = _accessPhase(access)
         for token in tokens:
           tokenState[token] = nextState
@@ -11378,7 +11442,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       mod.setItems(rewrittenItems)
 
     _rewriteModuleInOrder(rootModule)
-    print2(f"[postMainLoopBarrierCheckAndReset] removed {removedCount} barriers, inserted {insertedCount} barriers")
+    print2(f"[postMainLoopBarrierCheckAndReset] removed {removedCount} barriers, inserted {insertedCount} barriers, annotated {annotatedRawCount} loop-carried RAW reads")
     return
 
   ##############################################################################

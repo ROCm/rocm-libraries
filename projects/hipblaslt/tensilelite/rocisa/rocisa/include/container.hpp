@@ -1488,13 +1488,24 @@ namespace rocisa
         std::vector<int> warTokens;
         int              warDistance = 0;
 
+        // The mirror: a loop-carried read-after-write this instruction depends on.
+        // `rawTokens` are the tags the producing fill carried `rawDistance` trips
+        // ago. Rides the reader, where WAR rides the writer. Lowered to
+        // StinkyTofu's LoopCarriedRawData.
+        std::vector<int> rawTokens;
+        int              rawDistance = 0;
+
         MemTokenData(const std::vector<int>& tokens      = {},
                      const std::vector<int>& warTokens   = {},
-                     int                     warDistance = 0)
+                     int                     warDistance = 0,
+                     const std::vector<int>& rawTokens   = {},
+                     int                     rawDistance = 0)
             : Container()
             , tokens(tokens)
             , warTokens(warTokens)
             , warDistance(warDistance)
+            , rawTokens(rawTokens)
+            , rawDistance(rawDistance)
         {
         }
 
@@ -1503,6 +1514,8 @@ namespace rocisa
             , tokens(other.tokens)
             , warTokens(other.warTokens)
             , warDistance(other.warDistance)
+            , rawTokens(other.rawTokens)
+            , rawDistance(other.rawDistance)
         {
         }
 
@@ -1528,6 +1541,16 @@ namespace rocisa
                     if(i > 0)
                         result += ",";
                     result += " " + std::to_string(warTokens[i]);
+                }
+            }
+            if(rawDistance > 0)
+            {
+                result += " raw(d=" + std::to_string(rawDistance) + "):";
+                for(size_t i = 0; i < rawTokens.size(); ++i)
+                {
+                    if(i > 0)
+                        result += ",";
+                    result += " " + std::to_string(rawTokens[i]);
                 }
             }
             return result;

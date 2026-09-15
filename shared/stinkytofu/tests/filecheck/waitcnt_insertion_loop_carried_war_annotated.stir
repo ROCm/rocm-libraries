@@ -3,12 +3,19 @@
 # Loop-carried WAR named by mod.loopcarriedwar. Canonical case; the other
 # waitcnt_insertion_loop_carried_war_* tests refer back here.
 #
-# Reduced from the gfx1250 TDM+LDS main loop: ring of 3, one step per trip. Trip
-# k fills blk(k+2)%3, which is blk(k-1)%3 -- the buffer trip k-1 was reading.
-# Plain token overlap cannot see it, because a memtoken names a physical buffer
-# only for the trip it was emitted from: trip k-1 tagged those reads [0] while
-# trip k tags the fill [2]. mod.loopcarriedwar supplies the missing tag, which
-# TensileLite derives from _ldsTokenBackEdgeMap.
+# Reduced from the gfx1250 TDM+LDS main loop: ring 3, one step per trip, with
+# Read(k) = blk(k) and Write(k) = blk(k+2):
+#
+#                           iter 0   iter 1   iter 2   iter 3
+#   ds_load     (Read,  [0])  LDS0     LDS1     LDS2     LDS0
+#   tensor_load (Write, [2])  LDS2     LDS0     LDS1     LDS2
+#
+# Write(k) = Read(k-d) gives d = 1: iter 1 fills LDS0, which iter 0 was reading.
+# The tags [0] and [2] never move while the buffer under each shifts every
+# column, so plain token overlap compares [0] against [2], finds nothing, and
+# misses a hazard that is real in every iteration -- a memtoken names a physical
+# buffer only for the trip it was emitted from. mod.loopcarriedwar supplies the
+# missing tag, which TensileLite derives from _ldsTokenBackEdgeMap.
 #
 # Steady state at the barrier, oldest first:
 #
