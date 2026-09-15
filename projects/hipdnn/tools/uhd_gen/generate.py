@@ -147,71 +147,59 @@ def _finite_positive(value) -> bool:
 
 
 def collect_graph(command: list[str], environment: dict, log_dir: Path, commands: list,
-                  *, engine_descriptor_id: str) -> tuple[list[dict], set[str]]:
-    """Enumeration and timing must agree on identity, bindings and the exact tuple."""
-    candidates = []
-    seen_ids, seen_tuples = set(), set()
-    offset = 0
-    first = None
-    total = None
-    while True:
-        page = _run_json([command[0], "enumerate", *command[1:], "--offset", str(offset), "--limit", "10000"],
-                         environment, log_dir, len(commands), commands)
-        identity = _identity(page)
-        if str(identity[0]) != command[command.index("--engine-id") + 1]:
-            raise ValueError("enumeration returned another engine's catalog")
-        if identity[4] != engine_descriptor_id:
-            raise ValueError("enumerated engine does not own the recorded UED provenance")
-        if first is None:
-            first = page
-            total = page.get("total_count")
-            if not isinstance(total, int) or total < 0:
-                raise ValueError("enumeration lacks a bounded total_count")
-        elif identity != _identity(first) or page.get("total_count") != total:
-            raise ValueError("candidate enumeration identity/count changed between pages")
-        for key in ("problem_features", "device_features"):
-            if _feature_map(page, key) != _feature_map(first, key):
-                raise ValueError(f"{key} changed between enumeration pages")
-        batch = page.get("candidates")
-        if not isinstance(batch, list):
-            raise ValueError("enumeration lacks a candidates array")
-        for candidate in batch:
-            candidate_id = candidate.get("id")
-            knobs = _knob_tuple(candidate)
-            if not candidate_id or candidate_id in seen_ids or knobs in seen_tuples:
-                raise ValueError("candidate identities and complete enrolled knob tuples must be unique")
-            seen_ids.add(candidate_id)
-            seen_tuples.add(knobs)
-            _feature_map(candidate, "kernel_features")
-            candidates.append(candidate)
-        next_offset = page.get("next_offset")
-        if next_offset is None:
-            if len(candidates) != total:
-                raise ValueError("candidate enumeration ended before total_count; refusing silent truncation")
-            break
-        if not batch or next_offset != offset + len(batch) or next_offset >= total:
-            raise ValueError("candidate enumeration returned an invalid continuation offset")
-        offset = next_offset
+                  *, engine_descriptor_id: str, addressing_table: dict | None = None
+                  ) -> tuple[list[dict], set[str]]:
+    """One bench invocation per graph: the sweep enumerates and times in one process.
+
+    RFC 0019 §13.2: "Sweeping inside one process amortises" the plugin load, the graph
+    build and the kernel compilation that a process per row pays once each. The enumerate
+    call used to be a second process per graph that built the same catalog and threw the
+    timings away; `--sweep --json` now returns the catalog it timed, so one startup covers
+    both. The checks below are unchanged -- they simply read one response instead of two.
+    """
+    candidates: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_tuples: set[tuple] = set()
+    measured = _run_json([*command, "--sweep", "--json"], environment, log_dir, len(commands), commands)
+    first = measured
+    identity = _identity(measured)
+    if str(identity[0]) != command[command.index("--engine-id") + 1]:
+        raise ValueError("the sweep returned another engine's catalog")
+    if identity[4] != engine_descriptor_id:
+        raise ValueError("swept engine does not own the recorded UED provenance")
+    total = measured.get("total_count")
+    if not isinstance(total, int) or total < 0:
+        raise ValueError("the sweep lacks a bounded total_count")
+    batch = measured.get("candidates")
+    if not isinstance(batch, list):
+        raise ValueError("the sweep lacks a candidates array; it must report what it timed")
+    # A sweep holds the whole catalog in one process, so there is no continuation to
+    # follow -- but the count is still checked, because a page limit silently truncating
+    # the catalog would train a model on a subset and call it complete.
+    if measured.get("next_offset") is not None or len(batch) != total:
+        raise ValueError("the sweep did not time the whole catalog; refusing silent truncation")
+    for candidate in batch:
+        candidate_id = candidate.get("id")
+        knobs = _knob_tuple(candidate)
+        if not candidate_id or candidate_id in seen_ids or knobs in seen_tuples:
+            raise ValueError("candidate identities and complete enrolled knob tuples must be unique")
+        seen_ids.add(candidate_id)
+        seen_tuples.add(knobs)
+        _feature_map(candidate, "kernel_features")
+        candidates.append(candidate)
     if not candidates:
-        raise ValueError(f"no matched candidates for graph {first['graph_id']}")
+        raise ValueError(f"no matched candidates for graph {measured.get('graph_id')}")
+    # What each pinned integer addressed, learned from the engine's own answer. Accumulated
+    # across graphs because one graph's catalog shows only the values ITS candidates carry.
+    if addressing_table is not None:
+        addressing.observe(candidates, addressing_table)
     rows = []
     published = set(_feature_map(first, "problem_features")) | set(_feature_map(first, "device_features"))
-    # One invocation per graph, not per candidate. RFC 0019 §13.2: "Sweeping inside one
-    # process amortises" the plugin load, the graph build and the kernel compilation that a
-    # process per row pays once each. `--sweep` times every candidate the same pins
-    # enumerated, so the rows and the per-row stability loop are unchanged; what changes is
-    # that a 185-candidate graph costs one startup instead of 185.
-    #
-    # The trade this accepts: a kernel that CRASHES now takes the whole graph's rows with it
-    # rather than its own row. A kernel that merely fails to build or run does not -- autotune
-    # reports it as an unsucceeded result (makeCompileFailedResult and its siblings), so it
-    # still reaches the corpus as the failure it is.
-    measured = _run_json([*command, "--sweep", "--json"], environment, log_dir, len(commands), commands)
-    if _identity(measured) != _identity(first):
-        raise ValueError("timing response belongs to another graph/device/engine")
-    for key in ("problem_features", "device_features"):
-        if _feature_map(measured, key) != _feature_map(first, key):
-            raise ValueError(f"timing changed the enumerated {key}")
+    # The trade one process per graph accepts: a kernel that CRASHES takes the whole
+    # graph's rows with it rather than its own row. A kernel that merely fails to build or
+    # run does not -- autotune reports it as an unsucceeded result
+    # (makeCompileFailedResult and its siblings), so it still reaches the corpus as the
+    # failure it is.
     results = measured.get("results")
     if not isinstance(results, list):
         raise ValueError("sweep response lacks a results array")
@@ -225,7 +213,7 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
     # times a subset has silently dropped rows the corpus would then be missing without
     # saying so, and one that times something else was not the catalog that was enumerated.
     if set(by_id) != {candidate["id"] for candidate in candidates}:
-        raise ValueError("the sweep did not time exactly the enumerated candidates")
+        raise ValueError("the sweep did not time exactly the catalog it reported")
     for candidate in candidates:
         result = by_id[candidate["id"]]
         if _knob_tuple(result) != _knob_tuple(candidate):
@@ -359,20 +347,18 @@ def run_generate(args: argparse.Namespace) -> int:
             collection_tree = stage / "collection_descriptors"
             shutil.copytree(tree, collection_tree)
             exposed = dict(ued)
-            # RFC 0019 13.2: the collection UED exposes EVERY addressable KMD field, so the knob
-            # tuple equals the metadata tuple and every catalog entry is individually reachable.
-            # Only `int` addresses itself -- a knob value is an int64 end to end -- so the other
-            # four KMD types are addressed by an ordinal over their value set (addressing.py).
-            # Exposing `int` alone made two kernels differing only in e.g. `dtype` share a tuple
+            # RFC 0019 13.2: the collection UED exposes EVERY KMD field, so the knob tuple
+            # equals the metadata tuple and every catalog entry is individually reachable.
+            # Exposing only `int` made two kernels differing in e.g. `dtype` share a tuple
             # and abort the run on the collision at _knob_tuple.
-            ordinals = addressing.encodings(kmd, addressing.engine_kernels(tree, provenance["ued"]["id"]))
-            exposed["knobs"] = addressing.exposable(kmd, ordinals)
-            unaddressable = addressing.unaddressable(kmd, ordinals)
-            if unaddressable:
-                # Named rather than dropped: a declared field no kernel carries addresses
-                # nothing, and the tuple collision it causes surfaces far from this cause.
-                logger.warning("KMD fields no kernel populates, so nothing can be pinned on them: %s",
-                               ", ".join(sorted(unaddressable)))
+            #
+            # Which of those fields ends up addressed BY AN ORDINAL is the engine's
+            # decision, not this tool's: a knob value is an int64 end to end, so the
+            # ingestor numbers each non-integer field over its own value set and reports
+            # the pin it chose on every enumerated candidate. The mapping is read back off
+            # the collection below (addressing.observe) rather than re-derived here, so
+            # there is no second numbering to disagree with the engine's.
+            exposed["knobs"] = [field["name"] for field in kmd["fields"]]
             _write_json(collection_tree / ued_path.relative_to(tree), exposed)
             _write_json(stage / "shipping_ued.json", ued)
             environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
@@ -418,6 +404,7 @@ def run_generate(args: argparse.Namespace) -> int:
                     collected, names = collect_immediate_graph(command, run_env, stage / "commands", commands)
                 else:
                     collected, names = collect_graph(command, run_env, stage / "commands", commands,
+                                                     addressing_table=ordinals,
                                                      engine_descriptor_id=ued["id"])
                 rows.extend(collected)
                 published.update(names)
@@ -553,7 +540,11 @@ def run_generate(args: argparse.Namespace) -> int:
             # for reading rather than for use: an ordinal in a stored row means nothing without
             # the value set it indexes, and a disagreement between the two sides should be
             # visible here rather than only in a kernel that was addressed wrongly.
-            "knob_encodings": {name: list(values) for name, values in sorted(ordinals.items())},
+            # What each knob's pinned integer addressed, as the engine reported it on the
+            # candidates this corpus enumerated. Recorded for reading, not for use: the
+            # runtime derives its own numbering, and an ordinal in a stored row is
+            # unreadable without knowing which value it named.
+            "knob_encodings": addressing.as_manifest(ordinals),
             "engine_id": args.engine_id, "training_arches": arches, "promotion_role": args.role,
             "promotion_arch": args.arch or arches[0],
         })
