@@ -6,6 +6,8 @@
 #
 ################################################################################
 
+import copy
+import re
 from contextlib import contextmanager
 from copy import deepcopy
 from types import SimpleNamespace
@@ -16,23 +18,20 @@ from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
 
 import Tensile.KernelWriter as kw_module
-from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
 from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
 from Tensile.Common.ValidParameters import validParameters
+from Tensile.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
+from Tensile.Components.TDMFuse import TDM_GROUPS, tdmGrouping, tdmPapRejectReason, tdmScaleSharesDataSet
 from Tensile.Contractions import SizeMapping
+from Tensile.KernelWriter import KernelWriter
 from Tensile.SolutionStructs.Solution import (
     Solution,
     _disableUnsupportedRuntimeStaggerU,
     validateParameterTypes,
 )
-import copy
-import re
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Components.TDMFuse import TDM_GROUPS, tdmGrouping, tdmPapRejectReason, tdmScaleSharesDataSet
 
 pytestmark = pytest.mark.unit
 

@@ -12,35 +12,41 @@ Related coverage that is not this module:
 """
 import copy
 import itertools
+import re
 import types
 
 import pytest
 
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import defaultSolution
+from Tensile.Common.ValidParameters import validParameters
+from Tensile.Components import DecouplePGR as DP
+from Tensile.Components import TDMFuse as TF
 from Tensile.Components.DecouplePGR import (
     _asDataType,
     _ldsAlignedBytes,
+    _macroTileFromState,
+    DCP_MAX_LDS_BLOCKS_DIVERGENT,
+    DCP_THICK_GATE_SUPPORTED,
+    DCP_THICK_GATE_TEXT,
+    DCP_THICK_GATE_TOKENS,
+    decoupledSingleBuffered,
+    decoupledThickGateRelaxation,
     decouplePGRBlocks,
     decouplePGRLdsBytesEstimate,
-    decoupledSingleBuffered,
     divergentPairUnsupportedReason,
     equalPairDegeneratesToScalar,
     ldsBlocksForPgrLevel,
     macroTileFromMatrixInstruction,
     PGR_SPECIAL_AUTO,
     pgrAutoPairCandidates,
+    pgrAutoPairRanking,
+    pgrAutoPairRequested,
     pgrAutoPairSelectMaxLds,
     pgrSpecialValueRejectReason,
     resolvePrefetchGlobalReadSpecialValues,
 )
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Components.DecouplePGR import decouplePGRLdsBytesEstimate, divergentPairUnsupportedReason, ldsBlocksForPgrLevel, macroTileFromMatrixInstruction, pgrAutoPairCandidates, pgrAutoPairRanking, pgrAutoPairRequested, pgrAutoPairSelectMaxLds, resolvePrefetchGlobalReadSpecialValues, _macroTileFromState
-import re
-from Tensile.Components import TDMFuse as TF
-from Tensile.Components import DecouplePGR as DP
 from Tensile.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
-from Tensile.Components.DecouplePGR import DCP_MAX_LDS_BLOCKS_DIVERGENT, DCP_THICK_GATE_SUPPORTED, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS, PGR_SPECIAL_AUTO, decoupledThickGateRelaxation
 
 pytestmark = pytest.mark.unit
 
@@ -721,7 +727,7 @@ def test_solution_accepts_divergent_pairs(_gp_gfx1250, gfx1250_iim, assembler, c
 
 
 # Auto plus every real depth up to the divergent block ceiling. Read off those
-# two constants instead of listed, so raising the ceiling puts the pair shapes
+# two constants rather than listed, so raising the ceiling puts the pair shapes
 # it opens up under test the same day.
 _PGR_PAIR_SPACE = list(itertools.product(
     [PGR_SPECIAL_AUTO] + list(range(DCP_MAX_LDS_BLOCKS_DIVERGENT + 1)), repeat=2))

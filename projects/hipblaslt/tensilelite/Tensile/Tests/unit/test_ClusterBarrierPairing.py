@@ -16,14 +16,11 @@ they stay fast and hardware-free.
 
 from unittest.mock import MagicMock
 
-from rocisa.code import Module
-from rocisa.container import sgpr
-from rocisa.instruction import SBarrier, SCBranchSCC1, SCmpEQU32
-
-from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
 from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcmp1B32, SCBranchSCC1, SCmpEQU32, SCmpLeU32, SLShiftRightB32, TensorLoadToLds, VReadfirstlaneB32
+
+from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
 from Tensile.KernelWriter import KernelWriter
 
 

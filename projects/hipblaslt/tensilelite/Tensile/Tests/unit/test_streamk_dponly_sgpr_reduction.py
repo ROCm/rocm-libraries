@@ -29,8 +29,7 @@ from types import SimpleNamespace
 
 import pytest
 from rocisa.code import Label, Module
-from rocisa.container import sgpr, vgpr
-from rocisa.enum import RegisterType
+from rocisa.container import sgpr
 from rocisa.instruction import (
     SAndB32,
     SBranch,

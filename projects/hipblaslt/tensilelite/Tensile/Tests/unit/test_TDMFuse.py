@@ -15,21 +15,20 @@ import types
 
 import pytest
 
-# The four tensors a TDM descriptor group can carry; sparse metadata rides
-# tdmMetadataGroup0, which no grouping names.
-TDM_TENSORS = ("A", "MXSA", "MXSB", "B")
-
-from Tensile.Components.DecouplePGR import decouplePGRBlocks
-from Tensile.Components.TDMFuse import tdmBothTensors, tdmFusePaired, tdmGrouping
-from Tensile.Components.TDMFuse import tdmWaveComponents, tdmWavePartition
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.ValidParameters import validParameters
-from Tensile.Components import TDMFuse as TF
 from Tensile.Components import DecouplePGR as DP
+from Tensile.Components import TDMFuse as TF
+from Tensile.Components.DecouplePGR import decouplePGRBlocks
+from Tensile.Components.TDMFuse import (tdmBothTensors, tdmFusePaired, tdmGrouping,
+                                        tdmWaveComponents, tdmWavePartition)
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 
 pytestmark = pytest.mark.unit
 
+# The four tensors a TDM descriptor group can carry; sparse metadata rides
+# tdmMetadataGroup0, which no grouping names.
+TDM_TENSORS = ("A", "MXSA", "MXSB", "B")
 _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 _NO_MX_ON_B = {"MacDataTypeB": "F8", "DataTypeMXSB": "E8", "MXBlockB": 0}
 _ONE_WAVE_MI = [16, 16, 128, 1, 1, 2, 16, 1, 1]
