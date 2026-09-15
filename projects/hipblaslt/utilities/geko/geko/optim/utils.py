@@ -49,7 +49,6 @@ __all__ = [
 ]
 
 
-
 def get_checkpoint_file(build_dir: str | Path) -> Path | None:
     """Return checkpoint file found in a build directory.
 
@@ -247,7 +246,7 @@ def check_progress(tuning_dir: str | Path) -> Tuple[int, int, int]:
 
 
 def estimate_workload(conf_fl: str | Path, pop_size: int = 512) -> float:
-    """Estimate relative optimization workload for a Tensile config YAML.
+    """Estimate relative optimization workload for a TensileLite config YAML.
 
     The estimate is used only for scheduling priority (larger means heavier),
     not as an exact runtime prediction.
