@@ -28,6 +28,30 @@ differ. Without it, an agent that wrote nothing at all still passes every gate a
 this one -- the build succeeds, the suite reports what it reported last round, and
 the benchmark runs the previous engine.
 
+Some watched trees have a third, narrower shape: not "must not change" and not
+"unwatched", but "may only grow". The integration-test bundle tree is exactly this --
+the work this guard serves requires an agent to ADD a new bundle case (a new
+template+sweep directory, or a new case appended to an existing topology's
+sweep.json), and a flat --watch on that tree forbids the very thing the agent is
+asked to do. Not watching it instead reopens the cheat this guard exists to close:
+edit an existing case's shapes, or widen a tolerance in its metadata, until the pack
+that cannot serve them passes.
+
+`--allow-added GLOB` (repeatable) excuses a matching file from `added`: a brand-new
+file under the glob is not a violation, though it is still reported (in
+`allowed_added`). `--allow-grow GLOB` (repeatable) excuses a matching file from
+`modified` when its baseline content, parsed as JSON, is a structural *prefix* of
+its current content -- lists may only gain trailing elements, dicts may only gain
+keys, at every level (see `_json_grew`). A file that matches `--allow-grow` but was
+edited rather than appended to (an inserted or reordered element, an edited value at
+an existing key) stays in `modified` and stays a violation, because that edit is the
+cheat this guard exists to catch. Proving growth needs the baseline's *content*, not
+just its hash, so baseline mode additionally records the text of every file matching
+an `--allow-grow` glob under `grow_files`; a baseline written before this existed has
+no `grow_files`, and a check against it cannot prove growth for anything, so it fails
+closed -- every `--allow-grow` candidate stays a violation until the baseline is
+retaken.
+
 Patterns are repo-relative globs (`**` recurses). Directories and files that do not
 exist are not an error: a pattern matching nothing contributes nothing, which is
 reported as `watched_count`/`work_count` so a typo'd pattern is visible as zero
@@ -72,6 +96,57 @@ def _manifest(repo: Path, patterns: list[str]) -> dict[str, str]:
     return dict(sorted(found.items()))
 
 
+def _json_grew(old: object, new: object) -> bool:
+    """True if `new` extends `old` by appending only: new list elements land after
+    the old ones and new dict keys land alongside the old ones, with everything the
+    old value already had left byte-for-byte in place. This is the shape
+    `import_graph.py` produces when it appends a case to an existing topology's
+    sweep.json, and it is exactly what an edited-in-place case (a changed shape, a
+    widened tolerance) is NOT -- an altered or reordered existing entry always fails
+    this check, however small the edit."""
+    if isinstance(old, list) and isinstance(new, list):
+        return len(new) >= len(old) and all(new[i] == old[i] for i in range(len(old)))
+    if isinstance(old, dict) and isinstance(new, dict):
+        return all(key in new and _json_grew(old[key], new[key]) for key in old)
+    return old == new
+
+
+def _matched_paths(repo: Path, patterns: list[str]) -> set[str]:
+    """repo-relative posix paths, as the tree stands right now, that any pattern
+    matches. Used to test whether a path already classified as added or modified
+    also falls under a narrower --allow-added/--allow-grow carve-out; the carve-out
+    is layered on top of --watch, not a replacement for it."""
+    found: set[str] = set()
+    for pattern in patterns:
+        for match in glob.glob(
+            pattern, root_dir=repo, recursive=True, include_hidden=True
+        ):
+            candidate = repo / match
+            if candidate.is_file():
+                found.add(Path(match).as_posix())
+    return found
+
+
+def _grow_manifest(repo: Path, patterns: list[str]) -> dict[str, str]:
+    """path -> file text, over every file an --allow-grow glob matches. Recorded as
+    text rather than a hash because proving "this only grew" needs the old content
+    to diff structurally against; a hash only proves "this changed", which is the
+    fact already available from `_manifest` and not the one growth needs."""
+    found: dict[str, str] = {}
+    for pattern in patterns:
+        for match in glob.glob(
+            pattern, root_dir=repo, recursive=True, include_hidden=True
+        ):
+            candidate = repo / match
+            if not candidate.is_file():
+                continue
+            try:
+                found[Path(match).as_posix()] = candidate.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+    return dict(sorted(found.items()))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -94,6 +169,23 @@ def main() -> int:
         metavar="GLOB",
         help="repo-relative glob of files that MUST differ from the baseline; repeatable",
     )
+    parser.add_argument(
+        "--allow-added",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="repo-relative glob of files allowed to be newly added under --watch; repeatable",
+    )
+    parser.add_argument(
+        "--allow-grow",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help=(
+            "repo-relative glob of files allowed to change under --watch if the "
+            "change is JSON-prefix growth only (see _json_grew); repeatable"
+        ),
+    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -110,6 +202,7 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if args.mode == "baseline":
+        grow_manifest = _grow_manifest(repo, args.allow_grow) if args.allow_grow else {}
         out_path.write_text(
             json.dumps(
                 {
@@ -118,14 +211,17 @@ def main() -> int:
                     "work_count": len(work),
                     "files": manifest,
                     "work_files": work,
+                    "grow_files": grow_manifest,
                 },
                 indent=2,
             ),
             encoding="utf-8",
         )
-        print(
-            f"baseline: {len(manifest)} watched file(s), {len(work)} work file(s) -> {out_path}"
-        )
+        summary = f"baseline: {len(manifest)} watched file(s), {len(work)} work file(s)"
+        if args.allow_grow:
+            summary += f", {len(grow_manifest)} grow file(s) recorded"
+        summary += f" -> {out_path}"
+        print(summary)
         return 0
 
     if not args.baseline:
@@ -135,17 +231,58 @@ def main() -> int:
         snapshot = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
         baseline = snapshot["files"]
         work_baseline = snapshot.get("work_files", {})
+        grow_baseline = snapshot.get("grow_files", {})
     except (OSError, ValueError, KeyError) as error:
         print(
             f"error: could not read baseline {args.baseline}: {error}", file=sys.stderr
         )
         return 1
 
-    modified = sorted(
+    modified_all = sorted(
         k for k, v in manifest.items() if k in baseline and baseline[k] != v
     )
     removed = sorted(k for k in baseline if k not in manifest)
-    added = sorted(k for k in manifest if k not in baseline)
+    added_all = sorted(k for k in manifest if k not in baseline)
+
+    # Both carve-outs are narrower globs layered on top of --watch, not a
+    # replacement for it: a path only leaves `added`/`modified` if it BOTH matches
+    # one of these AND proves the specific shape (freshly added, or JSON-prefix
+    # growth) the carve-out promises. Anything else is still a violation.
+    allow_added_paths = (
+        _matched_paths(repo, args.allow_added) if args.allow_added else set()
+    )
+    allow_grow_paths = (
+        _matched_paths(repo, args.allow_grow) if args.allow_grow else set()
+    )
+
+    allowed_added = sorted(k for k in added_all if k in allow_added_paths)
+    added = sorted(k for k in added_all if k not in allow_added_paths)
+
+    grown: list[str] = []
+    grow_rejected: list[str] = []
+    for path in modified_all:
+        if path not in allow_grow_paths:
+            continue
+        old_text = grow_baseline.get(path)
+        if old_text is None:
+            # No recorded content -- an older baseline predates --allow-grow, or
+            # this glob wasn't passed at baseline time. Either way there is nothing
+            # to prove growth against, so this stays a violation: fail closed.
+            continue
+        try:
+            new_text = (repo / path).read_text(encoding="utf-8")
+            grew = _json_grew(json.loads(old_text), json.loads(new_text))
+        except (OSError, UnicodeDecodeError, ValueError):
+            # Not parseable as JSON on one side, or unreadable now: "could not
+            # check whether this grew" is not the same answer as "this is fine".
+            grew = False
+        if grew:
+            grown.append(path)
+        else:
+            grow_rejected.append(path)
+
+    grown_set = set(grown)
+    modified = sorted(k for k in modified_all if k not in grown_set)
     outside = modified + removed + added
 
     # The other half of the contract. Every gate after this one can be satisfied by an
@@ -168,6 +305,16 @@ def main() -> int:
         lines += [f"- deleted:  {path}" for path in removed]
         lines += [f"- added:    {path}" for path in added]
         feedback_parts.append("\n".join(lines))
+    if grow_rejected:
+        lines = [
+            "The following files may only grow -- gain a new case appended to what "
+            "was already there -- but their existing content changed instead. That "
+            'is a different instruction than "do not touch this file": put back '
+            "what was there and add the new case alongside it, not in place of it:",
+            "",
+        ]
+        lines += [f"- {path}" for path in grow_rejected]
+        feedback_parts.append("\n".join(lines))
     if args.expect_change and not work_changed:
         feedback_parts.append(
             "No file under the engine changed. Whatever was reported, nothing was "
@@ -183,6 +330,10 @@ def main() -> int:
                 "modified": modified,
                 "removed": removed,
                 "added": added,
+                "allowed_added": allowed_added,
+                "allowed_added_count": len(allowed_added),
+                "grown": grown,
+                "grown_count": len(grown),
                 "work_count": len(work),
                 "work_changed_count": len(work_changed),
                 "work_changed": work_changed,
@@ -193,11 +344,16 @@ def main() -> int:
         encoding="utf-8",
     )
     print(
-        f"watched {len(manifest)} file(s); {len(outside)} unexpected change(s). "
+        f"watched {len(manifest)} file(s); {len(outside)} unexpected change(s), "
+        f"{len(allowed_added)} allowed-added, {len(grown)} grown. "
         f"engine: {len(work)} file(s), {len(work_changed)} changed."
     )
     for path in outside:
         print(f"  unexpected: {path}")
+    for path in allowed_added:
+        print(f"  allowed:    {path}")
+    for path in grown:
+        print(f"  grown:      {path}")
     for path in work_changed:
         print(f"  engine:     {path}")
     return 0

@@ -26,6 +26,30 @@ vars:
   # that spelled `.dll` would be a Windows flow.
   hip_kernel_plugin: "${vars.build_dir}/bin/hipdnn_plugins/engines/hip_kernel_provider.dll"
 
+  # --- ingestor-engine-kernel ------------------------------------------------
+  #
+  # That flow builds into its own tree. It turns HIPDNN_ENABLE_KERNEL_INGESTOR and
+  # HIPKERNELPROVIDER_ENABLE_ROCKE on and then installs, and sharing a build directory
+  # with a flow whose exit condition is a benchmark median would let one run's
+  # reconfiguration move the other run's timings without either noticing. The cost is
+  # one cold build; the alternative costs a measurement nobody can trust.
+  ingestor_build_dir: "${vars.repo_root}/build-ingestor"
+  ingestor_install_dir: "${vars.repo_root}/install-ingestor"
+  # Built and installed copies of the same plugin. Both are here rather than in the flow
+  # for the reason above: the suffix and the install layout are machine-local. The flow
+  # asserts each exists at the step that first needs it, so a wrong layout here fails at
+  # that step with the path in the message rather than as a mystery skip later.
+  ingestor_plugin: "${vars.ingestor_build_dir}/bin/hipdnn_plugins/engines/hip_kernel_provider.dll"
+  installed_plugin: "${vars.ingestor_install_dir}/bin/hipdnn_plugins/engines/hip_kernel_provider.dll"
+  # The provider's own installed CTest root -- not the install prefix. The registered
+  # external integration entries live under here, and pointing ctest at the prefix finds
+  # nothing while exiting 0.
+  ingestor_ctest_root: "${vars.ingestor_install_dir}/bin/hip_kernel_provider"
+  # Clang is a prerequisite of the preset's toolchain and is not provisioned by anything
+  # in this repository; the superbuild skill installs it. CMAKE_PROGRAM_PATH points the
+  # preset at it on Windows.
+  clang_bin: D:/develop/dist/clang/bin
+
 tools:
   # Claude Code CLI. Verified present at this path on a Windows workstation (2026-09).
   claude:
