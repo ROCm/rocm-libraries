@@ -1194,6 +1194,10 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
                 stinkyInst->addModifier<LoopCarriedWarData>(
                     LoopCarriedWarData{memToken->warTokens, memToken->warDistance});
             }
+            if (memToken->rawDistance > 0 && !memToken->rawTokens.empty()) {
+                stinkyInst->addModifier<LoopCarriedRawData>(
+                    LoopCarriedRawData{memToken->rawTokens, memToken->rawDistance});
+            }
         }
 
         Legalized legalizedInsts =

@@ -8,7 +8,19 @@
 # the previous trip read. The scan is not gated on isBarrier, so tagging the
 # fill works with no backend change.
 #
-# Two token-[0] reads, one consumed and one not, plus a token-[1] prefetch.
+# Two token-[0] reads, one consumed and one not, plus a token-[1] prefetch of
+# next trip's data. Ring 3, one step per trip:
+#
+#                           iter 0   iter 1   iter 2   iter 3
+#   ds_load A   (Read,  [0])  LDS0     LDS1     LDS2     LDS0
+#   ds_load B   (Read,  [1])  LDS1     LDS2     LDS0     LDS1
+#   tensor_load (Write, [2])  LDS2     LDS0     LDS1     LDS2
+#
+# The fill has TWO WAR partners: against A at d = 1 (iter 1 fills LDS0, iter 0's
+# A read it) and against B at d = 2 (iter 2 fills LDS1, iter 0's B read it).
+# Naming only the nearest is enough -- CK_DS is in-order, so a wait that retires
+# the d = 1 reads retires everything behind them, d = 2 included.
+#
 # Steady state at the fill, oldest first:
 #
 #   [ A2(k-1), B(k-1), A1(k), A2(k), B(k) ]
@@ -16,6 +28,12 @@
 #
 # 5 from the tail, so the wait is 4, leaving all three of this trip's reads in
 # flight. B(k-1) is carried in too, but tagged [1].
+#
+# Scope: WAR only. The same ring also carries a RAW on each read (A at d = 2,
+# B at d = 1), deliberately left unannotated here so the dscnt result is not
+# entangled with tensorcnt. waitcnt_insertion_loop_carried_raw_distance1 is this
+# loop annotated from the RAW side; do not read this file as a model of a
+# complete main loop.
 #
 # CHECK-LABEL: @waitcnt_insertion_loop_carried_war_single_wave
 # CHECK: ^loop:
