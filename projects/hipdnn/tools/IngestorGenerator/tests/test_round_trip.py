@@ -127,7 +127,7 @@ def test_scale_add_round_trip_validates_clean(
     result = subprocess.run(
         [
             str(validator),
-            str(tmp_path / "descriptors"),
+            str(tmp_path / scale_add_config.descriptor_dir),
             "--expect-engine",
             scale_add_config.engine.name,
             "--json",
@@ -150,7 +150,7 @@ def test_binary_ops_round_trip_validates_clean(
     result = subprocess.run(
         [
             str(validator),
-            str(tmp_path / "descriptors"),
+            str(tmp_path / binary_ops_config.descriptor_dir),
             "--expect-engine",
             binary_ops_config.engine.name,
             "--json",
