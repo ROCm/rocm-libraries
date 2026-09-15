@@ -1,6 +1,6 @@
 # StinkyTofu Configuration via GlobalParameters
 
-Control StinkyTofu behavior through Tensile's `GlobalParameters` system -- either via `--global-parameters` on the CLI or in the YAML configuration file.
+Control StinkyTofu behavior through TensileLite's `GlobalParameters` system -- either via `--global-parameters` on the CLI or in the YAML configuration file.
 
 ## Quick Reference
 
@@ -140,4 +140,4 @@ GlobalParameters:
 
 ## Scope
 
-These parameters apply to the **Tensile/KernelWriter integration path**. For `stinkytofu-opt`, use the equivalent CLI flags (e.g. `--remarks`). See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).
+These parameters apply to the **TensileLite/KernelWriter integration path**. For `stinkytofu-opt`, use the equivalent CLI flags (e.g. `--remarks`). See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).
