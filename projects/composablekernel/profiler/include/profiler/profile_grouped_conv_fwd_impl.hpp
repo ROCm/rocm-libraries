@@ -489,11 +489,13 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
     }
     for(size_t i = 0; i < op_ptrs.size(); i++)
     {
-        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
-        {
-            // skip test if instance_index is specified
-            continue;
-        }
+        // NOTE: instance_index (when set) selects the Nth *supported* instance, i.e. the same
+        // numbering --list-instances prints ("[N] ...") and the same numbering run_impl uses
+        // internally (num_kernel - 1). It is NOT a raw index into op_ptrs (which enumerates every
+        // registered instance for this op/dtype, most of them unsupported for any given problem
+        // shape) -- do not skip by raw i here, or --instance N silently targets the wrong kernel
+        // (or none at all). run_impl already skips the actual timing run for every non-target
+        // supported instance via its own num_kernel-based current_is_target check below.
         auto& op_ptr      = op_ptrs[i];
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
                                                         wei_device_buf.GetDeviceBuffer(),

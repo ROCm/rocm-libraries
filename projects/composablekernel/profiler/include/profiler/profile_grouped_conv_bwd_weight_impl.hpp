@@ -333,11 +333,10 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     index_t num_kernel = 0;
     for(size_t i = 0; i < op_ptrs.size(); i++)
     {
-        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
-        {
-            // skip test if instance_index is specified
-            continue;
-        }
+        // NOTE: instance_index (when set) selects the Nth *supported* instance (matching
+        // --list-instances' "[N] ..." numbering and run_impl's num_kernel-based current_is_target
+        // check), not a raw index into op_ptrs -- see profile_grouped_conv_fwd_impl.hpp for the
+        // full rationale. Do not skip by raw i here.
         auto& op_ptr = op_ptrs[i];
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)
         {
