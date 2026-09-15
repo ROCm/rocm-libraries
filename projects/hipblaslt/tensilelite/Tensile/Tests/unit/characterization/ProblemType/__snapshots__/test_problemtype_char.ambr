@@ -26,6 +26,7 @@
     'DataTypeMXSA': '<DataType E8>',
     'DataTypeMXSB': '<DataType E8>',
     'DataTypeMetadata': '<DataType Int8>',
+    'DataTypeScaleA': '<DataType Float>',
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
     'FusedGemmA2A': False,
@@ -70,6 +71,7 @@
     'IndicesSummation': list([
       2,
     ]),
+    'Int4EncodingA': 'Signed',
     'MXBlockA': 0,
     'MXBlockB': 0,
     'MacDataTypeA': '<DataType Float>',
@@ -92,6 +94,8 @@
     'NumIndicesSummation': 1,
     'OperationType': 'GEMM',
     'OutputAmaxD': False,
+    'ScaleBlockSizeA': 0,
+    'ScaleZeroPointA': False,
     'SetConstStrideA': list([
     ]),
     'SetConstStrideB': list([
@@ -153,6 +157,7 @@
     'DataTypeE': '<DataType Float>',
     'DataTypeMXSA': '<DataType E8>',
     'DataTypeMXSB': '<DataType E8>',
+    'DataTypeScaleA': '<DataType Float>',
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
     'FusedGemmA2A': False,
@@ -196,6 +201,7 @@
     'IndicesSummation': list([
       2,
     ]),
+    'Int4EncodingA': 'Signed',
     'MXBlockA': 0,
     'MXBlockB': 0,
     'MacDataTypeA': '<DataType Float>',
@@ -218,6 +224,8 @@
     'NumIndicesSummation': 1,
     'OperationType': 'GEMM',
     'OutputAmaxD': False,
+    'ScaleBlockSizeA': 0,
+    'ScaleZeroPointA': False,
     'SetConstStrideA': list([
     ]),
     'SetConstStrideB': list([
@@ -263,7 +271,7 @@
     'getitem_datatype': 'Float',
     'is_mapping_iter_sorted': True,
     'keys_is_list': True,
-    'len': 90,
+    'len': 94,
   })
 # ---
 # name: test_no_data_type_raises
@@ -293,6 +301,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -336,6 +345,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -358,6 +368,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -421,6 +433,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -464,6 +477,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -486,6 +500,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -549,6 +565,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -592,6 +609,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -614,6 +632,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -677,6 +697,7 @@
       'DataTypeE': '<DataType Half>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -720,6 +741,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float8>',
@@ -742,6 +764,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -805,6 +829,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -848,6 +873,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -870,6 +896,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -934,6 +962,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -977,6 +1006,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -999,6 +1029,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1062,6 +1094,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -1105,6 +1138,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1127,6 +1161,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1190,6 +1226,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -1233,6 +1270,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1255,6 +1293,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1318,6 +1358,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -1361,6 +1402,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1383,6 +1425,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1446,6 +1490,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -1489,6 +1534,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1511,6 +1557,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1574,6 +1622,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -1621,6 +1670,7 @@
       'IndicesSummation': list([
         3,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1643,6 +1693,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1706,6 +1758,7 @@
       'DataTypeE': '<DataType BFloat16>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType BFloat16>',
       'DestDataType': '<DataType BFloat16>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -1749,6 +1802,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType BFloat16>',
@@ -1771,6 +1825,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1835,6 +1891,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -1878,6 +1935,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -1900,6 +1958,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -1964,6 +2024,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2007,6 +2068,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2029,6 +2091,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2093,6 +2157,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2136,6 +2201,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2158,6 +2224,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2222,6 +2290,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2265,6 +2334,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2287,6 +2357,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2352,6 +2424,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2395,6 +2468,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2417,6 +2491,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2480,6 +2556,7 @@
       'DataTypeE': '<DataType ComplexFloat>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType ComplexFloat>',
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2523,6 +2600,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType ComplexFloat>',
@@ -2545,6 +2623,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2608,6 +2688,7 @@
       'DataTypeE': '<DataType ComplexFloat>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType ComplexFloat>',
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2651,6 +2732,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType ComplexFloat>',
@@ -2673,6 +2755,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2736,6 +2820,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2779,6 +2864,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -2801,6 +2887,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2864,6 +2952,7 @@
       'DataTypeE': '<DataType Double>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Double>',
       'DestDataType': '<DataType Double>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -2907,6 +2996,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Double>',
@@ -2929,6 +3019,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -2992,6 +3084,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType XFloat32>',
       'FusedGemmA2A': False,
@@ -3035,6 +3128,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3057,6 +3151,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3120,6 +3216,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -3163,6 +3260,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3185,6 +3283,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3249,6 +3349,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -3292,6 +3393,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3314,6 +3416,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3377,6 +3481,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -3420,6 +3525,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3442,6 +3548,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3505,6 +3613,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -3548,6 +3657,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3570,6 +3680,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3633,6 +3745,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -3676,6 +3789,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -3698,6 +3812,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3761,6 +3877,7 @@
       'DataTypeE': '<DataType Half>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Half>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -3804,6 +3921,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -3826,6 +3944,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -3889,6 +4009,7 @@
       'DataTypeE': '<DataType Half>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -3932,6 +4053,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -3954,6 +4076,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4019,6 +4143,7 @@
       'DataTypeE': '<DataType Half>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4062,6 +4187,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -4084,6 +4210,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4147,6 +4275,7 @@
       'DataTypeE': '<DataType Int8>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Int8>',
       'DestDataType': '<DataType Int8>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4190,6 +4319,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Int8>',
@@ -4212,6 +4342,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4275,6 +4407,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4318,6 +4451,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4340,6 +4474,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4403,6 +4539,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4458,6 +4595,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 32,
       'MXBlockB': 32,
       'MacDataTypeA': '<DataType Float>',
@@ -4480,6 +4618,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4545,6 +4685,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4588,6 +4729,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4610,6 +4752,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': True,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4673,6 +4817,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4716,6 +4861,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4738,6 +4884,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4801,6 +4949,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4844,6 +4993,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4866,6 +5016,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -4929,6 +5081,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -4972,6 +5125,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -4994,6 +5148,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5057,6 +5213,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -5100,6 +5257,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5122,6 +5280,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5185,6 +5345,7 @@
       'DataTypeE': '<DataType Half>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -5228,6 +5389,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Half>',
@@ -5250,6 +5412,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5314,6 +5478,7 @@
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
       'DataTypeMetadata': '<DataType Int8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -5358,6 +5523,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5380,6 +5546,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5445,6 +5613,7 @@
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
       'DataTypeMetadata': '<DataType Int8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -5489,6 +5658,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5511,6 +5681,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5576,6 +5748,7 @@
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
       'DataTypeMetadata': '<DataType Int8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -5620,6 +5793,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5642,6 +5816,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5707,6 +5883,7 @@
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
       'DataTypeMetadata': '<DataType Int8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -5751,6 +5928,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5773,6 +5951,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5837,6 +6017,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -5880,6 +6061,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -5902,6 +6084,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -5965,6 +6149,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -6008,6 +6193,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6030,6 +6216,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -6093,6 +6281,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -6136,6 +6325,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6158,6 +6348,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -6221,6 +6413,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -6264,6 +6457,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6286,6 +6480,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
@@ -6349,6 +6545,7 @@
       'DataTypeE': '<DataType Float>',
       'DataTypeMXSA': '<DataType E8>',
       'DataTypeMXSB': '<DataType E8>',
+      'DataTypeScaleA': '<DataType Float>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
       'FusedGemmA2A': False,
@@ -6392,6 +6589,7 @@
       'IndicesSummation': list([
         2,
       ]),
+      'Int4EncodingA': 'Signed',
       'MXBlockA': 0,
       'MXBlockB': 0,
       'MacDataTypeA': '<DataType Float>',
@@ -6414,6 +6612,8 @@
       'NumIndicesSummation': 1,
       'OperationType': 'GEMM',
       'OutputAmaxD': False,
+      'ScaleBlockSizeA': 0,
+      'ScaleZeroPointA': False,
       'SetConstStrideA': list([
       ]),
       'SetConstStrideB': list([
