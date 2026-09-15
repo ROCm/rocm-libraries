@@ -640,13 +640,25 @@ struct RemoveTreeOnExit
     }
 };
 
-} // namespace
+using ModuleHandle = std::unique_ptr<std::remove_pointer_t<HMODULE>,
+                                     decltype(&hipdnn_data_sdk::utilities::closeLibrary)>;
 
-// The HIP anchor tier is dropped whenever this helper reports no origin, so a module
-// loaded from an extended-length path must still yield its directory. The test
-// executable itself stays at a short path, keeping this about the helper's buffer
-// rather than any executable-path limit.
-TEST(TestPlatformUtils, GetLoadedLibraryOriginResolvesAPathBeyondMaxPath)
+/// A module loaded from a directory whose path exceeds MAX_PATH, and the directory the
+/// lookups under test are expected to report. Declaration order is load-bearing: the
+/// handle is released before the tree is removed, so FreeLibrary runs while the image
+/// file is still there.
+struct LongPathModule
+{
+    RemoveTreeOnExit cleanup{};
+    ModuleHandle handle{nullptr, &hipdnn_data_sdk::utilities::closeLibrary};
+    std::filesystem::path expectedDirectory{};
+};
+
+/// Copies a system DLL into a freshly created extended-length directory and loads it.
+/// @p tag distinguishes both the directory and the copy's base name: the loader matches
+/// an already-loaded module by base name before mapping a new image, so two probes
+/// sharing a name would resolve to whichever was loaded first.
+void loadModuleFromLongPath(const std::wstring& tag, LongPathModule& probe)
 {
     namespace utilities = hipdnn_data_sdk::utilities;
 
@@ -654,7 +666,7 @@ TEST(TestPlatformUtils, GetLoadedLibraryOriginResolvesAPathBeyondMaxPath)
     const UINT systemLength = GetSystemDirectoryW(systemDirectory.data(), MAX_PATH);
     ASSERT_GT(systemLength, 0u);
     ASSERT_LT(systemLength, static_cast<UINT>(MAX_PATH));
-    // version.dll is not a KnownDLL, so the loader honours a copy's own path instead
+    // version.dll is not a KnownDLL, so the loader honors a copy's own path instead
     // of redirecting back to the system directory.
     const std::filesystem::path source
         = std::filesystem::path(std::wstring(systemDirectory.data(), systemLength)) / "version.dll";
@@ -667,11 +679,11 @@ TEST(TestPlatformUtils, GetLoadedLibraryOriginResolvesAPathBeyondMaxPath)
     {
         root += L'\\';
     }
-    root += L"hipdnn_long_origin_" + std::to_wstring(GetCurrentProcessId());
-    const RemoveTreeOnExit cleanup{std::filesystem::path(root)};
+    root += L"hipdnn_long_" + tag + L'_' + std::to_wstring(GetCurrentProcessId());
+    probe.cleanup.path = std::filesystem::path(root);
 
     std::wstring longDirectory = root;
-    const std::wstring segment(120, L'o');
+    const std::wstring segment(120, L'p');
     while(longDirectory.size() < static_cast<size_t>(MAX_PATH) + 64)
     {
         longDirectory += L'\\';
@@ -682,26 +694,59 @@ TEST(TestPlatformUtils, GetLoadedLibraryOriginResolvesAPathBeyondMaxPath)
     std::filesystem::create_directories(directory, failed);
     ASSERT_FALSE(failed) << failed.message();
 
-    const auto library = directory / "version.dll";
+    const auto library = directory / (L"hipdnn_long_" + tag + L"_probe.dll");
     std::filesystem::copy_file(
         source, library, std::filesystem::copy_options::overwrite_existing, failed);
     ASSERT_FALSE(failed) << failed.message();
     ASSERT_GT(library.native().size(), static_cast<size_t>(MAX_PATH));
 
-    const std::unique_ptr<std::remove_pointer_t<HMODULE>, decltype(&utilities::closeLibrary)>
-        handle(utilities::openLibrary(library), &utilities::closeLibrary);
-    ASSERT_NE(handle, nullptr);
+    probe.handle.reset(utilities::openLibrary(library));
+    ASSERT_NE(probe.handle, nullptr);
 
-    const auto expected = [&library] {
-        std::error_code resolveFailed;
-        const auto resolved = std::filesystem::weakly_canonical(library, resolveFailed);
-        return (resolveFailed ? library : resolved).parent_path();
-    }();
+    std::error_code resolveFailed;
+    const auto resolved = std::filesystem::weakly_canonical(library, resolveFailed);
+    probe.expectedDirectory = (resolveFailed ? library : resolved).parent_path();
+}
 
-    const auto origin = utilities::getLoadedLibraryOrigin(handle.get());
+} // namespace
 
-    EXPECT_TRUE(utilities::pathCompEq(origin, expected)) << origin << " != " << expected;
+// The HIP anchor tier is dropped whenever this helper reports no origin, so a module
+// loaded from an extended-length path must still yield its directory. The test
+// executable itself stays at a short path, keeping this about the helper's buffer
+// rather than any executable-path limit.
+TEST(TestPlatformUtils, GetLoadedLibraryOriginResolvesAPathBeyondMaxPath)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+
+    LongPathModule probe;
+    ASSERT_NO_FATAL_FAILURE(loadModuleFromLongPath(L"origin", probe));
+
+    const auto origin = utilities::getLoadedLibraryOrigin(probe.handle.get());
+
+    EXPECT_TRUE(utilities::pathCompEq(origin, probe.expectedDirectory))
+        << origin << " != " << probe.expectedDirectory;
     EXPECT_GT(origin.native().size(), static_cast<size_t>(MAX_PATH));
+}
+
+// The self tier and the two directories derived from it are dropped whenever this helper
+// throws, so a module loaded from an extended-length path must still yield its directory
+// when it is reached by an address rather than by handle.
+TEST(TestPlatformUtils, GetLoadedLibraryDirectoryForAddressResolvesAPathBeyondMaxPath)
+{
+    namespace utilities = hipdnn_data_sdk::utilities;
+
+    LongPathModule probe;
+    ASSERT_NO_FATAL_FAILURE(loadModuleFromLongPath(L"address", probe));
+
+    // The module's base address is inside the loaded copy's image by construction;
+    // an exported entry point may be a forwarder into another module.
+    const void* address = reinterpret_cast<const void*>(probe.handle.get());
+
+    const auto owning = utilities::getLoadedLibraryDirectoryForAddress(address);
+
+    EXPECT_TRUE(utilities::pathCompEq(owning, probe.expectedDirectory))
+        << owning << " != " << probe.expectedDirectory;
+    EXPECT_GT(owning.native().size(), static_cast<size_t>(MAX_PATH));
 }
 
 #endif // _WIN32

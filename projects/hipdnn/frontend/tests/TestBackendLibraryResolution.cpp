@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_frontend/BackendLibraryPath.hpp>
 #include <hipdnn_frontend/detail/DynamicBackendLibrary.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
@@ -16,6 +17,10 @@
 #include <memory>
 #include <string>
 #include <system_error>
+
+#if defined(__linux__)
+#include <link.h>
+#endif
 
 namespace
 {
@@ -233,7 +238,7 @@ TEST_F(TestBackendLibraryResolution, SecureExecutionStillHonoursTheProgrammaticO
     BackendResolutionInputs inputs;
     inputs.secureExecution = true;
     inputs.overrideDirectory = directoryWithLoadableBackend("override");
-    inputs.overrideSource = "setBackendLibraryPath()";
+    inputs.overrideSource = "setBackendLibraryPath_ext()";
     inputs.selfDirectory = directoryWithLoadableBackend("self");
     inputs.hipAnchorDirectory = directoryWithLoadableBackend("hip");
 
@@ -269,7 +274,7 @@ namespace
             }
         };
 
-        require(hipdnn_frontend::setBackendLibraryPath(early.path()),
+        require(hipdnn_frontend::setBackendLibraryPath_ext(early.path()),
                 "the setter was refused before resolution had run");
 
         hipdnn_frontend::detail::resolveBackendLibraryPath();
@@ -279,7 +284,7 @@ namespace
                     != std::string::npos,
                 "the stored override was never offered as a candidate");
 
-        require(!hipdnn_frontend::setBackendLibraryPath(late.path()),
+        require(!hipdnn_frontend::setBackendLibraryPath_ext(late.path()),
                 "the setter was accepted after resolution had run");
     }
     std::exit(status);
@@ -447,7 +452,8 @@ TEST_F(TestBackendLibraryResolution, AbsentNativeEnvironmentOverrideIsNotAnEmpty
     const BackendResolutionInputs inputs = backendResolutionInputs();
 
     EXPECT_FALSE(inputs.overrideDirectory.has_value())
-        << "an unset variable became an override: " << pathForDiagnostic(*inputs.overrideDirectory);
+        << "an unset variable became an override: "
+        << pathForDiagnostic(inputs.overrideDirectory.value_or(std::filesystem::path{}));
 }
 
 // The override must reach the filesystem as its own UTF-16. A narrowed spelling names
@@ -569,7 +575,8 @@ TEST_F(TestBackendLibraryResolution, AbsentEnvironmentOverrideIsNotAnEmptyOverri
     const BackendResolutionInputs inputs = backendResolutionInputs();
 
     EXPECT_FALSE(inputs.overrideDirectory.has_value())
-        << "an unset variable became an override: " << pathForDiagnostic(*inputs.overrideDirectory);
+        << "an unset variable became an override: "
+        << pathForDiagnostic(inputs.overrideDirectory.value_or(std::filesystem::path{}));
 }
 
 TEST_F(TestBackendLibraryResolution, ExecutableAddressUsesTheExecutableDirectory)

@@ -159,13 +159,12 @@ add_hipdnn_test(
     hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# A downstream consumer compiling the shipped runtime-load headers as C++20. Under that
-# standard std::filesystem::path::u8string() returns std::u8string, so a diagnostic that
-# concatenated it with a narrow literal would break every C++20 consumer at include time.
-# This compiles the real shipped header rather than a copy; there is nothing to run, so
-# the target is object-only and links nothing -- in particular not the backend, which
-# runtime-load mode must never require. hipdnn_frontend_dynamic_load_tests above is the
-# C++17 control.
+# Compiles the shipped public frontend umbrella as C++20, the standard under which
+# std::filesystem::path::u8string() returns std::u8string -- concatenating its result
+# with a narrow literal would break C++20 consumers at include time. There is nothing to
+# run: the target is object-only, consuming hipdnn_frontend_dynamic for its usage
+# requirements and linking nothing -- in particular not the backend, which runtime-load
+# mode must never require. hipdnn_frontend_dynamic_load_tests above is the C++17 control.
 if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     add_library(hipdnn_frontend_runtime_load_header_cpp20 OBJECT TestRuntimeLoadHeaderCpp20.cpp)
     target_compile_features(hipdnn_frontend_runtime_load_header_cpp20 PRIVATE cxx_std_20)

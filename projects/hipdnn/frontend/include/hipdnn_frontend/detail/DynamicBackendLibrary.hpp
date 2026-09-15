@@ -264,7 +264,7 @@ HIPDNN_HIDDEN inline BackendResolutionInputs backendResolutionInputs()
 
     // Close the setter before searching, regardless of which candidate succeeds.
     inputs.overrideDirectory = takeBackendLibraryOverride();
-    inputs.overrideSource = "setBackendLibraryPath()";
+    inputs.overrideSource = "setBackendLibraryPath_ext()";
 
     if(inputs.secureExecution)
     {
@@ -387,33 +387,3 @@ HIPDNN_HIDDEN inline Fn resolveBackendSymbol(std::atomic<void*>& cache, const ch
 }
 
 } // namespace hipdnn_frontend::detail
-
-namespace hipdnn_frontend
-{
-
-/**
- * @brief Point backend resolution at @p directory, ahead of every other location.
- *
- * Applies only to the calling module (executable or shared library), not other
- * modules' frontend instances. For process-wide injection, use
- * @ref hipdnn_frontend::detail::BACKEND_LIBRARY_PATH_ENV; this setter takes
- * precedence within its module.
- *
- * @param directory Directory joined with the platform's backend filename.
- *     Empty or relative values are reported on stderr and ignored at resolution.
- * @return `true` if stored; `false` without changes once resolution has started,
- *     including after a cached failure.
- */
-HIPDNN_HIDDEN inline bool setBackendLibraryPath(const std::filesystem::path& directory)
-{
-    auto& state = detail::backendLibraryOverrideState();
-    const std::lock_guard<std::mutex> lock(state.mutex);
-    if(state.resolutionStarted)
-    {
-        return false;
-    }
-    state.directory = directory;
-    return true;
-}
-
-} // namespace hipdnn_frontend

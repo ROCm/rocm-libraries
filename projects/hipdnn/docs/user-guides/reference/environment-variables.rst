@@ -109,7 +109,7 @@ Backend library discovery
 A consumer that links ``hipdnn_frontend_dynamic`` resolves the hipDNN backend shared library at first use rather than through a link-time dependency.
 hipDNN computes the path itself, in this order:
 
-#. ``HIPDNN_BACKEND_LIBRARY_PATH``, or ``hipdnn_frontend::setBackendLibraryPath()`` if the calling module has called it.
+#. ``hipdnn_frontend::setBackendLibraryPath_ext()`` if the calling module has called it, otherwise ``HIPDNN_BACKEND_LIBRARY_PATH``.
 #. The directory of the calling module (executable or shared library).
 #. That directory's sibling ``../lib`` and ``../lib64``.
 #. The directory the HIP runtime was loaded from.
@@ -117,6 +117,11 @@ hipDNN computes the path itself, in this order:
 
 Locations 2 and 3 require the calling module's own directory.
 When the loader reports no origin for it, or one that cannot be trusted -- a relative name, which would be interpreted against whatever working directory the process happens to have -- both are skipped and resolution continues with the remaining locations.
+
+.. warning::
+
+  On Windows, whichever location supplied the directory the backend is loaded from -- the setter, ``HIPDNN_BACKEND_LIBRARY_PATH``, the calling module's directory, its sibling ``../lib`` or ``../lib64``, or the HIP runtime's directory -- is searched for the backend's own first-level dependents ahead of ``System32``, so it must not be writable by lower-privileged principals.
+  The altered order does not apply transitively to those dependents' own dependencies, and KnownDLLs still resolve from the system directory.
 
 ``HIPDNN_BACKEND_LIBRARY_PATH``
 -------------------------------
@@ -130,13 +135,22 @@ The directory holding the backend shared library. The filename is always hipDNN'
 The value must be a non-empty absolute directory; any other value is reported on ``stderr`` and ignored.
 If the backend is absent or fails to load, resolution continues to the next location.
 
-``hipdnn_frontend::setBackendLibraryPath()`` applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module.
-Both are read once, at the first backend call; later changes have no effect.
+A consumer that links ``hipdnn_frontend_dynamic`` can call ``hipdnn_frontend::setBackendLibraryPath_ext()``, declared in ``<hipdnn_frontend/BackendLibraryPath.hpp>`` and reachable through ``<hipdnn_frontend.hpp>`` in a runtime-load build.
+It applies to one calling module (executable or shared library) rather than the whole process, and takes precedence over this variable for that module.
+The setter's directory is validated by the same rule -- non-empty and absolute, anything else reported on ``stderr`` and ignored -- and a stored value suppresses this variable, which is read only when the calling module stored none.
+A module that stored an empty or relative directory therefore gets neither its own override nor the variable's.
+
+Both are read once, at the calling module's first backend call.
+
+.. note::
+
+  That first call caches the outcome, failure included, and closes the setter before it starts searching.
+  After a failed load, ``setBackendLibraryPath_ext()`` returns ``false`` and stores nothing, so trying a different directory requires a new process.
 
 Secure execution
 ================
 
 On Linux, in a secure execution environment -- a set-user-ID or set-group-ID process, or one that gained capabilities across ``execve`` -- hipDNN ignores every environment variable that steers what code it loads: ``HIPDNN_BACKEND_LIBRARY_PATH``, ``HIPDNN_PLUGIN_DIR``, and ``HIPDNN_HEURISTIC_PLUGIN_DIR``.
-Backend resolution skips module-relative and HIP-runtime locations, but still honors an explicit ``setBackendLibraryPath()`` override before the system loader's hardened search.
+Backend resolution skips module-relative and HIP-runtime locations, but still honors an explicit ``setBackendLibraryPath_ext()`` override before the system loader's hardened search.
 Variables that do not select code, such as the logging variables above, are unaffected.
 Windows has no equivalent execution mode, so these three variables are always honored there.

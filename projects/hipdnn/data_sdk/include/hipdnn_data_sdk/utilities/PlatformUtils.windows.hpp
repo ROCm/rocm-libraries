@@ -25,7 +25,6 @@
 #endif
 
 #include <algorithm>
-#include <array>
 #include <cwctype>
 #include <filesystem>
 #include <limits>
@@ -209,20 +208,82 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
            == CSTR_EQUAL;
 }
 
+namespace detail
+{
+/// Full path of @p handle's module, sized to whatever the loader reports it needs.
+/// A null handle names the current executable.
+/// @p what names the lookup being attempted in the failure messages, and @p subject, when
+/// non-empty, names the module; callers that reach a module by handle or by address have
+/// no name to report.
+inline std::wstring moduleFileName(HMODULE handle, const char* what, const char* subject = nullptr)
+{
+    const auto describe = [what, subject] {
+        std::string message = "Failed to get ";
+        message += what;
+        if(subject != nullptr && *subject != '\0')
+        {
+            message += ": ";
+            message += subject;
+        }
+        return message;
+    };
+
+    // Extended-length paths exceed MAX_PATH, and GetModuleFileNameW reports truncation
+    // by filling the buffer rather than failing. Retry with a larger one instead of
+    // discarding a path this module genuinely has.
+    std::wstring modulePath(MAX_PATH, L'\0');
+    DWORD capacity = static_cast<DWORD>(modulePath.size());
+    DWORD length = GetModuleFileNameW(handle, modulePath.data(), capacity);
+    if(length == 0)
+    {
+        const DWORD error = GetLastError();
+        throw std::runtime_error(describe() + " (Error Code: " + std::to_string(error) + ")");
+    }
+
+    while(length >= capacity)
+    {
+        constexpr DWORD MAX_CAPACITY = (std::numeric_limits<DWORD>::max)() / 2;
+        if(capacity > MAX_CAPACITY)
+        {
+            throw std::runtime_error(describe() + ": path is implausibly long");
+        }
+        capacity *= 2;
+
+        modulePath.assign(capacity, L'\0');
+        length = GetModuleFileNameW(handle, modulePath.data(), capacity);
+        if(length == 0)
+        {
+            const DWORD error = GetLastError();
+            throw std::runtime_error(describe() + " (Error Code: " + std::to_string(error) + ")");
+        }
+    }
+
+    modulePath.resize(length);
+    return modulePath;
+}
+} // namespace detail
+
 inline std::filesystem::path getCurrentExecutableDirectory()
 {
-    std::array<wchar_t, MAX_PATH> result{};
-    const DWORD length = GetModuleFileNameW(nullptr, result.data(), MAX_PATH);
-    if(length == 0 || length == MAX_PATH)
-    {
-        throw std::runtime_error("Failed to get executable path");
-    }
-    return std::filesystem::path(result.data()).parent_path();
+    return std::filesystem::path(detail::moduleFileName(nullptr, "executable path")).parent_path();
 }
 
 inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-    auto handle = LoadLibraryW(libraryPath.c_str());
+    // LOAD_WITH_ALTERED_SEARCH_PATH searches the opened module's own directory for that
+    // module's dependents, and its behavior is documented as undefined for a relative
+    // path, so a relative path stays on plain LoadLibraryW. The alternate order
+    // substitutes that directory for the application directory rather than adding to it,
+    // so the application directory drops out of the dependent search.
+    HMODULE handle = nullptr;
+    if(libraryPath.is_absolute())
+    {
+        handle = LoadLibraryExW(libraryPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    }
+    else
+    {
+        handle = LoadLibraryW(libraryPath.c_str());
+    }
     if(handle == nullptr)
     {
         const DWORD error = GetLastError();
@@ -251,42 +312,7 @@ inline std::filesystem::path getLoadedLibraryOrigin(SharedLibraryHandle handle)
         throw std::runtime_error("Failed to get library origin: null handle");
     }
 
-    // Extended-length paths exceed MAX_PATH, and GetModuleFileNameW reports truncation
-    // by filling the buffer rather than failing. Retry with a larger one instead of
-    // discarding an origin this module genuinely has.
-    std::array<wchar_t, MAX_PATH> shortPath{};
-    DWORD capacity = static_cast<DWORD>(shortPath.size());
-    DWORD length = GetModuleFileNameW(handle, shortPath.data(), capacity);
-    if(length == 0)
-    {
-        throw std::runtime_error(
-            "Failed to get library origin (Error Code: " + std::to_string(GetLastError()) + ")");
-    }
-
-    const wchar_t* modulePath = shortPath.data();
-    std::wstring grownPath;
-    while(length >= capacity)
-    {
-        constexpr DWORD MAX_CAPACITY = (std::numeric_limits<DWORD>::max)() / 2;
-        if(capacity > MAX_CAPACITY)
-        {
-            throw std::runtime_error("Failed to get library origin: path is implausibly long");
-        }
-        capacity *= 2;
-
-        grownPath.assign(capacity, L'\0');
-        length = GetModuleFileNameW(handle, grownPath.data(), capacity);
-        if(length == 0)
-        {
-            throw std::runtime_error("Failed to get library origin (Error Code: "
-                                     + std::to_string(GetLastError()) + ")");
-        }
-    }
-    if(!grownPath.empty())
-    {
-        grownPath.resize(length);
-        modulePath = grownPath.c_str();
-    }
+    const std::wstring modulePath = detail::moduleFileName(handle, "library origin");
 
     // Resolve symlinks to find siblings; retain the module path on failure.
     std::error_code failed;
@@ -312,14 +338,8 @@ inline std::filesystem::path getLoadedLibraryDirectory(const char* libraryName)
         throw std::runtime_error("Failed to find loaded library: " + std::string(libraryName));
     }
 
-    std::array<wchar_t, MAX_PATH> result{};
-    const auto length = GetModuleFileNameW(handle, result.data(), result.size());
-    if(length == 0 || length >= result.size())
-    {
-        throw std::runtime_error("Failed to get loaded library path: " + std::string(libraryName));
-    }
-
-    return std::filesystem::path(result.data()).parent_path();
+    return std::filesystem::path(detail::moduleFileName(handle, "loaded library path", libraryName))
+        .parent_path();
 }
 
 /// Directory owning @p address, regardless of exports or how the module was loaded.
@@ -336,17 +356,13 @@ inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* add
         throw std::runtime_error("Failed to find loaded library for address");
     }
 
-    std::array<wchar_t, MAX_PATH> result{};
-    const auto length = GetModuleFileNameW(handle, result.data(), result.size());
-    if(length == 0 || length >= result.size())
-    {
-        throw std::runtime_error("Failed to get loaded library path for address");
-    }
+    const std::wstring modulePath
+        = detail::moduleFileName(handle, "loaded library path for address");
 
     // Resolve symlinks to find siblings; retain the module path on failure.
     std::error_code failed;
-    const auto resolved = std::filesystem::weakly_canonical(result.data(), failed);
-    return (failed ? std::filesystem::path(result.data()) : resolved).parent_path();
+    const auto resolved = std::filesystem::weakly_canonical(modulePath, failed);
+    return (failed ? std::filesystem::path(modulePath) : resolved).parent_path();
 }
 
 } // namespace hipdnn_data_sdk::utilities
