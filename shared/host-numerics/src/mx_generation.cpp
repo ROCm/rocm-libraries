@@ -1,8 +1,6 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#pragma once
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -18,7 +16,10 @@
 #include <vector>
 
 #include "detail/checked_arithmetic.hpp"
-#include "detail/data_generation.hpp"
+#include "detail/generation_primitives.hpp"
+#include "detail/generation_recipe_access.hpp"
+#include "detail/generation_values.hpp"
+#include "detail/mx_packing.hpp"
 #include "detail/threading.hpp"
 
 namespace roc::host_numerics {
@@ -181,8 +182,8 @@ std::optional<uint8_t> explicitScaleRaw(const MxGenerationInvocation& problem) {
 double generatedValue(const MxGenerationInvocation& problem, size_t row, size_t column,
                       size_t logicalIndex) {
     const std::array<size_t, 2> indices{row, column};
-    return detail::GenerationRecipeAccess::generatedNumericalValue(
-        problem.data.recipe(), indices, problem.shape, logicalIndex, problem.dataType);
+    return detail::generatedNumericalValue(problem.data.recipe(), indices, problem.shape,
+                                           logicalIndex, problem.dataType);
 }
 
 std::vector<double> decodedDataValues(ScalarType dataType) {
@@ -217,52 +218,6 @@ uint8_t constrainDataRawToInterval(ScalarType dataType, uint8_t raw, double scal
     }
     throw std::invalid_argument(
         "MX bounded interval contains no representable value at the selected block scale.");
-}
-
-std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_t bitsPerValue,
-                                     int threadCount) {
-    (void)threadCount;
-    const size_t totalBits = detail::checkedMultiply(
-        rawValues.size(), static_cast<size_t>(bitsPerValue), "MX packed storage size overflow.");
-    std::vector<std::byte> storage(detail::ceilDivide(totalBits, size_t{8}), std::byte{0});
-    if (bitsPerValue == 8) {
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) num_threads(threadCount)
-#endif
-        for (size_t index = 0; index < rawValues.size(); ++index)
-            storage[index] = static_cast<std::byte>(rawValues[index]);
-    } else if (bitsPerValue == 4) {
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) num_threads(threadCount)
-#endif
-        for (size_t byteIndex = 0; byteIndex < storage.size(); ++byteIndex) {
-            const size_t firstIndex = byteIndex * 2;
-            const uint8_t first = rawValues[firstIndex] & 0x0fU;
-            const uint8_t second =
-                firstIndex + 1 < rawValues.size() ? rawValues[firstIndex + 1] & 0x0fU : 0;
-            storage[byteIndex] = static_cast<std::byte>(first | (second << 4));
-        }
-    } else if (bitsPerValue == 6) {
-        const size_t groups = (rawValues.size() + 3U) / 4U;
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static) num_threads(threadCount)
-#endif
-        for (size_t group = 0; group < groups; ++group) {
-            const size_t firstIndex = group * 4U;
-            uint32_t word = 0;
-            for (size_t offset = 0; offset < 4U && firstIndex + offset < rawValues.size(); ++offset)
-                word |= static_cast<uint32_t>(rawValues[firstIndex + offset] & 0x3fU)
-                        << (offset * 6U);
-            const size_t byteOffset = group * 3U;
-            for (size_t byte = 0; byte < 3U && byteOffset + byte < storage.size(); ++byte)
-                storage[byteOffset + byte] = static_cast<std::byte>((word >> (byte * 8U)) & 0xffU);
-        }
-    } else {
-        for (size_t index = 0; index < rawValues.size(); ++index)
-            detail::writePackedBits(storage, index * static_cast<size_t>(bitsPerValue),
-                                    bitsPerValue, rawValues[index]);
-    }
-    return storage;
 }
 
 void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlocking& blocking,
@@ -304,7 +259,7 @@ void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlockin
             const uint16_t dataBits = scalarTypeInfo(problem.dataType).storageBits;
             const uint8_t dataMask = static_cast<uint8_t>((uint16_t{1} << dataBits) - 1U);
             const uint8_t dataRaw =
-                static_cast<uint8_t>(detail::GenerationRecipeAccess::generatedRawValue(
+                static_cast<uint8_t>(detail::generatedRawValue(
                     problem.data.recipe(), indices, problem.shape, recipeIndex, problem.dataType)) &
                 dataMask;
             dataRawValues[physicalIndex] = dataRaw;
@@ -456,4 +411,54 @@ void validateInvocation(const MxGenerationInvocation& problem) {
         throw std::invalid_argument("Unsupported MX data/scale scalar type combination.");
 }
 }  // namespace
+
+MxTensor generateMx(Shape shape, MxDataGeneration generation, const MxGenerationOptions& options) {
+    const MxGenerationInvocation problem(std::move(shape), std::move(generation), options);
+    validateInvocation(problem);
+    const size_t rows = problem.shape[0];
+    const size_t columns = problem.shape[1];
+    const size_t leadingDimension =
+        problem.leadingDimension == 0 ? rows : static_cast<size_t>(problem.leadingDimension);
+    const size_t physicalElementCount =
+        detail::checkedMultiply(leadingDimension, columns, "MX physical element count overflow.");
+    const size_t logicalElementCount =
+        detail::checkedMultiply(rows, columns, "MX logical element count overflow.");
+    if (leadingDimension > static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()))
+        throw std::overflow_error("MX leading dimension exceeds ptrdiff_t.");
+
+    const ScaleBlocking blocking(problem);
+    if (blocking.scaleCount > std::numeric_limits<uint32_t>::max())
+        throw std::overflow_error("MX scale count exceeds UInt32 scale-index storage.");
+    std::vector<uint8_t> dataRawValues(physicalElementCount, 0);
+    std::vector<uint8_t> scaleRawValues(blocking.scaleCount, 0);
+    std::vector<uint32_t> scaleIndexValues(logicalElementCount, 0);
+    std::vector<float> referenceValues(logicalElementCount, 0.0f);
+    const int threadCount =
+        detail::operationThreadCount(std::max(logicalElementCount, physicalElementCount));
+
+    if (problem.data.quantization() == MxDataQuantization::PreserveGeneratedEncoding)
+        generateUnbounded(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,
+                          referenceValues, threadCount);
+    else
+        generateQuantized(problem, blocking, dataRawValues, scaleRawValues, scaleIndexValues,
+                          referenceValues, threadCount);
+
+    std::vector<std::byte> dataStorage = detail::packRawValues(
+        dataRawValues, scalarTypeInfo(problem.dataType).storageBits, threadCount);
+    Tensor data = Tensor::takeOwnershipOfEncodedBackingStorage(
+        problem.dataType, Layout(problem.shape, {1, static_cast<ptrdiff_t>(leadingDimension)}),
+        std::move(dataStorage));
+    std::vector<std::byte> scaleStorage(scaleRawValues.size());
+    std::memcpy(scaleStorage.data(), scaleRawValues.data(), scaleRawValues.size());
+    Tensor scales = Tensor::takeOwnershipOfEncodedBackingStorage(
+        problem.scaleType, Layout::contiguousLastDimensionFastest(blocking.naturalScaleShape()),
+        std::move(scaleStorage));
+    Tensor scaleIndices =
+        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
+                                  std::span<const uint32_t>(scaleIndexValues));
+    Tensor reference =
+        Tensor::copyNativeStorage(Layout(problem.shape, {1, static_cast<ptrdiff_t>(rows)}),
+                                  std::span<const float>(referenceValues));
+    return {std::move(data), std::move(scales), std::move(scaleIndices), std::move(reference)};
+}
 }  // namespace roc::host_numerics

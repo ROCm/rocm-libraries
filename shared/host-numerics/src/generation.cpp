@@ -10,7 +10,9 @@
 #include <utility>
 #include <vector>
 
-#include "detail/data_generation.hpp"
+#include "detail/generation_primitives.hpp"
+#include "detail/generation_recipe_access.hpp"
+#include "detail/generation_values.hpp"
 #include "detail/threading.hpp"
 
 namespace roc::host_numerics {
