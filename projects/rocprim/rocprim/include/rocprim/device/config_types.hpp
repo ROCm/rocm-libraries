@@ -31,6 +31,7 @@
 #include <type_traits>
 
 #include <cassert>
+#include <cstring>
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -188,7 +189,7 @@ enum class target_arch : unsigned int
     gfx1200 = 1200,
     gfx1201 = 1201,
     gfx1250 = 1250,
-    gfx1250-strict = 1250,
+    gfx1250_strict = 1250,
     unknown = std::numeric_limits<unsigned int>::max(),
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
@@ -260,7 +261,7 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
         case target_arch::gfx1250:
-        case target_arch::gfx1250-strict: return gen::cdna5;
+        case target_arch::gfx1250_strict: return gen::cdna5;
         case target_arch::unknown:
         case target_arch::invalid: return gen::unknown;
     }
@@ -336,7 +337,7 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     ROCPRIM_RETURN_IF_ARCH(gfx1200);
     ROCPRIM_RETURN_IF_ARCH(gfx1201);
     ROCPRIM_RETURN_IF_ARCH(gfx1250);
-    ROCPRIM_RETURN_IF_ARCH(gfx1250-strict);
+    ROCPRIM_RETURN_IF_ARCH(gfx1250_strict);
 
     return target_arch::unknown;
 }
@@ -378,7 +379,14 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
         return result;
     }
 
-    arch = parse_gcn_arch(device_props.gcnArchName);
+    // `gfx1250-strict` isn't valid C++ syntax, so if gcnArchName is `gfx1250-strict`, it will be converted to `gfx1250_strict` in parse_gcn_arch.
+    char* arch_name = device_props.gcnArchName;
+    char hyphen = '-';
+    char underscore = '_';
+    char* arch_name_end = arch_name + std::strlen(arch_name);
+    std::replace(arch_name, arch_name_end, hyphen, underscore);
+
+    arch = parse_gcn_arch(arch_name);
     arch_cache[device_id].exchange(arch, std::memory_order_relaxed);
 
     return hipSuccess;
