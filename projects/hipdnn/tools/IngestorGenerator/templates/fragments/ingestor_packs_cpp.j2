@@ -6,14 +6,24 @@
 ## The struct is (label, registerSymbols, ownsModuleCache, resetModuleCache).
 ## ownsModuleCache and resetModuleCache must agree -- TestIngestorPacksModuleCacheOwnership
 ## asserts `ownsModuleCache == (resetModuleCache != nullptr)` for every pack. That test
-## passes for BOTH shapes, so it cannot tell you which one you needed:
-##   * packaged/kpack kernels  -> true, &reset<Name>ModuleCache (declare it in the .hpp
-##                                 too, and define it OUTSIDE the pack's anonymous
-##                                 namespace)
-##   * embedded_source kernels -> false, nullptr (no archive, nothing to drop)
-## A packaged engine left at `false, nullptr` therefore ships green and never drops its
-## module cache. The dialect is known at generation time, so this fragment emits the
-## matching pair rather than a default the reader must remember to correct.
+## passes for BOTH shapes, so it cannot tell you which one you needed.
+##
+## The discriminator is whether your dispatch handler ROUTES THROUGH
+## buildIngestorKernelCode, not which dialect your kernels use. That function takes a
+## `const compilation::KpackKernelLoader&` (IngestorKernelCode.hpp:237), so any handler
+## calling it holds a loader and owns a module cache:
+##   * handler routes through buildIngestorKernelCode -> true, &reset<Name>ModuleCache
+##     (declare it in the .hpp too, and define it OUTSIDE the pack's anonymous namespace)
+##   * handler does not route                         -> false, nullptr
+## hipkernel:Pointwise is the worked example of the first: it ships
+## `true, &resetPointwiseModuleCache` (IngestorPacks.cpp:16) even though its kernels are
+## embedded_source. hipkernel:ConvFwd does not route and ships `false, nullptr` (:19).
+##
+## This fragment can see the dialect but not whether you routed, so it emits the
+## dialect-based answer as a starting point. hipdnn-kernel-integration's RUNBOOK step 3
+## mandates routing through buildIngestorKernelCode, so an engine that follows it needs
+## `true, &reset...` even on the else-branch below. Correct the emitted row to match your
+## handler; a routed pack left at `false, nullptr` never drops its module cache.
 ## Check the IngestorPack struct before splicing: this row must match it field for field.
 {% if config.is_packaged -%}
 ## Packaged dialect: this engine owns a kpack module cache, so it must drop it. Define
