@@ -34,10 +34,13 @@ import {
   type OpNode,
 } from "./graph/flow";
 import { emptyGraph } from "./graph/model";
-import { GraphParseError, parseGraph, serializeGraph } from "./graph/serialize";
+import { parseGraph, serializeGraph } from "./graph/serialize";
 import type { ParamValue } from "./graph/model";
 import type { FileHandleRef } from "./platform";
 import { platform } from "./platform";
+import { ResultsWorkspace } from "./results/ResultsWorkspace";
+import { fromNativeExecution, type NativeExecutionSnapshot, type ResultDocument } from "./results/model";
+import "./results/results.css";
 
 const AUTOSAVE_KEY = "hipdnn.graph.autosave";
 
@@ -55,6 +58,19 @@ function Studio() {
   // any built plan and resets its Build/Execute state.
   const [engineResetKey, setEngineResetKey] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("create");
+  const [nativeDocument, setNativeDocument] = useState<ResultDocument | null>(null);
+  const nextNativeId = useRef(0);
+  const resultsDialog = useRef<HTMLDialogElement>(null);
+  const resultsOpener = useRef<HTMLElement | null>(null);
+  const onExecutionResult = useCallback((snapshot: NativeExecutionSnapshot) => {
+    setNativeDocument(fromNativeExecution(snapshot, `native-${++nextNativeId.current}`));
+  }, []);
+  const onResultsReset = useCallback(() => setNativeDocument(null), []);
+  const onShowResults = useCallback(() => {
+    resultsOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    resultsDialog.current?.showModal();
+  }, []);
+  const closeResults = useCallback(() => resultsDialog.current?.close(), []);
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -225,9 +241,9 @@ function Studio() {
 
   const doOpen = useCallback(async () => {
     if (dirty && !window.confirm("Discard unsaved changes and open a file?")) return;
-    const result = await platform.openTextFile();
-    if (!result) return;
     try {
+      const result = await platform.openTextFile();
+      if (!result) return;
       const graph = parseGraph(result.contents);
       const loaded = fromGraph(graph);
       setNodes(loaded.nodes);
@@ -238,7 +254,7 @@ function Studio() {
       setDirty(false);
       setEngineResetKey((k) => k + 1);
     } catch (error) {
-      const message = error instanceof GraphParseError ? error.message : "Failed to open file.";
+      const message = error instanceof Error ? error.message : "Failed to open file.";
       window.alert(message);
     }
   }, [dirty, setNodes, setEdges]);
@@ -337,7 +353,13 @@ function Studio() {
             />
           </div>
         </div>
-        <EnginePanel getGraph={getGraph} resetKey={engineResetKey} />
+        <EnginePanel
+          getGraph={getGraph}
+          resetKey={engineResetKey}
+          onExecutionResult={onExecutionResult}
+          onResultsReset={onResultsReset}
+          onShowResults={onShowResults}
+        />
       </TabPanel>
       <TabPanel id="implement" active={activeTab}>
         <CommandPanel scope="implement" getGraph={getGraph} />
@@ -345,6 +367,19 @@ function Studio() {
       <TabPanel id="verify" active={activeTab}>
         <CommandPanel scope="verify" getGraph={getGraph} />
       </TabPanel>
+      <dialog
+        ref={resultsDialog}
+        className="results results--dialog"
+        aria-labelledby="results-dialog-title"
+        onCancel={(event) => { event.preventDefault(); closeResults(); }}
+        onClose={() => resultsOpener.current?.focus()}
+      >
+        <div className="results__dialog-header">
+          <h2 id="results-dialog-title" className="panel__title">Benchmark results</h2>
+          <button type="button" onClick={closeResults}>Close results</button>
+        </div>
+        <ResultsWorkspace nativeDocument={nativeDocument} />
+      </dialog>
     </div>
   );
 }
