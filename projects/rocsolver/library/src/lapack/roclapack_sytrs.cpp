@@ -56,10 +56,13 @@ try
     rocblas_stride const shiftA = 0;
     rocblas_stride const shiftB = 0;
 
+    // ------------------------------------------
     // normal (non-batched non-strided) execution
-    rocblas_stride const strideA = 0;
-    rocblas_stride const strideB = 0;
-    rocblas_stride const strideP = 0;
+    // use reasonable default values
+    // ------------------------------------------
+    rocblas_stride const strideA = rocblas_stride(lda) * n;
+    rocblas_stride const strideB = rocblas_stride(ldb) * nrhs;
+    rocblas_stride const strideP = rocblas_stride(n);
     I const batch_count = 1;
 
     // memory workspace sizes:
@@ -79,6 +82,19 @@ try
 
     void* const work = static_cast<void*>(mem[0]);
 
+#ifdef NDEBUG
+#else
+    {
+        if((work != nullptr) && (size_work > 0))
+        {
+            hipStream_t stream;
+            ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
+
+            int value = 0xFF;
+            HIP_CHECK(hipMemsetAsync(work, value, size_work, stream));
+        }
+    }
+#endif
     // execution
     return rocsolver_sytrs_template<T>(handle, uplo, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP,
                                        B, shiftB, ldb, strideB, batch_count, work, size_work);

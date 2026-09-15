@@ -75,6 +75,19 @@ try
 
     work = mem[0];
 
+#ifdef NDEBUG
+#else
+    {
+        if((work != nullptr) && (size_work > 0))
+        {
+            hipStream_t stream;
+            ROCBLAS_CHECK(rocblas_get_stream(handle, &stream));
+
+            int value = 0xFF;
+            HIP_CHECK(hipMemsetAsync(work, value, size_work, stream));
+        }
+    }
+#endif
     // execution
     return rocsolver_sytrf_template<T>(handle, uplo, n, A, shiftA, lda, strideA, ipiv, strideP,
                                        info, batch_count, (T*)work);
