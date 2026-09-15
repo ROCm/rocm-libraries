@@ -1,7 +1,7 @@
 {
-  "version": "0.1",
+  "version": "1.0",
   "id": "ued-solo",
   "name": "test_fixture:solo",
-  "heuristic": "uhd-solo",
+  "sort_kernel_catalog": {"default": "1c245a40-2483-5c46-a92e-97cd450b0a51"},
   "metadata": "kmd-solo"
 }

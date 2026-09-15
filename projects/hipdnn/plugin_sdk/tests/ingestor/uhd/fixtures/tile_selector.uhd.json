@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "8d63aa4a-2510-4b56-9a5d-f586354e392c",
+  "id": "413c3e1a-df46-4494-ae53-b10849427244",
   "name": "Tile Selector UHD",
   "adapter": "tree_data",
   "features_signature": [
@@ -8,6 +8,17 @@
     "$q.seqlen"
   ],
   "features_hash": "sha256:30aa9a4e48ea3f2b",
+  "trained_against": {
+    "ued": {
+      "id": "f1900000-0000-0000-0000-000000000001",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "f1900000-0000-0000-0000-000000000002",
+      "revision": "1.0"
+    },
+    "umd": []
+  },
   "objective": "max",
   "score": {
     "units": "tflops",

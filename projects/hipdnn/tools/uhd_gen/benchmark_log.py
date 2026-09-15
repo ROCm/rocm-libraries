@@ -151,6 +151,13 @@ def row_from_record(record: dict, provenance: SweepProvenance) -> dict[str, Any]
     before the runtime emitted the field looks like -- distinguishable from a real
     identity, so a consumer can degrade deliberately rather than silently grouping
     every machine's rows together (RFC 0019.13 §11.2).
+
+    `is_valid`/`skip_reason` are the COLLECTION spelling of a failure and go no further
+    than this file. §8.3's published dataset records a failure once, as a null
+    measurement plus a non-empty `error`, and `results_import` performs that translation
+    on the way in. The boolean stays here because it is what the runtime record carries
+    at the moment of failure, and because this CSV has to remain an appendable, resumable
+    log (§8.8) rather than the place where the published encoding is decided.
     """
     succeeded = record.get("status") == "ok"
     row: dict[str, Any] = {

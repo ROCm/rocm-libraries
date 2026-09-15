@@ -116,6 +116,11 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
     // SelectionHeuristic::UHD used to sit between these two. It ranked kernels where the
     // heuristic-plugin ABI can only return engine ids, so it always reported applied=0 and
     // never changed this chain's outcome; the ranking it computed is now done by the engine.
+    //
+    // Prediction policies (SelectionHeuristic::ModeA / ModeB) are NOT injected here.
+    // RFC 0007 §5.3.2/§5.3.3 make the ordered policy list the only channel for policy
+    // selection: a caller that wants them asks for them by name through
+    // HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT or HIPDNN_HEUR_POLICY_ORDER.
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
@@ -236,6 +241,17 @@ void EngineHeuristicDescriptor::finalize()
 
     // Get serialized graph from GraphDescriptor
     const hipdnnPluginConstData_t serializedGraph = _graph->getSerializedGraph();
+    const heuristics::SelectionHeuristic::PredictionProvider predict
+        = [&](int64_t engineId, hipdnnEnginePredictionKind_t kind) {
+              hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
+              config.engine_id = engineId;
+              flatbuffers::FlatBufferBuilder builder;
+              builder.Finish(
+                  hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
+              const hipdnnPluginConstData_t configBytes{builder.GetBufferPointer(),
+                                                        builder.GetSize()};
+              return engineRm->getEnginePrediction(configBytes, serializedGraph, kind);
+          };
 
     // Resolve ordered policy IDs
     auto orderedPolicyIds = resolveHeuristicPolicyOrder();
@@ -330,14 +346,28 @@ void EngineHeuristicDescriptor::finalize()
             selection->setSerializedGraph(&serializedGraph);
 
             // Call finalize on this policy
-            if(!selection->finalize())
+            if(!selection->finalize(predict))
             {
                 // Policy declined or not applicable - continue to next policy
                 continue;
             }
 
-            // Policy succeeded! Get the sorted engine IDs
-            candidates = selection->getSortedEngineIds();
+            // Commit the result only after every ID and configuration is validated.
+            auto sortedIds = selection->getSortedEngineIds();
+            std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>>
+                configs;
+            configs.reserve(sortedIds.size());
+            for(const auto engineId : sortedIds)
+            {
+                auto config = selection->getEngineConfig(engineId);
+                if(config != nullptr)
+                {
+                    EngineConfigDescriptor::validateEngineConfig(*config, engineId);
+                }
+                configs.push_back(std::move(config));
+            }
+            candidates = std::move(sortedIds);
+            _engineConfigs = std::move(configs);
             success = true;
             break;
         }
@@ -585,21 +615,35 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
 
             auto engine = std::make_shared<EngineDescriptor>();
 
-            engine->setAttribute(
-                HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &_engineIds[i]);
-
-            ScopedDescriptor graphDesc(HipdnnBackendDescriptor::packDescriptor(_graph));
-            engine->setAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
-                                 HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                 1,
-                                 static_cast<const void*>(graphDesc.getPtr()));
-            engine->finalize();
+            const auto* resultConfig
+                = i < _engineConfigs.size() ? _engineConfigs[i].get() : nullptr;
+            if(resultConfig != nullptr)
+            {
+                // Applicability was already proved by getApplicableEngineIds.
+                // Materializing a losing L1 result must not enumerate its catalog.
+                engine->initializeHeuristicResult(_graph, _engineIds[i]);
+            }
+            else
+            {
+                engine->setAttribute(
+                    HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &_engineIds[i]);
+                ScopedDescriptor graphDesc(HipdnnBackendDescriptor::packDescriptor(_graph));
+                engine->setAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
+                                     HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                     1,
+                                     static_cast<const void*>(graphDesc.getPtr()));
+                engine->finalize();
+            }
 
             ScopedDescriptor engineDesc(HipdnnBackendDescriptor::packDescriptor(engine));
             config->setAttribute(HIPDNN_ATTR_ENGINECFG_ENGINE,
                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                  1,
                                  static_cast<const void*>(engineDesc.getPtr()));
+            if(resultConfig != nullptr)
+            {
+                config->setEngineConfig(*resultConfig, true);
+            }
         }
 
         *elementCount = std::min(requestedElementCount, static_cast<int64_t>(_engineIds.size()));

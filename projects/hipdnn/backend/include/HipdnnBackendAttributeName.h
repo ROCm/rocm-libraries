@@ -133,6 +133,20 @@ typedef enum
     /** @brief Required workspace size in bytes */
     HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE = 203,
 
+    /** @brief Whether the prediction read from this configuration evaluates its model
+     * (int64, in, default 1). Set to 0 to describe the binding and features without
+     * running the model. Set before reading HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT.
+     */
+    HIPDNN_ATTR_ENGINECFG_PREDICTION_EVALUATE_EXT = 204,
+
+    /** @brief Read-only configuration-kind prediction for the knobs on this configuration,
+     * returned as one HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT whose root is
+     * hipdnn_flatbuffers_sdk.data_objects.EnginePrediction. The buffer lives until the
+     * descriptor is destroyed. Readable on a knob-only configuration that was never
+     * finalized, which is how constraints are expressed without engine initialization.
+     */
+    HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT = 205,
+
     /** @} */
 
     /**
@@ -416,6 +430,47 @@ typedef enum
      * `EnginePluginResourceManager::resolveEngineName()`.
      */
     HIPDNN_ATTR_ENGINE_NAME_EXT = 1008,
+
+    /** @brief Whether the engine-kind prediction read from this engine evaluates its model
+     * (int64, in, default 1). Set to 0 to describe the model binding and feature map
+     * without running the model. Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT = 1009,
+
+    /** @brief Read-only engine-kind prediction for this engine on its operation graph,
+     * returned as one HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT whose root is
+     * hipdnn_flatbuffers_sdk.data_objects.EnginePrediction. The buffer lives until the
+     * descriptor is destroyed. Engines with no universal engine descriptor report
+     * PredictionStatus::UNAVAILABLE rather than failing.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_EXT = 1010,
+
+    /** @brief Zero-based offset into this engine's matched catalog (int64, in, default 0).
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT = 1011,
+
+    /** @brief Maximum catalog entries returned by one read of
+     * HIPDNN_ATTR_ENGINE_CANDIDATES_EXT (int64, in, must be in [1, 10000], default 10000).
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT = 1012,
+
+    /** @brief Knob choices restricting the enumerated catalog, as an array of finalized
+     * HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR descriptors (HIPDNN_TYPE_BACKEND_DESCRIPTOR, in).
+     * Unset knobs are unconstrained; default knob values never restrict discovery.
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT = 1013,
+
+    /** @brief Read-only EngineDetails carrying candidate_page, returned as one
+     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT. The buffer lives until the descriptor is
+     * destroyed. Total count is explicit; an offset beyond the count is invalid, never
+     * silently truncated. Engines that cannot enumerate their catalog report
+     * HIPDNN_STATUS_NOT_SUPPORTED rather than an empty page. This is a generation-tool
+     * surface: enroll the returned knob tuples in ordinary engine configs to run them.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATES_EXT = 1014,
 
     /** @} */
 

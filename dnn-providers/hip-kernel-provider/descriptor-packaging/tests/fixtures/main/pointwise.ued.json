@@ -1,7 +1,7 @@
 {
-  "version": "0.1",
+  "version": "1.0",
   "id": "ued-pointwise",
   "name": "test_fixture:pointwise",
-  "heuristic": "uhd-shared",
+  "sort_kernel_catalog": {"default": "bb58374f-2972-57b1-a9cb-c358bddef2e5"},
   "metadata": "kmd-pointwise"
 }

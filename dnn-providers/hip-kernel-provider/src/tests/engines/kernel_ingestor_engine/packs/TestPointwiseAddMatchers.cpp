@@ -389,10 +389,11 @@ TEST(TestPointwiseAddBinding, BindsDtypeAsTheRuntimeSpellingNotTheFlatbufferEnum
     // must spell dtypes past the two the shipped kernels are compiled for.
     ASSERT_TRUE(doubleBound.has_value());
 
-    // to_string(DataType)'s spelling, which is the vocabulary CategoricalEncoding.hpp
-    // encodes. EnumNameDataType would answer "FLOAT"/"DOUBLE" and `float32`/`float64` are
-    // the plausible near-misses; the encoder knows none of the four, so a wrong spelling
-    // here costs the feature rather than warning.
+    // to_string(DataType)'s spelling, which is the vocabulary a UHD's generated
+    // `categorical_encoding` (RFC 0019 §6.5) is fitted on. EnumNameDataType would answer
+    // "FLOAT"/"DOUBLE" and `float32`/`float64` are the plausible near-misses; a corpus
+    // recorded from real runs holds none of the four, so a wrong spelling here costs the
+    // feature rather than warning.
     EXPECT_EQ(boundString(*floatBound, "pointwise.input_a.dtype"), "fp32");
     EXPECT_EQ(boundString(*floatBound, "pointwise.input_b.dtype"), "fp32");
     EXPECT_EQ(boundString(*floatBound, "pointwise.output.dtype"), "fp32");
@@ -451,8 +452,8 @@ TEST(TestPointwiseAddBinding, OmitsBytesForADtypeWithNoStatableElementWidth)
 }
 
 /// The other half of the same rule: an unrecognized dtype has no runtime spelling, and
-/// binding to_string's "unknown" fallthrough would hand the encoder a category it
-/// deliberately does not carry (CategoricalEncoding.hpp). Absent instead.
+/// binding to_string's "unknown" fallthrough would hand the UHD's `categorical_encoding`
+/// a spelling its corpus never held, and so one it carries no code for. Absent instead.
 TEST(TestPointwiseAddBinding, OmitsDtypeAndBytesForAnUnsetDtype)
 {
     const GraphFixture fixture(

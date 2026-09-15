@@ -292,11 +292,17 @@ typedef MoeGroupedMatmulMode MoeGroupedMatmulMode_t; ///< @brief MoE routing mod
  * @brief Specifies the heuristic mode for engine selection
  *
  * Controls how the hipDNN backend selects execution plans and engines.
+ *
+ * A and B are not backend modes. They name prediction POLICIES
+ * (SelectionHeuristic::ModeA / SelectionHeuristic::ModeB) that the frontend
+ * places in the heuristic descriptor's ordered policy list
+ * (HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT); the backend mode itself stays
+ * HIPDNN_HEUR_MODE_FALLBACK for every value here.
  */
 enum class HeuristicMode
 {
-    A = 0, ///< cuDNN heuristic mode A (mapped to fallback for now)
-    B = 1, ///< cuDNN heuristic mode B (mapped to fallback for now)
+    A = 0, ///< Request the ModeA policy: rank calibrated no-search engine predictions
+    B = 1, ///< Request the ModeB policy: rank exact configuration predictions, engine fallback
     FALLBACK = 2, ///< Use fallback heuristics for engine selection
     OPENSOURCE = 3, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
 };
@@ -1037,7 +1043,9 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
-    // All cuDNN heuristic modes currently fold to hipDNN fallback.
+    // Every frontend heuristic mode folds to the single hipDNN backend mode.
+    // A and B select prediction policies through the policy order instead
+    // (see createEngineHeuristicDescriptorForGraph).
     case HeuristicMode::FALLBACK:
     case HeuristicMode::A:
     case HeuristicMode::B:

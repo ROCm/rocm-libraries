@@ -145,6 +145,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
         schemas/device_properties.fbs
         schemas/engine_config.fbs
         schemas/engine_details.fbs
+        schemas/engine_prediction.fbs
         schemas/execution_plan.fbs
         schemas/graph.fbs
         schemas/serialized_graph_and_plan.fbs

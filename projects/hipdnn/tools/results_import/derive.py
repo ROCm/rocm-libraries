@@ -52,10 +52,14 @@ DTYPE_BYTES: Mapping[str, int] = {
 def evaluate(expression: Any, query: Mapping[str, Any]) -> float:
     """Evaluates an opmeta `flops`/`elements` declaration against one row's ``q.*`` values.
 
-    The JsonLogic subset those declarations use: ``* + - /`` and ``ceil_div``, over literals and
-    ``$q.<name>`` references. Deliberately not the full evaluator -- these are closed-form
-    arithmetic, and an expression here reaching for a comparison or a variable outside ``$q.``
-    is a declaration that has outgrown what a corpus row can answer.
+    The JsonLogic subset those declarations use: ``* + - /``, ``max`` and ``ceil_div``, over
+    literals and ``$q.<name>`` references. Deliberately not the full evaluator -- these are
+    closed-form arithmetic, and an expression here reaching for a comparison or a variable
+    outside ``$q.`` is a declaration that has outgrown what a corpus row can answer.
+
+    The table tracks what the shipped declarations actually name, the way DTYPE_BYTES tracks
+    the dtypes they actually admit: ``min`` is absent because nothing declares it, and adding
+    it is the deliberate step that should accompany the declaration that needs it.
     """
     if isinstance(expression, str):
         if not expression.startswith("$q."):
@@ -93,6 +97,16 @@ def evaluate(expression: Any, query: Mapping[str, Any]) -> float:
         if values[1] == 0:
             raise UnsupportedExpression("ceil_div by zero in a declaration")
         return float(math.ceil(values[0] / values[1]))
+    if operator == "max":
+        # Variadic, and load-bearing rather than cosmetic: sdpa_fwd's effective causal FLOP
+        # count (RFC 0019 13.6) is `Sq*Sk - Sq*(Sq-1)/2`, whose first term goes NEGATIVE once
+        # queries outrun keys, and the max() is what falls back to half the rectangle there. A
+        # flat halving agrees only when Sq == Sk and is wrong by up to 2x when Sk > Sq.
+        if not values:
+            # `max()` of nothing raises ValueError, which would escape this module as something
+            # other than "the declaration cannot be read". Guarded like the zero divisors above.
+            raise UnsupportedExpression("max of no operands in a declaration")
+        return max(values)
 
     raise UnsupportedExpression(f"unsupported operator {operator!r}")
 

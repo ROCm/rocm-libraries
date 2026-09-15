@@ -13,6 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -22,10 +24,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
-#include "core/Handle.hpp"
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {

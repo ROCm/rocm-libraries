@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "hipdnn_backend.h"
@@ -180,6 +181,21 @@ public:
     using PluginResourceManagerBase::getLoadedPluginFiles;
 
     virtual std::string toString() const;
+
+    /// Owns a validated bounded page independently of the plugin allocation.
+    virtual std::vector<uint8_t> enumerateCandidates(int64_t engineId,
+                                                     const hipdnnPluginConstData_t& engineConfig,
+                                                     const GraphDescriptor* graph,
+                                                     uint64_t offset,
+                                                     uint64_t limit) const;
+
+    /// Queries one engine without changing applicability. Returned data is owned by
+    /// the host; invalid model/plugin predictions are explicit INVALID results.
+    virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getEnginePrediction(const hipdnnPluginConstData_t& engineConfig,
+                            const hipdnnPluginConstData_t& opGraph,
+                            hipdnnEnginePredictionKind_t kind,
+                            bool evaluate = true) const;
 
 protected:
     // Note: _pm member is inherited from PluginResourceManagerBase

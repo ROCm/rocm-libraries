@@ -45,7 +45,18 @@ PROJECT=hip-kernel-provider                      # the provider's own project() 
                                                  # `grep -m1 '^project(' $PROVIDER/CMakeLists.txt`
 
 MODULE=kernels/<arch>/<module>.py                # e.g. kernels/gfx950/attention_dense.py
-BUILDER=build_<op>                               # e.g. build_attention_dense
+BUILDERS=<builder fn>[ <builder fn>...]          # ENUMERATE, never guess: there is no
+                                                 # naming convention. Real modules define
+                                                 # build_unified_attention_3d_tiled,
+                                                 # build_gfx942_4warp_gqa, ... :
+                                                 #   grep -nE '^def build_' $PROVIDER/rocke/library/$MODULE
+                                                 # A module exposing SEVERAL builders may be
+                                                 # one engine or several -- a split-KV design
+                                                 # needs its segment AND reduce kernels packed
+                                                 # together. That is ONE PACK PER BUILDER in
+                                                 # one engine: each pack carries its own
+                                                 # `builder:`, so no schema change is needed.
+                                                 # Decide at 1a, confirm the split at step 3.
 ARCH=<gfxNNN>                                    # the ONE arch this engine ships for
 ENGINE=hipkernel:<CamelName>                     # scoped name; unscoped is rejected
 SLUG=<arch>_<op>                                 # e.g. gfx950_attention_dense
@@ -116,26 +127,54 @@ write down what you have**, mark the uncertain parts, and move to the next step.
 that produced no file is not a step in progress; it is a stall, and the cure is always the
 same: write the artifact, however incomplete, and continue.
 
-| Step | Produces | Gate |
-|---|---|---|
-| 0 | Environment ready, dialect stated | `.venv` present; rocKE ⇒ `packaged` |
-| 1 | Feasibility verdict | Reference **and** hardware both reachable |
-| 2a | `graph_contract.md` | File exists; op matched; disagreement table has rows |
-| 2b | `mining.md` | File exists, every constraint row has a verdict |
-| 3 | Batch message | Sent **and you proceeded on the stated defaults**; do not wait |
-| 4 | `config.yaml`, descriptors | `generate.py` exit 0; kernel count = agreed set; **staged copy count == generated count** |
-| 5 | Packed + validated tree | `success: true`, 0 ERROR, desk check clean |
-| 6 | Native pack | `grep -c "FILL THIS OUT"` = 0 |
-| 7 | Built, packed, staged | Engine id in `hipdnn_list_engines` |
-| 8 | Tests + an engine-pinned CI target | A real graph dispatched and matched a reference on `$ARCH`, and the shipped `dnn-benchmarking` workloads triaged (8e) |
-| 9 | Post-integration verification | The SHIPPED set swept over a real corpus, the integration suite run, every flagged graph triaged to a named cause, zero unexplained |
-| 10 | Report | All ten stages named, by number |
+`GPU` marks the steps that need a device. Everything else is host-only and can run while
+you wait for an allocation — a host-only check scheduled behind a device step is a
+sequencing bug, not a dependency.
+
+| Step | GPU | Produces | Gate |
+|---|---|---|---|
+| 0 | — | Environment ready, dialect stated | `.venv` present; rocKE ⇒ `packaged` |
+| 1 | 1c | Feasibility verdict | Reference **and** hardware both reachable |
+| 2a | — | `graph_contract.md` | File exists; op matched; disagreement table has rows |
+| 2b | — | `mining.md` | File exists, every constraint row has a verdict |
+| 3 | — | Batch message | Sent **and you proceeded on the stated defaults**; do not wait |
+| 4 | — | `config.yaml`, descriptors | `generate.py` exit 0; kernel count = agreed set; **staged copy count == generated count** |
+| 5 | — | Packed + validated tree | `success: true`, 0 ERROR, desk check clean |
+| 6 | — | Native pack | `generate.py --check-placeholders` exit 0 |
+| 7 | — | Built, packed, staged | Engine id in `hipdnn_list_engines` |
+| 8 | **yes** | Tests + an engine-pinned CI target | A real graph dispatched and matched a reference on `$ARCH`, and the shipped `dnn-benchmarking` workloads triaged (8e) |
+| 9 | 9a, 9c | Post-integration verification | The SHIPPED set swept over a real corpus, the integration suite run, every flagged graph triaged to a named cause, zero unexplained |
+| 10 | — | Report | All ten stages named, by number |
+
+**9b-0 is host-only and is the gate for step 9** — run it as soon as you have declines to
+reconcile, which is before the 9a sweep, not after it. It is written after 9a only
+because its input is easiest to describe there.
 
 **This runbook is meant to be executed without supervision.** Every step above has a
 command whose output decides pass or fail, and every judgement call has a documented
 default (step 3). Two things stop a run and only two: an operation the graph schema cannot
 express, and target hardware you cannot reach. Everything else you decide, record as an
 assumption, and carry to step 10. If you find yourself waiting, you have misread step 3.
+
+**An unverifiable feature is a stop, and the decision is the human's — but state the
+options rather than only the stop.** When a reference executor declines a feature your
+kernel serves (paged KV is the recurring one), you cannot prove correctness for it, so
+step 8's gate cannot pass for those graphs. Three responses are legitimate, in this
+order of preference:
+
+1. **Ship the rest, decline that feature, and record it** — the default. The engine
+   serves what it can prove; the gap is named in the step-10 report.
+2. **Repair the shared reference executor.** This is **in scope** if the repair is
+   bounded and you can state it in a sentence. Shared harness code is not off limits
+   merely because it is shared — an ingestor engine that cannot be verified is not
+   finished, and the reference is the thing making it unverifiable.
+3. **Stop and escalate** when the repair is open-ended, or the feature is the point of
+   the integration rather than an edge of it.
+
+Two runs have hit this and both invented their own answer from outside the skill, one
+recording the repair as "outside the skill's scope as written". It is not: pick from the
+three above, say which and why in the report, and take the choice to the human at step 3
+rather than deciding it silently at step 8.
 
 The ten **stages** of the completion contract in `SKILL.md` map onto these steps; 2a and 2b are
 two halves of stage 2. Stage 2a is new because the matcher you write at step 6 is a
@@ -181,7 +220,7 @@ engine. Points 1 and 2 of the CMake splice **never** apply to you.
 
 ```
 Produces:      a feasibility verdict on three axes, stated in the run log
-Gate:          1a signature_error empty; 1b a dense path exists; 1c --test-only accepted
+Gate:          the GATE blocks in 1a, 1b and 1c below — all three, as written there
 Typical time:  15 minutes
 ```
 
@@ -205,14 +244,20 @@ More generally: **verify locally before spending a remote job.**
 cd $GEN && PYTHONPATH=$GEN:$PROVIDER/descriptor-packaging/python:$PROVIDER/rocke/library:$PROVIDER/rocke/platform/python \
 python3 -c "
 from codegen.sources import introspect
-i = introspect('$MODULE', '$BUILDER')
-print('signature_error:', repr(i.signature_error))
-print('spec_class:', i.spec_class)
-print('required:', [f.name for f in i.required_fields])
-print('arches:', i.supported_arches)
-for f in i.fields: print(' ', f.name, '|', f.type_name, '| default=', repr(getattr(f,'default',None)))
+for b in '''$BUILDERS'''.split():
+    i = introspect('$MODULE', b)
+    print('==', b)
+    print('signature_error:', repr(i.signature_error))
+    print('spec_class:', i.spec_class)
+    print('required:', [f.name for f in i.required_fields])
+    print('arches:', i.supported_arches)
+    for f in i.fields: print(' ', f.name, '|', f.type_name, '| default=', repr(getattr(f,'default',None)))
 "
 ```
+
+Run it for **every** builder in `$BUILDERS`. Two builders of one split design must agree
+on the spec fields they share; where they diverge, that divergence is an applicability
+rule, not a detail — record it in the mining table.
 
 **GATE:** `signature_error` is empty. Non-empty ⇒ **STOP** — the builder does not take
 `(spec, *, arch)` and `hkp_pack` will refuse it. Report the message and ask whether to
@@ -266,22 +311,24 @@ You need, before stage 8:
 3. **A writable path the DEVICE MACHINE can see**, for the install tree, the graph
    corpora and the logs. Not merely a path *you* can see.
 
-Verify all three before you rely on them:
+Verify all three **on the machine that will run stage 8**, which is the whole point —
+the same commands on a login node prove nothing and will happily report success:
 
 ```bash
-# 1. The device is present and is the arch the pack was built for.
-rocminfo | grep -m1 -E "Name:\s+gfx"          # must match $ARCH exactly
+# Directly, if you already have the device:
+$GEN/tools/device_probe.sh $ARCH $SWEEP_ROOT $INSTALL
 
-# 2. You can execute there, and it is the machine you think it is.
-hostname && ls -d $INSTALL 2>/dev/null || echo "install tree not visible from here"
-
-# 3. The path is writable FROM THE MACHINE THAT WILL RUN, not from your shell.
-touch $SWEEP_ROOT/.probe && rm $SWEEP_ROOT/.probe && echo "writable"
+# On a scheduled cluster, SUBMIT it — do not run it where you type:
+srun -p <partition> -A <account> --gpus=1 \
+    $GEN/tools/device_probe.sh $ARCH $SWEEP_ROOT $INSTALL
 ```
 
-**GATE:** `rocminfo` reports `$ARCH` on the machine that will run the tests, and the
-write probe succeeds *there*. If the arch is unreachable, get a decision now and report
-the run as the stage it reached — never as stage 8.
+It checks the arch, the install tree's visibility and the write path from wherever it
+runs, and exits non-zero if any fails.
+
+**GATE:** `device_probe.sh` exits 0 **on the machine that will run the tests**. If the
+arch is unreachable, get a decision now and report the run as the stage it reached —
+never as stage 8.
 
 #### Worked example: a scheduled cluster
 
@@ -313,8 +360,14 @@ Three failure modes worth knowing, because each cost real time to diagnose:
 - **A launch failure can masquerade as a pending job.** `squeue` shows the requeued row
   and hides the failure. `sacct -j <jobid> --duplicates -o JobID,State,ExitCode,Start,End`
   shows the truth: `State=FAILED, Start=None` means it never ran at all.
+- **The device payload is workspace tooling, not product.** A job script carries scheduler
+  flags, image paths and site names — none of which belong in the repository, and some of
+  which must never be pushed to a public branch. If the compute node needs the script,
+  **stage it** to a filesystem that node can read and point the job at it; do not commit
+  it so the node can clone it. This has gone wrong: payloads were committed to a product
+  branch purely so a node could fetch them, and they carried site identifiers with them.
 
-The general lesson under all three: **confirm the device machine can see every path you
+The general lesson under all of them: **confirm the device machine can see every path you
 hand it, from that machine**, before you queue anything expensive.
 
 ---
@@ -503,6 +556,13 @@ Ask both as one question, e.g. "expose `<knob_a>` and `<knob_b>`; ship
 never ranks anything, the UED's knobs select nothing, autotuning has no candidate set, and
 the first graph whose dtype or shape differs finds nothing to serve it. The heuristic path
 becomes dead code that still reports green.
+
+**Never carry another arch's knob set across.** Run `knob_sweep.py --plan` before you
+propose one: it names the candidates, excludes the settled knobs *with reasons*, and flags
+predicates that differ between arches. A set transcribed from a sibling engine imports
+that engine's exclusions in both directions — you inherit a knob it ruled out for reasons
+that do not hold on your arch, and you miss one it never had. A proposal made by reading a
+sibling's shipped metadata was wrong three ways when the tool was finally asked.
 
 The set must deliver three different things:
 
@@ -891,8 +951,8 @@ make impossible.
 variant set you agreed in step 3. Exit 1 is a `ConfigError` — read it; usually a mistyped
 field, a knob on a non-int field, or a kernel `arch` outside its pack's `arch`.
 
-The glob is deliberate: **do not construct the KDP filename by hand.** The generator names
-it from `IngestorGenerator/codegen/models.py:374` (`kdp_stem`) — the bare engine slug for a
+The glob is deliberate: **do not construct the KDP filename by hand.** The generator
+derives it (`git grep -n 'def kdp_stem' -- '*.py'`) — the bare engine slug for a
 single-pack engine (`$SLUG.kdp.json`), the slug plus the pack name for a multi-pack one.
 Printing nothing means the generator wrote nothing, which is a step-4 failure, not a
 naming detail to work around.
@@ -963,7 +1023,7 @@ print('generated', len(a), '| staged', len(b), '| MATCH' if len(a)==len(b) else 
 On a typical configured build `$SRC_ROOT` resolves to
 `$PROVIDER/descriptor-packaging/examples/descriptors` — that tree is **both** the
 packager's production source root **and** a pinned test fixture, and nothing warns you.
-`tests/test_hkp_pack_layout.py:562` asserts its directory set **exactly**:
+`tests/test_hkp_pack_layout.py` asserts its directory set **exactly**:
 
 ```python
 assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
@@ -992,6 +1052,14 @@ Typical time:  30 minutes, plus pack time (comgr can take minutes per arch)
 ```
 
 Each proves something different. Run all three.
+
+**Set the comgr cache before 5b, not after it times out.** Every kernel this step packs
+is a comgr compile, and the cache defaults under `$HOME` — on a network home that turns
+a minutes-long pack into an afternoon, with no error, just slowness you attribute to the
+kernel. `$PROVIDER/descriptor-packaging/README.md` owns the variables and the
+measurements (`AMD_COMGR_CACHE_DIR` on local disk or a RAM disk; `AMD_COMGR_CACHE=0` to
+disable). Read it there rather than trusting a copy here — check `df -T "$HOME"` for a
+network filesystem type if you are unsure which case you are in.
 
 ```bash
 # 5a. Authored form -- exactly what the build enforces
@@ -1215,8 +1283,20 @@ Three buckets, and the middle one is the whole point:
 | bucket | meaning |
 |---|---|
 | SELECTED | wins for at least one shape. Fine. |
-| **APPLICABLE-BUT-NEVER-WINS** | legal everywhere it applies, and something always outranks it. **Dead weight that reports green.** |
+| **APPLICABLE-BUT-NEVER-WINS** | legal everywhere it applies, and something always outranks it **on the cold path**. Read the caveat below before calling it dead weight. |
 | UNREACHABLE | applicable to no shape at all. Either the corpus is missing a family or the variant should not exist. |
+
+**`variant_reachability.py` models the PRE-AUTOTUNE path only, and cannot model
+measurement.** It reproduces `score`-based ranking; it cannot call the native scorer or
+run a benchmark. So `APPLICABLE-BUT-NEVER-WINS` means **"never wins before autotuning"**,
+not "can never be selected". Where the plan builder benchmarks, every applicable candidate
+is measured and the winner persisted — those variants are the autotuner's candidate set,
+which is what the sizing discussion asks you to ship. A reader who missed this concluded a
+shipped set was three-quarters dead weight; it was not, and the claim was withdrawn.
+
+What the bucket *does* tell you is real: on the cold path the pick among tuned siblings is
+decided by `score`, and if `score` is constant across them the tie breaks on an arbitrary
+identifier. That is worth fixing in `score`. It is not a reason to delete variants.
 
 An integration once shipped 48 variants of which **24 no graph could select**. Not
 laziness in authoring: every shipped shape had a sequence length divisible by the wider
@@ -1239,7 +1319,7 @@ reporting a pass it did not earn.
 ```
 Produces:      packs/<Name>Native.cpp with all five hooks implemented, and a
                launch_surface: block in the profile enumerating what it restates
-Gate:          grep -c "FILL THIS OUT" == 0, and launch_surface.py --check clean
+Gate:          `generate.py --check-placeholders` exit 0, and launch_surface.py --check clean
 Typical time:  half a day. The largest step, and the point of the whole run.
 ```
 
@@ -1290,15 +1370,22 @@ first.
 **GATE — two commands, and the second is the one that catches real holes:**
 
 ```bash
-# 1. No unfinished hook.
-grep -c "FILL THIS OUT" $PROVIDER/src/engines/kernel_ingestor_engine/packs/*Native.cpp
+# 1. No unfinished hook, in ANY file this engine ships. Derived from the config
+#    and located by BASENAME, so it covers the generated tests/ stubs a
+#    packs/*Native.cpp glob silently skipped.
+#
+#    Point it at a root spanning BOTH halves of the splice: the provider puts
+#    packs in the engine dir and the test stubs under src/tests/engines/... .
+#    $PROVIDER/src covers both. A file it cannot locate is an unfinished splice
+#    and fails -- "found nothing" is never a pass.
+$GEN/.venv/bin/python $GEN/generate.py --config <your-config> \
+    --output-dir $PROVIDER/src --check-placeholders
 
-# 2. No graph attribute silently ignored. -h, and ONE schema -- see native-pack.md.
-FBS=$REPO/projects/hipdnn/flatbuffers_sdk/schemas/<op>_attributes.fbs
-grep -hoP '^\s+\K[a-z_]+(?=:)' "$FBS" | while read f; do
-    grep -q "$f(" $PROVIDER/src/engines/kernel_ingestor_engine/packs/<Name>Native.cpp \
-        || echo "UNCHECKED: $f"
-done
+# 2. No graph attribute silently ignored. ONE schema, and every pack source of
+#    this engine -- pass them all, a multi-pack engine splits its handling.
+$GEN/tools/field_audit.sh \
+    $REPO/projects/hipdnn/flatbuffers_sdk/schemas/<op>_attributes.fbs \
+    $PROVIDER/src/engines/kernel_ingestor_engine/packs/<Name>Native.cpp
 ```
 
 The first must be `0`. A `// TODO` in a path the engine reaches is an unfinished
@@ -1308,8 +1395,8 @@ say what would replace it*. Silence is not.
 
 The second must print nothing you have not deliberately accounted for. An empty
 `grep -c` and a wall of `UNCHECKED:` lines is the exact state that ships a matcher which
-ignores an attribute the graph can set — the shipped `AttentionDenseNative.cpp` still
-prints `UNCHECKED: implementation` today. `native-pack.md` § 6 has the reasoning and what
+ignores an attribute the graph can set — on a branch that ships a rocKE SDPA pack, that
+pack still prints `UNCHECKED: implementation`. `native-pack.md` § 6 has the reasoning and what
 counts as accounted for.
 
 ---
@@ -1335,10 +1422,10 @@ cat /tmp/$SLUG/fragments/*.txt
 |---|---|---|
 | 1 | `HIPDNN_DESCRIPTOR_FILES` | **NEVER** |
 | 2 | `HIPDNN_INGESTOR_PACK_KERNELS` | **NEVER** |
-| 3 | `.../kernel_ingestor_engine/CMakeLists.txt` `target_sources` | yes |
+| 3 | the engine's own `CMakeLists.txt` `target_sources` — `git ls-files '*engines/kernel_ingestor_engine/CMakeLists.txt' ':!*tests*'` (the `:!` excludes the test tree; without it the pattern returns row 5's file too, and these are different splice points) | yes |
 | 4a | `IngestorPacks.hpp` — the declaration | yes |
 | 4b | `IngestorPacks.cpp` — the `s_packs` row | yes |
-| 5 | `.../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | yes |
+| 5 | the engine's unit-test `CMakeLists.txt` — the same glob under the provider's test tree (`git ls-files '*tests*kernel_ingestor_engine/CMakeLists.txt'`) | yes |
 
 4a and 4b are **two edits for one pack**. Declaration without the row: the static-archive
 linker drops the translation unit, so the pack vanishes from unit tests while the plugin
@@ -1367,11 +1454,23 @@ do entirely different jobs:
 | Flag | Default | Job |
 |---|---|---|
 | `HIPDNN_ENABLE_KERNEL_INGESTOR` | **OFF** | The ingestor itself: descriptor loading, the kpack adapter, and `hipdnn_validate_descriptors`. **ON for any descriptor-backed integration** — nothing here works without it, and it is why the validator is usually missing. |
-| `HIPDNN_ENABLE_<OP>` | **OFF** | The **frontend** for an op that has one. With it off the graph API for that op is `#ifdef`-compiled out, so the graph cannot be expressed at all and every plan silently DECLINEs. Must be ON in **both** the hipDNN SDK at `HIPDNN_ROOT` and the provider. Check whether your op has such a flag: `grep -rhoE "HIPDNN_ENABLE_[A-Z_0-9]+" --include=CMakeLists.txt --include=*.cmake $REPO/projects/hipdnn` — most ops have none and are always compiled in. |
+| `HIPDNN_ENABLE_<OP>` | **OFF** | The **frontend** for an op that has one. With it off the graph API for that op is `#ifdef`-compiled out, so the graph cannot be expressed at all and every plan silently DECLINEs. Must be ON in **both** the hipDNN SDK at `$REPO/projects/hipdnn` and the provider. Check whether your op has such a flag: `grep -rhoE "HIPDNN_ENABLE_[A-Z_0-9]+" --include=CMakeLists.txt --include=*.cmake $REPO/projects/hipdnn` — most ops have none and are always compiled in. |
 | `ENABLE_<X>_ENGINE` | often **ON** | A **competing** hand-written engine for the same op. Nothing to do with the frontend, despite the similar name. Yours must beat it, or be pinned past it (8c). |
+| `HIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE` | **OFF** | Required for a rocKE `packaged` engine. With a production source root set and every language backend off, `HkpPackaging.cmake` **aborts the configure** rather than packing nothing — so this reads as a CMake error, not a missing engine. Its `_HIP` sibling does the same job for HIP kernels. |
 
 A missing frontend flag wastes a whole build: the provider compiles, your engine
 enumerates, and every graph declines with nothing pointing at the flag.
+
+**This table is for recognising the flags, not for enumerating them.** CMake owns the
+list; a hand-maintained mirror falls behind it. Get the current set and its defaults
+from the source before configuring:
+
+```bash
+# `option(...)` AND `set(... CACHE BOOL)` -- the packaging flags use the latter,
+# so an option()-only grep silently omits every one of them.
+git grep -nE '(option|set)\((HIPDNN_ENABLE|HIPKERNELPROVIDER_PRODUCTION)[A-Z_]*' \
+    -- '*CMakeLists.txt' '*.cmake'
+```
 
 **Use `skill://hipdnn-superbuild` rather than hand-rolling a configure.** It carries the
 repo-root rule, the preset table, the toolchain and the stale-cache retry; hand-rolling
@@ -1595,15 +1694,24 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
 endif()
 ```
 
-Read `integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake` for the full option
-list (`TEST_CONFIG` for per-case tolerance, `ENVIRONMENT`, `TEST_CATEGORIES_YAML`), and
-copy the shape of an existing block — `ENGINE_NAME ASM_SDPA_ENGINE` in that same file is
-the worked example.
+Find the helper that defines the registration function and read it for the full option
+list (`TEST_CONFIG` for per-case tolerance, `ENVIRONMENT`, `TEST_CATEGORIES_YAML`):
+
+```bash
+git grep -ln 'function(add_external_integration_test_target' -- '*.cmake'
+```
+
+Copy the shape of an existing block — grep that helper's callers for an `ENGINE_NAME`
+already in use and use the closest match as the worked example:
+
+```bash
+git grep -n 'ENGINE_NAME' -- '*CMakeLists.txt'
+```
 
 **There are TWO registration sites and they are not interchangeable.** The block above
-goes in the provider's `src/integration_tests/CMakeLists.txt`, beside the other
+goes in the provider's own `src/integration_tests/CMakeLists.txt`, beside the other
 engine-pinned targets. But the provider ALSO registers engine-scoped checks one level up,
-in `dnn-providers/hip-kernel-provider/src/CMakeLists.txt`, and **that is the site whose
+in the provider's top-level `src/CMakeLists.txt`, and **that is the site whose
 targets CI drives**: those blocks carry `TEST_CONFIG` (per-engine tolerances),
 `TEST_CATEGORIES_YAML` and `INSTALL_TEST_FILE`, which is the plumbing that makes a target
 appear as a named, labelled `<project>-<engine>-external-integration-check` in the
@@ -1656,9 +1764,10 @@ Four things that decide whether this works:
 3. **Gate on the build flags that produce your engine.** An ungated block turns "engine
    not built" from a skip into a wall of failures.
 4. **The engine must resolve to a NAME, not a bare id, for `--test-engine` to select it.**
-   The harness matches against the loaded engines' `engineName`
-   (`integration-tests/src/main.cpp`); no match means it exits with
-   `Error: Engine '<name>' is not loaded` before running a single case.
+   The harness matches against the loaded engines' `engineName` — the integration-test
+   harness `main.cpp`, `git grep -ln 'engineName' -- '*integration*/src/main.cpp'`; no
+   match means it exits with `Error: Engine '<name>' is not loaded` before running a
+   single case.
 
 **Pin exactly what the UED spells.** For a descriptor-registered engine the provider's
 `Container::getEngineName` answers from the UED's own `name` field, so
@@ -1851,6 +1960,23 @@ dvc pull Workloads/microbench/<yours>.tar.gz.dvc Workloads/models/<model>.tar.gz
 dnn-benchmark --graph Workloads/models/<model>.tar.gz --validate pytorch -o model.json
 ```
 
+**Enumerate the suites BEFORE you pull any — the denominator is the gate.** List every
+suite in the checkout (`ls Workloads/*/*.dvc`), write the total down, then justify each
+**exclusion** in one line. Report `served / declined / could-build` **out of that
+enumerated total**, never out of what you happened to fetch. A suite you did not run is a
+suite you cannot report on, and "I ran the ones I pulled" is not a scope decision.
+
+This is the same shape as the step-3 gate, which is `covered / servable` rather than a
+bare count of covered shapes. Without a denominator a numerator can be reported alone, and
+it has been: a run triaged a single-digit percentage of the available graphs and carried
+the numerator forward as a coverage result, on its way to a variant-set decision.
+
+**A hardcoded workload list in a script is a scope decision in disguise.** If your harness
+carries a `WORKLOADS` default it will be inherited by every later run without being
+re-examined — that is how the sample above became four consecutive runs. Derive the list
+from the enumeration at runtime, or print it *and its justification* at the top of every
+run so there is a claim to check.
+
 **Classify every graph in the suites relevant to your op into exactly three buckets**, and
 put the table in your step-9 report:
 
@@ -1864,7 +1990,10 @@ put the table in your step-9 report:
 
 **Worked example — an illustration of the shape, not a description of your op.** Your
 counts, reasons and shapes will all differ; what transfers is that the third bucket
-existed and was invisible from inside the integration's own bundles. From the run this
+existed and was invisible from inside the integration's own bundles. **That run's op was
+relevant to two suites and said so — enumerate yours rather than reusing this pair; it is
+the only concrete number on this page and reading it as a scope is exactly how the
+under-triage above happened.** From the run this
 step was written during: of 42 graphs for that op across
 `microbench/rocke` and `models/llama3.1`, **26 were buildable by the kernel and 16
 correctly declined** — every decline traceable to a named row of that engine's step-2b
@@ -2164,7 +2293,7 @@ test "$(grep -c '^### [0-9]' <report>)" -eq 10 && echo "PASS" || echo "FAIL"
 ```
 
 `grep -c` alone will not do it: its exit status means "matched at least once", not
-"matched exactly nine times", so a report with three sections exits 0 just like a
+"matched exactly this many times", so a report with three sections exits 0 just like a
 complete one. The `test -eq` wrapper is the part that can actually fail.
 
 Be precise about the ladder. A green validator proves parse, cross-reference, symbol

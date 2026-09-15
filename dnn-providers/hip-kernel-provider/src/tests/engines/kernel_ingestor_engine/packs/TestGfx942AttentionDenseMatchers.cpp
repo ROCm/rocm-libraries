@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -20,9 +21,7 @@
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 /**
  * @file TestGfx942AttentionDenseMatchers.cpp
@@ -491,6 +490,44 @@ TEST(TestGfx942AttentionDenseGraphMatch, AcceptsBottomRightCausalWhenSeqLensMatc
     EXPECT_TRUE(matchGraph(spec).has_value());
 }
 
+TEST(TestGfx942AttentionDenseGraphMatch, DeclinesBottomRightWhenDeprecatedCausalAlsoSet)
+{
+    // THE PRODUCTION ENCODING, and the one that was served wrongly.
+    //
+    // cuDNN's set_causal_mask() is a deprecated SETTER for the modern fields, not a
+    // parallel flag -- it sets diagonal_alignment=TOP_LEFT and right_bound=0. So a
+    // graph carrying `causal_mask: true` says "causal"; WHICH diagonal is what
+    // diagonal_alignment states.
+    //
+    // cuDNN-frontend's attention_inference benchmark configs emit exactly this for
+    // chunked prefill: causal_mask=true, diagonal_alignment=BOTTOM_RIGHT,
+    // causal_mask_bottom_right deliberately false. 116 of that suite's 428 graphs,
+    // every one with Sq != Skv.
+    //
+    // maskTypeFor previously returned TOP_LEFT on the boolean without reading the
+    // alignment, so the guard tested above never fired and these were served with
+    // the wrong triangle -- no error, plausible numbers. Same shape as the
+    // left_bound ordering bug this file already covers: a decline turned into a
+    // wrong answer by an early return on the deprecated field.
+    GraphSpec spec;
+    spec.seqLenKv = SEQ * 2;
+    spec.causalMaskDeprecated = true;
+    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx942AttentionDenseGraphMatch, AcceptsTopLeftWhenDeprecatedCausalSetAndAlignmentAgrees)
+{
+    // The complement, so the fix above cannot be "decline everything causal".
+    // causal_mask=true with TOP_LEFT alignment is the overwhelmingly common spelling
+    // (304 of those same 428 graphs) and must keep working at Sq != Skv, where
+    // top-left is well defined and is what the kernel implements.
+    GraphSpec spec;
+    spec.seqLenKv = SEQ * 2;
+    spec.causalMaskDeprecated = true;
+    spec.alignment = data_objects::DiagonalAlignment::TOP_LEFT;
+    EXPECT_TRUE(matchGraph(spec).has_value());
+}
 TEST(TestGfx942AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
 {
     // hipDNN permits D_qk != D_v; the kernel has ONE head_size and would read V with
@@ -834,9 +871,10 @@ TEST(TestGfx942AttentionDenseBinding, BindsDtypeAsTheRuntimeSpellingNotTheKmdSpe
     ASSERT_TRUE(fp16.has_value());
 
     // "bf16" -- NOT the KMD's "BF16" that kernel_match compares against, and not the
-    // flatbuffer enum's "BFLOAT16". CategoricalEncoding.hpp knows only the lowercase
-    // to_string() vocabulary and refuses anything else as unknown, which costs the
-    // feature silently rather than failing loudly.
+    // flatbuffer enum's "BFLOAT16". A UHD's `categorical_encoding` (RFC 0019 §6.5) holds
+    // exactly the spellings its corpus held -- the lowercase to_string() vocabulary -- and
+    // nothing folds case, so anything else has no code, which costs the feature silently
+    // rather than failing loudly.
     EXPECT_EQ(boundString(*bf16, "attention_dense.dtype"), "bf16");
     EXPECT_EQ(boundString(*fp16, "attention_dense.dtype"), "fp16");
 

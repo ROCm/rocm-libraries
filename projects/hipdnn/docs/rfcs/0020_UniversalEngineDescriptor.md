@@ -210,15 +210,16 @@ outside `graph_match` is unchanged:
 ### 4.2 Normative schema
 
 A conforming UED is a JSON object with the members below. Unknown members are rejected. Every
-member but `graph_match` is inert data — a version, identity, two references, and optional
-annotations; `graph_match` is the one member carrying structure, and it holds whichever of the
-two arms (§ 4.3, § 4.5) this engine matches with.
+member but `graph_match` is inert data — a format version, an authored revision, identity, two
+references, and optional annotations; `graph_match` is the one member carrying structure, and it
+holds whichever of the two arms (§ 4.3, § 4.5) this engine matches with.
 
 **Field specification (normative).**
 
 | Field | Req. | JSON type | Value constraints |
 |---|---|---|---|
 | `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
+| `revision` | no | string | `<major>.<minor>`, both numeric; defaults to `1.0` when omitted. The **authored-semantics** revision, distinct from both `version` (this file's JSON format) and `sdk_version` (the graph-schema floor): it moves when what the engine *means* changes, not when the format does. Removing, renaming, or reinterpreting a knob is a `major` bump; an additive change is a `minor` one. The accept rule (§ 14) does **not** read it — a UED is admitted or refused on `version` alone. What keys on it is a **UHD**: a model records the revision of every descriptor it was trained against and is disabled when the loaded descriptor is incompatible with the recorded one (same `major`, and a recorded `minor` no newer than the loaded one), so a UED that changes meaning must bump this field or leave a stale model scoring against semantics that no longer hold ([RFC 0019 § 8.1](0019_UniversalHeuristicDescriptor.md#81-descriptor-versions-and-uhd-coupling)). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
 | `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
@@ -232,11 +233,11 @@ two arms (§ 4.3, § 4.5) this engine matches with.
 | `numerical_notes` | no | array of string | hipDNN numerical-note tags. No duplicates. Absent => none. |
 
 Every field but `version`, `id`, `name`, and `metadata` may be omitted; a valid engine can expose
-no knobs, carry no notes, default its graph-schema floor, and ship no heuristic. `graph_match` is
-optional for the same reason the others are: its absence is well-defined as the behavior before
-the member existed — an engine that states no graph shape binds nothing and leaves applicability
-entirely to its packs' criteria. That is a narrow way to write an engine, not a broken one, and
-keeping it absence-safe is what holds the format on the `1.0` line (§ 14.2).
+no knobs, carry no notes, default its revision and its graph-schema floor, and ship no heuristic.
+`graph_match` is optional for the same reason the others are: its absence is well-defined as the
+behavior before the member existed — an engine that states no graph shape binds nothing and leaves
+applicability entirely to its packs' criteria. That is a narrow way to write an engine, not a
+broken one, and keeping it absence-safe is what holds the format on the `1.0` line (§ 14.2).
 
 A single JSON Schema **file** is delivered with the provider, and the inline copy below is that
 file's content; a build check verifies the two match. The file reflects the latest version
@@ -269,6 +270,12 @@ provider's native registry (is this symbol registered) is semantic and runs in �
     "version": {
       "type": "string",
       "enum": ["1.0"],
+      "addedInVersion": "1.0"
+    },
+    "revision": {
+      "description": "Authored-semantics revision, defaulting to 1.0 when absent; not read by the accept rule. A UHD's trained_against compatibility check keys on it (semantic; see RFC 0019 section 8.1).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
       "addedInVersion": "1.0"
     },
     "id": {

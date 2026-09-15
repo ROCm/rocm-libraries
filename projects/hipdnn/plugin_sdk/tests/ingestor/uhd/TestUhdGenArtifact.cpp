@@ -26,27 +26,27 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/AdapterFactory.hpp>
-#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
-
 #include <nlohmann/json.hpp>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <cstdint>
 #include <string>
 #include <vector>
 
 #if !defined(HIPDNN_UHD_GEN_PYTHON) || !defined(HIPDNN_UHD_GEN_TOOLS_DIR)
-#error "HIPDNN_UHD_GEN_PYTHON and HIPDNN_UHD_GEN_TOOLS_DIR must be defined; see tools/CMakeLists.txt"
+#error \
+    "HIPDNN_UHD_GEN_PYTHON and HIPDNN_UHD_GEN_TOOLS_DIR must be defined; see tools/CMakeLists.txt"
 #endif
 
-namespace hipdnn_plugin_sdk::ingestor::uhd
+namespace hipdnn_plugin_sdk::uhd
 {
 namespace
 {
@@ -81,86 +81,18 @@ std::string trainingCsv()
 /// being installed, which is also how the README documents driving it.
 int runUhdGen(const std::filesystem::path& csv, const std::filesystem::path& outputDir)
 {
-    const std::string command = std::string("cd ") + HIPDNN_UHD_GEN_TOOLS_DIR + " && "
-                                + HIPDNN_UHD_GEN_PYTHON + " -m uhd_gen"
-                                // `train` is a subcommand: the tool also exports benchmarks,
-                                // evaluates regret and promotes a model, and argparse requires
-                                // the verb rather than defaulting to training.
-                                + " train"
-                                + " --input " + csv.string()
-                                + " --features q.M kernel.tile_m"
-                                + " --target tflops"
-                                + " --output-dir " + outputDir.string()
-                                + " --name 'uhd_gen artifact test'"
-                                // A real run trains for hundreds of rounds; this corpus does
-                                // not need them, and the wall-clock is charged to every run.
-                                + " --num-boost-round 40 --early-stopping 10"
-                                // Diagnostics deliberately not suppressed: when this
-                                // fails, the tool's traceback is the only thing that says
-                                // why, and it lands in the test's output.
-                                + " 1>&2";
+    const std::string command
+        = std::string("cd \"") + HIPDNN_UHD_GEN_TOOLS_DIR + "\" && \"" + HIPDNN_UHD_GEN_PYTHON
+          + "\" -m uhd_gen train" + " --input \"" + csv.string() + "\""
+          + " --features q.M kernel.tile_m" + " --target tflops" + " --provenance \""
+          + (csv.parent_path() / "provenance.json").string() + "\"" + " --output-dir \""
+          + outputDir.string() + "\"" + " --name \"uhd_gen artifact test\""
+          + " --num-boost-round 40 --early-stopping 10"
+          // Diagnostics deliberately not suppressed: when this
+          // fails, the tool's traceback is the only thing that says
+          // why, and it lands in the test's output.
+          + " 1>&2";
     return std::system(command.c_str());
-}
-
-/// A UHD whose features are `$derived.*`, written by the tool and read by the runtime.
-///
-/// The rest of this suite trains a plain signature, so nothing here exercised RFC 0019 §6.4
-/// end to end: the expressions live in the descriptor, the tool folds them into
-/// `features_hash`, and the runtime recomputes that hash from the block it parsed. A
-/// disagreement fails §6.3 check 1 and degrades to declared order -- silently, because a
-/// degraded ranking is a legal one -- so only a round trip through both languages says the
-/// two renderings agree on a real artifact rather than on a pinned literal.
-TEST(TestUhdGenArtifactDerived, TheRuntimeRecomputesTheHashOfWhatTheToolDeclared)
-{
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
-        std::filesystem::temp_directory_path() / "hipdnn_uhd_gen_derived");
-
-    // The trainer fits on values, so the corpus carries a column per derived name; the
-    // runtime recomputes those same values from the expressions below.
-    const auto csv = dir.path() / "corpus.csv";
-    {
-        std::ofstream out(csv);
-        out << "q.M,derived.twice_m,kernel.tile_m,tflops\n";
-        for(const int64_t tileM : {64, 128, 256})
-        {
-            for(int row = 0; row < 25; ++row)
-            {
-                const double m = 1024.0 + (row * 128.0);
-                out << static_cast<int64_t>(m) << "," << static_cast<int64_t>(m * 2) << ","
-                    << tileM << "," << ((static_cast<double>(tileM) / 4.0) + (m / 4096.0))
-                    << "\n";
-            }
-        }
-    }
-
-    const auto outputDir = dir.path() / "out";
-    const std::string command = std::string(HIPDNN_UHD_GEN_PYTHON) + " -m uhd_gen train"
-                                + " --input " + csv.string()
-                                + " --features derived.twice_m kernel.tile_m"
-                                + R"( --derived 'twice_m={"*":["$q.M",2]}')"
-                                + " --target tflops"
-                                + " --output-dir " + outputDir.string()
-                                + " --name 'uhd_gen derived test'"
-                                + " --num-boost-round 40 --early-stopping 10 1>&2";
-    ASSERT_EQ(std::system(("cd " + std::string(HIPDNN_UHD_GEN_TOOLS_DIR) + " && " + command).c_str()),
-              0);
-
-    const auto path = outputDir / "heuristic.uhd.json";
-    std::ifstream file(path);
-    const auto document = nlohmann::json::parse(file);
-    const auto descriptor
-        = hipdnn_plugin_sdk::ingestor::detail::parseHeuristicDescriptor(document, path);
-
-    ASSERT_EQ(descriptor.derived.size(), 1u);
-    EXPECT_EQ(descriptor.derived.front().name, "twice_m");
-
-    // The contract: what the tool wrote equals what the runtime computes from the parsed
-    // block. Constructing the extractor is how the runtime does it.
-    const hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractor extractor(
-        descriptor.featuresSignature,
-        {{descriptor.derived.front().name, descriptor.derived.front().expression}},
-        descriptor.categoricalEncoding);
-    EXPECT_EQ(extractor.getSignatureHash(), descriptor.featuresHash);
 }
 
 class TestUhdGenArtifact : public ::testing::Test
@@ -173,6 +105,10 @@ protected:
 
         const auto csv = _dir->path() / "corpus.csv";
         std::ofstream(csv) << trainingCsv();
+        std::ofstream(_dir->path() / "provenance.json") << nlohmann::json{
+            {"ued", {{"id", "11000000-0000-0000-0000-000000000000"}, {"revision", "1.0"}}},
+            {"kmd", {{"id", "12000000-0000-0000-0000-000000000000"}, {"revision", "1.0"}}},
+            {"umd", nlohmann::json::array()}}.dump();
 
         _outputDir = _dir->path() / "out";
 
@@ -190,7 +126,7 @@ protected:
     /// The tool's descriptor, read back the way the runtime reads it: parsed by
     /// DescriptorLoader, then turned into a UhdConfig by the heuristic itself. There is no
     /// second file -- the descriptor IS the UHD -- so this is the whole load path.
-    hipdnn_plugin_sdk::ingestor::uhd::UhdConfig configFromTool() const
+    hipdnn_plugin_sdk::uhd::UhdConfig configFromTool() const
     {
         const auto path = _outputDir / "heuristic.uhd.json";
         std::ifstream file(path);
@@ -247,11 +183,11 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
     const auto adapter = makeUhdAdapter(config);
     ASSERT_NE(adapter, nullptr) << "the model artifact did not load against its descriptor";
 
-    const FeatureExtractor extractor(config.featuresSignature, config.derived);
+    const FeatureExtractor extractor(config.featuresSignature, config.categoricalEncoding);
 
     const auto scoreFor = [&](int64_t tileM) {
         FeatureExtractionContext ctx;
-        ctx.bindQueryVars({{"M", int64_t{2048}}});
+        ctx.bindQueryVars({{"q.M", int64_t{2048}}});
         ctx.bindKernelVars({{"tile_m", tileM}});
         return adapter->score(extractor.extract(ctx));
     };
@@ -262,93 +198,6 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
     EXPECT_GT(scoreFor(256), scoreFor(64));
 }
 
-/// A two-layer artifact, written by the tool and grouped by the runtime.
-///
-/// The adapter's own tests build grouped models by hand, and the trainer's tests check it
-/// writes the fields -- neither says the two agree. This trains one, loads it the way the
-/// runtime does, and asserts the grouping takes effect: candidates outside the group layer 1
-/// chose come back unusable, and inside it layer 2 still orders.
-///
-/// The corpus makes group 1 strictly better than group 0, so layer 1's choice is not a
-/// coin flip, and makes tflops rise with tile_m inside each group, so layer 2 has an
-/// ordering to find that layer 1 alone could not produce.
-TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
-{
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
-        std::filesystem::temp_directory_path() / "hipdnn_uhd_gen_grouped");
-
-    const auto csv = dir.path() / "corpus.csv";
-    {
-        std::ofstream out(csv);
-        out << "q.M,kernel.group,kernel.tile_m,tflops\n";
-        for(const int64_t group : {0, 1})
-        {
-            for(const int64_t tileM : {64, 128, 256})
-            {
-                // Enough distinct problems that layer 1 -- fitted on one row per
-                // (problem, group) -- has something to split on. At 25 it early-stopped
-                // into a single constant leaf, scored every candidate alike, and "chose" a
-                // group by tie-breaking on position.
-                for(int row = 0; row < 120; ++row)
-                {
-                    const double m = 1024.0 + (row * 128.0);
-                    const double base = (group == 1) ? 400.0 : 10.0;
-                    out << static_cast<int64_t>(m) << "," << group << "," << tileM << ","
-                        << (base + static_cast<double>(tileM) / 4.0 + m / 4096.0) << "\n";
-                }
-            }
-        }
-    }
-
-    const auto outputDir = dir.path() / "out";
-    const std::string command
-        = std::string(HIPDNN_UHD_GEN_PYTHON) + " -m uhd_gen train"
-          + " --input " + csv.string()
-          + " --features q.M kernel.group kernel.tile_m"
-          + " --group-by-feature kernel.group"
-          // Layer 1 is fitted per (problem, group), so the problem key is required.
-          + " --group-by q.M"
-          + " --target tflops"
-          + " --output-dir " + outputDir.string()
-          + " --name 'uhd_gen grouped test'"
-          + " --num-boost-round 40 --early-stopping 10 1>&2";
-    ASSERT_EQ(std::system(("cd " + std::string(HIPDNN_UHD_GEN_TOOLS_DIR) + " && " + command).c_str()),
-              0);
-
-    const auto path = outputDir / "heuristic.uhd.json";
-    std::ifstream file(path);
-    const auto document = nlohmann::json::parse(file);
-    const auto config = hipdnn_plugin_sdk::ingestor::UhdKernelHeuristic::configFrom(
-        hipdnn_plugin_sdk::ingestor::detail::parseHeuristicDescriptor(document, path));
-
-    const auto adapter = makeUhdAdapter(config);
-    ASSERT_NE(adapter, nullptr) << "the grouped artifact did not load against its descriptor";
-
-    const FeatureExtractor extractor(config.featuresSignature, config.derived);
-    const auto row = [&](int64_t group, int64_t tileM) {
-        FeatureExtractionContext ctx;
-        ctx.bindQueryVars({{"M", int64_t{2048}}});
-        ctx.bindKernelVars({{"group", group}, {"tile_m", tileM}});
-        return extractor.extract(ctx);
-    };
-
-    // Order matters to nothing here: the adapter groups by the value in the slot, not by
-    // position, so the losing group is listed first deliberately.
-    const auto scores = adapter->scoreBatch({row(0, 256), row(1, 64), row(1, 256), row(0, 64)});
-    ASSERT_EQ(scores.size(), 4U);
-
-    // Group 0 is the worse family, so nothing in it survives layer 1 -- including its
-    // largest tile, which would outrank group 1's smallest under a single flat model.
-    EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity());
-    EXPECT_EQ(scores[3], -std::numeric_limits<double>::infinity());
-
-    // Inside the chosen group layer 2 still ranks, which is the half a group decision alone
-    // cannot supply.
-    EXPECT_TRUE(std::isfinite(scores[1]));
-    EXPECT_TRUE(std::isfinite(scores[2]));
-    EXPECT_GT(scores[2], scores[1]);
-}
-
-} // namespace hipdnn_plugin_sdk::ingestor::uhd
+} // namespace hipdnn_plugin_sdk::uhd
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

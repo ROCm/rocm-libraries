@@ -18,9 +18,8 @@
 #include "plugin/HeuristicPluginManager.hpp"
 
 #include "config/ConfigBuiltIn.hpp"
+#include "prediction/PredictionBuiltIn.hpp"
 #include "static_ordering/StaticOrderingBuiltIn.hpp"
-#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-#endif
 
 namespace hipdnn_backend::plugin
 {
@@ -35,10 +34,14 @@ void HeuristicPluginManager::registerBuiltIns()
         hipdnn_backend::heuristics::static_ordering::populateFunctionTable(),
         "built-in:SelectionHeuristic::StaticOrdering"));
 
-    // RFC 0019 §5 puts kernel ranking in the engine ("the engine owns the UHD that ranks
-    // it"), and the heuristic-plugin ABI carries engine ids only. The built-in that used to
-    // register here computed a kernel ranking it could not return and always reported
-    // applied=0; the live path is the ingestor's UhdKernelHeuristic.
+    // ModeA/ModeB (RFC 0019 prediction ranking) are backend built-ins like the two
+    // above: RFC 0007 §5.3.5/§10.1 make built-in registration the home for
+    // first-party policies. One function table serves both policy IDs —
+    // getAllPolicyIds reports them together and HeuristicPluginManager records
+    // every ID a plugin exposes — so a single registration is enough.
+    registerPlugin(HeuristicPlugin::createBuiltIn(
+        hipdnn_backend::heuristics::prediction::populateFunctionTable(),
+        "built-in:SelectionHeuristic::ModeA+ModeB"));
 }
 
 } // namespace hipdnn_backend::plugin

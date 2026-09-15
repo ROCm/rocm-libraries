@@ -21,7 +21,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "core/Container.hpp"

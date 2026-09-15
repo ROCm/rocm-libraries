@@ -776,8 +776,10 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
 
     // With no descriptor-level override and no env var, resolveHeuristicPolicyOrder
     // returns the built-in default: Config first so HIPDNN_HEUR_CONFIG_PATH rules win,
-    // then UHD for data-driven selection, then StaticOrdering as the last-resort
-    // fallback that always succeeds. Keep in step with the default list in
+    // then StaticOrdering as the last-resort fallback that always succeeds. The backend
+    // injects nothing of its own here — RFC 0007 §5.3.2/§5.3.3 make the ordered policy
+    // list the only channel for policy selection, so a heuristic mode never adds an
+    // entry. Keep in step with the default list in
     // EngineHeuristicDescriptor::resolveHeuristicPolicyOrder.
     int64_t count = 999;
     ASSERT_NO_THROW(heur->getAttribute(
@@ -788,11 +790,46 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     ASSERT_NO_THROW(heur->getAttribute(
         HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 2, &count, buffer.data()));
     ASSERT_EQ(count, 2);
-    // The UHD policy used to sit between these two. It ranked kernels where the plugin ABI
-    // can only return engines, so it always reported applied=0 and never affected the chain.
     EXPECT_EQ(buffer[0], hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"));
     EXPECT_EQ(buffer[1],
               hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
+}
+
+// The prediction policies reach the descriptor as ordinary policy-order entries, in the
+// caller's order, and are never synthesized by the backend from a heuristic mode.
+TEST_F(TestGpuEngineHeuristicDescriptor, PredictionPoliciesTravelThroughPolicyOrderAttribute)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
+        "HIPDNN_HEUR_POLICY_ORDER", "");
+    auto heur = getEngineHeuristicDescriptor();
+    setGraph();
+    setHeuristicMode();
+
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    const std::vector<int64_t> requested{
+        policyNameToId("SelectionHeuristic::Config"),
+        policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME),
+        policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
+        policyNameToId("SelectionHeuristic::StaticOrdering"),
+    };
+    ASSERT_NO_THROW(heur->setAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       static_cast<int64_t>(requested.size()),
+                                       requested.data()));
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
+        .WillRepeatedly(Return(std::vector<int64_t>{1}));
+    ASSERT_NO_THROW(heur->finalize());
+
+    int64_t count = 0;
+    std::vector<int64_t> policies(requested.size());
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       static_cast<int64_t>(policies.size()),
+                                       &count,
+                                       policies.data()));
+    EXPECT_EQ(count, static_cast<int64_t>(requested.size()));
+    EXPECT_EQ(policies, requested);
 }
 
 TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderCountOnly)

@@ -23,7 +23,8 @@
 /// purpose -- computing the signature hash with the same code the runtime validates against
 /// is what makes a mismatch impossible by construction rather than by inspection.
 
-#include <hipdnn_plugin_sdk/ingestor/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 
@@ -44,16 +45,9 @@ namespace fbs = hipdnn_flatbuffers_sdk::data_objects;
 /// binds tensor uids rather than sizes, so there is no useful `$q.*` to split on. A real
 /// pack would want problem features too -- read this as a demonstration of the mechanism,
 /// not of a well-chosen feature set.
-const std::vector<std::string> SIGNATURE = {"$kernel.block_size"};
+const std::vector<nlohmann::json> SIGNATURE = {"$kernel.block_size"};
 
-/// MUST equal the `heuristic` id in pointwise_model.ued.json. The UED resolves its
-/// heuristic by id, and an id no descriptor defines is a dangling reference: the loader
-/// drops the whole engine, another engine serves the graph, and the model tests fail
-/// reporting the wrong engine rather than a missing UHD.
-///
-/// It used to differ, harmlessly, because the descriptor was a committed stub carrying
-/// this id and naming a FlatBuffer that carried its own. With the stub gone there is one
-/// descriptor and it must answer to the name the UED calls it by.
+/// The fixture UED's catalog-ranking model, resolved before generation.
 constexpr const char* UHD_ID = "5a1c0000-0000-4000-8000-000000000002";
 constexpr const char* MODEL_FILE = "pointwise_model.bin";
 constexpr const char* UHD_FILE = "pointwise_model.uhd.json";
@@ -125,7 +119,38 @@ void writeModel(const std::filesystem::path& path, const std::string& featuresHa
 /// Hand-rolled rather than routed through a JSON library: this is nine fixed fields with no
 /// user input, the tool already links the flatbuffers and plugin SDKs and nothing else, and
 /// the output is read back by DescriptorLoader in the same build.
-void writeUhd(const std::filesystem::path& path, const std::string& featuresHash)
+nlohmann::json snapshotProvenance(const std::vector<std::filesystem::path>& roots)
+{
+    using namespace hipdnn_plugin_sdk::ingestor;
+    const auto dependency = [](const auto& descriptor) {
+        return nlohmann::json{{"id", toString(descriptor.id)},
+                              {"revision",
+                               std::to_string(descriptor.revision.major) + "."
+                                   + std::to_string(descriptor.revision.minor)}};
+    };
+    for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(roots)))
+    {
+        const auto model = set.engine.sortKernelCatalog.find("default");
+        if(model == set.engine.sortKernelCatalog.end() || toString(model->second) != UHD_ID)
+        {
+            continue;
+        }
+        auto matchers = nlohmann::json::array();
+        for(const auto& matcher : set.matchers)
+        {
+            matchers.push_back(dependency(matcher));
+        }
+        return {{"ued", dependency(set.engine)},
+                {"kmd", dependency(set.schema)},
+                {"umd", std::move(matchers)}};
+    }
+    throw std::runtime_error(
+        "Model fixture UED did not resolve from the supplied descriptor roots");
+}
+
+void writeUhd(const std::filesystem::path& path,
+              const std::string& featuresHash,
+              const nlohmann::json& provenance)
 {
     std::ostringstream json;
     json << "{\n";
@@ -134,12 +159,8 @@ void writeUhd(const std::filesystem::path& path, const std::string& featuresHash
     json << "  \"name\": \"pointwise model selector\",\n";
     json << "  \"adapter\": \"tree_data\",\n";
 
-    json << "  \"features_signature\": [";
-    for(size_t i = 0; i < SIGNATURE.size(); ++i)
-    {
-        json << (i == 0 ? "" : ", ") << '"' << SIGNATURE[i] << '"';
-    }
-    json << "],\n";
+    json << "  \"features_signature\": " << nlohmann::json(SIGNATURE).dump() << ",\n";
+    json << "  \"trained_against\": " << provenance.dump() << ",\n";
 
     json << "  \"features_hash\": \"" << featuresHash << "\",\n";
     json << "  \"objective\": \"max\",\n";
@@ -163,25 +184,31 @@ void writeUhd(const std::filesystem::path& path, const std::string& featuresHash
 
 int main(int argc, char** argv)
 {
-    if(argc != 2)
+    if(argc < 3)
     {
-        std::cerr << "usage: uhd_model_gen <output-directory>\n";
+        std::cerr << "usage: uhd_model_gen <output-directory> <descriptor-root>...\n";
         return 1;
     }
 
     try
     {
         const std::filesystem::path outputDir(argv[1]);
+        std::vector<std::filesystem::path> roots;
+        for(int i = 2; i < argc; ++i)
+        {
+            roots.emplace_back(argv[i]);
+        }
+        const auto provenance = snapshotProvenance(roots);
         std::filesystem::create_directories(outputDir);
 
         // The runtime rejects a UHD whose declared hash disagrees with the signature it
         // carries, so computing it here with the runtime's own function is what keeps the
         // pair consistent by construction.
         const std::string featuresHash
-            = hipdnn_plugin_sdk::ingestor::uhd::FeatureExtractor::computeHash(SIGNATURE);
+            = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(SIGNATURE);
 
         writeModel(outputDir / MODEL_FILE, featuresHash);
-        writeUhd(outputDir / UHD_FILE, featuresHash);
+        writeUhd(outputDir / UHD_FILE, featuresHash, provenance);
     }
     catch(const std::exception& error)
     {

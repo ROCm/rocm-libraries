@@ -22,7 +22,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
@@ -283,9 +283,12 @@ enum class MaskType : int
 /**
  * @brief Which mask the graph is asking for.
  *
- * A REAL BOUND WINS OVER THE DEPRECATED BOOLEANS. The booleans only distinguish
- * top-left from bottom-right; they cannot express a window, so a graph that sets one
- * AND carries a bound is asking for a windowed mask and must be reported as such.
+ * A REAL BOUND WINS OVER THE DEPRECATED BOOLEANS, and so does an explicit
+ * `diagonal_alignment`. The booleans say only that a mask is CAUSAL: they cannot
+ * express a window, and they do not settle which diagonal when the modern field
+ * disagrees. A graph that sets one AND carries a bound is asking for a windowed
+ * mask and must be reported as such; a graph that sets one AND names an alignment
+ * is asking for that alignment.
  *
  * This ordering is load-bearing rather than stylistic. Returning on the boolean first
  * -- which is what this function used to do -- served a causal graph with
@@ -322,13 +325,32 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
         return MaskType::SLIDING_WINDOW;
     }
 
-    if(topLeftDeprecated)
+    // THE DEPRECATED BOOLEANS SAY "CAUSAL", NOT "TOP-LEFT".
+    //
+    // cuDNN's set_causal_mask() is a deprecated SETTER for the modern fields, not
+    // a parallel flag: it sets diagonal_alignment=TOP_LEFT and right_bound=0.
+    // set_causal_mask_bottom_right() does the same with BOTTOM_RIGHT. So the
+    // boolean records that a mask is causal; WHICH DIAGONAL is what
+    // diagonal_alignment states, and an explicit value for it must win.
+    //
+    // Returning TOP_LEFT here unconditionally -- as this function did, mirroring
+    // SdpaPlanUtils.hpp::getMaskType -- discards that field. Real producers set
+    // both: cuDNN-frontend's attention_inference benchmark configs mark chunked
+    // prefill `causal_mask: true` with `diagonal_alignment: BOTTOM_RIGHT`,
+    // deliberately leaving causal_mask_bottom_right false, because top-left
+    // alignment for a chunk at the end of a long cache would let it see none of
+    // the cache. 116 of that suite's 428 graphs are in that class and every one
+    // has Sq != Skv, which is exactly where the two conventions differ.
+    //
+    // This is the same failure mode as the left_bound ordering documented above,
+    // and it hid the same way: the Sq != Skv guard at the switch below is correct
+    // and never fired, because the graph had already been misclassified here.
+    if(topLeftDeprecated || bottomRightDeprecated)
     {
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-    if(bottomRightDeprecated)
-    {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
+        const bool bottomRight
+            = bottomRightDeprecated
+              || attributes.diagonal_alignment() == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+        return bottomRight ? MaskType::BOTTOM_RIGHT_CAUSAL : MaskType::TOP_LEFT_CAUSAL;
     }
 
     if(right == UNBOUNDED)
@@ -379,12 +401,13 @@ AttentionDenseProblem problemFor(const data_objects::TensorAttributes& q,
 /// The two runtime facts about a dtype the BINDING publishes.
 ///
 /// `spelling` is what `to_string(DataType)` in hipdnn_frontend/Types.hpp answers -- the
-/// only vocabulary a `.dtype` binding may hold, and the one CategoricalEncoding.hpp
-/// encodes. It is restated here rather than called because this provider does not link the
-/// frontend. It is emphatically NOT `supportedDataTypeName`'s vocabulary above: that one
-/// answers the KMD's spelling ("BF16") so kernelMatches can compare against a kernel's
-/// baked metadata, and crossing the two would hand CategoricalEncoding.hpp a string it
-/// refuses as unknown -- losing the feature rather than warning.
+/// only vocabulary a `.dtype` binding may hold, and the one a UHD's own
+/// `categorical_encoding` (RFC 0019 §6.5) is generated from. It is restated here rather than
+/// called because this provider does not link the frontend. It is emphatically NOT
+/// `supportedDataTypeName`'s vocabulary above: that one answers the KMD's spelling ("BF16")
+/// so kernelMatches can compare against a kernel's baked metadata, and crossing the two would
+/// hand the encoding a spelling its corpus never held -- nothing folds case, so "BF16" is not
+/// "bf16" -- which has no code and loses the feature rather than warning.
 ///
 /// An empty `spelling` is `to_string`'s "unknown" fallthrough, and `bytes == 0` is a width
 /// this pack will not state: both make the dependent token absent instead of silently
@@ -518,8 +541,7 @@ std::optional<int64_t>
             return std::nullopt;
         }
         const auto operandBytes = checkedMultiply(*count, width);
-        if(!operandBytes.has_value()
-           || total > std::numeric_limits<int64_t>::max() - *operandBytes)
+        if(!operandBytes.has_value() || total > std::numeric_limits<int64_t>::max() - *operandBytes)
         {
             return std::nullopt;
         }
@@ -865,9 +887,10 @@ std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& 
     bound[std::string(HEAD_SIZE_TOKEN)] = problem.headSize;
 
     // dtype binds as the runtime spelling STRING, never a pre-encoded number: the integer
-    // code space is CategoricalEncoding.hpp's and is applied downstream by the feature
-    // extractor, so a number here would freeze that code space inside the matcher and let
-    // the two drift apart silently.
+    // code space belongs to the descriptor that ships the model -- its own
+    // `categorical_encoding` (RFC 0019 §6.5) -- and is applied downstream by the feature
+    // extractor, so a number here would freeze one model's code space inside the matcher and
+    // let the two drift apart silently.
     const auto facts = dataTypeFacts(problem.dataType);
     if(!facts.spelling.empty())
     {

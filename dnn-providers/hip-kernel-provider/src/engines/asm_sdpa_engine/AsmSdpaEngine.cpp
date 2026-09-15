@@ -5,6 +5,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -60,13 +61,20 @@ void AsmSdpaEngine::getDetails(
 size_t AsmSdpaEngine::getMaxWorkspaceSize(
     const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
     for(const auto& pb : _planBuilders)
     {
         if(pb->isApplicable(handle, opGraph))
         {
-            return pb->getMaxWorkspaceSize(handle, opGraph, Settings{});
+            const auto bytes = pb->getMaxWorkspaceSize(handle, opGraph, Settings{});
+            if(const auto limit = hipdnn_plugin_sdk::heuristics::workspaceLimit(engineConfig);
+               limit && bytes > static_cast<uint64_t>(*limit))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "ASM SDPA exceeds the workspace limit");
+            }
+            return bytes;
         }
     }
 
@@ -86,6 +94,14 @@ void AsmSdpaEngine::initializeExecutionContext(
     {
         if(pb->isApplicable(handle, opGraph))
         {
+            if(const auto limit = hipdnn_plugin_sdk::heuristics::workspaceLimit(engineConfig);
+               limit
+               && pb->getMaxWorkspaceSize(handle, opGraph, Settings{})
+                      > static_cast<uint64_t>(*limit))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "ASM SDPA exceeds the workspace limit");
+            }
             pb->buildPlan(handle, opGraph, engineConfig, executionContext);
             return;
         }

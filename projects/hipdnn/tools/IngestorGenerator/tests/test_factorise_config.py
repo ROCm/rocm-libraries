@@ -227,6 +227,133 @@ class TestTriState:
         )
 
 
+#: The SAME four kernels as `SAMPLE`, with the policy-decided knob written in its
+#: other legal spelling: PRESENT AND None rather than omitted.
+#:
+#: Both spellings mean "the kernel's own policy decides this at build time"; which
+#: one a config carries is an artefact of how the spec was produced, not a
+#: difference in meaning. A hand-authored spec omits the key.
+#: `dispatch_parity.build_config` dumps the builder's dataclass wholesale
+#: (`dataclasses.fields(resolution.spec)`), so every declared-but-unset policy knob
+#: arrives present-and-None -- which is what every real dispatcher-derived config
+#: looks like.
+SAMPLE_NONE_SPELLING = _enumerated(
+    [
+        _kernel(
+            "attn.bf16_sq512_bm128_e1",
+            {"dtype": "bf16", "seqlen_q": 512, "block_m": 128, "use_exp2_fast": True},
+            {"dtype": "BF16", "seqlen_q": 512, "block_m": 128, "use_exp2_fast": 1},
+        ),
+        _kernel(
+            "attn.bf16_sq512_bm256_e0",
+            {"dtype": "bf16", "seqlen_q": 512, "block_m": 256, "use_exp2_fast": False},
+            {"dtype": "BF16", "seqlen_q": 512, "block_m": 256, "use_exp2_fast": 0},
+        ),
+        _kernel(
+            "attn.bf16_sq1024_bm128_e1",
+            {"dtype": "bf16", "seqlen_q": 1024, "block_m": 128, "use_exp2_fast": None},
+            {"dtype": "BF16", "seqlen_q": 1024, "block_m": 128, "use_exp2_fast": 1},
+        ),
+        _kernel(
+            "attn.bf16_sq1024_bm256_e1",
+            {"dtype": "bf16", "seqlen_q": 1024, "block_m": 256, "use_exp2_fast": None},
+            {"dtype": "BF16", "seqlen_q": 1024, "block_m": 256, "use_exp2_fast": 1},
+        ),
+    ]
+)
+
+
+class TestTriStateNoneSpelling:
+    """A spec key present as None means "policy decides", exactly like omitting it.
+
+    Three predicates decide this, and each one used to be a membership test that the
+    present-and-None form falls straight through:
+
+      factorise_config `resolved`     `field not in entry["spec"]`
+      factorise_config `policy_knobs` `f not in e["spec"]`
+      config_loader    metadata       `elif field_name in spec`
+
+    Every test below fails if any of the three regresses to a membership test. They
+    are the regression guard for that fix: the enumerated fixtures elsewhere in this
+    file all use the OMITTED spelling, so nothing else here exercises this path.
+    """
+
+    def test_a_none_spec_records_what_the_policy_chose(self):
+        """Guards `resolved`.
+
+        A membership test treats None as a pinned value, so no `resolved` block is
+        emitted and the policy's actual answer is lost.
+        """
+        group = factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY)[
+            "packs"
+        ][0]["variants"][0]
+        policy_shapes = [s for s in group["shapes"] if "resolved" in s]
+        assert policy_shapes, "a None-valued spec key must produce a `resolved` block"
+        assert policy_shapes[0]["resolved"] == {"use_exp2_fast": 1}
+
+    def test_a_none_spec_is_named_in_policy_knobs(self):
+        """Guards `policy_knobs`."""
+        group = factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY)[
+            "packs"
+        ][0]["variants"][0]
+        assert group["policy_knobs"] == ["use_exp2_fast"]
+
+    def test_a_none_spec_does_not_reach_metadata(self, tmp_path):
+        """Guards the config_loader arm, and is the failure the real set hit.
+
+        On the gfx942 set `use_exp2_fast` is None in all 64 specs while metadata
+        carries the policy's real per-shape 0/1. A membership test writes the None
+        into metadata, which then fails its own declared kmd_fields type:
+
+            metadata 'use_exp2_fast' = None does not match its declared
+            kmd_fields type 'int'
+
+        Either that error, or -- with a looser type -- None silently becomes the
+        catalog key for a binary built from the policy's actual answer.
+        """
+        compact = factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY)
+        for kernel in _expand(tmp_path, compact):
+            assert kernel.metadata["use_exp2_fast"] is not None
+            assert isinstance(kernel.metadata["use_exp2_fast"], int)
+
+    def test_both_spellings_produce_the_same_kernels(self, tmp_path):
+        """The two spellings differ only in provenance, so they must agree on every
+        expanded kernel -- name, spec and metadata alike."""
+        omitted_dir = tmp_path / "a"
+        none_dir = tmp_path / "b"
+        omitted_dir.mkdir()
+        none_dir.mkdir()
+        from_omitted = _expand(omitted_dir, _compact())
+        from_none = _expand(
+            none_dir,
+            factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY),
+        )
+        assert [k.name for k in from_omitted] == [k.name for k in from_none]
+        assert [dict(k.metadata) for k in from_omitted] == [
+            dict(k.metadata) for k in from_none
+        ]
+
+    def test_none_and_pinned_false_stay_distinguishable(self, tmp_path):
+        """The tri-state's whole point. `False` is a pinned value that builds a
+        specific binary; None is the policy deciding. Collapsing them ships the
+        wrong kernel under the right name."""
+        by_name = {
+            k.name: k
+            for k in _expand(
+                tmp_path,
+                factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY),
+            )
+        }
+        assert (
+            by_name["attn.bf16_sq512_bm256_e0"].kernel_source.spec["use_exp2_fast"]
+            is False
+        )
+        assert (
+            by_name["attn.bf16_sq1024_bm256_e1"].kernel_source.spec.get("use_exp2_fast")
+            is None
+        )
+
+
 class TestNameTemplates:
     def test_a_field_binds_only_when_it_matches_every_entry(self):
         """A coincidence is not a binding.

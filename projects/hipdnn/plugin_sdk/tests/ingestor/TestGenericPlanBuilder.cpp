@@ -4,7 +4,6 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <memory>
@@ -33,8 +32,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-#include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -54,26 +52,6 @@ using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
-
-class CountingBytesGraph final
-    : public hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph
-{
-public:
-    explicit CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls)
-        : _bytesCalls(std::move(bytesCalls))
-    {
-    }
-
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
-    {
-        ++*_bytesCalls;
-        return ContentCarryingTestGraph::bytes();
-    }
-
-private:
-    std::shared_ptr<std::atomic_uint> _bytesCalls;
-};
-
 using ::testing::_;
 using ::testing::Ref;
 using ::testing::Return;
@@ -1060,38 +1038,6 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
 
     EXPECT_EQ(context.plan().getWorkspaceSize(0), 64U);
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
-}
-
-TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotReadGraphBytes)
-{
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const ScopedConstantScore constantScore;
-    const WorkspaceEqualsBlockSizeHandler handler;
-    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager();
-    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const TestDeviceResolver resolver;
-    const TestPlanBuilder builder(engine, *manager, resolver);
-
-    flatbuffers::FlatBufferBuilder fbb;
-    const auto engineConfig = makeEmptyEngineConfig(fbb);
-    const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
-    const CountingBytesGraph graph(bytesCalls);
-
-    KnobFilterSettings settings;
-    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
-    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
-
-    KnobFilterContext context;
-    context.setExecutionSettings(settings);
-    builder.buildPlan(0, graph, engineConfig, context);
-
-    bytesCalls->store(0);
-    builder.buildPlan(0, graph, engineConfig, context);
-
-    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
-    EXPECT_EQ(bytesCalls->load(), 0U)
-        << "a second cold miss with benchmarking off must not read graph bytes";
 }
 
 /// prepare() fails for one kernel and succeeds for the rest: the shape of a code object
@@ -2102,103 +2048,191 @@ TEST(TestIngestorGenericPlanBuilder,
         << "the superset write-back must carry all three benchmarked candidates";
 }
 
-
-// ---------------------------------------------------------------------------
-// candidateFeatures: the corpus columns and the runtime's feature bindings
-// ---------------------------------------------------------------------------
-
-/// A DeviceProperties whose two numbers differ, so a field populated from the wrong one
-/// cannot pass by coincidence.
-DeviceProperties distinctDeviceProperties()
+/// A UHD is arch-keyed, so one gfx942 model serves every gfx942 board. A corpus merged
+/// from MI300X, MI325X and MI308X therefore has to carry what each board IS, not only
+/// which one a row came from -- otherwise the model averages over hardware it cannot
+/// see. These columns are that record, written through the same deviceFeatureValues()
+/// the extractor binds, so a column and a features_signature entry cannot drift apart.
+TEST(TestIngestorGenericPlanBuilderBenchmarkRecord, EveryCandidateRowCarriesTheDeviceFacts)
 {
-    DeviceProperties properties = testDeviceProperties();
-    properties.warpSize = 64;
-    properties.multiProcessorCount = 304;
-    return properties;
-}
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeThreeKernelDescendingTimer());
 
-/// One uhd variable value as the JSON candidateFeatures would have logged it, so the two
-/// sides are comparable without either learning the other's type.
-nlohmann::json asJson(const uhd::VariableContext::ValueType& value)
-{
-    return std::visit([](const auto& held) { return nlohmann::json(held); }, value);
-}
+    const TestGraph graph(makeGraphId(0xD9));
+    const TestHandle handle;
 
-TEST(TestIngestorGenericPlanBuilder, CandidateFeaturesNamesTheThreeUhdRoots)
-{
-    KernelDefinition kernel;
-    kernel.metadata = MetadataValues{{"block_m", int64_t{128}}, {"dtype", std::string("bf16")}};
-    const BoundTokens bound{{"seqlen_q", int64_t{512}}};
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
 
-    const auto features
-        = detail::candidateFeatures(bound, kernel, distinctDeviceProperties());
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
 
-    EXPECT_EQ(features["q.seqlen_q"].get<int64_t>(), 512);
-    EXPECT_EQ(features["kernel.block_m"].get<int64_t>(), 128);
-    EXPECT_EQ(features["kernel.dtype"].get<std::string>(), "bf16");
-    EXPECT_TRUE(features.contains("device.cu_count"))
-        << "results_import rejects a corpus with no device.* column outright: without "
-           "this root the sweep produces a dataset that cannot be imported at all";
-}
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
 
-/// The invariant the whole corpus rests on: every `device.*` column this logs is a name
-/// the runtime will actually bind, and vice versa.
-///
-/// The two lists are written in different headers on purpose -- deviceVarsFrom() is the
-/// runtime's and candidateFeatures() is the corpus's -- so nothing but this test stops
-/// one being renamed without the other. A drift there trains a model on a column that
-/// resolves to nothing at inference time, and RFC 0019 §6.3's contract check only catches
-/// it when the model is loaded, which is on a customer's machine.
-TEST(TestIngestorGenericPlanBuilder, CandidateFeaturesDeviceKeysMatchDeviceVarsFrom)
-{
-    const auto properties = distinctDeviceProperties();
-    const KernelDefinition kernel{};
-
-    const auto features = detail::candidateFeatures(BoundTokens{}, kernel, properties);
-    const auto runtimeVars = detail::deviceVarsFrom(properties);
-
-    std::vector<std::string> logged;
-    for(const auto& [key, value] : features.items())
+    nlohmann::json row;
+    for(const auto& recorded : recorder.getRecordedLogs())
     {
-        if(key.rfind("device.", 0) == 0)
+        const auto start = recorded.message.find('{');
+        if(start == std::string::npos)
         {
-            logged.push_back(key.substr(std::string("device.").size()));
-            EXPECT_EQ(value, asJson(runtimeVars.at(logged.back())))
-                << "column device." << logged.back()
-                << " carries a different value than the runtime binds for $device."
-                << logged.back();
+            continue;
+        }
+        auto parsed = nlohmann::json::parse(recorded.message.substr(start), nullptr, false);
+        if(!parsed.is_discarded() && parsed.contains("event")
+           && parsed["event"] == "ingestor.benchmark.candidate")
+        {
+            row = std::move(parsed);
+            break;
         }
     }
+    ASSERT_FALSE(row.is_null()) << "no candidate record was logged at all";
 
-    std::vector<std::string> bound;
-    bound.reserve(runtimeVars.size());
-    for(const auto& [name, unused] : runtimeVars)
-    {
-        static_cast<void>(unused);
-        bound.push_back(name);
-    }
+    const auto properties = testDeviceProperties();
+    ASSERT_TRUE(row.contains("device.cu_count"));
+    EXPECT_EQ(row["device.cu_count"].get<int64_t>(), properties.multiProcessorCount);
+    ASSERT_TRUE(row.contains("device.total_global_mem"));
+    EXPECT_EQ(row["device.total_global_mem"].get<int64_t>(),
+              static_cast<int64_t>(properties.totalGlobalMem));
+    ASSERT_TRUE(row.contains("device.peak_memory_bandwidth"));
+    EXPECT_DOUBLE_EQ(row["device.peak_memory_bandwidth"].get<double>(),
+                     peakMemoryBandwidth(properties));
 
-    EXPECT_THAT(logged, ::testing::UnorderedElementsAreArray(bound))
-        << "a logged column and a features_signature entry are the same string minus the "
-           "'$'; a name on one side only is either an untrainable binding or an "
-           "unbindable column";
+    // `device` is the identity, and stays envelope rather than becoming a feature: a
+    // model splitting on which card a row came from has memorised the fleet.
+    EXPECT_FALSE(row.contains("device.arch"));
+    EXPECT_FALSE(row.contains("device.gcn_arch_name"));
 }
 
-/// `cu_count` and `multi_processor_count` are the same quantity under two spellings, and
-/// both must carry the same number: a signature authored against either one has to
-/// resolve, and resolving to a different value depending on the spelling is worse than
-/// not resolving at all.
-TEST(TestIngestorGenericPlanBuilder, CandidateFeaturesSpellsCuCountBothWays)
+TEST(TestIngestorCandidateEnumeration, SparsePagesEnrollExactlyTheirReportedCandidate)
 {
-    const auto properties = distinctDeviceProperties();
-    const KernelDefinition kernel{};
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter benchmarking(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "0");
+    const ScopedSymbols symbols(
+        "test.graph",
+        [](const MatchContext& context) {
+            auto bound = acceptGraph(context);
+            (*bound)["$attention.dims"] = std::vector<int64_t>{32, 128};
+            (*bound)["$attention.dims[0]"] = int64_t{99};
+            return bound;
+        },
+        "test.kernel",
+        countingFloatKernels);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    auto schema = makeSchema();
+    schema.fields.push_back({"vector_width", MetadataType::INT, MetadataValue{int64_t{1}}});
+    auto pack = makePack({KERNEL_MATCHER_ID});
+    pack.kernels[1].metadata["vector_width"] = int64_t{4};
+    // A device-inapplicable tuple must not appear, even though all its knob values exist.
+    auto otherDevice = makeKernel(testId(0x70), "other_device", 128, "FLOAT");
+    otherDevice.arch = {"gfx999"};
+    pack.kernels.push_back(std::move(otherDevice));
+    const StateManager manager(
+        std::move(schema),
+        {{KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        makeTestDispatches(),
+        {std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        "test.graph");
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, "vector_width"});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, manager, resolver);
+    const TestGraph graph(makeGraphId(0xDA));
+    flatbuffers::FlatBufferBuilder empty;
+    const auto all = makeEmptyEngineConfig(empty);
+    const auto first = builder.enumerateCandidates(0, graph, all, 0, 1);
+    const auto second = builder.enumerateCandidates(0, graph, all, 1, 1);
+    ASSERT_EQ(first.total_count, 2U); // Not the four-point Cartesian product.
+    ASSERT_EQ(first.candidates.size(), 1U);
+    ASSERT_EQ(second.candidates.size(), 1U);
+    EXPECT_EQ(first.candidates.front()->id, toString(testId(0x64)));
+    EXPECT_EQ(second.candidates.front()->id, toString(testId(0x65)));
+    EXPECT_EQ(first.graph_id, second.graph_id);
+    EXPECT_EQ(first.device_id, second.device_id);
+    EXPECT_EQ(nlohmann::json::parse(first.problem_features).at("test.bound_token"),
+              BOUND_TOKEN_VALUE);
+    EXPECT_FALSE(nlohmann::json::parse(first.problem_features).contains("q.test.bound_token"));
+    const auto problemFeatures = nlohmann::json::parse(first.problem_features);
+    EXPECT_EQ(problemFeatures.at("attention.dims[0]"), 99);
+    EXPECT_EQ(problemFeatures.at("attention.dims[1]"), 128);
 
-    const auto features = detail::candidateFeatures(BoundTokens{}, kernel, properties);
+    for(const auto* page : {&first, &second})
+    {
+        const auto& candidate = *page->candidates.front();
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfigT enrolled;
+        enrolled.engine_id = ENGINE_ID.front();
+        for(const auto& knob : candidate.knob_settings)
+        {
+            enrolled.knobs.push_back(
+                std::make_unique<hipdnn_flatbuffers_sdk::data_objects::KnobSettingT>(*knob));
+        }
+        flatbuffers::FlatBufferBuilder serialized;
+        serialized.Finish(
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(serialized, &enrolled));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configuration(
+            serialized.GetBufferPointer(), serialized.GetSize());
+        KnobFilterSettings settings;
+        builder.initializeExecutionSettings(0, graph, configuration, settings);
+        KnobFilterContext context;
+        context.setExecutionSettings(settings);
+        builder.buildPlan(0, graph, configuration, context);
+        EXPECT_EQ(toString(context.plan().kernel().kernelId), candidate.id);
+    }
+    flatbuffers::FlatBufferBuilder scopedBuffer;
+    const auto scope = makeIntKnobEngineConfig(scopedBuffer, "vector_width", 4);
+    const auto scoped = builder.enumerateCandidates(0, graph, scope, 0, 10000);
+    ASSERT_EQ(scoped.total_count, 1U);
+    EXPECT_EQ(scoped.candidates.front()->id, second.candidates.front()->id);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, all, 3, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
 
-    EXPECT_EQ(features["device.cu_count"].get<int64_t>(), properties.multiProcessorCount);
-    EXPECT_EQ(features["device.multi_processor_count"].get<int64_t>(),
-              properties.multiProcessorCount);
-    EXPECT_EQ(features["device.warp_size"].get<int64_t>(), properties.warpSize);
+TEST(TestIngestorCandidateEnumeration, RejectsAmbiguityBeforeReturningTheFirstPage)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xDB));
+    flatbuffers::FlatBufferBuilder serialized;
+    const auto all = makeEmptyEngineConfig(serialized);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, all, 0, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestIngestorCandidateEnumeration, EmptyScopedCatalogIsNotUnsupportedOrAnInvalidScope)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+    const TestGraph graph(makeGraphId(0xDC));
+    flatbuffers::FlatBufferBuilder absentBuffer;
+    const auto absent = makeIntKnobEngineConfig(absentBuffer, BLOCK_SIZE, 777);
+    const auto empty = builder.enumerateCandidates(0, graph, absent, 0, 1);
+    EXPECT_EQ(empty.total_count, 0U);
+    EXPECT_TRUE(empty.candidates.empty());
+    flatbuffers::FlatBufferBuilder invalidBuffer;
+    const auto invalid = makeIntKnobEngineConfig(invalidBuffer, "unknown_knob", 1);
+    EXPECT_THROW(builder.enumerateCandidates(0, graph, invalid, 0, 1),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace

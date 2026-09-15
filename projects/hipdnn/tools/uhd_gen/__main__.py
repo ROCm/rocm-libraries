@@ -3,12 +3,13 @@
 # SPDX-License-Identifier: MIT
 """UHD Generation Tool CLI.
 
-Four subcommands, one per stage of RFC 0019.13's pipeline that exists today:
+Subcommands for collection, training, evaluation and descriptor installation:
 
     export-benchmarks   ingestor benchmark log -> §8.3 training CSV
     train               training CSV -> UHD descriptor + model artifact
     evaluate            corpus + trained UHD -> §11.2 regret report
     promote             install that pair into a descriptor tree and point a UED at it
+    generate            graph corpus -> public collection -> train/evaluate/promote
 
 Collect, train and install:
 
@@ -18,9 +19,10 @@ Collect, train and install:
 
     python -m uhd_gen train \\
         --input bench.csv \\
+        --descriptor-tree ./descriptors --engine hipkernel:pointwise \\
         --features q.seqlen_q kernel.block_size device.cu_count \\
         --target tflops \\
-        --group-by q.seqlen_q \\
+        --group-by benchmark device \\
         --output-dir ./uhd_output \\
         --descriptor-name pointwise \\
         --name "Pointwise UHD"
@@ -28,39 +30,47 @@ Collect, train and install:
     python -m uhd_gen promote \\
         --model-dir ./uhd_output \\
         --descriptor-tree ./descriptors \\
+        --arch gfx942 \\
         --engine hipkernel:pointwise
 
     python -m uhd_gen evaluate \\
         --input bench.csv \\
         --model-dir ./uhd_output
 
-Features must be namespace-qualified (`q.`, `kernel.`, `device.`); an unqualified
-name produces a descriptor that loads but never scores.
-
-Without the `promote` step the engine keeps its previous `heuristic` id and the new
-model is never consulted -- silently, since ranking by priority is a valid state.
+Feature columns are the full published names without a leading `$`; no namespace
+is inserted. Use --feature-signature for canonical inline expression objects.
+Computed features require the shared hipdnn_uhd_features executable.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import logging
 import sys
 import uuid
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .evaluate import add_evaluate_arguments, run_evaluate
+from .corpus_io import read_corpus_frame
+from .coverage import device_field_coverage, enforce_device_coverage
+from .knobs import add_knob_arguments, run_knobs
+from .merge import add_merge_arguments, run_merge
 from .features import (
     build_features_signature,
     compute_features_hash,
-    generate_categorical_encoding,
+    derive_categorical_encoding,
+    evaluate_feature_rows,
+    parse_signature_entry,
+    signature_references,
 )
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
-from .train_uhd import evaluate_regret, find_constant_feature_columns, train_model
+from .train_uhd import build_feature_matrix, evaluate_regret, train_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,27 +108,6 @@ _COST_METRIC_MARKERS = (
 #: pinned-by-construction from under-sampled, so the message says which two readings
 #: are possible and points at the corpus rather than asserting one.
 CONSTANT_FEATURE_WARN_FRACTION = 2 / 3
-
-
-def _parse_derived(entries: list[str] | None) -> list[tuple[str, str]]:
-    """Parse `NAME=EXPRESSION` pairs, keeping declaration order (RFC 0019 6.4)."""
-    parsed: list[tuple[str, str]] = []
-    for entry in entries or []:
-        name, separator, expression = entry.partition("=")
-        if not separator or not name.strip() or not expression.strip():
-            raise ValueError(f"--derived expects NAME=EXPRESSION, got {entry!r}")
-        # Parsed here so a malformed expression fails now rather than at load, where the
-        # engine would degrade to declared order without saying why.
-        try:
-            json.loads(expression)
-        except json.JSONDecodeError as error:
-            raise ValueError(f"--derived {name.strip()!r} is not valid JsonLogic: {error}") from None
-        parsed.append((name.strip(), expression.strip()))
-
-    duplicates = {n for n, _ in parsed if [x for x, _ in parsed].count(n) > 1}
-    if duplicates:
-        raise ValueError(f"--derived names must be unique; repeated: {sorted(duplicates)}")
-    return parsed
 
 
 def _looks_like_cost_metric(target: str) -> bool:
@@ -166,6 +155,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_promote_arguments(promote)
 
+    immediate_import = subparsers.add_parser("import-immediate", help="import hipdnn_bench --collect-immediate JSON without candidate enumeration")
+    immediate_import.add_argument("--input", nargs="+", required=True, help="Immediate JSON responses or normalized CSV corpora")
+    immediate_import.add_argument("--output", required=True, help="Output .json or .csv corpus")
+
+    knobs = subparsers.add_parser(
+        "knobs",
+        help="measure what each knob is worth, and how few AOT variants suffice",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_knob_arguments(knobs)
+
+    merge = subparsers.add_parser(
+        "merge",
+        help="join sweeps from several machines of one arch into one corpus",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_merge_arguments(merge)
+
+    from .generate import add_generate_arguments, run_generate
+    generate = subparsers.add_parser("generate", help="collect, train, evaluate and promote from a graph corpus")
+    add_generate_arguments(generate)
+
     # export-benchmarks parses its own argv tail, so it is split off before the
     # main parser sees flags it does not declare.
     if argv is None:
@@ -174,58 +185,59 @@ def main(argv: list[str] | None = None) -> int:
         return benchmark_log_main(argv[1:])
 
     args = parser.parse_args(argv)
+    if args.command == "import-immediate":
+        from .immediate import normalize_corpus, read_corpus
+        try:
+            frame = normalize_corpus(pd.concat([read_corpus(Path(path)) for path in args.input], ignore_index=True))
+            destination = Path(args.output)
+            if destination.suffix not in (".json", ".csv"):
+                raise ValueError("--output must have .json or .csv suffix")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.suffix == ".json":
+                records = frame.astype(object).where(pd.notna(frame), None).to_dict(orient="records")
+                destination.write_text(json.dumps(records, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+            else:
+                frame.to_csv(destination, index=False)
+            return 0
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            logger.error("%s", error)
+            return 1
+    if args.command == "generate":
+        return run_generate(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":
         return run_evaluate(args)
+    if args.command == "knobs":
+        return run_knobs(args)
+    if args.command == "merge":
+        return run_merge(args)
     return _run_train(args)
 
 
 def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
+    from .provenance import ROLES
+    parser.add_argument("--role", choices=ROLES, default="sort_kernel_catalog")
+    parser.add_argument("--arch", help="UED role-map architecture, or default for a multi-arch model")
     parser.add_argument(
         "--input",
         required=True,
-        help="Benchmark CSV/JSON with feature columns and target",
+        help="Training corpus with feature columns and target: the .parquet dataset "
+        "tools/results_import publishes, or a collected .csv/.json corpus",
     )
+    feature_source = parser.add_mutually_exclusive_group(required=True)
+    feature_source.add_argument("--features", nargs="+", help="Full published feature column names")
+    feature_source.add_argument("--feature-signature", help="JSON file containing a canonical inline features_signature array")
+    provenance = parser.add_mutually_exclusive_group()
+    provenance.add_argument("--descriptor-tree", help="Descriptors whose revisions are captured before fitting")
+    provenance.add_argument("--provenance", help="Explicit recorded trained_against JSON snapshot")
+    parser.add_argument("--engine", help="UED name/UUID, or immediate engine canonical name/public ID")
+    parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
     parser.add_argument(
-        "--features",
-        required=True,
-        nargs="+",
-        help="Feature column names to train on",
-    )
-    parser.add_argument(
-        "--group-by-feature",
-        default=None,
-        dest="group_by_feature",
-        metavar="FEATURE",
-        help=(
-            "Train two layers into one artifact: this feature names a candidate's group "
-            "(e.g. kernel.solver_id). Layer 1 ranks groups, layer 2 ranks candidates within "
-            "the chosen one. Ranking a whole catalog then takes the group decision first, "
-            "which a single ensemble over all candidates cannot express."
-        ),
-    )
-    parser.add_argument(
-        "--derived",
-        nargs="+",
-        default=None,
-        metavar="NAME=EXPRESSION",
-        help=(
-            "Derived values (RFC 0019 6.4), e.g. "
-            "intensity='{\"/\":[\"$q.flops\",\"$q.bytes\"]}'. The runtime evaluates each in "
-            "order and binds it to $derived.<name> before reading the signature, so a "
-            "feature may name it. Order matters: a later expression may read an earlier one."
-        ),
-    )
-    parser.add_argument(
-        "--keep-constant-features",
+        "--drop-constant-features",
         action="store_true",
-        dest="keep_constant_features",
-        help="Keep feature columns that never vary in the input. By default such a "
-        "column is dropped from features_signature: it cannot separate candidates, and "
-        "it costs a feature extraction per candidate score at runtime. Pass this when "
-        "the column does vary in the world and this corpus is merely thin, so the "
-        "signature matches the richer corpus you intend to retrain on.",
+        dest="drop_constant_features",
+        help="Omit constant model inputs; never changes the engine's authored public knobs.",
     )
     parser.add_argument(
         "--target",
@@ -249,9 +261,22 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--calibrated",
         action="store_true",
-        help="Declare the score cross-engine comparable (RFC 0019 §12.3). Only pass "
-        "this if the target really is calibrated across engines; it is not verified "
-        "here, and an unwarranted claim silently corrupts cross-engine comparison.",
+        help="Declare the score cross-engine comparable: RFC 0019 §4.1's "
+        "score.calibrated header, which RFC 0019 §11.3 reads when it compares "
+        "predicted throughput across engines. Only pass this if the target really is "
+        "calibrated across engines; it is not verified here, and an unwarranted claim "
+        "silently corrupts cross-engine comparison. RFC 0019.13 §11.2 additionally "
+        "requires --timing-statistic avgTimeMs alongside it.",
+    )
+    parser.add_argument(
+        "--timing-statistic",
+        default=None,
+        dest="timing_statistic",
+        help="Which measured timing the target was derived from (avgTimeMs, "
+        "minTimeMs, robustMeanMs). Recorded in the manifest per RFC 0019.13 §10.5, "
+        "because §11.2 refuses cross-engine comparison between models trained on "
+        "different statistics. Required with --calibrated, which §11.2 pins to "
+        "avgTimeMs.",
     )
     parser.add_argument(
         "--group-by",
@@ -351,9 +376,7 @@ def _resolve_uhd_id(requested: str | None) -> str:
         parsed = uuid.UUID(requested)
     except (ValueError, AttributeError, TypeError) as error:
         raise ValueError(
-            f"--uhd-id {requested!r} is not a UUID ({error}); the UED's `heuristic` "
-            "field is resolved by id, so a malformed one would leave the engine with "
-            "no heuristic and no error"
+            f"--uhd-id {requested!r} is not a UUID ({error})"
         ) from error
     canonical = str(parsed)
     if canonical != requested:
@@ -364,372 +387,251 @@ def _resolve_uhd_id(requested: str | None) -> str:
 
 
 def _run_train(args: argparse.Namespace) -> int:
+    from .provenance import snapshot_provenance, validate_provenance
+    from .immediate import LABEL_STATISTIC, ROLE, read_corpus, training_binding, validate_signature
+
+    immediate = args.role == ROLE
+    binding = None
+
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
-
-    # Before the output directory exists and long before training spends minutes: a bad
-    # id is an argument error, and finding it after the model is written wastes the run.
     try:
         uhd_id = _resolve_uhd_id(args.uhd_id)
-    except ValueError as error:
-        logger.error("%s", error)
-        return 1
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    logger.info("Loading data from %s", input_path)
-    if input_path.suffix == ".parquet":
-        # What tools/results_import publishes (RFC 0019.13 §8.3). Preferred over the collected
-        # CSV: the dataset carries its own types, so a column that is empty in one shard and
-        # populated in another cannot concatenate to `object` and change what the trainer sees.
-        df = pd.read_parquet(input_path)
-    elif input_path.suffix == ".json":
-        df = pd.read_json(input_path)
-    else:
-        # A collected CSV, read directly. Everything §8.3 checks is unchecked on this path --
-        # that is what the importer exists for -- so it is the escape hatch for a quick local
-        # run rather than the route a trained model should come by.
-        df = pd.read_csv(input_path)
-    logger.info("Loaded %d row(s)", len(df))
-
-    # RFC 0019.13 §10.2 step 1. A §8.3 CSV records the pairs that failed to run so
-    # coverage can be audited; they carry no timings, so training on them would fit
-    # the model to empty cells. Absent column means the CSV predates the envelope.
-    if "is_valid" in df.columns:
-        before = len(df)
-        df = df[df["is_valid"].astype(str).str.lower() == "true"]
-        skipped = before - len(df)
-        if skipped:
-            logger.info("Dropped %d row(s) with is_valid=False", skipped)
-        if df.empty:
-            logger.error("Every row in %s is is_valid=False; nothing to train on", input_path)
-            return 1
-
-    missing = set(args.features) - set(df.columns)
-    if missing:
-        logger.error("Missing feature columns: %s", missing)
-        return 1
-    if args.target not in df.columns:
-        logger.error("Missing target column: %s", args.target)
-        return 1
-
-    # RFC 0019 §7.2: features_hash is computed over the signature actually trained, so
-    # the drop decision has to happen here, before training and before the signature is
-    # built -- not as a post-hoc edit of either.
-    constants = find_constant_feature_columns(df, args.features)
-    constant_listing = ", ".join(f"{name}={value!r}" for name, value in constants)
-    features = list(args.features)
-    dropped: list[str] = []
-
-    if constants and len(constants) == len(args.features):
-        # Fails with the override too. The flag chooses a signature; it cannot make a
-        # column vary, and the degenerate model is the same either way.
-        logger.error(
-            "Every requested feature column is constant in %s, so there is nothing to "
-            "train on: %s. A model over columns that never vary scores every candidate "
-            "identically; shipping one is worse than shipping none, because the engine "
-            "would rank by a model that cannot discriminate instead of falling back to "
-            "its declared order. --keep-constant-features does not help -- it changes "
-            "the signature, not the fact that no column varies. Widen the corpus, or "
-            "pass --features that vary in it.",
-            input_path,
-            constant_listing,
-        )
-        return 1
-
-    if constants:
-        if args.keep_constant_features:
-            logger.warning(
-                "KEPT %d constant feature column(s) at --keep-constant-features: %s. "
-                "They stay in features_signature so the hash matches the richer corpus "
-                "you intend to retrain on, but they inform nothing in this model and "
-                "cost a feature extraction per candidate score at runtime.",
-                len(constants),
-                constant_listing,
-            )
+        if Path(args.descriptor_name).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
+            raise ValueError("--descriptor-name must be a file stem, not a path")
+        # This is captured before data preparation or fitting, never stamped later.
+        if immediate:
+            if args.target != "tflops" or args.objective != "max" or args.score_units not in (None, "tflops"):
+                raise ValueError("predict_engine_tflops requires --target tflops --objective max --score-units tflops")
+            if args.report_regret:
+                raise ValueError("L1 evaluation compares immediate engines, not within-engine candidate regret")
+            df, binding = training_binding(read_corpus(input_path), args.engine)
+            trained_against = binding["trained_against"]
+            if args.provenance:
+                recorded = validate_provenance(json.loads(Path(args.provenance).read_text(encoding="utf-8")))
+                if recorded != trained_against:
+                    raise ValueError("recorded provenance differs from immediate engine binding")
+            elif args.descriptor_tree:
+                recorded = snapshot_provenance(Path(args.descriptor_tree), args.engine, args.arch)
+                if recorded != trained_against:
+                    raise ValueError("descriptor provenance differs from immediate engine binding")
+            if args.group_by is not None and args.group_by != ["benchmark", "device"]:
+                raise ValueError("L1 training groups must be benchmark device, never engine/candidate rows")
+            args.group_by = ["benchmark", "device"]
+            args.calibrated = True
+            # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): L1 always declares a
+            # calibrated score, so its label is `avgTimeMs` and the manifest says so.
+            if args.timing_statistic not in (None, LABEL_STATISTIC):
+                raise ValueError(
+                    f"predict_engine_tflops labels are derived from {LABEL_STATISTIC}; "
+                    f"--timing-statistic {args.timing_statistic} contradicts the corpus")
+            args.timing_statistic = LABEL_STATISTIC
+            observed_arches = sorted(df["arch"].unique())
+            if args.training_arches and sorted(set(args.training_arches)) != observed_arches:
+                raise ValueError("--training-arches must match the measured immediate corpus")
+            args.training_arches = observed_arches
+            if args.arch is None:
+                if len(observed_arches) != 1:
+                    raise ValueError("multi-architecture L1 training requires --arch default")
+                args.arch = observed_arches[0]
+            if args.arch != "default" and (len(observed_arches) != 1 or args.arch != observed_arches[0]):
+                raise ValueError("L1 role-map arch must cover the complete training corpus")
         else:
-            for name, value in constants:
-                logger.warning(
-                    "DROPPED constant feature column %s: every row is %r. It cannot "
-                    "separate one candidate from another, so it is NOT in the trained "
-                    "features_signature and features_hash is over the smaller set. If "
-                    "this column does vary in the world and this corpus is merely thin, "
-                    "retrain with --keep-constant-features -- better, widen the corpus.",
-                    name,
-                    value,
-                )
-            dropped = [name for name, _ in constants]
-            features = [name for name in args.features if name not in set(dropped)]
-
-        if len(constants) / len(args.features) >= CONSTANT_FEATURE_WARN_FRACTION:
-            logger.warning(
-                "%d of %d requested feature columns are constant (%.0f%%, at or above "
-                "the %.0f%% thin-corpus threshold). Kernels that bake their geometry in "
-                "pin knobs by construction, and a pinned knob really is uninformative -- "
-                "but nothing in a CSV tells that apart from a corpus that only ever "
-                "sampled one value, and for a thin corpus dropping is the WRONG fix. "
-                "Check that %s spans the problems and kernels you expect to rank before "
-                "trusting this model.",
-                len(constants),
-                len(args.features),
-                100.0 * len(constants) / len(args.features),
-                100.0 * CONSTANT_FEATURE_WARN_FRACTION,
-                input_path,
-            )
-
-    if args.objective == "max" and _looks_like_cost_metric(args.target):
-        logger.warning(
-            "Target '%s' looks like a cost metric but --objective is 'max', so the "
-            "runtime will prefer the WORST kernel. Pass --objective min if that is "
-            "not what you want.",
-            args.target,
-        )
-
-    # RFC 0019 §6.5: the tool generates the encoding "while it gathers the data" for any
-    # string field the fixed table does not define, and ships it in the UHD. Built from the
-    # whole corpus before any split, so layer 1, layer 2 and the regret evaluation all encode
-    # a value the same way -- a per-fold table would give one value two numbers.
-    generated_encoding = generate_categorical_encoding(
-        {f"${name}": df[name].tolist() for name in features}
-    )
-    if generated_encoding:
-        logger.info(
-            "Generated categorical encoding for %d field(s): %s",
-            len(generated_encoding),
-            ", ".join(f"{ref} ({len(codes)} values)"
-                      for ref, codes in sorted(generated_encoding.items())),
-        )
-
-    logger.info("Training on features: %s", features)
-    logger.info("Target column: %s (objective: %s)", args.target, args.objective)
-    if args.group_by:
-        logger.info("GroupKFold columns: %s", args.group_by)
-
-    # An unencodable categorical value is an input error like a missing column, and is
-    # reported like one. Letting build_feature_matrix's ValueError escape would print a
-    # traceback through LightGBM's call stack, burying the column/row/value it names --
-    # the only three facts an author needs to fix the CSV.
-    try:
-        # Layer 1 ranks groups, so it is fitted on one row per (problem, group) carrying
-        # that group's best achievable target -- not on every candidate. Fitted on the raw
-        # rows it would instead rank individual candidates, and taking the group of the best
-        # one answers a different question: the error over a group's whole candidate set
-        # propagates into what should be a choice among a handful of groups.
-        layer_one_input = df
-        if args.group_by_feature:
-            if not args.group_by:
+            if args.provenance:
+                trained_against = validate_provenance(json.loads(Path(args.provenance).read_text(encoding="utf-8")))
+            elif args.descriptor_tree:
+                arch = args.training_arches[0] if args.training_arches and len(args.training_arches) == 1 else None
+                trained_against = snapshot_provenance(Path(args.descriptor_tree), args.engine, arch)
+            else:
+                raise ValueError("training requires --descriptor-tree or --provenance")
+            # The suffix decides, in `corpus_io.read_corpus_frame` for every command
+            # alike. `.parquet` is what tools/results_import publishes (RFC 0019.13
+            # §8.3) and is the route a model anyone ships should come by: the dataset
+            # carries its own types, so a column empty in one shard and populated in
+            # another cannot concatenate to `object` and quietly change what the
+            # trainer sees. A collected CSV is read directly, and nothing §8.3
+            # specifies is checked on it -- that is what the importer exists for -- so
+            # it is the escape hatch for a quick local run. The §11.2 label rule below
+            # is applied to all three alike: the published dataset earns no exemption
+            # from it.
+            df = read_corpus_frame(input_path)
+            # What "this row has no measurement" looks like, in both spellings, because
+            # a corpus arrives in both. A collected CSV says `is_valid=False`, which is
+            # what the runtime record carries at the moment of failure. §8.3's published
+            # dataset has no validity flag at all: the measurement is null and `error`
+            # carries the reason, so that no two columns can disagree about one row.
+            # Both mean the candidate never ran, and a candidate that never ran cannot
+            # be fitted -- its target is NaN, and without this the NaN reaches
+            # `train_uhd.train_model`, whose "target must contain finite nonnegative
+            # values" then reports a missing filter as a corrupt corpus. `evaluate`
+            # excludes exactly these rows, by both spellings, for the same reason
+            # (§5.6.3 and `Exclusions`), and training and evaluation must not disagree
+            # about which rows exist.
+            invalid = errored = unmeasured = 0
+            if "is_valid" in df.columns:
+                keep = df["is_valid"].astype(str).str.strip().str.lower() == "true"
+                invalid = int((~keep).sum())
+                df = df[keep]
+            if "error" in df.columns:
+                failed = df["error"].fillna("").astype(str).str.strip().str.len() > 0
+                errored = int(failed.sum())
+                df = df[~failed]
+            if args.target in df.columns:
+                # Coerced rather than trusted: a CSV column holding one empty cell reads
+                # back as `object`, so the target can be a string here even when every
+                # populated row is a number.
+                finite = np.isfinite(pd.to_numeric(df[args.target], errors="coerce"))
+                unmeasured = int((~finite).sum())
+                df = df[finite]
+            if invalid or errored or unmeasured:
+                # Counted apart because they are three different producer facts, and the
+                # one that fires says which end to look at: the collector's flag, the
+                # published dataset's error, or a target column that is neither.
+                logger.info(
+                    "Dropped %d row(s) with is_valid=False, %d row(s) carrying a "
+                    "collection error, and %d row(s) whose %s is not a finite number",
+                    invalid, errored, unmeasured, args.target)
+            # RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train
+            # its score on `avgTimeMs`". A calibrated model is the one whose absolute
+            # value gets compared across engines, and minimum- or robust-mean-derived
+            # throughput is optimistically biased, so the claim is checked rather than
+            # trusted. Uncalibrated ranking may use any statistic; it just has to say
+            # which, because §11.2 refuses to compare models trained on different ones.
+            if args.calibrated and args.timing_statistic != LABEL_STATISTIC:
                 raise ValueError(
-                    "--group-by-feature needs --group-by: layer 1 is fitted on one row per "
-                    "(problem, group), so it has to know which columns identify a problem. "
-                    "Without them every group would collapse to a single row."
-                )
-            keys = list(args.group_by) + [args.group_by_feature]
-            layer_one_input = (
-                df.sort_values(args.target, ascending=False)
-                  .drop_duplicates(subset=keys, keep="first")
-                  .reset_index(drop=True)
-            )
-            logger.info("Layer 1 fitted on %d group rows (from %d candidates)",
-                        len(layer_one_input), len(df))
-
+                    "--calibrated requires --timing-statistic avgTimeMs (RFC 0019.13 "
+                    f"§11.2); got {args.timing_statistic!r}")
+        if df.empty:
+            raise ValueError("No valid rows to train on")
+        signature = (
+            json.loads(Path(args.feature_signature).read_text(encoding="utf-8"))
+            if args.feature_signature else build_features_signature(args.features)
+        )
+        if not isinstance(signature, list) or not signature:
+            raise ValueError("features_signature must be a nonempty JSON array")
+        signature = [parse_signature_entry(entry) for entry in signature]
+        requested_signature = list(signature)
+        references = signature_references(signature)
+        if immediate:
+            for published in df["features"].unique():
+                validate_signature(signature, set(json.loads(published)))
+        missing = {reference[1:] for reference in references} - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing feature columns: {sorted(missing)}")
+        if args.target not in df.columns:
+            raise ValueError(f"Missing target column: {args.target}")
+        coverage = device_field_coverage(df)
+        enforce_device_coverage(signature, coverage)
+        categorical_encoding = derive_categorical_encoding(df, [ref[1:] for ref in references])
+        if any(isinstance(entry, dict) for entry in signature):
+            features_hash, values = evaluate_feature_rows(df, signature, categorical_encoding, args.feature_evaluator)
+            matrix = np.asarray(values, dtype=np.float64)
+        else:
+            features_hash = compute_features_hash(signature, categorical_encoding)
+            matrix = build_feature_matrix(df, [entry[1:] for entry in signature], categorical_encoding)
+        names = [entry[1:] if isinstance(entry, str) else f"expression_{index}"
+                 for index, entry in enumerate(signature)]
+        constant_indices = [index for index in range(matrix.shape[1])
+                            if np.all(matrix[:, index] == matrix[0, index])]
+        constants = []
+        for index in constant_indices:
+            value = df[signature[index][1:]].iloc[0] if isinstance(signature[index], str) else float(matrix[0, index])
+            constants.append((names[index], value.item() if hasattr(value, "item") else value))
+        if len(constants) == len(signature):
+            raise ValueError("Every requested feature column is constant: " +
+                             ", ".join(f"{name}={value!r}" for name, value in constants))
+        dropped = []
+        if constants:
+            logger.warning("%d feature column(s) never vary: %s", len(constants),
+                           ", ".join(f"{name}={value!r}" for name, value in constants))
+            if len(constants) / len(signature) >= CONSTANT_FEATURE_WARN_FRACTION:
+                logger.warning("High constant-feature proportion: check device and problem coverage")
+            if args.drop_constant_features:
+                dropped = [names[index] for index in constant_indices]
+                keep = [index for index in range(len(signature)) if index not in constant_indices]
+                signature = [signature[index] for index in keep]
+                names = [names[index] for index in keep]
+                matrix = matrix[:, keep]
+                remaining_refs = set(signature_references(signature))
+                categorical_encoding = {key: value for key, value in categorical_encoding.items() if key in remaining_refs}
+                if any(isinstance(entry, dict) for entry in signature):
+                    features_hash, _ = evaluate_feature_rows(df.iloc[:0], signature, categorical_encoding, args.feature_evaluator)
+                else:
+                    features_hash = compute_features_hash(signature, categorical_encoding)
+                logger.warning("Dropping constant model inputs %s; authored knobs are unchanged", dropped)
+        if args.objective == "max" and _looks_like_cost_metric(args.target):
+            logger.warning("Target '%s' looks like a cost; use --objective min to prefer faster candidates", args.target)
+        groups = args.group_by
+        if groups is None and "benchmark" in df.columns:
+            groups = ["benchmark"] + (["device"] if "device" in df.columns else [])
         model = train_model(
-            layer_one_input,
-            features,
-            args.target,
-            args.group_by,
-            generated_encoding=generated_encoding,
-            num_boost_round=args.num_boost_round,
-            early_stopping_rounds=args.early_stopping,
+            df, names, args.target, groups, num_boost_round=args.num_boost_round,
+            early_stopping_rounds=args.early_stopping, categorical_encoding=categorical_encoding,
+            feature_matrix=matrix,
         )
-
-        # Layer 2: one ensemble per group, fitted on that group's rows alone. Trained on the
-        # same feature columns, so one signature describes both layers; the slots a layer
-        # does not read are simply unused by its trees.
-        group_models: list[tuple[float, object]] = []
-        group_index = -1
-        if args.group_by_feature:
-            if args.group_by_feature not in features:
-                raise ValueError(
-                    f"--group-by-feature {args.group_by_feature!r} is not among --features; "
-                    "the runtime reads the group from a slot in the feature row, so it has "
-                    "to be one of them"
-                )
-            group_index = features.index(args.group_by_feature)
-            for value, rows in df.groupby(args.group_by_feature, sort=True):
-                # train_model cross-validates over problems, not rows, so a group with more
-                # rows than problems can still be unfittable. Skipping leaves the group to
-                # layer 1, which the adapter already handles -- a group it chose but layer 2
-                # does not describe ranks by layer 1 rather than being discarded.
-                try:
-                    group_models.append((
-                        float(value),
-                        train_model(
-                            rows,
-                            features,
-                            args.target,
-                            args.group_by,
-                            generated_encoding=generated_encoding,
-                            num_boost_round=args.num_boost_round,
-                            early_stopping_rounds=args.early_stopping,
-                        ),
-                    ))
-                except (ValueError, RuntimeError) as error:
-                    # Warn rather than fail: one unfittable group must not cost the artifact
-                    # every other group's layer 2, and the degradation is visible here.
-                    logger.warning("group %s not fitted (%s); it will rank by layer 1",
-                                   value, str(error).split(chr(10))[0][:90])
-            logger.info("Trained %d group model(s) on %s",
-                        len(group_models), args.group_by_feature)
-    except ValueError as error:
+        metrics = None
+        if args.report_regret:
+            metrics = evaluate_regret(
+                df, names, args.target, args.report_regret,
+                num_boost_round=args.num_boost_round, categorical_encoding=categorical_encoding,
+                feature_matrix=matrix, objective=args.objective,
+            )
+    except (OSError, TypeError, ValueError, KeyError) as error:
         logger.error("%s", error)
         return 1
 
-    if args.report_regret:
-        # Reported after training and measured independently of it: this scores the
-        # ranking the model induces on problems it did not see, which is the question
-        # the heuristic exists to answer. RMSE says how close the numbers are.
-        metrics = evaluate_regret(
-            df,
-            args.features,
-            args.target,
-            args.report_regret,
-            num_boost_round=args.num_boost_round,
-            generated_encoding=generated_encoding,
-        )
-        logger.info(
-            "Out-of-fold top-1 accuracy %.1f%% over %d problems "
-            "(%d single-variant excluded, %d unusable)",
-            metrics["top1_accuracy"] * 100.0,
-            metrics["problems_scored"],
-            metrics["problems_single_variant"],
-            metrics["problems_unusable"],
-        )
-        logger.info(
-            "Regret mean %.4f, median %.4f, p90 %.4f, p99 %.4f, max %.4f",
-            metrics["mean_regret"],
-            metrics["median_regret"],
-            metrics["p90_regret"],
-            metrics["p99_regret"],
-            metrics["max_regret"],
-        )
-        with (output_dir / "regret.json").open("w") as handle:
-            json.dump(metrics, handle, indent=2)
-
+    # No descriptor or model artifact is published before all input checks and fitting.
+    output_dir.mkdir(parents=True, exist_ok=True)
     lgbm_path = output_dir / "model.lgbm"
     model.save_model(str(lgbm_path))
-    logger.info("Saved LightGBM model to %s", lgbm_path)
 
-    derived = _parse_derived(args.derived)
-    features_signature = build_features_signature(features)
-    features_hash = compute_features_hash(
-        features_signature, generated_encoding or None, derived=derived
-    )
     fb_path = output_dir / "model.bin"
-    convert(
-        lgbm_path,
-        features_hash,
-        fb_path,
-        num_training_samples=len(df),
-        training_arches=args.training_arches,
-        model_version=args.model_version,
-        group_by_feature_index=group_index,
-        group_models=group_models or None,
-    )
-    logger.info("Converted to FlatBuffer: %s", fb_path)
-
+    convert(lgbm_path, features_hash, fb_path, num_training_samples=len(df),
+            training_arches=args.training_arches, model_version=args.model_version)
     if not args.keep_lgbm:
         lgbm_path.unlink()
-        logger.info("Removed intermediate %s", lgbm_path)
-
-    # `uhd_id` was resolved at entry, from --uhd-id or a fresh uuid4.
-    stem = args.descriptor_name
-
-    # The whole UHD, in the descriptor. RFC 0019 §4 always specified JSON; an earlier
-    # design put these fields in a FlatBuffer that a four-field stub pointed at, which
-    # made the UHD the only descriptor in the family a human could not read, diff or
-    # review -- to save 134 bytes on a file read once per engine.
-    #
-    # `model.bin` stays binary. It is read once per candidate score, and at a realistic
-    # 500 trees it is 3.7 MB; that one earns its format.
     descriptor = {
-        "version": "1.0",
-        "id": uhd_id,
-        "name": args.name,
-        "adapter": "tree_data",
-        "features_signature": features_signature,
-        "features_hash": features_hash,
-        # Omitted entirely when empty, so a UHD reading no engine-particular string field
-        # emits exactly the descriptor it did before this existed.
-        **({"categorical_encoding": generated_encoding} if generated_encoding else {}),
-        **({"derived": [{"name": n, "expression": e} for n, e in derived]} if derived else {}),
-        "objective": args.objective,
-        "score": {
-            "units": args.score_units or args.target,
-            "calibrated": args.calibrated,
-            # log1p because train_uhd.train_model always fits on log1p(target); the
-            # runtime inverts it to recover the declared units.
-            "transform": "log1p",
-        },
-        # The body key equals the adapter value (RFC 0019 §4). `artifact` is relative to
-        # this file, which is where the loader resolves it from, so the pair relocates
-        # together.
+        "version": "1.0", "id": uhd_id, "name": args.name, "adapter": "tree_data",
+        "features_signature": signature, "features_hash": features_hash,
+        "trained_against": trained_against, "objective": args.objective,
+        "score": {"units": args.score_units or args.target, "calibrated": args.calibrated, "transform": "log1p"},
         "tree_data": {"artifact": fb_path.name},
     }
-    descriptor_path = output_dir / f"{stem}.uhd.json"
-    with open(descriptor_path, "w", encoding="utf-8") as handle:
-        json.dump(descriptor, handle, indent=2)
-        handle.write("\n")
-    logger.info("Generated descriptor: %s", descriptor_path)
-
+    if categorical_encoding:
+        descriptor["categorical_encoding"] = categorical_encoding
+    descriptor_path = output_dir / f"{args.descriptor_name}.uhd.json"
+    descriptor_path.write_text(json.dumps(descriptor, indent=2) + "\n", encoding="utf-8")
     manifest = {
-        "uhd_id": uhd_id,
-        # What was asked for and what was trained, separately: a manifest that recorded
-        # only one of them would hide that the emitted signature is not the caller's.
-        "requested_features": list(args.features),
-        "features": features,
+        "uhd_id": uhd_id, "requested_features": args.features or requested_signature,
+        "features": names, "features_signature": signature, "features_hash": features_hash,
+        "trained_against": trained_against, "device_coverage": coverage,
         "constant_features": [{"column": name, "value": value} for name, value in constants],
-        "dropped_constant_features": dropped,
-        "keep_constant_features": bool(args.keep_constant_features),
-        "features_signature": features_signature,
-        "features_hash": features_hash,
-        "derived": [{"name": n, "expression": e} for n, e in derived],
-        "categorical_encoding": generated_encoding,
-        "target": args.target,
-        "objective": args.objective,
-        "score_units": args.score_units or args.target,
-        "score_calibrated": args.calibrated,
-        "score_transform": "log1p",
-        "group_by": args.group_by or [],
-        # The feature layer 1 groups on, and the count it produced. Recorded because the
-        # artifact alone gives an evaluator only a slot index, and a slot index cannot say
-        # which column it came from -- without the name, a report cannot attribute a regret
-        # to choosing the wrong group rather than the wrong member of the right one.
-        "group_by_feature": args.group_by_feature,
-        "group_models": len(group_models or []),
-        "num_trees": model.num_trees(),
-        "num_samples": len(df),
-        "input_file": str(input_path),
-        "training_arches": args.training_arches or [],
-        "model_version": args.model_version,
+        "dropped_constant_features": dropped, "drop_constant_features": bool(args.drop_constant_features),
+        "categorical_encoding": categorical_encoding, "target": args.target, "objective": args.objective,
+        "score_units": args.score_units or args.target, "score_calibrated": args.calibrated,
+        # RFC 0019.13 §10.5/§11.2: which measured timing the target came from. §11.2
+        # refuses cross-engine comparison between models trained on different ones, so
+        # a consumer has to be able to read it off the artifact rather than infer it.
+        "timing_statistic": args.timing_statistic,
+        "score_transform": "log1p", "group_by": groups or [], "num_trees": model.num_trees(),
+        "feature_importance": {
+            name: {"gain": float(gain), "split": int(split)}
+            for name, gain, split in zip(names, model.feature_importance(importance_type="gain"),
+                                         model.feature_importance(importance_type="split"))
+        },
+        "num_samples": len(df), "input_file": str(input_path.resolve()),
+        "input_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+        "training_arches": args.training_arches or [], "model_version": args.model_version,
+        "training_options": {"num_boost_round": args.num_boost_round, "early_stopping_rounds": args.early_stopping},
     }
-    manifest_path = output_dir / "train_manifest.json"
-    with open(manifest_path, "w", encoding="utf-8") as handle:
-        json.dump(manifest, handle, indent=2)
-    logger.info("Wrote training manifest: %s", manifest_path)
-
-    print("\nUHD generation complete")
-    print(f"  descriptor:     {descriptor_path}")
-    print(f"  model artifact: {fb_path} ({model.num_trees()} trees)")
-    print(f"  features hash:  {features_hash}")
-    if dropped:
-        print(f"  dropped (constant): {', '.join(dropped)}")
-    print(
-        "\nThe engine's UED must name this heuristic by id:\n"
-        f'  "heuristic": "{uhd_id}"\n'
-        "\nInstall the pair and write that id for you:\n"
-        f"  python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE>"
-    )
-
+    if immediate:
+        manifest.update(role=ROLE, binding=binding, arch=args.arch,
+                        training_problem_keys=sorted(set(zip(df["benchmark"], df["device"]))))
+    (output_dir / "train_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if metrics is not None:
+        (output_dir / "regret.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+    print(f"UHD generated: {descriptor_path}\nModel: {fb_path}\nFeatures hash: {features_hash}")
+    print(f"Install: python -m uhd_gen promote --model-dir {output_dir} --descriptor-tree <TREE> --role {args.role} --arch {args.arch or '<ARCH>'}")
     return 0
 
 

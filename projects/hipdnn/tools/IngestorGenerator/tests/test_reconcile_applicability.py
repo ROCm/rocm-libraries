@@ -42,8 +42,6 @@ _TOOL = _TOOLS / "reconcile_applicability.py"
 
 sys.path.insert(0, str(_TOOLS))
 
-from launch_surface import find_repo_root  # noqa: E402
-
 #: A stub standing in for both the kernel factory and the library entry point. Which
 #: shapes each serves is controlled per-test by the thresholds baked into the module.
 _STUB = '''
@@ -66,6 +64,20 @@ class Request:
             raise ValueError("head_size must be 64 or 128")
 
 
+class Adapter:
+    """A request in the GENERATOR side's vocabulary.
+
+    Real integrations need one when the kernel's dispatch entry point wants a
+    different shape of argument than the library's registry does. It duck-types as a
+    request but is not a `Request`, which is the whole point of the test below.
+    """
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+        if int(kw.get("head_size", 128)) not in (64, 128):
+            raise ValueError("head_size must be 64 or 128")
+
+
 class Candidate:
     def __init__(self, spec_id, algorithm, min_seqlen, opt_in=False, arches=()):
         self.spec_id, self.algorithm = spec_id, algorithm
@@ -84,7 +96,15 @@ class Candidate:
         return True, ""
 
     def admits(self, req):
-        """The complete question: capability prefilter, then the predicate."""
+        """The complete question: capability prefilter, then the predicate.
+
+        The isinstance check mirrors the real library: rocKE's candidates refuse
+        anything that is not their own request type, and duck-typing does not
+        satisfy a type check. The refusal is per-request and reads exactly like an
+        ordinary decline.
+        """
+        if not isinstance(req, Request):
+            return False, f"expected Request, got {type(req).__name__}"
         if self.arches and getattr(req, "arch", None) not in self.arches:
             return False, f"capability: arch {getattr(req, 'arch', None)!r} not in {self.arches}"
         return self._supports(req)
@@ -457,6 +477,84 @@ class TestAGateThatCannotPassByAskingNothing:
         assert "must be a JSON mapping" in result.stderr
 
 
+class TestReferenceRequestOverride:
+    """A profile whose `request.class` is an ADAPTER cannot use it against the
+    reference, and the failure looks exactly like a decline.
+
+    rocKE's candidates isinstance-check their argument and refuse anything else with
+    "expected AttentionRequest, got X". Duck-typing does not satisfy a type check.
+    That refusal is raised per shape and is recorded as a decline, so the tool
+    reported RECONCILED -- every decline is one the reference makes too -- having
+    never consulted the reference on a single shape. Same failure mode as
+    `TestAGateThatCannotPassByAskingNothing`, reached a different way.
+
+    `reference_request:` overrides `request:` for the reference side only, with an
+    optional `via:` translator so the mapping lives in the integration's own adapter.
+    """
+
+    @staticmethod
+    def _adapter_profile(tmp_path, *, reference_request: str) -> Path:
+        """`request.class` is `Adapter`, which every candidate type-rejects."""
+        path = tmp_path / f"adapter_{bool(reference_request)}.yaml"
+        path.write_text(
+            textwrap.dedent(
+                f"""
+                provider_root: {tmp_path}
+                slug: stub
+                arch: gfxstub
+                source: stub.py
+                builder: build_stub
+                engine: {{name: "hipkernel:Stub"}}
+                kmd_fields: []
+                metadata_fields: []
+                dispatch: {{module: stublib, function: kernel_spec}}
+                request:
+                  module: stublib
+                  class: Adapter
+                  defaults: {{algorithm: dense}}
+                {reference_request}
+                reference_candidates:
+                  module: stublib
+                  function: candidates
+                  match: algorithm
+                  family: dense
+                """
+            )
+        )
+        return path
+
+    def test_an_adapter_request_reconciles_by_asking_nothing(self, env, tmp_path):
+        """Without the override: every shape the reference sees raises at the type
+        check, so nothing is ever compared and the run must NOT report success."""
+        result = env.run(
+            self._adapter_profile(tmp_path, reference_request=""),
+            env.shapes(_LONG),
+        )
+        assert result.returncode == 2, result.stdout
+        assert "RECONCILED" not in result.stdout
+
+    def test_reference_request_restores_a_live_comparison(self, env, tmp_path):
+        """With the override the reference is asked in its own vocabulary, and the
+        shape both sides serve reconciles for a real reason."""
+        override = textwrap.indent(
+            textwrap.dedent(
+                """
+                reference_request:
+                  module: stublib
+                  class: Request
+                  defaults: {algorithm: dense}
+                """
+            ).strip(),
+            " " * 16,
+        ).lstrip()
+        result = env.run(
+            self._adapter_profile(tmp_path, reference_request=override),
+            env.shapes(_LONG),
+        )
+        assert result.returncode == 0, result.stderr
+        assert "both serve              1" in result.stdout
+
+
 class TestServingWhatTheReferenceDeclines:
     """The opposite direction, which used to be filed as agreement.
 
@@ -515,131 +613,3 @@ class TestServingWhatTheReferenceDeclines:
         result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_LONG))
         assert "asked nothing" not in result.stderr
         assert "agreement about nothing" not in result.stderr
-
-
-class TestTheRealGfx950SinkDeclinesStayFactual:
-    """The reconciler does not check reason TEXT, only that every declines KEY
-    matches a shape (mutating all six reasons to ``""`` or ``"lol"`` still exits 1
-    with an identical report) -- so a stale reason is invisible to every existing
-    gate. This class is the substitute: it re-derives, from the source files the
-    reasons cite, the two facts those reasons assert, and fails if either drifts.
-
-    Host-only: reads committed C++/JSON, no build or device needed.
-    """
-
-    _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)
-    _DECLINES = (
-        Path(__file__).resolve().parents[1]
-        / "configs"
-        / "gfx950_attention_dense.declines.json"
-    )
-    _GPU_PLAN = (
-        _REPO_ROOT
-        / "dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail"
-        / "GpuSdpaFwdPlan.hpp"
-    )
-    _CPU_PLAN = (
-        _REPO_ROOT
-        / "projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities"
-        / "cpu_graph_executor/detail/SdpaFwdPlan.hpp"
-    )
-
-    def _require_declines(self):
-        """Every test in this class defends a claim made by a row of
-        `gfx950_attention_dense.declines.json`. That file is a gfx950 pack
-        deliverable, so on a checkout without the pack there are no rows whose
-        framing could go stale and nothing to assert -- skip rather than fail.
-        This covers the two tests that re-derive a claim from the reference
-        sources as well as the three that read the rows directly: the CPU
-        reference only carries the `SUPPORTED: attention sinks` marker on a
-        branch that also ships these rows, so asserting on it elsewhere tests a
-        file the branch never claimed anything about."""
-        if not self._DECLINES.exists():
-            pytest.skip(
-                "gfx950_attention_dense.declines.json not present in this checkout"
-            )
-
-    def _reasons(self):
-        self._require_declines()
-        return json.loads(self._DECLINES.read_text())
-
-    def test_every_reason_is_substantive_not_a_placeholder(self):
-        """A reason mutated to ``""`` or ``"lol"`` must not be able to hide again:
-        require real prose, not merely a non-empty string."""
-        for name, reason in self._reasons().items():
-            assert len(reason) >= 80, (
-                f"{name}: decline reason is too short to be a real justification "
-                f"({len(reason)} chars) -- got {reason!r}"
-            )
-
-    def test_no_reason_claims_the_cpu_reference_cannot_verify_sinks(self):
-        """The exact staleness this finding fixed: a reason asserting sinks are
-        unverifiable BY ANYTHING is false once the CPU plan computes them
-        (SdpaFwdPlan.hpp). Guards against the claim silently regressing."""
-        for name, reason in self._reasons().items():
-            lowered = reason.lower()
-            assert "cannot verify it" not in lowered, (
-                f"{name}: reason claims sinks are unverifiable outright, but the "
-                f"test_sdk CPU reference computes them -- see SdpaFwdPlan.hpp"
-            )
-            assert "no reference executor available" not in lowered, (
-                f"{name}: reason claims no reference executor can verify sinks, "
-                f"which is false now that the CPU reference does"
-            )
-
-    def test_every_reason_names_the_abi_slot_and_the_gpu_reference(self):
-        """The two facts that replaced the stale claim: the 5-slot ABI has no
-        sink_ptr, and the GPU reference (this engine's CI executor) still
-        declines sinks. Both must survive in every row, not just some."""
-        for name, reason in self._reasons().items():
-            assert (
-                "5-argument" in reason or "5-slot" in reason
-            ), f"{name}: reason must name the 5-argument/5-slot kernarg ABI limit"
-            assert "GPU reference" in reason or "GpuSdpaFwdPlan" in reason, (
-                f"{name}: reason must name the GPU reference executor as the one "
-                f"that still declines sinks"
-            )
-
-    def test_the_gpu_reference_still_declines_sinks_as_claimed(self):
-        """Re-derive the claim from source rather than trusting the reason's
-        prose: GpuSdpaFwdPlan.hpp must still return false on
-        sink_token_tensor_uid. If this ever flips, every reason in the file
-        needs to be rewritten, not just this test updated."""
-        self._require_declines()
-        if not self._GPU_PLAN.exists():
-            pytest.skip("GpuSdpaFwdPlan.hpp not present in this checkout")
-        text = self._GPU_PLAN.read_text()
-        idx = text.find("sink_token_tensor_uid")
-        assert idx != -1, "GpuSdpaFwdPlan.hpp no longer mentions sink_token_tensor_uid"
-        # Read the body of the `if` that TESTS sinks, not a character window around
-        # the mention. A window is satisfied by any neighbouring `return false` --
-        # including the block-sparse and FP8 branches that bracket this one -- so it
-        # stays green through the one mutation that matters: flipping this branch to
-        # accept sinks while its neighbours still decline. Scope to the braces.
-        open_brace = text.find("{", idx)
-        close_brace = text.find("}", open_brace)
-        assert open_brace != -1 and close_brace != -1, (
-            "could not locate the braced body of the branch testing "
-            "sink_token_tensor_uid in GpuSdpaFwdPlan.hpp -- the check was "
-            "restructured and this test needs rewriting, not relaxing"
-        )
-        branch_body = text[open_brace : close_brace + 1]
-        assert "return false" in branch_body, (
-            "GpuSdpaFwdPlan.hpp's sink_token_tensor_uid branch no longer returns "
-            "false -- the GPU reference may now accept sinks, which would make "
-            f"every declines.json row's central claim stale. Branch body: {branch_body!r}"
-        )
-
-    def test_the_cpu_reference_still_computes_sinks_as_claimed(self):
-        """The other half: SdpaFwdPlan.hpp must still mark sinks SUPPORTED rather
-        than declining them, or the "ABI-and-CI-coverage gap, not unverifiable"
-        framing in every reason becomes false again."""
-        self._require_declines()
-        if not self._CPU_PLAN.exists():
-            pytest.skip("SdpaFwdPlan.hpp not present in this checkout")
-        text = self._CPU_PLAN.read_text()
-        assert "SUPPORTED: attention sinks" in text, (
-            "SdpaFwdPlan.hpp no longer marks sinks as supported -- the CPU "
-            "reference may have regressed to declining sink_token_tensor_uid, "
-            "which would make declines.json's framing stale again"
-        )

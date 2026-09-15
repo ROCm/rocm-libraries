@@ -1162,3 +1162,12 @@ packs:
     - {batch: 4, seqlen_q: 8192, seqlen_kv: 8192, num_query_heads: 48, num_kv_heads: 48, head_size: 128, causal: true, dtype: fp16, knobs: knobs4, resolved: {use_exp2_fast: 1}, ordinal: 2515}
     - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 64, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2521}
     - {batch: 8, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 8, head_size: 128, causal: false, dtype: fp16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2566}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 2567}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 28, num_kv_heads: 4, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2570}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 32, num_kv_heads: 32, head_size: 128, causal: true, dtype: bf16, knobs: knobs5, resolved: {use_exp2_fast: 0}, ordinal: 2572}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 2575}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2578}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 2580}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 40, num_kv_heads: 40, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2583}
+    - {batch: 4, seqlen_q: 2048, seqlen_kv: 2048, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs7, resolved: {use_exp2_fast: 0}, ordinal: 2585}
+    - {batch: 4, seqlen_q: 4096, seqlen_kv: 4096, num_query_heads: 64, num_kv_heads: 8, head_size: 128, causal: true, dtype: bf16, knobs: knobs6, resolved: {use_exp2_fast: 1}, ordinal: 2588}

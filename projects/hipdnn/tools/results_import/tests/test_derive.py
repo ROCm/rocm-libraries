@@ -12,6 +12,7 @@ rather than against the implementation's own output.
 from __future__ import annotations
 
 import json
+import math
 import pathlib
 
 import pytest
@@ -130,3 +131,96 @@ def test_an_unreadable_declaration_raises_rather_than_nulling():
         evaluate({"*": ["$q.absent", 2]}, {"M": 1024})
     with pytest.raises(UnsupportedExpression):
         dtype_width("float64")
+
+
+def test_sdpa_causal_flops_is_the_effective_count_not_a_flat_halving():
+    """The mask's own shape, which is why the declaration needs a `max`.
+
+    RFC 0019 13.6's average effective KV length per query is `kv_len - q_len + (q_len+1)/2`,
+    which over Sq queries is `Sq*Sk - Sq*(Sq-1)/2`. A flat `*0.5` of the dense count agrees only
+    when Sq == Sk, and it is wrong by nearly 2x when Sk > Sq -- most of a prefill or decode
+    corpus, and the direction that flatters nothing: every tflops derived from it would be off
+    by a factor no consumer can see.
+    """
+    sdpa = opmeta("sdpa_fwd")["flops"]
+    base = dict(batch=2, heads=16, head_dim=128, is_causal=1)
+    scale = 4 * 2 * 16 * 128
+
+    square = evaluate(sdpa, dict(base, seqlen_q=1024, seqlen_k=1024))
+    assert square == scale * (1024 * 1024 - 1024 * 1023 / 2)
+
+    # Sk > Sq: the effective count is nearly the whole rectangle, not half of it.
+    wide = evaluate(sdpa, dict(base, seqlen_q=128, seqlen_k=4096))
+    assert wide == scale * (128 * 4096 - 128 * 127 / 2)
+    assert wide == pytest.approx(1.97 * scale * 128 * 4096 / 2, rel=1e-2)
+
+    # Queries outrunning keys is what the max() guards: the first term goes negative there, and
+    # a negative FLOP count would derive a negative throughput that sorts ahead of nothing and
+    # behind everything.
+    tall = evaluate(sdpa, dict(base, seqlen_q=1024, seqlen_k=128))
+    assert tall == scale * 1024 * 128 / 2
+
+    # `is_causal` reads as 1 or 0, so the non-causal arm is the dense count exactly.
+    dense = evaluate(sdpa, dict(base, is_causal=0, seqlen_q=1024, seqlen_k=1024))
+    assert dense == scale * 1024 * 1024
+
+
+#: One realistic query row per shipped operation, checked against each file's `parameters`
+#: below. Realistic rather than generated: a conv row with every dimension set to the same
+#: number produces a negative output extent, and a fixture that is nonsense proves nothing
+#: about the declaration it evaluates.
+REPRESENTATIVE_QUERIES = {
+    "matmul": dict(M=1024, N=1024, K=1024, dtype="fp16"),
+    "conv_fwd": dict(N=32, C=64, K=64, groups=1, H=56, W=56, R=3, S=3, pad_h=1, pad_w=1,
+                     stride_h=1, stride_w=1, dilation_h=1, dilation_w=1, dtype="fp16"),
+    "sdpa_fwd": dict(batch=2, heads=16, seqlen_q=1024, seqlen_k=1024, head_dim=128,
+                     is_causal=1, dtype="fp16"),
+    "layernorm_fwd": dict(batch=4, seq_len=128, hidden_dim=768, dtype="fp16"),
+    "rmsnorm_fwd": dict(batch=4, seq_len=128, hidden_dim=768, dtype="fp16"),
+    "pointwise": dict(D0=8, D1=16, D2=32, D3=64, mode="ADD", dtype="fp16"),
+    "reduction": dict(rows=1024, cols=1024, mode="ADD", dtype="fp16"),
+}
+
+
+def test_every_shipped_declaration_evaluates_with_the_operators_this_module_implements():
+    """The check that was missing when `max` was.
+
+    sdpa_fwd has declared a `max` since it was written, and every import of an sdpa corpus died
+    with "unsupported operator 'max'" -- for the one operation we generate gfx942 heuristics
+    for. The suite evaluated hand-written expressions and two declarations, never the shipped
+    set, so the gap was invisible from here and only appeared on real measured data.
+
+    Evaluating every file also makes the two halves inseparable: a declaration may not name an
+    operator this module lacks, and this module's operator table may not be trimmed below what
+    the declarations name.
+    """
+    paths = sorted(OPERATIONS.glob("*.opmeta.json"))
+    assert paths, "no shipped operation declarations found"
+
+    for path in paths:
+        with path.open() as handle:
+            declaration = json.load(handle)
+        operation = declaration["operation"]
+        assert operation in REPRESENTATIVE_QUERIES, (
+            f"{operation} ships a declaration with no representative query row here; add one "
+            "rather than leaving the declaration unevaluated"
+        )
+        query = REPRESENTATIVE_QUERIES[operation]
+        assert set(query) == set(declaration["parameters"]), (
+            f"{operation}'s representative row and its declared parameters disagree: "
+            f"row-only {sorted(set(query) - set(declaration['parameters']))}, "
+            f"declared-only {sorted(set(declaration['parameters']) - set(query))}"
+        )
+
+        # `bytes` is not declared by anything today; iterated anyway so the first declaration to
+        # carry one is evaluated here rather than at an import.
+        for key in ("flops", "elements", "bytes"):
+            if key not in declaration:
+                continue
+            value = evaluate(declaration[key], query)
+            assert math.isfinite(value) and value > 0, f"{operation}.{key} evaluated to {value}"
+
+        metrics = derive_metrics(query, time_ms=1.0, opmeta=declaration)
+        assert metrics["gbs"] > 0
+        # tflops is null exactly for the operations that declare no flops, never by accident.
+        assert (metrics["tflops"] is None) is ("flops" not in declaration)

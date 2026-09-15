@@ -25,6 +25,7 @@ shipped tiles are simultaneously legal at the shapes the corpus actually has.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -247,23 +248,46 @@ class TestBundleDiscovery:
 
 
 class TestGfx950RealBundle:
-    """The real 84-variant gfx950 bundle against the real 93-shape corpus --
-    the case the module docstring and `TestHistoricalCase` above only model in
-    miniature. Nothing here needs a device or a build: `.kdp.json`/`.kmd.json`
-    are committed descriptor JSON and the corpus is a committed shape list.
+    """The real gfx950 bundle against the real 93-shape corpus -- the case the
+    module docstring and `TestHistoricalCase` above only model in miniature.
+    Nothing here needs a device or a build: `.kdp.json`/`.kmd.json` are
+    committed descriptor JSON and the corpus is a committed shape list.
 
-    A second-pass review found that `gfx950_attention_dense.profile.yaml` had
-    no `score:` block, so this exact bundle ran NARROWED -- every applicable
-    variant reported reachable without ever checking which one the native
-    scorer would pick. The review also established, by actually computing
-    `applicable()` over all 84 descriptors x 93 shapes, that the gap was inert:
-    no shape has more than one applicable variant, so no ranking, tie, or
-    fall-through is ever evaluated by this bundle today. The tests below pin
-    both halves of that finding so a second `block_n` (or any change that
-    makes ranking start to matter) cannot silently go unranked again: the
-    first test fails the day the corpus and bundle stop being that narrow,
-    and the second fails if the declared ranking ever disagrees with the
-    narrowed (unranked) verdict while the bundle is still that narrow.
+    WHAT THESE USED TO ASSERT, AND WHY THAT EXPIRED. When the pack shipped 84
+    variants, a second-pass review established that no corpus shape had more
+    than ONE applicable variant, so the profile's missing `score:` block was
+    inert -- no ranking, tie, or fall-through was ever evaluated. These tests
+    pinned that with literal counts (84 variants, `SELECTED 82`, `UNREACHABLE
+    2`) and an `applicable() <= 1` assertion.
+
+    `329865eb878` ("full coverage + block_m variants, 1612 kernels") ENDED that
+    inertness ON PURPOSE: it ships both `block_m` geometries per shape, so every
+    covered shape now admits exactly the twin. `<= 1` therefore had to fail, and
+    the literal counts moved with every resize (84 -> 1612 -> 1678 -> 1694).
+    Those literals were fixture, not invariant, and they were asserting the
+    absence of the very feature that commit added.
+
+    WHAT ACTUALLY HAS TO HOLD, and what these now check instead -- derived from
+    the bundle rather than hard-coded, so a resize cannot make them stale again:
+
+      1. Every candidate set a shape presents is TIED ON `block_n`. That is the
+         real precondition for the native `scoreKernel`, which ranks on
+         `block_n` ALONE (Gfx950AttentionDenseNative.cpp): while all candidates
+         for a shape share one `block_n`, the declared ranking cannot reorder
+         them and the choice falls to tuning. The day a second `block_n` reaches
+         one shape's candidate set, `score` starts doing real work and its
+         correctness needs verifying rather than assuming -- which is the alarm
+         the old `<= 1` was reaching for, stated in terms of the thing that
+         actually matters.
+      2. Declaring the ranking still changes NOTHING observable: the narrowed
+         and declared runs must agree line for line. That is the profile
+         comment's claim, and it survives the resize untouched.
+
+    Consequence worth stating, because it is the measurement trap: tied
+    candidates mean the shipped set is only as good as its TIE-BREAK unless
+    something measures them. That is why every sweep over this pack must export
+    `HIPDNN_FORCE_BENCHMARKING=1` (Knowledge/hipdnn/gpu-perf-comparison-
+    methodology.md trap 3 -- unforced, the identical set measured 1.195 -> 0.999).
     """
 
     _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)
@@ -310,12 +334,22 @@ class TestGfx950RealBundle:
             if not path.exists():
                 pytest.skip(f"{label} not present in this checkout")
 
-    def test_no_shape_has_more_than_one_applicable_variant_today(self):
-        """The inertness claim, checked directly rather than inferred from the
-        tool's own report: with 84 descriptors sharing one `block_n` value, if
-        any corpus shape ever admits two applicable variants this assertion is
-        the first thing to fail, which is exactly when a declared ranking
-        starts doing real work instead of being a no-op."""
+    def test_every_candidate_set_is_tied_on_block_n(self):
+        """The precondition for the native `scoreKernel`, checked directly
+        rather than inferred from the tool's own report.
+
+        `scoreKernel` ranks on `block_n` ALONE. So long as every candidate set a
+        shape presents holds ONE distinct `block_n`, the declared ranking is a
+        tie it cannot break, and which variant runs is decided by tuning rather
+        than by `score`. That is the property the pack's own comment says to
+        re-check whenever the variant set changes, and it is what makes
+        `HIPDNN_FORCE_BENCHMARKING=1` mandatory for any perf claim about it.
+
+        This deliberately does NOT assert `len(candidates) <= 1`. Shipping both
+        `block_m` geometries per shape (329865eb878) made multi-candidate sets
+        the intended state; the question is no longer "is there a choice?" but
+        "can `score` see a difference?", and the answer must stay no.
+        """
         self._require_assets()
         defaults, descriptors = variant_reachability.load_bundle(str(self._KDP))
         shapes = json.loads(self._SHAPES.read_text())
@@ -330,29 +364,47 @@ class TestGfx950RealBundle:
             d["name"]: variant_reachability._resolved_metadata(d, defaults)
             for d in descriptors
         }
-        remapped = [variant_reachability._remap(s, field_map) for s in shapes]
-        counts = [
-            sum(
-                1
+        offenders = {}
+        covered = 0
+        for shape in shapes:
+            remapped = variant_reachability._remap(shape, field_map)
+            candidates = [
+                meta
                 for meta in metas.values()
-                if variant_reachability.applicable(meta, s, divides)
-            )
-            for s in remapped
-        ]
-        assert max(counts) <= 1, (
-            "a corpus shape now admits more than one applicable variant -- the "
-            "declared `score:` block in gfx950_attention_dense.profile.yaml is "
-            "no longer a no-op and its correctness needs to be re-verified, "
-            "not assumed"
+                if variant_reachability.applicable(meta, remapped, divides)
+            ]
+            if not candidates:
+                continue
+            covered += 1
+            block_ns = {meta["block_n"] for meta in candidates}
+            if len(block_ns) > 1:
+                offenders[str(sorted(remapped.items()))] = sorted(block_ns)
+        # A query that matches nothing is a failed query, not evidence of
+        # tidiness -- the assertion below would pass vacuously on an empty
+        # bundle or a mis-keyed field_map.
+        assert covered, (
+            "no corpus shape matched ANY variant; the field_map or the bundle "
+            "is wrong, so this test proved nothing"
+        )
+        assert not offenders, (
+            f"{len(offenders)} shape(s) now present candidates differing in "
+            f"`block_n`: {offenders}. The native scoreKernel ranks on block_n "
+            f"alone, so it is no longer a tie -- the ranking now picks a "
+            f"winner and its correctness needs verifying, not assuming."
         )
 
     def test_declared_ranking_matches_the_narrowed_verdict(self, tmp_path):
         """Runs the real tool twice against the real bundle: once with no
         ranking declared (narrowed), once with the profile's `score:` block.
-        Both must land on the identical 82 SELECTED / 0 APPLICABLE-BUT-NEVER-
-        WINS / 2 UNREACHABLE verdict established by the review -- proof that
-        declaring the ranking changed nothing observable today, which is the
-        claim the profile comment makes."""
+
+        The two must agree on EVERY tally. That is the profile comment's claim
+        -- declaring the ranking changes nothing observable -- and it is the
+        thing worth pinning. The tallies are compared to EACH OTHER rather than
+        to literals: the old form hard-coded `SELECTED 82` from an 84-variant
+        bundle and went stale three resizes running (84 -> 1612 -> 1678 -> 1694)
+        while the property it meant to protect never changed.
+        """
+
         self._require_assets()
         narrowed = subprocess.run(
             [
@@ -386,7 +438,32 @@ class TestGfx950RealBundle:
         assert "NO RANKING DECLARED" in narrowed.stdout
         assert "NO RANKING DECLARED" not in declared.stdout
         assert "ranking declared  block_n (max wins)" in declared.stdout
-        for out in (narrowed.stdout, declared.stdout):
-            assert "SELECTED                    82" in out
-            assert "APPLICABLE-BUT-NEVER-WINS   0" in out
-            assert "UNREACHABLE                 2" in out
+
+        def tallies(text):
+            found = dict(
+                re.findall(
+                    r"^\s+(SELECTED|APPLICABLE-BUT-NEVER-WINS|UNREACHABLE)\s+(\d+)\s*$",
+                    text,
+                    re.M,
+                )
+            )
+            # An empty parse would make the equality below trivially true, so
+            # require all three verdicts to have actually been read.
+            assert set(found) == {
+                "SELECTED",
+                "APPLICABLE-BUT-NEVER-WINS",
+                "UNREACHABLE",
+            }, f"could not parse the verdict tallies from:\n{text}"
+            return found
+
+        narrowed_tallies = tallies(narrowed.stdout)
+        assert narrowed_tallies == tallies(declared.stdout), (
+            "declaring the ranking changed the verdict; the profile's claim "
+            "that `score:` is observationally inert on this bundle no longer "
+            "holds and needs re-verifying"
+        )
+        # APPLICABLE-BUT-NEVER-WINS is the one tally with an absolute meaning:
+        # a variant applicable to some shape yet always outranked is dead
+        # weight that every other gate reports green.
+        assert narrowed_tallies["APPLICABLE-BUT-NEVER-WINS"] == "0"
+        assert int(narrowed_tallies["SELECTED"]) > 0
