@@ -342,10 +342,13 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 64, 1, 256]
+          - Exact: [128, 64, 1, 512]
         - ActivationArgs:
           - [Enum: none]
   -
-    - # ProblemType, TN, F8 swizzle-B, multi-wave N-split + HalfPLR=3 (rotating Valu groups; DepthU=256)
+    - # ProblemType, TN, F8 swizzle-B, multi-wave N-split + HalfPLR=3 (rotating Valu groups; DepthU=256).
+      # K=512 also exercises multi-main-loop-iteration (K>DepthU): the swizzled local read must reset its
+      # per-K-sub-iteration LDS offset at each DepthU boundary.
       OperationType: GEMM
       DataType: F8
       DestDataType: F8
@@ -406,5 +409,6 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 64, 1, 256]
+          - Exact: [128, 64, 1, 512]
         - ActivationArgs:
           - [Enum: none]
