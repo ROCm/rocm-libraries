@@ -25,10 +25,10 @@
 from . import __version__
 from . import Parallel
 from .Utilities.ConditionalImports import print, TENSILE_TERM_COLORS
-from .Utilities.Toolchain import getVersion
 from collections import OrderedDict
 
 from copy import deepcopy
+from pathlib import Path
 from .AsmCaps import getCapabilitiesCache
 from typing import Any, NamedTuple, Optional, Tuple, Dict
 
@@ -2410,12 +2410,61 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
       printExit("Config file requires version=%s is not compatible with current Tensile version=%s" \
           % (config["MinimumRequiredVersion"], __version__) )
 
-  if "HipConfig" in config:
-    output = getVersion(config["HipConfig"], regex=r'(.+)')
-    globalParameters["HipClangVersion"] = output.strip()
+  version_str = os.environ.get("ROCM_VERSION")
+  if not version_str:
+    # Note: Python ROCm SDK (pip) version detection is intentionally omitted
+    # here; it will be handled by PR #11023 with proper feature-gating.
+    for root in [os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), "/opt/rocm"]:
+      if root:
+        try:
+          version_str = (Path(root) / ".info" / "version").read_text().strip()
+          break
+        except OSError:
+          continue
+  if not version_str:
+    # Fallback: derive ROCm root from PATH (e.g. TheRock builds where
+    # amdclang++ is on PATH but ROCM_PATH is not set and /opt/rocm doesn't exist).
+    # Walk up from the executable's directory: handles both dist/bin/ and
+    # dist/lib/llvm/bin/ layouts by trying each ancestor.
+    import shutil
+    for exe in ["amdclang++", "rocm-smi", "amd-smi"]:
+      exe_path = shutil.which(exe)
+      if not exe_path:
+        continue
+      candidate = Path(exe_path).parent
+      for _ in range(5):
+        # Standard ROCm install layout: .info/version
+        try:
+          version_str = (candidate / ".info" / "version").read_text().strip()
+          break
+        except OSError:
+          pass
+        # TheRock component dist layout: include/hip/hip_version.h
+        try:
+          hip_ver_h = (candidate / "include" / "hip" / "hip_version.h").read_text()
+          maj = re.search(r'#define\s+HIP_VERSION_MAJOR\s+(\d+)', hip_ver_h)
+          min_ = re.search(r'#define\s+HIP_VERSION_MINOR\s+(\d+)', hip_ver_h)
+          pat = re.search(r'#define\s+HIP_VERSION_PATCH\s+(\d+)', hip_ver_h)
+          if maj and min_ and pat:
+            version_str = f"{maj.group(1)}.{min_.group(1)}.{pat.group(1)}"
+            break
+        except OSError:
+          pass
+        parent = candidate.parent
+        if parent == candidate:
+          break
+        candidate = parent
+      if version_str:
+        break
+  if version_str:
+    # Strip pre-release suffixes before storing (e.g. "0a20260813" -> "0")
+    # so that nightly version strings like "10.1.0a20260813" are handled correctly.
+    parts = version_str.split(".")[:3]
+    version_str = ".".join(re.match(r'\d+', p.split("-")[0]).group() for p in parts)
+    globalParameters["HipClangVersion"] = version_str
     tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
   else:
-    raise ValueError("HipConfig not specified in config, could not set HipClangVersion")
+    raise ValueError("ROCM_VERSION not set, could not set HipClangVersion")
 
   # User-specified global parameters
   tPrint(3, "GlobalParameters:")
@@ -2529,7 +2578,6 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
     "Version",
     "ClientConfig",
     "WriteMasterSolutionIndex",
-    "HipConfig",
     "OffloadBundler",
     "Assembler",
   }

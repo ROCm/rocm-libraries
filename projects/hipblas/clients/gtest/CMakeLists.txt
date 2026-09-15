@@ -166,7 +166,7 @@ if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE stdc++fs )
 endif()
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   target_link_libraries( hipblas-test PRIVATE hip::host )
 
   if( CUSTOM_TARGET )
@@ -174,12 +174,8 @@ if(HIP_PLATFORM STREQUAL amd)
   endif( )
 
 else( )
-  target_include_directories( hipblas-test
-    PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
-
-  target_link_libraries( hipblas-test PRIVATE ${CUDA_LIBRARIES} )
+  target_include_directories( hipblas-test SYSTEM PRIVATE $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}> )
+  target_link_libraries( hipblas-test PRIVATE hip::host ${CUDA_LIBRARIES} )
 endif( )
 
 if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)

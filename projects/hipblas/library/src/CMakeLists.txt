@@ -38,7 +38,7 @@ endfunction( )
 # ########################################################################
 prepend_path( ".." hipblas_headers_public relative_hipblas_headers_public )
 
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   set( hipblas_source "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblas.cpp" )
 
   message(STATUS "** NOTE: amd_detail/hipblas.cpp is compiled with the verbose flag -v for QC purposes.")
@@ -66,10 +66,13 @@ endif()
 set(static_depends)
 
 find_package( hipblas-common REQUIRED CONFIG PATHS ${ROCM_PATH})
-target_link_libraries( hipblas PUBLIC roc::hipblas-common )
+# hip::host is required unconditionally: hipBLAS' public headers expose HIP
+# types and the hip::host target provides the HIP runtime include directories
+# needed by consumers of roc::hipblas on both AMD and CUDA backends.
+target_link_libraries( hipblas PUBLIC roc::hipblas-common hip::host )
 
 # Build hipblas from source on AMD platform
-if(HIP_PLATFORM STREQUAL amd)
+if(NOT USE_CUDA)
   if( NOT TARGET rocblas )
     if( CUSTOM_ROCBLAS )
       set ( ENV{rocblas_DIR} ${CUSTOM_ROCBLAS})
@@ -83,7 +86,6 @@ if(HIP_PLATFORM STREQUAL amd)
 
   list(APPEND static_depends PACKAGE rocblas)
   target_link_libraries( hipblas PRIVATE roc::rocblas )
-  target_link_libraries( hipblas PUBLIC hip::host )
 
   # Add rocSOLVER as a dependency if BUILD_WITH_SOLVER is on
   if( BUILD_WITH_SOLVER )
@@ -112,15 +114,16 @@ if(HIP_PLATFORM STREQUAL amd)
   endif( )
 
 else( )
-  target_compile_definitions( hipblas PRIVATE ${HIPBLAS_HIP_PLATFORM_COMPILER_DEFINES} )
+  target_compile_definitions( hipblas PRIVATE ${HIPBLAS_CUDA_COMPILER_DEFINES} )
 
-  target_link_libraries( hipblas PRIVATE ${CUDA_CUBLAS_LIBRARIES} )
-
-  # External header includes included as system files
-  target_include_directories( hipblas
-    SYSTEM PRIVATE
-      $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-  )
+  # hipBLAS' public headers expose cuBLAS and CUDA runtime declarations on this
+  # backend, so propagate their usage requirements to consumers of roc::hipblas.
+  # Using legacy FindCUDA variables since FindCUDAToolkit (which provides
+  # imported targets) requires CMake 3.17. Include dirs must be added explicitly
+  # because legacy variables do not propagate them transitively.
+  target_include_directories( hipblas SYSTEM PUBLIC
+    $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}> )
+  target_link_libraries( hipblas PUBLIC ${CUDA_CUBLAS_LIBRARIES} ${CUDA_LIBRARIES} )
 endif( )
 
 # External header includes included as system files
@@ -179,7 +182,7 @@ rocm_install_targets(
 )
 #         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_EXECUTE WORLD_READ
 
-if(HIP_PLATFORM STREQUAL amd )
+if(NOT USE_CUDA )
   rocm_export_targets(
     TARGETS roc::hipblas
     DEPENDS PACKAGE hip

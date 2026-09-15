@@ -232,7 +232,7 @@ function(TensileCreateLibraryFiles
   endif()
   set(ENV_PATH_ARG "PATH=${ESC_PATH}")
   set(CommandLine
-    "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" --
+    "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" "ROCM_VERSION=${hip_VERSION}" --
     ${CommandLine})
   message(STATUS "Tensile_CREATE_COMMAND: ${CommandLine}")
 
