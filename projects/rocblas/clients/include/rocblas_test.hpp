@@ -198,9 +198,26 @@ bool match_test_category(const Arguments& arg, const char* category);
 // INSTANTIATE_TEST_CATEGORY(testclass, HMM)         \
 // INSTANTIATE_TEST_CATEGORY(testclass, known_bug)
 
-// Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression
-#define CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(test) \
-    catch_signals_and_exceptions_as_failures([&] { test; }, true)
+// Macro to call catch_signals_and_exceptions_as_failures() with a lambda expression.
+// YAML threads>1, devices>1 (except repeatability_check, which loops GPUs in testing_*.hpp),
+// or HMM:true require RUN_TEST_ON_THREADS_STREAMS in TEST_P; this path ignores those fields
+// (including the HMM managed-memory skip).
+#define CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(test)                                           \
+    do                                                                                           \
+    {                                                                                            \
+        const auto& arg = GetParam();                                                            \
+        ASSERT_LE(arg.threads, 1)                                                                \
+            << "YAML threads>1 requires RUN_TEST_ON_THREADS_STREAMS in TEST_P";                  \
+        if(!arg.repeatability_check)                                                             \
+        {                                                                                        \
+            ASSERT_LE(arg.devices, 1)                                                            \
+                << "YAML devices>1 requires RUN_TEST_ON_THREADS_STREAMS in TEST_P "              \
+                   "(repeatability_check may set devices without that dispatch)";                \
+        }                                                                                        \
+        ASSERT_FALSE(arg.HMM) << "YAML HMM:true requires RUN_TEST_ON_THREADS_STREAMS in TEST_P " \
+                                 "(managed-memory skip is only in that dispatch)";               \
+        catch_signals_and_exceptions_as_failures([&] { test; }, true);                           \
+    } while(0)
 
 // Function to catch signals and exceptions as failures
 void launch_test_on_threads(std::function<void()> test,
@@ -224,9 +241,9 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
     do                                                                                 \
     {                                                                                  \
         const auto& arg          = GetParam();                                         \
-        size_t      threads      = arg.threads;                                        \
-        size_t      streams      = arg.streams;                                        \
-        size_t      devices      = arg.devices;                                        \
+        size_t      threads      = arg.threads > 0 ? arg.threads : 1;                  \
+        size_t      streams      = arg.streams > 0 ? arg.streams : 1;                  \
+        size_t      devices      = arg.devices > 0 ? arg.devices : 1;                  \
         int         availDevices = 0;                                                  \
         bool        HMM          = arg.HMM;                                            \
         CHECK_HIP_ERROR(hipGetDeviceCount(&availDevices));                             \

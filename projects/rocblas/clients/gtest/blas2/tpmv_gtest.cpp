@@ -71,6 +71,7 @@ namespace
         static std::string name_suffix(const Arguments& arg)
         {
             RocBLAS_TestName<tpmv_template> name(arg.name);
+            name << rocblas_datatype2string(arg.a_type);
 
             if(strstr(arg.function, "_bad_arg") != nullptr)
             {
@@ -78,9 +79,8 @@ namespace
             }
             else
             {
-                name << rocblas_datatype2string(arg.a_type) << '_' << (char)std::toupper(arg.uplo)
-                     << '_' << (char)std::toupper(arg.transA) << '_' << (char)std::toupper(arg.diag)
-                     << '_' << arg.N;
+                name << '_' << (char)std::toupper(arg.uplo) << '_' << (char)std::toupper(arg.transA)
+                     << '_' << (char)std::toupper(arg.diag) << '_' << arg.N;
 
                 if(TPMV_TYPE == TPMV_STRIDED_BATCHED)
                     name << '_' << arg.stride_a;

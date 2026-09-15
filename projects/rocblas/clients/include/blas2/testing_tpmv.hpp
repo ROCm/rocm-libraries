@@ -67,13 +67,13 @@ void testing_tpmv_bad_arg(const Arguments& arg)
     DAPI_EXPECT(rocblas_status_invalid_pointer,
                 rocblas_tpmv_fn,
                 (handle, uplo, transA, diag, N, dAp, nullptr, incx));
-    // If N is 64 bit
-    if(arg.api & c_API_64)
+    // If N is 64 bit and API is not 64 bit, then N truncation seen as negative value
+    if(!(arg.api & c_API_64))
     {
         int64_t n_over_int32 = 2147483649;
         DAPI_EXPECT(rocblas_status_invalid_size,
                     rocblas_tpmv_fn,
-                    (nullptr, uplo, transA, diag, n_over_int32, dAp, dx, incx));
+                    (handle, uplo, transA, diag, n_over_int32, dAp, dx, incx));
     }
 }
 

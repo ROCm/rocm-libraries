@@ -45,11 +45,14 @@ Definitions:
 Tests:
 - name: tpmv_bad_arg
   category: quick
-  function: tpmv_bad_arg
-  precision: *single_double_precisions
-  uplo: [L, U]
-  transA: [N, T, C]
-  diag: [N, U]
+  function: 
+  - tpmv_bad_arg
+  - tpmv_batched_bad_arg
+  - tpmv_strided_batched_bad_arg
+  precision: *single_double_precisions_complex_real
+  uplo: L
+  transA: N
+  diag: N
   api: [ C, FORTRAN, FORTRAN_64 ]
 
 - name: tpmv_arg_checks
@@ -153,15 +156,6 @@ Tests:
     - tpmv_batched: *single_precision
     - tpmv_strided_batched: *single_precision
 
-- name: tpmv_batched_bad_arg
-  category: pre_checkin
-  function: tpmv_batched_bad_arg
-  precision: *single_double_precisions
-  uplo: [L, U]
-  transA: [  N, T, C ]
-  diag: [N, U]
-  api: [ C, FORTRAN ]
-
 - name: tpmv_batched_small
   category: quick
   function: tpmv_batched
@@ -219,16 +213,6 @@ Tests:
     - tpmv_batched: *single_precision
     - tpmv_strided_batched: *single_precision
   stride_scale: 1
-
-- name: tpmv_strided_batched_bad_arg
-  category: pre_checkin
-  function: tpmv_strided_batched_bad_arg
-  precision: *single_double_precisions
-  transA: N
-  uplo: [L]
-  transA: [  T ]
-  diag: [N]
-  stride_scale: [ 1 ]
 
 - name: tpmv_strided_batched_small
   category: quick
