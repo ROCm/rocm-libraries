@@ -17,8 +17,13 @@
 
 // Tolerance resolution shared by both verification harnesses. Reads per-op,
 // per-dtype numbers from TestTolerances.hpp and aggregates them into a single
-// atol/rtol pair for each output tensor. TOML per-test overrides are applied
-// last. See ALMIOPEN-2216 for the DynamicTolerances upgrade path.
+// atol/rtol pair for each output tensor.
+//
+// TOML per-test overrides apply to engine output only. They are read from an
+// engine's own config file, so they say how far that engine may drift — never how
+// far our checked-in golden data may. Reference validation calls defaultTolerance()
+// and can never be loosened by an engine's config. See ALMIOPEN-2216 for the
+// DynamicTolerances upgrade path.
 
 namespace hipdnn_integration_tests::tolerance
 {
@@ -152,7 +157,29 @@ inline float outputOpTolerance(const fb::GraphWrapper& wrapper, data::DataType d
     return toleranceForNode(rootAttr, dataType);
 }
 
-// Resolve atol/rtol for an output tensor: policy-selected default, then TOML override.
+// The policy-selected default for one output tensor, with no per-test override.
+//
+// This is what a reference-vs-golden comparison uses. TOML overrides live in an
+// engine's own config file (config/<ENGINE>.toml), so they describe how far *that
+// engine* may drift; applying one to our own checked-in golden data would loosen
+// the gate that is supposed to be measuring the data.
+inline float defaultTolerance(const fb::GraphWrapper& wrapper,
+                              data::DataType dataType,
+                              TolerancePolicy policy = TolerancePolicy::MAX_ACROSS_NODES)
+{
+    switch(policy)
+    {
+    case TolerancePolicy::MAX_ACROSS_NODES:
+        return maxAcrossNodes(wrapper, dataType);
+    case TolerancePolicy::OUTPUT_OP_TOLERANCE:
+        return outputOpTolerance(wrapper, dataType);
+    default:
+        throw std::invalid_argument("unknown TolerancePolicy");
+    }
+}
+
+// Resolve atol/rtol for an output tensor an *engine* produced: policy-selected
+// default, then the engine's TOML override.
 inline void resolveTolerance(const fb::GraphWrapper& wrapper,
                              data::DataType dataType,
                              const std::string& testName,
@@ -160,20 +187,8 @@ inline void resolveTolerance(const fb::GraphWrapper& wrapper,
                              float& rtol,
                              TolerancePolicy policy = TolerancePolicy::MAX_ACROSS_NODES)
 {
-    float defaultTolerance = 1e-3f;
-    switch(policy)
-    {
-    case TolerancePolicy::MAX_ACROSS_NODES:
-        defaultTolerance = maxAcrossNodes(wrapper, dataType);
-        break;
-    case TolerancePolicy::OUTPUT_OP_TOLERANCE:
-        defaultTolerance = outputOpTolerance(wrapper, dataType);
-        break;
-    default:
-        throw std::invalid_argument("unknown TolerancePolicy");
-    }
-    atol = defaultTolerance;
-    rtol = defaultTolerance;
+    atol = defaultTolerance(wrapper, dataType, policy);
+    rtol = atol;
     applyTomlToleranceOverride(testName, atol, rtol);
 }
 

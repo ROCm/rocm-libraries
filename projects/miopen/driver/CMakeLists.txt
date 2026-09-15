@@ -77,6 +77,18 @@ endif()
 # and modifying MIOpen's public enum carries ABI/consumer risk. Lowest-risk fix:
 # silence this specific warning here.
 target_compile_options(MIOpenDriver PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-microsoft-enum-value>)
+
+# Leave AMDGPU device code uninstrumented under a host UBSan build, mirroring the MIOpen library
+# target (see the MIOPEN_DISABLE_DEVICE_UBSAN detection in the top-level CMakeLists.txt). The
+# driver compiles HIP device translation units (e.g. dm_bnorm.cpp); the newer ROCm clang shipped
+# in the TheRock artifact base instruments their device code with UBSan
+# (__ubsan_handle_builtin_unreachable, referenced from __cxa_pure_virtual), and there is no device
+# UBSan runtime to link against. -Xarch_device scopes -fno-sanitize=undefined to the device
+# sub-compile so host code keeps UBSan. SHELL: keeps the two tokens together and un-deduplicated.
+if(MIOPEN_DISABLE_DEVICE_UBSAN)
+    target_compile_options(MIOpenDriver PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+endif()
 add_dependencies(MIOpenDriver miopen-generate-kernels)
 target_include_directories(MIOpenDriver PRIVATE ../src/kernels)
 # MIOpen_with_plugins ensures CK plugin .so's are built alongside MIOpenDriver

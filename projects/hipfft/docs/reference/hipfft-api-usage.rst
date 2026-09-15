@@ -72,6 +72,10 @@ These planning routines assume that you have allocated a plan
 
 .. doxygenfunction:: hipfftSetAutoAllocation
 
+.. doxygenfunction:: hipfftSetWorkArea
+
+.. doxygenfunction:: hipfftXtSetWorkArea
+
 .. doxygenfunction:: hipfftMakePlan1d
 
 .. doxygenfunction:: hipfftMakePlan2d
@@ -121,6 +125,8 @@ obtained using these routines.
 .. doxygenfunction:: hipfftGetSizeMany
 
 .. doxygenfunction:: hipfftXtGetSizeMany
+
+.. doxygenfunction:: hipfftGetSize
 
 
 Executing plans

@@ -178,6 +178,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   #10149: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_conversion_bsr.cpp
   unit_test_internal_conversion_extras.cpp
+  unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp

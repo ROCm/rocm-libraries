@@ -75,6 +75,38 @@ static const char* h_elem_scalar(const rocke_type_t* t)
  * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
  * op.attrs), so a synthetic op aliasing the same operands/results/regions and
  * reusing the original attrs map reproduces the Python emission exactly. */
+static rocke_status_t
+    h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op, bool scale16)
+{
+    const char* op_id
+        = scale16 ? "wmma_scale16_f32_16x16x128_fp8_fp8" : "wmma_scale_f32_16x16x128_fp8_fp8";
+    const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
+                                  : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
+    if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
+    {
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "WMMA op '%s' is not available on %s",
+                            op_id,
+                            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
+    }
+    if(op->num_operands != 5 || op->num_results != 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s expects 5 operands and 1 result", op_id);
+    }
+    rocke_h_emitf(lw,
+                  "f32x8 %s = %s(0, %s, 0, %s, (int16_t)0, %s, "
+                  "0, 0, %s, 0, 0, %s, false, false);",
+                  rocke_h_name(lw, op->results[0]),
+                  builtin,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]),
+                  rocke_h_name(lw, op->operands[3]),
+                  rocke_h_name(lw, op->operands[4]));
+    return lw->status;
+}
+
 static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const char* op_id;
@@ -90,6 +122,14 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(!op_id)
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
+    }
+    if(__builtin_strcmp(op_id, "wmma_scale_f32_16x16x128_fp8_fp8") == 0)
+    {
+        return h_emit_gfx1250_scaled_wmma(lw, op, false);
+    }
+    if(__builtin_strcmp(op_id, "wmma_scale16_f32_16x16x128_fp8_fp8") == 0)
+    {
+        return h_emit_gfx1250_scaled_wmma(lw, op, true);
     }
     snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
     legacy_opcode = rocke_opcode_from_name(dotted);
