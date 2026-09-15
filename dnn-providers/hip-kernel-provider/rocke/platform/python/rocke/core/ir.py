@@ -3182,6 +3182,19 @@ class IRBuilder:
             result_name_hint="lds_addr",
         ).result
 
+    def global_addr_of(self, ptr: Value, index: Value) -> Value:
+        """The i64 address of `ptr[index]` in global memory.
+
+        The TDM descriptor carries a raw 57-bit global address rather than a
+        pointer, so the element GEP has to be materialised as an integer.
+        """
+        return self._op(
+            "tile.global_addr_of",
+            [ptr, index],
+            [I64],
+            result_name_hint="gaddr",
+        ).result
+
     def smem_ptr_add(self, lds_addr: Value, byte_off: Value) -> Value:
         """Compute `lds_addr + byte_off` and return an i64 LDS address.
 
@@ -4418,6 +4431,7 @@ PURE_OP_NAMES = {
     "tile.wave_ballot",
     "tile.sync_half_block",
     "tile.smem_addr_of",
+    "tile.global_addr_of",
     "tile.smem_ptr_add",
     "tile.lane_id",
     "tile.ds_bpermute",

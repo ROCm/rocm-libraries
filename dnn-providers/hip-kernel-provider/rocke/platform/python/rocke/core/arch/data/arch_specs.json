@@ -160,7 +160,7 @@
         "has_async_lds": false,
         "has_async_global_lds": true,
         "has_ds_read_tr": false,
-        "has_tdm": false,
+        "has_tdm": true,
         "buffer_load_max_dwords": 4
       },
       "limits": {

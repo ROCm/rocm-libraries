@@ -38,9 +38,9 @@ class TestGfx1250Arch(unittest.TestCase):
         # gfx1250 HAS async global->LDS DMA via its own GFX12 family
         # (global_load_async_to_lds_b128 + s_wait_asynccnt), GPU-validated via the
         # DTLA path -- distinct from the gfx9 buffer_load_lds (which does not
-        # select here). TDM is not verified on this part.
+        # select here). TDM rides its own tensor_load_to_lds opcode.
         self.assertTrue(target.memory.has_async_global_lds)
-        self.assertFalse(target.memory.has_tdm)
+        self.assertTrue(target.memory.has_tdm)
         # has_async_lds / has_ds_read_tr denote the gfx9/gfx950 ds_read_tr / async
         # ABI (MFMA-pipeline gating), which gfx1250 lacks; its async/transpose use
         # distinct GFX12 opcodes gated in the ISA backend, so these stay False.

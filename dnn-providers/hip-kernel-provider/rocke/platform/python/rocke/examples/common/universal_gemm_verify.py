@@ -80,6 +80,20 @@ def main() -> int:
         help="double-buffer direct-to-LDS and prefetch the next K tile",
     )
     p.add_argument(
+        "--tdm",
+        action="store_true",
+        help="stage A/B with the gfx1250 tensor data mover instead of "
+        "direct-to-LDS (one descriptor per operand per K tile)",
+    )
+    p.add_argument(
+        "--tdm-depth",
+        type=int,
+        default=1,
+        choices=(1, 2),
+        help="TDM LDS buffers: 1 issues and waits per tile, 2 ping-pongs so "
+        "the next tile's transfer overlaps the current tile's WMMAs",
+    )
+    p.add_argument(
         "--cshuffle-no-alias",
         action="store_true",
         help="give the cshuffle C tile its own LDS bytes (no A/B aliasing) and "
@@ -128,6 +142,8 @@ def main() -> int:
         cshuffle_no_alias=args.cshuffle_no_alias,
         direct_to_lds=args.direct_to_lds,
         dtl_prefetch=args.dtl_prefetch,
+        tdm=args.tdm,
+        tdm_depth=args.tdm_depth,
     )
     data = DataSpec(
         dtype_a=args.dtype,

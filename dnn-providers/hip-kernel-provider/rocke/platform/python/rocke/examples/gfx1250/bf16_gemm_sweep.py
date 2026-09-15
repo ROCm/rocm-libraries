@@ -59,6 +59,8 @@ def _make_spec(
     lds_k_pad: int = 0,
     direct_to_lds: bool = False,
     dtl_prefetch: bool = False,
+    tdm: bool = False,
+    tdm_depth: int = 1,
 ) -> UniversalGemmSpec:
     target = config["target"]
     warp_tile_m, warp_tile_n, warp_tile_k = target["warp_tile"]
@@ -88,6 +90,8 @@ def _make_spec(
             lds_k_pad=lds_k_pad,
             direct_to_lds=direct_to_lds,
             dtl_prefetch=dtl_prefetch,
+            tdm=tdm,
+            tdm_depth=tdm_depth,
         ),
         data=DataSpec(
             dtype_a=dtype,
@@ -155,6 +159,42 @@ def enumerate_tile_configs(config: Dict[str, Any]) -> List[UniversalGemmSpec]:
     return _dedupe_valid(specs, arch=config["target"]["arch"])
 
 
+def _load_paths(traits: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The global->LDS mechanisms to try, as trait overrides.
+
+    The three paths are mutually exclusive, so they are enumerated as a list
+    rather than multiplied out: pairing ``dtl_prefetch`` with
+    ``direct_to_lds=False``, or ``tdm_depth`` with ``tdm=False``, would inflate
+    the grid with combinations ``is_valid_spec`` rejects anyway.
+    """
+    paths: List[Dict[str, Any]] = []
+    for direct_to_lds in traits.get("direct_to_lds", [False]):
+        for dtl_prefetch in traits.get("dtl_prefetch", [False]):
+            if dtl_prefetch and not direct_to_lds:
+                continue
+            paths.append(
+                {
+                    "direct_to_lds": direct_to_lds,
+                    "dtl_prefetch": dtl_prefetch,
+                    "tdm": False,
+                    "tdm_depth": 1,
+                }
+            )
+    for tdm in traits.get("tdm", [False]):
+        if not tdm:
+            continue
+        for depth in traits.get("tdm_depth", [1]):
+            paths.append(
+                {
+                    "direct_to_lds": False,
+                    "dtl_prefetch": False,
+                    "tdm": True,
+                    "tdm_depth": int(depth),
+                }
+            )
+    return paths
+
+
 def enumerate_trait_configs(
     config: Dict[str, Any], finalists: Sequence[UniversalGemmSpec]
 ) -> List[UniversalGemmSpec]:
@@ -167,28 +207,22 @@ def enumerate_trait_configs(
                     for waves_per_eu in traits["waves_per_eu"]:
                         for lds_swizzle in traits["lds_swizzle"]:
                             for lds_k_pad in traits["lds_k_pad"]:
-                                for direct_to_lds in traits.get(
-                                    "direct_to_lds", [False]
-                                ):
-                                    for dtl_prefetch in traits.get(
-                                        "dtl_prefetch", [False]
-                                    ):
-                                        specs.append(
-                                            replace(
-                                                base,
-                                                trait=replace(
-                                                    base.trait,
-                                                    pipeline=pipeline,
-                                                    scheduler=scheduler,
-                                                    epilogue=epilogue,
-                                                    waves_per_eu=waves_per_eu,
-                                                    lds_swizzle=lds_swizzle,
-                                                    lds_k_pad=lds_k_pad,
-                                                    direct_to_lds=direct_to_lds,
-                                                    dtl_prefetch=dtl_prefetch,
-                                                ),
-                                            )
+                                for path in _load_paths(traits):
+                                    specs.append(
+                                        replace(
+                                            base,
+                                            trait=replace(
+                                                base.trait,
+                                                pipeline=pipeline,
+                                                scheduler=scheduler,
+                                                epilogue=epilogue,
+                                                waves_per_eu=waves_per_eu,
+                                                lds_swizzle=lds_swizzle,
+                                                lds_k_pad=lds_k_pad,
+                                                **path,
+                                            ),
                                         )
+                                    )
     return _dedupe_valid(specs, arch=config["target"]["arch"])
 
 
@@ -224,6 +258,26 @@ def _bf16_to_float32(np, values):
     return bits.view(np.float32)
 
 
+def _float32_to_fp16(np, values):
+    return (
+        np.ascontiguousarray(values, dtype=np.float32)
+        .astype(np.float16)
+        .view(np.uint16)
+    )
+
+
+def _fp16_to_float32(np, values):
+    return np.ascontiguousarray(values, dtype=np.uint16).view(np.float16).astype(
+        np.float32
+    )
+
+
+# The device buffers are raw u16 either way, so only the encode/decode of the
+# 16-bit element differs between the two operand types the sweep supports.
+_ENCODE_16 = {"bf16": _float32_to_bf16, "fp16": _float32_to_fp16}
+_DECODE_16 = {"bf16": _bf16_to_float32, "fp16": _fp16_to_float32}
+
+
 @dataclass
 class PreparedProblem:
     rt: Runtime
@@ -234,6 +288,7 @@ class PreparedProblem:
     c_dev: int
     c_host: Any
     reference: Any
+    dtype: str = "bf16"
 
     @classmethod
     def create(
@@ -242,24 +297,29 @@ class PreparedProblem:
         padded_n: int,
         *,
         with_reference: bool,
+        dtype: str = "bf16",
     ) -> "PreparedProblem":
         import numpy as np
 
+        if dtype not in _ENCODE_16:
+            raise ValueError(
+                f"sweep host buffers support {sorted(_ENCODE_16)}, got {dtype!r}"
+            )
+        encode = _ENCODE_16[dtype]
+        decode = _DECODE_16[dtype]
         m, n, k = shape
         rng = np.random.default_rng(0xC0FFEE)
         a_values = rng.integers(-5, 6, size=(m, k), dtype=np.int16)
         b_values = rng.integers(-5, 6, size=(n, k), dtype=np.int16)
-        a = _float32_to_bf16(np, a_values)
+        a = encode(np, a_values)
         b = np.zeros((padded_n, k), dtype=np.uint16)
-        b[:n] = _float32_to_bf16(np, b_values)
+        b[:n] = encode(np, b_values)
         c = np.empty((m, n), dtype=np.uint16)
         reference = None
         if with_reference:
-            a_f32 = _bf16_to_float32(np, a)
-            b_f32 = _bf16_to_float32(np, b[:n])
-            reference = _bf16_to_float32(
-                np, _float32_to_bf16(np, a_f32 @ b_f32.T)
-            )
+            a_f32 = decode(np, a)
+            b_f32 = decode(np, b[:n])
+            reference = decode(np, encode(np, a_f32 @ b_f32.T))
 
         rt = Runtime()
         a_dev = rt.alloc(a.nbytes)
@@ -268,7 +328,7 @@ class PreparedProblem:
         rt.memcpy_h2d(a_dev, _as_u8_buffer(a), a.nbytes)
         rt.memcpy_h2d(b_dev, _as_u8_buffer(b), b.nbytes)
         rt.memset(c_dev, 0, c.nbytes)
-        return cls(rt, shape, padded_n, a_dev, b_dev, c_dev, c, reference)
+        return cls(rt, shape, padded_n, a_dev, b_dev, c_dev, c, reference, dtype)
 
     @property
     def args(self) -> bytes:
@@ -418,7 +478,7 @@ def verify_record(
             problem.c_dev,
             problem.c_host.nbytes,
         )
-        actual = _bf16_to_float32(np, problem.c_host)
+        actual = _DECODE_16[problem.dtype](np, problem.c_host)
         error = np.abs(actual - problem.reference)
         bad = error > tolerance + tolerance * np.abs(problem.reference)
         incorrect = int(np.count_nonzero(bad))
@@ -543,6 +603,7 @@ def _independent_final_timings(
     arch: str,
     warmup: int,
     iters: int,
+    dtype: str = "bf16",
 ) -> List[float]:
     payload = {
         "record": asdict(record),
@@ -551,6 +612,7 @@ def _independent_final_timings(
         "arch": arch,
         "warmup": warmup,
         "iters": iters,
+        "dtype": dtype,
     }
     worker_input = output_dir / "final_worker.json"
     worker_input.write_text(json.dumps(payload, indent=2))
@@ -600,7 +662,10 @@ def _run_worker(path: Path) -> int:
     record = BuildRecord(**payload["record"])
     shape = tuple(int(x) for x in payload["shape"])
     problem = PreparedProblem.create(
-        shape, int(payload["padded_n"]), with_reference=False
+        shape,
+        int(payload["padded_n"]),
+        with_reference=False,
+        dtype=str(payload.get("dtype", "bf16")),
     )
     try:
         result = benchmark_record(
@@ -629,6 +694,7 @@ def _build_and_benchmark(
     warmup: int,
     iters: int,
     attempts: int,
+    dtype: str = "bf16",
 ) -> Tuple[List[BuildRecord], List[Dict[str, Any]], PreparedProblem]:
     records = build_all_instances(
         specs,
@@ -637,7 +703,9 @@ def _build_and_benchmark(
         isa=isa,
         parallel=workers,
     )
-    problem = PreparedProblem.create(shape, padded_n, with_reference=True)
+    problem = PreparedProblem.create(
+        shape, padded_n, with_reference=True, dtype=dtype
+    )
     results = []
     for index, record in enumerate(records, 1):
         result = benchmark_record(
@@ -682,6 +750,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     stages = {"tile", "trait", "final"}
     arch = str(target["arch"])
     isa = str(target["isa"])
+    dtype = str(target["dtype"])
     shape = (int(problem["m"]), int(problem["n"]), int(problem["k"]))
     output_dir = Path(config["output_dir"])
     cache_dir = output_dir / "hsaco_cache"
@@ -712,6 +781,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             warmup=benchmark["warmup"],
             iters=benchmark["iters"],
             attempts=benchmark["attempts"],
+            dtype=dtype,
         )
         try:
             tile_record_map = _record_by_id(tile_records, arch=arch)
@@ -764,6 +834,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             warmup=benchmark["warmup"],
             iters=benchmark["iters"],
             attempts=benchmark["attempts"],
+            dtype=dtype,
         )
         trait_problem.close()
         _write_results(output_dir, "trait", trait_results)
@@ -779,7 +850,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         }
 
     if "final" in stages:
-        final_problem = PreparedProblem.create(shape, padded_n, with_reference=True)
+        final_problem = PreparedProblem.create(
+            shape, padded_n, with_reference=True, dtype=dtype
+        )
         trait_record_map = _record_by_id(trait_records, arch=arch)
         robust_finalists = []
         try:
@@ -801,6 +874,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     arch=arch,
                     warmup=int(benchmark["warmup"]),
                     iters=int(benchmark["iters"]),
+                    dtype=dtype,
                 )
                 final_ms = statistics.median(samples)
                 m, n, k = shape
