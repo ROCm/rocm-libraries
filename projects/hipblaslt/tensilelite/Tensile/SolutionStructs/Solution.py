@@ -213,7 +213,7 @@ def _subtileWaveStraddlesStrip(stack, perWaveMTiles):
   # A wave must own whole strips or share one with other waves; a fraction of a
   # strip has no soffset register, and the GR emit indexes past the end of
   # localSubtilesRegister.  Only reachable on a non-power-of-two free dim.
-  if stack <= 0 or perWaveMTiles <= 0:
+  if stack <= 0:
     return False
   return perWaveMTiles % stack != 0 and stack % perWaveMTiles != 0
 
@@ -280,7 +280,7 @@ def _subtileStripSharingReason(state, tc, mtTiles, stack):
   # over 4 waves pads to 8 and looks clean against a strip of 16, while the
   # wave actually owns 6 and straddles the strip boundary.
   miWaveTile = int(state["MIWaveTile"][0 if tc == 'A' else 1])
-  wavesPerStrip = max(1, stack // perWaveMTiles) if perWaveMTiles else 1
+  wavesPerStrip = max(1, stack // perWaveMTiles)
   if wavesPerStrip > 1 and miWaveTile and stack % miWaveTile != 0:
     return ("UseSubtileImpl=1 shares an LDS strip on tensor %s between waves whose "
             "MIWaveTile %d does not divide the strip of %d, so a wave's MFMA tiles "
