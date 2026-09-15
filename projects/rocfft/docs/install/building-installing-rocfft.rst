@@ -68,6 +68,40 @@ The clients are not built by default. To build them, use ``-DBUILD_CLIENTS=on``.
 The build process downloads and builds GoogleTest and FFTW if they are not already installed.
 rocFFT uses version 1.11 of GoogleTest.
 
+MPI and RCCL
+=============================
+
+MPI distributed transforms require ``-DROCFFT_MPI_ENABLE=ON`` and a GPU-aware MPI.
+On Cray systems also pass ``-DROCFFT_CRAY_MPI_ENABLE=ON`` and link the GTL library
+(see the Cray MPI example below). Leave ``ROCFFT_RCCL_ENABLE`` off for an MPI-only
+build; that is the default.
+
+The optional RCCL transpose backend is a rocFFT 1.0.39 / ROCm 10.0 feature. Enable it
+with ``-DROCFFT_RCCL_ENABLE=ON`` only when CMake can ``find_package(rccl)`` from the
+same ROCm prefix used to compile rocFFT (typically ``$ROCM_PATH/lib/cmake``).
+RCCL itself ships in older ROCm releases, but this rocFFT tree (1.0.40) is not
+intended to be built against ROCm 6.2.
+
+Example: MPI-only on a Cray node (no RCCL)::
+
+   cmake -DCMAKE_CXX_COMPILER=hipcc -DCMAKE_C_COMPILER=hipcc \
+     -DCMAKE_BUILD_TYPE=Release \
+     -DBUILD_CLIENTS=ON -DBUILD_FFTW=ON -DBUILD_GTEST=ON \
+     -DROCFFT_MPI_ENABLE=ON -DROCFFT_CRAY_MPI_ENABLE=ON \
+     -DROCFFT_RCCL_ENABLE=OFF \
+     -DGPU_TARGETS=gfx90a \
+     -DCMAKE_INSTALL_PREFIX=rocFFT_install \
+     -DCMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake;${ROCM_PATH}/lib/cmake/hip;${MPICH_DIR}" \
+     -DCMAKE_SHARED_LINKER_FLAGS="-L${MPICH_DIR}/lib -lmpi ${PE_MPICH_GTL_DIR_amd_gfx90a} ${PE_MPICH_GTL_LIBS_amd_gfx90a} ${CRAY_XPMEM_POST_LINK_OPTS} -lxpmem" \
+     ..
+
+Example: same build with RCCL (requires a ROCm that provides ``roc::rccl`` and
+matches this rocFFT, ROCm 10.x preferred)::
+
+   cmake ... -DROCFFT_RCCL_ENABLE=ON ...
+
+``AMDGPU_TARGETS`` still works but is deprecated; use ``GPU_TARGETS``.
+
 You can build the clients separately from the main library.
 For example, to build all the clients with an existing rocFFT library, invoke CMake from
 within the ``rocm-libraries/projects/rocfft/rocFFT-src/clients`` folder using these commands:

@@ -26,6 +26,11 @@
 // the macro undefined the file expands to nothing.
 #ifdef ROCFFT_RCCL_ENABLE
 
+#include "rocfft_location.h"
+#ifdef ROCFFT_MPI_ENABLE
+#include "rocfft_mpi.h"
+#endif
+
 #include <cstddef>
 #include <hip/hip_runtime.h>
 #include <map>
@@ -62,13 +67,19 @@ private:
     std::string        what_message;
 };
 
-// value-semantic handle to an RCCL communicator set for single-process
-// multi-GPU transfers.
+// value-semantic handle to an RCCL communicator whose ranks are
+// sorted rocfft_location_t values (comm_rank, then device).
+//
+// Single-process create(devices) is the special case where every
+// location has comm_rank 0. Multi-process create(mpi_comm, ...)
+// initializes only the caller's local locations; NCCL rank is the
+// index in the sorted world set (with one GPU per MPI rank that
+// equals the MPI rank).
 //
 // Thread safety: create()/reset_all() are internally synchronized. A given
 // comm is NOT safe for concurrent use (per NCCL: only one thread may
-// operate a comm at a time), so plans sharing a comm (same device set) must
-// be executed serially; concurrent use needs caller-side serialization.
+// operate a comm at a time), so plans sharing a comm must be executed
+// serially; concurrent use needs caller-side serialization.
 class rocfft_rccl_comm_t
 {
 public:
@@ -89,51 +100,70 @@ public:
         return static_cast<bool>(pimpl);
     }
 
-    // return a populated handle for the specified devices, or an empty
-    // handle if RCCL is disabled, fewer than two devices were given, or
-    // initialization failed. Communicators are cached per device-set
-    // so different plans can use different GPU subsets concurrently.
+    // single-process communicator spanning the given local devices
+    // (NCCL ranks = sorted device ids on comm_rank 0). Need >= 2 devices.
+    // Communicators are cached per world location set.
     static rocfft_rccl_comm_t create(const std::set<int>& devices);
+
+#ifdef ROCFFT_MPI_ENABLE
+    // multi-process communicator. world must contain every participating
+    // (mpi_rank, device); this rank initializes only locations whose
+    // comm_rank == local_comm_rank. Collective on mpi_comm: unique id is
+    // broadcast from rank 0, then every rank calls ncclCommInitRank.
+    static rocfft_rccl_comm_t
+        create(MPI_Comm mpi_comm, int local_comm_rank, const std::set<rocfft_location_t>& world);
+#endif
 
     // release all cached communicators (called at rocfft_cleanup()).
     static void reset_all();
 
-    // return the RCCL communicator for a specific device. Throws
-    // std::invalid_argument if device_id is not part of this
-    // communicator set.
+    // return the RCCL communicator for a local device. Throws
+    // std::invalid_argument if device_id is not a local participant.
     ncclComm_t get_comm(int device_id) const;
 
-    // communicator-owned stream for a device. RCCL requires a comm to
+    // communicator-owned stream for a local device. RCCL requires a comm to
     // always use the same stream, so the stream lives/dies with the comm;
     // callers record their own event on it to sync.
     hipStream_t get_stream(int device_id) const;
 
-    // total number of ranks in this communicator
+    // total number of NCCL ranks (world size), not the local GPU count
     size_t num_ranks() const;
 
-    // NCCL rank assigned to the given device
+    // NCCL rank of a world location. Throws if the location is not in the world.
+    int get_rank(const rocfft_location_t& location) const;
+
+    // single-process helper: NCCL rank of device_id on comm_rank 0
     int get_rank(int device_id) const;
 
-    // device IDs in RCCL rank order (rank 0 first, ..., rank num_ranks()-1 last).
-    // useful for callers that need to iterate over the communicator's devices
-    // in a well-defined order matching the NCCL rank numbering.
+    // world locations in NCCL rank order
+    std::vector<rocfft_location_t> get_locations() const;
+
+    // local (this process) locations in NCCL rank order
+    std::vector<rocfft_location_t> get_local_locations() const;
+
+    // local device IDs in NCCL rank order among local participants.
+    // for a single-process comm this is the full device list.
     std::vector<int> get_devices() const;
 
     // all-to-all with uniform counts. Sendbufs/recvbufs are sized
-    // num_ranks() and indexed by RCCL rank; the wrapper owns the
-    // group scope, per-call hipSetDevice, and launches on each comm's
-    // own stream. Count is in logical (precision, array_type) elements
-    // (mapped to ncclDataType_t / adjusted for complex/planar inside).
-    // Throws std::invalid_argument on size mismatch, rocfft_rccl_exception_t
-    // on RCCL failure.
+    // num_ranks() and indexed by NCCL rank. Non-local slots may be
+    // nullptr; only local participants are launched. Count is in
+    // logical (precision, array_type) elements.
     void alltoall(const std::vector<const void*>& sendbufs,
                   const std::vector<void*>&       recvbufs,
                   size_t                          count,
                   rocfft_precision                precision,
                   rocfft_array_type               array_type) const;
 
-    // point-to-point send: endpoints are device ids; runs on the comm's
-    // own stream for device_id.
+    // point-to-point send from a local device to a peer location
+    void send(const void*              sendbuf,
+              size_t                   count,
+              const rocfft_location_t& peer,
+              int                      device_id,
+              rocfft_precision         precision,
+              rocfft_array_type        array_type) const;
+
+    // single-process helper: peer identified by device id on comm_rank 0
     void send(const void*       sendbuf,
               size_t            count,
               int               peer_device_id,
@@ -141,8 +171,15 @@ public:
               rocfft_precision  precision,
               rocfft_array_type array_type) const;
 
-    // point-to-point receive: endpoints are device ids; runs on the comm's
-    // own stream for device_id. Throws rocfft_rccl_exception_t on failure.
+    // point-to-point receive on a local device from a peer location
+    void recv(void*                    recvbuf,
+              size_t                   count,
+              const rocfft_location_t& peer,
+              int                      device_id,
+              rocfft_precision         precision,
+              rocfft_array_type        array_type) const;
+
+    // single-process helper: peer identified by device id on comm_rank 0
     void recv(void*             recvbuf,
               size_t            count,
               int               peer_device_id,
@@ -153,19 +190,18 @@ public:
 private:
     struct Impl;
 
-    // owning cache keyed by device set: the comm (and its streams) persists
-    // for reuse by later plans, amortizing ncclCommInitRank; freed at
-    // reset_all(). Reuse is safe because the comm owns its stream, keeping
-    // RCCL's fixed comm/stream pairing across sequential and overlapping plans.
-    // The mutex only makes looking up / creating a cached comm thread-safe;
-    // it does NOT make using a comm's collectives thread-safe (a comm still
-    // must be used by one thread at a time)
-    static std::map<std::set<int>, rocfft_rccl_comm_t> comm_cache;
-    static std::mutex                                  comm_cache_mutex;
+    static rocfft_rccl_comm_t create_from_world(const std::set<rocfft_location_t>& world,
+                                                int                                local_comm_rank
+#ifdef ROCFFT_MPI_ENABLE
+                                                ,
+                                                MPI_Comm mpi_comm
+#endif
+    );
 
-    // shared so copies of the handle refer to the same RCCL state; the
-    // Impl destructor (running exactly once when the last handle dies)
-    // calls ncclCommFinalize/Destroy on the owned communicators.
+    // owning cache keyed by world location set
+    static std::map<std::set<rocfft_location_t>, rocfft_rccl_comm_t> comm_cache;
+    static std::mutex                                                comm_cache_mutex;
+
     std::shared_ptr<Impl> pimpl;
 };
 
@@ -173,22 +209,17 @@ private:
 class rocfft_rccl_group_t
 {
 public:
-    // opens an RCCL group, throws rocfft_rccl_exception_t if
-    // ncclGroupStart fails
     rocfft_rccl_group_t();
     ~rocfft_rccl_group_t() noexcept;
 
-    // throws rocfft_rccl_exception_t on ncclGroupEnd failure
     void end();
 
-    // non-copyable, non-movable
     rocfft_rccl_group_t(const rocfft_rccl_group_t&) = delete;
     rocfft_rccl_group_t& operator=(const rocfft_rccl_group_t&) = delete;
     rocfft_rccl_group_t(rocfft_rccl_group_t&&)                 = delete;
     rocfft_rccl_group_t& operator=(rocfft_rccl_group_t&&) = delete;
 
 private:
-    // true between a successful ncclGroupStart and the matching ncclGroupEnd
     bool needs_ending = false;
 };
 
