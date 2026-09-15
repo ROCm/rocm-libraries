@@ -1,0 +1,159 @@
+# ##########################################################################
+# Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+# ##########################################################################
+
+"""
+Benchmark execution script for hipSOLVER.
+
+This script executes selected benchmark suites and collates the results to CSV.
+For profiling functionality, use hipsolver-profile.py (to be added).
+For graphing functionality, use hipsolver-graph.py (to be added).
+"""
+
+import argparse
+import collections
+import csv
+import math
+import shlex
+import sys
+from subprocess import Popen, PIPE
+
+from hipsolver_suites import SUITES, get_size_configurations
+
+
+#################################################
+############## Helper functions #################
+#################################################
+
+def setup_vprint(args):
+    """
+    SETUP_VPRINT defines the function vprint as the normal print function when
+    verbose output is enabled, or alternatively as a function that does nothing.
+    """
+    global vprint
+    vprint = print if args.verbose else lambda *a, **k: None
+
+
+def call_hipsolver_bench(bench_executable, *args):
+    """
+    CALL_HIPSOLVER_BENCH executes system call to the benchmark
+    client executable with the given list of arguments
+    """
+    cmd = [bench_executable]
+    for arg in args:
+        if isinstance(arg, str):
+            cmd.extend(shlex.split(arg, False, False))
+        elif isinstance(arg, collections.abc.Sequence):
+            cmd.extend(arg)
+        else:
+            cmd.append(str(arg))
+    process = Popen(cmd, stdout=PIPE, stderr=PIPE)
+    vprint('executing {}'.format(' '.join(cmd)))
+    stdout, stderr = process.communicate()
+    return (str(stdout, encoding='utf-8', errors='surrogateescape'),
+            str(stderr, encoding='utf-8', errors='surrogateescape'),
+            process.returncode)
+
+
+def execute_benchmarks(output_file, suite, precision, case, bench_executable, local):
+    """
+    EXECUTE_BENCHMARKS collects the arguments for the benchmark client, calls
+    the client, gets the resulting time, and writes everything to output file
+    """
+    init = False
+    benchmark_generator = SUITES[suite]
+    sizenormal, sizebatch = get_size_configurations(case)
+
+    for roww, n, bench_args in benchmark_generator(suite=suite, precision=precision,
+                                                    sizenormal=sizenormal, sizebatch=sizebatch):
+        # Run benchmark
+        # TODO: for some reason, the hipsolver-bench outputs results to stderr. 
+        # this may need revision in the future.
+        out, err, exitcode = call_hipsolver_bench(bench_executable, bench_args)
+        if exitcode != 0:
+            sys.exit("hipsolver-bench call failure: {}".format(err))
+        try:
+            time = float(err) #prefered case should be float(out)
+        except ValueError:
+            time="n/a"
+        # write results
+        if local:
+            row = {'n': roww['n']}
+            row['gpu_time_us'] = time
+        else:
+            row = roww
+            row['gpu_time_us'] = time
+            # re-enable if needed
+            #row['log_n'] = math.log10(n)
+            #row['log_gpu_time_us'] = math.log10(time)
+
+        if not init:
+            results = csv.DictWriter(output_file, fieldnames=row.keys(),
+                                      extrasaction='raise', dialect='excel')
+            results.writeheader()
+            init = True
+        results.writerow(row)
+
+
+#################################################
+######### Main functions ########################
+#################################################
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        prog='hipsolver-perfoptim-suite',
+        description='Executes a selected suite of benchmarks and collates the results.')
+    parser.add_argument('-v','--verbose',
+            action='store_true',
+            help='display more information about operations being performed')
+    parser.add_argument('-l','--local',
+            action='store_true',
+            help='prints to screen only size and time as results')
+    parser.add_argument('--exe',
+            default='../../build/release/clients/staging/hipsolver-bench',
+            help='the benchmark executable to run')
+    parser.add_argument('-o',
+            dest='output_path',
+            default=None,
+            help='the name of the output file where the benchmark results will be written')
+    parser.add_argument('suite',
+            choices=SUITES.keys(),
+            help='the set of benchmarks to run')
+    parser.add_argument('precision',
+            choices=['s', 'd', 'c', 'z'],
+            help='the precision to use for the benchmarks')
+    parser.add_argument('case',
+            nargs='+',
+            choices=['small', 'medium', 'large', 'huge'],
+            help='the size cases to use for the benchmarks')
+    args = parser.parse_args()
+    setup_vprint(args)
+
+    if args.output_path is not None and not args.local:
+        with open(args.output_path, 'w', buffering=1, encoding='utf-8') as output_file:
+            execute_benchmarks(output_file, args.suite, args.precision, args.case, args.exe, args.local)
+    else:
+        execute_benchmarks(sys.stdout, args.suite, args.precision, args.case, args.exe, args.local)
