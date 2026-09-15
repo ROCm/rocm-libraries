@@ -2463,20 +2463,6 @@ class GlobalWriteBatchWriter:
                                                       labelPrefix="subtile_skip_store")
                 if skipLabel is not None:
                   storeCodeModule.add(skipLabel)
-                # PLSIN weave: register this DEFERRED pair's (P-1) capture gap at its NATURAL
-                # position here -- the store itself moves forward to the fold, but keeping the
-                # gap at the un-folded site preserves the gap SPACING, so terminal MFMAs whose
-                # accvgpr_read consumers are only reachable from an earlier gap (the ones the
-                # fold's own compressed gaps are too late for) still get woven.  Placed AFTER
-                # the OOB skip label so the woven MFMAs always execute (never branched over).
-                if self._weaveMode and _weavePairIdx is not None:
-                  cap = self._weaveCapturePair(_weavePairIdx)
-                  if cap is not None:
-                    flatItems = list(storeCodeModule.flatitems())
-                    gap = Module(f"PlsinFoldGapDeferred_pair{_weavePairIdx}")
-                    cap["gap"] = gap
-                    cap["gapAnchor"] = flatItems[-1] if flatItems else None
-                    storeCodeModule.add(gap)
                 self.storesIssued += 1
 
               elif isFoldSecond:
@@ -2507,10 +2493,10 @@ class GlobalWriteBatchWriter:
                   storeCodeModule.add(afterL)
                 else:
                   # Fused full-tile path: register only pair P (batchB) gap B, between the two
-                  # coalesced stores.  Pair P-1 (batchA)'s gap is registered at its natural
-                  # earlier site in the isFoldFirst branch above (so the two gaps stay SPREAD
-                  # like the un-folded weave, not compressed into the fold).  weavePairA=None
-                  # here to avoid overwriting pair P-1's already-registered deferred gap.
+                  # coalesced stores.  Pair P-1 (batchA)'s gap is intentionally not registered
+                  # (weavePairA=None): ATT verification showed a pair P-1 gap -- whether placed
+                  # in-fold or deferred to its natural un-folded site -- is inert, because the
+                  # remaining terminal MFMAs are MFMA-input-latency bound, not gap-slot bound.
                   wpB = None
                   if self._weaveMode and _weavePairIdx is not None:
                     wpB = _weavePairIdx      # batchB = pair P (gap B between the coalesced stores)
