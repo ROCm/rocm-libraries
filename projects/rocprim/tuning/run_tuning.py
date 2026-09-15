@@ -89,7 +89,8 @@ def get_available_algorithms() -> List[str]:
         "device_radix_sort_onesweep",
         "device_segmented_radix_sort",
         "device_find_first_of",
-        "device_run_length_encode"
+        "device_run_length_encode",
+        "device_run_length_encode_non_trivial"
     ])
 
 def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
