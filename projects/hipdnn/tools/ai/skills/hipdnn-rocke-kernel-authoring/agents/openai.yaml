@@ -1,0 +1,23 @@
+interface:
+  display_name: "hipDNN rocKE Kernel Authoring"
+  short_description: "Turn a hipDNN graph into a rocKE builder, proven and packed into a kpack"
+  default_prompt: >-
+    Use hipdnn-rocke-kernel-authoring to take a hipDNN graph to a rocKE builder and a
+    packed kpack with correctness evidence. Read SKILL.md for entry/completion
+    requirements, then execute RUNBOOK.md as the only ordered workflow. Consult its
+    linked pages for contracts; do not invent a second sequence. Do not restate rocKE's
+    own documentation — rocke-docs-map.md routes to the tree that owns it. Do not perform
+    native-pack, registration or graph-dispatch work; that belongs to
+    hipdnn-kernel-integration. If a shipped builder already serves the graph, stop and
+    route to hipdnn-ingestor-engine's rocke-mining.md instead of writing a second one.
+    Report the spec dataclass with every field classified baked, runtime-parameter or
+    matcher-only; the probed architecture list, labelled probed; the numerics against an
+    independent reference on a named device; the packed descriptor read back as
+    kind kpack; and the handover statement naming every baked constant, the launch
+    geometry, the kernarg order, and which pack-time checks are now unenforced together
+    with the matcher criteria owed in their place. rocKE never reaches the runtime as
+    rocKE, so no rocKE Python runs at launch and every per-launch check the builder made
+    is now the matcher's problem. Never report a successful lowering, a validating kpack,
+    a skipped reference or an unmeasured performance claim as a working kernel; a packed
+    kpack is a compiled artifact, not an integration, and no rocKE-specific native pack
+    exists to dispatch it.

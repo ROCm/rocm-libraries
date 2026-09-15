@@ -1,0 +1,105 @@
+# Worked example: the DROP-IN dialect variant of configs/scale_add.yaml.
+#
+# scale_add.yaml authors `kind: embedded_source`, whose source must be registered
+# in CMake and embedded into the provider binary at configure time -- adding a
+# kernel means reconfigure + rebuild + reinstall. This config authors the same
+# operation as `kind: hiprtc_file`: the sources ship as a plain DIRECTORY (the
+# "bundle") beside the descriptors, hipRTC compiles them at prepare(), and a new
+# variant reaches an already-installed hipDNN by copying files in and restarting.
+#
+# THE TWO KERNELS BELOW SHARE ONE SOURCE FILE. They differ only in `metadata`,
+# and the `$kernel.<field>` tokens in `defines` turn that difference into two
+# different compile commands and therefore two different binaries. That is the
+# whole feature.
+#
+# SCOPE, read before authoring a real one: a dropped-in descriptor set must reuse
+# an ALREADY-INSTALLED pack's native symbols, and its entry point must take the
+# same arguments in the same order as that pack's registered dispatch handler
+# launches. `loadValidatedDescriptorSets` pre-flights every match/dispatch/score
+# symbol and drops the whole engine on a miss, with one log line. A genuinely new
+# native symbol still needs a provider rebuild; no format change fixes that.
+# This config emits its own native stub, like every other config here -- that
+# stub is what a rebuild would install, and only then can variants be dropped in
+# against it.
+#
+# Generate with:
+#   ./.venv/bin/python generate.py --config configs/hiprtc_dropin.yaml \
+#       --output-dir <out>
+# The bundle directory is staged into <out>/descriptors/scale_add_hiprtc/scale_add_sources/.
+
+engine:
+  name: hipkernel:ScaleAddHiprtc
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  knobs: [block_size]
+  heuristic: native
+
+kmd_fields:
+  - name: block_size
+    type: int
+    default_value: 64
+  - name: dtype
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hiprtc_file
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: scale_add_hiprtc
+    arch: [gfx942]
+    kernels:
+      # `defines` values are TEMPLATES, shipped verbatim in the descriptor and
+      # resolved on the target against this kernel's completed metadata. They are
+      # literal token replacement: `$kernel.block_size` becomes `64`, and
+      # `$kernel.block_size * 2` is an ERROR, not `64 * 2`. Rendering is pinned --
+      # bool as 1/0, int as decimal, string verbatim; float and int_list are
+      # refused because neither has one right spelling.
+      #
+      # `metadata.dtype` carries the FLATBUFFERS ENUM spelling -- FLOAT, HALF --
+      # and not the C++ type spelling. A kernel-scoped dtype matcher compares this
+      # value to `EnumNameDataType(<the graph's dtype>)`, so `float` or `_Float16`
+      # matches nothing: the kernel is filtered out of every graph, silently,
+      # with no error at generation, at load or at plan time. Copy the spellings
+      # your own pack's matcher compares against, not these names' C++ cousins.
+      #
+      # Both kernels restate `defines` in full: a kernel's own `kernel_source`
+      # keys replace the pack's `kernel_defaults`, key for key, rather than
+      # merging into them.
+      - name: scale_add_hiprtc.f32_block64
+        kernel_source:
+          kind: hiprtc_file
+          bundle: scale_add_sources
+          source_file: ScaleAddHiprtc.hip
+          entry_point: ScaleAddHiprtc
+          defines:
+            SCALE_ADD_DTYPE: "$kernel.dtype"
+            SCALE_ADD_BLOCK_SIZE: "$kernel.block_size"
+        metadata:
+          block_size: 64
+          dtype: FLOAT
+        priority: 0
+      - name: scale_add_hiprtc.f16_block256
+        kernel_source:
+          kind: hiprtc_file
+          bundle: scale_add_sources
+          source_file: ScaleAddHiprtc.hip
+          entry_point: ScaleAddHiprtc
+          defines:
+            SCALE_ADD_DTYPE: "$kernel.dtype"
+            SCALE_ADD_BLOCK_SIZE: "$kernel.block_size"
+        metadata:
+          block_size: 256
+          dtype: HALF
+        priority: 0
+
+# No `specialization` block: a drop-in emits no `provenance`, so there is nothing
+# for one to declare. The block exists for the packaged and rocKE paths, where a
+# receiving machine has only the shipped contract to check a binary's
+# specialization against. A hipRTC kernel is specialized by the `-D` flags the
+# descriptor already states verbatim in `defines`, where a reader sees them
+# without importing a producer.

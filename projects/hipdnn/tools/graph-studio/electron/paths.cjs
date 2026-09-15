@@ -19,6 +19,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 
 const isWindows = process.platform === "win32";
 
@@ -66,6 +67,21 @@ function outputPaths(outDir) {
 
 function buildTreePaths(configFile) {
   const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  const base = path.dirname(path.resolve(configFile));
+  const resolvePath = (value) => typeof value === "string" && value
+    ? slashes(path.resolve(base, value))
+    : undefined;
+  if (config.mode === "installed") {
+    const result = { mode: "installed", source: slashes(path.resolve(configFile)) };
+    for (const key of ["root", "appDir", "distDir", "addonPath", "backendLibrary",
+      "pluginDir", "pythonExecutable", "electronExecutable"]) {
+      result[key] = resolvePath(config[key]);
+      if (!result[key]) throw new Error(`${configFile}: missing installed path ${key}`);
+    }
+    result.runtimeDirs = compact(config.runtimeDirs).map(resolvePath);
+    result.binDirs = compact(config.binDirs).map(resolvePath);
+    return result;
+  }
   return {
     mode: "in-tree",
     root: slashes(config.buildDir ?? path.dirname(configFile)),
@@ -76,6 +92,9 @@ function buildTreePaths(configFile) {
     libraries: compactPaths(config.libraries),
     runtimeDirs: compactPaths(config.runtimeDirs),
     pluginDir: slashes(config.pluginDir ?? ""),
+    backendLibrary: resolvePath(config.backendLibrary),
+    pythonExecutable: resolvePath(config.pythonExecutable),
+    binDirs: compact(config.binDirs).map(resolvePath),
   };
 }
 
@@ -126,6 +145,11 @@ function hipdnnPaths(env) {
     return buildTreePaths(env.HIPDNN_BUILD_CONFIG);
   }
 
+  const installed = path.join(STUDIO_DIR, "runtime-config.json");
+  if (fs.existsSync(installed)) {
+    return buildTreePaths(installed);
+  }
+
   if (env.HIPDNN_BUILD_DIR) {
     const configFile = path.join(env.HIPDNN_BUILD_DIR, BUILD_CONFIG_RELPATH);
     if (!fs.existsSync(configFile)) {
@@ -162,11 +186,41 @@ function hipdnnPaths(env) {
  */
 function resolve(env = process.env) {
   const hipdnn = hipdnnPaths(env);
+  if (hipdnn.mode === "installed") return hipdnn;
   return {
     ...hipdnn,
     ...outputPaths(env.GRAPH_STUDIO_OUT_DIR ?? hipdnn.outDir ?? null),
     nativeSrcDir: slashes(NATIVE_SRC_DIR),
   };
+}
+
+/** Establish loader paths before launching Electron or the benchmark interpreter. */
+function runtimeEnvironment(paths, env = process.env) {
+  const result = { ...env };
+  const prepend = (entries, current) => [...new Set([
+    ...compact(entries),
+    ...(current ? current.split(path.delimiter).filter(Boolean) : []),
+  ])].join(path.delimiter);
+  result.PATH = prepend([
+    path.join(paths.root, "bin"),
+    ...(paths.binDirs ?? []),
+    ...(paths.pythonExecutable ? [path.dirname(paths.pythonExecutable)] : []),
+  ], result.PATH);
+  if (isWindows) {
+    result.PATH = prepend(paths.runtimeDirs, result.PATH);
+  } else {
+    result.LD_LIBRARY_PATH = prepend(paths.runtimeDirs, result.LD_LIBRARY_PATH);
+  }
+  result.HIPDNN_SDK = paths.root;
+  result.HIPDNN_PLUGIN_DIR = paths.pluginDir;
+  if (!result.DNN_BENCH_WORKSPACE) {
+    const cache = result.XDG_CACHE_HOME
+      || (isWindows ? result.LOCALAPPDATA : null)
+      || path.join(os.homedir(), ".cache");
+    result.DNN_BENCH_WORKSPACE = path.join(cache, "hipdnn-graph-studio");
+  }
+  if (paths.mode === "installed") delete result.VITE_DEV_SERVER_URL;
+  return result;
 }
 
 /** Directory holding napi.h, for the add-on's include path. */
@@ -176,6 +230,7 @@ function napiIncludeDir() {
 
 module.exports = {
   resolve,
+  runtimeEnvironment,
   napiIncludeDir,
   BUILD_CONFIG_RELPATH,
   STUDIO_DIR,

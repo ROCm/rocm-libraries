@@ -17,6 +17,14 @@ public:
                 compile,
                 (const std::string& kernelFileName, const std::vector<std::string>& options),
                 (const, override));
+
+    MOCK_METHOD(std::unique_ptr<compilation::ICompiledProgram>,
+                compileSource,
+                (const std::string& sourceText,
+                 const std::string& programName,
+                 const std::vector<compilation::KernelHeader>& headers,
+                 const std::vector<std::string>& options),
+                (const, override));
 };
 
 } // namespace hip_kernel_provider

@@ -1,0 +1,513 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+#
+# Hand this a hipDNN graph. It makes TEST_ENGINE run that graph: an agent writes the
+# kernels (and, when the operation is new to the engine, the plan family around them),
+# the provider is built, the integration cases covering that graph's operations have
+# to pass, and the graph is then timed against HIP_MLOPS_ENGINE -- the engine
+# TEST_ENGINE duplicates -- on the same machine, in the same iteration.
+#
+# Nothing here is specific to one operation. The graph decides which integration
+# suites run (graph_profile.py maps node types to bundle names), the graph is what
+# gets benchmarked, and both coverage floors are *measured* from this checkout at the
+# start of the run rather than written into this file. Point it at a batchnorm graph
+# and it writes batchnorm kernels; point it at a matmul graph and it writes matmul
+# kernels and the plan family they need.
+#
+# TEST_ENGINE is deliberately narrow: one plan builder, one graph shape -- single-node
+# batchnorm forward inference, no fusion, no training, no backward -- and one stub
+# kernel entry point. That is the point of it. An engine that plans more shapes than it
+# has kernels for spreads a round's effort across work nobody is measuring, and every
+# extra plan is another way for a gate to go green on something the benchmark never
+# runs. Measured baseline on this checkout, filter quick_BatchnormInference_* (72
+# cases): Passed 0, Skipped 24, Failed 48 -- so the coverage floor is 48, and those 48
+# are exactly the cases the one kernel under test has to turn green.
+#
+#   profile           -> which suites cover this graph
+#   reference_probe   -> HIP_MLOPS_ENGINE can run this graph, so there is a baseline
+#   baseline_coverage -> how many cases TEST_ENGINE accepts today (the coverage floor)
+#   scope_baseline    -> hash the files that define how this run is measured
+#   loop kernel_cycle
+#     implement   -> agent writes the engine
+#     scope       -> the engine changed; nothing that measures it did
+#     build       -> the provider compiles
+#     integration -> zero failures, and no fewer passes than the floor
+#     bench_new   -> the graph, N iterations, pinned to TEST_ENGINE
+#     bench_ref   -> the same graph, same N, HIP_MLOPS_ENGINE
+#     compare     -> median ratio vs the speed target; the loop's exit condition
+#
+# A stage that fails abandons the iteration, records the failing step and its log
+# directory in feedback.md, and the agent starts the next round from what it wrote.
+#
+#   python orchestrate.py run configs/flows/test-engine-kernel.yaml \
+#       --input graph=test-graphs/batchnorm_inference_fp32_nchw_xl.json --tee
+version: 1
+name: test-engine-kernel
+description: Make TEST_ENGINE execute a given graph correctly and beat HIP_MLOPS_ENGINE on it.
+
+inputs:
+  graph:
+    description: >-
+      The hipDNN graph TEST_ENGINE must learn to execute. It also decides which
+      integration suites gate the run, and it is what both engines are benchmarked on,
+      so it has to be big enough that the kernel outweighs submit-and-drain overhead
+      -- roughly 0.03 ms on gfx1151. Measured on
+      test-graphs/batchnorm_inference_fp32_nchw.json (2352 elements),
+      HIP_MLOPS_ENGINE and a TEST_ENGINE with empty stub kernels both report ~0.03 ms,
+      so that graph cannot tell a good kernel from no kernel. Use
+      test-graphs/batchnorm_inference_fp32_nchw_xl.json, where the same pair reads
+      4.35 ms against 0.11 ms; test-graphs/README.md has the measured sizing ladder.
+    type: path
+    required: true
+  arch:
+    description: Target GPU architecture the kernels are written for
+    default: gfx1151
+  tier:
+    description: Bundle tier the integration filter selects from - quick, standard, comprehensive or full
+    default: quick
+  test_filter:
+    description: >-
+      GTest filter for the integration gate. Empty derives it from the graph's node
+      types, which is the point of this flow; set it only to narrow or widen a run
+      deliberately. Whichever is used is recorded in profile.json.
+    default: ""
+  reference_engine:
+    description: The engine TEST_ENGINE is validated and timed against
+    default: HIP_MLOPS_ENGINE
+  bench_iterations:
+    description: Timed iterations per engine
+    default: "50"
+  bench_warmup:
+    description: >-
+      Untimed iterations before timing starts, per engine. Sized for the graph, not
+      for habit: on a shared-memory APU a several-hundred-megabyte working set pays
+      page migration on its first touches, and a 3-iteration warm-up on the 411 MB
+      graph left a 40% standard deviation that a 10-iteration warm-up cut to 1.5%.
+    default: "10"
+  perf_target_ratio:
+    description: >-
+      Largest acceptable TEST_ENGINE/reference median ratio, and it reads in either
+      direction: 0.80 means TEST_ENGINE must be at least 20% FASTER than the
+      reference, 1.00 means it must match it, 1.15 means it may be 15% slower.
+      The default demands a real win, which rules out the cheapest way to pass -- a
+      port of the reference algorithm lands at ratio ~1.0 by construction.
+      Run-to-run spread of the reference engine against itself on the benchmark graph
+      is ~1.5% at this warm-up, so 0.80 is far outside the noise.
+    default: "0.80"
+  notes:
+    description: Extra constraints for the implementing agent (use =@file.md for a long brief)
+    default: ""
+
+vars:
+  test_engine_dir: "${vars.repo_root}/dnn-providers/hip-kernel-provider/src/engines/test_engine"
+  mlops_engine_dir: "${vars.repo_root}/dnn-providers/hip-kernel-provider/src/engines/hip_mlops_engine"
+  container_file: "${vars.repo_root}/dnn-providers/hip-kernel-provider/src/core/Container.cpp"
+  scripts_dir: "${vars.hipdnn_root}/tools/orchestrator/scripts"
+  profile_file: "${run.dir}/profile.json"
+  scope_baseline: "${run.dir}/scope-baseline.json"
+
+steps:
+
+  # Which integration cases exercise this graph. Derived from the graph's node types
+  # so the gate moves with the input instead of being pinned to one operation.
+  - id: profile
+    tool: python
+    args:
+      - "${vars.scripts_dir}/graph_profile.py"
+      - "--graph"
+      - "${inputs.graph}"
+      - "--tier"
+      - "${inputs.tier}"
+      - "--filter-override"
+      - "${inputs.test_filter}"
+      - "--out"
+      - "${vars.profile_file}"
+    cwd: "${vars.repo_root}"
+    result_file: "${vars.profile_file}"
+    result_schema:
+      required: [graph, tier, node_types, op_tokens, op_tokens_text, derived_filter, gtest_filter, op_count]
+    timeout: 300
+    outputs:
+      gtest_filter: { json_file: result, path: "$.gtest_filter" }
+      op_count: { json_file: result, path: "$.op_count", type: int }
+      op_tokens_text: { json_file: result, path: "$.op_tokens_text" }
+    assert:
+      - that: "${steps.profile.outputs.op_count} > 0"
+        message: "the graph declares no operations, so nothing can be derived from it"
+
+  # Fail fast, before hours of agent time: if the reference engine cannot run this
+  # graph there is no baseline to compare against, and the perf gate at the end of
+  # every iteration would be unreachable for reasons that have nothing to do with the
+  # kernel. Three iterations is enough to prove it runs; this is not a measurement.
+  - id: reference_probe
+    tool: graph_bench
+    args:
+      - "--graph"
+      - "${inputs.graph}"
+      - "--engine"
+      - "${inputs.reference_engine}"
+      - "--test-article"
+      - "${vars.hip_kernel_plugin}"
+      - "--iterations"
+      - "3"
+      - "--warmup"
+      - "1"
+      - "--out"
+      - "${run.dir}/reference-probe.json"
+    cwd: "${vars.build_dir}/bin"
+    result_file: "${run.dir}/reference-probe.json"
+    result_schema:
+      required: [engine, median_ms]
+    timeout: 900
+    outputs:
+      engine: { json_file: result, path: "$.engine" }
+      median_ms: { json_file: result, path: "$.median_ms", type: float }
+    assert:
+      - that: "${steps.reference_probe.outputs.median_ms} > 0"
+        message: "the reference engine produced a non-positive median - nothing was measured"
+
+  # The coverage floor, measured rather than written down. `Failed: 0` is also what a
+  # run that skipped everything prints, and an engine makes a case skip by declining
+  # the graph -- so the gate in the loop is "pass at least as many as the engine
+  # accepts today", and what it accepts today is passed+failed right now.
+  - id: baseline_coverage
+    tool: integration_tests
+    args:
+      - "--test-article"
+      - "${vars.hip_kernel_plugin}"
+      - "--test-engine"
+      - "TEST_ENGINE"
+      - "--gtest_filter=${steps.profile.outputs.gtest_filter}"
+    cwd: "${vars.build_dir}/bin"
+    expect_exit: [0, 1]
+    timeout: 7200
+    outputs:
+      passed: { regex: 'Passed:\s+(\d+)', from: stderr, type: int }
+      selected: { regex: 'Passed:\s+\d+ / (\d+)', from: stderr, type: int }
+      skipped: { regex: 'Skipped:\s+(\d+)', from: stderr, type: int }
+      failed: { regex: 'Failed:\s+(\d+)', from: stderr, type: int }
+    assert:
+      - that: "${steps.baseline_coverage.outputs.selected} > 0"
+        message: "the derived gtest filter selected no tests - nothing would gate this run"
+      # passed+failed is what the engine accepts. Zero means it declines every case
+      # this graph's operations cover, so the loop would have no coverage floor at all
+      # and "0 failed" would be satisfied by an engine that still does nothing.
+      - that: "${steps.baseline_coverage.outputs.passed} + ${steps.baseline_coverage.outputs.failed} > 0"
+        message: "TEST_ENGINE accepts none of the selected cases - it cannot plan for this graph's operations at all, so add the plan family before running this flow"
+
+  # Taken before the agent has touched anything, so "did this change?" is answered
+  # against the checkout as the operator handed it over.
+  - id: scope_baseline
+    tool: python
+    args:
+      - "${vars.scripts_dir}/guard_scope.py"
+      - "--repo"
+      - "${vars.repo_root}"
+      - "--mode"
+      - "baseline"
+      - "--out"
+      - "${vars.scope_baseline}"
+      - "--watch"
+      - "dnn-providers/integration-tests/src/**/*"
+      - "--watch"
+      - "dnn-providers/integration-tests/CMakeLists.txt"
+      - "--watch"
+      - "dnn-providers/integration-tests/test_categories*.yaml"
+      - "--watch"
+      - "dnn-providers/integration-tests/integration-test-bundles/**/*.json"
+      - "--watch"
+      - "dnn-providers/hip-kernel-provider/src/engines/hip_mlops_engine/**/*"
+      - "--watch"
+      - "dnn-providers/hip-kernel-provider/config/**/*"
+      - "--watch"
+      - "dnn-providers/hip-kernel-provider/*test_categories*.yaml"
+      - "--expect-change"
+      - "dnn-providers/hip-kernel-provider/src/engines/test_engine/**/*"
+    cwd: "${vars.repo_root}"
+    timeout: 600
+    outputs:
+      watched: { json_file: "${vars.scope_baseline}", path: "$.watched_count", type: int }
+      engine_files: { json_file: "${vars.scope_baseline}", path: "$.work_count", type: int }
+    assert:
+      # A typo in a glob makes every later check vacuous, and a vacuous guard is worse
+      # than no guard: it reads as evidence.
+      - that: "${steps.scope_baseline.outputs.watched} > 0"
+        message: "the scope guard matched no files to protect - every --watch glob is wrong, and the in-loop check would pass unconditionally"
+      - that: "${steps.scope_baseline.outputs.engine_files} > 0"
+        message: "the scope guard found no engine files to watch for change - the --expect-change glob is wrong"
+
+  - id: kernel_cycle
+    loop:
+      max_iterations: 6
+      until: "${steps.compare.outputs.meets_target} == 1"
+      on_exhausted: fail
+      # A failed stage takes its whole iteration down and the cycle starts over with
+      # the failing step and its log directory recorded in feedback.md. Re-running one
+      # step in place re-asks a question whose inputs have not changed.
+      on_step_failure: retry
+      feedback_from: "${steps.compare.outputs.feedback}"
+    steps:
+
+      # --output-format json buffers the entire session and emits it at exit, so a
+      # three-hour step shows nothing until it is over and a wedged one looks
+      # identical to a working one. stream-json emits an event per turn as it
+      # happens -- every tool call, every message -- which `--tee` then mirrors to
+      # the terminal live. --verbose is not optional: the CLI refuses stream-json
+      # under --print without it. Nothing here reads this step's stdout (the result
+      # contract is the result_file), so the output format is free to change.
+      - id: implement
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "stream-json"
+          - "--verbose"
+          - "--model"
+          - "claude-opus-5[1m]"
+          - "--permission-mode"
+          - "acceptEdits"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${vars.repo_root}"
+        prompt_file: ../prompts/implement_kernel.md
+        result_file: "${loop.attempt_dir}/implement.json"
+        result_schema:
+          required: [engine_ops, entry_points, changed_files, new_plans, addressed_feedback, summary]
+        # 40 minutes. Measured, not guessed, and deliberately not three hours.
+        #
+        # The only implement step that has ever completed took 358.6s -- 55 turns,
+        # $4.06 -- and all it did was copy the reference kernels. That is the floor
+        # for the easiest possible version of this task, and it is already above 300s.
+        # The current target forbids the copy, so this round is strictly more work.
+        #
+        # A kill here is destructive rather than merely wasteful, which is what makes
+        # a tight budget a false economy: the agent edits the checkout in place, so a
+        # kill lands mid-edit. One run died just after deleting the kernel TU that
+        # three plans still compiled; the next two rounds spent their entire budget
+        # repairing that instead of writing kernels, and the run ended with a
+        # half-migrated engine on disk. The killed rounds are billed in full and
+        # produce nothing.
+        #
+        # Use --max-iterations to cap spend. That bounds whole rounds, each of which
+        # ends at a consistent tree; this bounds a single edit, which does not.
+        timeout: 1200
+        outputs:
+          changed_files: { json_file: result, path: "$.changed_files", type: count }
+          entry_points: { json_file: result, path: "$.entry_points", type: count }
+          summary: { json_file: result, path: "$.summary" }
+          # The CLI's own session id, out of the stream's first `system/init` event.
+          # Recorded so the session is reachable after the run: `claude --resume <id>`
+          # reopens it, and scripts/agent_log.py renders this step's transcript from
+          # the log. Without it a finished round leaves a result file and no way back
+          # to the reasoning that produced it.
+          session_id: { regex: '"session_id":"([^"]+)"' }
+        assert:
+          - that: "${steps.implement.outputs.changed_files} > 0"
+            message: "the agent reported changing no files"
+
+      # Both halves of the contract, and both are needed. The suite, the bundles, the
+      # engine TOML and the reference engine define how this round is judged: an agent
+      # can turn every gate below green by editing them, and none of that shows up as
+      # a failing test. In the other direction, an agent that wrote nothing at all
+      # also passes every gate below -- the build succeeds, the suite reports what it
+      # reported last round, and the benchmark times the previous engine. Checked
+      # before the build, so a violation costs seconds rather than an hour.
+      - id: scope
+        tool: python
+        args:
+          - "${vars.scripts_dir}/guard_scope.py"
+          - "--repo"
+          - "${vars.repo_root}"
+          - "--mode"
+          - "check"
+          - "--baseline"
+          - "${vars.scope_baseline}"
+          - "--out"
+          - "${loop.attempt_dir}/scope.json"
+          - "--watch"
+          - "dnn-providers/integration-tests/src/**/*"
+          - "--watch"
+          - "dnn-providers/integration-tests/CMakeLists.txt"
+          - "--watch"
+          - "dnn-providers/integration-tests/test_categories*.yaml"
+          - "--watch"
+          - "dnn-providers/integration-tests/integration-test-bundles/**/*.json"
+          - "--watch"
+          - "dnn-providers/hip-kernel-provider/src/engines/hip_mlops_engine/**/*"
+          - "--watch"
+          - "dnn-providers/hip-kernel-provider/config/**/*"
+          - "--watch"
+          - "dnn-providers/hip-kernel-provider/*test_categories*.yaml"
+          - "--expect-change"
+          - "dnn-providers/hip-kernel-provider/src/engines/test_engine/**/*"
+        cwd: "${vars.repo_root}"
+        result_file: "${loop.attempt_dir}/scope.json"
+        result_schema:
+          required: [watched_count, outside_count, work_changed_count, modified, removed, added, feedback]
+        timeout: 600
+        outputs:
+          outside_count: { json_file: result, path: "$.outside_count", type: int }
+          watched_count: { json_file: result, path: "$.watched_count", type: int }
+          work_changed_count: { json_file: result, path: "$.work_changed_count", type: int }
+        assert:
+          - that: "${steps.scope.outputs.watched_count} == ${steps.scope_baseline.outputs.watched}"
+            message: "the guard watched a different number of files than the baseline did - the globs or the checkout moved under it"
+          - that: "${steps.scope.outputs.outside_count} == 0"
+            message: "files that define how this run is measured were edited - see scope.json and this step's stdout.log for the list"
+          - that: "${steps.scope.outputs.work_changed_count} > 0"
+            message: "no file under the engine changed - whatever the agent reported, nothing reached disk, and every gate below would be measuring the previous round"
+
+      - id: build
+        tool: cmake
+        args:
+          - "--build"
+          - "${vars.build_dir}"
+          - "--parallel"
+          - "16"
+        cwd: "${vars.repo_root}"
+        timeout: 10800
+
+      # Pinned to TEST_ENGINE. Without --test-engine hipDNN's own heuristics choose,
+      # and a suite that passed because the reference engine ran the graph says nothing
+      # about the kernels this loop is writing.
+      #
+      # expect_exit allows 1 because that is what a run with failing tests returns; the
+      # asserts below, not the exit code, decide the round. There is no --test-config:
+      # TEST_ENGINE has no TOML, so no tolerance override and no skip list can quietly
+      # widen what counts as passing.
+      - id: integration
+        tool: integration_tests
+        args:
+          - "--test-article"
+          - "${vars.hip_kernel_plugin}"
+          - "--test-engine"
+          - "TEST_ENGINE"
+          - "--gtest_filter=${steps.profile.outputs.gtest_filter}"
+        cwd: "${vars.build_dir}/bin"
+        expect_exit: [0, 1]
+        timeout: 7200
+        outputs:
+          passed: { regex: 'Passed:\s+(\d+)', from: stderr, type: int }
+          selected: { regex: 'Passed:\s+\d+ / (\d+)', from: stderr, type: int }
+          skipped: { regex: 'Skipped:\s+(\d+)', from: stderr, type: int }
+          failed: { regex: 'Failed:\s+(\d+)', from: stderr, type: int }
+        assert:
+          - that: "${steps.integration.outputs.failed} == 0"
+            message: "the integration cases covering this graph have failures against TEST_ENGINE"
+          # `Failed: 0` on its own is what a run that skipped everything also prints.
+          # The floor is what the engine accepted before the loop started, so an engine
+          # that reaches zero failures by declining graphs lands under it.
+          - that: "${steps.integration.outputs.passed} >= ${steps.baseline_coverage.outputs.passed} + ${steps.baseline_coverage.outputs.failed}"
+            message: "fewer cases passed than TEST_ENGINE accepted before this run - either tests were lost or the engine started declining graphs it used to accept, which skips rather than fails"
+          - that: "${steps.integration.outputs.selected} == ${steps.baseline_coverage.outputs.selected}"
+            message: "a different number of cases was selected than at baseline - the filter and the suite must be the same ones the floor was measured against"
+
+      # Exits 2 when the engine declines the graph, which is not in expect_exit: this
+      # is the step that answers the actual question the flow was given -- can
+      # TEST_ENGINE run *this* graph -- and a decline is a failed round, not a
+      # measurement of zero.
+      - id: bench_new
+        tool: graph_bench
+        args:
+          - "--graph"
+          - "${inputs.graph}"
+          - "--engine"
+          - "TEST_ENGINE"
+          - "--test-article"
+          - "${vars.hip_kernel_plugin}"
+          - "--iterations"
+          - "${inputs.bench_iterations}"
+          - "--warmup"
+          - "${inputs.bench_warmup}"
+          - "--out"
+          - "${loop.attempt_dir}/bench_test_engine.json"
+          - "--label"
+          - "iter-${loop.iteration}"
+        cwd: "${vars.build_dir}/bin"
+        result_file: "${loop.attempt_dir}/bench_test_engine.json"
+        result_schema:
+          required: [engine, graph, iterations, timing_method, median_ms, samples_ms]
+        timeout: 1800
+        outputs:
+          engine: { json_file: result, path: "$.engine" }
+          median_ms: { json_file: result, path: "$.median_ms", type: float }
+          samples: { json_file: result, path: "$.samples_ms", type: count }
+        assert:
+          - that: "${steps.bench_new.outputs.engine} == TEST_ENGINE"
+            message: "the benchmark did not run on TEST_ENGINE"
+          # A short series is a cheaper, quieter series. Count the samples rather than
+          # trusting the iteration count the same file reports.
+          - that: "${steps.bench_new.outputs.samples} == ${inputs.bench_iterations}"
+            message: "fewer timing samples than requested iterations"
+
+      # Measured in the same iteration, immediately after TEST_ENGINE, on the same
+      # graph and the same machine state. A reference median carried over from an
+      # earlier iteration would drift against a machine that got busier.
+      - id: bench_ref
+        tool: graph_bench
+        args:
+          - "--graph"
+          - "${inputs.graph}"
+          - "--engine"
+          - "${inputs.reference_engine}"
+          - "--test-article"
+          - "${vars.hip_kernel_plugin}"
+          - "--iterations"
+          - "${inputs.bench_iterations}"
+          - "--warmup"
+          - "${inputs.bench_warmup}"
+          - "--out"
+          - "${loop.attempt_dir}/bench_reference.json"
+          - "--label"
+          - "iter-${loop.iteration}"
+        cwd: "${vars.build_dir}/bin"
+        result_file: "${loop.attempt_dir}/bench_reference.json"
+        result_schema:
+          required: [engine, graph, iterations, timing_method, median_ms, samples_ms]
+        timeout: 1800
+        outputs:
+          engine: { json_file: result, path: "$.engine" }
+          median_ms: { json_file: result, path: "$.median_ms", type: float }
+          samples: { json_file: result, path: "$.samples_ms", type: count }
+        assert:
+          - that: "${steps.bench_ref.outputs.engine} == ${inputs.reference_engine}"
+            message: "the reference benchmark did not run on the reference engine"
+          - that: "${steps.bench_ref.outputs.samples} == ${inputs.bench_iterations}"
+            message: "fewer timing samples than requested iterations"
+
+      # The condition grammar compares numbers but does not divide them, on purpose: a
+      # ratio computed inside a config file is a ratio nobody can test. The arithmetic
+      # is here, and the loop reads one integer out of it.
+      - id: compare
+        tool: python
+        args:
+          - "${vars.scripts_dir}/compare_bench.py"
+          - "--new"
+          - "${loop.attempt_dir}/bench_test_engine.json"
+          - "--ref"
+          - "${loop.attempt_dir}/bench_reference.json"
+          - "--max-ratio"
+          - "${inputs.perf_target_ratio}"
+          - "--out"
+          - "${loop.attempt_dir}/compare.json"
+        cwd: "${vars.repo_root}"
+        result_file: "${loop.attempt_dir}/compare.json"
+        result_schema:
+          required: [meets_target, ratio, max_ratio, budget_ms, gap_ms, new_median_ms, ref_median_ms, new_engine, ref_engine, feedback]
+        timeout: 600
+        outputs:
+          meets_target: { json_file: result, path: "$.meets_target", type: int }
+          ratio: { json_file: result, path: "$.ratio", type: float }
+          new_median_ms: { json_file: result, path: "$.new_median_ms", type: float }
+          ref_median_ms: { json_file: result, path: "$.ref_median_ms", type: float }
+          feedback: { json_file: result, path: "$.feedback" }
+          gap_ms: { json_file: result, path: "$.gap_ms", type: float }
+        assert:
+          # The comparison reads two files this iteration produced; if it somehow read
+          # a stale pair, the medians it reports would not be the ones just measured.
+          - that: "${steps.compare.outputs.new_median_ms} == ${steps.bench_new.outputs.median_ms}"
+            message: "the comparison's TEST_ENGINE median is not the one bench_new measured"
+          - that: "${steps.compare.outputs.ref_median_ms} == ${steps.bench_ref.outputs.median_ms}"
+            message: "the comparison's reference median is not the one bench_ref measured"

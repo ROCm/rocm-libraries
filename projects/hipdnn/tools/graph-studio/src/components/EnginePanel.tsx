@@ -11,6 +11,7 @@ import {
 import { serializeGraph } from "../graph/serialize";
 import { platform } from "../platform";
 import type { Graph } from "../graph/model";
+import type { NativeExecutionSnapshot } from "../results/model";
 
 /**
  * Engine control panel: build and execute the current graph through the hipDNN
@@ -21,6 +22,8 @@ import type { Graph } from "../graph/model";
  */
 
 type Phase = "idle" | "busy" | "ok" | "error";
+type BuildProvenance = Pick<NativeExecutionSnapshot, "graphLabel" | "graphSource" | "submittedGraphJson">;
+type AcceptedBuild = Omit<NativeExecutionSnapshot, "startedAt" | "result"> & { readonly handle: BuildHandle };
 
 const LOG_LEVEL_KEY = "hipdnn.logLevel";
 const LOG_LEVELS: readonly LogLevel[] = ["off", "error", "warn", "info"];
@@ -30,9 +33,12 @@ interface EnginePanelProps {
   getGraph(): Graph;
   /** Bumped by New/Open so the panel drops a stale build (disables Execute). */
   resetKey: number;
+  onExecutionResult(snapshot: NativeExecutionSnapshot): void;
+  onResultsReset(): void;
+  onShowResults(): void;
 }
 
-export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
+export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsReset, onShowResults }: EnginePanelProps) {
   const [info, setInfo] = useState<EngineInfo | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState<string>("");
@@ -49,6 +55,27 @@ export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
   // Which JSON produced the live plan: the canvas graph, or an imported hipDNN one.
   const [planSource, setPlanSource] = useState<"studio" | "imported">("studio");
   const logRef = useRef<HTMLDivElement>(null);
+  const generationRef = useRef(0);
+  const acceptedBuild = useRef<AcceptedBuild | null>(null);
+
+  const discardBuild = useCallback(() => {
+    ++generationRef.current;
+    const previous = acceptedBuild.current;
+    acceptedBuild.current = null;
+    if (previous) void engine.release(previous.handle);
+    setHandle(null);
+    setSelectedEngine(null);
+    setSerializedGraph(null);
+    setPlanSource("studio");
+    onResultsReset();
+    return generationRef.current;
+  }, [onResultsReset]);
+
+  useEffect(() => () => {
+    ++generationRef.current;
+    if (acceptedBuild.current) void engine.release(acceptedBuild.current.handle);
+    acceptedBuild.current = null;
+  }, []);
 
   // The engine list is queried for the *current* graph, but getGraph changes on
   // every edit — a ref keeps the query callbacks stable so effects don't refire
@@ -83,18 +110,12 @@ export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
   // New/Open replaced the graph: drop any built plan so Execute disables and the
   // engine/status readouts don't describe a graph that no longer exists.
   useEffect(() => {
-    setHandle((prev) => {
-      if (prev) void engine.release(prev);
-      return null;
-    });
-    setSelectedEngine(null);
-    setSerializedGraph(null);
-    setPlanSource("studio");
+    discardBuild();
     setEngines([]);
     setEngineChoice("");
     setStatus("");
     setPhase("idle");
-  }, [resetKey]);
+  }, [resetKey, discardBuild]);
 
   const onLevelChange = useCallback((level: LogLevel) => {
     setLogLevel(level);
@@ -141,10 +162,15 @@ export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
 
   // Shared tail for both compile paths (Studio graph and imported hipDNN JSON).
   const applyBuildResult = useCallback(
-    (result: BuildPlanResult, source: "studio" | "imported") => {
+    (result: BuildPlanResult, pending: BuildProvenance, generation: number): void => {
+      if (generation !== generationRef.current) {
+        if (result.handle) void engine.release(result.handle);
+        return;
+      }
       appendCaptured(result.captured);
       if (result.engines && result.engines.length > 0) setEngines(result.engines);
       if (!result.ok || !result.handle) {
+        if (result.handle) void engine.release(result.handle);
         setPhase("error");
         const code = result.error?.code ?? "UNKNOWN";
         setStatus([`Build failed [${code}]`, result.error?.message ?? "", ...result.log].join("\n"));
@@ -152,10 +178,19 @@ export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
         note("ERROR", `Build failed [${code}]: ${result.error?.message ?? ""}`);
         return;
       }
+      acceptedBuild.current = {
+        ...pending,
+        handle: result.handle,
+        engine: result.selectedEngine ?? null,
+        builtGraphJson: result.serializedGraph ?? null,
+        workspaceBytes: result.workspaceSize,
+        backend: info?.backend ?? "Unavailable",
+        device: info?.device,
+      };
       setHandle(result.handle);
       setSelectedEngine(result.selectedEngine ?? null);
       setSerializedGraph(result.serializedGraph ?? null);
-      setPlanSource(source);
+      setPlanSource(pending.graphSource);
       setPhase("ok");
       setStatus([`Build OK.`, `Workspace: ${result.workspaceSize ?? 0} bytes`, ...result.log].join("\n"));
       setStatusKind("info");
@@ -169,42 +204,67 @@ export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
         );
       }
     },
-    [appendCaptured, note, engineChoice, engines],
+    [appendCaptured, note, engineChoice, engines, info],
   );
 
-  const startBuild = useCallback(() => {
+  const startBuild = useCallback((): number => {
+    const generation = discardBuild();
     setPhase("busy");
     setStatus("Building…");
     setStatusKind("info");
-    setHandle((prev) => {
-      if (prev) void engine.release(prev);
-      return null;
-    });
-    setSelectedEngine(null);
-  }, []);
+    return generation;
+  }, [discardBuild]);
+
+  const buildRejected = useCallback((error: unknown, generation: number) => {
+    if (generation !== generationRef.current) return;
+    const message = error instanceof Error ? error.message : String(error);
+    setPhase("error");
+    setStatus(`Build failed: ${message}`);
+    setStatusKind("error");
+    note("ERROR", `Build failed: ${message}`);
+  }, [note]);
 
   const doBuild = useCallback(async () => {
-    const graphJson = serializeGraph(getGraph());
-    startBuild();
-    applyBuildResult(
-      await engine.build(graphJson, engineChoice ? { engineId: engineChoice } : {}),
-      "studio",
-    );
-  }, [getGraph, engineChoice, startBuild, applyBuildResult]);
+    const graph = getGraph();
+    const pending: BuildProvenance = {
+      graphLabel: graph.name, graphSource: "studio", submittedGraphJson: serializeGraph(graph),
+    };
+    const generation = startBuild();
+    try {
+      const result = await engine.build(pending.submittedGraphJson, engineChoice ? { engineId: engineChoice } : {});
+      applyBuildResult(result, pending, generation);
+    } catch (error) {
+      buildRejected(error, generation);
+    }
+  }, [getGraph, engineChoice, startBuild, applyBuildResult, buildRejected]);
 
   // Compile a graph handed over in hipDNN's canonical JSON. The canvas keeps
   // showing the Studio graph, so the plan is badged as imported until the next
   // Build.
   const doImportHipdnnJson = useCallback(async () => {
-    const file = await platform.openTextFile(".json");
+    let file;
+    try {
+      file = await platform.openTextFile(".json");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      note("ERROR", `Import failed: ${message}`);
+      setStatus(`Import failed: ${message}`);
+      setStatusKind("error");
+      return;
+    }
     if (!file) return;
-    startBuild();
+    const pending: BuildProvenance = {
+      graphLabel: file.handle.name, graphSource: "imported", submittedGraphJson: file.contents,
+    };
+    const generation = startBuild();
     note("INFO", `Loading hipDNN JSON from ${file.handle.name}.`);
-    applyBuildResult(
-      await engine.buildHipdnnJson(file.contents, engineChoice ? { engineId: engineChoice } : {}),
-      "imported",
-    );
-  }, [engineChoice, startBuild, applyBuildResult, note]);
+    try {
+      const result = await engine.buildHipdnnJson(file.contents, engineChoice ? { engineId: engineChoice } : {});
+      applyBuildResult(result, pending, generation);
+    } catch (error) {
+      buildRejected(error, generation);
+    }
+  }, [engineChoice, startBuild, applyBuildResult, buildRejected, note]);
 
   const doExportHipdnnJson = useCallback(async () => {
     if (!serializedGraph) return;
@@ -216,25 +276,40 @@ export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
   }, [serializedGraph, getGraph, note]);
 
   const doExecute = useCallback(async () => {
-    if (!handle) return;
+    const built = acceptedBuild.current;
+    if (!built) return;
+    const generation = generationRef.current;
+    const startedAt = new Date().toISOString();
     setPhase("busy");
     setStatus("Executing…");
     setStatusKind("info");
-    const result = await engine.execute(handle, { randomizeInputs: true });
-    appendCaptured(result.captured);
-    if (result.ok) {
-      setPhase("ok");
-      setStatus([`Execute OK.`, `Elapsed: ${result.elapsedMs ?? "?"} ms`, ...result.log].join("\n"));
-      setStatusKind("info");
-      note("INFO", `Execute OK (${result.elapsedMs?.toFixed(1) ?? "?"} ms).`);
-    } else {
+    try {
+      const result = await engine.execute(built.handle, { randomizeInputs: true });
+      if (generation !== generationRef.current) return;
+      onExecutionResult({ ...built, startedAt, result });
+      appendCaptured(result.captured);
+      if (result.ok) {
+        setPhase("ok");
+        setStatus([`Execute OK.`, `Elapsed: ${result.elapsedMs ?? "?"} ms`, ...result.log].join("\n"));
+        setStatusKind("info");
+        note("INFO", `Execute OK (${result.elapsedMs?.toFixed(1) ?? "?"} ms).`);
+      } else {
+        setPhase("error");
+        const code = result.error?.code ?? "UNKNOWN";
+        setStatus([`Execute failed [${code}]`, result.error?.message ?? "", ...result.log].join("\n"));
+        setStatusKind("error");
+        note("ERROR", `Execute failed [${code}]: ${result.error?.message ?? ""}`);
+      }
+    } catch (error) {
+      if (generation !== generationRef.current) return;
+      onResultsReset();
+      const message = error instanceof Error ? error.message : String(error);
       setPhase("error");
-      const code = result.error?.code ?? "UNKNOWN";
-      setStatus([`Execute failed [${code}]`, result.error?.message ?? "", ...result.log].join("\n"));
+      setStatus(`Execute failed: ${message}`);
       setStatusKind("error");
-      note("ERROR", `Execute failed [${code}]: ${result.error?.message ?? ""}`);
+      note("ERROR", `Execute failed: ${message}`);
     }
-  }, [handle, appendCaptured, note]);
+  }, [appendCaptured, note, onExecutionResult, onResultsReset]);
 
   const copyLog = useCallback(() => {
     const text = entries.map((e) => `[${e.severity}] ${e.message.trimEnd()}`).join("\n");
@@ -313,6 +388,7 @@ export function EnginePanel({ getGraph, resetKey }: EnginePanelProps) {
         </div>
 
         <div className="engine__io">
+          <button type="button" onClick={onShowResults}>Results…</button>
           <button
             type="button"
             onClick={() => void doExportHipdnnJson()}

@@ -1,10 +1,12 @@
 # Coverage, correctness and performance sweeps
 
-[RUNBOOK.md](../../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md) owns the ordered
-create/extend workflow. This page specifies the Python sweep interface, input data,
-measurement protocol and evidence. A sweep requires installed arms and the actual
-target device; it does not replace early feasibility, native host proof or the
-engine-pinned integration tests.
+[hipdnn-kernel-integration](../../ai/skills/hipdnn-kernel-integration/RUNBOOK.md) owns
+the ordered create path -- kernel to landed integration. [RUNBOOK.md](../../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md)
+owns the production-mining workflow that surrounds it, which is where a sweep
+belongs. This page specifies the Python sweep interface, input data, measurement
+protocol and evidence. A sweep requires installed arms and the actual target device;
+it does not replace early feasibility, native host proof or the engine-pinned
+integration tests.
 
 ## Invocation and prerequisites
 
