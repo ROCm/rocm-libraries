@@ -11,6 +11,7 @@ Related coverage that is not this module:
   SIA4 barrier vs wave-parity  -> test_ClusterBarrierPairing.py
 """
 import copy
+import itertools
 import types
 
 import pytest
@@ -38,9 +39,8 @@ from Tensile.Components.DecouplePGR import decouplePGRLdsBytesEstimate, divergen
 import re
 from Tensile.Components import TDMFuse as TF
 from Tensile.Components import DecouplePGR as DP
-from Tensile.Components.DecouplePGR import decouplePGRBlocks
 from Tensile.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
-from Tensile.Components.DecouplePGR import DCP_THICK_GATE_SUPPORTED, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS, decoupledThickGateRelaxation
+from Tensile.Components.DecouplePGR import DCP_MAX_LDS_BLOCKS_DIVERGENT, DCP_THICK_GATE_SUPPORTED, DCP_THICK_GATE_TEXT, DCP_THICK_GATE_TOKENS, PGR_SPECIAL_AUTO, decoupledThickGateRelaxation
 
 pytestmark = pytest.mark.unit
 
@@ -643,7 +643,7 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
         "PrefetchGlobalReadA": 1,
         "PrefetchGlobalReadB": 2,
         "PrefetchLocalRead": 1,
-        "ScheduleIterAlg": 0,
+        "ScheduleIterAlg": 4,
         "StaggerU": 0,
         "GlobalSplitU": 1,
         "GlobalSplitUAlgorithm": "MultipleBuffer",
@@ -676,11 +676,92 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
     return sol, capsys.readouterr().out
 
 
+def _emitDerived(sol, assembler):
+    """(per-kernel err list, assembly text) for an already derived solution.
+
+    Driven the way TensileCreateLibrary drives it, so a writer that raises on a
+    resource overflow arrives as processKernelSource's err with empty source
+    instead of as an exception. CPU only; no GPU is touched.
+    """
+    import shutil
+
+    import rocisa
+    from Tensile.Common.Types import DebugConfig
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from Tensile.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+                                                  processKernelSource)
+    from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+    with preserve_rocisa_kernel_state():
+        kwa = KernelWriterAssembly(assembler, DebugConfig())
+        errs, pieces = [], []
+        for kernel in generateKernelObjectsFromSolutions([sol]):
+            ri = rocisa.rocIsa.getInstance()
+            ri.init(tuple(kernel["ISA"]),
+                    shutil.which("amdclang++") or "/usr/bin/amdclang++")
+            ri.setKernel(tuple(kernel["ISA"]), kernel["WavefrontSize"])
+            kernel.duplicate = False
+            kernel["BaseName"] = getKernelFileBase(False, kernel)
+            res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(),
+                                      False, kernel)
+            src = res.src
+            if isinstance(src, (bytes, bytearray)):
+                src = src.decode(errors="replace")
+            pieces.append(src or "")
+            errs.append(res.err)
+    return errs, "\n".join(pieces)
+
+
 @pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
 def test_solution_accepts_divergent_pairs(_gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB):
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
     assert sol.get("Valid") is True, out
+
+
+# Auto plus every real depth up to the divergent block ceiling. Read off those
+# two constants instead of listed, so raising the ceiling puts the pair shapes
+# it opens up under test the same day.
+_PGR_PAIR_SPACE = list(itertools.product(
+    [PGR_SPECIAL_AUTO] + list(range(DCP_MAX_LDS_BLOCKS_DIVERGENT + 1)), repeat=2))
+
+
+@pytest.mark.parametrize("pgrA, pgrB", _PGR_PAIR_SPACE)
+def test_derived_valid_pair_also_emits(_gp_gfx1250, gfx1250_iim, assembler, capsys,
+                                       pgrA, pgrB):
+    """Deriving Valid has to mean a kernel comes out.
+
+    The gate that accepts a pair and the emission it authorises are separate
+    code. A divergent pair relaxes the thick tensor's wait in the emitted text,
+    which needs an optimisation pass that not every derived ScheduleIterAlg
+    runs; without it the writer overflows resources and TensileCreateLibrary
+    reports err=-2 with no source. The tuning path asks for that error
+    tolerantly, so such a kernel is dropped without a word.
+
+    One test over the whole space rather than an emission assertion added to
+    each validity test, so a pair shape is covered the day it becomes valid.
+    test_solution_accepts_divergent_pairs pins which pairs must derive Valid,
+    so this cannot go quiet by skipping every case.
+    """
+    sol, out = _derive(gfx1250_iim, assembler, capsys,
+                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    if sol.get("Valid") is not True:
+        assert out.strip(), "(%s, %s) was refused with no reason" % (pgrA, pgrB)
+        pytest.skip("(%s, %s) refused at derivation: %s"
+                    % (pgrA, pgrB, out.strip().splitlines()[-1]))
+    errs, asm = _emitDerived(sol, assembler)
+    warnings = [line for line in capsys.readouterr().out.splitlines()
+                if "WARNING" in line]
+    gate = decoupledThickGateRelaxation(sol)
+    assert errs == [0] and asm, (
+        "(%s, %s) derives Valid but emits err=%s with %d bytes of source: resolved "
+        "pair (%s, %s), thick gate %s, _ScheduleIterAlg=%s, _StinkyTofuOptLevel=%s. %s"
+        % (pgrA, pgrB, errs, len(asm), sol.get("PrefetchGlobalReadA"),
+           sol.get("PrefetchGlobalReadB"),
+           None if gate is None else gate.mechanism,
+           sol.get("_ScheduleIterAlg"), sol.get("_StinkyTofuOptLevel"),
+           warnings[-1] if warnings else "(no warning captured)"))
 
 
 @pytest.mark.parametrize(

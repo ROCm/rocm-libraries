@@ -551,7 +551,7 @@ def dcpLdsSide(tc):
     nBlkB x [MXSB|B] at strideB whatever the descriptor grouping says, so
     this is the LDS block stride pairing and never descriptor ownership:
     routing it through tdmSetOwner would swap a scale by the other side's
-    stride and gate its reads on the other side's token.
+    stride (descriptor ownership is separate from this layout stride).
     """
     return DCP_LDS_SIDE[tc]
 

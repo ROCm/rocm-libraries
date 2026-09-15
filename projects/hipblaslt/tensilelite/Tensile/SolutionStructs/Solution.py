@@ -47,6 +47,8 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
                                        decoupledOneBlockBoth, decouplePGRBlocks, \
                                        equalPairDegeneratesToScalar, \
                                        divergentPairUnsupportedReason, \
+                                       decoupledThickGateRelaxation, \
+                                       DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
                                        resolvePrefetchGlobalReadSpecialValues
 from Tensile.Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
@@ -3023,8 +3025,10 @@ class Solution(collections.abc.Mapping):
         decoupled, blkA, blkB = decouplePGRBlocks(state)
         if decoupled and blkA != blkB:
           reject(state, printRejectionReason,
-                 "TDMFuse=%d requires an equal decoupled pair (got PGRA=%d, PGRB=%d -> %d and %d LDS blocks); "
-                 "MXSB shares %s's descriptor set and cannot follow a divergent cadence"
+                 "TDMFuse=%d requires an equal decoupled pair (got PGRA=%d, PGRB=%d -> %d and %d LDS blocks): "
+                 "MXSB rides %s's descriptor set but follows B's LDS block count, so a divergent pair puts "
+                 "two cadences on one shared set whose single swap arm cannot express both "
+                 "(see KernelWriterAssembly: shared set needs a three-way swap arm)"
                  % (tdmFuse, state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"],
                     blkA, blkB, owner))
           return
@@ -5631,6 +5635,23 @@ class Solution(collections.abc.Mapping):
                  "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) need a "
                  "single-buffered fill slot: %s"
                  % (numLdsBlkA, numLdsBlkB, dcpUnsupported))
+          return
+        dcpGate = decoupledThickGateRelaxation(state)
+        if dcpGate is not None and dcpGate.mechanism == DCP_THICK_GATE_TEXT and \
+           not state["_StinkyTofuOptLevel"]:
+          # The text mechanism relaxes the gate by rewriting instructions that
+          # already exist, in a pass only _StinkyTofuOptLevel=3 runs.
+          # divergentPairUnsupportedReason cannot make this call:
+          # ScheduleIterAlg 0 and 4 both derive _ScheduleIterAlg=0, and it is
+          # also asked of states with no grouping to resolve a mechanism from.
+          reject(state, printRejectionReason,
+                 "PrefetchGlobalReadA/B: divergent LDS blocks (A=%u, B=%u) on the %s "
+                 "grouping relax the thick tensor's gate in the emitted text, which "
+                 "needs _StinkyTofuOptLevel=3; ScheduleIterAlg=%u derives level %u. "
+                 "Use ScheduleIterAlg=4, or a grouping that gives A and B separate "
+                 "descriptors."
+                 % (numLdsBlkA, numLdsBlkB, tdmGroupingName(state),
+                    state["ScheduleIterAlg"], state["_StinkyTofuOptLevel"]))
           return
       # (0,1)/(1,0): one LDS block each, no double-buffer partner.
       if decoupledOneBlockBoth(state):
