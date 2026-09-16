@@ -265,22 +265,15 @@ def main():
     reset_reported_failures()
     jobs, isaInfoMap, logicPath, files, check, args = _setup()
 
-    # Cross-file invariants (sibling DeviceNames, gfx1250v0-overlay
-    # consistency) run only when --check-all is given, and only over the
-    # already --architecture-filtered `files` -- the same scope the
-    # per-solution validators below use -- so a build for one architecture
-    # can't be failed by unrelated data in another. `files` excludes
-    # Experimental logic the same way _runChecks()'s own per-file loop does.
+    # Cross-file invariants (sibling DeviceNames) run only when --check-all is
+    # given, and only over the already --architecture-filtered `files` -- the
+    # same scope the per-solution validators below use -- so a build for one
+    # architecture can't be failed by unrelated data in another. `files`
+    # excludes Experimental logic the same way _runChecks()'s own per-file
+    # loop does.
     corpus_files = [f for f in files if "Experimental" not in f.parts]
     corpus_violations = (
-        check_corpus_invariants(
-            logicPath,
-            corpus_files,
-            args.Architecture.split(";"),
-            overlay_required=args.RequireGfx1250v0Overlay,
-        )
-        if check.All
-        else []
+        check_corpus_invariants(logicPath, corpus_files) if check.All else []
     )
     report_corpus_invariant_violations(corpus_violations)
     if corpus_violations:

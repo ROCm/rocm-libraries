@@ -26,12 +26,57 @@
 GPU architecture detection for TensileLite unit and common tests.
 """
 
+import contextlib
 import os
-import subprocess
+
+from Tensile.GpuArch import cmake_gpu_target, detect_gpu_archs
+
+
+@contextlib.contextmanager
+def _rocmPathFromTestOverride():
+    """``TENSILE_ROCM_PATH`` standing in for ``ROCM_PATH`` inside the block.
+
+    ``Tensile.GpuArch`` reads ``ROCM_PATH``, the variable the build uses. The
+    tests keep their own override so a run can probe a different install without
+    moving the one the build points at, so it is applied here and taken back
+    out again rather than leaking into anything the tests go on to launch.
+    """
+    override = os.environ.get("TENSILE_ROCM_PATH")
+    if not override:
+        yield
+        return
+
+    previous = os.environ.get("ROCM_PATH")
+    os.environ["ROCM_PATH"] = override
+    try:
+        yield
+    finally:
+        if previous is None:
+            del os.environ["ROCM_PATH"]
+        else:
+            os.environ["ROCM_PATH"] = previous
 
 
 def get_available_archs() -> list[str]:
-    """Get list of available GPU architectures via rocm_agent_enumerator.
+    """Get list of available GPU architectures, one entry per distinct name.
+
+    Reads through ``Tensile.GpuArch``, the same detection the build uses, so a
+    stepping suffix survives. It has to: ``config_helpers.configMarks`` keys its
+    ``skip-<arch>`` marks off this list, and the two spellings of a config carry
+    mirrored marks -- a strict config says ``skip-gfx1250``, a base config says
+    ``skip-gfx1250-strict``. Handing that comparison a truncated ``gfx1250`` for
+    an agent named ``gfx1250-strict`` therefore does not narrow the selection,
+    it reverses it: every base config runs against a strict client and every
+    strict config is skipped. ``rocm_agent_enumerator``, which this used to
+    call, truncates in exactly that way.
+
+    The target features go, through the same ``cmake_gpu_target`` the build
+    spells ``GPU_TARGETS`` with. A detection tool answers with a configuration,
+    so amdgpu-arch names a gfx90a agent ``gfx90a:sramecc+:xnack-``, and a mark
+    is written for the architecture rather than for one agent's features:
+    ``skip-gfx90a`` never matches ``skip-gfx90a:sramecc+:xnack-``, so keeping
+    them would unskip every config pinned off this architecture. Only the
+    colon-delimited features come off; the hyphenated stepping stays.
 
     Environment variable priority:
         1. TENSILE_ROCM_PATH (test-specific override)
@@ -39,24 +84,11 @@ def get_available_archs() -> list[str]:
         3. /opt/rocm (default)
 
     Returns:
-        List of unique gfx architecture strings (e.g. ["gfx950"]).
-        Returns empty list if rocm_agent_enumerator is not found or fails.
+        List of unique gfx architecture strings (e.g. ["gfx1250-strict"]).
+        Returns empty list if no detection tool is found or all of them fail.
     """
-    rocmpath = os.environ.get(
-        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
-    )
-    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
-    if not os.path.exists(enumerator):
-        return []
-    try:
-        output = subprocess.check_output([enumerator, "-t", "GPU"])
-        return list(dict.fromkeys(
-            line.strip()
-            for line in output.decode().splitlines()
-            if line.strip() and "gfx000" not in line
-        ))
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return []
+    with _rocmPathFromTestOverride():
+        return list(dict.fromkeys(map(cmake_gpu_target, detect_gpu_archs())))
 
 
 def has_arch(target: str) -> bool:

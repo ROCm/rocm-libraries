@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Union, NamedTuple
 
 from Tensile.Common import ensurePath, print2
 from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common.Types import IsaVersion
 from ..SolutionStructs import Solution
 
 from .Component import Assembler, Linker, Bundler
@@ -56,7 +57,7 @@ def buildAssemblyCodeObjectFiles(
       destRoot: Union[Path, str],
       asmDir: Union[Path, str],
       compress: bool=True,
-      outputArchNames: Optional[Dict[str, str]]=None,
+      archNames: Optional[Dict[IsaVersion, str]]=None,
     ):
     """Builds code object files from assembly files.
 
@@ -65,19 +66,20 @@ def buildAssemblyCodeObjectFiles(
         kernels: A list of the kernel objects to build.
         writer: The KernelWriterAssembly object to use.
         destRoot: The library/ root directory. Per-arch outputs are written to
-            destRoot/<gfx>/; isaToGfx() yields a bare gfx name already (no target
-            features), so the routing here is the bare gfx.
+            destRoot/<arch>/.
         asmDir: The directory containing the assembly files.
         compress: Whether to compress the code object files.
-        outputArchNames: base gfx -> output subtree; a stepping routes into
-            destRoot/<stepping>/ keeping the ISA filename. Identity for ordinary.
+        archNames: ISA version -> the architecture that ISA is being built as,
+            from archNamesByIsa. It names the compiler target, the code object,
+            and the output subtree; two architectures can share an ISA, so none
+            of the three can be derived from the ISA the kernels carry.
     """
 
     extObj = ".o"
     extCo = ".co"
     extCoRaw = ".co.raw"
 
-    outArchNames = outputArchNames or {}
+    archNames = archNames or {}
     destRoot = Path(destRoot)
     archKernelMap = collections.defaultdict(list)
     for k in kernels:
@@ -88,13 +90,13 @@ def buildAssemblyCodeObjectFiles(
       if len(archKernels) == 0:
         continue
 
-      gfx = isaToGfx(arch)
-      destDir = Path(ensurePath(destRoot / outArchNames.get(gfx, gfx)))
+      name = archNames.get(arch) or isaToGfx(arch)
+      destDir = Path(ensurePath(destRoot / name))
 
       objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)
       if len(objectFiles):
-        coFileMap[asmDir / ("TensileLibrary_"+ gfx + extCoRaw)] = objectFiles
+        coFileMap[asmDir / ("TensileLibrary_"+ name + extCoRaw)] = objectFiles
       for kernel in archKernels:
         coName = kernel.get("codeObjectFile", None)
         if coName:
@@ -105,7 +107,7 @@ def buildAssemblyCodeObjectFiles(
         linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
-          bundler.compress(str(coFileRaw), str(coFile), gfx)
+          bundler.compress(str(coFileRaw), str(coFile), name)
         else:
           shutil.move(coFileRaw, coFile)
         coFiles.append(coFile)

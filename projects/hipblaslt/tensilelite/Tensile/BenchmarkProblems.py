@@ -61,7 +61,7 @@ from .Toolchain.Source import SourceToolchain
 from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
         BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
-from Tensile.Common.Architectures import isaToGfx, gfxToVariants
+from Tensile.Common.Architectures import archNamesByIsa, isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 from Tensile.Common.TimingInstrumentation import timing_context
 
@@ -126,9 +126,33 @@ def _cacheDataMatches(cacheData, benchmarkStep):
     return all(cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items())
 
 
-def _computeCacheKey(benchmarkStep):
-    """Compute a deterministic hash from the cache-relevant parameter fields."""
+def cmdLineArchsFor(archNames, isaInfoMap) -> List[str]:
+    """The compiler targets a build for these ISAs will actually be given.
+
+    A stepping shares its architecture's ISA, so the ISA-derived name would tune
+    with the other stepping's compiler target and produce code objects the
+    tuned-for silicon cannot load. The requested names win where they cover an
+    ISA; the rest fall back to that ISA's own name.
+    """
+    buildArchNames = archNamesByIsa(archNames or [])
+    return [
+        var
+        for isa in isaInfoMap.keys()
+        for var in gfxToVariants(buildArchNames.get(isa) or isaToGfx(isa))
+    ]
+
+
+def _computeCacheKey(benchmarkStep, cmdLineArchs):
+    """Compute a deterministic hash from the cache-relevant parameter fields.
+
+    The compiler targets belong in the key because they decide what the cached
+    code objects contain while leaving every benchmark parameter untouched: two
+    architectures sharing an ISA are tuned by two runs that agree on every field
+    here, and without the targets the second would load the first's objects and
+    hand the wrong machine code to silicon that cannot run it.
+    """
     cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
+    cacheFields["_Architectures"] = ",".join(sorted(cmdLineArchs))
     canonical = json.dumps(cacheFields, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
@@ -142,8 +166,7 @@ def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage) -> Optional[Cac
     """Return the cache entry from cachePath iff its params match benchmarkStep, else None.
 
     Returning None triggers a recompile, which is the right thing for any
-    cache.yaml that doesn't contain everything --use-cache needs (including
-    legacy caches written before LibraryFile was persisted).
+    cache.yaml that doesn't contain everything --use-cache needs.
     """
     if not os.path.isfile(cachePath):
         return None
@@ -169,21 +192,6 @@ def _loadCacheIfMatches(cacheDir, benchmarkStep) -> Optional[CacheEntry]:
     return _readCacheIfValid(
         cachePath, benchmarkStep,
         "Cache hash collision at {path}; will overwrite on recompile",
-    )
-
-
-# TODO(2026-05-04): Remove the legacy single cache.yaml fallback after a transition
-# period of ~3 months (i.e. on/after 2026-08-04). It exists only so users with
-# pre-multi-cache output dirs from develop don't pay one extra recompile after
-# upgrading. See PR #6583.
-def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep) -> Optional[CacheEntry]:
-    """Return the cache entry from the pre-multi-cache stepBaseDir/cache.yaml
-    iff matching. Legacy caches written before LibraryFile was persisted are
-    treated as invalid (KeyError → None → recompile)."""
-    cachePath = os.path.join(stepBaseDir, "cache.yaml")
-    return _readCacheIfValid(
-        cachePath, benchmarkStep,
-        "Legacy cache at {path} does not match config; will recompile",
     )
 
 
@@ -456,7 +464,8 @@ def writeBenchmarkFiles(
         deviceId: int,
         gfxName: str,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
-        probSolMap: dict
+        probSolMap: dict,
+        archNames: Optional[List[str]] = None,
     ):
     """Write all the files needed for a given benchmarking step"""
 
@@ -490,8 +499,7 @@ def writeBenchmarkFiles(
 
         kernelWriterAssembly = KernelWriterAssembly(asmToolchain.assembler, debugConfig)
 
-        cmdLineArchs = [var for isa in isaInfoMap.keys() for var in gfxToVariants(isaToGfx(isa))]
-    # cmdLineArchs = [variant isaToGfx(isa) for isa in isaInfoMap.keys() for gfxToVariants()]
+        cmdLineArchs = cmdLineArchsFor(archNames, isaInfoMap)
     # write solution, kernels and CMake
     problemType = solutions[0]["ProblemType"]
     codeObjectFiles, _= writeSolutionsAndKernels( \
@@ -590,6 +598,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                          gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict,
                          buildOnly: bool = False,
                          solutionPoolIndex: dict = None,
+                         archNames: Optional[List[str]] = None,
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
 
@@ -665,7 +674,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
         backend_name = str(backendConfig.get("Name", "tensile")).lower()
 
         # check if a solution cache exists and if it matches our solution parameters
-        cacheKey = _computeCacheKey(benchmarkStep)
+        cacheKey = _computeCacheKey(benchmarkStep, cmdLineArchsFor(archNames, isaInfoMap))
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
         sourcePath = Path(cacheDir) / "source"
         
@@ -674,18 +683,11 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
             cachedLibraryFile = None
             if useCache:
                 cacheEntry = _loadCacheIfMatches(cacheDir, benchmarkStep)
-                if cacheEntry is None:
-                    # TODO(2026-05-04): Drop legacy fallback after ~2026-08-04 (see _loadLegacyCacheIfMatches).
-                    cacheEntry = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
-                    if cacheEntry is not None:
-                        cacheDir = stepBaseDir
-                        sourcePath = shortNamePath / "source"
                 if cacheEntry is not None:
                     cacheValid = True
                     codeObjectFiles = cacheEntry["CodeObjectFiles"]
                     cachedLibraryFile = cacheEntry["LibraryFile"]
-                elif os.path.isdir(os.path.join(stepBaseDir, "caches")) \
-                        or os.path.isfile(os.path.join(stepBaseDir, "cache.yaml")):
+                elif os.path.isdir(os.path.join(stepBaseDir, "caches")):
                     printWarning("Cache data does not match config: redoing solution generation")
 
         # Pre-compute benchmark runner helper
@@ -732,7 +734,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                             benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                             benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                             benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                            sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap)
+                            sourcePath, debugConfig, getattr(benchmarkStep, "gateTypeArgs", None), deviceId, gfxName, isaInfoMap, probSolMap, archNames)
                 # ^ this mutates solutions
 
                 # write cache data
@@ -880,6 +882,7 @@ def main(
     probSolMap: dict,
     buildOnly: bool = False,
     solutionPoolFiles: list = None,
+    archNames: Optional[List[str]] = None,
 ):
     """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
 
@@ -888,6 +891,8 @@ def main(
         buildOnly: If True, generate and build kernels but skip benchmarking.
         solutionPoolFiles: If non-empty, load solutions from matching pool files
             instead of generating from ForkParameters.
+        archNames: The gfx names this build was asked for, when the caller knows
+            them. Needed to tune a stepping, whose ISA cannot name its target.
     """
     if config is None:
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
@@ -963,6 +968,7 @@ def main(
                             probSolMap=probSolMap,
                             buildOnly=buildOnly,
                             solutionPoolIndex=solutionPoolIndex,
+                            archNames=archNames,
                         )
                 totalTestFails += benchmarkErrors
 

@@ -452,12 +452,11 @@ rocblaslt_status
 rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matmul_desc dst);
 
 // for internal use during testing, fetch arch name
+// The name the runtime reports for the current device. This is also the compiler
+// target its kernels were built for -- including a silicon-revision variant such
+// as gfx1250-strict, which ROCr reports for gfx1250 A0 parts -- so it names both
+// the device-library subtree and the files inside it.
 std::string rocblaslt_internal_get_arch_name();
-
-// The library subtree the current device loads: "gfx1250v0" for a v0 part (its
-// own tree only, no fallback), otherwise the base name. Filenames inside the
-// subtree keep the revision-agnostic rocblaslt_internal_get_arch_name().
-std::string rocblaslt_internal_get_library_arch_name();
 
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
