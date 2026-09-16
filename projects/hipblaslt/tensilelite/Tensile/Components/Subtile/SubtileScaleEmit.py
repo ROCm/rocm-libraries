@@ -195,15 +195,18 @@ def emitScaleLRLoad(ti, writer, kernel):
 # Scale GR ptr update
 # ---------------------------------------------------------------------------
 
-def emitScaleGRPtrUpdate(ti, writer, kernel):
+def emitScaleGRPtrUpdate(ti, writer, kernel, holdOnLastIter=False):
   """Advance scale SRD base pointer by one depthU iteration."""
+  # Deferred: SubtileGREmit imports this module, so it cannot be imported here
+  # at module scope.
+  from .SubtileGREmit import emitSrdAdvance
+
   module = Module()
   tc = ti.tc
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
-  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
-  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0))
+  emitSrdAdvance(module, tc, inc, writer, holdOnLastIter)
   return module
 
 
@@ -496,9 +499,9 @@ def localReadDoScaleSubtile(tc, writer, kernel):
 ##################################################
 # Scale SRD pointer update: advance scale SRD by scaleDepthU * scaleBpe bytes.
 #
-def globalReadScalePtrUpdates(tc, writer, kernel):
+def globalReadScalePtrUpdates(tc, writer, kernel, holdOnLastIter=False):
   ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-  return emitScaleGRPtrUpdate(ti_, writer, kernel)
+  return emitScaleGRPtrUpdate(ti_, writer, kernel, holdOnLastIter)
 
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
