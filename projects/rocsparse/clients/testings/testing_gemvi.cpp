@@ -59,6 +59,28 @@ void testing_gemvi_bad_arg(const Arguments& arg)
 
     select_bad_arg_analysis(rocsparse_gemvi<T>, nargs_to_exclude, args_to_exclude, PARAMS);
 
+    // buffer_size is required by the buffer-size query.
+    EXPECT_ROCSPARSE_STATUS(rocsparse_gemvi_buffer_size<T>(handle, trans, m, n, nnz, nullptr),
+                            rocsparse_status_invalid_pointer);
+
+    // temp_buffer is required when the corresponding buffer-size query reports
+    // nonzero workspace.
+    EXPECT_ROCSPARSE_STATUS(rocsparse_gemvi<T>(handle,
+                                               trans,
+                                               1,
+                                               1024,
+                                               alpha_device_host,
+                                               A,
+                                               1,
+                                               1024,
+                                               x_val,
+                                               x_ind,
+                                               beta_device_host,
+                                               y,
+                                               idx_base,
+                                               nullptr),
+                            rocsparse_status_invalid_pointer);
+
     {
         auto tmp = trans;
         trans    = rocsparse_operation_transpose;

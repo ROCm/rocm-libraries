@@ -163,7 +163,9 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *  @param[in]
  *  idx_base    rocsparse_index_base_zero or rocsparse_index_base_one.
  *  @param[in]
- *  temp_buffer temporary storage buffer.
+ *  temp_buffer temporary storage buffer of at least the size returned by
+ *              \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()".
+ *              May be \p nullptr when the returned size is zero.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
