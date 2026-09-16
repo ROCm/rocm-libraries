@@ -123,11 +123,11 @@ Most requests arrive as "my PR is blocked, can someone look?". Steps 1-3 are che
 7 | **Answer in the thread** | The classification, the links behind it, and who owns the next step
 
 ```bash
-# 2 - required contexts on the base branch (needs no admin rights)
-gh api repos/ROCm/rocm-libraries/rulesets --jq '.[] | "\(.id) \(.name) \(.target)"'
-gh api repos/ROCm/rocm-libraries/rulesets/<RULESET_ID> \
-  --jq '[.rules[] | select(.type=="required_status_checks")
+# 2 - required contexts and their current results (needs no admin rights)
+gh api repos/ROCm/rocm-libraries/rules/branches/<BASE_BRANCH> \
+  --jq '[.[] | select(.type=="required_status_checks")
          | .parameters.required_status_checks[].context]'
+gh pr checks <PR_NUMBER> --repo ROCm/rocm-libraries --required
 # 3 - is there anything to bypass?
 gh pr view <PR_NUMBER> --repo ROCm/rocm-libraries --json mergeStateStatus,reviewDecision
 # 4 - current state of every check
@@ -138,11 +138,12 @@ gh search issues "<error text>" --repo ROCm/rocm-libraries --repo ROCm/TheRock -
 gh run rerun --failed <RUN_ID>
 ```
 
-**Required checks (step 2).** On `develop`, `rocm-libraries` requires `TheRock CI Summary`,
-`Math CI Summary` and `pre-commit`, while `rocm-systems` requires `TheRock CI Summary` and
-`HIP NVIDIA CI Summary` and no `pre-commit`. The two `gardening.md` files differ by six lines, so
-enumerate rather than assume. Everything outside the set - packaging install lanes, coverage
-thresholds, aggregates - is advisory: worth an issue, never worth a bypass.
+**Required checks (step 2).** Query the effective rules for the pull request's base branch; do not
+infer them from workflow files or a saved list. At the time of writing, `develop` in
+`rocm-libraries` requires `Multi-Arch CI Summary`, `Math CI Summary`, and `pre-commit`.
+`rocm-systems` has a different set, and either repository's rules can change without a documentation
+change. Everything outside the queried set - packaging install lanes, coverage thresholds, and
+other workflow summaries - is advisory: worth an issue, never worth a bypass.
 
 **Merge state (step 3).**
 
