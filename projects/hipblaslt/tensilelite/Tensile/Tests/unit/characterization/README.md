@@ -18,7 +18,10 @@ Each module was characterized the same way, one atomic commit per module, **add-
 3. **Determinism.** No RNG / clock / network / global-state leakage into a snapshot. Normalize incidental fields *in the test*, never by changing production code to make a golden stable. Deep-copy shared globals and reset `globalParameters` between tests.
 4. **Measure.** Run path-mode coverage (below) for the module; aim ≥95% line. When a module can't reach the bar honestly (real fork/IPC paths, GPU/asm emit, integration-only builders), accept it below the bar: record an **ADR** under `adr/` explaining the structural reason, and index it with a short pointer row in `DECISIONS.md` — do not fake coverage.
 5. **No regression.** Once per batch, run the full `-m unit` suite and confirm it stays green and whole-project coverage does not drop.
-6. **Mutation (widening).** Once a module is covered, mutation testing certifies the assertions actually *catch* changes; survivors are triaged and killed (see **Mutation testing** below).
+6. **Mutation (gap discovery).** Once a module is covered, optional mutation
+   analysis looks for behavioral changes that its assertions do not detect.
+   Survivors are diagnostic leads; confirmed gaps are closed with focused
+   characterization tests (see **Mutation testing** below).
 
 ### Directory layout
 
@@ -181,7 +184,9 @@ Raising the floors is the ratchet click: a deliberate, reviewed step, never auto
 time it is a genuine rise (new tests pushed coverage up, so you lock the gain in). A per-file drop is
 a signal to decide first. If a file lost coverage because a test is missing, that is a real
 regression; add the test rather than lowering its floor. Only when a drop is intentional (for
-example, code was removed) do you reset that file's floor as part of the same reviewed change.
+example, code was removed) do you reset that file's floor as part of the same reviewed change. The
+tool holds you to that: `update` raises floors on its own, but it will not lower one unless you name
+that file with `--allow-lower`.
 
 A floor-raising PR is a small, behavior-neutral maintenance change. It should touch only
 `coverage-baseline.json` (the per-file floors) and, when you also lift the whole-project floor,
@@ -193,26 +198,42 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    tox -e coverage-unit    # writes coverage.json
    ```
 
-2. **Recompute the per-file floors.** Rewrite the baseline from that report:
+2. **Raise the per-file floors.** Ratchet the baseline against that report:
 
    ```bash
    python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
    ```
 
-   This sets each file's floor to its current coverage (rounded to two decimals). The numbers
-   normally go up.
+   Each file's floor rises to its current coverage (rounded to two decimals), and a file with no
+   floor yet is pinned at its current number. Floors never move down here: if any file measured
+   lower, `update` writes nothing, names those files, and exits non-zero.
 
-3. **Review the baseline diff before you commit it.** Expect rises. If a file dropped, do not just
-   record the lower number: decide first (a missing test means add the test; an intentional code
-   removal means say so in the PR). The diff is the review artifact, so keep it readable.
+3. **Decide about any drop, then name it.** A refusal is the tool asking which of two situations you
+   are in. A missing test is a real regression, so add the test rather than lowering the floor. Only
+   when the drop is intentional (code was removed, say) do you lower that file, and you lower it by
+   naming it:
 
-4. **Optionally raise the whole-project floor.** If combined coverage has climbed with room to
+   ```bash
+   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update \
+       --current coverage.json \
+       --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
+   ```
+
+   One `--allow-lower` per file, and it lowers only the files named. That is what keeps a run made
+   to move one floor from quietly resetting all the others to whatever the coverage run on disk
+   happened to measure.
+
+4. **Review the baseline diff before you commit it.** Expect rises, plus exactly the reductions you
+   named. The diff is the review artifact, so keep it readable, and say in the PR why each lowered
+   floor was accepted.
+
+5. **Optionally raise the whole-project floor.** If combined coverage has climbed with room to
    spare, bump `fail_under` in `pyproject.toml` toward the 80% target. Leave a small margin below the
    measured number (a point or two): the per-file `--tolerance` already absorbs run-to-run wobble for
    the per-file floors, but `fail_under` is an exact cutoff, so a floor set right at the current
    number can trip on normal noise.
 
-5. **Commit and open the PR.** Commit the `coverage-baseline.json` (and, if changed, `pyproject.toml`)
+6. **Commit and open the PR.** Commit the `coverage-baseline.json` (and, if changed, `pyproject.toml`)
    diff with a one-line rationale, for example "raise floors after landing the DataType tests". Never
    widen the tolerance or blank the baseline to go green.
 
@@ -265,10 +286,22 @@ ADRs are **append-only and superseded, never edited in place**. If a later chang
 
 ## Mutation testing
 
-The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and run through tox:
+Mutation testing is used only as an optional, offline technique for finding gaps
+in characterization coverage. A surviving mutant is not a product failure or a
+CI result. When it exposes an observable gap, the lasting result is a focused
+characterization test in this suite—not a mutation-score gate or a production
+code change made only to improve the score.
+
+The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and can
+be run explicitly through tox:
 
 ```bash
 tox -e mutation-unit
 ```
 
-It is currently a narrow **report-only pilot** (ten files); widening across the critical modules is planned. Accepted equivalent mutants and every `# pragma: no mutate` are justified in `DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on the mutant, and reverts cleanly).
+It is not part of tox's default environment list or the project CI workflow.
+The optional maintainer/agent procedure and safety helpers live in the
+[`tensilelite-mutation-rerun` skill](../../../../../skills/tensilelite-mutation-rerun/SKILL.md).
+Accepted equivalent mutants and every `# pragma: no mutate` are justified in
+`DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on
+the mutant, and reverts cleanly).

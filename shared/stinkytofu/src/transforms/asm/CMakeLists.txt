@@ -11,7 +11,9 @@ target_sources(stinkytofu_objs PRIVATE
     SwInstructionPrefetchAbsDynamicPass.cpp
     PhiPlacement.cpp
     BuildDefUseChain.cpp
+    DefUseAnalysisCleanup.cpp
     CFGBuilderPass.cpp
+    StinkyUnreachableBlockElimPass.cpp
     LongBranchLoweringPass.cpp
     PeepholeOptimizationPass.cpp
     DeadCodeEliminationPass.cpp
@@ -45,9 +47,12 @@ target_sources(stinkytofu_objs PRIVATE
     LoopRegionRemarkPass.cpp
     RemoveWaitAluPass.cpp
     InsertWaitAluPass.cpp
-    RederiveExpertScopePass.cpp
     EstimateAsmCyclesPass.cpp
     InsertCoexecHazardPass.cpp
+    EpilogueStoreSinkPass.cpp
     StinkyWmmaVgprReorderPass.cpp
     FlattenCalleesPass.cpp
 )
+
+add_subdirectory(ra)
+add_subdirectory(ssa)

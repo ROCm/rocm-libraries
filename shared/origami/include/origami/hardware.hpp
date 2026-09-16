@@ -59,6 +59,7 @@ class ORIGAMI_EXPORT hardware_t {
     gfx1200,
     gfx1201,
     gfx1100,
+    gfx1101,
     gfx1150,
     gfx1151,
     gfx1152,
@@ -80,6 +81,7 @@ class ORIGAMI_EXPORT hardware_t {
     if (str == "gfx1200") return architecture_t::gfx1200;
     if (str == "gfx1201") return architecture_t::gfx1201;
     if (str == "gfx1100") return architecture_t::gfx1100;
+    if (str == "gfx1101") return architecture_t::gfx1101;
     if (str == "gfx1150") return architecture_t::gfx1150;
     if (str == "gfx1151") return architecture_t::gfx1151;
     if (str == "gfx1152") return architecture_t::gfx1152;
@@ -102,6 +104,7 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1200: return "gfx1200";
       case architecture_t::gfx1201: return "gfx1201";
       case architecture_t::gfx1100: return "gfx1100";
+      case architecture_t::gfx1101: return "gfx1101";
       case architecture_t::gfx1150: return "gfx1150";
       case architecture_t::gfx1151: return "gfx1151";
       case architecture_t::gfx1152: return "gfx1152";
@@ -199,6 +202,9 @@ class ORIGAMI_EXPORT hardware_t {
         return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
       case architecture_t::gfx1100:
         return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
+      case architecture_t::gfx1101:
+        // AMD Navi 32
+        return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5};
       case architecture_t::gfx1150:
         // AMD Strix Point iGPU
         return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5};
@@ -385,9 +391,11 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 32, data_type_t::BFloat8Float8), 16}, // v_mfma_f32_16x16x32_bf8_f8
 
              // I8
-             {matrix_instruction(32, 32, 16, data_type_t::Int8), 32}, // v_mfma_f32_32x32x16_f8
+             {matrix_instruction(32, 32, 16, data_type_t::Int8), 32}, // v_mfma_i32_32x32x16_i8
+             {matrix_instruction(32, 32, 32, data_type_t::Int8), 32}, // v_mfma_i32_32x32x32_i8
              {matrix_instruction(32, 32, 4, data_type_t::Int8), 64}, // v_mfma_i32_32x32x4_2b_i8
-             {matrix_instruction(16, 16, 32, data_type_t::Int8), 16}, // v_mfma_f32_16x16x32_i8
+             {matrix_instruction(16, 16, 32, data_type_t::Int8), 16}, // v_mfma_i32_16x16x32_i8
+             {matrix_instruction(16, 16, 64, data_type_t::Int8), 16}, // v_mfma_i32_16x16x64_i8
              {matrix_instruction(16, 16, 4, data_type_t::Int8), 32}, // v_mfma_i32_16x16x4_4b_i8
              {matrix_instruction(4, 4, 4, data_type_t::Int8), 8}, // v_mfma_i32_4x4x4_16b_i8
 
@@ -468,6 +476,17 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
          }},
         {architecture_t::gfx1100,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32},  // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+         }},
+        {architecture_t::gfx1101,
          {
              // F16
              {matrix_instruction(16, 16, 16, data_type_t::Half), 32},  // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16

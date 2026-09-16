@@ -66,7 +66,7 @@ include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
 
-set(VERSION_STRING "3.7.0")
+set(VERSION_STRING "3.8.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(NOT DEFINED ENV{HIP_PATH})
@@ -89,6 +89,9 @@ option(BUILD_VERBOSE "Output additional build information" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
+
+# Feature flags
+option(HIPSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
@@ -366,7 +369,7 @@ endif()
 # Package specific CPACK vars
 if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.37.0)
+  set(rocsolver_minimum 3.38.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")

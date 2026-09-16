@@ -70,7 +70,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if problem.select_path() != path:
@@ -92,6 +92,8 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             dtype=problem.dtype,
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
+            use_fp8=problem.use_fp8,
+            fp8_fnuz=problem.fp8_fnuz,
         )
 
     candidate = KernelCandidate(
@@ -136,7 +138,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if not _d256_decode_cohort(problem):

@@ -47,7 +47,7 @@ from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, architectureMap, 
                                          gfxToIsa, isaToGfx
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
-                                            restoreDefaultGlobalParameters
+                                            restoreDefaultGlobalParameters, validateRuntimeLanguage
 from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
@@ -222,10 +222,8 @@ def addCommonArguments(argParser):
 
     argParser.add_argument("-d", "--device", dest="device", default=0, type=int, \
         help="override which device to benchmark")
-    argParser.add_argument("-p", "--platform", dest="platform", type=int, \
-        help="override which OpenCL platform to benchmark")
     argParser.add_argument("--runtime-language", dest="RuntimeLanguage", \
-        choices=["HIP", "OCL"], help="override which runtime language to use")
+        choices=["HIP"], help="override which runtime language to use")
     argParser.add_argument("--code-object-version", dest="CodeObjectVersion", \
         choices=["4", "5", "V4", "V5", "default"], action="store", default="4", help="HSA code-object version")
     argParser.add_argument("-v", "--verbose", action="store_true", \
@@ -268,9 +266,6 @@ def argUpdatedGlobalParameters(args):
     """
     rv = {}
     # override config with command-line options
-    if args.platform:
-        print1("# Command-line override: Platform")
-        rv["Platform"] = args.platform
     if args.RuntimeLanguage:
         print1("# Command-line override: RuntimeLanguage")
         rv["RuntimeLanguage"] = args.RuntimeLanguage
@@ -290,6 +285,10 @@ def argUpdatedGlobalParameters(args):
 
     for key, value in args.global_parameters:
         rv[key] = value
+
+    if "Platform" in rv:
+        printExit("OpenCL platform selection is no longer supported.")
+    validateRuntimeLanguage(rv.get("RuntimeLanguage"))
 
     PyTestBuildArchNames = os.environ.get("PyTestBuildArchNames")
     if PyTestBuildArchNames != None and len(PyTestBuildArchNames) > 0:
