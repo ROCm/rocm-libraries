@@ -1601,16 +1601,16 @@ RppStatus hip_exec_normalize_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDesc
 
     // if computeMean is set, compute mean values by processing over input based on axisMask values
     if (computeMean)
-        hip_exec_compute_mean_stddev_tensor(srcPtr, srcGenericDescPtr, meanTensor, stdDevTensor,
-                                            true, roiTensor, axisMask, tensorDims, maxParamVolume,
-                                            paramShape, paramStrides, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_compute_mean_stddev_tensor(
+            srcPtr, srcGenericDescPtr, meanTensor, stdDevTensor, true, roiTensor, axisMask,
+            tensorDims, maxParamVolume, paramShape, paramStrides, handle));
 
     // if computeStdDev is set, compute stdDev values by processing over input based on axisMask
     // values
     if (computeStdDev)
-        hip_exec_compute_mean_stddev_tensor(srcPtr, srcGenericDescPtr, meanTensor, stdDevTensor,
-                                            false, roiTensor, axisMask, tensorDims, maxParamVolume,
-                                            paramShape, paramStrides, handle);
+        RPP_RETURN_IF_ERROR(hip_exec_compute_mean_stddev_tensor(
+            srcPtr, srcGenericDescPtr, meanTensor, stdDevTensor, false, roiTensor, axisMask,
+            tensorDims, maxParamVolume, paramShape, paramStrides, handle));
 
     // based on number of dimensions call the corresponding kernel
     if (tensorDims == 2) {
