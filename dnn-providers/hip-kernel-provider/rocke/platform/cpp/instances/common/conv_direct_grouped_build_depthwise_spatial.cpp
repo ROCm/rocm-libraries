@@ -31,7 +31,11 @@
  *                  rocke_build_direct_depthwise_spatial_new (init b + build).
  * Byte-identical to the Python source.
  */
+#ifdef _WIN32
+#include <malloc.h>
+#else
 #include <alloca.h>
+#endif
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

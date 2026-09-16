@@ -19,7 +19,11 @@
  * Phase functions: prologue, load_weights, build_descriptors, stream_h_loop.
  * Byte-identical to the Python source.
  */
+#ifdef _WIN32
+#include <malloc.h>
+#else
 #include <alloca.h>
+#endif
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
