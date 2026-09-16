@@ -180,6 +180,53 @@ pad fixes it" guesswork). It takes an explicit `mode` and hard-fails rather than
 origin, swizzle, and all four labels. That is deliberate: a defaulted value does not error, it silently
 analyzes a *different* kernel than yours and prints your kernel's name on the answer.
 
+**DERIVE the CFG from the recording — do NOT type it.** A hand-filled `CFG` block is a second source of
+truth for what the kernel does, sitting beside the emit and free to drift from it, and the natural place to
+copy one from is a sibling kernel (the near-miss trap). When a recorded pipeline exists, pull every field off
+its transaction, exactly as `verify_lds_roundtrip` does:
+
+```python
+t = next(t for t in pipe.transactions if t.space_id == SPACE and t.kind == "store")
+CFG = dict(strides=tuple(t.strides), origin=tuple(t.origin), lds_swizzle=t.swizzle,
+           dtype_name=t.dtype_name, arch=pipe.arch, ...)      # DERIVED, not typed
+```
+
+If a field must be supplied by hand (no recording available), ASSERT it against the recorded value as soon
+as one exists, and say in the report that it was hand-supplied.
+
+```python
+from rocke.helpers.tiling import lds_conflict as lc
+
+ARCH = "<gfx target>"        # REQUIRED: from the user (simulate) or the host GPU (investigate)
+CFG = dict(                  # the subject, stated once, explicitly
+    tile_free=TF, wtag="b64", arch=ARCH, kernel_label="<kernel>", operand_label="A",
+    dims_label="M", macro_label="<macro MxN, waves WxW, tile_k=K>", strides=(TF, 1),
+    dtype_name="<f16|f32|...>", origin=(0, 0), lds_swizzle=False,
+)
+descs = lc.ProbeDescs.from_coop(coop_native, wave_native, transpose=_transpose_desc)  # both transposes
+
+# ---- SIMULATE: no GPU. Gated on selftest(ARCH); raises if ARCH has no validated model. ----
+rep = lc.analyze_store(descs, mode="simulate", render_to=out_png, **CFG)
+# rep.verdict -> "SIMULATED (<arch> model validated by selftest; no per-case hardware ...)"
+# figure is watermarked SIMULATED. rep.measured is None. Binding stage is NOT answerable.
+
+# ---- INVESTIGATE: host GPU must BE ARCH (run_probe enforces it). ----
+def measure(pad, mode="store"):
+    """Run ONE probe under rocprof in the container; return its counters. This is the only host/
+    container-specific glue — everything else is in the module."""
+    r = lc.run_probe(descs, mode, arch=ARCH, dtype=DTYPE, tile_free=TF, tile_k=TK, n_waves=NW,
+                     warp_free=WF, lds_pad=pad, lds_swizzle=False, block_lanes=WAVE)
+    assert r["max_abs_diff"] == 0.0                   # bit-exact or the counters are meaningless
+    # ... docker exec rocprofv3 (lc.COUNTER_PMC / lc.ROCPROF_RECIPE) on a runner that calls run_probe ...
+    hw = lc.parse_counter_csv(outdir)                 # {BC, IDX, conflicts_per_access, ADDR, ...}
+    hw["max_abs_diff"] = r["max_abs_diff"]
+    return hw
+
+rep = lc.analyze_store(descs, mode="investigate", measure=measure, verify_fix=True,
+                       render_to=out_png, **CFG)
+# rep.verdict / rep.conflicts_per_access / rep.fix_pad / rep.located / rep.png / rep.facts_table()
+```
+
 `analyze_store` does: **`selftest(arch)`** → address-map → `simulate` → *(investigate)* **`measure` on GPU +
 HARD `gate(sim==HW)`** → `recommend_pad` (closed-form conflict-free pad) → *(optional)* verify the fix on
 GPU → `render_conflict_3panel`. It returns a `ConflictReport` whose `.facts_table()` yields the facts +
