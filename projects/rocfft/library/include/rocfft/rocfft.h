@@ -27,12 +27,19 @@
 #ifndef ROCFFT_H
 #define ROCFFT_H
 
+/** @def ROCFFT_EXPORT
+ *  @brief Export/import visibility macro for rocFFT symbols.
+ */
 #ifdef rocfft_EXPORTS
 #include "rocfft-export.h"
 #else
 #define ROCFFT_EXPORT
 #endif
 
+/*! @def ROCFFT_DEPRECATED_MSG(msg)
+ *  @brief Marks a function or type as deprecated with a message.
+ *  @param msg The deprecation message to display.
+ */
 #if defined(__cplusplus) && __cplusplus >= 201402L
 #define ROCFFT_DEPRECATED_MSG(msg) [[deprecated(msg)]]
 #elif defined(__GNUC__)
