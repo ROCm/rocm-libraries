@@ -569,6 +569,10 @@ NB_MODULE(_stinkytofu, m) {
              "Mark the beginning of a named instruction-group scope")
         .def("end_group", &PyLogicalModule::endGroup, nb::arg("name"),
              "Mark the end of a named instruction-group scope")
+        .def("begin_callable", &PyLogicalModule::beginCallable, nb::arg("name"),
+             "Mark the beginning of a callable function body")
+        .def("end_callable", &PyLogicalModule::endCallable, nb::arg("name"),
+             "Mark the end of a callable function body")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
             "dump",

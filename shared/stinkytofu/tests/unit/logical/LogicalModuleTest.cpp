@@ -23,9 +23,12 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -64,4 +67,39 @@ TEST(IRModuleTest, AddInstructions) {
 
     EXPECT_EQ(module->size(), 2);
     EXPECT_EQ(module->getInstructions().size(), 2);
+}
+
+TEST(IRModuleTest, RecordsCallableMarkersInSourceOrder) {
+    PyLogicalModule module("test_kernel");
+
+    module.beginCallable("label_Activation_Relu_VW1");
+    module.add(makeLogicalInstructionShared(VMovB32(vgpr(0), vgpr(1))));
+    module.endCallable("label_Activation_Relu_VW1");
+
+    const auto& markers = module.getCallableMarkers();
+    ASSERT_EQ(markers.size(), 2);
+    EXPECT_TRUE(markers[0].isBegin);
+    EXPECT_EQ(markers[0].name, "label_Activation_Relu_VW1");
+    EXPECT_EQ(markers[0].position, 0);
+    EXPECT_FALSE(markers[1].isBegin);
+    EXPECT_EQ(markers[1].name, "label_Activation_Relu_VW1");
+    EXPECT_EQ(markers[1].position, 1);
+}
+
+TEST(IRModuleTest, LowersCallableIntoSeparateFunction) {
+    PyLogicalModule module("test_kernel");
+    module.add(makeLogicalInstructionShared(VMovB32(vgpr(0), vgpr(1))));
+    module.beginCallable("label_Activation_Relu_VW1");
+    module.addLabel("label_Activation_Relu_VW1");
+    module.add(makeLogicalInstructionShared(VMovB32(vgpr(2), vgpr(3))));
+    module.endCallable("label_Activation_Relu_VW1");
+    module.addLabel("label_ASM_End");
+
+    auto asmModule = lowerLogicalModuleToAsm(module, {12, 5, 0});
+
+    ASSERT_EQ(asmModule->numFunctions(), 2);
+    const std::string assembly = asmModule->emitAssembly();
+    ASSERT_NE(assembly.find("label_ASM_End:"), std::string::npos);
+    ASSERT_NE(assembly.find("label_Activation_Relu_VW1:"), std::string::npos);
+    EXPECT_LT(assembly.find("label_ASM_End:"), assembly.find("label_Activation_Relu_VW1:"));
 }
