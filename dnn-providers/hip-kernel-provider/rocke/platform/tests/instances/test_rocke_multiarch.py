@@ -567,7 +567,7 @@ class TestWmmaCshuffleBlastRadius(unittest.TestCase):
         # the C tile goes live, which only holds while C's live range opens
         # after the last A/B read -- a property of the emitter, not of the spec.
         # This tile sits in the window where the credit is the whole verdict:
-        # AB=128K aliased fits gfx1250's 160K cap, AB+C=256K does not. Any
+        # AB=256K aliased fits gfx1250's 320K cap, AB+C=384K does not. Any
         # future caller that keeps A/B live across its epilogue breaks the
         # premise, and this is the assertion that will notice.
         import dataclasses
@@ -577,7 +577,7 @@ class TestWmmaCshuffleBlastRadius(unittest.TestCase):
         aliased = dataclasses.replace(
             self._wmma_base(),
             tile=dataclasses.replace(
-                self._wmma_base().tile, tile_m=256, tile_n=256, tile_k=128
+                self._wmma_base().tile, tile_m=256, tile_n=256, tile_k=256
             ),
         )
         ok, why = is_valid_spec(aliased, arch="gfx1250")

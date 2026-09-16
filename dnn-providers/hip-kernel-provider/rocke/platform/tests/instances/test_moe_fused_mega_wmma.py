@@ -167,10 +167,13 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
 
         # Both GEMM sub-specs fit on their own; doubling all three operand tiles
         # at the wide inter slice only overruns once Hidden_smem is counted too.
+        # Sized against gfx1250's 320 KiB per-WG LDS: the inter slice alone is
+        # ~258 KiB and the down slice ~96 KiB, so each clears the cap and only
+        # the fused total does not.
         spec = FusedMegaWmmaSpec(
             name="mega_over",
             dtype="bf16",
-            tile_n_inter=512,
+            tile_n_inter=1024,
             tile_n_down=512,
             double_buffer=True,
         )
