@@ -150,6 +150,13 @@ def _derive(engine_name: str, repo: Path) -> dict:
         "native_file": native_file.as_posix(),
         "descriptor_dir": descriptor_dir.as_posix(),
         "engine_toml": engine_toml.as_posix(),
+        # The same three, relative to the repo. Not decoration: `guard_scope.py` globs
+        # with `root_dir=repo`, which an absolute pattern ignores -- it would match
+        # nothing, report nothing, and leave a carve-out that reads as present and does
+        # nothing. Anything passed to a --watch/--allow-* flag must use these.
+        "native_file_rel": native_file.relative_to(repo).as_posix(),
+        "descriptor_dir_rel": descriptor_dir.relative_to(repo).as_posix(),
+        "engine_toml_rel": engine_toml.relative_to(repo).as_posix(),
         "external_test_target": f"{_PROJECT_NAME}-{namespace}-{kebab_local}-external-integration-check",
         # Every suite the engine's generated sources define, not one shard of them. A
         # filter naming a single suite leaves its siblings built, linked and never run:

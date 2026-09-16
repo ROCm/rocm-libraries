@@ -185,6 +185,11 @@ steps:
       census_filter: { json_file: result, path: "$.census_filter" }
       generated_test_source_count: { json_file: result, path: "$.generated_test_source_count", type: int }
       collisions: { json_file: result, path: "$.collisions", type: int }
+      # Repo-relative, for the scope guard: it globs with root_dir=repo, and an absolute
+      # pattern there matches nothing while looking like a carve-out that works.
+      native_file_rel: { json_file: result, path: "$.native_file_rel" }
+      descriptor_dir_rel: { json_file: result, path: "$.descriptor_dir_rel" }
+      engine_toml_rel: { json_file: result, path: "$.engine_toml_rel" }
     assert:
       - that: "${steps.identity.outputs.collisions} > 0"
         message: "this engine is not present in the checkout, so there is nothing to work on - run the create flow first"
@@ -444,6 +449,26 @@ steps:
           - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorPacks.hpp"
           - "--allow-modified"
           - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt"
+          # The engine under optimisation. This flow changes an engine that already
+          # exists, so its pack, kernel, descriptors, TOML and generated tests are all
+          # MODIFIED, never added -- the allow-added entries above cover the create path,
+          # where the agent writes these files for the first time, and cover nothing here.
+          # Without this the flow forbids its own purpose, which is what a generalize run
+          # proved by having a correct widening rejected as three files outside scope.
+          #
+          # Pinned to THIS engine through identity wherever a name exists for it. The
+          # kernels tree is the exception: kernel filenames are free-form and no
+          # derivation names them.
+          - "--allow-modified"
+          - "${steps.identity.outputs.native_file_rel}"
+          - "--allow-modified"
+          - "${steps.identity.outputs.descriptor_dir_rel}/**/*"
+          - "--allow-modified"
+          - "${steps.identity.outputs.engine_toml_rel}"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/Test${steps.identity.outputs.pack_class}*.cpp"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/kernels/**/*"
           # Bytecode caches are a side effect of running the migration scripts, not an edit.
           # The baseline is taken once at preflight, so without this a single stray .pyc
           # fails every remaining iteration of the loop.
