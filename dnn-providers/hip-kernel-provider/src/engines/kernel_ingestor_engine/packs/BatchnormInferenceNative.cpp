@@ -470,9 +470,9 @@ BatchnormInferenceBinding batchnormInferenceBinding(const BoundTokens& bound)
 /// x's and y's own per-dim strides, then each per-channel operand's own channel stride.
 struct BatchnormInferenceGeometry
 {
-    int64_t dims[SUPPORTED_RANK] = {0, 0, 0, 0};
-    int64_t xStrides[SUPPORTED_RANK] = {0, 0, 0, 0};
-    int64_t yStrides[SUPPORTED_RANK] = {0, 0, 0, 0};
+    std::array<int64_t, SUPPORTED_RANK> dims = {0, 0, 0, 0};
+    std::array<int64_t, SUPPORTED_RANK> xStrides = {0, 0, 0, 0};
+    std::array<int64_t, SUPPORTED_RANK> yStrides = {0, 0, 0, 0};
     int64_t meanStrideC = 0;
     int64_t invVarianceStrideC = 0;
     int64_t scaleStrideC = 0;
@@ -704,8 +704,9 @@ private:
     const compilation::KpackKernelLoader& _kpackLoader;
 };
 
-} // namespace
-
+/// The kpack module cache this pack's dispatch handler loads through, process-lifetime.
+/// Internal: unlike the pointwise pack's, no test reaches for it, so it stays in this
+/// translation unit rather than gaining a declaration nobody else uses.
 compilation::KpackModuleCache& batchnormInferenceKpackModuleCache()
 {
     // Process-lifetime, as the pointwise pack's is: a loaded module outlives the plan
@@ -714,6 +715,8 @@ compilation::KpackModuleCache& batchnormInferenceKpackModuleCache()
     static compilation::KpackModuleCache s_moduleCache;
     return s_moduleCache;
 }
+
+} // namespace
 
 void resetBatchnormInferenceModuleCache()
 {

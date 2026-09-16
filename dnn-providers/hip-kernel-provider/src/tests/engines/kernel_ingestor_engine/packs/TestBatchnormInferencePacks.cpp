@@ -36,7 +36,6 @@ using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 // ---------------------------------------------------------------------------
 // Shipped descriptor set

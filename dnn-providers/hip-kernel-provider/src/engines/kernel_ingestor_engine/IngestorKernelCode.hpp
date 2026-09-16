@@ -99,7 +99,7 @@ inline std::string readDescriptorFile(const std::filesystem::path& path,
                                       const std::string& what,
                                       const std::string& label)
 {
-    std::ifstream input(path, std::ios::binary);
+    const std::ifstream input(path, std::ios::binary);
     if(!input.good())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
@@ -181,11 +181,16 @@ inline std::vector<compilation::KernelHeader>
         if(!resolveInsideDescriptorTree(
                kernel, std::filesystem::path(kernel.source.bundle) / name, resolved, boundary))
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                "hiprtc_file kernel source for " + label + ": bundle header '" + name
-                    + "' resolves to '" + resolved.string()
-                    + "', which is outside the descriptor tree '" + boundary.string() + "'");
+            std::string error = "hiprtc_file kernel source for " + label;
+            error += ": bundle header '";
+            error += name;
+            error += "' resolves to '";
+            error += resolved.string();
+            error += "', which is outside the descriptor tree '";
+            error += boundary.string();
+            error += "'";
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                           error);
         }
         bundleHeaders.emplace(name, resolved);
     }
@@ -199,12 +204,14 @@ inline std::vector<compilation::KernelHeader>
               });
         if(collides)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                "hiprtc_file kernel source for " + label + ": bundle header '" + name
-                    + "' has the same name as one of the provider's embedded headers."
-                      " Rename it: which one an #include resolves to would otherwise be"
-                      " invisible");
+            std::string error = "hiprtc_file kernel source for " + label;
+            error += ": bundle header '";
+            error += name;
+            error += "' has the same name as one of the provider's embedded headers."
+                     " Rename it: which one an #include resolves to would otherwise be"
+                     " invisible";
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                           error);
         }
         headers.emplace_back(name, readDescriptorFile(bundleHeader.second, "bundle header", label));
     }
@@ -327,10 +334,13 @@ inline IngestorKernelCode
             if(!hipdnn_plugin_sdk::ingestor::substituteKernelDefine(
                    templateText, kernel.metadata, value, error))
             {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                    "hiprtc_file kernel source for " + label + ": cannot bind define '" + name
-                        + "': " + error);
+                std::string message = "hiprtc_file kernel source for " + label;
+                message += ": cannot bind define '";
+                message += name;
+                message += "': ";
+                message += error;
+                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                               message);
             }
             options.add(name, value);
         }
