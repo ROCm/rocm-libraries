@@ -51,7 +51,6 @@ namespace rpptest {
 inline constexpr const char* kSkipList[] = {
     // ---- not reproducible: the result changes from run to run -------------------
     "Image_Effects/SpatterTest.*",
-    "Voxel_Geometric/FlipVoxelTest.Correctness/HOST_*_NDHWC3_FullRoi_*",
 
     // ---- known kernel defects ---------------------------------------------------
     "Image_Color/ColorCastTest.Correctness/*",
@@ -73,8 +72,6 @@ inline constexpr const char* kSkipList[] = {
     "Image_Color/HistogramEqualizeTest.Correctness/HIP_U8toU8_PLN3toPKD3_FullRoi_2x36x55",
     "Image_Color/HistogramEqualizeTest.Correctness/HIP_U8toU8_PKD3_FullRoi_1x45x13",
     "Image_Color/HistogramEqualizeTest.Correctness/HIP_U8toU8_PLN3_FullRoi_1x45x13",
-    "Image_DataExchange/ChannelPermuteTest.Correctness/HOST_I8toI8_PKD3_FullRoi_*_perm201",
-    "Image_DataExchange/ChannelPermuteTest.Correctness/HOST_I8toI8_PLN3toPKD3_FullRoi_*_perm201",
     "Image_DataExchange/YuvToRgbCubicVTest.Correctness/HIP_U8toU8_PKD3_FullRoi_*",
     "Image_Effects/CoarseDropoutTest.Correctness/HIP_*_PartialRoi_*",
     "Image_Effects/CutoutDropoutTest.Correctness/*_PartialRoi_*",
