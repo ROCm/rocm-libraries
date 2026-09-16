@@ -402,6 +402,20 @@ namespace rocsparse
         return std::min(x, y);
     }
 
+    // Compute the number of blocks (grid.x) required to cover \p size elements with
+    // \p elements_per_block elements per block, clamped to \p max_grid_size. The count
+    // is evaluated in 64-bit and clamped before it is narrowed into dim3, so a row count
+    // that exceeds the device grid limit does not silently truncate grid.x. Callers must
+    // pair a clamped grid with a grid-stride loop in the kernel so that all elements are
+    // still processed. Pass handle->properties.maxGridSize[0] as \p max_grid_size.
+    __host__ __forceinline__ uint32_t get_grid_size(int64_t size,
+                                                    int64_t elements_per_block,
+                                                    int64_t max_grid_size)
+    {
+        const int64_t num_blocks = (size - 1) / elements_per_block + 1;
+        return static_cast<uint32_t>(rocsparse::min(num_blocks, max_grid_size));
+    }
+
     __device__ __forceinline__ float sqrt(float val)
     {
         return std::sqrt(val);
