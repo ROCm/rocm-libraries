@@ -123,7 +123,10 @@ def make_case_inputs(
         "bf8e5m2": ml_dtypes.float8_e5m2,
     }
     rng = np.random.default_rng(0xB10C)
-    packed_fp4 = spec.dtype_a == "fp4" and spec.dtype_b == "fp4"
+    packed_fp4 = spec.dtype_a in ("fp4", "fp4e2m1") and spec.dtype_b in (
+        "fp4",
+        "fp4e2m1",
+    )
     if packed_fp4:
         # Exercise all 16 code points, including signed zero. Keep codes
         # unpacked until group masking is finished.
@@ -276,7 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--n", type=int, default=16)
     p.add_argument("--k", type=int, default=128)
     p.add_argument("--block-k", type=int, default=None)
-    p.add_argument("--dtype", default="fp8e4m3", choices=("fp8e4m3", "bf8e5m2", "fp4"))
+    p.add_argument(
+        "--dtype", default="fp8e4m3", choices=("fp8e4m3", "bf8e5m2", "fp4", "fp4e2m1")
+    )
     p.add_argument("--tol", type=float, default=2e-2, help="legacy WMMA tolerance only")
     p.add_argument(
         "--matrix-path", default="wmma", choices=("wmma", "wmma_scale", "wmma_scale16")

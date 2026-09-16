@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import operator
 from dataclasses import replace
 
 import numpy as np
@@ -200,3 +201,88 @@ def test_reject_unsupported_fp4_contract(changes):
     assert not is_valid_spec(spec)[0]
     with pytest.raises(ValueError, match="invalid block_scaled_gemm"):
         build_block_scaled_gemm(spec)
+
+
+@pytest.mark.parametrize("path", ["wmma_scale", "wmma_scale16"])
+@pytest.mark.parametrize(
+    "a_dtype,b_dtype",
+    [("fp4e2m1", "fp4e2m1"), ("fp4", "fp4e2m1"), ("fp4e2m1", "fp4")],
+)
+def test_fp4e2m1_alias_preserves_packed_contract(path, a_dtype, b_dtype):
+    original = fp4_spec(path, 256)
+    alias = replace(original, dtype_a=a_dtype, dtype_b=b_dtype)
+    assert is_valid_spec(alias)[0]
+    assert block_scaled_gemm_signature(alias) == block_scaled_gemm_signature(original)
+    assert ArchTarget.from_gfx("gfx1250").mma.has_shape(
+        family=path,
+        a_dtype=a_dtype,
+        b_dtype=b_dtype,
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+    )
+    for lower, options in (
+        (lower_kernel_to_llvm, {"llvm_flavor": "llvm23"}),
+        (lower_kernel_to_hip, {}),
+    ):
+        assert lower(
+            build_block_scaled_gemm(alias), arch="gfx1250", **options
+        ) == lower(build_block_scaled_gemm(original), arch="gfx1250", **options)
+    for actual, expected in zip(
+        make_case_inputs(alias, "mixed"), make_case_inputs(original, "mixed")
+    ):
+        np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("path,count", [("wmma_scale", 4), ("wmma_scale16", 8)])
+@pytest.mark.parametrize("dtype", ["fp8", "fp4"])
+def test_scale_operands_pack_consecutive_k_groups_low_byte_first(path, count, dtype):
+    # Evaluate only the integer dependency graph of each MMA scale operand.
+    # Distinct rows/columns and high-bit bytes expose stride, order, and zext errors.
+    spec = replace(fp4_spec(path, 256), dtype_a=dtype, dtype_b=dtype)
+    kernel = build_block_scaled_gemm(spec)
+    producers = {v.name: op for op in kernel.body.ops for v in op.results}
+    groups = spec.K // spec.block_k
+    a = np.arange(spec.M * groups, dtype=np.uint8).reshape(spec.M, groups)
+    b = (np.arange(groups * spec.N, dtype=np.uint8) + 129).reshape(groups, spec.N)
+    binary = {
+        "arith.add": operator.add,
+        "arith.mul": operator.mul,
+        "arith.mod": operator.mod,
+        "arith.div": operator.floordiv,
+        "arith.shl": operator.lshift,
+        "arith.or": operator.or_,
+    }
+    for lane in (0, 7, 16, 31):
+
+        def evaluate(value):
+            if value.name == "%A_scale":
+                return a.ravel()
+            if value.name == "%B_scale":
+                return b.ravel()
+            op = producers[value.name]
+            if op.name == "arith.constant":
+                return op.attrs["value"]
+            if op.name == "gpu.thread_id":
+                return lane
+            if op.name == "gpu.block_id":
+                return 0
+            args = [evaluate(v) for v in op.operands]
+            if op.name == "memref.global_load_typed":
+                return int(args[0][args[1]])
+            if op.name == "arith.zext":
+                return args[0]
+            return binary[op.name](*args)
+
+        calls = [op for op in kernel.body.ops if op.name == "tile.mma"]
+        assert len(calls) == 2
+        for step, call in enumerate(calls):
+            start = step * count
+            stop = start + count
+            expected_a = int.from_bytes(a[lane % 16, start:stop].tobytes(), "little")
+            expected_b = int.from_bytes(b[start:stop, lane % 16].tobytes(), "little")
+            assert evaluate(call.operands[3]) == expected_a
+            assert evaluate(call.operands[4]) == expected_b
+            assert call.operands[3].type.name == f"i{count * 8}"
+            assert call.operands[4].type.name == f"i{count * 8}"
