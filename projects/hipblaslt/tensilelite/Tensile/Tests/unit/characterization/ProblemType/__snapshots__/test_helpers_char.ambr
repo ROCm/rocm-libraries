@@ -25,6 +25,7 @@
     'IndexAssignmentsA',
     'IndexAssignmentsB',
     'IndexAssignmentsLD',
+    'Int4EncodingA',
     'MXBlockA',
     'MXBlockB',
     'MacDataTypeA',
@@ -39,6 +40,8 @@
     'NumIndicesLD',
     'OperationType',
     'OutputAmaxD',
+    'ScaleBlockSizeA',
+    'ScaleZeroPointA',
     'SetConstStrideA',
     'SetConstStrideB',
     'SetConstStrideBias',
@@ -139,6 +142,9 @@
     'IndexAssignmentsLD': list([
       'list',
     ]),
+    'Int4EncodingA': list([
+      'str',
+    ]),
     'MXBlockA': list([
       'int',
     ]),
@@ -179,6 +185,12 @@
       'str',
     ]),
     'OutputAmaxD': list([
+      'bool',
+    ]),
+    'ScaleBlockSizeA': list([
+      'int',
+    ]),
+    'ScaleZeroPointA': list([
       'bool',
     ]),
     'SetConstStrideA': list([
