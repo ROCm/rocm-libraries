@@ -97,7 +97,8 @@ You are open to **any** algorithm, not just GEMM. When the problem is one we hav
 ### Per-kernel design record — OFFER the design journal (the user decides)
 Once a design is APPROVED, **offer** a per-kernel design record — **keeping one, and its scope, is the USER'S
 decision, never automatic.** If they opt in, the coordinator writes
-`helpers/tiling/docs/kernels/<kernel>_design.md` from `docs/kernels/_TEMPLATE.md`: a **reproduction-complete**
+`kernels/<kernel>/docs/design_report.md` (renders in `docs/viz/`) from `docs/kernels/_TEMPLATE.md` -- the
+path SOT is that template's self-contained kernel-folder layout: a **reproduction-complete**
 report carrying everything to rebuild it — the approved design + specialist rationale, the exact static
 distributions (Rs/Hs/Ps/Ys), flags, arch/machine, the stepwise pipeline + layout-viz images, and tabularized
 perf (TFLOPS, rocprof incl. LDS, occupancy/VGPR/scratch/ASM) — then an appended entry per build/sweep iteration

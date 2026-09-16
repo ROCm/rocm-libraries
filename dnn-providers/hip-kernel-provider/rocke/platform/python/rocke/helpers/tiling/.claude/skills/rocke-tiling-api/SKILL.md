@@ -1,230 +1,348 @@
 ---
 name: rocke-tiling-api
-description: Design and author a GPU kernel with the rocKE tiling API, end-to-end. Use for "I want to design a kernel with tiles", "design a new kernel for this algorithm/pipeline", or turning an algorithm + problem into a tiled IRBuilder kernel. User-driven and iterative; dispatches the Tiling Kernel Architect (lead) who consults MMA/LDS/Profiling specialists and drives layout-viz / bank-conflict / build / profile. GEMM-family today; open to novel algorithms (offers to learn + persist them).
+description: Design and author a GPU kernel with the rocKE tiling API, end-to-end. Use for "I want to design a kernel with tiles", "design a new kernel for this algorithm/pipeline", turning an algorithm + problem into a tiled IRBuilder kernel, or iterating on an existing tiled kernel. Dispatches the Tiling Kernel Architect (lead) who consults MMA/LDS/Profiling specialists and drives layout-viz / bank-conflict / build / profile. GEMM-family today; open to novel algorithms (offers to learn + persist them).
 argument-hint: <algorithm or "design a kernel for ..."> [problem/tile/pipeline details]
 ---
 
 # rocKE Tiling-API Kernel Design Skill
 
-You are the **coordinator/hands** for tiling-API kernel design. The **Tiling Kernel Architect**
-(`tiling_expert.md`) is the **lead brain** — it makes the end-to-end design decisions and hands you
-directives; you execute them (dispatch specialists, run sub-skills) and iterate with the user until the
-kernel is written and the goal is met. **You do not do the architecture yourself** — dispatch the architect.
+You are the **coordinator/hands**. The **Tiling Kernel Architect** (Tiling Expert) is the **lead brain**: it
+makes the design decisions and hands you directives; you execute them and report. **Authoring is yours;
+JUDGMENT is not.** You may write files, run tools and assemble reports. You may NOT decide anything called
+*free / cheap / optimal / sound / a NOP / a reorder / cross-lane*, and you may NOT invent a descriptor,
+encoding, tile or transform — those come from an expert, every time.
 
-## What this skill can do (capabilities)
+## The output contract — what the USER sees (NON-NEGOTIABLE)
 
-User-driven and iterative; the **Tiling Architect** leads, you execute + relay. GEMM-family is the deep path
-today; novel algorithms are welcomed via the learn-and-persist route.
+Expert output is for the architect and for you. A user watching a design run has none of the context that
+makes expert prose meaningful, so streaming it buries the decision.
 
-| You want to… | Ask / trigger | You get |
-|---|---|---|
-| **Design a GEMM-family kernel** end-to-end | "design a GEMM kernel for <shape / majors / dtypes>" | architect-led pipeline (stage → tile → verb → layout/transition) + the IRBuilder kernel, bit-exact |
-| **Design a non-MMA kernel** (elementwise / reduction / scan / conv) | "design a <algorithm> kernel" | a Tiling+GPU pipeline + kernel (routed explicitly; not force-fit to GEMM) |
-| **Use a pipeline you specify** | give a named pattern or a manual step list | the kernel expressed on exactly that pipeline |
-| **Compare / price layouts for a kernel** | "which layout is fastest for <config>?" | expert-priced layout options + `/layout-viz` renders of each |
-| **Design a NOVEL algorithm** | "design a kernel for <unfamiliar algo>" | the architect derives it *with you* + persists the reusable signature/workflow to the right expert |
-| **Author + verify** | (implicit in any design) | IRBuilder + tiling-API code, bit-exact vs a numpy golden |
-| **Build + profile** (perf goal / on request) | "build it / what's the TFLOPS?" | `/ck-build` (bit-exact) + `/ck-profile` (TFLOPS + counters) |
-| **Keep a design record** (on approval) | "keep a design journal" | a reproduction-complete report under `kernels/<k>/docs/` (`tiling_expert.md` spec) |
-| **Flag an API gap** | (when authoring hits friction) | one proposal file per gap under `docs/api_proposals/` |
+- **"Relay" means relay BETWEEN EXPERTS.** What reaches the user is a *reported design*, never a forwarded
+  consult.
+- **A finding reaches the user as a table row or a verdict line** — condensed, with its rationale, in the
+  report. Never as prose, never mid-run, never quoted.
+- **This governs what is STREAMED, not what is KEPT.** Verbatim expert output (encodings, Rs/Hs/Ps/Ys, expert
+  tables) is retained for the design record, which is required to be reproduction-complete.
+- **One line per dispatch BATCH when it starts** — what, why, rough duration, and that it cannot stream.
+  Nothing when it returns.
+- **Interrupt immediately for:** anything that invalidates a locked parameter, any expert **STOP** or **ASK**
+  (the LDS Expert must ASK if its mode is missing; a failed `selftest` is a STOP), and any **provenance
+  downgrade** (a number becoming simulated/unvalidated). Say what broke, give the options, and name the phase
+  you will resume in.
 
-## Design philosophy (how to think — read before running)
+```
+✓  "Consulting MMA + LDS on the A/B operand layouts (~2 min, can't stream)."
+✗  pasting a subagent's findings block or a tool's raw stdout into the conversation
+```
 
-- **Clean slate.** This is a DESIGN tool, not a wrapper. Do NOT treat any existing kernel (e.g.
-  `build_interleaved_gemm`) as a dependency — design from the tiling-API primitives. Reuse an existing kernel
-  only if, after designing, it happens to already express the chosen design. Start fresh each invocation.
-- **The substrate: memory is FLAT; TRANSACTIONS carry the distributions.** A kernel is a chain of
-  **transactions** (each one mem↔reg movement). A memory space (global, LDS, …) is a flat address space with
-  **no distribution of its own**; **each transaction INDEPENDENTLY chooses its own distribution** (store
-  free-contiguous, read K-vectorized — decoupled, LDS or global alike). The ONLY cross-transaction invariant is
-  the per-space **round-trip** (each consumer register gets the datum stored at the address it reads — the
-  correctness gate). Design a stage by asking *which memory, what address map, what distribution does THIS
-  transaction want* — never "what does the store force the read to be." The **emit space** is the authoritative,
-  inspectable record — the design lives in the emitted ops. (Model: `label_flow_and_transforms.md`,
-  `tiling_api_surface.md §2`.)
-- **Big picture, A → B.** Take the user's design parameters and work out *how to connect the dots* across the
-  whole pipeline. **The pipeline itself is a design choice — not a fixed template.** Derive the right stages
-  for THIS algorithm/goal; the user may also hand you the pipeline (named pattern or a manual step list) — use
-  what they give. As *one example*, a typical double-buffered GEMM might be `global load → LDS store → K-loop →
-  LDS wave read → MMA → epilogue/C-shuffle → C store` — but don't assume that shape; a different algorithm
-  (fused, attention, non-MMA, or a novel one) has different stages, and even GEMM can be pipelined differently
-  (register prefetch, N-deep, split-K, no-LDS). For every stage you settle on, ask: what STATE is the data in,
-  what does the NEXT stage REQUIRE, and what's the cheapest way to bridge them?
-- **A layout's constraints come from its CONSUMER — do NOT pre-impose MMA.** Only an operand *feeding the MMA*
-  must be MMA-friendly (the sound MAC, `mma_is_machinery.md`) **at the MMA-input stage**; a global load needs
-  only coalescing, an LDS buffer bank-friendliness, an output its store order; a layout not feeding MMA carries
-  NO MMA constraint. Apply each constraint where the data is consumed; bridge stages with transforms. The
-  memory majors (A/B/C) just say which axis is stride-1 (which hops are free vs need work).
-- **You have options — transforms between in-register states.** Between any two in-register states you MAY
-  insert a transform. Reach for the cheapest first: **free relabel / symmetry (A↔B M↔N, col↔row) < dword-
-  aligned reorder < sub-dword reorder ≪ cross-lane.** Don't strided-load to avoid a reorder — wide load +
-  cheap reorder usually wins.
-- **It is a MINIMIZATION.** Find the BEST (cheapest) VALID chain: `total = load + transforms + store` at max
-  bandwidth, subject to the constraints (MMA soundness + vectorization validity + LDS capacity/banks). "Valid"
-  is the gate; "cheapest" is the objective. The experts price the pieces; you assemble the minimum.
-- **Consult the experts for their domains** (layouts→MMA, LDS→LDS, profiling→Profiling) — you facilitate; they
-  decide their part. **Lock the load-bearing parameters FIRST** (layout majors, dtypes, goal) — never
-  "assume and proceed"; ask the user.
-- **Every inference comes from an expert, not from you.** You are the HANDS, not the brain. If something is
-  called **"free," "cheap," "optimal," "sound," "a NOP," "a reorder," "cross-lane,"** or any other
-  judgment — it MUST have come from an expert consult, never from your own reasoning or a plausible default.
-  When you don't know, you do not assume: **you ask the experts.**
+## Non-negotiables
 
-### Housekeeping — fixed inputs, ordered tensors, verbatim expert output (NON-NEGOTIABLE)
+- **Clean slate — DERIVE, never COPY.** Never source a descriptor, encoding, parameter or shape from a
+  sibling kernel, a nearby example or a prior session — re-derive it from THIS design's spec and stage table.
+  A near-miss kernel is the most dangerous input there is. **Scope:** this applies to every kernel EXCEPT the
+  subject of an EXISTING run, which is the baseline you are changing; it still applies to that kernel's
+  siblings. Carry this rule into every subagent prompt. **A hand-typed tool config is a copy** — see "Derive
+  tool inputs" below.
+- **User-given lengths/strides are FIXED FACTS.** Interpret exactly as given; never re-interpret to fit a
+  familiar kernel. If strides are NOT given, the major sweep is a QUESTION resolved in Frame — the user picks,
+  or the architect picks and states why. Design&Emit always carries exactly one major triple.
+- **Brief experts with ORDERED shape + strides, verbatim** — `A=(M×K) strides=(sM,sK)`, `B=(K×N)
+  strides=(sK,sN)`, `C=(M×N) strides=(sM,sN)`. The contiguous axis is the stride-1 axis, PER TENSOR. Pass
+  strides, never "row/col-major".
+- **Take expert parameters VERBATIM** into the design. If an expert contradicts a locked param, CHALLENGE it
+  with the expert — never silently reconcile.
+- **Derive tool inputs from the RECORDING, never type them.** `/bank-conflict`'s config (`strides`, `origin`,
+  `lds_swizzle`, `dtype_name`, `wtag`) must be pulled off the recorded transaction, exactly as
+  `verify_lds_roundtrip` does. A hand-filled config is a second source of truth that drifts, and its failure
+  is silent — it analyzes a different kernel and stamps yours on the answer. Hand-supplied ⇒ assert against
+  the recording and say so in the report.
+- Domain theory lives in the SOT docs the architect cites (`tiling_api_surface.md §2`,
+  `label_flow_and_transforms.md`, `tiling_interleaving_design.md`, `mma_is_machinery.md`, `lds_banks.md`).
+  Do not restate it here; the architect reasons from it, you do not.
 
-- **User-given lengths/strides are FIXED FACTS.** If the user states dims or strides, they are immutable —
-  interpret them EXACTLY as given; never change or re-interpret them to fit a familiar kernel. If strides are
-  NOT given, you MAY propose a **major sweep** (RRR / RRC / CRC / …) to cover the bases — but never invent or
-  override a stated one.
-- **Brief experts with ORDERED tensor shape + strides, verbatim.** Always hand each operand as
-  `A=(M×K) strides=(sM,sK)`, `B=(K×N) strides=(sK,sN)`, `C=(M×N) strides=(sM,sN)` — the stride paired with its
-  axis. The **contiguous axis is the stride-1 axis, decided PER TENSOR** (logical layout is A=M×K, B=K×N,
-  C=M×N). "Row/col-major" is only a logical read of the strides and maps to a DIFFERENT physical axis per
-  tensor — pass the strides, not the word.
-- **Take expert-provided settings/parameters VERBATIM.** No interpretation, no flattening, no averaging. If an
-  expert's annotation contradicts a locked param, that is a BUG to CHALLENGE with the expert — never silently
-  reconcile it yourself.
-- **Clean-slate is enforced in the dispatch.** Tell every subagent: do NOT re-define the locked spec to match
-  any existing kernel. If an existing kernel differs from the spec, that difference IS the design task — build
-  the spec'd variant from primitives.
+## Validation — what is proven, and when (the design is not done until this is)
 
-**The planning loop (how you START — do this before any user back-and-forth on the design):**
-1. **Consult the experts FIRST — no user permission needed for the initial consult.** With only the
-   load-bearing params locked (goal + layout majors + dtypes), dispatch the Tiling Architect (lead), which
-   returns the pipeline design + the specialist directives; carry those out (MMA/LDS/…, and `/layout-viz`
-   when it helps). Do NOT gate this behind "may I consult the experts?" — just do it.
-2. **Produce a CONCRETE plan** out of the consults — every stage, every layout, every transform priced by the
-   expert who owns it (no bare assumptions left).
-3. **Reflect the concrete plan to the user** — show ALL the steps and ALL the proposed layouts (INCLUDING any
-   the user themselves suggested), each with the expert's verdict. **Be prepared to invoke `/layout-viz`** to
-   show the layouts and the pipeline dataflow so the user can SEE what you're proposing.
-4. **Iterate with the user** until they're satisfied; each change loops back through the relevant expert.
-Then: implement → test → bring results back to the experts → relay feedback → sweep-iterate until good.
+Validation is not one step at the end; it is a LADDER, and each rung proves something narrower than the
+next. The failure to avoid is reading a low rung as if it were a high one — a structurally gated design that
+computes the wrong answer passes every CPU-side check in this skill.
+
+| Rung | Gate | Proves | Does NOT prove | When |
+|---|---|---|---|---|
+| 1 | arithmetic + budget screen | the design is EXPRESSIBLE (macro%wave, wave%atom, K%atom, vw vs dtype/stride-1, LDS fits) | anything about behaviour | Design&Emit, before emitting |
+| 2 | `witness(pipe, kernel)` | the RECORDING IS COMPLETE — nothing emitted outside the decorated verbs | that what was recorded is right | every record |
+| 3 | `verify_lds_roundtrip` (per space, non-vacuous) | each LDS space ROUND-TRIPS: the consumer reads the datum the store wrote | the value is the right value | every record |
+| 4 | `verify_mma_soundness` (non-vacuous) | operand pairs form a SOUND MAC | the operands hold the right data | every record |
+| 5 | **bit-exact vs a numpy golden** | **the kernel COMPUTES THE RIGHT ANSWER** | anything about speed | Finish (needs a GPU) |
+| 6 | `/ck-profile`, `/bank-conflict --mode investigate` | the MEASURED perf + conflict numbers | correctness | Finish (needs the target GPU) |
+
+**Rungs 1–4 are structural and CPU-only. Rung 5 is the correctness gate and there is no substitute for it.**
+Passing 1–4 means the design is well-formed and self-consistent; it says nothing about arithmetic. So be
+explicit: **throughout Frame→Iterate a design is structurally gated and arithmetically UNPROVEN.** Never
+describe an un-run rung 5 as "validated" — Open decisions carries "correctness: not yet proven" until it
+passes.
+
+**The golden.** Random floats cannot prove bit-exactness — f16 accumulation reorders and the comparison
+drowns in rounding. Use **small integers** (`rng.integers(-3, 4)`, the house pattern), which are exactly
+representable, so the bar is `max_abs_diff == 0.0` — *not* `allclose`. Any non-zero difference is a real bug,
+never rounding. A probe or kernel that is not bit-exact makes every downstream number meaningless.
+
+**Re-validate after anything that changes the recording** — completion, and every Iterate change. Rungs 2–4
+are cheap; re-run them every time. If completion changed the LDS stride, pad, swizzle or buffer count, the
+LDS findings are void as well (Finish step 2).
+
+**No GPU, or a host whose arch ≠ the target?** Rungs 5–6 cannot run. That is a legitimate stopping point —
+but the design ships **UNVALIDATED**, and you say so in the report and in the design record rather than
+letting the structural passes imply correctness.
+
+**Correctness and performance are different gates.** Bit-exactness is the correctness gate; wall-time/TFLOPS
+is the perf gate and only applies when the goal is performance. A faster kernel that is not bit-exact is not
+a kernel.
 
 ## Prerequisites (Read First)
 
 1. `../shared/prerequisites.md` — path resolution, dispatch rules, "Consult, Don't Improvise", fail-fast.
 2. `../shared/temporary_file_policy.md` — probes/build dirs/renders are temporary; track + offer cleanup.
 
-## Experts (via the dispatch table) & sub-skills you orchestrate
+## Experts & sub-skills
 
-- **Tiling Expert** (`tiling_expert.md`) — the LEAD architect. Dispatch it first and on every iteration; it
-  returns the pipeline design + the consult/tool directives you carry out.
-- **MMA Expert** — operand/accumulator layouts, interleave, C-shuffle soundness, K-distribution.
-- **LDS Expert** — LDS bank conflicts, swizzle/pad, LDS-budget occupancy.
-- **Profiling Expert** (`"hardware counters"`) — bottleneck classification, TFLOPS.
-- **GPU Expert** — non-MMA compute correctness/intrinsics.
-- **Sub-skills the architect directs (you invoke):** `/layout-viz` (see dataflow), `/bank-conflict` (LDS
-  conflicts), `/ck-build` (build + bit-exact in container), `/ck-profile` (TFLOPS/counters).
+Request by generic ROLE via the dispatch table (filenames below are pointers, not addresses): **Tiling
+Expert** (lead architect), **MMA Expert** (operand/accumulator layouts, interleave, C-shuffle soundness),
+**LDS Expert** (bank conflicts, swizzle/pad, LDS budget), **Profiling Expert** (`"hardware counters"`),
+**GPU Expert** (non-MMA compute). Sub-skills you invoke: `/layout-viz`, `/bank-conflict`, `/ck-build`,
+`/ck-profile`. Dispatch with model `opus`.
 
-Dispatch specialists with model `opus`; each subagent reads its team-member file before working. Pass the
-architect's exact question + the concrete config; relay results back to the architect.
+**Required brief, per expert** — beyond the ordered tensors above. Mark every field GIVEN or PROPOSED:
+
+| Expert | Must also carry |
+|---|---|
+| **MMA** | MMA atom (16×16 vs 32×32 — interleave requires 16×16), wave size, macro/wave/thread tiles, waves_m×waves_n, issue order (M-outer/N-outer), **and WHICH STAGE the question is about** (constraints come from the consumer) |
+| **LDS** | **`mode`** (`simulate` in Frame→Iterate, `investigate` in Finish — its rule 0 requires this and it will ASK if missing), LDS-space stride (`tile_free + lds_pad`), origin, swizzle, access width, waves in the cooperative store, NB + wave size **for the target** |
+
+**Coupled ownership.** "Re-consult the owning expert" is not enough: an LDS lever that changes **vector width,
+LDS stride, or the distribution** (narrowing swizzle, redistribute) also re-consults **MMA**; an MMA change
+that alters any LDS descriptor also re-consults **LDS**. Only a pad preserving `b128` alignment is
+single-owner.
 
 ## Workflow
 
-1. **Read prerequisites; settle the output location** (temp-file policy). **DEFAULT: give each new kernel its
-   own self-contained folder** `platform/python/rocke/helpers/tiling/kernels/<kernel>/`: kernel code in the
-   folder (`__init__.py` or module), **`docs/`** (the design report + `docs/viz/` renders), **`tmp/`**
-   (throwaway scripts / verbose captures / scratch code). **Only rocke-CORE changes touch the rocke source
-   tree**; everything kernel-specific stays in the kernel folder. (Cleanup — keep/move/summarize + clear
-   `tmp/` — happens at the end, step 11.)
-2. **Classify the problem** (the architect confirms): **GEMM-family** (GEMM, batched, fused-epilogue,
-   attention) → Tiling+MMA+LDS; **non-MMA** (elementwise/reduction/scan/conv) → Tiling+GPU; **NOVEL** →
-   the learn-and-persist path (step 6). *(Today the deep support is GEMM-family; route others explicitly,
-   don't force-fit.)*
-3. **Lock ONLY the load-bearing params** (schema below): goal, layout majors, dtypes. These you MUST get from
-   the user (`AskUserQuestion`) — never invent them. Everything else (tiles, pipeline shape, transforms) is a
-   DESIGN OUTPUT the experts produce; do NOT pre-gather or assume it, and do NOT ask the user to fill it in
-   before the consult.
-4. **Consult the experts FIRST — no user permission needed.** Dispatch the Tiling Expert (lead) with the
-   problem + goal + locked params. It returns: the stage-by-stage pipeline (tile size + tiling-API verb +
-   layout/transition per hop), and **directives** — which specialists to consult and which tools to run.
-   Execute those directives immediately: dispatch the named specialists (MMA/LDS/…) and run `/layout-viz`
-   where it clarifies a layout/flow. Feed every result back to the architect until a CONCRETE plan converges
-   (every "free/cheap/sound/reorder/cross-lane" backed by the owning expert — no bare assumptions).
-5. **Reflect the concrete plan to the user + iterate.** Present ALL steps and ALL proposed layouts (INCLUDING
-   any the user suggested), each with its expert verdict; offer/attach `/layout-viz` renders of the layouts and
-   the pipeline dataflow. Iterate with the user until satisfied — each change re-consults the relevant expert.
-   **Build/profile is ON REQUEST** (goal = performance, or a specialist calls for it) — default is design +
-   write + bit-exact; only run `/ck-build`+`/ck-profile` when asked or when the goal demands perf.
-6. **Novel algorithm → learn & persist:** if unfamiliar, the architect offers to LEARN it with the user
-   (derive its data-movement + tensor signature + pipeline). Once validated, persist the reusable
-   **signature + workflow** into the RIGHT expert (pipeline/structure → `tiling_expert.md`; layout → MMA
-   Expert; memory → LDS Expert), one concise entry per algorithm — so the next author starts warm. (Deep
-   derivations go to a design doc + a pointer; never store per-run measured numbers in the experts.)
-7. **Document & record the design (on approval).** Once the user **APPROVES**, **OFFER** a per-kernel design
-   record — **the user decides; offer, don't impose.** If they opt in, create it at
-   `kernels/<kernel>/docs/design_report.md` (renders in `docs/viz/`) from `docs/kernels/_TEMPLATE.md`. The
-   record SPEC is the **Tiling Expert's** (`tiling_expert.md`, "Per-kernel design record"): a
-   **reproduction-complete, visually-expressive** report (tables/pictograms/images over prose) carrying
-   reproduction (ordered strides; arch/machine/ROCm/commit + build-run commands; tiling+buffering; stage-by-stage
-   pipeline + `/layout-viz` images; exact A/B/C Rs/Hs/Ps/Ys + recipe; flags; expert tables) + tabularized
-   performance appended per iteration (TFLOPS/throughput/binding-stage progression, rocprof incl. LDS, kernel
-   stats). Unlike the experts, it DOES carry measured numbers; conflict numbers still need `/bank-conflict`
-   validation.
-8. **Write the kernel** — IRBuilder + tiling API, exactly the design the architect specified. Verify
-   **bit-exact** vs a numpy golden (integer inputs) when a GPU is available; say so if skipped. Append the
-   result to the design record (step 7).
-9. **Report vs the goal** — the design, the specialist findings, any viz/conflict/profile results.
-10. **API-gap proposals** — for each authoring friction the architect flags, write ONE file per gap under
-   `platform/python/rocke/helpers/tiling/docs/api_proposals/` (so each is processed individually) using the
-   template there. Do NOT change the API here — propose only.
-11. **Cleanup (when the kernel + result are settled)** — a deliberate keep/move/summarize pass over the kernel
-    folder: promote the keeper renders into `docs/viz/`, fold scratch findings into the report, **clear the
-    kernel's `tmp/`** (throwaway scripts/captures), and offer to remove any probes/build dirs/containers per the
-    temp-file policy. Decide per artifact: keep (report/viz), summarize (into the report), or delete (tmp).
+```
+  NEW      ─→ Frame ─→ Design&Emit ─────────────→ Iterate ─→ Finish
+              (ask +   (architect → CONFIRM →     (viz,      (complete,
+               confirm)  specialists → skeleton    re-record)  verify, offers)
+                         → record → witness → report)
+  EXISTING ─→ Recover ──────────────────────────→ Iterate ─→ Finish
+              (pin config, record, verify claim)
 
-## Design-input schema (gather from the user; prompt for gaps)
+  Frame..Iterate are CPU-only (emit, record, render, simulate). The GPU is needed only in Finish.
+```
 
-- **Goal** — correctness only / peak TFLOPS / a specific target / learning.
-- **Algorithm** — prose or the math; is it GEMM-family, non-MMA, or novel?
-- **Tensor descriptors** (per operand) — lengths, strides, dtype, memory space (global/LDS).
-- **Problem size** — M/N/K or the general dims.
-- **Layout style** — canonical (basic) / interleaved / custom (user supplies their own distributions). **If
-  the user has no preference, PROMPT with the pros/cons and let them choose (or supply their own):**
-  - *canonical (basic):* direct hardware placement (label == position), simplest — no derivation/relabel; but
-    locked to native placement, so a store/coalesce-friendly layout can force strided or cross-lane movement.
-  - *interleaved:* labels flow for wide coalesced load/store, LDS reuse, and a store-friendly derived C — at
-    the cost of a derivation (position ≠ label) + a dtype-graded reorder (often free via a symmetry).
-  - *custom:* the user hands you `make_tile_desc` encodings; the MMA Expert validates soundness (§2) +
-    vectorization (§2b) before use.
-  The MMA Expert owns the detailed comparison and the concrete encoding — surface the choice, then defer.
-- **Tiles** — macro / wave / thread.
-- **Parallelism** — waves_m × waves_n, wave size (64/32), target arch (gfx90a/gfx942/…).
-- **Pipeline** — a named pattern ("GEMM double-buffered prefetch + CShuffle") OR a manual step list
-  (`global load(macro) → local store(macro) → K-loop → local load(wave) → GEMM → local store(macro) → sync →
-  swap LDS`). More detail = better start; less = the architect guides you iteratively.
+**Pick the arm first.** Names an existing kernel/file ⇒ EXISTING; do not re-interview. Ambiguous ⇒ ASK
+(guessing NEW and re-interviewing is the annoying failure).
+
+### Frame (NEW)
+
+Settle the output location: propose `kernels/<kernel>/` (code + `docs/` + `docs/viz/` + `tmp/`) in one line
+and proceed unless the user objects. Only rocke-CORE changes touch the rocke source tree.
+
+**Round 1 — REQUIRED, never invented** (`AskUserQuestion`): goal (correctness / peak TFLOPS / a target /
+learning) · algorithm · ordered tensor descriptors (lengths, strides, dtype, memory space) · arch + wave size
+· **kernel name** · caller-side constraints (grid/launch convention, pointer/ABI shape, batch stride, fusion
+it must absorb, any fixed occupancy or LDS budget it shares). Required items are asked until answered.
+
+**Round 2 — OPTIONAL levers**, offered once: layout style (canonical / interleaved / custom) · tiles · waves_m
+× waves_n · pipeline (named pattern or step list). "Skip, you decide" is a first-class answer. **Round-2
+answers are PROPOSALS subject to expert validation** — an expert may return one INVALID, which is a blocking
+issue.
+
+Then dispatch the architect to **CLASSIFY**: GEMM-family → Tiling+MMA+LDS · non-MMA → Tiling+GPU · NOVEL →
+the architect offers to learn it *with the user* (derive data-movement, compute structure, tensor signature,
+pipeline) before Design&Emit. Route non-GEMM explicitly; do not force-fit.
+
+### Design&Emit (NEW)
+
+**1. Architect proposes (cheap).** Dispatch with the round-1 params. It returns the pipeline design + its
+`GIVEN / ASSUMED / CONFIRM` lists.
+
+**2. CONFIRM before spending.** Put the architect's `CONFIRM` list to the user as one `AskUserQuestion`, each
+assumed value shown as the default so "looks right" is one click. This is a decision list, not an expert
+relay — it does not violate the output contract. Anything the user skipped in round 2 is ASSUMED-pending-
+confirm, never settled. Do not run specialists before this returns.
+
+**3. Specialists.** Execute the architect's directives (MMA/LDS/…). They may construct candidate encodings and
+run `mma_pair_compatible` / `classify_transform` / `RegisterMapper` standalone — these need only encodings, not
+a kernel — and must state the target a `cross_lane` verdict was classified against. Feed results back until
+the plan is concrete: every judgment word owned by an expert, no bare assumptions.
+
+**4. Exit gate — arithmetic + budget.** Before emitting: macro%wave, wave%atom, K%atom, vector width vs dtype
+and the stride-1 axis, and the LDS budget vs capacity/occupancy. Report as a pass/fail row. A design that
+fails does not proceed.
+
+**5. The architect AUTHORS the skeleton; you write it verbatim.** Choosing encodings, origins, vector widths
+and swizzle IS design — not yours. The skeleton is the smallest runnable IRBuilder + tiling-API function
+satisfying:
+
+> **Skeleton invariant — every distinct TRANSACTION is emitted at least once, at the real descriptors,
+> strides, dtype, swizzle and distribution — including the steady-state buffer swap and the full epilogue /
+> C-shuffle chain.** Only *repetition* (loop trip counts, multi-tile iteration), host glue, and *edge-case*
+> predication may be omitted.
+>
+> Why each clause: omit the swap and `verify_lds_roundtrip` covers half the design; omit the epilogue and the
+> C side — the derived C, the de-interleave, the CShuffle's own LDS space and its budget — is unanalysed;
+> predication changes the emitted op kind and can change the achievable vector width, so wherever it is
+> omitted the coalescing verdict is **provisional** and must be labelled so.
+>
+> **LDS stride, pad, swizzle and buffer COUNT are part of the skeleton, not of completion.** They set the
+> bank map; changing them later voids every LDS finding.
+
+The build fn must `return b.kernel, mma` (house convention — the recorder returns its result verbatim, and
+`mma` is what carries arch/wave size into the recording).
+
+**6. Record + witness.**
+```python
+(kernel, mma), pipe = tiling_recorder.record_build(build_fn, *args, **cfg)
+tiling_recorder.witness(pipe, kernel)        # CoverageError = the recording is SHORT
+```
+`record_build` only sees the decorated verbs; anything emitted outside them (a raw `b.mma`) is invisible, and
+every render and conflict number would inherit the hole. A `CoverageError` is a hard stop back to the
+architect and an API-gap candidate.
+
+**7. Gates — CALL them, and require them NON-VACUOUS.** `render_sweep`/`view` do NOT run them:
+```python
+halves = auto_pipeline.verify_lds_roundtrip(pipe, space_id, tile_k=<K>)   # per LDS space
+n_mma  = auto_pipeline.verify_mma_soundness(pipe)
+```
+`verify_lds_roundtrip` returns `[]` when a space has no store or no read; `verify_mma_soundness` returns `0`
+when no MMA was emitted. **Both are PASS BY OMISSION** — exactly what an incomplete skeleton produces. Require
+a non-empty half list for EVERY LDS space and a count matching the design's MMA issues. Empty/zero is **NOT
+RUN**, and goes in Open decisions.
+
+**8. Report** (the Output Format below), built from the RECORDING. **The recording is authoritative about the
+CODE, not about what the design should be** — a disagreement means either the skeleton mis-expresses the
+design or the design was wrong. STOP, hand both to the architect, and let it say which. Never report a design
+the architect has not reconciled.
+
+### Recover (EXISTING)
+
+1. **Pin the config.** Build fns are parameterised FAMILIES. Enumerate the parameters, get the exact values
+   from the user (or read them off the call site / test they named), echo them back. **Never record at
+   defaults** — that analyses a kernel the user is not working on while labelling it theirs.
+2. **Get the goal** — "change X" and "why is it slow" need different work.
+3. **Record + witness + gates** at the pinned config (Design&Emit steps 6–7), and reflect the recovered
+   parameters as the report's parameters table + pipeline for confirmation.
+4. **Verify any asserted defect BEFORE fixing it.** "The A store is conflicting" is a claim; run the owning
+   sub-skill and confirm it. Fixing an unverified defect is the failure `/bank-conflict` exists to prevent.
+5. **Dispatch the architect once** with the recovered pipeline + the requested change, so it classifies the
+   change (structural → architect; layout → MMA; memory → LDS) and emits directives. Then → Iterate. Do not
+   redesign anything the user did not ask you to touch.
+
+### Iterate
+
+**If the request already names the analysis, run it and skip the menu.** Otherwise ask, defaulting to the
+architect's directives, each tied to the Open decision it settles ("coalescing — settles open decision #2"):
+
+| Option | Runs | Covers |
+|---|---|---|
+| **Sweep** | `/layout-viz render_sweep` — L0 overview + L1 flows (roles are DERIVED per kernel; a GEMM yields prefetch A/B, lds_read A/B, compute, epilogue — a non-MMA kernel differs) | dataflow |
+| **Bank conflicts** | `/bank-conflict <access> --mode simulate --arch <target>` | store **and** read, by different rules — the store via the write-port model, the read via the read-port model (`conflicts/access = max_depth − 1`). The read is **gfx90a-only and envelope-gated** (2 dwords/lane, no broadcast); outside that it is geometry-only and the cost is UNKNOWN until `investigate` — carry that in Open decisions |
+| **Coalescing** | `/layout-viz` coalescing, one image per output major; ASM cross-check only once the kernel COMPILES (CPU-side `compile_kernel` + `llvm-objdump`, no GPU) — otherwise the diagram ships without it and must say so | global access |
+| **All three** | the sweep + both L2 analyses | |
+
+**Simulate-mode discipline.** Requires a REGISTERED model for that arch whose `selftest` passes; if the target
+has none, `/bank-conflict` hard-stops — the Bank-conflicts option is **UNAVAILABLE**, and the choices are
+build+validate a model on that hardware (a Finish task) or proceed with conflicts UNKNOWN in Open decisions.
+Never substitute another target's constants. A SIMULATED number may **rank** candidates and **flag** one for
+Finish; it may **not** disqualify a layout or justify adopting a fix. Simulate sees replays but not
+instruction count or occupancy, so on simulated evidence alone you may adopt only zero-instruction levers
+(free symmetry, `b128`-preserving pad, contiguity-preserving swizzle) — **never a narrowing swizzle or a
+redistribute**, whose cost is instructions. Each adoption enters Open decisions as "unvalidated, re-test in
+Finish". Driving a SIMULATED conflicts/access down across iterations IS the BC→0 antipattern wearing a caveat.
+
+**If the goal is performance, take ONE baseline `/ck-profile` before the first change** — a perf run that
+never measured "before" cannot report an improvement. Thereafter on request.
+
+Each change: re-consult the owning expert(s) (coupled ownership above) **silently**, have the architect
+re-author the affected skeleton part, **re-record + re-witness + re-gate**, update **only the affected report
+section**. Every render comes from a fresh recording; a carried-over render is stale data.
+
+**Exit: ASK.** "Is this design final, or keep iterating?" Nothing else triggers Finish — the user will not
+spontaneously say FINAL.
+
+### Finish
+
+1. **Complete the kernel** (NEW) — grow the skeleton into the full kernel: repetition, host glue, edge-case
+   predication. Do NOT rewrite it; the recorded pipeline IS the approved design. *(EXISTING: skip — the kernel
+   already exists; verify your edits re-record to the approved pipeline.)*
+2. **Re-record + witness + gates.** If completion changed the LDS stride, pad, swizzle or buffer count,
+   **every Iterate LDS verdict is VOID and must be re-run.** Say so rather than carrying the old number.
+3. **Rung 5 — verify bit-exact** vs a numpy golden (see Validation): integer inputs, bar is
+   `max_abs_diff == 0.0`. Needs a GPU whose arch matches the target — check (`rocminfo`). If it cannot run,
+   the design ships UNVALIDATED and the report must say so.
+4. **Measure, then record.** In this order, because the design record is specified as reproduction-complete
+   and carries measured numbers — offered earlier it gets written with `N/A` where its value lives:
+   `/ck-build` + `/ck-profile` → `/bank-conflict --mode investigate` (promotes simulated numbers to measured;
+   host GPU must BE the target arch) → **then offer** the design record. Spec + path: the Tiling Expert's
+   "Per-kernel design record" + `docs/kernels/_TEMPLATE.md`; it carries expert reasoning and tables
+   **verbatim** (the output contract governs streaming, not this).
+5. **Persist NOVEL learnings** — signature + workflow into the right expert (pipeline/structure → Tiling;
+   layout → MMA; memory → LDS), one concise entry, number-free. These are shared checked-in files: **show the
+   diff and get the user's approval** before writing.
+6. **API-gap proposals** — one file per gap under `docs/api_proposals/` using the template there. Propose
+   only. (Record frictions as they happen, throughout — a `CoverageError` is one.)
+7. **Cleanup** — after whichever offers the user accepted: promote keeper renders to `docs/viz/`, fold scratch
+   findings into the report, clear `tmp/`, offer to remove probes/build dirs/containers.
 
 ## Output Format
 
+The report is the primary user-facing output; Iterate updates sections in place rather than reprinting it.
+
 ```
-## Tiling-API Kernel Design — <algorithm / kernel>
+## Tiling-API Kernel Design — <kernel>
 
-- bucket: <GEMM-family | non-MMA | novel> ; goal: <...> ; arch: <...>
-- inputs: GIVEN <...> | ASSUMED <...> | still MISSING <...>
+- arm/phase: <NEW|EXISTING / Design&Emit|Iterate N|Finish> ; goal: <...> ; arch+wave: <...>
+- inputs: GIVEN <...> | ASSUMED-confirmed <...> | DERIVED by <expert> <...> | OPEN <...>
+- validation: rungs 1-4 <witness mem n/n mma n/n · round-trip halves per space · soundness n/n ·
+              arith+budget pass/fail>   (empty/zero = NOT RUN, not pass)
+  **correctness (rung 5): <bit-exact max_abs_diff 0.0 | NOT YET PROVEN | UNVALIDATED (no target GPU)>**
+  perf (rung 6): <measured | not run>
 
-### Architecture (from the Tiling Expert)
-- pipeline: <stage → tile → tiling-API verb → layout/transition, per hop; buffering/prefetch/swap>
+### Design parameters
+| dtypes | MMA atom | macro | wave | thread | threads | waves (m×n) | buffering | LDS stride/pad/swizzle |
 
-### Consults & tool runs (executed)
-- MMA Expert: <finding> | LDS Expert: <finding> | /layout-viz: <path> | /bank-conflict: <verdict>
-- /ck-build /ck-profile: <only if run — bit-exact / TFLOPS>
+### Pipeline
+<pictograph: every stage, its function, the resources it uses>
 
-### Kernel
-- IRBuilder + tiling-API code; bit-exact: <yes / skipped (no GPU)>
+### Layouts (all proposed, including the user's own)
+| stage | layout | transform in | conditions | expert | provenance | verdict / rationale |
+(conditions = what the verdict depends on, e.g. dtype/atom — never compress a conditional to an
+ unconditional word. provenance inline on every number, e.g. "4-way (SIMULATED, pending counters)".)
 
-### Learnings persisted (novel only)
-- <algorithm> signature + workflow → <expert file / doc>
+### Visualizations
+- sweep: <dir> | store conflicts: <SIMULATED c/a> | read conflicts: <SIMULATED c/a, or GEOMETRY if out of envelope> | coalescing: <verdict [provisional if unpredicated]>
 
-### API-gap proposals
-- <name> → `docs/api_proposals/<name>.md`: <friction + proposed addition>
+### Open decisions
+- <what is open, what would settle it>  · stages ABSENT from the recording  · unvalidated adoptions
+
+### Glossary
+- <every term of art used above>
 ```
 
-## Notes
-- **The architect leads; you execute.** Every layout/memory/perf judgment is a specialist's; every structural
-  decision is the architect's; you run tools and relay. If you hit a gap or a result that doesn't make sense,
-  STOP and consult the architect again — don't improvise.
-- **Bit-exact is the correctness gate**; wall-time/TFLOPS is the perf gate (only when the goal is perf).
-- Do not restate domain theory here — it lives in the SOT docs the architect cites
-  (`tiling_api_surface.md`, `visualization_api_surface.md`, `tiling_interleaving_design.md`,
-  `mma_is_machinery.md`, `lds_banks.md`).
+Appended in Finish: `### Kernel` (bit-exact yes/skipped) · `### Learnings persisted` · `### API-gap proposals`.
+
+## Glossary (for YOUR use — define these for the user on first use)
+
+- **emit space** — the ops the build function actually emits. The authoritative record of the design: the
+  design *is* the emitted ops, so it is inspected by recording, not by reading source intent.
+- **transaction** — one mem↔reg movement (a load/store/fill), recorded as an object by `tiling_recorder`.
+  Each transaction independently chooses its own distribution.
+- **round-trip** — the per-LDS-space correctness invariant: each consumer register gets the datum stored at
+  the address it reads.
+- **served group** — the lanes the LDS arbitrates together (half-wave × dword phase).
+- **binding stage** — the pipeline stage currently limiting wall-time. BC is a diagnostic; this is the objective.
+- **K-stride aliasing** — LDS rows a whole number of banks apart, so stepping K lands on the same bank.
+- **major sweep (RRR/RRC/CRC…)** — one letter per tensor (A,B,C) for which axis is stride-1; used when the
+  user gives no strides.
+- **MMA atom** — the hardware matrix instruction shape (e.g. 16×16×16). Interleave requires the 16×16 atom.
+- **derived C / C-shuffle (CShuffle)** — the accumulator's post-MMA relabel + epilogue gather into a
+  store-friendly order; may use its own LDS space.
+- **Rs/Hs/Ps/Ys** — the encoding factorisation of a tile distribution.
+- **L0/L1/L2/L3** — `/layout-viz` levels: overview · flows · analyses (coalescing, bank-conflict) · single panels.
