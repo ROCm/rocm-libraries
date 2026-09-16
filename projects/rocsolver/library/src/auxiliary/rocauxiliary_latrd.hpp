@@ -2416,64 +2416,153 @@ __device__ inline void reduce_wave_sum(S& val)
     if constexpr(is_cdna)
         val += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
 
-    // Result is in the last lane; broadcast to lane 0 so callers using lane_id==0 are unchanged.
-    val = shfl_bcast_T(val, warpSize - 1);
+    // Result is left in the LAST lane (warpSize-1). Callers consume it there -- no final
+    // broadcast to lane 0. (The shuffle-fallback paths below are all-reduces that leave the
+    // result in every lane, so lane warpSize-1 is valid there too; the contract is uniform.)
 
 #else
-    // Shuffle fallback for non-AMDGCN or pre-GFX8.
+    // Shuffle fallback for non-AMDGCN or pre-GFX8. All-reduce: every lane ends with the sum,
+    // so lane warpSize-1 holds the result (matching the DPP path's contract).
 #pragma unroll
     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
         val += shift_left(val, r);
 #endif
 }
 
-template <std::int32_t BDIM = 0, typename S>
-__device__ inline void reduce_block_sum(S& val, S* smem)
+// Two-argument overload: reduce two independent accumulators in one call, INTERLEAVING the
+// DPP moves. Each step issues both mov_dpp instructions before either add, so the two streams
+// hide each other's mov_dpp latency -- the s_nops the single-arg version needs (because the add
+// must wait for its own mov_dpp) disappear. Same reduction as calling reduce_wave_sum twice.
+template <std::int32_t WDIM = 0, typename S>
+__device__ inline void reduce_wave_sum(S& v1, S& v2)
 {
-    /* assert(BDIM == blockDim.x); */
-
-    /* if(blockDim.x > warpSize) */
-    if constexpr(true)
+#if defined(__gfx1250__)
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
     {
-        /* __shared__ S smem[BDIM]; */
-        rocblas_int tid = threadIdx.x;
+        v1 += shift_left(v1, r);
+        v2 += shift_left(v2, r);
+    }
+#elif defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
+    && !defined(__GFX7__)
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
 
-        smem[tid] = val;
-        __syncthreads();
+    // Steps 1-4: quad_perm / row_ror over the first 16 lanes -- moves issued in pairs.
+    v1 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(v1);
+    v2 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(v2);
+    v1 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(v1);
+    v2 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(v2);
+    v1 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(v1);
+    v2 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(v2);
+    v1 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(v1);
+    v2 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(v2);
 
-        /* #pragma unroll */
-        for(rocblas_int r = blockDim.x / 2; r >= warpSize; r /= 2)
-        {
-            if(tid < r)
-            {
-                smem[tid] += smem[tid + r];
-            }
-            __syncthreads();
-        }
-
-        val = smem[tid];
-        __syncthreads();
-
-        /* #pragma unroll */
-        /* for(rocblas_int r = warpSize / 2; r >= 1; r /= 2) */
-        /* { */
-        /*     val += shift_left(val, r); */
-        /* } */
-        reduce_wave_sum(val);
-
-        if(threadIdx.x == 0)
-        {
-            smem[0] = val;
-        }
-        __syncthreads();
-
-        /* val = smem[0]; */
-        /* __syncthreads(); */
+    // Step 5: broadcast lane-15 into lanes 16-31.
+    if constexpr(is_cdna)
+    {
+        v1 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(v1);
+        v2 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(v2);
     }
     else
     {
-        reduce_wave_sum(val);
+        v1 += ds_swizzle_T<0x1e0>(v1);
+        v2 += ds_swizzle_T<0x1e0>(v2);
     }
+
+    // Step 6: broadcast lane-31 into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+    {
+        v1 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(v1);
+        v2 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(v2);
+    }
+
+    // Results left in the LAST lane (warpSize-1); consumed there, no broadcast to lane 0.
+
+#else
+    // All-reduce fallback: every lane ends with the sum, so lane warpSize-1 is valid.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+    {
+        v1 += shift_left(v1, r);
+        v2 += shift_left(v2, r);
+    }
+#endif
+}
+
+// Block-wide sum reduction. Two-stage: (1) each wave reduces its lanes via DPP
+// (reduce_wave_sum, register-only, arch-correct for wave32/64); (2) one partial per wave is
+// written to LDS; (3) wave 0 loads the per-wave partials and DPP-reduces them in a single pass.
+// This keeps LDS traffic to one word per wave (<=16 on CDNA/wave64, <=32 on RDNA/wave32, since
+// blockDim <= 1024, so the partials always fit in a single wave) and uses one
+// __syncthreads-bounded LDS round-trip instead of a full log-depth LDS tree.
+// Contract: the reduced value is valid in `val` of thread 0 (all call sites read under
+// `if(tid == 0)`); smem[0] also holds it. `smem` must have >= blockDim/warpSize slots (callers
+// pass a MAX_THDS-deep buffer, so this is amply satisfied).
+template <std::int32_t BDIM = 0, typename S>
+__device__ inline void reduce_block_sum(S& val, S* smem)
+{
+    const rocblas_int tid = threadIdx.x;
+    const rocblas_int nwaves = blockDim.x / warpSize; // <= 1024/32 = 32, fits one wave
+
+    // Stage 1: DPP-reduce within each wave (leaves the wave sum in the LAST lane).
+    reduce_wave_sum(val);
+
+    // Stage 2: one partial per wave -> LDS, read from the wave's last lane.
+    if(tid % warpSize == warpSize - 1)
+        smem[tid / warpSize] = val;
+    __syncthreads();
+
+    // Stage 3: wave 0 loads the <= nwaves partials (zero-padded) and DPP-reduces in one pass.
+    // The block result lands in wave 0's last lane = global thread warpSize-1.
+    if(tid < warpSize)
+    {
+        val = (tid < nwaves) ? smem[tid] : S(0);
+        reduce_wave_sum(val);
+        if(tid == warpSize - 1)
+            smem[0] = val;
+    }
+    __syncthreads();
+}
+
+// Two-argument overload: reduce two independent accumulators with interleaved DPP (see the
+// reduce_wave_sum(v1,v2) overload). s1 partials go to smem[0..nwaves), s2 to smem[nwaves..2*nwaves),
+// so `smem` must have >= 2*(blockDim/warpSize) slots (<=64; callers pass a MAX_THDS-deep buffer,
+// so this holds). Contract: both results are valid in v1/v2 of thread 0 (the sole call site reads
+// them from registers under `if(tid == 0)`). Unlike the single-arg version this does NOT persist
+// to smem[0] -- no caller reads the block result out of LDS.
+template <std::int32_t BDIM = 0, typename S>
+__device__ inline void reduce_block_sum(S& v1, S& v2, S* smem)
+{
+    const rocblas_int tid = threadIdx.x;
+    const rocblas_int nwaves = blockDim.x / warpSize;
+
+    // Stage 1: interleaved DPP reduction within each wave (result in the LAST lane).
+    reduce_wave_sum(v1, v2);
+
+    // Stage 2: one partial per wave for each accumulator, read from the wave's last lane.
+    if(tid % warpSize == warpSize - 1)
+    {
+        const rocblas_int w = tid / warpSize;
+        smem[w] = v1;
+        smem[nwaves + w] = v2;
+    }
+    __syncthreads();
+
+    // Stage 3: wave 0 loads both partial sets (zero-padded) and interleave-DPP-reduces them.
+    // Both results land in wave 0's last lane = global thread warpSize-1.
+    if(tid < warpSize)
+    {
+        v1 = (tid < nwaves) ? smem[tid] : S(0);
+        v2 = (tid < nwaves) ? smem[nwaves + tid] : S(0);
+        reduce_wave_sum(v1, v2);
+    }
+    __syncthreads();
 }
 
 template <int MAX_THDS, typename T, typename I, typename S, typename U>
@@ -2633,7 +2722,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
         }
         reduce_block_sum(temp, smem);
 
-        if(tid == 0)
+        if(tid == warpSize - 1)
         {
             // set tau, beta, and put scaling factor into smem[0]
             run_set_taubeta<T>(tau_j, &temp, v, E + j);
@@ -2764,7 +2853,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
         }
         reduce_block_sum(temp, smem);
 
-        if(tid == 0)
+        if(tid == warpSize - 1)
         {
             // alpha = - 1/2 * tauj^2 * <v, w>
             smem[0] = -0.5 * tau_j[0] * tau_j[0] * temp;
@@ -2912,7 +3001,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                 }
                 reduce_wave_sum(temp);
 
-                if(lane_id == 0 && ii < nj + 1)
+                if(lane_id == warpSize - 1 && ii < nj + 1)
                     pA[ii + j + j * ldSA] -= temp;
             }
             if constexpr(SW_SYNC)
@@ -2942,7 +3031,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                     temp += v[ii + 1] * conj(v[ii + 1]);
                 reduce_block_sum(temp, pSmem);
 
-                if(tid == 0)
+                if(tid == warpSize - 1)
                 {
                     run_set_taubeta<T>(tau_j, &temp, v, E + j); // v[0] <- 1, temp <- scal
                     tau[j] = tau_j[0];
@@ -2992,9 +3081,10 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
             for(I jj = tid; jj < nj; jj += MAX_THDS)
                 temp += Atmp[jj + (rocblas_stride)ii * ldSA] * v[jj];
             reduce_block_sum(temp, pSmem);
-            if(tid == 0)
+            if(tid == warpSize - 1)
                 w[j + 1 + ii] = temp;
-            __syncthreads();
+            // No __syncthreads() needed: reduce_block_sum already ends with an internal
+            // barrier, so the next ii iteration's pSmem writes cannot race prior readers.
         }
 
         // Step 5: z1(0:j-1) = W(j+1:n-1, 0:j-1)^H * v(0:nj-1)
@@ -3025,25 +3115,27 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
         }
         else
         {
+            // Steps 5 & 7 merged: one pass over columns jj computes both z1 (from W) and z2
+            // (from A), reading v[ii] once instead of twice and collapsing two grid-strided
+            // loops (each with its own reduction + barrier) into one.
             for(I jj = bid; jj < j; jj += gridDim.x)
             {
-                T s1 = T(0);
+                T s1 = T(0), s2 = T(0);
                 for(I ii = tid; ii < nj; ii += MAX_THDS)
-                    s1 += Wtmp[ii + jj * ldSW] * v[ii];
-                reduce_block_sum(s1, pSmem);
-                if(tid == 0)
+                {
+                    T vi = v[ii];
+                    s1 += Wtmp[ii + jj * ldSW] * vi;
+                    s2 += Atmp[ii + jj * ldSA] * vi;
+                }
+                reduce_block_sum(s1, s2, pSmem);
+                if(tid == warpSize - 1)
+                {
                     z1[jj] = s1;
-                __syncthreads();
-            }
-            for(I jj = bid; jj < j; jj += gridDim.x)
-            {
-                T s2 = T(0);
-                for(I ii = tid; ii < nj; ii += MAX_THDS)
-                    s2 += Atmp[ii + jj * ldSA] * v[ii];
-                reduce_block_sum(s2, pSmem);
-                if(tid == 0)
                     z2[jj] = s2;
-                __syncthreads();
+                }
+                // No __syncthreads() needed: reduce_block_sum ends with an internal barrier, and
+                // the z1/z2 store touches only registers + global memory, so the next jj
+                // iteration's pSmem writes cannot race this iteration's pSmem reads.
             }
         }
         if constexpr(SW_SYNC)
@@ -3087,7 +3179,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                     }
                 }
                 reduce_wave_sum(temp);
-                if(lane_id == 0 && ii < nj)
+                if(lane_id == warpSize - 1 && ii < nj)
                     w[j + 1 + ii] += temp;
             }
         }
@@ -3110,7 +3202,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
                 temp += v[ii] * conj(w[ii + j + 1]);
             reduce_block_sum(temp, pSmem);
 
-            if(tid == 0)
+            if(tid == warpSize - 1)
                 pSmem[0] = -0.5 * tau_j[0] * tau_j[0] * temp; // alpha
             __syncthreads();
 
@@ -3119,10 +3211,16 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
             for(I ii = tid; ii < nj; ii += MAX_THDS)
                 pW[(j + 1 + ii) + j * ldSW] = alpha * v[ii] + tau_j[0] * w[ii + j + 1];
         }
-        if constexpr(SW_SYNC)
-            swGrid.sync();
-        else
-            cooperative_groups::this_grid().sync();
+        // This grid sync only protects the NEXT iteration's Part A reads of A/W from this
+        // iteration's Part E writes. On the final iteration there is no next iteration, so it
+        // can be skipped (kernel termination does not require a grid sync).
+        if(j < nb - 1)
+        {
+            if constexpr(SW_SYNC)
+                swGrid.sync();
+            else
+                cooperative_groups::this_grid().sync();
+        }
     }
 }
 
@@ -3284,7 +3382,7 @@ __global__ void __launch_bounds__(MAX_THDS)
                 }
                 reduce_wave_sum(temp);
 
-                if(lane_id == 0 && ii < nj + 1)
+                if(lane_id == warpSize - 1 && ii < nj + 1)
                 {
                     int aoff = (int)((ii + j + (I)j * ldSA) * sizeof(T));
                     T updated = raw_load_A(aoff) - temp;
@@ -3308,7 +3406,7 @@ __global__ void __launch_bounds__(MAX_THDS)
                 }
                 reduce_block_sum(temp, pSmem);
 
-                if(tid == 0)
+                if(tid == warpSize - 1)
                 {
                     T v0 = raw_load_A((int)((&v[0] - pA) * sizeof(T)));
                     run_set_taubeta<T>(tau_j, &temp, &v0, E + j);
@@ -3361,7 +3459,7 @@ __global__ void __launch_bounds__(MAX_THDS)
                     temp += aval * vval;
                 }
                 reduce_block_sum(temp, pSmem);
-                if(tid == 0)
+                if(tid == warpSize - 1)
                     raw_store_W(temp, (int)(((j + 1 + ii) + (I)j * ldSW) * sizeof(T)));
                 __syncthreads();
             }
@@ -3395,7 +3493,7 @@ __global__ void __launch_bounds__(MAX_THDS)
                         s1 += raw_load_W((int)(Wtmp_base + (ii + (I)jj * ldSW) * sizeof(T))) * vval;
                     }
                     reduce_block_sum(s1, pSmem);
-                    if(tid == 0)
+                    if(tid == warpSize - 1)
                         raw_store_z1(s1, (int)(jj * sizeof(T)));
                     __syncthreads();
                 }
@@ -3408,7 +3506,7 @@ __global__ void __launch_bounds__(MAX_THDS)
                         s2 += raw_load_A((int)(Atmp2_base + (ii + (I)jj * ldSA) * sizeof(T))) * vval;
                     }
                     reduce_block_sum(s2, pSmem);
-                    if(tid == 0)
+                    if(tid == warpSize - 1)
                         raw_store_z2(s2, (int)(jj * sizeof(T)));
                     __syncthreads();
                 }
@@ -3446,7 +3544,7 @@ __global__ void __launch_bounds__(MAX_THDS)
                     }
                 }
                 reduce_wave_sum(temp);
-                if(lane_id == 0 && ii < nj)
+                if(lane_id == warpSize - 1 && ii < nj)
                 {
                     int woff = (int)(((j + 1 + ii) + (I)j * ldSW) * sizeof(T));
                     T updated = raw_load_W(woff) + temp;
@@ -3470,7 +3568,7 @@ __global__ void __launch_bounds__(MAX_THDS)
             }
             reduce_block_sum(temp, pSmem);
 
-            if(tid == 0)
+            if(tid == warpSize - 1)
                 pSmem[0] = -0.5 * tau_j[0] * tau_j[0] * temp;
             __syncthreads();
 
