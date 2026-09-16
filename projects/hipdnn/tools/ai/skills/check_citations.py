@@ -27,8 +27,14 @@ A path resolves in this order:
 
     1. relative to the directory of the citing markdown file,
     2. relative to the repository root,
-    3. as a unique path-suffix match under the indexed code roots
+    3. relative to `projects/`, where the sibling projects these pages name in
+       shorthand live (`miopen/src/kernels/`, `composablekernel/example/`),
+    4. as a unique path-suffix match under the indexed code roots
        (`dnn-providers/`, `projects/hipdnn/`).
+
+Steps 1-3 are a stat each. Only steps 1-4's two roots are indexed: suffix-indexing
+all of rocm-libraries to reach the sibling projects would cost more than it is worth,
+which is why they resolve by construction and not by suffix.
 
 A suffix that matches no file is rot. A suffix that matches more than one file is
 ambiguous and fails too: lengthen the cited path until it is unique
@@ -306,16 +312,25 @@ def expand_braces(token: str) -> list[str]:
 class Resolver:
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = repo_root
+        self.projects_root = repo_root / "projects"
         self.index = SuffixIndex(repo_root)
+
+    def bases(self, citing_file: Path) -> tuple[Path, ...]:
+        """Where a path may be anchored, cheapest first. All three are one stat.
+
+        `projects/` is here because these pages write sibling projects in shorthand
+        (`miopen/src/kernels/`, `composablekernel/example/`). Those are not indexed —
+        suffix-indexing rocm-libraries whole would make this tool slow — so they are
+        resolved by construction instead.
+        """
+        return (citing_file.parent, self.repo_root, self.projects_root)
 
     def resolve(self, cited: str, citing_file: Path) -> tuple[Path | None, str | None]:
         """Return (path, error). Exactly one of the two is None."""
-        local = (citing_file.parent / cited).resolve()
-        if local.is_file():
-            return local, None
-        from_root = (self.repo_root / cited).resolve()
-        if from_root.is_file():
-            return from_root, None
+        for base in self.bases(citing_file):
+            candidate = (base / cited).resolve()
+            if candidate.is_file():
+                return candidate, None
         matches = self.index.lookup(cited)
         if len(matches) == 1:
             return matches[0], None
@@ -325,8 +340,8 @@ class Resolver:
         return None, f"ambiguous path, {len(matches)} matches: {shown}"
 
     def resolve_glob(self, pattern: str, citing_file: Path) -> list[Path]:
-        """A glob is satisfied by one match, in the same three-step path order."""
-        for base in (citing_file.parent, self.repo_root):
+        """A glob is satisfied by one match, in the same path order."""
+        for base in self.bases(citing_file):
             try:
                 hits = [p for p in base.glob(pattern) if p.is_file()]
             except (NotImplementedError, ValueError):
@@ -335,8 +350,17 @@ class Resolver:
                 return hits
         return self.index.lookup_glob(pattern)
 
+    def anchored_elsewhere(self, token: str) -> bool:
+        """Does this reference name a tree outside the checkout by construction?
+
+        An absolute or `$VAR`-rooted path is out-of-repo whatever happens to exist on
+        the machine running this: `/opt/rocm/lib/libamd_comgr.so` is not a claim about
+        the repository. Asked before resolution, for that reason.
+        """
+        return "/" in token and (token[0] in "/~" or "$" in token)
+
     def outside_repo(self, token: str) -> bool:
-        """Is this reference anchored somewhere this checkout does not contain?
+        """Is an unresolved reference anchored somewhere this checkout lacks?
 
         Only asked once a reference has failed to resolve. A bare file name is never
         out-of-repo — it is anchored nowhere at all, which is vagueness, not another
@@ -344,9 +368,8 @@ class Resolver:
         """
         if "/" not in token:
             return False
-        if token[0] in "/~" or "$" in token:
-            return True
-        if (self.repo_root / token.split("/", 1)[0]).exists():
+        lead = token.split("/", 1)[0]
+        if (self.repo_root / lead).exists() or (self.projects_root / lead).exists():
             return False
         if is_glob(token):
             return True
@@ -408,7 +431,9 @@ def identifier_of(span: str) -> str | None:
     return name
 
 
-def cited_ranges(match: re.Match[str], spans: list[re.Match[str]]) -> list[tuple[int, int]]:
+def cited_ranges(
+    match: re.Match[str], spans: list[re.Match[str]]
+) -> list[tuple[int, int]]:
     """The cited range, plus any `:N` continuations running on directly after it."""
     start = int(match.group("start"))
     ranges = [(start, int(match.group("end") or start))]
@@ -434,9 +459,13 @@ def check_citations(
                 if not looks_like_a_path(cited) or is_placeholder(cited):
                     continue
                 where = f"{md.relative_to(resolver.repo_root)}:{lineno}"
+                citation = match.group(0).strip("`")
+                if resolver.anchored_elsewhere(cited):
+                    outside.append(OutOfRepo(where, citation))
+                    continue
                 target, error = resolver.resolve(cited, md)
                 if target is None and resolver.outside_repo(cited):
-                    outside.append(OutOfRepo(where, match.group(0).strip("`")))
+                    outside.append(OutOfRepo(where, citation))
                     continue
                 checked += 1
                 if target is None:
@@ -546,24 +575,27 @@ def check_paths(
                 members = expand_braces(cited)
                 tally.brace_members += len(members) - 1
                 for member in members:
-                    if resolver.outside_repo(member):
+                    if resolver.anchored_elsewhere(member):
                         outside.append(OutOfRepo(where, member))
                         continue
                     if is_glob(member):
-                        tally.globs += 1
                         if resolver.resolve_glob(member, md):
+                            tally.globs += 1
                             tally.resolved += 1
+                        elif resolver.outside_repo(member):
+                            outside.append(OutOfRepo(where, member))
                         else:
+                            tally.globs += 1
                             tally.failed += 1
                             failures.append(
-                                Failure(
-                                    "path", where, f"`{member}` matches no file"
-                                )
+                                Failure("path", where, f"`{member}` matches no file")
                             )
                         continue
                     target, error = resolver.resolve(member, md)
                     if target is not None:
                         tally.resolved += 1
+                    elif resolver.outside_repo(member):
+                        outside.append(OutOfRepo(where, member))
                     elif "/" in member:
                         tally.failed += 1
                         failures.append(Failure("path", where, f"`{member}` {error}"))
