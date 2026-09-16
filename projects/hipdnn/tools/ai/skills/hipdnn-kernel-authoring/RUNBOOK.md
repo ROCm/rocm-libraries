@@ -63,6 +63,19 @@ the directory whose `lib/cmake/` holds `hipdnn_frontend/`, `hipdnn_data_sdk/` an
 `hipdnn_test_sdk/`, which is what [harness.md](harness.md)'s `find_package` calls
 resolve against.
 
+**Those two pages carry no feature flags, and the defaults are off.** They configure a
+toolchain and a prefix, nothing more. The flags that decide whether your graph's
+operation exists in the build at all are owned by
+[hipdnn-superbuild](../hipdnn-superbuild/SKILL.md)'s option table — read it and set what
+your graph needs. `HIPDNN_ENABLE_SDPA` is the one that bites: it defaults **OFF**
+(`projects/hipdnn/CMakeLists.txt:55`), and with it off the SDPA API is `#ifdef`-compiled
+out of the frontend, so an attention graph does not fail loudly — the plan **declines**.
+`HIPDNN_ENABLE_KERNEL_INGESTOR` is off by default too, and also gates
+`hipdnn_validate_descriptors`, which is why that binary is usually missing later.
+
+A decline you caused by building without the flag is indistinguishable, at the API, from
+a decline the reference genuinely owes you. **Resolve that before believing either.**
+
 **The minimal driver.** The smallest program that makes the later gates observable —
 not the harness, which comes at step 8. Built against `$INSTALL`, it does two things:
 
@@ -83,11 +96,19 @@ generated version header and its export set (`projects/hipdnn/test_sdk/CMakeList
 says what that costs you.
 
 **Gate:** the driver's own printed output — an `isApplicable` answer for *this* graph,
-and a hipRTC compile result for each `$ARCH`. A build that exited zero is not this
-gate, and neither is an install you inherited. Step 4 rests on the first half, step 7
-on the second, step 8 on both. A driver that was not run reports NOT RUN rather than a
-bare pass; `isApplicable` returning false is a real observation that feeds step 4's
-decline handling, not a result to hide.
+and a hipRTC compile result for each `$ARCH`, **with the feature flags this build was
+configured with recorded beside them**. A build that exited zero is not this gate, and
+neither is an install you inherited. Step 4 rests on the first half, step 7 on the
+second, step 8 on both. A driver that was not run reports NOT RUN rather than a bare
+pass.
+
+`isApplicable` returning false is a real observation and feeds step 4's decline
+handling — **but only once you have confirmed the operation was compiled in.** Check the
+flags against the configure log's `hipDNN: SDPA support disabled` / `enabled` line
+(`projects/hipdnn/CMakeLists.txt:57-60`) before recording a decline. A decline from a
+feature that was never built is a fact about your build, not about the reference, and
+carrying it into step 4 produces a BLOCKED report that is internally consistent and
+wrong.
 
 ## 3. Read the graph and specify the operation
 
