@@ -382,6 +382,9 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
         "compv6": "CompV6",
         "preshufflev1": "PreShuffleV1",
         "preshufflev2": "PreShuffleV2",
+        "wavelet": "Wavelet",
+        # comp_async has no Pipeline enumerator, so it is intentionally absent:
+        # its budget exists only on the Python side.
     }
 
     def _lds_pipeline_switch(per_pipeline: Dict[str, int], indent: str) -> list:

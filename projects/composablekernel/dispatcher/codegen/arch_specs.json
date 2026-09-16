@@ -298,6 +298,27 @@
         "doubling case, which is the one that can overflow."
       ]
     },
+    "comp_async": {
+      "basis": "fraction",
+      "value": 0.5,
+      "_reason": [
+        "Mandatory double buffering, no configuration choice:",
+        "GemmPipelineAgBgCrCompAsync::GetSmemSize() returns",
+        "num_lds_buffers * smem_size with num_lds_buffers = 2.",
+        "Has no Pipeline enumerator on the C++ side, so this entry only",
+        "affects the Python validator; it is emitted to C++ only for",
+        "pipelines that exist in that enum."
+      ]
+    },
+    "wavelet": {
+      "basis": "fraction",
+      "value": 1.0,
+      "_reason": [
+        "Single-buffered. Listed explicitly so that every pipeline the",
+        "validators can see has a deliberate entry rather than silently",
+        "inheriting 'default'."
+      ]
+    },
 
     "compv6": {
       "basis": "fraction",

@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-16T02:11:39.811195
+Generated at: 2026-09-16T02:35:18.750329
 
 To update this file:
 1. Edit arch_specs.json
@@ -152,6 +152,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "comp_async": 32768,
+        "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
         "default": 65536,
@@ -165,6 +167,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "comp_async": 32768,
+        "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
         "default": 65536,
@@ -178,6 +182,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "comp_async": 32768,
+        "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
         "default": 65536,
@@ -191,6 +197,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 163840,
         "compv4": 81920,
         "preshufflev2": 81920,
+        "comp_async": 81920,
+        "wavelet": 163840,
         "compv6": 81920,
         "preshufflev1": 81920,
         "default": 163840,
@@ -204,6 +212,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "comp_async": 32768,
+        "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
         "default": 65536,
@@ -217,6 +227,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "comp_async": 32768,
+        "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
         "default": 65536,
@@ -230,6 +242,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 65536,
         "compv4": 32768,
         "preshufflev2": 32768,
+        "comp_async": 32768,
+        "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
         "default": 65536,
@@ -243,6 +257,8 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "compv5": 327680,
         "compv4": 163840,
         "preshufflev2": 163840,
+        "comp_async": 163840,
+        "wavelet": 327680,
         "compv6": 163840,
         "preshufflev1": 163840,
         "default": 327680,

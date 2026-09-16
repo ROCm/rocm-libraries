@@ -21,7 +21,10 @@ Can be run as:
     ctest -R test_lds_capacity_arch_aware
 """
 
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -61,12 +64,36 @@ GFX942_FROZEN = {
     "compv6": 32768,
     "preshufflev1": 32768,
     "preshufflev2": 32768,
+    # comp_async allocates two LDS buffers unconditionally. It previously had no
+    # entry and inherited the 64 KB default, which is twice what it can use.
+    "comp_async": 32768,
+    "wavelet": 65536,
     "default": 65536,
 }
 
-# Pipelines that get half the capacity. compv4 and preshufflev2 are genuinely
-# double-buffered, so half is the exact model rather than a safety margin.
-HALF_CAPACITY_PIPELINES = ("compv4", "compv6", "preshufflev1", "preshufflev2")
+# Pipelines that get half the capacity. compv4, preshufflev2 and comp_async are
+# genuinely double-buffered, so half is the exact model rather than a margin.
+# comp_async doubles unconditionally (num_lds_buffers = 2), which makes a
+# missing entry silently grant it twice the LDS it allocates.
+HALF_CAPACITY_PIPELINES = (
+    "compv4",
+    "compv6",
+    "preshufflev1",
+    "preshufflev2",
+    "comp_async",
+)
+
+# Every pipeline the validators can encounter must have a deliberate entry.
+# Falling through to "default" is how comp_async got a full-capacity budget.
+EXPECTED_PIPELINES = set(HALF_CAPACITY_PIPELINES) | {
+    "mem",
+    "compv1",
+    "compv2",
+    "compv3",
+    "compv5",
+    "wavelet",
+    "default",
+}
 
 
 class TestLdsBudgetIsArchAware(unittest.TestCase):
@@ -129,6 +156,13 @@ class TestLdsBudgetIsSafe(unittest.TestCase):
     def test_every_architecture_is_present(self):
         """A new GPU must not silently inherit another architecture's budget."""
         self.assertEqual(set(LDS_CAPACITY_LIMITS_BY_ARCH), set(HARDWARE_LDS_KB))
+
+    def test_every_pipeline_has_a_deliberate_entry(self):
+        """Falling through to 'default' is how a double-buffered pipeline
+        silently gets twice the LDS it allocates."""
+        for arch, per_pipeline in LDS_CAPACITY_LIMITS_BY_ARCH.items():
+            with self.subTest(arch=arch):
+                self.assertEqual(set(per_pipeline), EXPECTED_PIPELINES)
 
     def test_double_buffered_pipelines_get_half(self):
         """Pipelines that stage two LDS buffers get half the capacity.
@@ -260,6 +294,111 @@ class TestLdsValidationEndToEnd(unittest.TestCase):
         errors = self._lds_errors("gfx942", self._config("compv3"))
         self.assertTrue(errors)
         self.assertIn("gfx942", errors[0])
+
+
+class TestCppPythonParity(unittest.TestCase):
+    """The two validators must agree; a Python-only fix emits kernels that the
+    C++ filter then rejects at dispatch.
+
+    Compiles the generated header and diffs every value against the Python
+    table. Needs only a host C++ compiler -- no GPU, no hipcc -- and skips
+    cleanly where none is available.
+    """
+
+    # comp_async is deliberately absent: it has no Pipeline enumerator on the
+    # C++ side, so it exists only in the Python table.
+    CPP_PIPELINE_ENUM = {
+        "mem": "Mem",
+        "compv1": "CompV1",
+        "compv2": "CompV2",
+        "compv3": "CompV3",
+        "compv4": "CompV4",
+        "compv5": "CompV5",
+        "compv6": "CompV6",
+        "preshufflev1": "PreShuffleV1",
+        "preshufflev2": "PreShuffleV2",
+        "wavelet": "Wavelet",
+    }
+
+    @staticmethod
+    def _arch_enum(arch):
+        return arch.upper().replace("GFX", "GFX_")
+
+    def _run_cpp_probe(self):
+        compiler = shutil.which("g++") or shutil.which("c++")
+        if compiler is None:
+            self.skipTest("no host C++ compiler available")
+
+        pairs = [
+            (arch, pipeline)
+            for arch in sorted(LDS_CAPACITY_LIMITS_BY_ARCH)
+            for pipeline in sorted(self.CPP_PIPELINE_ENUM)
+        ]
+        lines = "\n".join(
+            f'    std::cout << "{a} {p} "'
+            f" << get_lds_capacity(GpuArch::{self._arch_enum(a)},"
+            f" Pipeline::{self.CPP_PIPELINE_ENUM[p]})"
+            f' << " " << get_lds_total_capacity(GpuArch::{self._arch_enum(a)})'
+            f' << "\\n";'
+            for a, p in pairs
+        )
+        source = (
+            '#include "ck_tile/dispatcher/arch_specs_generated.hpp"\n'
+            "#include <iostream>\n"
+            "using namespace ck_tile::dispatcher;\n"
+            "using namespace ck_tile::dispatcher::arch_specs;\n"
+            "int main() {\n" + lines + "\n    return 0;\n}\n"
+        )
+
+        includes = [
+            DISPATCHER_DIR / "include",
+            DISPATCHER_DIR.parent / "include",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "probe.cpp"
+            exe = Path(tmp) / "probe"
+            src.write_text(source)
+            cmd = [compiler, "-std=c++17"]
+            for inc in includes:
+                cmd += ["-I", str(inc)]
+            cmd += [str(src), "-o", str(exe)]
+
+            build = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(
+                build.returncode,
+                0,
+                f"generated header failed to compile:\n{build.stderr}",
+            )
+            run = subprocess.run([str(exe)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+
+        parsed = {}
+        for line in run.stdout.strip().splitlines():
+            arch, pipeline, budget, total = line.split()
+            parsed[(arch, pipeline)] = (int(budget), int(total))
+        return parsed
+
+    def test_cpp_budgets_match_python(self):
+        for (arch, pipeline), (budget, _) in self._run_cpp_probe().items():
+            with self.subTest(arch=arch, pipeline=pipeline):
+                self.assertEqual(budget, get_lds_limit(arch, pipeline))
+
+    def test_cpp_total_capacity_matches_python(self):
+        for (arch, _), (_, total) in self._run_cpp_probe().items():
+            with self.subTest(arch=arch):
+                self.assertEqual(total, LDS_TOTAL_CAPACITY_BY_ARCH[arch])
+
+    def test_cpp_rejects_a_tile_that_python_rejects(self):
+        """End-to-end agreement on the tile at the heart of the defect.
+
+        96 KB of fp16 staging under compv3: over budget on gfx942, within it
+        on gfx950. Both validators must draw the line in the same place.
+        """
+        staging = 128 * 128 * 2 + 256 * 128 * 2  # 98304 bytes
+        cpp = self._run_cpp_probe()
+        self.assertGreater(staging, cpp[("gfx942", "compv3")][0])
+        self.assertLessEqual(staging, cpp[("gfx950", "compv3")][0])
 
 
 if __name__ == "__main__":

@@ -2235,9 +2235,17 @@ def _show_arch_info(gpu_target: str, datatype: str):
         for dtype in gpu_combos.keys():
             print(f"  {dtype}")
 
-        # LDS limits
-        print(f"\nLDS staging budget on {gpu_target}:")
-        for pipeline, limit in LDS_CAPACITY_LIMITS_BY_ARCH[gpu_target.lower()].items():
+        # LDS limits. An unknown target falls back to the smallest budget we
+        # ship, matching the validator, rather than raising KeyError.
+        budgets = LDS_CAPACITY_LIMITS_BY_ARCH.get(gpu_target.lower())
+        if budgets is None:
+            budgets = min(
+                LDS_CAPACITY_LIMITS_BY_ARCH.values(), key=lambda b: b["default"]
+            )
+            print(f"\nLDS staging budget (unknown target, smallest shipped):")
+        else:
+            print(f"\nLDS staging budget on {gpu_target}:")
+        for pipeline, limit in budgets.items():
             print(f"  {pipeline}: {limit // 1024}KB")
 
         # Unsupported trait combinations
