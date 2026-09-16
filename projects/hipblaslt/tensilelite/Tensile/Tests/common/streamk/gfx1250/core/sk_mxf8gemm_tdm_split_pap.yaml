@@ -98,10 +98,10 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 2048]
-          - Exact: [256, 256, 1, 2064]  #tail
-          - Exact: [257, 256, 1, 2048]  #edge-m
-          - Exact: [256, 257, 1, 2048]  #edge-n
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2064]  #tail
+          - Exact: [2049, 2048, 1, 2048]  #edge-m
+          - Exact: [2048, 2049, 1, 2048]  #edge-n
         - ActivationArgs:
           - [Enum: none]
   #######################################
@@ -181,9 +181,9 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 2048]
-          - Exact: [256, 256, 1, 2080]  #tail
-          - Exact: [257, 256, 1, 2048]  #edge-m
-          - Exact: [256, 257, 1, 2048]  #edge-n
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2080]  #tail
+          - Exact: [2049, 2048, 1, 2048]  #edge-m
+          - Exact: [2048, 2049, 1, 2048]  #edge-n
         - ActivationArgs:
           - [Enum: none]
