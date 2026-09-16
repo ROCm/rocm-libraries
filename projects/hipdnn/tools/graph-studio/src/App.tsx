@@ -17,6 +17,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImplementPanel } from "./components/ImplementPanel";
+import { TensorView } from "./components/TensorView";
 import { VerifyReport } from "./components/VerifyReport";
 import { CommandPanel } from "./components/CommandPanel";
 import { Inspector } from "./components/Inspector";
@@ -370,6 +371,9 @@ function Studio() {
         <CommandPanel scope="verify" getGraph={getGraph}>
           <VerifyReport />
         </CommandPanel>
+      </TabPanel>
+      <TabPanel id="tensors" active={activeTab}>
+        <TensorView />
       </TabPanel>
       <dialog
         ref={resultsDialog}
