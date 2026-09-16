@@ -16,8 +16,8 @@ export interface ParamSpec {
   readonly default: ParamValue;
   /** Allowed values when type is "enum". */
   readonly options?: readonly string[];
-  /** Render this param only while another param of the same node holds `equals`. */
-  readonly visibleWhen?: { readonly key: string; readonly equals: ParamValue };
+  /** Render this param only while every listed param of the same node holds `equals`. */
+  readonly visibleWhen?: readonly { readonly key: string; readonly equals: ParamValue }[];
 }
 
 export type ParamValue = number | string | boolean;

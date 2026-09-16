@@ -544,9 +544,9 @@ Napi::Value Execute(const Napi::CallbackInfo& info)
         const TensorPtr& tensor = kv.second;
         if(!tensor || tensor->get_is_virtual())
             continue;
-        const int64_t volume = tensor->get_volume();
+        const int64_t elements = studio::storageElements(tensor->get_dim(), tensor->get_stride());
         const std::size_t bytes
-            = static_cast<std::size_t>(volume) * studio::dtypeSize(tensor->get_data_type());
+            = static_cast<std::size_t>(elements) * studio::dtypeSize(tensor->get_data_type());
         if(bytes == 0)
         {
             cleanup();

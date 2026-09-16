@@ -58,7 +58,7 @@ export function OpNodeView({ data, selected }: NodeProps<OpNode>) {
           {params.slice(0, 4).map((spec) => (
             <div className="op-node__param" key={spec.key}>
               <span className="op-node__param-key">{spec.label}</span>
-              <span className="op-node__param-value">{String(data.params[spec.key])}</span>
+              <span className="op-node__param-value">{String(data.params[spec.key] ?? spec.default)}</span>
             </div>
           ))}
         </div>

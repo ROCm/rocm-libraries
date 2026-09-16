@@ -7,9 +7,11 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_frontend.hpp>
 #include <nlohmann/json.hpp>
@@ -32,6 +34,12 @@ struct BuildInputError
 hipdnn_frontend::DataType pickIoDtype(const nlohmann::json& root);
 
 std::size_t dtypeSize(hipdnn_frontend::DataType dt);
+
+// Elements a tensor spans in memory: the highest addressable offset plus one.
+// Equals the dim product when packed and stays correct when strides pad, so it
+// is what device buffers must be sized by. Falls back to the dim product when
+// no usable stride list is available.
+int64_t storageElements(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
 
 // Construct the frontend graph from Studio JSON. outputByPort maps
 // "node:port" → the tensor that port produces. Throws BuildInputError.

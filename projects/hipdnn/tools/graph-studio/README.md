@@ -16,8 +16,13 @@ graph out without writing any code.
   reductions, pooling and resampling, block-scale quantize/dequantize, plus
   input and output tensors.
 - Edit each node's shape, data type, and settings in the inspector.
+- Choose a tensor's memory layout with **Stride layout**. Dimensions stay in
+  hipDNN's canonical order (`N,C,W` / `N,C,H,W` / `N,C,D,H,W`); the layout names
+  the axes from slowest- to fastest-varying, so `NHWC` is channels-last over
+  `NCHW` dims. `PACKED_ROW_MAJOR` works at any rank, and `CUSTOM` takes explicit
+  comma-separated strides — one per dimension, which may leave padding gaps.
 - Let hipDNN infer output shapes, or clear **Use defaults** on an Output node to
-  pin its dimensions yourself.
+  pin its dimensions and layout yourself.
 - Save and load graphs as JSON. Your work is also auto-saved between sessions.
 - Drag the dividers between the operators, properties, and engine/log panels to
   resize them; the layout is remembered between sessions.

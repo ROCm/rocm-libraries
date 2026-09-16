@@ -6,6 +6,34 @@ import type { OpCatalogEntry, ParamSpec, ParamValue } from "./model";
  * op registry.
  */
 
+/**
+ * Stride orders offered for input/output tensors. Dimensions are always given
+ * in hipDNN's canonical order (N,C,W / N,C,H,W / N,C,D,H,W); the layout only
+ * decides the strides, i.e. which axis varies fastest. Each name lists axes
+ * from slowest- to fastest-varying, so NHWC is channels-last over NCHW dims.
+ * PACKED_ROW_MAJOR is rank-agnostic and CUSTOM takes explicit strides.
+ */
+export const STRIDE_LAYOUTS = [
+  "PACKED_ROW_MAJOR",
+  "NCW",
+  "NWC",
+  "NCHW",
+  "NHWC",
+  "CHWN",
+  "NCDHW",
+  "NDHWC",
+  "CDHWN",
+  "CUSTOM",
+] as const;
+
+const LAYOUT_PARAM: ParamSpec = {
+  key: "layout",
+  label: "Stride layout",
+  type: "enum",
+  default: "PACKED_ROW_MAJOR",
+  options: STRIDE_LAYOUTS,
+};
+
 export const OP_CATALOG: readonly OpCatalogEntry[] = [
   {
     type: "Input",
@@ -16,6 +44,14 @@ export const OP_CATALOG: readonly OpCatalogEntry[] = [
     outputs: [{ id: "out", label: "out" }],
     params: [
       { key: "shape", label: "Shape", type: "string", default: "1,3,224,224" },
+      LAYOUT_PARAM,
+      {
+        key: "strides",
+        label: "Strides",
+        type: "string",
+        default: "150528,50176,224,1",
+        visibleWhen: [{ key: "layout", equals: "CUSTOM" }],
+      },
       {
         key: "dtype",
         label: "dtype",
@@ -370,7 +406,18 @@ export const OP_CATALOG: readonly OpCatalogEntry[] = [
         label: "Shape",
         type: "string",
         default: "1,3,224,224",
-        visibleWhen: { key: "use_defaults", equals: false },
+        visibleWhen: [{ key: "use_defaults", equals: false }],
+      },
+      { ...LAYOUT_PARAM, visibleWhen: [{ key: "use_defaults", equals: false }] },
+      {
+        key: "strides",
+        label: "Strides",
+        type: "string",
+        default: "150528,50176,224,1",
+        visibleWhen: [
+          { key: "use_defaults", equals: false },
+          { key: "layout", equals: "CUSTOM" },
+        ],
       },
     ],
   },
@@ -394,19 +441,20 @@ export function defaultParams(type: string): Record<string, ParamValue> {
 
 /**
  * The params of `entry` that apply to a node currently holding `params`, i.e.
- * those whose `visibleWhen` condition (if any) is satisfied. A param the node
- * has never been given falls back to its catalog default, so graphs saved
- * before a param existed still resolve.
+ * those whose `visibleWhen` conditions (if any) all hold. A param the node has
+ * never been given falls back to its catalog default, so graphs saved before a
+ * param existed still resolve.
  */
 export function visibleParams(
   entry: OpCatalogEntry,
   params: Record<string, ParamValue>,
 ): readonly ParamSpec[] {
   if (!entry.params.some((spec) => spec.visibleWhen)) return entry.params;
-  return entry.params.filter((spec) => {
-    const cond = spec.visibleWhen;
-    if (!cond) return true;
-    const other = entry.params.find((s) => s.key === cond.key);
-    return (params[cond.key] ?? other?.default) === cond.equals;
-  });
+  return entry.params.filter(
+    (spec) =>
+      spec.visibleWhen?.every((cond) => {
+        const other = entry.params.find((s) => s.key === cond.key);
+        return (params[cond.key] ?? other?.default) === cond.equals;
+      }) ?? true,
+  );
 }

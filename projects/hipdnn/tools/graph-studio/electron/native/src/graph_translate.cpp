@@ -196,6 +196,110 @@ std::vector<int64_t> parseShape(const std::string& csv)
     return dims;
 }
 
+// Canonical hipDNN dimension order for a rank, i.e. the axis letters a layout
+// name may use. Ranks outside 3..5 have no named layouts.
+std::string_view canonicalAxes(std::size_t rank)
+{
+    switch(rank)
+    {
+    case 3:
+        return "NCW";
+    case 4:
+        return "NCHW";
+    case 5:
+        return "NCDHW";
+    default:
+        return {};
+    }
+}
+
+// Strides for `dims` (always in canonical order) under a layout that names its
+// axes from slowest- to fastest-varying, e.g. NHWC over NCHW dims. Returns an
+// empty vector when the layout is not a permutation of this rank's axes.
+std::vector<int64_t> layoutStrides(const std::vector<int64_t>& dims, std::string_view layout)
+{
+    const std::string_view axes = canonicalAxes(dims.size());
+    if(axes.empty() || axes.size() != layout.size())
+        return {};
+    std::vector<int64_t> strides(dims.size(), 0);
+    int64_t running = 1;
+    for(std::size_t i = layout.size(); i-- > 0;)
+    {
+        const std::size_t d = axes.find(layout[i]);
+        // Strides are always >= 1 here, so a non-zero slot means a repeated axis.
+        if(d == std::string_view::npos || strides[d] != 0)
+            return {};
+        strides[d] = running;
+        running *= dims[d];
+    }
+    return strides;
+}
+
+// Explicit strides. Strict, unlike parseShape: any malformed or non-positive
+// token rejects the whole list so a typo cannot silently shorten it.
+std::vector<int64_t> parseStrides(const std::string& csv)
+{
+    std::vector<int64_t> strides;
+    std::size_t start = 0;
+    while(start < csv.size())
+    {
+        std::size_t comma = csv.find(',', start);
+        if(comma == std::string::npos)
+            comma = csv.size();
+        std::string tok = csv.substr(start, comma - start);
+        const std::size_t first = tok.find_first_not_of(" \t");
+        const std::size_t last = tok.find_last_not_of(" \t");
+        if(first == std::string::npos)
+            return {};
+        tok = tok.substr(first, last - first + 1);
+        try
+        {
+            std::size_t used = 0;
+            const long long v = std::stoll(tok, &used);
+            if(v <= 0 || used != tok.size())
+                return {};
+            strides.push_back(static_cast<int64_t>(v));
+        }
+        catch(...)
+        {
+            return {};
+        }
+        start = comma + 1;
+    }
+    return strides;
+}
+
+// Strides for a tensor node from its `layout`/`strides` params. `what` names
+// the tensor for error messages.
+std::vector<int64_t>
+    resolveStrides(const json& params, const std::vector<int64_t>& dims, const std::string& what)
+{
+    const std::string layout = stringParam(params, "layout", "PACKED_ROW_MAJOR");
+    if(layout == "PACKED_ROW_MAJOR")
+        return rowMajorStrides(dims);
+
+    if(layout == "CUSTOM")
+    {
+        const std::vector<int64_t> strides = parseStrides(stringParam(params, "strides", ""));
+        if(strides.size() != dims.size())
+        {
+            throw BuildInputError{"INVALID_VALUE",
+                                  what + " needs " + std::to_string(dims.size())
+                                      + " positive custom strides, one per dimension."};
+        }
+        return strides;
+    }
+
+    const std::vector<int64_t> strides = layoutStrides(dims, layout);
+    if(strides.empty())
+    {
+        throw BuildInputError{"INVALID_VALUE",
+                              what + " layout '" + layout + "' does not apply to a rank-"
+                                  + std::to_string(dims.size()) + " shape."};
+    }
+    return strides;
+}
+
 // Resolve the source (node, port) feeding a target (node, port). Returns the
 // edge (or nullptr) and fills srcNode/srcPort.
 const json* findEdgeSource(const json& edges,
@@ -240,6 +344,20 @@ std::size_t dtypeSize(DataType dt)
     default:
         return 1;
     }
+}
+
+int64_t storageElements(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    int64_t volume = 1;
+    for(const int64_t d : dims)
+        volume *= d;
+    if(volume <= 0 || dims.size() != strides.size())
+        return volume;
+
+    int64_t last = 0;
+    for(std::size_t i = 0; i < dims.size(); ++i)
+        last += (dims[i] - 1) * strides[i];
+    return last + 1;
 }
 
 DataType pickIoDtype(const json& root)
@@ -350,13 +468,14 @@ void translateGraph(const json& root,
                                           "Input '" + title + "' has no valid shape."};
                 }
                 reg("out",
-                    Graph::tensor(TensorAttributes()
-                                      .set_dim(dims)
-                                      .set_stride(rowMajorStrides(dims))
-                                      .set_data_type(ioDtype)
-                                      .set_name(title)
-                                      .set_uid(++g_nextUid)
-                                      .set_is_virtual(false)));
+                    Graph::tensor(
+                        TensorAttributes()
+                            .set_dim(dims)
+                            .set_stride(resolveStrides(params, dims, "Input '" + title + "'"))
+                            .set_data_type(ioDtype)
+                            .set_name(title)
+                            .set_uid(++g_nextUid)
+                            .set_is_virtual(false)));
             }
             else if(type == "Pointwise")
             {
@@ -637,14 +756,14 @@ void translateGraph(const json& root,
         t->set_output(true).set_uid(++g_nextUid);
         if(!boolParam(params, "use_defaults", true))
         {
+            const std::string what = "Output '" + n.value("title", std::string("Output")) + "'";
             const std::vector<int64_t> dims = parseShape(stringParam(params, "shape", ""));
             if(dims.empty())
             {
                 throw BuildInputError{"INVALID_VALUE",
-                                      "Output '" + n.value("title", std::string("Output"))
-                                          + "' has 'Use defaults' off but no valid shape."};
+                                      what + " has 'Use defaults' off but no valid shape."};
             }
-            t->set_dim(dims).set_stride(rowMajorStrides(dims));
+            t->set_dim(dims).set_stride(resolveStrides(params, dims, what));
         }
         sawOutput = true;
     }
