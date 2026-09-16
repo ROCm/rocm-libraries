@@ -81,7 +81,11 @@ Two consequences for authoring:
 - Downstream, only `bool`, `int` and `string` metadata can be rendered into a `-D`;
   `float` and integer lists are rejected, because a float has no single textual
   spelling and `-DALPHA=1` and `-DALPHA=1.0` are different types in device code. Pass
-  floats and lists as kernel arguments, not macros.
+  floats and lists as kernel arguments, not macros — **unless the launch ABI is bound**
+  ([SKILL.md](SKILL.md)). On the `hiprtc_file` reuse branch you cannot add an argument to
+  carry them, because the installed handler's `launch()` passes a fixed set and nothing
+  else; the value then has to be a macro the handler already supplies, or the kernel does
+  not belong on that branch.
 
 ## Device facts
 

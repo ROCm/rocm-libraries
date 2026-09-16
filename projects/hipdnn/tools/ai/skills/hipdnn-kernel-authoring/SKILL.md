@@ -46,15 +46,34 @@ Record before authoring, and treat a missing item as a blocked gate, never a def
 | Graph and its form (live `Graph`, JSON, binary blob, sample source) | Determines how nodes/UIDs/strides are enumerated — [graph-analysis.md](graph-analysis.md) |
 | Target architecture(s), and whether one is locally present | Compile flag, ISA availability, and whether device proof needs a scheduler — [device-envelope.md](device-envelope.md) |
 | A capable hipDNN reference for this graph | Without an independent oracle there is nothing to prove against — [harness.md](harness.md) |
-| Integration target's launch ABI, or **"unbound" — the normal answer** | A kernel authored against the wrong *bound* argument list is diagnosed nowhere downstream |
+| Integration target's launch ABI, launch geometry and launch count, or **"unbound" — the normal answer** | A kernel authored against the wrong *bound* argument list, grid or launch count is diagnosed nowhere downstream |
 | Dtypes, layouts (derived from strides) and the shape envelope to support | Decides what is a runtime parameter and what is a `-D` specialization |
 
 **"Unbound" is the normal answer, not a fallback.** The integration writes the dispatch
-handler, so the kernel's argument list is an **output** of this skill and the handler's
-`launch()` is written from it. Only say "bound" when you are genuinely adding a kernel to
-a pack that already exists and already ships a handler — in which case name that pack and
-take the argument list from its `launch()` body, in order, because wrong arity is
-diagnosed nowhere. Do not invent a handler signature either way.
+handler, so the kernel's argument list, its launch geometry and how many launches it takes
+are **outputs** of this skill, and the handler's `prepare()` and `launch()` are written
+from them. Only say "bound" when you are genuinely adding a kernel to a pack that already
+exists and already ships a handler — the `hiprtc_file` drop-in branch — in which case name
+that pack and take all three from that handler, because on that branch it owns:
+
+- **the argument list**, verbatim from its `launch()` body, in order. The installed
+  pointwise handler passes exactly three pointers and nothing else
+  (`PointwiseNative.cpp:442-459`), so there is no fourth argument to carry anything.
+- **the launch geometry**, fixed by its `prepare()`. That same handler sets block
+  `block_size`×1×1 and grid 1×1×1 (`PointwiseNative.cpp:435-436`), so a kernel that
+  assumes a grid sized to the tensor processes one block's worth of it.
+- **the launch count**, which is one. `prepare()` yields a single prepared dispatch and
+  `launch()` issues it once; there is no seam at which a second launch could be inserted.
+
+**Every one of those mismatches is silent.** The entry point is resolved by name alone —
+`getKernel(entry_point)` (`IngestorKernelCode.hpp:351`) is a `hipModuleGetFunction` on the
+name (`Program.cpp:118-121`) — and `launch()` builds its parameter array from whatever the
+caller passed, with no check against the compiled kernel
+(`compilation/IRunnableKernel.hpp:21-25`). hipRTC compiles, the symbol resolves, the
+launch runs, and only the numbers are wrong. The descriptor author's end of the same seam
+is
+[hiprtc-mining.md §Entry point](../hipdnn-ingestor-engine/hiprtc-mining.md#entry-point-the-handlers-argument-list-verbatim).
+Do not invent a handler signature either way.
 
 When the request names no target architecture — a generic in-tree sample, say — the
 architecture is whichever device the correctness proof will run on. Name that device
@@ -87,8 +106,10 @@ Completion requires all of:
   or proven inert; and every tensor UID classified input, output, or virtual.
 - HIP source that compiles through hipRTC for each target architecture, with the
   exact compile options used, and the entry-point signature stated verbatim.
-- A named decomposition: one kernel, a legal fusion, or an ordered sequence of
-  launches with each launch's inputs, outputs and any scratch it requires.
+- A named decomposition: one kernel, a legal fusion, or — only when the ABI is unbound —
+  an ordered sequence of launches with each launch's inputs, outputs and any scratch it
+  requires. On a bound ABI the launch count is one, so a sequence there is a signal you
+  are on the wrong branch, not a plan.
 - Reference-vs-kernel numerics from a run that actually executed both sides on
   byte-identical inputs, with per-output tolerance and its provenance, on named
   shapes, on a named device.
