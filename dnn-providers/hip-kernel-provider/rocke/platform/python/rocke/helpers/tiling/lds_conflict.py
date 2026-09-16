@@ -493,7 +493,7 @@ class ProbeDescs:
 
 
 def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, warp_free, lds_pad,
-                lds_swizzle, dtype, wave_size, name=None, n_iter=64, force_vw=0):
+                lds_swizzle, dtype, wave_size, name=None, n_iter=64, force_vw=0, n_reads=1):
     """Build a store-mirror or read-only probe KernelDef using the caller's exact descriptors.
 
     mode="store": loop{ store(coop); sync; read(store-layout); sync } -- read keeps the store live,
@@ -576,6 +576,13 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
             _read_wave()
             b.sync_lds_only()
             b.scf_yield()
+        # n_reads LIVE wave reads, each to its OWN output slice, separated by barriers.
+        # WHY: the read cost cannot be isolated by subtracting a "store only" probe -- an LDS store with
+        # no consumer is dead code and the compiler deletes it (measured: 0 LDS instructions). Instead
+        # vary the number of LIVE reads and take the SLOPE: (n=2) - (n=1) is exactly one wave read, and
+        # the single coop store cancels identically. Distinct output slices stop DCE; the barriers stop
+        # the identical loads being CSE'd into one. Verify the design held by checking SQ_INSTS_LDS
+        # actually scales with n_reads -- if it does not, the reads were merged and the slope is invalid.
         # GUARDRAIL: the output window must EXACTLY hold the fragment the read produces. A window that is
         # too small is a device-side buffer OVERRUN (the kernel writes past the allocation), and the
         # compiler responds by bounds-guarding and scalarizing the store -- so the probe silently stops
@@ -593,9 +600,14 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
                 f"Size the probe to the READ descriptor: tile_k must equal the descriptor's K extent "
                 f"(k_sub*16) and warp_free its free extent (m_sub*16).")
         rd = _read_wave()
-        out2 = make_tensor_desc((tile_k, warp_free), (warp_free, 1), dt)
+        out2 = make_tensor_desc((tile_k * n_reads, warp_free), (warp_free, 1), dt)
         store_fragment(b, out_ptr, make_window(out2, (zero, zero)),
                        make_fragment(descs.wave_read, dt, rd.value), tid)
+        for i in range(1, n_reads):
+            b.sync_lds_only()
+            rd_i = _read_wave()
+            store_fragment(b, out_ptr, make_window(out2, (b.const_i32(i * tile_k), zero)),
+                           make_fragment(descs.wave_read, dt, rd_i.value), tid)
     else:
         raise ValueError(mode)
 
@@ -605,7 +617,7 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
 
 def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_waves, warp_free,
               lds_pad, lds_swizzle, block_lanes, n_iter=64, grid_ctas=512, verify=True,
-              force_vw=0):
+              force_vw=0, n_reads=1):
     """Compile, launch and verify a probe on the real GPU. Returns a dict incl. max_abs_diff
     (None when the config masks lanes so a full-band compare would false-flag untouched cells).
 
@@ -641,7 +653,8 @@ def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_wave
     np_dtype = _NP_DTYPE[dtype.name]
     kernel = build_probe(descs, mode, tile_free=tile_free, tile_k=tile_k, n_waves=n_waves,
                          warp_free=warp_free, lds_pad=lds_pad, n_iter=n_iter, force_vw=force_vw,
-                         lds_swizzle=lds_swizzle, dtype=dtype, wave_size=a.WAVE)
+                         lds_swizzle=lds_swizzle, dtype=dtype, wave_size=a.WAVE,
+                         n_reads=n_reads)
     art = compile_kernel(kernel, arch=arch)
     sig = (SignatureBuilder().ptr("IN", dtype.name).ptr("OUT", dtype.name)
            .scalar("N", "i32").build())
@@ -651,7 +664,7 @@ def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_wave
     rng = np.random.default_rng(0)
     in_h = rng.integers(-5, 6, size=(coop_free, tile_k)).astype(np_dtype)
     out_h = (np.zeros((coop_free, tile_k), dtype=np_dtype) if mode == "store"
-             else np.zeros((tile_k, warp_free), dtype=np_dtype))
+             else np.zeros((tile_k * n_reads, warp_free), dtype=np_dtype))
 
     rt = Runtime()
     in_d, out_d = DeviceMem(in_h.nbytes), DeviceMem(out_h.nbytes)
@@ -673,7 +686,7 @@ def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_wave
             # store writes the read back in that same order, so the golden is the band TRANSPOSED.
             # Established empirically on gfx90a before this check was added; without it a read probe's
             # counters would be unverified, which the cardinal rule forbids.
-            ov = out_h[:, :coop_free].astype(np.float32)
+            ov = out_h[:tile_k, :coop_free].astype(np.float32)
             diff = float(np.abs(ov - in_h.T.astype(np.float32)).max())
     return {"mode": mode, "pad": lds_pad, "force_vw": force_vw, "lds_swizzle": bool(lds_swizzle),
             "block_lanes": block_lanes, "kernel": kernel.name, "max_abs_diff": diff}
