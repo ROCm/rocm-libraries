@@ -46,6 +46,17 @@
 #define CK_TILE_FMHA_BWD_DQ_STATIC_STRIDE 1
 #endif
 
+// Mirror tile pairing halves the causal grid to balance the triangular load.
+// That wins only while the halved grid still occupies enough of the machine.
+// Measured on gfx1250 (256 CUs) over 16 (seqlen, batch, nhead) points: below
+// the threshold disabling pairing is -17..-35%, above it pairing is worth
+// +11..+36%, and the flip tracks the *workgroup count*, not the sequence
+// length -- the same seqlen reverses when batch*nhead changes. Enable pairing
+// only when the paired grid exceeds CUs/this. This is the job-count condition
+// the persistent path already applies via tile_n_interleave.
+#ifndef CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV
+#define CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV 2
+#endif
 namespace ck_tile {
 
 // Per-CU state for group-mode deterministic persistent scheduling.
@@ -1259,7 +1270,14 @@ struct FmhaBwdDQDKDVKernel
         if constexpr(kUsePersistent)
             return dim3(get_num_cus(), 1, 1);
         else if constexpr(kMaskTilePairing)
-            return dim3(integer_divide_ceil(jobs_per_head, 2), nhead_, batch_size_);
+        {
+            const index_t paired_x  = integer_divide_ceil(jobs_per_head, 2);
+            const index_t paired_wg = paired_x * nhead_ * batch_size_;
+            const index_t min_wg    = static_cast<index_t>(get_num_cus()) /
+                                      CK_TILE_FMHA_BWD_PAIRING_MIN_CU_DIV;
+            return (paired_wg > min_wg) ? dim3(paired_x, nhead_, batch_size_)
+                                        : dim3(jobs_per_head, nhead_, batch_size_);
+        }
         else
             return dim3(jobs_per_head, nhead_, batch_size_);
     }
@@ -1303,7 +1321,13 @@ struct FmhaBwdDQDKDVKernel
                     const index_t n_tiles =
                         integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0);
                     const index_t x      = blockIdx.x;
-                    const index_t mirror = n_tiles - 1 - x;
+                    // GridSize() may have declined to pair, in which case it
+                    // launched the full grid; then this block covers only x.
+                    // Inferring it from gridDim keeps host and device in sync
+                    // with no kargs flag, and leaves the `mirror != x` test
+                    // below byte-identical to the always-paired form.
+                    const index_t mirror =
+                        (static_cast<index_t>(gridDim.x) < n_tiles) ? (n_tiles - 1 - x) : x;
                     // archA's two-inlined-body form. Faster, but miscompiled
                     // under expert scheduling mode when dropout is on.
                     run_(kargs, dim3(x, blockIdx.y, blockIdx.z), 0, 1);
