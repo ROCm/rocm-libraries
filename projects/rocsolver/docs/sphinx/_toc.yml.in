@@ -36,7 +36,7 @@ subtrees:
     title: rocSOLVER API summary
   - file: reference/types.rst
     title: rocSOLVER types
-  - file: reference/precision.rst
+  - file: reference/data_type_support.rst
     title: rocSOLVER precision support
   - file: reference/env_variables.rst
     title: rocSOLVER environment variables

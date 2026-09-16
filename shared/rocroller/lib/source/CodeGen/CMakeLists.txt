@@ -14,6 +14,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerFromKernelGraph.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MemoryInstructions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SubInstruction.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDataMover.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitCount.cpp"
 )
 

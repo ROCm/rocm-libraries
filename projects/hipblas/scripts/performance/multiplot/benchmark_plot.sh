@@ -10,6 +10,13 @@ BENCHMARK=true
 PLOT=true
 VS_THEO_MAX=false
 VS_PERF=false
+GBPS=
+TAG_PARENT=false
+A_BLAS_SUBDIR=
+B_BLAS_SUBDIR=
+PLOT_TAG2=
+A_TREE=
+B_TREE=
 
 usage()
 {
@@ -46,6 +53,21 @@ usage()
     echo ""
     echo "--perf_vs_perf true:  to plot performance / performance,"
     echo "                  default: $VS_PERF"
+    echo ""
+    echo "--gbps <value>:  memory bandwidth in GB/s for theoretical max,"
+    echo "                 overrides built-in per-arch value"
+    echo ""
+    echo "--tag-parent true:  tag1 CSVs under {tag1}/blasL/ (no NAME subfolder)"
+    echo ""
+    echo "--a-blas-subdir NAME:  tag1 CSVs under {tag1}/blasL/NAME/"
+    echo ""
+    echo "--b-blas-subdir NAME:  tag2 CSVs under {tag2}/blasL/NAME/ (e.g. gfx950 under MI355X)"
+    echo ""
+    echo "--plot-tag2 NAME:  plot output folder tag1_NAME (default: b-blas-subdir or tag2)"
+    echo ""
+    echo "--a-tree DIR:  tag1 CSVs under DIR/blasL/ only (see plot.py)"
+    echo ""
+    echo "--b-tree DIR:  tag2 CSVs under DIR/blasL/ only"
     echo ""
     echo "Example: $0 --tag1 gfx90a --plot false --benchmark true --level1 false --level2 false --level3 true"
     exit 1
@@ -106,6 +128,41 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --gbps)
+      GBPS="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --tag-parent)
+      TAG_PARENT="$2"
+      shift
+      shift
+      ;;
+    --a-blas-subdir)
+      A_BLAS_SUBDIR="$2"
+      shift
+      shift
+      ;;
+    --b-blas-subdir)
+      B_BLAS_SUBDIR="$2"
+      shift
+      shift
+      ;;
+    --plot-tag2)
+      PLOT_TAG2="$2"
+      shift
+      shift
+      ;;
+    --a-tree)
+      A_TREE="$2"
+      shift
+      shift
+      ;;
+    --b-tree)
+      B_TREE="$2"
+      shift
+      shift
+      ;;
     -h|--help)
       usage
       ;;
@@ -163,26 +220,52 @@ else
     PERF_VS_PERF=""
 fi
 
+if [ -n "$GBPS" ]; then
+    GBPS_ARG="--gbps $GBPS"
+else
+    GBPS_ARG=""
+fi
+
+LAYOUT_ARGS=""
+if [ "$TAG_PARENT" == "true" ]; then
+    LAYOUT_ARGS="$LAYOUT_ARGS --tag-parent"
+fi
+if [ -n "$A_BLAS_SUBDIR" ]; then
+    LAYOUT_ARGS="$LAYOUT_ARGS --a-blas-subdir $A_BLAS_SUBDIR"
+fi
+if [ -n "$B_BLAS_SUBDIR" ]; then
+    LAYOUT_ARGS="$LAYOUT_ARGS --b-blas-subdir $B_BLAS_SUBDIR"
+fi
+if [ -n "$PLOT_TAG2" ]; then
+    LAYOUT_ARGS="$LAYOUT_ARGS --plot-tag2 $PLOT_TAG2"
+fi
+if [ -n "$A_TREE" ]; then
+    LAYOUT_ARGS="$LAYOUT_ARGS --a-tree $A_TREE"
+fi
+if [ -n "$B_TREE" ]; then
+    LAYOUT_ARGS="$LAYOUT_ARGS --b-tree $B_TREE"
+fi
+
 if [ "$LEVEL1" == "true" ]; then
   if [ "$BENCHMARK" == "true" ]; then
-    python3 benchmark.py -l blas1 -t $TAG1 -b $ROCBLAS_BENCH -f dot -f axpy -f scal -f nrm2
+    python3 benchmark.py -l blas1 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f dot -f axpy -f scal -f nrm2
   fi
   if [ "$PLOT" == "true" ]; then
-    python3 plot.py -l blas1 --tag1 $TAG1 --tag2  $TAG2 $THEO_MAX $PERF_VS_PERF -f dot -f axpy -f scal
+    python3 plot.py -l blas1 --tag1 $TAG1 --tag2  $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS -f dot -f axpy -f scal -f nrm2
   fi
 fi
 
 if [ "$LEVEL2" == "true" ]; then
   if [ "$BENCHMARK" == "true" ]; then
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv -f hbmv
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH -f gemv -f symv -f trmv -f tpmv -f spmv -f gbmv -f sbmv -f tbmv
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH -f ger -f syr -f spr -f syr2 -f spr2
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH -f trsv -f tbsv -f tpsv
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv -f hbmv
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f gemv -f symv -f trmv -f tpmv -f spmv -f gbmv -f sbmv -f tbmv
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f ger -f syr -f spr -f syr2 -f spr2
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f trsv -f tbsv -f tpsv
   fi
   if [ "$PLOT" == "true" ]; then
-    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv
-    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f gemv -f trmv -f tpmv -f tbmv # missing symv, spmv, gbmv, sbmv
-    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f ger -f syr -f spr -f syr2 -f spr2
+    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv
+    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemv -f trmv -f tpmv -f tbmv
+    python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f ger -f syr -f spr -f syr2 -f spr2
 #   python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f trsv -f tpsv -f tbsv # need to speed up triangle solve initialization
   fi
 fi
@@ -195,14 +278,14 @@ if [ "$LEVEL3" == "true" ]; then
   fi
 
   if [ "$BENCHMARK" == "true" ]; then
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH -f gemm
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH -f trmm -f symm -f trsm
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH -f syrk -f syrkx -f syr2k
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH -f hemm -f herk -f herkx -f her2k
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f gemm
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f trmm -f symm -f trsm
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f syrk -f syrkx -f syr2k
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f hemm -f herk -f herkx -f her2k
   fi
   if [ "$PLOT" == "true" ]; then
-    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f gemm -f trmm -f symm # missing trsm, need to speed up triangle solve initialization
-    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f gemm -f syrk -f syrkx -f syr2k
-    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF --label1 "M" --label2 "N" -f gemm -f hemm -f herk -f herkx -f her2k
+    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f trmm -f symm # missing trsm, need to speed up triangle solve initialization
+    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f syrk -f syrkx -f syr2k
+    python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f hemm -f herk -f herkx -f her2k
   fi
 fi

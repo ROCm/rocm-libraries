@@ -8,12 +8,20 @@
 #include <iostream>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-
 namespace hipdnn_test_sdk::utilities
 {
+
+/// Check if a path has the compound extension .meta.json.
+///
+/// std::filesystem::path::extension() returns only the last extension (".json"),
+/// so "Small.meta.json" passes a naive `.json` filter. This helper detects the
+/// compound extension by inspecting the stem's extension:
+///   path("Small.meta.json").stem()           → "Small.meta"
+///   path("Small.meta").extension()           → ".meta"
+inline bool isMetaJsonFile(const std::filesystem::path& filepath)
+{
+    return filepath.extension() == ".json" && filepath.stem().extension() == ".meta";
+}
 
 class ScopedDirectory
 {
@@ -60,7 +68,8 @@ inline std::vector<std::filesystem::path>
     {
         for(const auto& entry : std::filesystem::recursive_directory_iterator(directory))
         {
-            if(entry.path().extension() == ".json" && entry.path().filename() != "meta.json")
+            if(entry.path().extension() == ".json" && entry.path().filename() != "meta.json"
+               && !isMetaJsonFile(entry.path()))
             {
                 paths.push_back(entry.path());
             }
@@ -75,22 +84,6 @@ inline std::vector<std::filesystem::path>
 
     std::sort(paths.begin(), paths.end());
     return paths;
-}
-
-/// Scan golden reference data directory for bundle JSON files.
-/// Returns a gtest parameter generator. On failure or empty directory, returns
-/// a sentinel empty-path so SetUp() can GTEST_SKIP() gracefully.
-inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
-{
-    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-               / "../lib/golden_reference_data" / subDirectory;
-
-    auto paths = scanBundleJsonFiles(dir);
-    if(paths.empty())
-    {
-        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
-    }
-    return testing::ValuesIn(paths);
 }
 
 }

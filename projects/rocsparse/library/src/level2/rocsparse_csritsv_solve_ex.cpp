@@ -229,14 +229,14 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
     if(descr->diag_type == rocsparse_diag_type_unit)
     {
         rocsparse_int max = std::numeric_limits<rocsparse_int>::max();
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csritsv_info->get_position(),
-                                           &max,
-                                           sizeof(rocsparse_int),
-                                           hipMemcpyHostToDevice,
-                                           stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(info->csritsv_info->get_position(),
+                                                     &max,
+                                                     sizeof(rocsparse_int),
+                                                     hipMemcpyHostToDevice,
+                                                     stream));
 
         // Wait for device transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     }
 
     const rocsparse_fill_mode fill_mode = descr->fill_mode;
@@ -253,8 +253,8 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
             //
             if(compute_nrm)
             {
-                RETURN_IF_HIP_ERROR(
-                    hipMemcpyAsync(y_p, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                    y_p, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
                 //
                 // Scale.
                 //
@@ -264,12 +264,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                     = (rocsparse::floating_data_t<T>*)(y_p + m);
                 RETURN_IF_ROCSPARSE_ERROR(
                     rocsparse::nrminf_diff<1024>(handle, m, y_p, y, device_nrm, nullptr, false));
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(host_nrm,
-                                                   device_nrm,
-                                                   sizeof(rocsparse::floating_data_t<T>),
-                                                   hipMemcpyDeviceToHost,
-                                                   stream));
-                RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(host_nrm,
+                                                             device_nrm,
+                                                             sizeof(rocsparse::floating_data_t<T>),
+                                                             hipMemcpyDeviceToHost,
+                                                             stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
                 if(recordable)
                 {
                     host_history[0] = host_nrm[0];
@@ -281,16 +281,16 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
             {
                 if(compute_nrm)
                 {
-                    RETURN_IF_HIP_ERROR(
-                        hipMemcpyAsync(y, y_p, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                        y, y_p, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
                 }
                 else
                 {
                     //
                     // Copy.
                     //
-                    RETURN_IF_HIP_ERROR(
-                        hipMemcpyAsync(y, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                        y, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
                     //
                     // Scale.
                     //
@@ -328,7 +328,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
     if(handle->pointer_mode == rocsparse_pointer_mode_device)
     {
         csrmv_alpha_device_host = csrmv_alpha_device;
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             csrmv_alpha_device, &s_minus_one, sizeof(T), hipMemcpyHostToDevice, stream));
     }
     else
@@ -461,7 +461,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                       rocsparse_pointer_mode_host,
                                                       indextype,
                                                       &zero_pivot));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         if(zero_pivot != -1)
         {
             return rocsparse_status_success;
@@ -486,8 +486,8 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         {
             for(rocsparse_int freeiter = 0; freeiter < host_nfreeiter; ++freeiter)
             {
-                RETURN_IF_HIP_ERROR(
-                    hipMemcpyAsync(y_p, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                    y_p, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
 
                 RETURN_IF_ROCSPARSE_ERROR(
                     (rocsparse::
@@ -530,7 +530,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
             // Compute residual.
             //
             RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(y_p, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                rocsparse_hipMemcpyAsync(y_p, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
             RETURN_IF_ROCSPARSE_ERROR(
                 (rocsparse::csrmv_template<T, I, J, T, T, T>)(handle,
                                                               trans,
@@ -557,12 +557,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
             {
                 RETURN_IF_ROCSPARSE_ERROR(
                     rocsparse::nrminf<1024>(handle, m, y_p, device_nrm, nullptr, false));
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(host_nrm,
-                                                   device_nrm,
-                                                   sizeof(rocsparse::floating_data_t<T>),
-                                                   hipMemcpyDeviceToHost,
-                                                   stream));
-                RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(host_nrm,
+                                                             device_nrm,
+                                                             sizeof(rocsparse::floating_data_t<T>),
+                                                             hipMemcpyDeviceToHost,
+                                                             stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
                 if(verbose)
                 {
                     std::cout << "device iter " << iter << ", nrm " << host_nrm[0] << std::endl;
@@ -625,7 +625,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 // Copy x to y_{k+1}
                 //
                 RETURN_IF_HIP_ERROR(
-                    hipMemcpyAsync(y, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                    rocsparse_hipMemcpyAsync(y, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
 
                 //
                 // y_{k+1} = -T y_k + alpha * y_{k+1}
@@ -675,7 +675,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
             // Copy x to y_{k+1}
             //
             RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(y, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                rocsparse_hipMemcpyAsync(y, x, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
 
             //
             // y_{k+1} = -T y_k + alpha * y_{k+1}
@@ -709,12 +709,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 //
                 RETURN_IF_ROCSPARSE_ERROR(
                     rocsparse::nrminf_diff<1024>(handle, m, y_p, y, device_nrm, nullptr, false));
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(host_nrm,
-                                                   device_nrm,
-                                                   sizeof(rocsparse::floating_data_t<T>),
-                                                   hipMemcpyDeviceToHost,
-                                                   stream));
-                RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(host_nrm,
+                                                             device_nrm,
+                                                             sizeof(rocsparse::floating_data_t<T>),
+                                                             hipMemcpyDeviceToHost,
+                                                             stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
                 if(verbose)
                 {
                     std::cout << "device iter " << iter << ", nrm " << host_nrm[0] << std::endl;
@@ -736,22 +736,22 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         {
             if(break_loop == false)
             {
-                RETURN_IF_HIP_ERROR(
-                    hipMemcpyAsync(y_p, y, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                    y_p, y, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
             }
         }
         else
         {
             if(break_loop == true)
             {
-                RETURN_IF_HIP_ERROR(
-                    hipMemcpyAsync(y, y_p, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                    y, y_p, sizeof(T) * m, hipMemcpyDeviceToDevice, stream));
             }
         }
         break;
     }
     }
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     return rocsparse_status_success;
 }
 

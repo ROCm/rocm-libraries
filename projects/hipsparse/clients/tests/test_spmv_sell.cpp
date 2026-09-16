@@ -37,5 +37,6 @@ TEST_ROUTINE_WITH_CONFIG(spmv_sell,
                          arg.betai,
                          arg.transA,
                          arg.baseA,
-                         arg.spmv_alg);
+                         arg.spmv_alg,
+                         arg.call_preprocess);
 #endif

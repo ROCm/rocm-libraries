@@ -23,6 +23,15 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+
+import org.jenkinsci.plugins.workflow.graph.FlowGraphWalker
+import org.jenkinsci.plugins.workflow.actions.ErrorAction
+import org.jenkinsci.plugins.workflow.actions.WarningAction
+import org.jenkinsci.plugins.workflow.actions.LabelAction
+import org.jenkinsci.plugins.workflow.actions.ThreadNameAction
+import org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode
+import org.jenkinsci.plugins.workflow.cps.nodes.StepEndNode
+
 def miopenCheckout()
 {
     // checkout project
@@ -33,6 +42,21 @@ def miopenCheckout()
         extensions: scm.extensions + [[$class: 'CleanCheckout']] + [[$class: 'SubmoduleOption', disableSubmodules: false, parentCredentials: true, recursiveSubmodules: true, ]],
         userRemoteConfigs: scm.userRemoteConfigs
     ])
+}
+
+// Root of the agent's remote filesystem, i.e. the directory holding "workspace/<job>".
+// Agents may be given a per-agent remote root (so that several agents can share a machine
+// without stepping on each other's workspaces), so this must not assume /var/jenkins.
+// A customWorkspace has no "workspace/" segment at all; fall back to the workspace's parent
+// rather than throwing out of substring().
+def nodeRemoteRoot() {
+    String ws = env.WORKSPACE
+    int idx = ws.lastIndexOf("workspace/")
+    if (idx > 0) {
+        return ws.substring(0, idx)
+    }
+    int slash = ws.lastIndexOf("/")
+    return slash > 0 ? ws.substring(0, slash + 1) : "/"
 }
 
 def check_host() {
@@ -50,7 +74,7 @@ def check_host() {
 }
 
 //default
-// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
+// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -G Ninja -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
 //
 def cmake_build(Map conf=[:]){
 
@@ -98,8 +122,7 @@ def cmake_build(Map conf=[:]){
     def test_flags = conf.get("test_flags","")
 
     if (conf.get("vcache_enable","") == "true"){
-        //grab root of node workspace. not guaranteed to be /var/jenkins
-        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
+        String remote_root = nodeRemoteRoot()
         def vcache = conf.get(vcache_path,"${remote_root}/.cache/miopen/vcache")
         build_envs = " MIOPEN_VERIFY_CACHE_PATH='${vcache}' " + build_envs
     } else{
@@ -143,10 +166,10 @@ def cmake_build(Map conf=[:]){
             rm -f src/kernels/miopen*.udb
             cd build
         """
-    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake ${setup_args}   .. ")
+    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake -G Ninja ${setup_args}   .. ")
     // WORKAROUND_SWDEV_290754
     // It seems like this W/A is not required since 4.5.
-    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init make -j\$(nproc) ${make_targets}")
+    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init ninja -j\$(nproc) ${make_targets}")
     def execute_cmd = conf.get("execute_cmd", "")
 
     def cmd = conf.get("cmd", """
@@ -213,7 +236,7 @@ def getDockerImageName(dockerArgs)
         sh "echo ${env.THEROCK_CANDIDATE_IMAGE} >> ${env.WORKSPACE}/factors.txt"
     }
     def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
-    // Note: The following files and directories from the CK repo are used to generate a hash for 
+    // Note: The following files and directories from the CK repo are used to generate a hash for
     // the docker image build. To ensure that we rebuild the docker image only when necessary.
     // Add any other files or directories that should trigger a rebuild of the docker image when changed.
     sh """
@@ -236,7 +259,7 @@ def getDockerImageName(dockerArgs)
         | md5sum \
         | awk '{print \$1}' >> "${env.WORKSPACE}/factors.txt"
     """
-    
+
     sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
@@ -250,8 +273,10 @@ def getDockerImageName(dockerArgs)
     return image
 }
 
-// Builds rocm/miopen:therock-<shortHash> from source; returns {image, fullHash, shortHash, skip}.
-// Skips if :therock already carries this hash; reuses the hash-tagged image if it exists.
+// Resolves the newest TheRock multi-arch nightly version, then builds
+// rocm/miopen:therock-<rocm-version> pinned to it (and labeled rocm.nightly.version=<version>);
+// returns {image, fullHash, shortHash, rocmVersion, skip}. Reuses the version-tagged image if
+// that exact nightly was already built (content-true gate) instead of rebuilding.
 def buildTheRockDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
@@ -261,7 +286,10 @@ def buildTheRockDockerImage(Map conf=[:])
 
     def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
 
-    // Read the TheRock hash from the ci-env action (single source of truth).
+    // Pin TheRock's build_tools (the install_rocm_from_artifacts.py installer) to the ref tracked
+    // in the ci-env action, so the tooling that downloads the nightly tarball is reproducible.
+    // The prebuilt ROCm itself comes from the newest multi-arch nightly release (--latest-release
+    // in the Dockerfile), which is date-rolled and not tied to this ref.
     def theRockHash = sh(
         script: """
             grep -A 2 'therock-ref:' ${env.WORKSPACE}/.github/actions/ci-env/action.yml \
@@ -273,51 +301,71 @@ def buildTheRockDockerImage(Map conf=[:])
     ).trim()
 
     def shortHash   = theRockHash.take(7)
-    def hashedImage = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock-${shortHash}"
+    def date        = new Date().format('yyyyMMdd')
 
-    // Check whether this hash is already live on :therock via its baked-in label.
-    // Pull and inspect are separated so that docker pull stdout does not contaminate the captured label.
-    def lastPromotedHash = ""
-    try {
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
-            lastPromotedHash = sh(
-                script: """
-                    docker inspect \
-                        --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
-                """.stripIndent(),
-                returnStdout: true
-            ).trim()
-        }
-    } catch (Exception e) {
-        echo "Could not read label from existing :therock image (first-time run?): ${e.message}"
+    def buildContext    = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+    def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min " +
+                          "--cache-from type=registry,ref=${cacheRef} "
+
+    // A docker-container buildx builder is needed for both the resolve step (uses --output) and
+    // the base build; create it once up front (idempotent).
+    def ensureBuilder = """
+        docker buildx inspect ci-builder >/dev/null 2>&1 || \
+        docker buildx create --name ci-builder --driver docker-container --use
+        docker buildx use ci-builder
+        docker buildx inspect --bootstrap
+    """.stripIndent()
+
+    // Resolve the newest multi-arch nightly version cheaply (S3 list only, no multi-GB download):
+    // build the scratch resolve_version_out target and read /rocm_version.txt back out. This is
+    // the source of truth for the tag, the label, the download pin, and the layer cache key.
+    def resolveDir  = "${env.WORKSPACE}/therock_resolve"
+    def rocmVersion = ""
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        sh ensureBuilder
+        sh "rm -rf ${resolveDir}"
+        sh """
+            DOCKER_BUILDKIT=1 docker buildx build \
+            --builder ci-builder \
+            --target resolve_version_out \
+            --output type=local,dest=${resolveDir} \
+            --build-arg THEROCK_RESOLVE_BUST=${date} \
+            -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile \
+            ${buildContext}
+        """.stripIndent()
+        rocmVersion = sh(script: "cat ${resolveDir}/rocm_version.txt 2>/dev/null || true", returnStdout: true).trim()
     }
-
-    if (lastPromotedHash == theRockHash) {
-        echo "TheRock hash ${shortHash} is already promoted to :therock - skipping build."
-        return [image: null, fullHash: theRockHash, shortHash: shortHash, skip: true]
+    if (!rocmVersion) {
+        error "Could not resolve the latest ROCm nightly version (empty result) - aborting TheRock base build."
     }
-    echo "New TheRock hash detected: ${theRockHash} (previously promoted: '${lastPromotedHash ?: 'none'}')"
+    // Tag by the actual ROCm nightly version so the tag never lies about its contents. Sanitize
+    // defensively (nightly 'a<date>' versions are already tag-safe; only dev '+<hash>' builds
+    // would need it, and --latest-release never selects those).
+    def rocmVersionTag = rocmVersion.replaceAll('[^A-Za-z0-9_.-]', '_')
+    def hashedImage    = "${env.MIOPEN_DOCKER_IMAGE_URL}:therock-${rocmVersionTag}"
+    echo "Resolved ROCm nightly version: ${rocmVersion} -> ${hashedImage}"
 
-    // Reuse the hash-tagged image if a previous nightly already built it.
+    // Reuse the version-tagged base if this exact nightly was already built (content-true gate:
+    // same nightly => same tag => skip; a new nightly => new tag => build).
     def imageAlreadyBuilt = false
     withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
         def rc = sh(script: "docker manifest inspect ${hashedImage} > /dev/null 2>&1", returnStatus: true)
         imageAlreadyBuilt = (rc == 0)
     }
     if (imageAlreadyBuilt) {
-        echo "Hash-tagged image ${hashedImage} already exists - reusing without rebuild."
+        echo "Version-tagged image ${hashedImage} already exists - reusing without rebuild."
     } else {
-        echo "Hash-tagged image ${hashedImage} not found - will build now."
+        echo "Version-tagged image ${hashedImage} not found - will build now."
     }
 
     if (!imageAlreadyBuilt) {
         def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                         "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                          "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
-                         "--build-arg BUILD_TYPE=build " +
+                         "--build-arg BUILD_TYPE=artifact " +
+                         "--build-arg ROCM_NIGHTLY_VERSION=${rocmVersion} " +
+                         "--label rocm.nightly.version=${rocmVersion} " +
                          "--label therock.git.hash=${theRockHash} " +
+                         "--label therock.build.date=${date} " +
                          "--target update_therock " +
                          " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
@@ -327,21 +375,16 @@ def buildTheRockDockerImage(Map conf=[:])
 
         echo "Building ${hashedImage} with args: ${dockerArgs}"
 
-        def buildContext    = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min " +
-                              "--cache-from type=registry,ref=${cacheRef} "
-
+        // The nightly tarball is served from an anonymous S3 bucket, so no GITHUB_TOKEN build
+        // secret is needed (the earlier per-component artifact path required one for the GitHub
+        // Actions API rate limit).
         try {
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                sh """
-                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
-                    docker buildx create --name ci-builder --driver docker-container --use
-                    docker buildx use ci-builder
-                    docker buildx inspect --bootstrap
-                """.stripIndent()
+                sh ensureBuilder
 
                 sh """
                     DOCKER_BUILDKIT=1 docker buildx build \
+                    --builder ci-builder \
                     --push \
                     --tag ${hashedImage} \
                     ${dockerCacheArgs} \
@@ -358,7 +401,7 @@ def buildTheRockDockerImage(Map conf=[:])
         }
     }
 
-    return [image: hashedImage, fullHash: theRockHash, shortHash: shortHash, skip: false]
+    return [image: hashedImage, fullHash: theRockHash, shortHash: shortHash, rocmVersion: rocmVersion, skip: false]
 }
 
 // Retags the CI image as rocm/miopen-dev:multiarch_dev_<date> and :latest.
@@ -403,6 +446,59 @@ def promoteTheRockDockerImage(String hashedImage, String fullHash)
 }
 
 
+// Embeds TheRock and CK git hashes as Docker image labels.
+private def embedBuildMetadata(String dockerArgs) {
+    try {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
+            def promotedHash = sh(
+                script: """
+                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
+                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                """.stripIndent(),
+                returnStdout: true
+            ).trim()
+            if (promotedHash) {
+                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
+                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
+                env.THEROCK_PROMOTED_HASH = promotedHash
+            }
+
+            // Propagate the ROCm nightly version onto the CI image (and thus, via docker tag, the
+            // dev image). Prefer the value this run's base build produced; otherwise read it back
+            // from the promoted :therock base. Mirrors the therock.git.hash handling above.
+            def rocmVersion = env.THEROCK_ROCM_VERSION
+            if (!rocmVersion) {
+                rocmVersion = sh(
+                    script: """
+                        docker inspect --format '{{ index .Config.Labels "rocm.nightly.version" }}' \
+                            ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
+                    """.stripIndent(),
+                    returnStdout: true
+                ).trim()
+            }
+            if (rocmVersion && rocmVersion != "<no value>") {
+                echo "Embedding ROCm nightly version into CI image metadata: ${rocmVersion}"
+                dockerArgs = dockerArgs + "--label rocm.nightly.version=${rocmVersion} "
+            }
+        }
+    } catch (Exception e) {
+        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
+    }
+
+    def ckHash = sh(
+        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
+        returnStdout: true
+    ).trim()
+    if (ckHash) {
+        echo "Embedding CK hash into CI image metadata: ${ckHash}"
+        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
+        env.CK_GIT_HASH = ckHash
+    }
+    return dockerArgs
+}
+
+
 def getDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
@@ -436,7 +532,7 @@ def getDockerImage(Map conf=[:])
     }
     else if (gpu_family == "navi")
     {
-        gpu_arch = "gfx1101;gfx1151"
+        gpu_arch = "gfx1101"
     }
     else
     {
@@ -484,93 +580,107 @@ def getDockerImage(Map conf=[:])
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
 
-    // Carry the promoted TheRock hash forward into the CI image metadata.
-    try {
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh "docker pull ${env.MIOPEN_DOCKER_IMAGE_URL}:therock > /dev/null 2>&1 || true"
-            def promotedHash = sh(
-                script: """
-                    docker inspect --format '{{ index .Config.Labels "therock.git.hash" }}' \
-                        ${env.MIOPEN_DOCKER_IMAGE_URL}:therock 2>/dev/null || true
-                """.stripIndent(),
-                returnStdout: true
-            ).trim()
-            if (promotedHash) {
-                echo "Embedding TheRock hash into CI image metadata: ${promotedHash}"
-                dockerArgs = dockerArgs + "--label therock.git.hash=${promotedHash} "
-                env.THEROCK_PROMOTED_HASH = promotedHash
-            }
-        }
-    } catch (Exception e) {
-        echo "Could not read TheRock label from :therock image, skipping metadata embedding: ${e.message}"
-    }
-
-    // Embed the CK commit hash built into this image.
-    def ckHash = sh(
-        script: "git -C ${env.WORKSPACE}/${env.CK_DIR} rev-parse HEAD",
-        returnStdout: true
-    ).trim()
-    if (ckHash) {
-        echo "Embedding CK hash into CI image metadata: ${ckHash}"
-        dockerArgs = dockerArgs + "--label ck.git.hash=${ckHash} "
-        env.CK_GIT_HASH = ckHash
-    }
-
-    echo "Docker Args: ${dockerArgs}"
+    // ensure_only: true = check registry only (manifest inspect), build if absent.
+    // ensure_only: false (default) = pull to local daemon, build if pull fails.
+    def ensure_only = conf.get("ensure_only", false)
 
     def dockerImage
-    try{
-        echo "Pulling down image: ${image}"
-        dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            dockerImage.pull()
+    if (ensure_only) {
+        def remoteExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
         }
-        def embeddedTheRockHash = sh(
-            script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
-            returnStdout: true
-        ).trim()
-        def embeddedCkHash = sh(
-            script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
-            returnStdout: true
-        ).trim()
-        echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
-    }
-    catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-        echo "The job was cancelled or aborted"
-        throw e
-    }
-    catch(Exception ex)
-    {
-        echo "Building image..."
-        def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
-                              "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
-
-        try {
-
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                sh """
-                    docker buildx rm ci-builder || true
-                    docker buildx create --name ci-builder --driver docker-container --use
-                    docker buildx use ci-builder
-                    docker buildx inspect --bootstrap
-                """.stripIndent()
-                sh """
-                    DOCKER_BUILDKIT=1 docker buildx build \
-                    --builder ci-builder \
-                    --push \
-                    --tag ${image} \
-                    ${dockerCacheArgs} \
-                    ${dockerArgs} \
-                    ${buildContext}
-                """.stripIndent()
-            }
+        if (remoteExists) {
+            echo "Image ${image} already exists in registry - skipping build."
             dockerImage = docker.image("${image}")
-        } catch (Exception bex) {
-            echo "Buildx not available or failed, falling back to docker.build"
-            dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+        } else {
+            dockerArgs = embedBuildMetadata(dockerArgs)
+            echo "Docker Args: ${dockerArgs}"
+            echo "Building image..."
+            def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+            def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                                  "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
+            try {
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    sh """
+                        docker buildx rm ci-builder || true
+                        docker buildx create --name ci-builder --driver docker-container --use
+                        docker buildx use ci-builder
+                        docker buildx inspect --bootstrap
+                    """.stripIndent()
+                    sh """
+                        DOCKER_BUILDKIT=1 docker buildx build \
+                        --builder ci-builder \
+                        --push \
+                        --tag ${image} \
+                        ${dockerCacheArgs} \
+                        ${dockerArgs} \
+                        ${buildContext}
+                    """.stripIndent()
+                }
+                dockerImage = docker.image("${image}")
+            } catch (Exception bex) {
+                echo "Buildx not available or failed, falling back to docker.build"
+                dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
+            }
+        }
+    } else {
+        try{
+            echo "Pulling down image: ${image}"
+            dockerImage = docker.image("${image}")
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
+                dockerImage.pull()
+            }
+            def embeddedTheRockHash = sh(
+                script: "docker inspect --format '{{ index .Config.Labels \"therock.git.hash\" }}' ${image} 2>/dev/null || true",
+                returnStdout: true
+            ).trim()
+            def embeddedCkHash = sh(
+                script: "docker inspect --format '{{ index .Config.Labels \"ck.git.hash\" }}' ${image} 2>/dev/null || true",
+                returnStdout: true
+            ).trim()
+            echo "CI image TheRock hash: ${embeddedTheRockHash ?: 'not set'} | CK hash: ${embeddedCkHash ?: 'not set'}"
+        }
+        catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+            echo "The job was cancelled or aborted"
+            throw e
+        }
+        catch(Exception ex)
+        {
+            dockerArgs = embedBuildMetadata(dockerArgs)
+            echo "Docker Args: ${dockerArgs}"
+            echo "Building image..."
+            def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+            def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max,registry.insecure=true " +
+                                  "--cache-from type=registry,ref=${cacheRef},registry.insecure=true "
+
+            try {
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    sh """
+                        docker buildx rm ci-builder || true
+                        docker buildx create --name ci-builder --driver docker-container --use
+                        docker buildx use ci-builder
+                        docker buildx inspect --bootstrap
+                    """.stripIndent()
+                    sh """
+                        DOCKER_BUILDKIT=1 docker buildx build \
+                        --builder ci-builder \
+                        --push \
+                        --tag ${image} \
+                        ${dockerCacheArgs} \
+                        ${dockerArgs} \
+                        ${buildContext}
+                    """.stripIndent()
+                }
+                dockerImage = docker.image("${image}")
+            } catch (Exception bex) {
+                echo "Buildx not available or failed, falling back to docker.build"
+                dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
             }
         }
     }
@@ -584,22 +694,37 @@ def getDockerImage(Map conf=[:])
         image = getDockerImageName(dockerArgs)
         image = image + "_perfTest"
 
-        try{
-            echo "Pulling down perf test image: ${image}"
-            dockerImage = docker.image("${image}")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.pull()
+        if (ensure_only) {
+            def remotePerfExists = withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                sh(script: "docker manifest inspect ${image} > /dev/null 2>&1", returnStatus: true) == 0
             }
-        }
-        catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
-            echo "The job was cancelled or aborted"
-            throw e
-        }
-        catch(Exception ex)
-        {
-            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-                dockerImage.push()
+            if (remotePerfExists) {
+                echo "Perf test image ${image} already exists in registry - skipping build."
+                dockerImage = docker.image("${image}")
+            } else {
+                dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
+            }
+        } else {
+            try{
+                echo "Pulling down perf test image: ${image}"
+                dockerImage = docker.image("${image}")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.pull()
+                }
+            }
+            catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+                echo "The job was cancelled or aborted"
+                throw e
+            }
+            catch(Exception ex)
+            {
+                dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
+                withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                    dockerImage.push()
+                }
             }
         }
     }
@@ -628,6 +753,20 @@ def setGithubStatus(String context, String state, String description) {
         } catch (Exception e) {
             echo "WARNING: GitHub status POST failed after retries (context=${context}, state=${state}, code=${code})"
         }
+    }
+}
+
+def withStageStatus(Closure body) {
+    def stageName = env.STAGE_NAME
+    setGithubStatus(stageName, 'pending', 'In progress')
+    try {
+        body()
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        setGithubStatus(stageName, 'error', 'Job cancelled or aborted')
+        throw e
+    } catch (Exception e) {
+        setGithubStatus(stageName, 'failure', 'Stage failed')
+        throw e
     }
 }
 
@@ -723,15 +862,14 @@ def buildHipClangJob(Map conf=[:]){
                 }
             }
 
-            //grab root of node workspace. not guaranteed to be /var/jenkins
-            String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
+            String remote_root = nodeRemoteRoot()
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
                 timeout(time: build_timeout, unit:'MINUTES')
                 {
-                    // We set LOGNAME here because under the hood dvc calls Python's getpass.getuser() object to 
+                    // We set LOGNAME here because under the hood dvc calls Python's getpass.getuser() object to
                     // create a unique hash to store its local cache in. When Jenkins runs this Docker container, it
                     // runs as a UID that doesn't have an entry in /etc/passwd within the container. getuser() throws
-                    // an exception if it can't get the user name for the current user's UID, but it will check the 
+                    // an exception if it can't get the user name for the current user's UID, but it will check the
                     // LOGNAME environment variable and use that value if it's available.
                     // https://github.com/iterative/dvc/blob/3915fa26aa7d95d5cbe345e62846bfd82dccbfc7/dvc/repo/__init__.py#L646
                     // https://docs.python.org/3/library/getpass.html#getpass.getuser
@@ -766,8 +904,7 @@ def RunPerfTest(Map conf=[:]){
             docker_image.pull()
         }
         echo "docker image: ${docker_image}"
-        //grab root of node workspace. not guaranteed to be /var/jenkins
-        String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))
+        String remote_root = nodeRemoteRoot()
         docker_image.inside(dockerOpts + " -v=${remote_root}:${remote_root}")
         {
             timeout(time: 100, unit: 'MINUTES')
@@ -852,5 +989,442 @@ def sendTeamsFailureNotification(Map conf=[:]) {
         }
     }
 }
+
+// Selective-rerun helpers: on "Restart from Stage", reads the previous build's
+// FlowNode graph to find stages that already passed. Uses FlowNode (not wfapi)
+// because wfapi only exposes top-level stages, not parallel sub-stages.
+// Returns empty set on first run, full success, or any error (fail-open).
+
+// True if a node carries a FAILURE/ABORTED marker. catchError(stageResult:
+// 'FAILURE') records a WarningAction (not an ErrorAction) on the inner step,
+// so checking WarningAction is what catches swallowed failures.
+@NonCPS
+private def isNodeFailed(def node) {
+    if (node.getAction(ErrorAction)) return true
+
+    try {
+        def warning = node.getAction(WarningAction)
+        if (warning != null) {
+            def result = warning.result?.toString()
+            if (result && (result.contains('FAILURE') || result.contains('ABORTED'))) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+    }
+
+    return false
+}
+
+// Detects failure via node markers, getOutcome(), or ResultAction reflection.
+@NonCPS
+private def isStageMarkedFailed(def endNode) {
+    if (isNodeFailed(endNode)) return true
+
+    try {
+        def outcome = endNode.getOutcome()
+        if (outcome != null) {
+            def outcomeStr = outcome.toString()
+            if (outcomeStr.contains('FAILURE') || outcomeStr.contains('ABORTED')) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+    }
+
+    // Fallback: ResultAction via reflection
+    try {
+        def actions = endNode.getActions()
+        def resultAction = actions.find { action ->
+            action.getClass().getSimpleName() == 'ResultAction'
+        }
+        if (resultAction != null) {
+            def result = resultAction.result?.toString()
+            if (result && (result.contains('FAILURE') || result.contains('ABORTED'))) {
+                return true
+            }
+        }
+    } catch (Exception e) {
+    }
+
+    return false
+}
+
+// Reads declarative's STAGE_STATUS tag off a node, or null. Declarative sets
+// this on the stage StepStartNode: 'SKIPPED_FOR_CONDITIONAL' (when{} false),
+// 'SKIPPED_FOR_FAILURE'/'SKIPPED_FOR_RESTART' (never ran), 'FAILED_AND_CONTINUED'
+// (catchError swallowed a failure). Read via reflection -- no import needed.
+@NonCPS
+private def getStageStatusTag(def node) {
+    if (node == null) return null
+    try {
+        def tagsAction = node.getActions().find { a ->
+            a.getClass().getSimpleName() == 'TagsAction'
+        }
+        if (tagsAction != null) {
+            def tags = tagsAction.getTags()
+            if (tags != null) return tags['STAGE_STATUS']
+        }
+    } catch (Exception e) {
+    }
+    return null
+}
+
+// Positive confirmation the stage's end node completed without error.
+// Uses getError() (documented FlowNode API: null == no error) rather than
+// getOutcome().toString(), whose form is 'normal[...]'/'abnormal[...]' and does
+// NOT contain the word 'SUCCESS'. Any exception -> treat as not-confirmed (re-run).
+@NonCPS
+private def isStageSucceeded(def endNode) {
+    if (endNode == null) return false
+    try {
+        return endNode.getError() == null
+    } catch (Exception e) {
+    }
+    return false
+}
+
+// Classifies every stage in a build as 'SUCCESS', 'FAILED', or 'NOTRUN'.
+// Inverted model: SUCCESS requires positive confirmation. Anything skipped,
+// interrupted before completion, or not positively-successful is NOTRUN (no
+// signal -> must re-run). FAILED stages are locked out so a newer failure
+// cannot be overridden by an older pass in the restart chain.
+@NonCPS
+def getStageOutcomesFromBuild(def rawBuild) {
+    def outcomes = [:]   // stageName -> 'SUCCESS' | 'FAILED' | 'NOTRUN'
+    def execution = rawBuild?.execution
+    if (!execution) return outcomes
+
+    def startObjs      = [:]    // startId -> StepStartNode
+    def startNames     = [:]    // startId -> stageName
+    def endNodes       = [:]    // startId -> StepEndNode
+    // Stage start ids that enclose a failed node. A catchError failure marks an
+    // inner step, not the stage end node, so propagate it up every enclosing block.
+    def failedStageIds = [] as Set
+
+    def walker = new FlowGraphWalker(execution)
+    def walkerIter = walker.iterator()
+    while (walkerIter.hasNext()) {
+        def flowNode = walkerIter.next()
+        if (isNodeFailed(flowNode)) {
+            failedStageIds << flowNode.id
+            try {
+                failedStageIds.addAll(flowNode.getAllEnclosingIds())
+            } catch (Exception e) {
+            }
+        }
+        if (flowNode instanceof StepStartNode) {
+            def label  = flowNode.getAction(LabelAction)
+            def thread = flowNode.getAction(ThreadNameAction)
+            if (label && !thread) {
+                startNames[flowNode.id] = label.displayName
+                startObjs[flowNode.id]  = flowNode
+            }
+        } else if (flowNode instanceof StepEndNode) {
+            endNodes[flowNode.startNode?.id] = flowNode
+        }
+    }
+
+    for (def entry : startNames.entrySet()) {
+        def startId   = entry.key
+        def stageName = entry.value
+        def startNode = startObjs[startId]
+        def endNode   = endNodes[startId]
+
+        def statusTag = getStageStatusTag(startNode)
+        statusTag = statusTag != null ? statusTag.toString() : null
+
+        // Skipped via when{}, prior failure, or restart -> never ran.
+        if (statusTag != null && statusTag.startsWith('SKIPPED')) {
+            outcomes[stageName] = 'NOTRUN'
+            continue
+        }
+        // Failure markers: catchError tag, ErrorAction/WarningAction on the
+        // stage or any descendant, or a non-SUCCESS end-node outcome.
+        if ((statusTag != null && statusTag.contains('FAILED')) ||
+            failedStageIds.contains(startId) ||
+            (endNode != null && isStageMarkedFailed(endNode))) {
+            outcomes[stageName] = 'FAILED'
+            continue
+        }
+        // Started (has a start node) but never completed (no end node). We only
+        // analyze finished builds, so this means the stage was interrupted by a
+        // whole-build abort. Lock it as must-re-run so an older build's pass
+        // cannot resurrect it.
+        if (endNode == null) {
+            outcomes[stageName] = 'FAILED'
+            continue
+        }
+        // Require positive confirmation of SUCCESS; otherwise re-run.
+        outcomes[stageName] = isStageSucceeded(endNode) ? 'SUCCESS' : 'NOTRUN'
+    }
+    return outcomes
+}
+
+// Consolidates outcomes across a chain of restarts (same commit), newest build
+// first. The most recent build with a definite SUCCESS or FAILED outcome for a
+// stage wins, so a newer failure/abort can never be overridden by an older
+// pass. Returns [passed: Set<String>, failed: Set<String>] where 'passed' are
+// stages safe to skip and 'failed' are reported for debugging.
+@NonCPS
+def getPassedStagesAcrossRestartChain(def startBuild) {
+    def decided = [:]    // stageName -> 'SUCCESS' | 'FAILED' (newest decision wins)
+    def visited = [] as Set
+    def currentBuild = startBuild
+
+    while (currentBuild != null && !visited.contains(currentBuild.number)) {
+        visited << currentBuild.number
+
+        def outcomes = getStageOutcomesFromBuild(currentBuild)
+        for (def entry : outcomes.entrySet()) {
+            def name    = entry.key
+            def outcome = entry.value
+            if (decided.containsKey(name)) continue       // a newer build already decided
+            if (outcome == 'SUCCESS' || outcome == 'FAILED') {
+                decided[name] = outcome
+            }
+            // NOTRUN carries no signal -> leave undecided for an older build
+        }
+
+        def restartCause = currentBuild?.getCauses()?.find { cause ->
+            cause.getClass().getName().contains('RestartDeclarativePipeline')
+        }
+        if (restartCause) {
+            currentBuild = restartCause.getOriginal()
+        } else {
+            break
+        }
+    }
+
+    def passed = [] as Set
+    def failed = [] as Set
+    for (def entry : decided.entrySet()) {
+        if (entry.value == 'SUCCESS') passed << entry.key
+        else if (entry.value == 'FAILED') failed << entry.key
+    }
+    return [passed: passed, failed: failed]
+}
+
+// Returns [passedStages: Set<String>, debugMsg: String]. Consolidates passed
+// stages across restart chains. Empty set on non-restart or error (fail-open:
+// when in doubt, run everything).
+@NonCPS
+def getPassedStagesFromPreviousBuild() {
+    def passed = [] as Set
+    def debugMsg = ""
+    try {
+        def restartCause = currentBuild.rawBuild?.getCauses()?.find { cause ->
+            cause.getClass().getName().contains('RestartDeclarativePipeline')
+        }
+        if (!restartCause) {
+            debugMsg = "not a restart build, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
+
+        def prevRun = restartCause.getOriginal()
+        if (!prevRun) {
+            debugMsg = "could not resolve restarted build, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
+        if (prevRun.result?.toString() == 'SUCCESS') {
+            debugMsg = "previous build was SUCCESS, running all stages"
+            return [passedStages: passed, debugMsg: debugMsg]
+        }
+
+        def chain = getPassedStagesAcrossRestartChain(prevRun)
+        passed = chain.passed
+        debugMsg = "restarting from build #${prevRun.number}; " +
+                   "will re-run failed/aborted: ${chain.failed}"
+    } catch (Exception e) {
+        debugMsg = "error (${e.message}), running all stages"
+        return [passedStages: [] as Set, debugMsg: debugMsg]
+    }
+    return [passedStages: passed, debugMsg: debugMsg]
+}
+
+// Stage factory methods -- return Map<String,Closure> for parallel().
+// Moved here to keep the Jenkinsfile under the 64 KB bytecode limit.
+def addStageIf(Map stagesMap, boolean condition, String name, Closure body) {
+    if (condition) stagesMap[name] = { stage(name) { body() } }
+}
+
+
+def fullTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn, def runDbSyncJobFn, def runBuildAndSingleGtestJobFn) {
+    def result = getPassedStagesFromPreviousBuild()
+    def passedStages = result.passedStages
+    echo "Selective rerun: ${result.debugMsg}"
+    echo "Selective rerun: passedStages (${passedStages.size()}): ${passedStages}"
+    def stages = [:]
+
+    def Full_test    = pipelineEnv.Full_test
+    def Bf16_flags   = pipelineEnv.Bf16_flags
+    def Fp16_flags   = pipelineEnv.Fp16_flags
+    def Tf32_flags   = pipelineEnv.Tf32_flags
+    def gfx90a_flags = pipelineEnv.gfx90a_flags
+    def gfx942_flags = pipelineEnv.gfx942_flags
+    def gfx1101_flags = pipelineEnv.gfx1101_flags
+    def Build_timeout_minutes = pipelineEnv.Build_timeout_minutes as Integer
+
+    def hipTidy = 'Hip Tidy'
+    addStageIf(stages, pipelineParams.RUN_HIP_TIDY && !passedStages.contains(hipTidy), hipTidy) {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        def setupCmd = "CXX='/opt/rocm/llvm/bin/clang++' cmake -G Ninja -DCMAKE_PREFIX_PATH=/opt/rocm -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On .. "
+                        def buildCmd = "ninja -j\$(nproc) -k 0 analyze"
+                        buildHipClangJob(setup_cmd: setupCmd, build_cmd: buildCmd, needs_gpu: false, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX90A Tests
+    def dbsyncGfx90a = 'Dbsync gfx90a'
+    addStageIf(stages, pipelineParams.DBSYNC_TEST && pipelineParams.TARGET_GFX90A && !passedStages.contains(dbsyncGfx90a), dbsyncGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runDbSyncJobFn(gfx90a_flags, "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def bf16Gfx90a = 'Bf16 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx90a), bf16Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp16Gfx90a = 'Fp16 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx90a), fp16Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx90a = 'Fp32 Hip Install All gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx90a), fp32Gfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx90a_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX942 Tests
+    def bf16Gfx942 = 'Bf16 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_BF16 && !passedStages.contains(bf16Gfx942), bf16Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp16Gfx942 = 'Fp16 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx942), fp16Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx942 = 'Fp32 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx942), fp32Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def tf32Gfx942 = 'TF32 Hip Install All gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942 && pipelineParams.DATATYPE_TF32 && !passedStages.contains(tf32Gfx942), tf32Gfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Tf32_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    // GFX1101 Tests
+    def fp16Gfx1101 = 'Fp16 Hip Install All gfx1101'
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP16 && !passedStages.contains(fp16Gfx1101), fp16Gfx1101) {
+        node(rocmnodeFn("navi32")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32Gfx1101 = 'Fp32 Hip Install All gfx1101'
+    addStageIf(stages, pipelineParams.TARGET_NAVI32 && pipelineParams.DATATYPE_FP32 && !passedStages.contains(fp32Gfx1101), fp32Gfx1101) {
+        node(rocmnodeFn("navi32")) {
+            try {
+                withStageStatus { runBuildAndSingleGtestJobFn(flags: Full_test + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci") }
+            } finally { cleanWs() }
+        }
+    }
+
+    return stages
+}
+
+def nightlyTestStages(def pipelineParams, def pipelineEnv, def rocmnodeFn, def withWorkingDirFn) {
+    def stages = [:]
+
+    def gfx90a_flags  = pipelineEnv.gfx90a_flags
+    def gfx942_flags  = pipelineEnv.gfx942_flags
+    def Smoke_targets = pipelineEnv.Smoke_targets
+
+    addStageIf(stages, true, 'Mark Build As Nightly') {
+        node(rocmnodeFn("nogpu")) {
+            try {
+                withWorkingDirFn { currentBuild.description = "Nightly Build" }
+            } finally { cleanWs() }
+        }
+    }
+
+
+
+
+
+
+
+    def fp32DebugGfx90a = 'Fp32 Hip Debug gfx90a'
+    addStageIf(stages, pipelineParams.TARGET_GFX90A, fp32DebugGfx90a) {
+        node(rocmnodeFn("gfx90a")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: gfx90a_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    def fp32DebugGfx942 = 'Fp32 Hip Debug gfx942'
+    addStageIf(stages, pipelineParams.TARGET_GFX942, fp32DebugGfx942) {
+        node(rocmnodeFn("gfx942")) {
+            try {
+                withStageStatus {
+                    withWorkingDirFn {
+                        buildHipClangJob(setup_flags: gfx942_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true, gpu_family: "ci")
+                    }
+                }
+            } finally { cleanWs() }
+        }
+    }
+
+    return stages
+}
+
 
 return this

@@ -32,6 +32,7 @@ solution:
     ArchString: gfx950
     Xnack: false
     Sramecc: true
+    AsicRevisionId: -1
   mac_m: 256
   mac_n: 256
   mac_k: 128

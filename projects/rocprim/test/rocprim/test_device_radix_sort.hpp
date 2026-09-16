@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -89,33 +89,6 @@ public:
 };
 
 TYPED_TEST_SUITE_P(RocprimDeviceRadixSort);
-
-template<class KeyIter>
-auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
-    -> std::enable_if_t<
-        rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
-{
-    using key_type = typename std::iterator_traits<KeyIter>::value_type;
-    test_utils::generate_random_data_n(keys_input,
-                                       size,
-                                       static_cast<key_type>(-1000),
-                                       static_cast<key_type>(+1000),
-                                       rng_engine);
-    test_utils::add_special_values(keys_input, size, rng_engine);
-}
-
-template<class KeyIter>
-auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
-    -> std::enable_if_t<
-        !rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
-{
-    using key_type = typename std::iterator_traits<KeyIter>::value_type;
-    test_utils::generate_random_data_n(keys_input,
-                                       size,
-                                       rocprim::numeric_limits<key_type>::min(),
-                                       rocprim::numeric_limits<key_type>::max(),
-                                       rng_engine);
-}
 
 // Working around custom_float_test_type, which is both a float and a common::custom_type
 template<class T>
@@ -293,7 +266,7 @@ void sort_keys()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             common::device_ptr<key_type>  d_keys_input(keys_input, size);
             common::device_ptr<key_type>  d_keys_output_alloc;
@@ -555,7 +528,7 @@ void sort_pairs()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
@@ -835,7 +808,7 @@ void sort_keys_double_buffer()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             common::device_ptr<key_type> d_keys_input(keys_input, size);
             common::device_ptr<key_type> d_keys_output(size);
@@ -1069,7 +1042,7 @@ void sort_pairs_double_buffer()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);

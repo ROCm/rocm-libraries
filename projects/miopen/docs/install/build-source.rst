@@ -26,10 +26,9 @@ To install MIOpen, you must first install these prerequisites. These prerequisit
 all types of MIOpen installations.
 
 * A :doc:`ROCm <rocm:index>`-enabled platform
-* A base software stack that includes either:
+* A base software stack that includes:
 
   * :doc:`HIP <hip:index>` (HIP and HCC libraries and header files)
-  * OpenCL (OpenCL libraries and header files) (Using MIOpen with OpenCL is now deprecated.)
 
 * `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_: CMake modules for common
   build tasks needed for the ROCm software stack
@@ -79,18 +78,17 @@ You can specify this directory during the configuration phase using ``CMAKE_PREF
 
 MIOpen's HIP backend uses :doc:`rocBLAS <rocblas:index>` by default. You can install the rocBLAS
 minimum release using ``apt-get install rocblas``. To disable rocBLAS, set the configuration flag
-``-DMIOPEN_USE_ROCBLAS=Off``. rocBLAS is **not** available with OpenCL.
+``-DMIOPEN_USE_ROCBLAS=Off``.
 
 MIOpen's HIP backend can use :doc:`hipBLASLt <hipblaslt:index>`. To install the minimum release of hipBLASLt,
 use ``apt-get install hipblaslt``. In addition to installing hipBLASLt, you must also
 install :doc:`hipBLAS <hipblas:index>`. To install the hipBLAS minimum release, use ``apt-get install hipblas``.
 To disable hipBLASLt, set the configuration flag ``-DMIOPEN_USE_HIPBLASLT=Off``.
-hipBLASLt is **not** available with OpenCL.
 
 Building MIOpen
 ================================================
 
-You can build MIOpen form source using either a HIP backend or an OpenCL backend.
+You can build MIOpen from source using the HIP backend.
 
 HIP backend
 --------------------------------------------------------------------------------------------------------
@@ -122,33 +120,6 @@ To build MIOpen using the HIP backend (in ROCm 3.5 and later), follow these step
 
       When specifying the path for the ``CMAKE_PREFIX_PATH`` variable, **do not** use the tilde (``~``)
       symbol to represent the home directory.
-
-OpenCL backend
---------------------------------------------------------------------------------------------------------
-
-To build MIOpen using an OpenCL backend, run the following command:
-
-.. code:: shell
-
-   cmake -DMIOPEN_BACKEND=OpenCL ..
-
-.. note::
-
-   OpenCL is deprecated and the HIP backend is recommended instead. To install MIOpen using HIP, follow the instructions in
-   the preceding section.
-
-The preceding code assumes OpenCL is installed in one of the standard locations. If not, then manually
-set these CMake variables:
-
-.. code:: shell
-
-   cmake -DMIOPEN_BACKEND=OpenCL -DMIOPEN_HIP_COMPILER=<hip-compiler-path> -DOPENCL_LIBRARIES=<opencl-library-path> -DOPENCL_INCLUDE_DIRS=<opencl-headers-path> ..
-
-Here's an example showing how to configure the dependency path for an environment (applies to ROCm version 3.5 and later):
-
-.. code:: shell
-
-   cmake -DMIOPEN_BACKEND=OpenCL -DMIOPEN_HIP_COMPILER=/opt/rocm/llvm/bin/clang++ -DCMAKE_PREFIX_PATH="/opt/rocm/;/opt/rocm/hip;/root/MIOpen/install_dir" ..
 
 .. _setting-up-locations:
 
@@ -306,8 +277,8 @@ To format the code per commit, install githooks:
 Storing large file using Git Large File Storage
 =========================================================
 
-`Data Versioning System (DVS) <https://dvc.org/>`_ replaces large files, such as audio samples, videos, datasets, and 
-graphics with text pointers inside Git, while storing the file contents on a remote server. MIOpen uses DVC to 
+`Data Versioning System (DVS) <https://dvc.org/>`_ replaces large files, such as audio samples, videos, datasets, and
+graphics with text pointers inside Git, while storing the file contents on a remote server. MIOpen uses DVC to
 store large files, such as kernel database files (``*.kdb``), which are normally > 0.5 GB.
 
 To install DVC, use the `instructions provided for your platform here <https://dvc.org/doc/install>`_.
@@ -325,7 +296,7 @@ or
    dvc pull "filename"
 
 
-If you are familiar with using Git LFS, a key difference with DVC is that you must manually run ``dvc pull`` after you 
+If you are familiar with using Git LFS, a key difference with DVC is that you must manually run ``dvc pull`` after you
 switch branches or merge changes in Git to ensure any large binaries are kept in sync with your checkout.
 
 Installing the dependencies manually

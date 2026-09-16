@@ -142,6 +142,8 @@ public:
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanVarianceDataTypeEnum);
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 

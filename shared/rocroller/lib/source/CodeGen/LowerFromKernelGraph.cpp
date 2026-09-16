@@ -1018,6 +1018,16 @@ namespace rocRoller
                     tag, load, m_graph->buildTransformer(tag));
             }
 
+            Generator<Instruction> operator()(int tag, LoadTiledTDMToLDS const& load)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadTiledTDMToLDS({})", tag);
+                co_yield Instruction::Comment("GEN: LoadTiledTDMToLDS");
+
+                co_yield m_loadStoreTileGenerator.genLoadTiledTDMToLDS(
+                    tag, load, m_graph->buildTransformer(tag));
+            }
+
             Generator<Instruction> operator()(int tag, StoreVGPR const& store)
             {
                 co_yield Instruction::Comment("GEN: StoreVGPR");

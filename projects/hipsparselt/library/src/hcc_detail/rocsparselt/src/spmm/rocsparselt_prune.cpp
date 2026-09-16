@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -718,7 +718,7 @@ rocsparselt_status rocsparselt_smfmac_prune(const rocsparselt_handle*       hand
     auto _handle = reinterpret_cast<const _rocsparselt_handle*>(handle);
     if(!check_is_init_handle(_handle))
     {
-        hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
+        hipsparselt_cerr << "handle was not initialized or has already been destroyed" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
 
@@ -730,7 +730,7 @@ rocsparselt_status rocsparselt_smfmac_prune(const rocsparselt_handle*       hand
     auto _matmulDescr = reinterpret_cast<const _rocsparselt_matmul_descr*>(matmulDescr);
     if(!check_is_init_matmul_descr(_matmulDescr))
     {
-        log_error(_handle, __func__, "matmulDescr did not initialized or already destroyed");
+        log_error(_handle, __func__, "matmulDescr was not initialized or has already been destroyed");
         return rocsparselt_status_invalid_handle;
     }
 
@@ -798,7 +798,7 @@ rocsparselt_status rocsparselt_smfmac_prune2(const rocsparselt_handle*    handle
     auto _handle = reinterpret_cast<const _rocsparselt_handle*>(handle);
     if(!check_is_init_handle(_handle))
     {
-        hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
+        hipsparselt_cerr << "handle was not initialized or has already been destroyed" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
 
@@ -811,7 +811,7 @@ rocsparselt_status rocsparselt_smfmac_prune2(const rocsparselt_handle*    handle
         const_cast<rocsparselt_mat_descr*>(sparseMatDescr));
     if(!check_is_init_mat_descr(_sparseMatDescr))
     {
-        log_error(_handle, __func__, "sparseMatDescr did not initialized or already destroyed");
+        log_error(_handle, __func__, "sparseMatDescr was not initialized or has already been destroyed");
         return rocsparselt_status_invalid_handle;
     }
 
@@ -893,7 +893,7 @@ rocsparselt_status rocsparselt_smfmac_prune_check(const rocsparselt_handle*     
     auto _handle = reinterpret_cast<const _rocsparselt_handle*>(handle);
     if(!check_is_init_handle(_handle))
     {
-        hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
+        hipsparselt_cerr << "handle was not initialized or has already been destroyed" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
 
@@ -905,7 +905,7 @@ rocsparselt_status rocsparselt_smfmac_prune_check(const rocsparselt_handle*     
     auto _matmulDescr = reinterpret_cast<const _rocsparselt_matmul_descr*>(matmulDescr);
     if(!check_is_init_matmul_descr(_matmulDescr))
     {
-        log_error(_handle, __func__, "matmulDescr did not initialized or already destroyed");
+        log_error(_handle, __func__, "matmulDescr was not initialized or has already been destroyed");
         return rocsparselt_status_invalid_handle;
     }
 
@@ -963,7 +963,7 @@ rocsparselt_status rocsparselt_smfmac_prune_check2(const rocsparselt_handle*    
     auto _handle = reinterpret_cast<const _rocsparselt_handle*>(handle);
     if(!check_is_init_handle(_handle))
     {
-        hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
+        hipsparselt_cerr << "handle was not initialized or has already been destroyed" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
 
@@ -976,7 +976,7 @@ rocsparselt_status rocsparselt_smfmac_prune_check2(const rocsparselt_handle*    
         const_cast<rocsparselt_mat_descr*>(sparseMatDescr));
     if(!check_is_init_mat_descr(_sparseMatDescr))
     {
-        log_error(_handle, __func__, "sparseMatDescr did not initialized or already destroyed");
+        log_error(_handle, __func__, "sparseMatDescr was not initialized or has already been destroyed");
         return rocsparselt_status_invalid_handle;
     }
 

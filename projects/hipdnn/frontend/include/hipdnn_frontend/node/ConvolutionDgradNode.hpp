@@ -96,40 +96,40 @@ public:
 
         auto& dxDims = dx->get_dim();
 
-        if(!dxDims.empty())
-        {
-            HIPDNN_RETURN_IF_NE(
-                dxDims.size(),
-                dyDims.size(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionDgradNode: dx tensor dimension count must match dy tensor "
-                "dimension count");
+        HIPDNN_RETURN_IF_TRUE(dxDims.empty(),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "ConvolutionDgradNode: output dimension inference is not possible; "
+                              "set dx dimensions explicitly.");
 
-            // Validate batch size matches
-            HIPDNN_RETURN_IF_NE(dxDims[0],
-                                dyDims[0],
-                                ErrorCode::INVALID_VALUE,
-                                "ConvolutionDgradNode: dx tensor batch size must match dy "
-                                "tensor batch size");
+        HIPDNN_RETURN_IF_NE(dxDims.size(),
+                            dyDims.size(),
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: dx tensor dimension count must match dy tensor "
+                            "dimension count");
 
-            HIPDNN_RETURN_IF_NE(
-                dxDims[1] % wDims[1],
-                0,
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionDgradNode: dx tensor channels must be divisible by weight "
-                "tensor input channels");
+        // Validate batch size matches
+        HIPDNN_RETURN_IF_NE(dxDims[0],
+                            dyDims[0],
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: dx tensor batch size must match dy "
+                            "tensor batch size");
 
-            // dxDims[1] / wDims[1] is group count
-            // weightChannels = inputChannels / groups
-            // groups = inputChannels / weightChannels
-            auto groupCount = dxDims[1] / wDims[1];
-            HIPDNN_RETURN_IF_NE(
-                wDims[0] % groupCount,
-                0,
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionDgradNode: Weight tensor output channels must be divisible by "
-                "the number of groups");
-        }
+        HIPDNN_RETURN_IF_NE(dxDims[1] % wDims[1],
+                            0,
+                            ErrorCode::INVALID_VALUE,
+                            "ConvolutionDgradNode: dx tensor channels must be divisible by weight "
+                            "tensor input channels");
+
+        // dxDims[1] / wDims[1] is group count
+        // weightChannels = inputChannels / groups
+        // groups = inputChannels / weightChannels
+        auto groupCount = dxDims[1] / wDims[1];
+        HIPDNN_RETURN_IF_NE(
+            wDims[0] % groupCount,
+            0,
+            ErrorCode::INVALID_VALUE,
+            "ConvolutionDgradNode: Weight tensor output channels must be divisible by "
+            "the number of groups");
 
         // Validate spatial parameter counts match spatial dimensions
         auto spatialDims = dyDims.size() - 2; // Skip N and C dimensions
@@ -188,36 +188,32 @@ public:
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionDgradNode: Post-padding must be non-negative");
 
-            if(!dxDims.empty())
-            {
-                auto outputSize = dyDims[i + 2];
-                auto kernelSize = wDims[i + 2];
-                auto inputSize = dxDims[i + 2];
+            auto outputSize = dyDims[i + 2];
+            auto kernelSize = wDims[i + 2];
+            auto inputSize = dxDims[i + 2];
 
-                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
-                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+            auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+            auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
 
-                HIPDNN_RETURN_IF_LT(numerator,
-                                    0,
-                                    ErrorCode::INVALID_VALUE,
-                                    "ConvolutionDgradNode: Input spatial dimension at index "
-                                        + std::to_string(i) + " (" + std::to_string(inputSize)
-                                        + ") is too small for the kernel size ("
-                                        + std::to_string(kernelSize) + ") and dilation ("
-                                        + std::to_string(dilationVal) + ")");
+            HIPDNN_RETURN_IF_LT(numerator,
+                                0,
+                                ErrorCode::INVALID_VALUE,
+                                "ConvolutionDgradNode: Input spatial dimension at index "
+                                    + std::to_string(i) + " (" + std::to_string(inputSize)
+                                    + ") is too small for the kernel size ("
+                                    + std::to_string(kernelSize) + ") and dilation ("
+                                    + std::to_string(dilationVal) + ")");
 
-                const int64_t expectedOutputSize = (numerator / strideVal) + 1;
+            const int64_t expectedOutputSize = (numerator / strideVal) + 1;
 
-                HIPDNN_RETURN_IF_NE(
-                    outputSize,
-                    expectedOutputSize,
-                    ErrorCode::INVALID_VALUE,
-                    "ConvolutionDgradNode: dy tensor spatial dimension at index "
-                        + std::to_string(i) + " (" + std::to_string(outputSize)
-                        + ") does not match expected dimension ("
-                        + std::to_string(expectedOutputSize)
-                        + ") given dx dimensions, kernel size, padding, stride, and dilation");
-            }
+            HIPDNN_RETURN_IF_NE(
+                outputSize,
+                expectedOutputSize,
+                ErrorCode::INVALID_VALUE,
+                "ConvolutionDgradNode: dy tensor spatial dimension at index " + std::to_string(i)
+                    + " (" + std::to_string(outputSize) + ") does not match expected dimension ("
+                    + std::to_string(expectedOutputSize)
+                    + ") given dx dimensions, kernel size, padding, stride, and dilation");
         }
 
         return {};
@@ -243,91 +239,12 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        auto dxDims = dx->get_dim();
+        auto& dxDims = dx->get_dim();
 
-        if(dxDims.empty())
-        {
-            auto& dyDims = dy->get_dim();
-            auto& wDims = w->get_dim();
-
-            dxDims.resize(dyDims.size());
-
-            auto& prePadding = attributes.get_pre_padding();
-            auto& postPadding = attributes.get_post_padding();
-            auto& stride = attributes.get_stride();
-            auto& dilation = attributes.get_dilation();
-
-            dxDims[0] = dyDims[0]; // N (batch) matches dy
-
-            // Group count cannot be inferred from dy and w alone, so the
-            // inferred dx[1] uses w[1] (i.e. assumes groups = 1). For
-            // grouped convolutions, callers should set dx dimensions
-            // explicitly to avoid an incorrect channel count on the
-            // inferred input-gradient tensor.
-            HIPDNN_FE_LOG_WARN("ConvolutionDgradNode: inferring dx dimensions without an "
-                               "explicit dx shape; assuming groups=1. For grouped "
-                               "convolutions, set dx dimensions explicitly.");
-            dxDims[1] = wDims[1]; // C (input channels), assuming groups=1
-
-            // We calculate spatial dimensions (i_2, ..., i_n)
-            for(size_t i = 2; i < dyDims.size(); ++i)
-            {
-                auto spatialIdx = i - 2;
-
-                HIPDNN_RETURN_IF_TRUE(
-                    spatialIdx >= prePadding.size() || spatialIdx >= postPadding.size()
-                        || spatialIdx >= stride.size() || spatialIdx >= dilation.size(),
-                    ErrorCode::INVALID_VALUE,
-                    "ConvolutionDgradNode: Insufficient padding/stride/dilation parameters for "
-                    "spatial dimensions");
-
-                auto dySize = dyDims[i];
-                auto kernelSize = wDims[i];
-                auto prePad = prePadding[spatialIdx];
-                auto postPad = postPadding[spatialIdx];
-                auto strideVal = stride[spatialIdx];
-                auto dilationVal = dilation[spatialIdx];
-
-                HIPDNN_RETURN_IF_LT(strideVal,
-                                    1,
-                                    ErrorCode::INVALID_VALUE,
-                                    "ConvolutionDgradNode: Stride must be positive");
-
-                HIPDNN_RETURN_IF_LT(dilationVal,
-                                    1,
-                                    ErrorCode::INVALID_VALUE,
-                                    "ConvolutionDgradNode: Dilation must be positive");
-
-                HIPDNN_RETURN_IF_LT(prePad,
-                                    0,
-                                    ErrorCode::INVALID_VALUE,
-                                    "ConvolutionDgradNode: Pre-padding must be non-negative");
-
-                HIPDNN_RETURN_IF_LT(postPad,
-                                    0,
-                                    ErrorCode::INVALID_VALUE,
-                                    "ConvolutionDgradNode: Post-padding must be non-negative");
-
-                // Conv fwd output spatial dim size:
-                // out_i = (in_i + pre_padding + post_padding - dilation * (kernel_size - 1) - 1) / stride + 1
-
-                // Solve for input spatial dim size:
-                // in_i = stride * (out_i - 1) - pre_padding - post_padding + dilation * (kernel_size - 1) + 1)
-                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
-
-                dxDims[i] = strideVal * (dySize - 1) + dilatedKernelSize - prePad - postPad;
-
-                HIPDNN_RETURN_IF_LE(
-                    dxDims[i],
-                    0,
-                    ErrorCode::INVALID_VALUE,
-                    "ConvolutionDgradNode: Inferred input spatial dimension at index "
-                        + std::to_string(i) + " (" + std::to_string(dxDims[i])
-                        + ") is non-positive. Check padding, stride, and dilation parameters.");
-            }
-
-            dx->set_dim(dxDims);
-        }
+        HIPDNN_RETURN_IF_TRUE(dxDims.empty(),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "ConvolutionDgradNode: output dimension inference is not possible; "
+                              "set dx dimensions explicitly.");
 
         if(dx->get_stride().empty())
         {

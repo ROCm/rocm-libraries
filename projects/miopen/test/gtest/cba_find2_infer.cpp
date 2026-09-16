@@ -122,9 +122,9 @@ TEST_P(GPU_ConvBiasActivFind2Infer_FP32, ConvBiasActivAsm1x1UFind2Float)
     RunTunableSolver<miopen::solver::fusion::ConvBiasActivAsm1x1U>(
         fused_problem, invoke_params, conv_config, test_skipped);
 }
-TEST_P(GPU_ConvBiasActivFind2Infer_FP32, ConvOclDirectFwdFind2Fused)
+TEST_P(GPU_ConvBiasActivFind2Infer_FP32, ConvHipDirectFwdFind2Fused)
 {
-    RunTunableSolver<miopen::solver::fusion::ConvOclDirectFwdFused>(
+    RunTunableSolver<miopen::solver::fusion::ConvHipDirectFwdFused>(
         fused_problem, invoke_params, conv_config, test_skipped);
 }
 TEST_P(GPU_ConvBiasActivFind2Infer_FP32, ConvBinWinogradRxSFind2Fused)

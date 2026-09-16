@@ -13,6 +13,12 @@
 namespace hipdnn_frontend::detail
 {
 
+enum class ActivePlanFinalization
+{
+    UNFINALIZED,
+    FINALIZED
+};
+
 inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
 {
     int64_t availableEngineCount = 0;

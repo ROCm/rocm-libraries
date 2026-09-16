@@ -13,14 +13,13 @@ GlobalParameters:
   EnqueuesPerSync: 1
   SyncsPerBenchmark: 0
   NumElementsToValidate: 128
-  Platform: 0
   Device: 0
   KernelTime: True
   SleepPercent: 0
   NumBenchmarks: 1
   PrintSolutionRejectionReason: True
   LibraryFormat: yaml
-  BoundsCheck: True
+  BoundsCheck: 1
 
 BenchmarkProblems:
   ########################################

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_ormtr_unmtr.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -41,6 +42,7 @@ rocblas_status rocsolver_ormtr_unmtr_impl(rocblas_handle handle,
                                           T* ipiv,
                                           T* C,
                                           const rocblas_int ldc)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "ormtr" : "unmtr");
     ROCSOLVER_ENTER_TOP(name, "--side", side, "--uplo", uplo, "--trans", trans, "-m", m, "-n", n,
@@ -104,6 +106,10 @@ rocblas_status rocsolver_ormtr_unmtr_impl(rocblas_handle handle,
         handle, side, uplo, trans, m, n, A, shiftA, lda, strideA, ipiv, strideP, C, shiftC, ldc,
         strideC, batch_count, (T*)scalars, (T*)AbyxORwork, work2, work3, work4, (T*)diagORtmptr,
         (T*)trfact, (T**)workArr, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

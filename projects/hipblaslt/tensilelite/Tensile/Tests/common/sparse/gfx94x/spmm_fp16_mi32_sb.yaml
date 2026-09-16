@@ -5,15 +5,13 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   DataInitValueActivationArgs: [0.5, -1]
   PruneSparseMode: 0
-  MinKForGSU: 1
 
 BenchmarkProblems:
   #######################################
@@ -58,11 +56,11 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -124,12 +122,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0,1]
+        - DirectToVgprSparseMetadata: [false, true]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
         - AssertFree1ElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -195,12 +193,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0,1]
+        - DirectToVgprSparseMetadata: [false, true]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
         - AssertFree1ElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -267,12 +265,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
         - AssertFree1ElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -338,12 +336,12 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [18]
         - StoreVectorWidth: [-1]
         - AssertFree0ElementMultiple: [8]
         - AssertFree1ElementMultiple: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

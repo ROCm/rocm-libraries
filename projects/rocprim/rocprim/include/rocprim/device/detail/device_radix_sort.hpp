@@ -1359,7 +1359,7 @@ struct onesweep_iteration_helper
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
                     // It only seems worse on gfx942 in some cases.
-                    if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())
+                    if(ROCPRIM_IS_CDNA3())
                     {
                         const int offset = ranks[i] - x;
                         if(offset >= 0 && offset < static_cast<int>(BlockSize * NKey))
@@ -1452,7 +1452,7 @@ struct onesweep_iteration_helper
                 for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
                     // It only seems worse on gfx942 in some cases.
-                    if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())
+                    if(ROCPRIM_IS_CDNA3())
                     {
                         const int offset = ranks[i] - x;
                         if(offset >= 0 && offset < static_cast<int>(BlockSize * NValue))

@@ -32,7 +32,7 @@
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 //Replace std::regex, as it crashes when matching long lines(GCC Bug #86164).
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #ifdef _WIN32
 #include "shlwapi.h"
@@ -40,8 +40,6 @@
 #else
 #include <fnmatch.h>
 #endif
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -108,4 +106,3 @@ namespace TensileLite
     } // namespace Serialization
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

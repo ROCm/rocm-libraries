@@ -97,19 +97,22 @@ void testing_gemvi_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_gemvi(const Arguments& arg)
 {
-    rocsparse_int        M     = arg.M;
-    rocsparse_int        N     = arg.N;
+    rocsparse_int M = arg.M;
+    rocsparse_int N = arg.N;
+
     rocsparse_operation  trans = arg.transA;
     rocsparse_index_base base  = arg.baseA;
 
     T h_alpha = arg.get_alpha<T>();
     T h_beta  = arg.get_beta<T>();
 
+    floating_data_t<T> percentage = arg.get_percentage<T>();
+
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 
-    // Vector sparsity of 33%
-    rocsparse_int nnz = N * 0.33;
+    // Vector sparsity of percentage%
+    rocsparse_int nnz = N * (percentage / floating_data_t<T>(100));
     rocsparse_int lda = (trans == rocsparse_operation_none) ? M : N;
 
     // Allocate host memory

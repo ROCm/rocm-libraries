@@ -271,9 +271,6 @@ int GemmDriver<T>::AllocateBuffersAndCopy()
     size_t c_sz = gemm_desc.m * gemm_desc.n + (gemm_desc.batch_count - 1) * gemm_desc.strideC;
 
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     a_dev = std::make_unique<GPUMem>(ctx, a_sz, sizeof(T));
     b_dev = std::make_unique<GPUMem>(ctx, b_sz, sizeof(T));
     c_dev = std::make_unique<GPUMem>(ctx, c_sz, sizeof(T));

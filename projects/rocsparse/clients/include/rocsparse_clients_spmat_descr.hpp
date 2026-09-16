@@ -28,7 +28,6 @@
 #include "gbyte.hpp"
 #include "rocsparse.hpp"
 #include "rocsparse_check.hpp"
-#include "rocsparse_graph.hpp"
 #include "rocsparse_matrix_factory.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_reproducibility_test_save.hpp"

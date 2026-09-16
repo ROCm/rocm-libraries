@@ -30,6 +30,7 @@ namespace rocRoller
             EXEC,
             EXEC_LO,
             EXEC_HI,
+            TTMP6,
             TTMP7,
             TTMP9,
             Constant,
@@ -84,6 +85,8 @@ namespace rocRoller
             /// Allocation x must have (x % alignment) == alignmentPhase. -1 means to use default for register type.
             int alignment      = -1;
             int alignmentPhase = 0;
+            // Option to enforce reserved region allocation (Register::Type::Vector only)
+            bool forceReservedRegion = false;
 
             static AllocationOptions FullyContiguous();
 

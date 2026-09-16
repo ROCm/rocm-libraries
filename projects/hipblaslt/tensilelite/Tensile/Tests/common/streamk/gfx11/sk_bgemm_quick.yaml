@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -40,7 +40,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - WavefrontSize: [32]
         - 1LDSBuffer: [1]
@@ -73,7 +73,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 3, 1, 1, 4]
           - [16, 16, 16, 1, 1, 4, 1, 1, 4]
           - [16, 16, 16, 1, 1, 5, 1, 1, 4]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -102,7 +102,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - WavefrontSize: [32]
         - 1LDSBuffer: [1]
@@ -135,7 +135,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 3, 1, 1, 4]
           - [16, 16, 16, 1, 1, 4, 1, 1, 4]
           - [16, 16, 16, 1, 1, 5, 1, 1, 4]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -165,7 +165,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - WavefrontSize: [32]
         - 1LDSBuffer: [0, 1]
@@ -198,7 +198,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 3, 1, 1, 4]
           - [16, 16, 16, 1, 1, 4, 1, 1, 4]
           - [16, 16, 16, 1, 1, 5, 1, 1, 4]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]
@@ -244,7 +244,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - WavefrontSize: [32]
         - 1LDSBuffer: [1]
@@ -277,7 +277,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 3, 1, 1, 4]
           - [16, 16, 16, 1, 1, 4, 1, 1, 4]
           - [16, 16, 16, 1, 1, 5, 1, 1, 4]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -318,7 +318,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - WavefrontSize: [32]
         - 1LDSBuffer: [1]
@@ -351,7 +351,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 3, 1, 1, 4]
           - [16, 16, 16, 1, 1, 4, 1, 1, 4]
           - [16, 16, 16, 1, 1, 5, 1, 1, 4]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -393,7 +393,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - WavefrontSize: [32]
         - 1LDSBuffer: [0, 1]
@@ -426,7 +426,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 3, 1, 1, 4]
           - [16, 16, 16, 1, 1, 4, 1, 1, 4]
           - [16, 16, 16, 1, 1, 5, 1, 1, 4]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]

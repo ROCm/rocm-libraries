@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -308,6 +308,21 @@ rocsparselt_status
                                           rocsparselt_matmul_alg_selection* algSelection,
                                           const rocsparselt_matmul_descr*   matmulDescr,
                                           rocsparselt_matmul_alg            alg);
+
+/*! \ingroup aux_module
+ *  \brief Destroy an algorithm selection descriptor
+ *  \details
+ *  \p rocsparselt_matmul_alg_selection_destroy releases the resources used by an instance
+ *  of the algorithm selection. This function is the last call with a specific algorithm selection
+ *  instance.
+ *
+ *  @param[in]
+ *  algSelection  the algorithm selection descriptor
+ *
+ *  \retval rocsparselt_status_success the operation completed successfully.
+ *  \retval rocsparselt_status_invalid_handle \p algSelection is invalid.
+ */
+rocsparselt_status rocsparselt_matmul_alg_selection_destroy(const rocsparselt_matmul_alg_selection* algSelection);
 
 /*! \ingroup aux_module
  *  \brief Specify the algorithm attribute of a algorithm selection descriptor

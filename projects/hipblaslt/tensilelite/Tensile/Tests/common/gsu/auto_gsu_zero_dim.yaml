@@ -7,12 +7,10 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
-  MinKForGSU: 2
   CMakeBuildType: Debug
 
 BenchmarkProblems:
@@ -46,15 +44,15 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [-1]
-        - PreloadKernArgs: [1]
+        - PreloadKernArgs: [true]
         - GlobalSplitUAlgorithm: ["MultipleBuffer","MultipleBufferSingleKernel"]
         - GlobalSplitUCoalesced: [False,True]
         - GlobalSplitUWorkGroupMappingRoundRobin: [False,True]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

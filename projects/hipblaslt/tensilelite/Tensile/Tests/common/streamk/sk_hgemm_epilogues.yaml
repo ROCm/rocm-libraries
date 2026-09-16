@@ -4,7 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 2
   DataInitTypeBeta: 2
@@ -19,7 +19,6 @@ GlobalParameters:
   # ForceGenerateKernel: True
   # GenerateSourcesAndExit: True
   KeepBuildTmp: True
-  # DeviceLDS: 163840
   # MaxLDS: 163840
   RotatingBufferSize: 514
 
@@ -87,9 +86,9 @@ BenchmarkProblems:
           # - [32,32,16,1, 1, 2,1, 2,2]
           # - [32,32,16,1, 1, 1,1, 2,2]
         - 1LDSBuffer: [-1]
-        - ClusterLocalRead: [True]
+        - ClusterLocalRead: [1]
         - DepthU: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GlobalReadVectorWidthA: [2]
         - GlobalReadVectorWidthB: [8]
         - LdsBlockSizePerPadA: [512]
@@ -123,7 +122,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         # - WorkGroupMappingXCC: [1, 8, 16]
         # - WorkGroupMappingXCCGroup: [304]
-        - ActivationFuncCall: [1]
+        - ActivationFuncCall: [true]
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [24000, 256, 1, 256]

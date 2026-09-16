@@ -18,13 +18,13 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
-    , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
-    , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createBatchnormTensor(tensorMap, attributes.bias_tensor_uid()))
-    , _estMean(miopen_utils::createBatchnormTensor(tensorMap, attributes.mean_tensor_uid()))
+    : _x(miopen_utils::createPaddedTensor(tensorMap, attributes.x_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, attributes.y_tensor_uid()))
+    , _scale(miopen_utils::createPaddedTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createPaddedTensor(tensorMap, attributes.bias_tensor_uid()))
+    , _estMean(miopen_utils::createPaddedTensor(tensorMap, attributes.mean_tensor_uid()))
     , _invVariance(
-          miopen_utils::createBatchnormTensor(tensorMap, attributes.inv_variance_tensor_uid()))
+          miopen_utils::createPaddedTensor(tensorMap, attributes.inv_variance_tensor_uid()))
 {
 }
 
@@ -34,17 +34,16 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
-    , _y(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
-    , _scale(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
-    , _bias(miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.bias_tensor_uid()))
-    , _estMean(
-          miopen_utils::createBatchnormTensor(tensorMap, inferenceAttributes.mean_tensor_uid()))
-    , _invVariance(miopen_utils::createBatchnormTensor(
-          tensorMap, inferenceAttributes.inv_variance_tensor_uid()))
+    : _x(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.x_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.y_tensor_uid()))
+    , _scale(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.bias_tensor_uid()))
+    , _estMean(miopen_utils::createPaddedTensor(tensorMap, inferenceAttributes.mean_tensor_uid()))
+    , _invVariance(miopen_utils::createPaddedTensor(tensorMap,
+                                                    inferenceAttributes.inv_variance_tensor_uid()))
     , _optActivation(pointwiseAttributes)
     , _activationOut(
-          miopen_utils::createBatchnormTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
+          miopen_utils::createPaddedTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
 {
 }
 
@@ -115,20 +114,20 @@ void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
 
-    auto xBuffer = miopen_utils::findDeviceBuffer(
+    auto xBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = miopen_utils::findDeviceBuffer(
+    auto scaleBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.scale().uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer = miopen_utils::findDeviceBuffer(
+    auto biasBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.bias().uid(), deviceBuffers, numDeviceBuffers);
-    auto estMeanBuffer = miopen_utils::findDeviceBuffer(
+    auto estMeanBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.estMean().uid(), deviceBuffers, numDeviceBuffers);
-    auto invVarianceBuffer = miopen_utils::findDeviceBuffer(
+    auto invVarianceBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
         _inferenceParams.invVariance().uid(), deviceBuffers, numDeviceBuffers);
 
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut().has_value())
     {
-        auto activationOutBuffer = miopen_utils::findDeviceBuffer(
+        auto activationOutBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardInferenceActivationInvVariance(
@@ -152,7 +151,7 @@ void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
     }
     else
     {
-        auto yBuffer = miopen_utils::findDeviceBuffer(
+        auto yBuffer = hipdnn_plugin_sdk::findDeviceBuffer(
             _inferenceParams.y().uid(), deviceBuffers, numDeviceBuffers);
         THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInferenceInvVariance(
             handle.miopenHandle,

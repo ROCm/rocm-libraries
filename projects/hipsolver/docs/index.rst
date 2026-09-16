@@ -37,7 +37,7 @@ The hipSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
   .. grid-item-card:: Reference
 
     * :ref:`api-intro`
-    * :ref:`precision-support`
+    * :ref:`hipsolver-data-type-support`
     * :ref:`library_api`
     * :ref:`library_dense`
     * :ref:`library_sparse`

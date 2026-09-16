@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,10 +27,10 @@
 #include "../detail/various.hpp"
 #include "../intrinsics/arch.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup intrinsicsmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
@@ -333,9 +333,9 @@ namespace detail
     }
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group intrinsicsmodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_THREAD_HPP_

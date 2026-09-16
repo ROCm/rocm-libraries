@@ -28,7 +28,7 @@ import sys
 import argparse
 
 from yaml import SafeDumper as yamlDumper
-from yaml import SafeLoader as yamlLoader
+from yaml import SafeLoader
 
 
 def printExit(message):
@@ -123,7 +123,7 @@ class TuningConfiguration(object):
             except IOError:
                 printExit("Cannot open file: %s" % filename )
 
-            data = yaml.load(stream, yamlLoader)
+            data = yaml.load(stream, SafeLoader)
 
             if CONST.GlobalParameters in data:
                 self.__globalParameters = data[CONST.GlobalParameters]

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -508,19 +508,19 @@ void testing_csr2bsr(Arguments argus)
 
         // call host csr2bsr here
         int bsr_nnzb_gold;
-        host_csr_to_bsr<T>(dir,
-                           m,
-                           n,
-                           block_dim,
-                           bsr_nnzb_gold,
-                           csr_idx_base,
-                           hcsr_row_ptr,
-                           hcsr_col_ind,
-                           hcsr_val,
-                           bsr_idx_base,
-                           hbsr_row_ptr_gold,
-                           hbsr_col_ind_gold,
-                           hbsr_val_gold);
+        host_csr_to_bsr<int, int, T>(dir,
+                                     m,
+                                     n,
+                                     block_dim,
+                                     bsr_nnzb_gold,
+                                     csr_idx_base,
+                                     hcsr_row_ptr,
+                                     hcsr_col_ind,
+                                     hcsr_val,
+                                     bsr_idx_base,
+                                     hbsr_row_ptr_gold,
+                                     hbsr_col_ind_gold,
+                                     hbsr_val_gold);
 
         // Unit check
         unit_check_general(1, 1, 1, &bsr_nnzb_gold, &hbsr_nnzb);

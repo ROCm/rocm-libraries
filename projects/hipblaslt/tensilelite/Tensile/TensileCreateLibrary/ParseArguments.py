@@ -51,7 +51,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     argParser.add_argument("LogicPath", help="Path to LibraryLogic.yaml files.")
     argParser.add_argument("OutputPath", help="Where to write library files?")
     argParser.add_argument(
-        "RuntimeLanguage", help="Which runtime language?", choices=["OCL", "HIP", "HSA"]
+        "RuntimeLanguage", help="Which runtime language?", choices=["HIP", "HSA"]
     )
     argParser.add_argument(
         "--cxx-compiler",
@@ -99,6 +99,13 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         dest="Experimental",
         action="store_true",
         help="Include logic files in directories named 'Experimental'.",
+    )
+    argParser.add_argument(
+        "--enable-gemm-a2a-fusion",
+        dest="EnableGemmA2AFusion",
+        action="store_true",
+        default=False,
+        help="Include logic whose ProblemType enables fused GEMM + all-to-all.",
     )
     argParser.add_argument(
         "--no-enumerate", action="store_true", help="Do not run rocm_agent_enumerator."
@@ -195,6 +202,14 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         default=False,
         help="Disable assembly comments in generated assembly code"
     )
+    argParser.add_argument(
+        "--emit-mainloop-trace-marker",
+        dest="EmitMainloopTraceMarker",
+        action="store_true",
+        default=False,
+        help="Emit s_ttracedata mainloop iteration markers for SQTT/trace decoders "
+        "(subtile kernels only; adds 2 instructions per iteration)"
+    )
 
     args = argParser.parse_args()
 
@@ -205,6 +220,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["LazyLibraryLoading"] = args.LazyLibraryLoading
     arguments["EnableMarker"] = args.EnableMarker
     arguments["DisableAsmComments"] = args.DisableAsmComments
+    arguments["EmitMainloopTraceMarker"] = args.EmitMainloopTraceMarker
     if args.CmakeCxxCompiler:
         os.environ["CMAKE_CXX_COMPILER"] = args.CmakeCxxCompiler
     arguments["LogicFormat"] = args.LogicFormat
@@ -224,6 +240,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["LogicFilter"] = args.LogicFilter
     arguments["OutputPath"] = args.OutputPath
     arguments["Experimental"] = args.Experimental
+    arguments["EnableGemmA2AFusion"] = args.EnableGemmA2AFusion
     arguments["GenSolTable"] = args.GenSolTable
 
     return arguments

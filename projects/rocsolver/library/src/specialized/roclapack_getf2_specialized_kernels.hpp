@@ -43,7 +43,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
     I myrow = hipThreadIdx_x;
     const I ty = hipThreadIdx_y;
-    const I id = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
+    const I id = hipBlockIdx_x * static_cast<I>(hipBlockDim_y) + ty;
 
     if(id >= batch_count)
         return;
@@ -156,7 +156,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
     I myrow = hipThreadIdx_x;
     const I ty = hipThreadIdx_y;
-    const I id = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
+    const I id = hipBlockIdx_x * static_cast<I>(hipBlockDim_y) + ty;
 
     if(id >= batch_count)
         return;
@@ -584,7 +584,9 @@ rocblas_status getf2_run_small(rocblas_handle handle,
         msize = n + 1;
 
     // prepare kernel launch
-    dim3 grid(1, blocks, 1);
+    // batch blocks go on grid.x (limit 2^31), not grid.y: grid.y is capped at
+    // 65536 on some archs (e.g. gfx1201), which overflows for large batches.
+    dim3 grid(blocks, 1, 1);
     dim3 block(nthds, ngrp, 1);
     size_t lmemsize = msize * ngrp * sizeof(T);
     hipStream_t stream;

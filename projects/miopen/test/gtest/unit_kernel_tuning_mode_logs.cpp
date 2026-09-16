@@ -51,11 +51,11 @@ protected:
 TEST_F(CPU_KernelTuningModeLogs_NONE, PhaseToStringMapping)
 {
     using miopen::KernelPhase;
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Unknown), "unknown");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Execution), "execution");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Validation), "validation");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::SolverTuning), "solver_tuning");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Tuning), "tuning");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Unknown), "unknown");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Execution), "execution");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Validation), "validation");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::SolverTuning), "solver_tuning");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Tuning), "tuning");
 }
 
 TEST_F(CPU_KernelTuningModeLogs_NONE, ScopedKernelPhaseRestoresPrevious)
@@ -240,6 +240,31 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, FlushIncludesKernelsArrayAtLevelTwo)
     EXPECT_NE(captured.find("\"is_transformation\":true"), std::string::npos);
     EXPECT_NE(captured.find("\"is_transformation\":false"), std::string::npos);
     EXPECT_NE(captured.find("\"number_of_transformations\":1"), std::string::npos);
+}
+
+// A solver that launches outside MIOpen's HIPOCKernel (ConvHipConv, whose invokers
+// launch hipconv kernels straight through the HIP runtime) opens its config under the
+// solver name, because the solution carries no construction_params to name it, and then
+// files the kernel record itself. That record has to win the config_name at every level,
+// including level 1 where the kernels array is suppressed: without it the log says only
+// that the solver ran, never which kernel produced the time.
+TEST_F(CPU_KernelTuningModeLogs_NONE, KernelRecordNamesConfigAtLevelOne)
+{
+    PerfLogEnv guard{1};
+    miopen::SetKernelPhase(miopen::KernelPhase::Execution);
+
+    testing::internal::CaptureStderr();
+    miopen::LogSolutionName("ConvHipConv", 220, 0);
+    miopen::AddPerformanceConfig("ConvHipConv", "index:0");
+    miopen::AddKernelToJsonAccumulator("direct_l1[waves_k=2,kh=3]", 0.5f, false);
+    miopen::AddInvokerTimes({0.5f});
+    miopen::FlushJsonAccumulator();
+    const std::string captured = testing::internal::GetCapturedStderr();
+
+    EXPECT_NE(captured.find("\"config_name\":\"direct_l1[waves_k=2,kh=3]\""), std::string::npos);
+    EXPECT_NE(captured.find("\"config_descriptor\":\"index:0\""), std::string::npos);
+    EXPECT_NE(captured.find("\"kernels\":null"), std::string::npos);
+    EXPECT_EQ(captured.find("\"config_name\":\"ConvHipConv\""), std::string::npos);
 }
 
 TEST_F(CPU_KernelTuningModeLogs_NONE, LogSolutionNameOnlyEmitsOnChange)

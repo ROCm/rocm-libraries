@@ -26,8 +26,9 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -44,8 +45,7 @@
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
+#include "stinkytofu/support/StandardInstrumentations.hpp"
 
 using namespace stinkytofu;
 
@@ -112,14 +112,31 @@ void printAvailablePasses() {
     }
 }
 
-// Function to find and create a pass by name
-std::unique_ptr<Pass> createPassByName(const std::string& passName) {
+// A user-specified pass: bare name + optional comma-separated argument list
+// parsed out of `--PassName=arg1,arg2`.
+struct RequestedPass {
+    std::string name;
+    std::vector<std::string> args;
+};
+
+// Function to find and create a pass by name (with optional arguments)
+std::unique_ptr<Pass> createPassByName(const std::string& passName,
+                                       const std::vector<std::string>& args = {}) {
     for (const auto& passInfo : availablePasses) {
         if (passName == passInfo.name) {
-            return passInfo.creator();
+            return passInfo.creator(args);
         }
     }
     return nullptr;
+}
+
+static void trimWhitespace(std::string& s) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
+        s.erase(0, 1);
+    }
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
+        s.pop_back();
+    }
 }
 
 int extractOptLevel(int argc, char** argv) {
@@ -133,87 +150,163 @@ int extractOptLevel(int argc, char** argv) {
     return -1;
 }
 
-// Function to parse command-line arguments for passes
-std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx) {
-    std::vector<std::string> passNames;
+bool isKernelConfigArg(const std::string& arg) {
+    static constexpr const char* kAssignPrefixes[] = {
+        "--TileA0=", "--TileB0=", "--TileM0=",  "--NumGRA=",
+        "--NumGRB=", "--NumGRM=", "--NumWaves="};
+    for (const char* prefix : kAssignPrefixes) {
+        if (arg.starts_with(prefix)) return true;
+    }
+    return arg == "--TileA0" || arg == "--TileB0" || arg == "--TileM0" || arg == "--NumGRA" ||
+           arg == "--NumGRB" || arg == "--NumGRM" || arg == "--NumWaves";
+}
+
+// Function to parse command-line arguments for passes.
+//
+// Accepts both `--PassName` and `--PassName=arg1,arg2,...` forms.
+// In the second form, the comma-separated tokens after `=` are passed
+// to the pass's creator function.
+std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
+    std::vector<RequestedPass> passes;
     for (int i = startIdx; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
-            static constexpr char kSnapJson[] = "--pass-order-snapshot-json=";
-            static constexpr char kSnapAfter[] = "--pass-order-snapshot-after-passes=";
-            if (arg.starts_with(kSnapJson) || arg.starts_with(kSnapAfter) ||
-                arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
+            if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
+                arg == "--verify-each" || arg == "--dump-passes" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
-                arg.starts_with("--ds-read-order=") || arg == "--from-label" || arg == "--to-label")
+                arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
+                arg.starts_with("--ds-read-drain-latency=") ||
+                arg.starts_with("--ds-read-throttle-latency=") ||
+                arg.starts_with("--ds-read-throttle-transition-factor=") ||
+                arg.starts_with("--ds-read-throttle-transition-entries=") ||
+                arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--tensor-load-wmma-space=") ||
+                arg.starts_with("--global-read-queue-depth=") ||
+                arg.starts_with("--global-read-drain-latency=") ||
+                arg.starts_with("--merge-barrier-threshold=") ||
+                arg == "--enable-wmma-hide-budget-prescan" || arg.starts_with("--vgpr-msb-mode=") ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
             // mistaken for a missing pass (e.g. `--debug-pass FooPass` was
             // emitting `Warning: Unknown pass 'debug-pass'` because the
             // `--` prefix was stripped and `debug-pass` wasn't a known pass).
-            if (arg == "-o" || arg == "--debug-pass") {
+            if (arg == "-o" || arg == "--debug-pass" || arg == "--TileA0" || arg == "--TileB0" ||
+                arg == "--TileM0" || arg == "--NumGRA" || arg == "--NumGRB" || arg == "--NumGRM" ||
+                arg == "--NumWaves") {
                 ++i;  // skip the value argument
                 continue;
             }
-            passNames.push_back(arg.substr(2));  // Remove "--" prefix
+            std::string body = arg.substr(2);  // strip "--"
+            RequestedPass rp;
+            size_t eq = body.find('=');
+            if (eq == std::string::npos) {
+                rp.name = std::move(body);
+            } else {
+                rp.name = body.substr(0, eq);
+                std::string rest = body.substr(eq + 1);
+                size_t start = 0;
+                while (start <= rest.size()) {
+                    size_t comma = rest.find(',', start);
+                    std::string tok = rest.substr(
+                        start, comma == std::string::npos ? std::string::npos : comma - start);
+                    trimWhitespace(tok);
+                    if (!tok.empty()) rp.args.push_back(std::move(tok));
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+            }
+            passes.push_back(std::move(rp));
         }
     }
-    return passNames;
+    return passes;
 }
 
-std::string extractPassOrderSnapshotJsonPath(int argc, char** argv) {
-    static constexpr char kPrefix[] = "--pass-order-snapshot-json=";
+static bool parseUint32Value(const std::string& value, uint32_t& out) {
+    if (value.empty()) return false;
+    uint64_t result = 0;
+    for (unsigned char c : value) {
+        if (!std::isdigit(c)) return false;
+        result = result * 10 + static_cast<uint64_t>(c - '0');
+        if (result > std::numeric_limits<uint32_t>::max()) return false;
+    }
+    out = static_cast<uint32_t>(result);
+    return true;
+}
+
+static bool parseGemmTileField(const char* flag, const std::string& value, uint32_t& field,
+                               std::string& error) {
+    if (parseUint32Value(value, field)) return true;
+    error = std::string("Invalid value for ") + flag;
+    return false;
+}
+
+static bool parseGemmTileConfigOptions(int argc, char** argv, stinkytofu::GemmTileConfig& config,
+                                       std::string& error) {
+    config = {};
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a.starts_with(kPrefix)) return a.substr(std::strlen(kPrefix));
+        auto parseAssign = [&](const char* prefix, const char* flag, uint32_t& field) -> bool {
+            if (!a.starts_with(prefix)) return true;
+            return parseGemmTileField(flag, a.substr(std::strlen(prefix)), field, error);
+        };
+        auto parseNext = [&](const char* flag, uint32_t& field) -> bool {
+            if (a != flag) return true;
+            if (i + 1 >= argc) return true;
+            return parseGemmTileField(flag, argv[++i], field, error);
+        };
+
+        if (!parseAssign("--TileA0=", "--TileA0", config.TileA0)) return false;
+        if (a.starts_with("--TileA0=")) continue;
+        if (!parseAssign("--TileB0=", "--TileB0", config.TileB0)) return false;
+        if (a.starts_with("--TileB0=")) continue;
+        if (!parseAssign("--TileM0=", "--TileM0", config.TileM0)) return false;
+        if (a.starts_with("--TileM0=")) continue;
+        if (!parseAssign("--NumGRA=", "--NumGRA", config.NumGRA)) return false;
+        if (a.starts_with("--NumGRA=")) continue;
+        if (!parseAssign("--NumGRB=", "--NumGRB", config.NumGRB)) return false;
+        if (a.starts_with("--NumGRB=")) continue;
+        if (!parseAssign("--NumGRM=", "--NumGRM", config.NumGRM)) return false;
+        if (a.starts_with("--NumGRM=")) continue;
+        if (!parseAssign("--NumWaves=", "--NumWaves", config.NumWaves)) return false;
+        if (a.starts_with("--NumWaves=")) continue;
+
+        if (!parseNext("--TileA0", config.TileA0)) return false;
+        if (a == "--TileA0") continue;
+        if (!parseNext("--TileB0", config.TileB0)) return false;
+        if (a == "--TileB0") continue;
+        if (!parseNext("--TileM0", config.TileM0)) return false;
+        if (a == "--TileM0") continue;
+        if (!parseNext("--NumGRA", config.NumGRA)) return false;
+        if (a == "--NumGRA") continue;
+        if (!parseNext("--NumGRB", config.NumGRB)) return false;
+        if (a == "--NumGRB") continue;
+        if (!parseNext("--NumGRM", config.NumGRM)) return false;
+        if (a == "--NumGRM") continue;
+        if (!parseNext("--NumWaves", config.NumWaves)) return false;
+        if (a == "--NumWaves") continue;
     }
-    return {};
+    return true;
 }
 
-static void trimWhitespace(std::string& s) {
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
-        s.erase(0, 1);
-    }
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
-        s.pop_back();
-    }
-}
-
-static std::vector<std::string> splitCommaPassNames(const char* prefix, const std::string& a) {
-    if (!a.starts_with(prefix)) return {};
-    std::string rest = a.substr(std::strlen(prefix));
-    std::vector<std::string> out;
-    size_t start = 0;
-    while (start < rest.size()) {
-        size_t comma = rest.find(',', start);
-        std::string token =
-            rest.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
-        trimWhitespace(token);
-        if (!token.empty()) {
-            out.push_back(std::move(token));
-        }
-        if (comma == std::string::npos) {
-            break;
-        }
-        start = comma + 1;
-    }
-    return out;
-}
-
-/// Comma-separated `Pass::getName()` strings; if omitted, default is StinkyDAGSchedulerPass only.
-std::vector<std::string> extractPassOrderSnapshotAfterPasses(int argc, char** argv) {
-    static constexpr char kPrefix[] = "--pass-order-snapshot-after-passes=";
-    for (int i = 1; i < argc; ++i) {
-        std::vector<std::string> v = splitCommaPassNames(kPrefix, argv[i]);
-        if (!v.empty()) return v;
-    }
-    return {};
+static void printKernelConfigHelp(std::ostream& os) {
+    os << "  Kernel configuration (GemmTileConfig fields):\n";
+    os << "  --TileA0 <n>        (or --TileA0=<n>)\n";
+    os << "  --TileB0 <n>        (or --TileB0=<n>)\n";
+    os << "  --TileM0 <n>        (or --TileM0=<n>)\n";
+    os << "  --NumGRA <n>        (or --NumGRA=<n>)\n";
+    os << "  --NumGRB <n>        (or --NumGRB=<n>)\n";
+    os << "  --NumGRM <n>        (or --NumGRM=<n>)\n";
+    os << "  --NumWaves <n>      (or --NumWaves=<n>)\n";
 }
 }  // namespace
 
 int main(int argc, char** argv) {
     BackendRegistry::registerAllBackends();
+    AllocatorRegistry::registerAllAllocators();
+    AllocationRulesRegistry::registerAll();
 
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
@@ -221,16 +314,17 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
-        std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
-                     "(stinkytofu-analysis)\n";
-        std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
-                     "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
+        std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
-        std::cerr << "Input formats:\n";
+        printKernelConfigHelp(std::cerr);
+        std::cerr << "\nInput formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
         std::cerr << "  <file>.s         Raw GPU assembly (auto-detected by extension)\n\n";
         std::cerr << "Output flags:\n";
@@ -281,16 +375,17 @@ int main(int argc, char** argv) {
         std::cerr << "  --arch <arch>    Target architecture. Supported:";
         for (const auto& key : BackendRegistry::getRegisteredArchKeys()) std::cerr << " " << key;
         std::cerr << "\n";
-        std::cerr << "  --pass-order-snapshot-json=<path>  Before/after instruction order JSON "
-                     "(stinkytofu-analysis)\n";
-        std::cerr << "  --pass-order-snapshot-after-passes=A,B  Pass::getName() allow-list "
-                     "(optional; default: scheduler only)\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
+        std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
+        std::cerr << "                   after.txt in the working directory (implied by\n";
+        std::cerr << "                   --debug-pass)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
-        std::cerr << "Input formats:\n";
+        printKernelConfigHelp(std::cerr);
+        std::cerr << "\nInput formats:\n";
         std::cerr << "  <file>.stir      StinkyTofu IR text format (default)\n";
         std::cerr << "  <file>.s         Raw GPU assembly (auto-detected by extension)\n\n";
         std::cerr << "Output flags:\n";
@@ -319,6 +414,11 @@ int main(int argc, char** argv) {
 
     // Parse architecture option
     std::array<int, 3> arch = {12, 5, 0};  // default gfx1250
+    // Concrete stepping identity when the user named one (e.g. "gfx1250v0"). Steppings that share
+    // an ISA triple (gfx1250 v1 vs gfx1250v0 on {12,5,0}) are indistinguishable by triple, so the
+    // triple-based getGfxArchID() first-matches v1. When the user names a stepping, resolve the
+    // GfxArchID by identity instead. Empty => no name given, keep the legacy triple behavior.
+    std::string resolvedArchName;
     int irFileIdx = 1;
     int passStartIdx = 2;
 
@@ -332,7 +432,16 @@ int main(int argc, char** argv) {
         }
 
         std::string archStr = argv[2];
-        if (!BackendRegistry::parseArchKey(archStr, arch)) {
+        // Resolve by concrete identity name first so a stepping variant sharing a triple
+        // (e.g. gfx1250v0) is selectable at runtime. getArchInfo(name) returns nullptr on a name
+        // not registered as an identity in this build (no assert), so a plain triple spelling
+        // (e.g. gfx942 in a gfx1250 build) falls through to the triple parser, and a stepping name
+        // absent from this build fails cleanly at the getArchPipeline() check below.
+        if (const auto* namedInfo = ArchHelper::getInstance().getArchInfo(archStr)) {
+            arch = {static_cast<int>(namedInfo->major), static_cast<int>(namedInfo->minor),
+                    static_cast<int>(namedInfo->stepping)};
+            resolvedArchName = archStr;
+        } else if (!BackendRegistry::parseArchKey(archStr, arch)) {
             std::cerr << "Error: Invalid architecture format '" << archStr
                       << "'. Expected gfx<major><minor><stepping> (e.g. gfx1250)\n";
             return 1;
@@ -354,12 +463,37 @@ int main(int argc, char** argv) {
 
     std::string filename = argv[irFileIdx];
 
-    stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
-    passFeatureConfig.passOrderSnapshot.jsonPath = extractPassOrderSnapshotJsonPath(argc, argv);
-    passFeatureConfig.passOrderSnapshot.dumpAfterPasses =
-        extractPassOrderSnapshotAfterPasses(argc, argv);
+    stinkytofu::GemmTileConfig gemmTileConfig;
+    std::string gemmTileConfigError;
+    if (!parseGemmTileConfigOptions(argc, argv, gemmTileConfig, gemmTileConfigError)) {
+        std::cerr << "Error: " << gemmTileConfigError << "\n";
+        return 1;
+    }
 
-    // Parse --ds-read-order=ProgramOrder|Ascending|AscendingCache
+    stinkytofu::PassFeatureConfig passFeatureConfig = getPassFeatureConfig();
+
+    // Parse --vgpr-msb-mode=none|msb8|msb16 (override of ToolchainCaps::probe).
+    // Useful when running on a host whose comgr doesn't know the target ISA,
+    // so the FileCheck/regression tests can pin the mode explicitly.
+    std::optional<stinkytofu::VgprMsbMode> vgprMsbOverride;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a.starts_with("--vgpr-msb-mode=")) {
+            std::string val = a.substr(std::string("--vgpr-msb-mode=").size());
+            if (val == "none")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::None;
+            else if (val == "msb8")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::Msb8;
+            else if (val == "msb16")
+                vgprMsbOverride = stinkytofu::VgprMsbMode::Msb16;
+            else {
+                std::cerr << "Error: --vgpr-msb-mode expects none|msb8|msb16, got '" << val
+                          << "'\n";
+                return 1;
+            }
+        }
+    }
+
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a.starts_with("--ds-read-order=")) {
@@ -373,11 +507,35 @@ int main(int argc, char** argv) {
             else if (val == "AscendingCache")
                 passFeatureConfig.dagFeatures.dsReadOrder =
                     stinkytofu::PassFeatureConfig::DsReadOrder::AscendingCache;
+        } else if (a.starts_with("--ds-read-queue-depth=")) {
+            passFeatureConfig.dagFeatures.dsReadQueueDepth = std::stoi(a.substr(22));
+        } else if (a.starts_with("--ds-read-drain-latency=")) {
+            passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
+        } else if (a.starts_with("--ds-read-throttle-latency=")) {
+            passFeatureConfig.dagFeatures.dsReadThrottleLatency = std::stoi(a.substr(27));
+        } else if (a.starts_with("--ds-read-throttle-transition-factor=")) {
+            passFeatureConfig.dagFeatures.dsReadThrottleTransitionFactor =
+                std::stod(a.substr(std::string("--ds-read-throttle-transition-factor=").size()));
+        } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
+            passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
+                std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
+        } else if (a.starts_with("--ds-read-per-wmma=")) {
+            passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--tensor-load-wmma-space=")) {
+            passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
+        } else if (a.starts_with("--global-read-queue-depth=")) {
+            passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
+        } else if (a.starts_with("--global-read-drain-latency=")) {
+            passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
+        } else if (a == "--enable-wmma-hide-budget-prescan") {
+            passFeatureConfig.dagFeatures.enableWmmaHideBudgetPrescan = true;
+        } else if (a.starts_with("--merge-barrier-threshold=")) {
+            passFeatureConfig.dagFeatures.mergeBarrierThreshold = std::stoi(a.substr(26));
         }
     }
 
     // Parse and validate user-specified passes from command line
-    std::vector<std::string> requestedPasses = parsePassNames(argc, argv, passStartIdx);
+    std::vector<RequestedPass> requestedPasses = parsePassNames(argc, argv, passStartIdx);
     int optLevel = extractOptLevel(argc, argv);
 
     if (optLevel >= 0 && !requestedPasses.empty()) {
@@ -388,11 +546,17 @@ int main(int argc, char** argv) {
 
     if (!requestedPasses.empty()) {
         std::cerr << "\n=== Adding Passes ===\n";
-        for (const auto& passName : requestedPasses) {
-            if (createPassByName(passName))
-                std::cerr << "Adding pass: " << passName << "\n";
-            else {
-                std::cerr << "Warning: Unknown pass '" << passName << "' - skipping\n";
+        for (const auto& rp : requestedPasses) {
+            if (createPassByName(rp.name, rp.args)) {
+                std::cerr << "Adding pass: " << rp.name;
+                if (!rp.args.empty()) {
+                    std::cerr << " (args:";
+                    for (const auto& a : rp.args) std::cerr << " " << a;
+                    std::cerr << ")";
+                }
+                std::cerr << "\n";
+            } else {
+                std::cerr << "Warning: Unknown pass '" << rp.name << "' - skipping\n";
                 std::cerr << "Use --list-passes to see available passes\n";
             }
         }
@@ -408,6 +572,11 @@ int main(int argc, char** argv) {
     bool printOutput = false;
     bool emitAsm = false;
     bool enableRemarks = false;
+    bool verifyEach = false;
+    // Off by default: createDebugPrintInstrumentation() opens before.txt/after.txt
+    // eagerly, so installing it unconditionally littered the working directory of every
+    // run. Mirrors the needsFileOutput gate the pipeline path already has.
+    bool dumpPasses = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -417,9 +586,13 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--print-output") printOutput = true;
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
+        if (std::string(argv[i]) == "--verify-each") verifyEach = true;
+        if (std::string(argv[i]) == "--dump-passes") dumpPasses = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
+            // Naming a pass to debug is only meaningful with the dumps on.
+            dumpPasses = true;
             stinkytofu::PassManagerDebugConfig::addDebugOnly(argv[++i]);
         }
         if (std::string(argv[i]) == "-o" && i + 1 < argc) outputFile = argv[++i];
@@ -454,7 +627,11 @@ int main(int argc, char** argv) {
     fileBuffer << inputFile.rdbuf();
     std::string fileContent = fileBuffer.str();
 
-    GfxArchID archID = getGfxArchID(arch[0], arch[1], arch[2]);
+    // Prefer the named stepping's identity when the user gave one; the triple alone first-matches
+    // v1 for steppings that share it. resolvedArchName is only set after getArchInfo(name)
+    // confirmed the name is registered, so getGfxArchID(name) here never hits its assert path.
+    GfxArchID archID = resolvedArchName.empty() ? getGfxArchID(arch[0], arch[1], arch[2])
+                                                : getGfxArchID(resolvedArchName);
 
     stinkytofu::MultiParseResult parsed;
     std::shared_ptr<stinkytofu::SignatureBase> asmSignature;  // non-null for .s input with header
@@ -513,13 +690,13 @@ int main(int argc, char** argv) {
         std::string origFuncName = parsed.functions[0]->funcName;
         auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
 
-        // Find from-label and to-label positions
+        // Find from-label and to-label positions (first occurrence, in case a
+        // label name repeats elsewhere in the file).
         int fromIdx = -1, toIdx = -1;
         for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == fromLabel)
-                fromIdx = idx;
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == toLabel)
-                toIdx = idx;
+            if (!originalInsts[idx]->isLabel) continue;
+            if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
+            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
         }
         if (fromIdx < 0) {
             std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
@@ -606,6 +783,10 @@ int main(int argc, char** argv) {
         emitVerbatim(preResult);
     }
 
+    // Set to true if any analysis/verification pass reports a failure; surfaced as a
+    // non-zero exit code after all functions and output have been processed.
+    bool analysisFailed = false;
+
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         if (optLevel >= 0) {
@@ -613,6 +794,7 @@ int main(int argc, char** argv) {
             stinkytofu::StinkyAsmModule::ModuleOptions moduleOpts{};
             moduleOpts.OptLevel = optLevel;
             moduleOpts.EnableRemarks = enableRemarks;
+            moduleOpts.VerifyEach = verifyEach;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -622,6 +804,10 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
                           << "'\n";
                 continue;
+            }
+            if (asmSignature) {
+                func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
+                                 static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
             }
 
             stinkytofu::Backend backend(module);
@@ -633,26 +819,29 @@ int main(int argc, char** argv) {
             stinkytofu::PassManager passManager;
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
-            passManager.addInstrumentation(createDebugPrintInstrumentation());
-            if (!passFeatureConfig.passOrderSnapshot.jsonPath.empty()) {
-                auto collector = std::make_shared<stinkytofu::DAGScheduleJsonCollector>(
-                    passFeatureConfig.passOrderSnapshot.jsonPath, parsedFunc->funcName);
+            if (dumpPasses) passManager.addInstrumentation(createDebugPrintInstrumentation());
+            if (verifyEach) {
                 passManager.addInstrumentation(
-                    std::make_shared<stinkytofu::PassOrderSnapshotInstrumentation>(
-                        std::move(collector)));
+                    std::make_shared<stinkytofu::VerifyInstrumentation>());
             }
             passManager.setPassFeatureConfig(passFeatureConfig);
-            setKernelConfig(passManager, arch);
-            passManager.setAsmCapsConfig(stinkytofu::ToolchainCaps::probe(archID));
+            gemmTileConfig.arch = arch;
+            passManager.setGemmTileConfig(gemmTileConfig);
+            auto caps = stinkytofu::ToolchainCaps::probe(archID);
+            if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
+            // Stand in for rocisa's archCaps, which only TensileLite can supply.
+            caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
+            caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0};
+            passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
-            for (const auto& passName : requestedPasses) {
-                auto pass = createPassByName(passName);
+            for (const auto& rp : requestedPasses) {
+                auto pass = createPassByName(rp.name, rp.args);
                 if (pass) passManager.addPass(std::move(pass));
             }
 
             stinkytofu::Function func(parsedFunc->funcName);
-            func.setGemmTileConfig(passManager.getPassContext().getGemmTileConfig());
+            func.setGemmTileConfig(gemmTileConfig);
 
             auto result = stinkytofu::StinkyIRConverter::populateFunctionFromParsed(*parsedFunc,
                                                                                     func, archID);
@@ -661,8 +850,13 @@ int main(int argc, char** argv) {
                           << "'\n";
                 continue;
             }
+            if (asmSignature) {
+                func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
+                                 static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
+            }
 
             passManager.run(func);
+            if (passManager.getPassContext().getAnalysisFailed()) analysisFailed = true;
 
             emitFunction(func);
         }
@@ -670,5 +864,5 @@ int main(int argc, char** argv) {
 
     emitVerbatim(postResult);
 
-    return 0;
+    return analysisFailed ? 1 : 0;
 }

@@ -1290,3 +1290,169 @@ TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2)
         }
     }
 }
+
+// ============================================================================
+// buildFullIndices extra tests
+// ============================================================================
+
+TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2OnePadded)
+{
+    // Shape [2, 2, 3, 4, 5], normalizedDimCount=2: normalize over last 2 dims (4*5=20)
+    // Batch dims = [2, 2, 3], 12 independent groups of 20 elements each
+
+    Tensor<double> x({2, 2, 3, 4, 5});
+    Tensor<double> y({2, 2, 3, 4, 5});
+    Tensor<double> scale({1, 1, 1, 4, 5});
+    Tensor<double> bias({1, 1, 1, 4, 5});
+    Tensor<double> mean({2, 2, 3, 1, 1});
+    Tensor<double> rstd({2, 2, 3, 1, 1});
+
+    x.fillWithRandomValues(-5.0, 5.0, 123);
+    scale.fillWithValue(1.0);
+    bias.fillWithValue(0.0);
+
+    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
+
+    auto tolerance = layernorm::getTolerance<double>();
+
+    // Verify each of the 12 groups has zero-mean, unit-variance output
+    for(int b0 = 0; b0 < 2; b0++)
+    {
+        for(int b1 = 0; b1 < 2; b1++)
+        {
+            for(int b2 = 0; b2 < 3; b2++)
+            {
+                double outMean = 0.0;
+                for(int d3 = 0; d3 < 4; d3++)
+                {
+                    for(int d4 = 0; d4 < 5; d4++)
+                    {
+                        outMean += y.getHostValue(b0, b1, b2, d3, d4);
+                    }
+                }
+                outMean /= 20.0;
+                EXPECT_NEAR(outMean, 0.0, tolerance);
+
+                double outVar = 0.0;
+                for(int d3 = 0; d3 < 4; d3++)
+                {
+                    for(int d4 = 0; d4 < 5; d4++)
+                    {
+                        const double diff = y.getHostValue(b0, b1, b2, d3, d4) - outMean;
+                        outVar += diff * diff;
+                    }
+                }
+                outVar /= 20.0;
+                EXPECT_NEAR(outVar, 1.0, tolerance);
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2OnePaddedBatchDims)
+{
+    // Shape [2, 2, 3, 4, 5], normalizedDimCount=2: normalize over last 2 dims (4*5=20)
+    // Batch dims = [2, 2, 3], 12 independent groups of 20 elements each
+
+    Tensor<double> x({2, 2, 3, 4, 5});
+    Tensor<double> y({2, 2, 3, 4, 5});
+    Tensor<double> scale({4, 5});
+    Tensor<double> bias({4, 5});
+    Tensor<double> mean({2, 2, 3, 1, 1});
+    Tensor<double> rstd({2, 2, 3, 1, 1});
+
+    x.fillWithRandomValues(-5.0, 5.0, 123);
+    scale.fillWithValue(1.0);
+    bias.fillWithValue(0.0);
+
+    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
+
+    auto tolerance = layernorm::getTolerance<double>();
+
+    // Verify each of the 12 groups has zero-mean, unit-variance output
+    for(int b0 = 0; b0 < 2; b0++)
+    {
+        for(int b1 = 0; b1 < 2; b1++)
+        {
+            for(int b2 = 0; b2 < 3; b2++)
+            {
+                double outMean = 0.0;
+                for(int d3 = 0; d3 < 4; d3++)
+                {
+                    for(int d4 = 0; d4 < 5; d4++)
+                    {
+                        outMean += y.getHostValue(b0, b1, b2, d3, d4);
+                    }
+                }
+                outMean /= 20.0;
+                EXPECT_NEAR(outMean, 0.0, tolerance);
+
+                double outVar = 0.0;
+                for(int d3 = 0; d3 < 4; d3++)
+                {
+                    for(int d4 = 0; d4 < 5; d4++)
+                    {
+                        const double diff = y.getHostValue(b0, b1, b2, d3, d4) - outMean;
+                        outVar += diff * diff;
+                    }
+                }
+                outVar /= 20.0;
+                EXPECT_NEAR(outVar, 1.0, tolerance);
+            }
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceLayernormFp64, Fprop5DNormalizeLast2OnePaddedNormalizedDims)
+{
+    // Shape [2, 2, 3, 4, 5], normalizedDimCount=2: normalize over last 2 dims (4*5=20)
+    // Batch dims = [2, 2, 3], 12 independent groups of 20 elements each
+
+    Tensor<double> x({2, 2, 3, 4, 5});
+    Tensor<double> y({2, 2, 3, 4, 5});
+    Tensor<double> scale({1, 1, 1, 4, 5});
+    Tensor<double> bias({1, 1, 1, 4, 5});
+    Tensor<double> mean({2, 2, 3});
+    Tensor<double> rstd({2, 2, 3});
+
+    x.fillWithRandomValues(-5.0, 5.0, 123);
+    scale.fillWithValue(1.0);
+    bias.fillWithValue(0.0);
+
+    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, LAYERNORM_DEFAULT_EPSILON, 2, &mean, &rstd);
+
+    auto tolerance = layernorm::getTolerance<double>();
+
+    // Verify each of the 12 groups has zero-mean, unit-variance output
+    for(int b0 = 0; b0 < 2; b0++)
+    {
+        for(int b1 = 0; b1 < 2; b1++)
+        {
+            for(int b2 = 0; b2 < 3; b2++)
+            {
+                double outMean = 0.0;
+                for(int d3 = 0; d3 < 4; d3++)
+                {
+                    for(int d4 = 0; d4 < 5; d4++)
+                    {
+                        outMean += y.getHostValue(b0, b1, b2, d3, d4);
+                    }
+                }
+                outMean /= 20.0;
+                EXPECT_NEAR(outMean, 0.0, tolerance);
+
+                double outVar = 0.0;
+                for(int d3 = 0; d3 < 4; d3++)
+                {
+                    for(int d4 = 0; d4 < 5; d4++)
+                    {
+                        const double diff = y.getHostValue(b0, b1, b2, d3, d4) - outMean;
+                        outVar += diff * diff;
+                    }
+                }
+                outVar /= 20.0;
+                EXPECT_NEAR(outVar, 1.0, tolerance);
+            }
+        }
+    }
+}

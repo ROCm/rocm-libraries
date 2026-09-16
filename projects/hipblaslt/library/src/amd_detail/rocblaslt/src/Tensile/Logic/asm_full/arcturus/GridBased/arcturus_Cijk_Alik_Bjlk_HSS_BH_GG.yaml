@@ -64,8 +64,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: 1
-  TransposeB: 1
+  TransposeA: True
+  TransposeB: True
   UseBeta: true
   UseBias: 0
   UseE: false

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BackendEnumStringUtils.hpp"
+#include "FlatbufferUtilities.hpp"
 #include "Helpers.hpp"
 #include "HipdnnException.hpp"
 #include "descriptors/BackendDescriptor.hpp"
@@ -11,16 +12,24 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/Handle.hpp"
 #include "handle/HandleFactory.hpp"
+#include "heuristics/DeviceProperties.hpp"
+#include "heuristics/config/AutotuneCacheEnv.hpp"
+#include "heuristics/config/AutotuneCacheKey.hpp"
+#include "heuristics/config/AutotuneRankingStore.hpp"
 #include "hipdnn_backend.h"
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 #include "plugin/HeuristicPluginResourceManager.hpp"
 
 #include <hipdnn_backend/version.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
 #include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
 
 #include <cstring>
+#include <vector>
 
 using namespace hipdnn_backend;
 
@@ -244,8 +253,27 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
                   graphByteSize);
 
     return hipdnn_backend::tryCatch([&, apiName = __func__]() {
-        hipdnn_backend::DescriptorFactory::createGraphExt(
-            descriptor, serializedGraph, graphByteSize);
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedGraph,
+                                                                         graphByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedGraph, graphByteSize);
+            const auto* graphBlob = container->graph_blob();
+
+            // Reject a container with no graph, matching createGraphExt's
+            // zero-byte-size HIPDNN_STATUS_BAD_PARAM behavior.
+            THROW_IF_TRUE(graphBlob == nullptr || graphBlob->empty(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Serialized graph-and-plan container carries no graph.");
+            hipdnn_backend::DescriptorFactory::createGraphExt(
+                descriptor, graphBlob->data(), graphBlob->size());
+        }
+        else
+        {
+            hipdnn_backend::DescriptorFactory::createGraphExt(
+                descriptor, serializedGraph, graphByteSize);
+        }
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
     });
@@ -355,6 +383,103 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryGraphAndPlan_ext(
+    hipdnnBackendDescriptor_t graphDescriptor,
+    hipdnnBackendDescriptor_t executionPlanDescriptor,
+    size_t requestedByteSize,
+    size_t* blobByteSize,
+    uint8_t* serializedBlob)
+{
+    LOG_API_ENTRY("graphDescriptor={}, executionPlanDescriptor={}, requestedByteSize={}, "
+                  "blobByteSize_ptr={:p}, serializedBlob_ptr={:p}",
+                  logPtr(graphDescriptor),
+                  logPtr(executionPlanDescriptor),
+                  requestedByteSize,
+                  static_cast<void*>(blobByteSize),
+                  static_cast<void*>(serializedBlob));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(graphDescriptor);
+        throwIfNull(blobByteSize);
+
+        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        graphDesc->buildSerializedGraph();
+        auto graphData = graphDesc->getSerializedGraph();
+
+        std::vector<uint8_t> planBytes;
+        if(executionPlanDescriptor != nullptr)
+        {
+            throwIfInvalidDescriptor(executionPlanDescriptor);
+            auto executionPlanDesc
+                = executionPlanDescriptor->asDescriptor<hipdnn_backend::ExecutionPlanDescriptor>();
+
+            size_t planSize = 0;
+            executionPlanDesc->serializeBackendPlan(0, &planSize, nullptr);
+            planBytes.resize(planSize);
+            executionPlanDesc->serializeBackendPlan(planSize, &planSize, planBytes.data());
+        }
+
+        const auto container
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::buildGraphAndPlanContainer(
+                graphData.ptr, graphData.size, planBytes.data(), planBytes.size());
+
+        *blobByteSize = container.size();
+
+        if(serializedBlob != nullptr)
+        {
+            THROW_IF_LT(requestedByteSize,
+                        container.size(),
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the serialized graph-and-plan size ("
+                            + std::to_string(container.size()) + ")");
+            std::memcpy(serializedBlob, container.data(), container.size());
+        }
+
+        LOG_API_SUCCESS(apiName, "blobByteSize={}", *blobByteSize);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryContents_ext(
+    const uint8_t* serializedBlob, size_t blobByteSize, int* contentFlags)
+{
+    LOG_API_ENTRY("serializedBlob_ptr={:p}, blobByteSize={}, contentFlags_ptr={:p}",
+                  static_cast<const void*>(serializedBlob),
+                  blobByteSize,
+                  static_cast<void*>(contentFlags));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(serializedBlob);
+        throwIfNull(contentFlags);
+
+        *contentFlags = 0;
+
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedBlob,
+                                                                         blobByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedBlob, blobByteSize);
+
+            if(container->graph_blob() != nullptr && !container->graph_blob()->empty())
+            {
+                *contentFlags |= HIPDNN_SERIALIZED_CONTENT_GRAPH;
+            }
+            if(container->plan_blob() != nullptr && !container->plan_blob()->empty())
+            {
+                *contentFlags |= HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN;
+            }
+        }
+        else
+        {
+            // No container identifier (or too short to be one): legacy bare-graph blob.
+            *contentFlags = HIPDNN_SERIALIZED_CONTENT_GRAPH;
+        }
+
+        LOG_API_SUCCESS(apiName, "contentFlags={}", *contentFlags);
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
     hipdnnBackendCreateAndDeserializeExecutionPlan_ext(hipdnnHandle_t handle,
                                                        hipdnnBackendDescriptor_t* descriptor,
@@ -371,9 +496,27 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t
         throwIfNull(handle);
         throwIfNull(descriptor);
 
+        const uint8_t* planData = serializedPlan;
+        size_t planDataSize = planByteSize;
+
+        if(hipdnn_backend::flatbuffer_utilities::isGraphAndPlanContainer(serializedPlan,
+                                                                         planByteSize))
+        {
+            const auto* container
+                = hipdnn_backend::flatbuffer_utilities::verifyAndGetGraphAndPlanContainer(
+                    serializedPlan, planByteSize);
+            const auto* planBlob = container->plan_blob();
+
+            THROW_IF_TRUE(planBlob == nullptr || planBlob->empty(),
+                          HIPDNN_STATUS_BAD_PARAM,
+                          "Serialized graph-and-plan container carries no execution plan.");
+            planData = planBlob->data();
+            planDataSize = planBlob->size();
+        }
+
         auto executionPlanDesc = std::make_shared<hipdnn_backend::ExecutionPlanDescriptor>();
         executionPlanDesc->deserializeBackendPlan(
-            handle->getPluginResourceManager(), serializedPlan, planByteSize);
+            handle->getPluginResourceManager(), planData, planDataSize);
         *descriptor = HipdnnBackendDescriptor::packDescriptor(executionPlanDesc);
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
@@ -689,6 +832,77 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t handle,
+                                                                 const char* engineName,
+                                                                 int64_t* engineId)
+{
+    LOG_API_ENTRY("handle={:p}, engineName_ptr={:p}, engineId_ptr={:p}",
+                  static_cast<void*>(handle),
+                  static_cast<const void*>(engineName),
+                  static_cast<void*>(engineId));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(engineName);
+        throwIfNull(engineId);
+
+        const auto resolved = handle->findEngineIdByName(engineName);
+        if(!resolved.has_value())
+        {
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  std::string("No loaded engine is named '") + engineName + "'.");
+        }
+
+        *engineId = *resolved;
+
+        LOG_API_SUCCESS(apiName, "engineName={}, engineId={}", engineName, *engineId);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineNameById_ext(hipdnnHandle_t handle,
+                                                                 int64_t engineId,
+                                                                 char* engineName,
+                                                                 size_t* engineNameLen)
+{
+    LOG_API_ENTRY("handle={:p}, engineId={}, engineName_ptr={:p}, engineNameLen_ptr={:p}",
+                  static_cast<void*>(handle),
+                  engineId,
+                  static_cast<void*>(engineName),
+                  static_cast<void*>(engineNameLen));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(engineNameLen);
+
+        const auto resolved = handle->findEngineNameById(engineId);
+        if(!resolved.has_value())
+        {
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  "No loaded engine has ID "
+                                      + hipdnn_data_sdk::utilities::formatEngineIdHex(engineId)
+                                      + ".");
+        }
+
+        const size_t requiredEngineNameLen = resolved->size() + 1;
+
+        if(engineName == nullptr)
+        {
+            *engineNameLen = requiredEngineNameLen;
+            return;
+        }
+
+        if(*engineNameLen < requiredEngineNameLen)
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
+        }
+
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            engineName, resolved->c_str(), *engineNameLen);
+
+        LOG_API_SUCCESS(apiName, "engineId={}, engineName={}", engineId, *resolved);
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHandle_t handle,
                                                                        size_t* numPolicies)
 {
@@ -796,6 +1010,138 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
                         info.pluginName,
                         info.pluginVersion,
                         info.apiVersion);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendWriteEngineRankingResults_ext(hipdnnHandle_t handle,
+                                               hipdnnBackendDescriptor_t graphDescriptor,
+                                               const int64_t* engineIdsInRankOrder,
+                                               size_t engineIdCount,
+                                               hipdnnAutotuneCacheWriteOutcome_ext_t* outcome)
+{
+    LOG_API_ENTRY("handle={}, graphDescriptor={}, engineIdsInRankOrder_ptr={:p}, engineIdCount={}",
+                  logPtr(handle),
+                  logPtr(graphDescriptor),
+                  static_cast<const void*>(engineIdsInRankOrder),
+                  engineIdCount);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(handle);
+
+        if(outcome != nullptr)
+        {
+            *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+        }
+
+        // Runs before all other validation: a disabled cache must never read or write.
+        if(hipdnn_backend::heuristics::config::exactCacheDisabled())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: exact-match autotune cache "
+                "disabled via HIPDNN_DISABLE_EXACT_ENGINE_CACHE; declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED;
+            }
+            return;
+        }
+
+        throwIfInvalidDescriptor(graphDescriptor);
+
+        // Declines rather than failing the caller's run on any cache problem below.
+        if(!graphDescriptor->isFinalized())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: graph descriptor is not "
+                "finalized; declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+            }
+            return;
+        }
+
+        if(engineIdsInRankOrder == nullptr || engineIdCount == 0)
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: no engine ranking provided; "
+                "declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
+            }
+            return;
+        }
+
+        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+
+        try
+        {
+            const hipdnnPluginConstData_t serializedGraph = graphDesc->getSerializedGraph();
+
+            const auto devProps = hipdnn_backend::heuristics::queryDeviceProperties(handle);
+            const auto devicePropsSerialized
+                = hipdnn_backend::heuristics::serializeDeviceProperties(devProps);
+            const hipdnnPluginConstData_t devicePropsWrapper
+                = hipdnn_backend::heuristics::wrapSerializedDeviceProperties(devicePropsSerialized);
+
+            const auto cacheKey = hipdnn_backend::heuristics::config::deriveCacheKey(
+                serializedGraph, devicePropsWrapper);
+            if(!cacheKey.has_value())
+            {
+                HIPDNN_BACKEND_LOG_WARN(
+                    "hipdnnBackendWriteEngineRankingResults_ext: graph is unkeyable; "
+                    "declining write.");
+                if(outcome != nullptr)
+                {
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+                }
+                return;
+            }
+
+            const std::vector<int64_t> order(engineIdsInRankOrder,
+                                             engineIdsInRankOrder + engineIdCount);
+
+            // Report what the store actually did. The optimistic WRITTEN set at entry is a
+            // default for the paths that never reach here; a record identical to one already on
+            // disk writes nothing, and saying otherwise would make the outcome a lie precisely
+            // where a caller is relying on it to tell writes apart from no-ops.
+            const auto writeStatus = hipdnn_backend::heuristics::config::exactCacheStore().put(
+                *cacheKey, {}, order, order);
+            if(outcome != nullptr)
+            {
+                switch(writeStatus)
+                {
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::WRITTEN:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNCHANGED:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNAVAILABLE:
+                    // The shard could not be opened, locked, or read. The cache is best-effort,
+                    // so this stays a success with a decline rather than an error.
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+                    break;
+                default:
+                    break;
+                }
+            }
+
+            LOG_API_SUCCESS(apiName, "wrote engine ranking with {} engines", engineIdCount);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "hipdnnBackendWriteEngineRankingResults_ext: failed to write engine ranking "
+                "({}); declining write.",
+                e.what());
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+            }
+        }
     });
 }
 

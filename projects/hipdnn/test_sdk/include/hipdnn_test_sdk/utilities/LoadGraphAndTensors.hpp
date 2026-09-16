@@ -110,10 +110,16 @@ struct GraphAndTensorMap
             auto validatorFunc = hipdnn_data_sdk::utilities::Visitor{
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
-
-                    auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<DataType>{
-                        absTolerance, relTolerance};
-                    return validator.allClose(*referenceTensorPtr, *tensorMap.at(uid));
+                    if constexpr(std::is_same_v<DataType, bool>)
+                    {
+                        return CpuIntReferenceValidation<bool>{}.allClose(*referenceTensorPtr,
+                                                                          *tensorMap.at(uid));
+                    }
+                    else
+                    {
+                        return CpuFpReferenceValidation<DataType>{absTolerance, relTolerance}
+                            .allClose(*referenceTensorPtr, *tensorMap.at(uid));
+                    }
                 },
                 [&](int) {
                     throw std::runtime_error("validateTensors: Cannot validate integer tensors");
@@ -152,7 +158,7 @@ inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
     {
         for(auto& [name, value] : node.at("outputs").items())
         {
-            if(name.find("_tensor_uid") == std::string::npos)
+            if(name.find("_tensor_uid") == std::string::npos || value.is_null())
             {
                 continue;
             }

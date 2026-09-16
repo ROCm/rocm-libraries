@@ -3,9 +3,11 @@
 
 # GfxXXX.hpp are generated in build/hardware/arch_headers/ by hardware/CMakeLists.txt
 # ArchHelper_includes.inc includes them directly (same dir)
-target_sources(stinkytofu PRIVATE
+target_sources(stinkytofu_objs PRIVATE
     ArchHelper.cpp
+    AsmTargetRegisters.cpp
     ComgrProbe.cpp
+    HWModel.cpp
     HwReg.cpp
     ToolchainCaps.cpp
 )

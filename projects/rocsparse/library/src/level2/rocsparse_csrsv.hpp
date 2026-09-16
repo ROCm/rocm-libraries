@@ -82,7 +82,8 @@ namespace rocsparse
                                  rocsparse_dnvec_descr       y,
                                  rocsparse_solve_policy      policy,
                                  rocsparse_csrsv_info        csrsv_info,
-                                 void*                       temp_buffer);
+                                 void*                       temp_buffer,
+                                 bool                        force_conj = false);
 
     rocsparse_status launch_csrsv_analysis_kernel(rocsparse_handle    handle,
                                                   rocsparse_operation trans,
@@ -95,7 +96,7 @@ namespace rocsparse
                                                   void* __restrict__ csr_diag_ind,
                                                   int32_t* __restrict__ done_array,
                                                   void* __restrict__ max_nnz,
-                                                  void* __restrict__ zero_pivot,
+                                                  void*                zero_pivot,
                                                   rocsparse_index_base idx_base,
                                                   rocsparse_diag_type  diag_type,
                                                   rocsparse_fill_mode  mode);

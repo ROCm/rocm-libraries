@@ -1,2 +1,3 @@
 rocm-docs-core==1.33.1
 numpy
+sphinxcontrib-datatemplates==0.11.0

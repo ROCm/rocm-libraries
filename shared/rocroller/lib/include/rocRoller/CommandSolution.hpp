@@ -62,6 +62,9 @@ namespace rocRoller
         void setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts);
         std::optional<std::pair<uint, uint>> getManualWavefrontCounts() const;
 
+        void setManualWorkgroupClusterSize(std::array<unsigned int, 3> const&);
+        std::optional<std::array<unsigned int, 3>> getManualWorkgroupClusterSize() const;
+
         /**
          * @brief Set the number of wave tiles to execute within a workgroup
          *
@@ -139,7 +142,8 @@ namespace rocRoller
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;
-        std::optional<std::pair<uint, uint>> m_wavefrontCounts;
+        std::optional<std::pair<uint, uint>>       m_wavefrontCounts;
+        std::optional<std::array<unsigned int, 3>> m_workgroupClusterSize;
 
         int m_kernelDimension = 0;
 

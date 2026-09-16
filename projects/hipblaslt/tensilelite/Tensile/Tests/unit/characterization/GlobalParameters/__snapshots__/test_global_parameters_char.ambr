@@ -1,0 +1,7 @@
+# serializer version: 1
+# name: test_print_capabilities_table
+  dict({
+    'has_isa_row': True,
+    'nonempty': True,
+  })
+# ---

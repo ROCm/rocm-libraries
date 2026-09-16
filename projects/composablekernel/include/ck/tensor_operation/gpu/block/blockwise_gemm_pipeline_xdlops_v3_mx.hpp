@@ -526,6 +526,11 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
             {
                 auto LoopFunc = [&](auto scale_comp_buf, auto scale_mem_buf) {
 #if defined(__gfx125__)
+                    // Drain this wave's own ds_reads before the barrier. The copies below
+                    // overwrite the buffer being read, and block_sync_lds_async_load() only
+                    // waits on ASYNCcnt, so without this the read drain can be sunk past
+                    // the barrier and the buffer is overwritten while still being read.
+                    llvm_amdgcn_s_wait_dscnt(0);
                     block_sync_lds_async_load();
 #else
                     // wait for EXP_CNT, LDS, GDS, Constant and Message
@@ -622,16 +627,29 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                                 vector_type<ComputeTypeA, KPack> a_thread_vec;
                                 vector_type<ComputeTypeB, BKPack> b_thread_vec;
 
-                                static_for<0, KPack, 1>{}([&](auto ik) {
-                                    a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                        a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                            make_tuple(m0, I0, imxdl, kxdl, ik))>{}];
-                                });
-                                static_for<0, BKPack, 1>{}([&](auto ik) {
-                                    b_thread_vec.template AsType<ComputeTypeB>()(ik) =
-                                        b_thread_buf[Number<b_thread_desc_.CalculateOffset(
-                                            make_tuple(n0, I0, inxdl, kxdl, ik))>{}];
-                                });
+                                auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                                      decltype(a_thread_buf),
+                                                                      decltype(a_thread_desc_),
+                                                                      ComputeTypeA,
+                                                                      Number<m0>,
+                                                                      Number<0>,
+                                                                      Number<imxdl>,
+                                                                      Number<kxdl>,
+                                                                      index_expression::Ik>{
+                                    a_thread_vec, a_thread_buf};
+                                auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                                      decltype(b_thread_buf),
+                                                                      decltype(b_thread_desc_),
+                                                                      ComputeTypeB,
+                                                                      Number<n0>,
+                                                                      Number<0>,
+                                                                      Number<inxdl>,
+                                                                      Number<kxdl>,
+                                                                      index_expression::Ik>{
+                                    b_thread_vec, b_thread_buf};
+
+                                static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA));
+                                static_for<0, BKPack, 1>{}(MakeFunctorInvoker(loadB));
 
                                 using mfma_input_type_a = typename vector_type< //
                                     ComputeTypeA,
@@ -809,16 +827,29 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         vector_type<ComputeTypeA, KPack> a_thread_vec;
                         vector_type<ComputeTypeB, BKPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, imxdl, kxdl, ik))>{}];
-                        });
-                        static_for<0, BKPack, 1>{}([&](auto ik) {
-                            b_thread_vec.template AsType<ComputeTypeB>()(ik) =
-                                b_thread_buf[Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, inxdl, kxdl, ik))>{}];
-                        });
+                        auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                              decltype(a_thread_buf),
+                                                              decltype(a_thread_desc_),
+                                                              ComputeTypeA,
+                                                              Number<m0>,
+                                                              Number<0>,
+                                                              Number<imxdl>,
+                                                              Number<kxdl>,
+                                                              index_expression::Ik>{a_thread_vec,
+                                                                                    a_thread_buf};
+                        auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                              decltype(b_thread_buf),
+                                                              decltype(b_thread_desc_),
+                                                              ComputeTypeB,
+                                                              Number<n0>,
+                                                              Number<0>,
+                                                              Number<inxdl>,
+                                                              Number<kxdl>,
+                                                              index_expression::Ik>{b_thread_vec,
+                                                                                    b_thread_buf};
+
+                        static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA));
+                        static_for<0, BKPack, 1>{}(MakeFunctorInvoker(loadB));
 
                         using mfma_input_type_a = typename vector_type< //
                             ComputeTypeA,
@@ -942,16 +973,29 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         vector_type<ComputeTypeA, KPack> a_thread_vec;
                         vector_type<ComputeTypeB, BKPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, imxdl, kxdl, ik))>{}];
-                        });
-                        static_for<0, BKPack, 1>{}([&](auto ik) {
-                            b_thread_vec.template AsType<ComputeTypeB>()(ik) =
-                                b_thread_buf[Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, inxdl, kxdl, ik))>{}];
-                        });
+                        auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                              decltype(a_thread_buf),
+                                                              decltype(a_thread_desc_),
+                                                              ComputeTypeA,
+                                                              Number<m0>,
+                                                              Number<0>,
+                                                              Number<imxdl>,
+                                                              Number<kxdl>,
+                                                              index_expression::Ik>{a_thread_vec,
+                                                                                    a_thread_buf};
+                        auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                              decltype(b_thread_buf),
+                                                              decltype(b_thread_desc_),
+                                                              ComputeTypeB,
+                                                              Number<n0>,
+                                                              Number<0>,
+                                                              Number<inxdl>,
+                                                              Number<kxdl>,
+                                                              index_expression::Ik>{b_thread_vec,
+                                                                                    b_thread_buf};
+
+                        static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA));
+                        static_for<0, BKPack, 1>{}(MakeFunctorInvoker(loadB));
 
                         using mfma_input_type_a = typename vector_type< //
                             ComputeTypeA,
@@ -1018,16 +1062,29 @@ struct BlockwiseGemmXdlops_pipeline_v3_mx<BlockGemmPipelineScheduler::Intrawave,
                         vector_type<ComputeTypeA, KPack> a_thread_vec;
                         vector_type<ComputeTypeB, BKPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeTypeA>()(ik) =
-                                a_thread_buf[Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, imxdl, kxdl, ik))>{}];
-                        });
-                        static_for<0, BKPack, 1>{}([&](auto ik) {
-                            b_thread_vec.template AsType<ComputeTypeB>()(ik) =
-                                b_thread_buf[Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, inxdl, kxdl, ik))>{}];
-                        });
+                        auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                              decltype(a_thread_buf),
+                                                              decltype(a_thread_desc_),
+                                                              ComputeTypeA,
+                                                              Number<m0>,
+                                                              Number<0>,
+                                                              Number<imxdl>,
+                                                              Number<kxdl>,
+                                                              index_expression::Ik>{a_thread_vec,
+                                                                                    a_thread_buf};
+                        auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                              decltype(b_thread_buf),
+                                                              decltype(b_thread_desc_),
+                                                              ComputeTypeB,
+                                                              Number<n0>,
+                                                              Number<0>,
+                                                              Number<inxdl>,
+                                                              Number<kxdl>,
+                                                              index_expression::Ik>{b_thread_vec,
+                                                                                    b_thread_buf};
+
+                        static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA));
+                        static_for<0, BKPack, 1>{}(MakeFunctorInvoker(loadB));
 
                         using mfma_input_type_a = typename vector_type< //
                             ComputeTypeA,

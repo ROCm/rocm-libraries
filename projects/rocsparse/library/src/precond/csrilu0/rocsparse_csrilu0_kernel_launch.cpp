@@ -63,7 +63,7 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
     const int64_t max_nnz = trm_info->get_max_nnz();
 
     const bool sleep
-        = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908 && //
+        = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908 && //
            handle->asic_rev < 2);
 
     rocsparse::csrilu0_kernel_launch_t launch{};
@@ -80,10 +80,10 @@ rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle          hand
     }
 
     const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                                       0,
-                                       sizeof(int32_t) * A->rows * A_batch_count,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                                 0,
+                                                 sizeof(int32_t) * A->rows * A_batch_count,
+                                                 handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csrilu0_info, A, boost, buffer_size, buffer));
     return rocsparse_status_success;

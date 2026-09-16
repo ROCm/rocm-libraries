@@ -19,9 +19,11 @@
  * ************************************************************************ */
 #include "stinkytofu/core/PassManager.hpp"
 
+#include <cstdint>
 #include <iostream>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
@@ -35,6 +37,14 @@ void PassContext::setGemmTileConfig(const GemmTileConfig& config) {
     } else {
         STINKY_UNREACHABLE("Invalid architecture, unable to compute wavefront size");
     }
+    // Same derivation point as wavefrontSize: both are functions of the arch alone.
+    hwModel_ = &hwModelForArch(gemmConfig.arch);
+}
+
+const HWModel& PassContext::getHWModel() const {
+    // A PassContext that never had setGemmTileConfig() called still has to answer
+    // this; hwModelForArch() maps the unset {0,0,0} arch to the default model.
+    return hwModel_ ? *hwModel_ : hwModelForArch(gemmConfig.arch);
 }
 
 //----------------------------------------------------------------------

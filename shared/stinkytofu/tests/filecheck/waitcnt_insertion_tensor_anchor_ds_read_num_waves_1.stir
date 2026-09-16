@@ -1,0 +1,61 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): when NumWaves == 1, DS reads are tensor-wait
+# anchors. A pending tensor_load_to_lds with overlapping MemTokenData must drain
+# before the ds_read issues.
+#
+# IR (single block):
+#   tensor_load_to_lds   tokens=[0]
+#   ds_load_b64          tokens=[0]   (no consumer of v[0:1])
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_anchor_ds_read_num_waves_1
+# CHECK: tensor_load_to_lds
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# The wait carries the drained token union (here just the single drained load).
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_b64
+# CHECK-SAME: tokens = [0]
+
+st.func @waitcnt_insertion_tensor_anchor_ds_read_num_waves_1() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Drained-token union: consumer reads tok0, tok1 stays in flight ---
+# Queue at the ds_load: [tok0, tok1]. The ds_load consumes tok0; the wait keeps the
+# 1 newest (tok1) in flight and drains tok0 -> tlcnt = 1, drained tokens = [0].
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_drained_single
+# CHECK: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-SAME: tokens = [0]
+
+st.func @waitcnt_insertion_tensor_drained_single() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[20:23], s[24:31]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+
+# --- Multi-group drain: one wait drains TWO token groups; union is exact ---
+# Queue at the ds_load: [tok0, tok1, tok2]. The ds_load consumes tok1, but the FIFO
+# wait that reaches tok1 keeps only tok2 (the 1 newest) in flight -> tlcnt = 1 -> it
+# drains BOTH tok0 and tok1. The emitted wait must carry the UNION [0,1], even though
+# the consuming ds_read only names tok1 — the case a single-consumer approximation
+# would get wrong.
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_drained_multi
+# CHECK: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-SAME: tokens = [0,1]
+
+st.func @waitcnt_insertion_tensor_drained_multi() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[20:23], s[24:31]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[32:35], s[36:43]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+}

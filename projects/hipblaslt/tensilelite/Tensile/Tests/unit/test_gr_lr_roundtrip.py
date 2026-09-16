@@ -26,6 +26,7 @@ from gpu_test_helpers import (
     setup_roundtrip_writer,
     build_roundtrip_inner_asm,
     alloc_export_vgprs,
+    requires_gpu,
 )
 
 
@@ -320,7 +321,7 @@ def print_grid_diff(label, actual, expected):
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+@requires_gpu
 class TestGrLrRoundtrip:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)

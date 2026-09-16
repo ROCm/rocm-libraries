@@ -128,6 +128,8 @@ struct GemmPipelineAgBgCrCompV6 : public BaseGemmPipelineAgBgCrCompV6<Problem>
     static constexpr auto I1 = number<1>{};
     static constexpr auto I2 = number<2>{};
 
+    static constexpr bool LargeTensors = Problem::LargeTensors;
+
     static constexpr index_t BlockSize = Problem::kBlockSize;
 
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
@@ -681,7 +683,7 @@ struct GemmPipelineAgBgCrCompV6 : public BaseGemmPipelineAgBgCrCompV6<Problem>
             };
 
             auto ReadCompFunc = [&]() {
-                static_for<0, KRepeat - 1, 1>{}([&]() {
+                static_for<0, KRepeat - 1, 1>{}([&](auto) {
                     __syncthreads();
                     block_gemm(c_block_tile, a_lds_tile, b_lds_tile);
 

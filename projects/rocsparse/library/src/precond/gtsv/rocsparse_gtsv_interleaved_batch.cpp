@@ -198,7 +198,7 @@ namespace rocsparse
         rocsparse_int* p = reinterpret_cast<rocsparse_int*>(reinterpret_cast<void*>(ptr));
         // ptr += ((sizeof(rocsparse_int) * m * batch_count - 1) / 256 + 1) * 256;
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             u2, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_interleaved_batch_lu_kernel<128>),
@@ -236,7 +236,7 @@ namespace rocsparse
         T*    r2  = reinterpret_cast<T*>(ptr);
         //   ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             r2, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_interleaved_batch_qr_kernel<128>),

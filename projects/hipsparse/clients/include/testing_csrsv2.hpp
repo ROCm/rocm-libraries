@@ -464,7 +464,7 @@ void testing_csrsv2(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
 
         // Host csrsv2
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
         CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
 
         int position_gold;

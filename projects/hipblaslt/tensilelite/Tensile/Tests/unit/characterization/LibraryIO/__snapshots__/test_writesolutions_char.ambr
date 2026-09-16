@@ -1,0 +1,113 @@
+# serializer version: 1
+# name: test_find_body_offset
+  dict({
+    'body': '''
+      - SolutionIndex: 0
+        Name: k0
+  
+    ''',
+    'offset': 75,
+  })
+# ---
+# name: test_find_body_offset_no_body
+  dict({
+    'at_eof': True,
+    'offset': 48,
+  })
+# ---
+# name: test_header_minimal
+  '''
+  - MinimumRequiredVersion: <VERSION>
+  - ProblemSizes:
+  
+  '''
+# ---
+# name: test_header_with_bias_and_activation
+  '''
+  - MinimumRequiredVersion: <VERSION>
+  - ProblemSizes:
+  - BiasTypeArgs: [[0, 4]]
+  - ActivationArgs:
+    - [Enum: relu]
+    - [Enum: gelu]
+  
+  '''
+# ---
+# name: test_header_with_problem_sizes
+  '''
+  - MinimumRequiredVersion: <VERSION>
+  - ProblemSizes:
+    - Range: [16, 16, 1, 16]
+    - Exact: [128, 64, 1, 256]
+  
+  '''
+# ---
+# name: test_write_solutions_cache_same_size
+  '''
+  - MinimumRequiredVersion: <VERSION>
+  - ProblemSizes:
+  - SolutionIndex: 0
+    Name: k0
+  
+  '''
+# ---
+# name: test_write_solutions_cache_shifted
+  '''
+  - MinimumRequiredVersion: <VERSION>
+  - ProblemSizes:
+    - Range: [16, 16, 1, 16]
+    - Range: [32, 32, 1, 32]
+    - Exact: [1, 2, 3, 4]
+  - SolutionIndex: 0
+    Name: k0
+  
+  '''
+# ---
+# name: test_write_solutions_full
+  '''
+  - MinimumRequiredVersion: <VERSION>
+  - ProblemSizes:
+    - Range: [16, 16, 1, 16]
+  - ISA: [9, 4, 2]
+    ProblemType:
+      ActivationComputeDataType: 0
+      ActivationType: none
+      BiasDataTypeList: [0]
+      ComputeDataType: 0
+      DataType: 0
+      DataTypeA: 0
+      DataTypeAmaxD: 0
+      DataTypeB: 0
+      DataTypeE: 0
+      DataTypeMXSA: DataTypeEnum.E8
+      DataTypeMXSB: DataTypeEnum.E8
+      DestDataType: 0
+      F32XdlMathOp: 0
+      MacDataTypeA: 0
+      MacDataTypeB: 0
+      OperationType: GEMM
+    SolutionIndex: 0
+    SolutionNameMin: sol0
+  - ISA: [9, 4, 2]
+    ProblemType:
+      ActivationComputeDataType: 0
+      ActivationType: none
+      BiasDataTypeList: [0]
+      ComputeDataType: 0
+      DataType: 0
+      DataTypeA: 0
+      DataTypeAmaxD: 0
+      DataTypeB: 0
+      DataTypeE: 0
+      DataTypeMXSA: DataTypeEnum.E8
+      DataTypeMXSB: DataTypeEnum.E8
+      DestDataType: 0
+      F32XdlMathOp: 0
+      MacDataTypeA: 0
+      MacDataTypeB: 0
+      OperationType: GEMM
+    SolutionIndex: 1
+    SolutionNameMin: sol1
+  
+  '''
+# ---

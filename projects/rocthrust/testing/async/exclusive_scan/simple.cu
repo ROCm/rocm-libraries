@@ -47,6 +47,10 @@ struct test_simple
 {
   void operator()(std::size_t num_values) const
   {
+#ifdef ADDRESS_SANITIZER_BUILD
+    std::cerr << "Skipping test due to memory constraints in address sanitizer build." << std::endl;
+    return;
+#endif
     testing::async::test_policy_overloads<simple_invoker<T>>::run(num_values);
   }
 };
@@ -77,6 +81,8 @@ struct test_simple_in_place
 {
   void operator()(std::size_t num_values) const
   {
+    CHECK_ASAN_ENABLEMENT();
+	
     using invoker = simple_inplace_invoker<T>;
     testing::async::test_policy_overloads<invoker>::run(num_values);
   }

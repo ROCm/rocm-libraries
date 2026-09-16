@@ -397,7 +397,11 @@ void Solution::RunImpl(const Handle& handle,
             return mha::InvokeParams(dataBackward, workspace, workspace_size);
         }
 
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
+        case miopenProblemDirectionBackwardWeights:
+#ifdef MIOPEN_BETA_API
+        case miopenProblemDirectionInference:
+#endif
+            MIOPEN_THROW(miopenStatusNotImplemented);
         }
     }();
 
@@ -488,10 +492,8 @@ void Solution::RunImpl(const Handle& handle,
 
     const softmax::ProblemDescription problem_description = problem_casted.AsSoftmax();
 
-    float alpha                        = softmax_desc.GetAlpha();
-    float beta                         = softmax_desc.GetBeta();
-    miopenSoftmaxAlgorithm_t algorithm = softmax_desc.GetAlgorithm();
-    miopenSoftmaxMode_t mode           = softmax_desc.GetMode();
+    float alpha = softmax_desc.GetAlpha();
+    float beta  = softmax_desc.GetBeta();
 
     const auto invoke_ctx = [&]() -> AnyInvokeParams {
         switch(problem_casted.GetDirection())
@@ -501,7 +503,7 @@ void Solution::RunImpl(const Handle& handle,
             auto y = get_input_checked(miopenTensorSoftmaxY, "miopenTensorSoftmaxY");
 
             return softmax::InvokeParams(
-                &alpha, &beta, *x.descriptor, x.buffer, *y.descriptor, y.buffer, algorithm, mode);
+                &alpha, &beta, *x.descriptor, x.buffer, *y.descriptor, y.buffer);
         }
         case miopenProblemDirectionBackward: {
             auto y  = get_input_checked(miopenTensorSoftmaxY, "miopenTensorSoftmaxY");
@@ -515,12 +517,14 @@ void Solution::RunImpl(const Handle& handle,
                                          *dy.descriptor,
                                          dy.buffer,
                                          *dx.descriptor,
-                                         dx.buffer,
-                                         algorithm,
-                                         mode);
+                                         dx.buffer);
         }
 
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
+        case miopenProblemDirectionBackwardWeights:
+#ifdef MIOPEN_BETA_API
+        case miopenProblemDirectionInference:
+#endif
+            MIOPEN_THROW(miopenStatusNotImplemented);
         }
     }();
 
@@ -532,16 +536,30 @@ void Solution::RunImpl(const Handle& handle,
 
     solver::softmax::Softmax regularSoftmax;
     solver::softmax::AttnSoftmax attnSoftmax;
+    solver::softmax::SoftmaxNoncontiguous noncontiguousSoftmax;
 
     if(!kernels.empty())
     {
-        const auto ctx = ExecutionContext{&handle};
-        auto db_getter = MakeConvDbGetter(ctx);
-        const auto softmax_solution =
-            GetSolver() == regularSoftmax.SolverDbId()
-                ? solver::FindSolution(
-                      regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
-                : attnSoftmax.GetSolution(ctx, problem_description);
+        const auto ctx              = ExecutionContext{&handle};
+        auto db_getter              = MakeConvDbGetter(ctx);
+        const auto softmax_solution = [&]() {
+            const auto solverId = GetSolver();
+            if(solverId == regularSoftmax.SolverDbId())
+            {
+                return solver::FindSolution(
+                    regularSoftmax, ctx, problem_description, db_getter, invoke_ctx);
+            }
+            else if(solverId == attnSoftmax.SolverDbId())
+            {
+                return attnSoftmax.GetSolution(ctx, problem_description);
+            }
+            else if(solverId == noncontiguousSoftmax.SolverDbId())
+            {
+                return noncontiguousSoftmax.GetSolution(ctx, problem_description);
+            }
+            MIOPEN_THROW(miopenStatusInvalidValue,
+                         "Invalid softmax solver ID: " + solverId.ToString());
+        }();
         auto kernel_handles = std::vector<Kernel>{std::begin(kernels), std::end(kernels)};
 
         if(softmax_solution.invoker_factory.has_value())
@@ -568,12 +586,25 @@ void Solution::RunImpl(const Handle& handle,
         return;
     }
 
-    auto ctx       = ExecutionContext{&handle};
-    auto db_getter = MakeConvDbGetter(ctx);
-    const auto softmax_solution =
-        GetSolver() == regularSoftmax.SolverDbId()
-            ? solver::FindSolution(regularSoftmax, ctx, problem_description, db_getter, invoke_ctx)
-            : attnSoftmax.GetSolution(ctx, problem_description);
+    auto ctx                    = ExecutionContext{&handle};
+    auto db_getter              = MakeConvDbGetter(ctx);
+    const auto softmax_solution = [&]() {
+        const auto solverId = GetSolver();
+        if(solverId == regularSoftmax.SolverDbId())
+        {
+            return solver::FindSolution(
+                regularSoftmax, ctx, problem_description, db_getter, invoke_ctx);
+        }
+        else if(solverId == attnSoftmax.SolverDbId())
+        {
+            return attnSoftmax.GetSolution(ctx, problem_description);
+        }
+        else if(solverId == noncontiguousSoftmax.SolverDbId())
+        {
+            return noncontiguousSoftmax.GetSolution(ctx, problem_description);
+        }
+        MIOPEN_THROW(miopenStatusInvalidValue, "Invalid softmax solver ID: " + solverId.ToString());
+    }();
 
     if(softmax_solution.invoker_factory.has_value())
     {
@@ -707,8 +738,12 @@ AnyInvokeParams Solution::MakeInvokeParams(const Problem& problem_,
                                      workspace,
                                      workspace_size,
                                      conv_desc.attribute.gfx90aFp16alt.GetWrW()};
-    default: MIOPEN_THROW(miopenStatusNotImplemented);
+#ifdef MIOPEN_BETA_API
+    case miopenProblemDirectionInference: break;
+#endif
     }
+
+    MIOPEN_THROW(miopenStatusNotImplemented);
 }
 
 Problem Solution::Transpose(const Problem& problem, RunInput* x, const RunInput& w, RunInput* y)
