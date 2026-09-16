@@ -1,0 +1,23 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Phase 1 CPU-only host-ASAN coverage. This file is applied only to
+# hip_kernel_provider_tests; provider integration tests remain GPU-only.
+test_categories:
+  host-asan:
+    description: "GPU-independent hip-kernel-provider unit tests for host ASAN"
+    test_patterns:
+      - "TestContext.*"
+      - "TestHandle.*"
+      - "TestPluginPublic.*"
+      - "TestFindTensorAttributes.*"
+      - "TestIsChannelLastLayout.*"
+      - "TestParseActivation.*"
+    labels:
+      - "host-asan"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    host-asan: 300

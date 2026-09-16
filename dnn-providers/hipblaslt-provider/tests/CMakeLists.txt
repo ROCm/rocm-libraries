@@ -36,6 +36,13 @@ add_executable(
 
 target_compile_options(hipblaslt_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
+# HipErrorHandler calls hipGetLastError() after every test, which initializes
+# HIP and probes /dev/kfd. Keep host-ASAN's admitted CPU-only suites independent
+# of the device runtime without changing normal or device-ASAN test behavior.
+if(THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    target_compile_definitions(hipblaslt_plugin_tests PRIVATE HIPDNN_TEST_SKIP_HIP_ERROR_HANDLER)
+endif()
+
 target_link_libraries(
     hipblaslt_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host
                                   hipblaslt_plugin_private hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads

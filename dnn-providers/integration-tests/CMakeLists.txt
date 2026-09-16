@@ -318,6 +318,42 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
         )
     endforeach()
 
+    # Host-ASAN is a separate, positive-only admission lane. Keep one category
+    # manifest per executable: applying a shared catch-all category to all three
+    # binaries would silently admit new GPU tests. The CI-side runner audits the
+    # generated commands and requires the exact selected names/counts before it
+    # executes any test.
+    apply_test_category_labels(
+        hipdnn_integration_tests_unit_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_host_asan_unit.yaml"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+        INSTALL_TEST_FILE "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+        ENVIRONMENT ${TEST_ENVIRONMENT}
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+    apply_test_category_labels(
+        hipdnn_gpu_ref_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_host_asan_gpu_ref.yaml"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+        INSTALL_TEST_FILE "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+        ENVIRONMENT ${TEST_ENVIRONMENT}
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+    apply_test_category_labels(
+        hipdnn_golden_data_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_host_asan_golden.yaml"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+        INSTALL_TEST_FILE "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+        COMMAND_ARGS
+            --reference cpu
+            --gd "${CMAKE_BINARY_DIR}/lib/integration-test-bundles/quick/BatchnormFwdInference"
+        INSTALL_COMMAND_ARGS
+            --reference cpu
+            --gd "../../${CMAKE_INSTALL_LIBDIR}/integration-test-bundles/quick/BatchnormFwdInference"
+        ENVIRONMENT ${TEST_ENVIRONMENT}
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+
     # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.
     install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"

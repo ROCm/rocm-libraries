@@ -32,6 +32,7 @@
 #   ROCALUTION_EMULATION_SMOKE=1      -> smoke subset (solver tests, reduced params)
 #   ROCALUTION_EMULATION_REGRESSION=1 -> regression subset
 #   ROCALUTION_EMULATION_EXTENDED=1   -> extended subset
+#   ROCALUTION_HOST_ONLY=1             -> disable accelerator initialization
 #   (no env var)                      -> full parameter sweep
 #
 # GPU-heavy tests (local_matrix, local_vector, etc.) skip automatically when
@@ -78,6 +79,22 @@ test_categories:
     notes: |
       CMakeLists.txt sets ROCALUTION_EMULATION_EXTENDED=1 for this suite.
 
+  host-asan:
+    description: "CPU-only host memory-safety tests for host-ASAN presubmit"
+    test_patterns:
+      - "local_vector_test.*host*"
+      - "local_matrix_test/parameterized_local_matrix_test.*host*"
+    exclude:
+      - "*device*"
+    labels:
+      - "host-asan"
+      - "pr"
+    notes: |
+      CMakeLists.txt sets ROCALUTION_HOST_ONLY=1 so the test main disables the
+      accelerator before initialization and does not probe GPU device nodes.
+      The device-named cases are excluded to preserve LeakSanitizer coverage;
+      their host variants currently expose known leaks tracked separately.
+
   full:
     description: "Full test suite — no emulation env var, all parameter combinations (target: < 8 hours)"
     test_patterns:
@@ -120,6 +137,7 @@ execution_settings:
     quick: 300
     standard: 1800
     comprehensive: 14400
+    host-asan: 1800
     full: 28800
     ffm-quick: 7200    # 2 hours — hard FFM PR budget
     ffm-full: 7200     # 2 hours — initially same as ffm-quick

@@ -57,3 +57,17 @@ test_categories:
       # installed gtest binary, so it is absent from the installed CTestTestfile.cmake. See
       # tools/CMakeLists.txt.
       - "hipdnn_list_engines_smoke"
+
+  # Phase 1 host-ASAN coverage. These are native unit targets validated without
+  # /dev/kfd or a DRM render node; integration, samples, and providers stay out.
+  host-asan:
+    description: "GPU-independent native unit tests for host ASAN"
+    test_patterns:
+      - "hipdnn_data_sdk_tests"
+      - "hipdnn_flatbuffers_sdk_tests"
+      - "hipdnn_backend_tests"
+      - "hipdnn_frontend_tests"
+      - "hipdnn_test_sdk_tests"
+      - "hipdnn_plugin_sdk_tests"
+    labels:
+      - "host-asan"
