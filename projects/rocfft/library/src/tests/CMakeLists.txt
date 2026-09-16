@@ -55,6 +55,13 @@ target_link_libraries( rocfft-internal-test PRIVATE
   ${ROCFFT_SQLITE_LIB}
 )
 
+if(BUILD_CODE_COVERAGE)
+  # Match the offload driver used by librocfft to avoid kernel image incompatibility
+  target_link_options(rocfft-internal-test PRIVATE --offload-new-driver)
+  # Coverage with new offload driver requires dynamic loading symbols
+  target_link_libraries(rocfft-internal-test PRIVATE ${CMAKE_DL_LIBS})
+endif()
+
 # Use installed GTest, or build from source (BUILD_GTEST=ON forces this).
 if( NOT BUILD_GTEST )
   find_package( GTest QUIET )

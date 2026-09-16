@@ -47,8 +47,19 @@ endfunction()
 # Add code coverage flags to a library target, if enabled
 function( rocfft_add_coverage_flags target )
   if( BUILD_CODE_COVERAGE )
-    target_compile_options( ${target} PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping )
-    target_link_options( ${target} INTERFACE -fprofile-instr-generate )
+    message(STATUS "rocFFT: code coverage instrumentation ENABLED (${target})")
+    # ccache (direct mode) does not include -fprofile-instr-generate in its hash, so a
+    # coverage compile can hit a cached NON-coverage object and come back
+    # un-instrumented (observed: 0 __llvm_profile symbols despite the flag). Add a
+    # coverage-specific compile definition to ensure ccache sees distinct hashes and
+    # does not incorrectly return non-instrumented objects. Subsequent builds should
+    # still hit ccache, so the build is not fully recompiled.
+    target_compile_definitions(${target} PRIVATE ROCFFT_COVERAGE_INSTRUMENTED=1)
+
+    # ROCm 7.14: Device PGO/coverage requires the new offload driver and LLVM commit
+    # 7c0a3a52cf96 which fixes device profile collection and sections emission.
+    target_compile_options( ${target} PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping --offload-new-driver )
+    target_link_options( ${target} INTERFACE -fprofile-instr-generate --offload-new-driver )
   endif()
 endfunction()
 
