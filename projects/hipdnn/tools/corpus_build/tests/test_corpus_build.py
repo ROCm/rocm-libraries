@@ -636,7 +636,17 @@ def test_the_command_line_produces_a_corpus_offline(tmp_path, capsys):
     assert manifest["emitted"] == 50
     assert len(list((out / "graphs").glob("*.json"))) == 50
     assert (out / "manifest.csv").is_file()
-    assert set(manifest["mix"]) == {"model", "kernel", "sweep"}
+    # The kernel source contributes only what the packs in this tree can serve: a
+    # geometry needs `--min-candidates` kernels claiming it before it is rankable, so a
+    # checkout shipping the pipeline without a multi-kernel pack has nothing to draw
+    # there. Derived rather than hardcoded, so this still demands all three sources
+    # wherever such a pack is installed.
+    servable, _ = kernels.collect(
+        kernels.discover([pipeline.REPO / kernels.DEFAULT_KDP_ROOT]),
+        min_candidates=pipeline.DEFAULT_MIN_CANDIDATES,
+        max_bytes=pipeline.DEFAULT_MAX_BYTES,
+    )
+    assert set(manifest["mix"]) == {"model", "sweep"} | ({"kernel"} if servable else set())
     assert manifest["seed"] == 1
     assert all(entry["sha256"] for entry in manifest["inputs"])
     printed = capsys.readouterr().out
