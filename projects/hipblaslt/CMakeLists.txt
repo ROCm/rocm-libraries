@@ -708,7 +708,6 @@ endif()
 # Install TensileLite Python packages and test tools for artifact-based testing.
 # Produces:
 #   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
-#   share/hipblaslt/tensilelite/Tensile/     — legacy import compatibility shim
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
@@ -723,11 +722,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "__pycache__" EXCLUDE
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
-    )
-    install(
-        FILES "${_tensilelite_src}/Tensile/__init__.py"
-        DESTINATION "${_tensilelite_install_dest}/Tensile"
-        COMPONENT tests
     )
 
     # Scripts used by unit tests
