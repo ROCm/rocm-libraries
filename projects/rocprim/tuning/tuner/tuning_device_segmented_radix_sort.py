@@ -24,8 +24,6 @@ from typing import Optional, OrderedDict, Callable
 import sys
 import os
 
-from pytest import param
-
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS, BASE_DIR
