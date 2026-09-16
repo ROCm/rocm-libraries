@@ -34,8 +34,31 @@
 #include <mutex>
 #include <stdlib.h>
 
+#include <hip/hip_runtime.h>
+
 #include "hipblas_test.hpp"
 #include "host_alloc.hpp"
+
+// Under HSA_XNACK=1 on a discrete GPU (e.g. gfx942 MI300X), a plain host
+// allocation is part of the SVM address space: an H2D copy can pull its pages
+// into VRAM, and a later CPU write (e.g. the OpenMP-parallel hipblas_init_matrix
+// fill) then faults them back RAM<-VRAM through svm_migrate_to_ram. With many
+// OpenMP threads faulting at once this serializes on the amdgpu SVM migration
+// mutex (perf: ~98% osq_lock), turning client init into an hours-long stall.
+// Hinting the range's preferred location as the CPU keeps these host-only
+// buffers in RAM so the init writes don't trigger migration -- while preserving
+// full OpenMP parallelism. Best-effort: ignored where advise is unsupported
+// (integrated APUs have unified memory and never hit this path).
+static void host_mem_advise_cpu(void* ptr, size_t size)
+{
+    if(!ptr || !size)
+        return;
+    int deviceId = 0;
+    if(hipGetDevice(&deviceId) != hipSuccess)
+        return;
+    // hipCpuDeviceId marks the host as the preferred location for the range.
+    (void)hipMemAdvise(ptr, size, hipMemAdviseSetPreferredLocation, hipCpuDeviceId);
+}
 
 // light weight memory tracking for threshold limit on total use
 static size_t                  mem_used{0};
@@ -214,6 +237,7 @@ void* host_malloc(size_t size)
             memset(ptr, value, size);
 
         alloc_ptr_use(ptr, size);
+        host_mem_advise_cpu(ptr, size);
 
         return ptr;
     }
@@ -227,6 +251,7 @@ void* host_calloc(size_t nmemb, size_t size)
     {
         void* ptr = calloc(nmemb, size);
         alloc_ptr_use(ptr, nmemb * size);
+        host_mem_advise_cpu(ptr, nmemb * size);
         return ptr;
     }
     else
