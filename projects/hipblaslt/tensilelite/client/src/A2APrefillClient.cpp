@@ -618,6 +618,7 @@ namespace TensileLite
                 const int batch = std::max(1, args["a2a-multigpu-batch"].as<int>());
                 const int skewXUs    = std::max(0, args["a2a-multigpu-skew-x-us"].as<int>());
                 const int skewGemmUs = std::max(0, args["a2a-multigpu-skew-gemm-us"].as<int>());
+                const bool warBarrier = args["a2a-multigpu-war-barrier"].as<int>() != 0;
 
                 int deviceCount = 0;
                 HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
@@ -640,7 +641,7 @@ namespace TensileLite
                 std::cout << "[a2a-multigpu] W=" << W << " M=" << M << " N=" << N << " K=" << K
                           << " k_local=" << kLoc << " launches=" << launches << " batch=" << batch
                           << " skew-x-us=" << skewXUs << " skew-gemm-us=" << skewGemmUs
-                          << std::endl;
+                          << " war-barrier=" << warBarrier << std::endl;
 
                 ContractionProblemGemm problem = base;
                 problem.resetTensor(ContractionProblemGemm::TENSOR::B,
@@ -883,9 +884,12 @@ namespace TensileLite
                                                          streams[d]));
 
                             // WAR barrier: gates the x rewrite below.
-                            hipLaunchKernelGGL(
-                                a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
-                            HIP_CHECK_EXC(hipGetLastError());
+                            if(warBarrier)
+                            {
+                                hipLaunchKernelGGL(
+                                    a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
+                                HIP_CHECK_EXC(hipGetLastError());
+                            }
 
                             if(skewXUs != 0 && d == W - 1)
                             {
