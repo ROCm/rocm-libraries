@@ -315,13 +315,13 @@ inline std::optional<LineStoreFileId>
     peekLineStoreFileId(const std::filesystem::path& path) noexcept
 {
 #if defined(_WIN32)
-    const HANDLE probe = CreateFileW(path.wstring().c_str(),
-                                     FILE_READ_ATTRIBUTES,
-                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                     nullptr,
-                                     OPEN_EXISTING,
-                                     FILE_ATTRIBUTE_NORMAL,
-                                     nullptr);
+    const auto probe = CreateFileW(path.wstring().c_str(),
+                                   FILE_READ_ATTRIBUTES,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   nullptr,
+                                   OPEN_EXISTING,
+                                   FILE_ATTRIBUTE_NORMAL,
+                                   nullptr);
     if(probe == INVALID_HANDLE_VALUE)
     {
         return std::nullopt;
@@ -357,8 +357,10 @@ inline std::optional<LineStoreFileId>
 inline NativeLineStoreHandle openLineStoreHandle(const std::filesystem::path& path)
 {
 #if defined(_WIN32)
+    // FILE_GENERIC_READ and FILE_GENERIC_WRITE share standard-rights bits; that overlap is
+    // what makes clang-tidy call the operands equivalent.
     return CreateFileW(path.wstring().c_str(),
-                       FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                       FILE_GENERIC_READ | FILE_GENERIC_WRITE, // NOLINT(misc-redundant-expression)
                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        nullptr,
                        OPEN_ALWAYS,
@@ -448,8 +450,9 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
 inline NativeLineStoreHandle openExistingLineStoreHandle(const std::filesystem::path& path)
 {
 #if defined(_WIN32)
+    // Overlapping standard-rights bits; see openLineStoreHandle().
     return CreateFileW(path.wstring().c_str(),
-                       FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                       FILE_GENERIC_READ | FILE_GENERIC_WRITE, // NOLINT(misc-redundant-expression)
                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        nullptr,
                        OPEN_EXISTING,
@@ -616,7 +619,7 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
 
     size_t written = 0;
 #if defined(_WIN32)
-    LARGE_INTEGER end{};
+    const LARGE_INTEGER end{};
     if(SetFilePointerEx(handle, end, nullptr, FILE_END) == 0)
     {
         return false;
@@ -665,7 +668,7 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
 inline bool truncateLineStoreToEmpty(NativeLineStoreHandle handle) noexcept
 {
 #if defined(_WIN32)
-    LARGE_INTEGER origin{};
+    const LARGE_INTEGER origin{};
     if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
     {
         return false;
@@ -686,7 +689,7 @@ inline std::optional<std::string> readAllLineStoreBytes(NativeLineStoreHandle ha
     std::array<char, 65536> buffer{};
 
 #if defined(_WIN32)
-    LARGE_INTEGER origin{};
+    const LARGE_INTEGER origin{};
     if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
     {
         return std::nullopt;

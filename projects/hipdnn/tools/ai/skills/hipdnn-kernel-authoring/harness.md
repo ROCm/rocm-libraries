@@ -70,6 +70,18 @@ pointers for the CPU reference. The GPU reference
 `dnn-providers/integration-tests/src/harness/`) takes device pointers; ask it with
 `requiresDeviceMemory()` rather than assuming.
 
+That harness directory is **source-tree only**. The integration-tests project installs
+its bundle directory (`dnn-providers/integration-tests/CMakeLists.txt:149`), a ctest
+file (`dnn-providers/integration-tests/CMakeLists.txt:312`), the test executable
+(`dnn-providers/integration-tests/CMakeLists.txt:333`), an export set
+(`dnn-providers/integration-tests/CMakeLists.txt:360`) and three cmake config files
+(`dnn-providers/integration-tests/CMakeLists.txt:365`) — no headers and no harness
+library. So from a program built against `$INSTALL` you can **read** the GPU reference
+as a worked example but cannot link it. The CPU reference above has no such problem:
+`hipdnn_test_sdk` installs its headers, targets and export set
+(`projects/hipdnn/test_sdk/CMakeLists.txt:54`, `:57`, `:68`, `:74`), so
+`find_package(hipdnn_test_sdk)` reaches it.
+
 The same serialized bytes drive the reference and the engine. That is the invariant
 worth exploiting: inspect, validate and execute the identical object.
 
@@ -114,6 +126,20 @@ Tolerance is per operation and per element type, resolved in
 RMSNorm/Pointwise/LayerNorm/SDPA; unknown ops fall back to `1e-3`). For a fused
 graph, `MAX_ACROSS_NODES` — the loosest per-node tolerance in the graph — is the
 conservative default; `OUTPUT_OP_TOLERANCE` is tighter.
+
+`ToleranceResolver.hpp` lives under `dnn-providers/integration-tests/src/harness/`,
+which is source-tree only (above): readable as a worked example, not linkable from
+`$INSTALL`. What an installed tree gives you instead is
+`projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp` —
+per-operation namespaces (`batchnorm`, `rmsnorm`, `conv`, `matmul`, `moe`, `reduction`,
+`pointwise`, `layernorm`, `sdpa`) of `constexpr` per-element-type tolerance functions
+such as `getToleranceInference` (`hipdnn_test_sdk/utilities/TestTolerances.hpp:24-50`).
+It carries no resolver and no fused-graph mode, so `MAX_ACROSS_NODES` is yours to apply
+by hand: take the loosest of the per-node numbers. Several of its numbers state their
+own reason in a comment — the bfloat16 inference tolerance explains why 5e-3 was
+sub-format-precision (`hipdnn_test_sdk/utilities/TestTolerances.hpp:40-44`) — and that
+reason travels with the number. The rule below is unchanged by the source you read it
+from.
 
 Rules:
 
