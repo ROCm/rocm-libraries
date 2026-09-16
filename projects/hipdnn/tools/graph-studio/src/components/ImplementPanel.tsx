@@ -121,8 +121,16 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
       else next[input.name] = input.default === null || input.default === undefined ? "" : String(input.default);
     }
     setValues(next);
-    const firstPath = flow.inputs.find((input) => input.type === "path");
-    setGraphInputs(firstPath ? [firstPath.name] : []);
+    // The input that wants the canvas is the one called `graph`, not merely the first
+    // `path` the flow happens to declare. A pipeline's path inputs include corpus
+    // directories and prior run directories, and binding the canvas to one of those
+    // produces a value that is a real file and the wrong thing entirely -- a resume
+    // flow whose first path input is `prior_run` was handed a graph file and looked
+    // for its contract underneath it. Fall back to the first path only when no input
+    // is named `graph`, so single-input flows still work without ceremony.
+    const byName = flow.inputs.find((input) => input.type === "path" && input.name === "graph");
+    const target = byName ?? flow.inputs.find((input) => input.type === "path");
+    setGraphInputs(target ? [target.name] : []);
     // The flow's own budget, not 1. These loops exist to repair what their gates
     // catch, and a budget of 1 means the first gate that fails ends the run with the
     // feedback collected and nowhere to spend it -- the engine says so in as many
@@ -281,7 +289,19 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
     });
   }, [applyStatus]);
 
-  const browse = useCallback(async (name: string) => {
+  // A flow's `path` inputs are not all files: this pipeline has a corpus directory and
+  // a prior run directory, and a file picker cannot express either. The flow schema has
+  // one `path` type and no file/directory distinction, so rather than guess from the
+  // input's name, both pickers are offered and the operator says which they meant.
+  const browse = useCallback(async (name: string, kind: "file" | "directory") => {
+    if (kind === "directory") {
+      const dir = await platform.openDirectory();
+      // Same contract as the file branch: the Electron platform carries the absolute
+      // path as the handle token, and a browser has none to give.
+      if (!dir || typeof dir.token !== "string") return;
+      setValues((previous) => ({ ...previous, [name]: dir.token as string }));
+      return;
+    }
     const opened = await platform.openTextFile();
     // The Electron platform carries the absolute path as the handle token; a
     // browser has no path to give, which is why this is desktop-only.
@@ -404,7 +424,7 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
                     : previous.filter((name) => name !== input.name),
                 )
               }
-              onBrowse={() => void browse(input.name)}
+              onBrowse={(kind) => void browse(input.name, kind)}
             />
           ))}
           {flow && flow.inputs.length === 0 && (
@@ -473,7 +493,7 @@ interface InputFieldProps {
   disabled: boolean;
   onValue(next: InputValue): void;
   onUseGraph(use: boolean): void;
-  onBrowse(): void;
+  onBrowse(kind: "file" | "directory"): void;
 }
 
 /** One control, chosen from the type the flow declared for the input. */
@@ -510,14 +530,24 @@ function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, on
             onChange={(event) => onValue(event.target.value)}
           />
           {isPath && (
-            <button
-              type="button"
-              className="implement__browse"
-              onClick={onBrowse}
-              disabled={disabled || usesGraph}
-            >
-              Browse…
-            </button>
+            <>
+              <button
+                type="button"
+                className="implement__browse"
+                onClick={() => onBrowse("file")}
+                disabled={disabled || usesGraph}
+              >
+                File…
+              </button>
+              <button
+                type="button"
+                className="implement__browse"
+                onClick={() => onBrowse("directory")}
+                disabled={disabled || usesGraph}
+              >
+                Folder…
+              </button>
+            </>
           )}
         </div>
       )}
