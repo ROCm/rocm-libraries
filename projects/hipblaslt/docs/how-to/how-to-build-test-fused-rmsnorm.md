@@ -204,12 +204,12 @@ to the source tree, so no benchmark run is needed to produce them:
 
 ```text
 library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/
-  Equality/partialrms_k1_*.yaml               # bf16 K1 producer (PRMS, PRMS_RA)
-  Equality/partialrms_mxfp8_quant_k1_*.yaml   # K1 producer with MX fp8 quant
-  Equality/mxfp8_quant_k1_*.yaml              # standalone MX fp8 quant
-  Equality/mxfp8_rstdscale_k3_*.yaml          # K3 consumer via ScaleAlphaVec
-  Origami/partialrms_*.yaml
-  partialrms_residualout_*.yaml
+  Equality/bench_fused_bf16_partialrms_residualadd_*.yaml
+                                              # bf16 K1 producer
+  Equality/partialrms_residual_mxfp8quant_*.yaml
+                                              # MX fp8 K1 producer
+  Origami/alphavec2_sweep_bf16_*.yaml         # bf16 K3 consumer
+  Origami/alphavec2_sweep_mxfp8_*.yaml        # MX fp8 K3 consumer
 ```
 
 Earlier revisions of this guide generated these from
@@ -230,8 +230,7 @@ REL=src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950
 rm -rf $OUT
 mkdir -p $OUT/$REL/Equality $OUT/$REL/Origami
 cp $SRC/Equality/*.yaml          $OUT/$REL/Equality/
-cp $SRC/*.yaml                   $OUT/$REL/
-cp $SRC/Origami/partialrms*.yaml $OUT/$REL/Origami/
+cp $SRC/Origami/alphavec2*.yaml  $OUT/$REL/Origami/
 ```
 
 Two details matter here:
@@ -355,8 +354,8 @@ entry under troubleshooting.
   `PRMS`/`PRMS_RA` logic. Regenerate `3_LibraryLogic` and rebuild
   `tensilelite-device-libraries` with `HIPBLASLT_LIBLOGIC_PATH` pointing to it.
 - **`no RstdScale (K3) solution selected`**: the gfx950 library is missing the
-  ScaleAlphaVec logic from `gemm_rstdscale_k3.yaml`. Regenerate the K3 logic,
-  merge it with the PartialRMS logic, and rebuild `tensilelite-device-libraries`.
+  `UseScaleAlphaVec: 2` logic. Add or regenerate the matching
+  `Origami/alphavec2_sweep_*` logic and rebuild `tensilelite-device-libraries`.
 - **`getKernel failed: row_div`**: build `row_div-library-gfx950` and make sure
   `row_div_gfx950.co` is present under `$BUILD_DIR/Tensile/library/gfx950`.
 - **`getKernel failed: row_rstd`**: build `row_rstd-library-gfx950` and make
@@ -381,11 +380,11 @@ entry under troubleshooting.
   in `tensile_host.cpp`, now fixed. For a REQUANT-only chain,
   `ConstructTensileProblem` and `updateTensileProblem` unconditionally set
   `DQuantSize0 = requantMxBlockSize` and `DQuantSize1 = 1`. That pairing is only
-  correct for the PartialRMS flow, where the problem has already been transposed
-  so free0 is the hidden dimension. The standalone `mxfp8_quant_k1_*` solutions
+  correct for the PartialRMS flow, where free0 is the hidden dimension. The standalone
+  `mxfp8_quant_k1_*` solutions
   are tuned with `DQuantSize0 = 1` and `DQuantSize1 = blockSize`, so the
   `DQuantSize0Equal` / `DQuantSize1Equal` predicates rejected every candidate.
-  Both sites now pick the pair based on whether the PartialRMS transpose is active.
+  Both sites now pick the pair based on whether the chain uses PartialRMS.
   The `setMxScale` arguments are deliberately left in terms of `q0`/`q1`, since that
   expression already matches Tensile's convention for either orientation.
 - **`MX UE8M0 scale buffer mismatch` (`FusedEpilogueE2E.mxfp8Quant*`)**: this was a
@@ -407,9 +406,9 @@ entry under troubleshooting.
   bodies now follow it.
 
   Be aware of the consequence: the two paths emit transposed grids for the same
-  logical operation. After the PartialRMS transpose tokens sit on free1, giving
-  `[M_tokens × N_hidden/blockSize]`; a REQUANT-only chain leaves tokens on free0,
-  giving `[N_hidden/blockSize × M_tokens]`. Both are self-consistent and validated,
+  logical operation. In a PartialRMS problem tokens sit on free1, giving
+  `[tokens × features/blockSize]`; a REQUANT-only chain leaves tokens on free0,
+  giving `[features/blockSize × tokens]`. Both are self-consistent and validated,
   but a caller that feeds these scales downstream must orient them per path. Making
   the two agree would require re-tuning non-PartialRMS solutions for the transposed
   orientation.

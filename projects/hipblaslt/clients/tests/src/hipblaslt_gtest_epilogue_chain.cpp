@@ -759,14 +759,14 @@ static void setMxBlockScale(hipblasLtMatmulDesc_t           mm,
 }
 
 // Core TN fused matmul: op(A)=T, op(B)=N, alpha=1, beta=0, one heuristic result.
-// Optional MX block scales on A and/or B (pass nullptr to skip).
+// A (k x m) and B (k x n) are packed column-major matrices. Optional MX block scales on A
+// and/or B (pass nullptr to skip).
 static hipblasStatus_t runTnFusedMatmul(hipblasLtHandle_t                  handle,
                                         FusedMatmulLayout                  layout,
                                         int64_t                            m,
                                         int64_t                            n,
                                         int64_t                            k,
                                         void*                              dA,
-                                        int64_t                            lda,
                                         void*                              dScaleA,
                                         void*                              dB,
                                         void*                              dScaleB,
@@ -780,7 +780,7 @@ static hipblasStatus_t runTnFusedMatmul(hipblasLtHandle_t                  handl
     algoCount = 0;
 
     hipblasLtMatrixLayout_t layA = nullptr, layB = nullptr, layC = nullptr, layD = nullptr;
-    hipblasLtMatrixLayoutCreate(&layA, layout.aType, k, m, lda);
+    hipblasLtMatrixLayoutCreate(&layA, layout.aType, k, m, k);
     hipblasLtMatrixLayoutCreate(&layB, layout.bType, k, n, k);
     hipblasLtMatrixLayoutCreate(&layC, layout.cdType, m, n, m);
     hipblasLtMatrixLayoutCreate(&layD, layout.cdType, m, n, m);
@@ -839,7 +839,6 @@ static hipblasStatus_t runBf16TnFusedMatmul(hipblasLtHandle_t                  h
                                             int64_t                            n,
                                             int64_t                            k,
                                             void*                              dA,
-                                            int64_t                            lda,
                                             void*                              dB,
                                             void*                              dC,
                                             void*                              dD,
@@ -848,15 +847,12 @@ static hipblasStatus_t runBf16TnFusedMatmul(hipblasLtHandle_t                  h
                                             size_t                             workspaceSize,
                                             int&                               algoCount)
 {
-    // TN bf16 GEMM with col-major A/B/C/D descriptors. The lda override lets the
-    // decomposed consumer feed a row-major [M, N_hidden] producer output as op(A)^T.
     return runTnFusedMatmul(handle,
                             {HIP_R_16BF, HIP_R_16BF, HIP_R_16BF},
                             m,
                             n,
                             k,
                             dA,
-                            lda,
                             nullptr,
                             dB,
                             nullptr,
@@ -877,7 +873,6 @@ static hipblasStatus_t runFp8Fp8TnFusedMatmulBf16D(hipblasLtHandle_t            
                                                    int64_t                            n,
                                                    int64_t                            k,
                                                    void*                              dA,
-                                                   int64_t                            lda,
                                                    void*                              dMxScaleA,
                                                    void*                              dB,
                                                    void*                              dMxScaleB,
@@ -894,7 +889,6 @@ static hipblasStatus_t runFp8Fp8TnFusedMatmulBf16D(hipblasLtHandle_t            
                             n,
                             k,
                             dA,
-                            lda,
                             dMxScaleA,
                             dB,
                             dMxScaleB,
@@ -934,11 +928,11 @@ static void expectBf16Near(const std::vector<uint16_t>& actual,
 // ---- End-to-end numeric test: decomposed RMSNorm consumer (Kernel 3 RstdScale) ----
 //
 // Exercises the decomposed flow's consumer stage in isolation: a GEMM2 with the
-// HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY epilogue multiplies each output row by a
-// pre-computed per-row rstd carried in the handoff descriptor (K3 RstdScale, normal
-// orientation, no reduction). This test puts a host-computed rstd in the caller-owned handoff
-// buffer so the consumer can be exercised independently of the producer. Verifies
-// D[m,n] = (alpha * op(A)*op(B))[m,n] * rstd[m]. gfx950-only.
+// HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY epilogue multiplies each token's output by a
+// pre-computed per-token rstd carried in the handoff descriptor. This test puts a host-computed
+// rstd in the caller-owned handoff buffer so the consumer can be exercised independently of the
+// producer. Verifies out[m,n] = (mat1 @ W)[m,n] * rstd[m]; the consumer performs no
+// reduction. gfx950-only.
 
 static void createScaleApplyDescriptor(hipblasLtFusedEpilogueRMSNormDescriptor_t stats,
                                        hipblasLtFusedEpilogueDescriptor_t*       fused)
@@ -956,35 +950,36 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
     if(!deviceIsGfx950())
         GTEST_SKIP() << "fused RMSNorm (RstdScale) is wired for gfx950 only";
 
-    // TN, bf16, col-major. K3 RstdScale library tiles are N_out=64 wide; K = N_hidden.
-    const int64_t M = 256, N = 64, K = 64;
+    // Operation: mat1[mTok,K] row-major @ W[K,nOut] column-major produces
+    // out[mTok,nOut] row-major. Pass W as A and mat1 as B so hipBLASLt computes
+    // W^T @ mat1^T = out^T and applies the handoff rstd along D.N.
+    const int64_t mTok = 256, nOut = 64, K = 64;
     const float   alpha = 1.0f;
 
-    std::vector<uint16_t> hA(static_cast<size_t>(K) * M);
-    std::vector<uint16_t> hB(static_cast<size_t>(K) * N);
-    std::vector<uint16_t> hD(static_cast<size_t>(M) * N, 0);
-    std::vector<float>    hRstd(static_cast<size_t>(M));
+    std::vector<uint16_t> hMat1(static_cast<size_t>(K) * mTok);
+    std::vector<uint16_t> hW(static_cast<size_t>(K) * nOut);
+    std::vector<uint16_t> hD(static_cast<size_t>(mTok) * nOut, 0);
+    std::vector<float>    hRstd(static_cast<size_t>(mTok));
 
     std::mt19937                          rng(321);
     std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
     std::uniform_real_distribution<float> rdist(0.25f, 1.75f);
-    fillRandomBf16(hA, rng, dist);
-    fillRandomBf16(hB, rng, dist);
+    fillRandomBf16(hMat1, rng, dist);
+    fillRandomBf16(hW, rng, dist);
     for(auto& r : hRstd)
-        r = rdist(rng); // arbitrary per-row scale standing in for the producer's rstd
+        r = rdist(rng); // arbitrary per-token scale standing in for the producer's rstd
 
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dRstd = nullptr,
-         *dWs           = nullptr;
+    void *       dMat1 = nullptr, *dW = nullptr, *dD = nullptr, *dRstd = nullptr, *dWs = nullptr;
     const size_t wsSize = size_t(64) * 1024 * 1024;
-    ASSERT_EQ(hipMalloc(&dA, hA.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, hB.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMat1, hMat1.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dW, hW.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dD, hD.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dRstd, hRstd.size() * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD;
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), hA.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), hB.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+    ASSERT_EQ(
+        hipMemcpy(dMat1, hMat1.data(), hMat1.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(hipMemcpy(dW, hW.data(), hW.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
               hipSuccess);
     ASSERT_EQ(hipMemcpy(dRstd, hRstd.data(), hRstd.size() * sizeof(float), hipMemcpyHostToDevice),
               hipSuccess);
@@ -1000,40 +995,45 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
                   stats, dRstd, hRstd.size() * sizeof(float)),
               HIPBLAS_STATUS_SUCCESS);
 
-    // Consumer chain: RMSNorm scale-apply reads the deferred per-row scale from the handoff.
+    // Consumer chain: RMSNorm scale-apply reads the deferred per-token scale from the handoff.
     hipblasLtFusedEpilogueDescriptor_t cons = nullptr;
     ASSERT_NO_FATAL_FAILURE(createScaleApplyDescriptor(stats, &cons));
 
+    // Translate to hipBLASLt API descriptors.
+    const int64_t M = nOut;
+    const int64_t N = mTok;
+    void* const   A = dW;
+    void* const   B = dMat1;
+    void* const   D = dD;
+    void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
+
     int algoCount = 0;
-    ASSERT_EQ(
-        runBf16TnFusedMatmul(handle, M, N, K, dA, K, dB, dC, dD, cons, dWs, wsSize, algoCount),
-        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, cons, dWs, wsSize, algoCount),
+              HIPBLAS_STATUS_SUCCESS);
     ASSERT_GT(algoCount, 0) << "no RstdScale (K3) solution selected for the scale-apply problem";
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
               hipSuccess);
 
-    // Reference: the decomposed consumer (K3) swaps the GEMM operands (transposeForScaleApply)
-    // so the token axis (M) lands on the tensile N-direction, where UseScaleAlphaVec=2 applies
-    // the per-token rstd. The kernel therefore writes the output col-major [N, M] (tokens on the
-    // N stride): element (m tokens, n N_out) lands at address n + m*N. The GEMM value and the
-    // per-token rstd[m] scale are unchanged from the natural orientation.
-    std::vector<float> expected(static_cast<size_t>(M) * N);
-    for(int64_t m = 0; m < M; ++m)
-        for(int64_t n = 0; n < N; ++n)
+    // D is column-major [nOut, mTok], whose bytes are the row-major [mTok, nOut] result.
+    // UseScaleAlphaVec=2 applies the per-token rstd along hipBLASLt N:
+    // out[m,n] = alpha * sum_k(mat1[m,k] * W[k,n]) * rstd[m].
+    std::vector<float> expected(static_cast<size_t>(mTok) * nOut);
+    for(int64_t m = 0; m < mTok; ++m)
+        for(int64_t n = 0; n < nOut; ++n)
         {
             float acc = 0.0f;
             for(int64_t kk = 0; kk < K; ++kk)
-                acc += bf16_to_f32(hA[kk + m * K]) * bf16_to_f32(hB[kk + n * K]);
-            expected[n + m * N] = acc * alpha * hRstd[m]; // kernel writes col-major [N, M]
+                acc += bf16_to_f32(hMat1[kk + m * K]) * bf16_to_f32(hW[kk + n * K]);
+            expected[m * nOut + n] = acc * alpha * hRstd[m];
         }
     expectBf16Near(hD, expected);
 
     hipblasLtFusedEpilogueDestroy(cons);
     hipblasLtFusedEpilogueRMSNormDescriptorDestroy(stats);
     hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dMat1));
+    static_cast<void>(hipFree(dW));
     static_cast<void>(hipFree(dD));
     static_cast<void>(hipFree(dRstd));
     static_cast<void>(hipFree(dWs));
@@ -1043,25 +1043,26 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
 //
 // The full decomposed RMSNorm flow across two matmul calls linked by a caller-buffered RMSNorm
 // handoff descriptor:
-//   GEMM1 (producer, PARTIAL_RMSNORM_STATS): h2 = (x @ W0) * gamma  [M, N_hidden]; the library
+//   GEMM1 (producer, PARTIAL_RMSNORM_STATS): h2 = (x @ W0) * gamma [mTok, Nhidden]; the library
 //     runs K1 (PartialRMS) + row_rstd, stashing rstd = rsqrt(mean(h1^2)+eps) in the handoff.
-//   GEMM2 (consumer, RMSNORM_SCALE_APPLY):    y  = rstd * (h2 @ W1)  [M, N_out] via Kernel 3.
-// The combined result equals RMSNorm(x @ W0) @ W1. gamma=1 keeps the reference simple. TN bf16;
-// h2 is produced row-major [M, N_hidden] and fed to GEMM2 as its TN A operand (lda=N_hidden).
+//   GEMM2 (consumer, RMSNORM_SCALE_APPLY):    y = rstd * (h2 @ W1) [mTok, Nout] via Kernel 3.
+// Each call passes its weight as A and activation as B, so hipBLASLt computes the transpose of
+// the row-major result in column-major storage. The combined result equals
+// RMSNorm(x @ W0) @ W1. gamma=1 keeps the reference simple.
 // Needs a merged K1(PartialRMS)+K3(RstdScale) gfx950 library; gfx950-only.
 TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
 {
     if(!deviceIsGfx950())
         GTEST_SKIP() << "decomposed RMSNorm flow is wired for gfx950 only";
 
-    const int64_t M = 1024, Nhidden = 1024, K0 = 64, Nout = 64;
+    const int64_t mTok = 1024, Nhidden = 1024, K0 = 64, Nout = 64;
     const float   eps = 1e-5f;
 
-    std::vector<uint16_t> hX(static_cast<size_t>(K0) * M);
+    std::vector<uint16_t> hX(static_cast<size_t>(K0) * mTok);
     std::vector<uint16_t> hW0(static_cast<size_t>(K0) * Nhidden);
     std::vector<uint16_t> hW1(static_cast<size_t>(Nhidden) * Nout);
     std::vector<uint16_t> hGamma(static_cast<size_t>(Nhidden), f32_to_bf16(1.0f)); // gamma = 1
-    std::vector<uint16_t> hResidual(static_cast<size_t>(M) * Nhidden);
+    std::vector<uint16_t> hResidual(static_cast<size_t>(mTok) * Nhidden);
 
     std::mt19937                          rng(4242);
     std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
@@ -1076,10 +1077,10 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     ASSERT_EQ(hipMalloc(&dX, hX.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dW0, hW0.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * 2), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dH2, size_t(M) * Nhidden * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dH2, size_t(mTok) * Nhidden * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dW1, hW1.size() * 2), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD2, size_t(M) * Nout * 2), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dD2, size_t(mTok) * Nout * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dRstd, size_t(mTok) * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
     ASSERT_EQ(hipMemcpy(dX, hX.data(), hX.size() * 2, hipMemcpyHostToDevice), hipSuccess);
@@ -1098,7 +1099,7 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
-                  stats, dRstd, size_t(M) * sizeof(float)),
+                  stats, dRstd, size_t(mTok) * sizeof(float)),
               HIPBLAS_STATUS_SUCCESS);
 
     // Producer chain: residual-add + partial RMSNorm stats + gamma + eps + handoff.
@@ -1123,34 +1124,55 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
                   prod, HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS, &stats, sizeof(stats)),
               HIPBLAS_STATUS_SUCCESS);
 
-    // GEMM1 producer: h2 [M, N_hidden] (row-major) + rstd stashed in the handoff.
+    // GEMM1 producer: h2 [mTok, Nhidden] (row-major) + rstd stashed in the handoff.
     int algoCount = 0;
-    ASSERT_EQ(runBf16TnFusedMatmul(
-                  handle, M, Nhidden, K0, dX, K0, dW0, dH2, dH2, prod, dWs, wsSize, algoCount),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no PartialRMS (K1) producer solution selected";
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    {
+        // Translate GEMM1 to hipBLASLt API descriptors.
+        const int64_t M = Nhidden;
+        const int64_t N = mTok;
+        const int64_t K = K0;
+        void* const   A = dW0;
+        void* const   B = dX;
+        void* const   D = dH2;
+        void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
+
+        ASSERT_EQ(
+            runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, prod, dWs, wsSize, algoCount),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(algoCount, 0) << "no PartialRMS (K1) producer solution selected";
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
 
     // Consumer chain: scale-apply + the same handoff.
     hipblasLtFusedEpilogueDescriptor_t cons = nullptr;
     ASSERT_NO_FATAL_FAILURE(createScaleApplyDescriptor(stats, &cons));
 
-    // GEMM2 consumer: h2 (row-major [M, N_hidden]) is the TN A operand [N_hidden, M] (lda=N_hidden).
-    ASSERT_EQ(
-        runBf16TnFusedMatmul(
-            handle, M, Nout, Nhidden, dH2, Nhidden, dW1, dD2, dD2, cons, dWs, wsSize, algoCount),
-        HIPBLAS_STATUS_SUCCESS);
-    ASSERT_GT(algoCount, 0) << "no RstdScale (K3) consumer solution selected";
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    // GEMM2 consumer: W1 is A [Nout, Nhidden], and h2 is B [Nhidden, mTok].
+    {
+        // Translate GEMM2 to hipBLASLt API descriptors.
+        const int64_t M = Nout;
+        const int64_t N = mTok;
+        const int64_t K = Nhidden;
+        void* const   A = dW1;
+        void* const   B = dH2;
+        void* const   D = dD2;
+        void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
 
-    std::vector<uint16_t> hD2(static_cast<size_t>(M) * Nout);
+        ASSERT_EQ(
+            runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, cons, dWs, wsSize, algoCount),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_GT(algoCount, 0) << "no RstdScale (K3) consumer solution selected";
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
+    std::vector<uint16_t> hD2(static_cast<size_t>(mTok) * Nout);
     ASSERT_EQ(hipMemcpy(hD2.data(), dD2, hD2.size() * 2, hipMemcpyDeviceToHost), hipSuccess);
 
     // Reference: gemm1 = x@W0 (TN) + residual; rstd = rsqrt(mean(gemm1^2)+eps);
     // y = rstd * (gemm1 @ W1). gamma=1 so RMSNorm scale-apply uses rstd directly.
-    std::vector<float> gemm1(static_cast<size_t>(M) * Nhidden);
-    std::vector<float> rstd(static_cast<size_t>(M));
-    for(int64_t m = 0; m < M; ++m)
+    std::vector<float> gemm1(static_cast<size_t>(mTok) * Nhidden);
+    std::vector<float> rstd(static_cast<size_t>(mTok));
+    for(int64_t m = 0; m < mTok; ++m)
     {
         float ss = 0.0f;
         for(int64_t j = 0; j < Nhidden; ++j)
@@ -1168,8 +1190,8 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
     // by the producer, GEMM2 reads it, then y = bf16(rstd * (h2 @ W1)). Compare with a combined
     // absolute+relative tolerance so near-zero cancellation elements (tiny ref) do not blow up a
     // pure relative metric.
-    std::vector<float> expected(static_cast<size_t>(M) * Nout);
-    for(int64_t m = 0; m < M; ++m)
+    std::vector<float> expected(static_cast<size_t>(mTok) * Nout);
+    for(int64_t m = 0; m < mTok; ++m)
         for(int64_t n = 0; n < Nout; ++n)
         {
             float acc = 0.0f;
@@ -1199,8 +1221,8 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
 
 // ---- Validation: the decomposed flow requires a caller-owned handoff buffer ----
 //
-// The library does not allocate the per-row rstd storage, so both decomposed stages reject a
-// handoff descriptor with no buffer, or one too small for that call's D row count. This covers
+// The library does not allocate the per-token rstd storage, so both decomposed stages reject a
+// handoff descriptor with no buffer or with fewer than D.N scales for either stage. This covers
 // the matmul-level enforcement; the argument checks on
 // hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer itself are in
 // FusedEpilogueLifecycle.rmsnormStatsBufferValidation. gfx950-only, because reaching the
@@ -1210,10 +1232,14 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
     if(!deviceIsGfx950())
         GTEST_SKIP() << "decomposed RMSNorm flow is wired for gfx950 only";
 
-    const int64_t M = 1024, Nhidden = 1024, K0 = 64, Nout = 64;
+    // Operation:
+    //   x[mTok,K0] row-major @ W0[K0,Nhidden] column-major -> h2[mTok,Nhidden] row-major;
+    //   h2[mTok,Nhidden] row-major @ W1[Nhidden,Nout] column-major -> out[mTok,Nout] row-major.
+    // Each call passes its weight as A and activation as B.
+    const int64_t mTok = 1024, Nhidden = 1024, K0 = 64, Nout = 64;
     const float   eps = 1e-5f;
 
-    std::vector<uint16_t> hX(static_cast<size_t>(K0) * M);
+    std::vector<uint16_t> hX(static_cast<size_t>(K0) * mTok);
     std::vector<uint16_t> hW0(static_cast<size_t>(K0) * Nhidden);
     std::vector<uint16_t> hW1(static_cast<size_t>(Nhidden) * Nout);
     std::vector<uint16_t> hGamma(static_cast<size_t>(Nhidden), f32_to_bf16(1.0f));
@@ -1230,12 +1256,12 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
     ASSERT_EQ(hipMalloc(&dX, hX.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dW0, hW0.size() * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * 2), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dH2, size_t(M) * Nhidden * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dH2, size_t(mTok) * Nhidden * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dW1, hW1.size() * 2), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD2, size_t(M) * Nout * 2), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dResidual, size_t(M) * Nhidden * 2), hipSuccess);
-    ASSERT_EQ(hipMemset(dResidual, 0, size_t(M) * Nhidden * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dD2, size_t(mTok) * Nout * 2), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dRstd, size_t(mTok) * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dResidual, size_t(mTok) * Nhidden * 2), hipSuccess);
+    ASSERT_EQ(hipMemset(dResidual, 0, size_t(mTok) * Nhidden * 2), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
     ASSERT_EQ(hipMemcpy(dX, hX.data(), hX.size() * 2, hipMemcpyHostToDevice), hipSuccess);
     ASSERT_EQ(hipMemcpy(dW0, hW0.data(), hW0.size() * 2, hipMemcpyHostToDevice), hipSuccess);
@@ -1253,52 +1279,73 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
     hipblasLtFusedEpilogueDescriptor_t prod = nullptr;
     ASSERT_NO_FATAL_FAILURE(createPartialStatsDescriptor(stats, dResidual, dGamma, eps, &prod));
 
-    const size_t requiredBytes = size_t(M) * sizeof(float);
+    const size_t requiredBytes = size_t(mTok) * sizeof(float);
     int          algoCount     = 0;
 
-    // No buffer: the producer rejects instead of allocating one internally.
-    EXPECT_EQ(runBf16TnFusedMatmul(
-                  handle, M, Nhidden, K0, dX, K0, dW0, dH2, dH2, prod, dWs, wsSize, algoCount),
-              HIPBLAS_STATUS_INVALID_VALUE);
-    ASSERT_GT(algoCount, 0) << "no PartialRMS (K1) producer solution selected";
+    {
+        // Translate GEMM1 to hipBLASLt API descriptors.
+        const int64_t M = Nhidden;
+        const int64_t N = mTok;
+        const int64_t K = K0;
+        void* const   A = dW0;
+        void* const   B = dX;
+        void* const   D = dH2;
+        void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
 
-    // One row short of M * batchCount * sizeof(float).
-    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
-                  stats, dRstd, requiredBytes - sizeof(float)),
-              HIPBLAS_STATUS_SUCCESS);
-    EXPECT_EQ(runBf16TnFusedMatmul(
-                  handle, M, Nhidden, K0, dX, K0, dW0, dH2, dH2, prod, dWs, wsSize, algoCount),
-              HIPBLAS_STATUS_INVALID_VALUE);
+        // No buffer: the producer rejects instead of allocating one internally.
+        EXPECT_EQ(
+            runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, prod, dWs, wsSize, algoCount),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        ASSERT_GT(algoCount, 0) << "no PartialRMS (K1) producer solution selected";
 
-    // Correctly sized: the same producer call now runs, confirming the rejections above are
-    // caused by the buffer and not by the problem setup.
-    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, dRstd, requiredBytes),
-              HIPBLAS_STATUS_SUCCESS);
-    EXPECT_EQ(runBf16TnFusedMatmul(
-                  handle, M, Nhidden, K0, dX, K0, dW0, dH2, dH2, prod, dWs, wsSize, algoCount),
-              HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        // One scale short of D.N * batchCount * sizeof(float).
+        ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
+                      stats, dRstd, requiredBytes - sizeof(float)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(
+            runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, prod, dWs, wsSize, algoCount),
+            HIPBLAS_STATUS_INVALID_VALUE);
 
-    // The consumer validates the buffer against its own D row count as well.
+        // Correctly sized: the same producer call now runs, confirming the rejections above are
+        // caused by the buffer and not by the problem setup.
+        ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, dRstd, requiredBytes),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(
+            runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, prod, dWs, wsSize, algoCount),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
+    // The consumer validates the buffer against D.N, not D.M.
     hipblasLtFusedEpilogueDescriptor_t cons = nullptr;
     ASSERT_NO_FATAL_FAILURE(createScaleApplyDescriptor(stats, &cons));
 
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
                   stats, dRstd, requiredBytes - sizeof(float)),
               HIPBLAS_STATUS_SUCCESS);
-    EXPECT_EQ(
-        runBf16TnFusedMatmul(
-            handle, M, Nout, Nhidden, dH2, Nhidden, dW1, dD2, dD2, cons, dWs, wsSize, algoCount),
-        HIPBLAS_STATUS_INVALID_VALUE);
-    ASSERT_GT(algoCount, 0) << "no RstdScale (K3) consumer solution selected";
 
-    ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, dRstd, requiredBytes),
-              HIPBLAS_STATUS_SUCCESS);
-    EXPECT_EQ(
-        runBf16TnFusedMatmul(
-            handle, M, Nout, Nhidden, dH2, Nhidden, dW1, dD2, dD2, cons, dWs, wsSize, algoCount),
-        HIPBLAS_STATUS_SUCCESS);
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    {
+        // Translate GEMM2 to hipBLASLt API descriptors.
+        const int64_t M = Nout;
+        const int64_t N = mTok;
+        const int64_t K = Nhidden;
+        void* const   A = dW1;
+        void* const   B = dH2;
+        void* const   D = dD2;
+        void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
+
+        EXPECT_EQ(
+            runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, cons, dWs, wsSize, algoCount),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        ASSERT_GT(algoCount, 0) << "no RstdScale (K3) consumer solution selected";
+
+        ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(stats, dRstd, requiredBytes),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(
+            runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, cons, dWs, wsSize, algoCount),
+            HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
 
     hipblasLtFusedEpilogueDestroy(prod);
     hipblasLtFusedEpilogueDestroy(cons);
@@ -1396,7 +1443,7 @@ static void expectMxScaleEqual(const std::vector<uint8_t>& got, const std::vecto
 }
 
 
-// CPU reference for the producer's transposed MX-fp8 quant: dOutT[nh, mt] = gamma[nh]*h1[mt, nh],
+// CPU reference for the producer's MX-fp8 quant: dOutT[nh, mt] = gamma[nh]*h1[mt, nh],
 // block along the N_hidden (free0) axis with q1=1 over M_tokens. Scale grid is
 // [M_tokens (rows) x N_hidden/blockSize (cols)]. Returns swizzled scale + fp8 D bytes.
 static MxFp8Ref referenceProducerMxfp8(const std::vector<float>&    h1,
@@ -1455,7 +1502,6 @@ static hipblasStatus_t runTypedTnFusedMatmulFp8D(hipblasLtHandle_t              
                                                  int64_t                            n,
                                                  int64_t                            k,
                                                  void*                              dA,
-                                                 int64_t                            lda,
                                                  void*                              dB,
                                                  void*                              dC,
                                                  void*                              dD,
@@ -1471,7 +1517,6 @@ static hipblasStatus_t runTypedTnFusedMatmulFp8D(hipblasLtHandle_t              
                             n,
                             k,
                             dA,
-                            lda,
                             nullptr,
                             dB,
                             nullptr,
@@ -1504,7 +1549,7 @@ namespace
         int64_t nOut      = 64;
         int32_t blockSize = 32;
         float   eps       = 1e-5f;
-        // Producer scale geometry (free0=nHid q0=1, free1=mTok q1=blockSize).
+        // Producer scale geometry (free0=nHid q0=blockSize, free1=mTok q1=1).
         int64_t mTiles;
         int64_t nTiles;
         int64_t paddedRows;
@@ -1554,8 +1599,8 @@ static TypedTestDims makeTypedTestDims(hipDataType gemm1InType)
     d.elemSz = (gemm1InType == HIP_R_16F || gemm1InType == HIP_R_16BF) ? 2u : 1u;
     d.isBf8  = (gemm1InType == HIP_R_8F_E5M2);
 
-    // Producer scale (new orientation): rows = M_tokens (free1, pad x32),
-    // cols = N_hidden/blockSize (kblock, pad x8) with the AITER GFX950 swizzle.
+    // Producer scale: rows = mTok (free1, pad x32), cols = nHid/blockSize
+    // (free0 blocks, pad x8) with the GFX950 swizzle.
     d.mTiles     = d.mTok;
     d.nTiles     = (d.nHid + d.blockSize - 1) / d.blockSize;
     d.paddedRows = ((d.mTiles + 31) / 32) * 32;
@@ -1563,16 +1608,16 @@ static TypedTestDims makeTypedTestDims(hipDataType gemm1InType)
     d.scaleBufSz = static_cast<size_t>(d.paddedRows) * d.paddedCols;
     d.rstdRows   = d.mTok;
 
-    d.szABytes = static_cast<size_t>(d.k0) * d.mTok * d.elemSz;
-    d.szBBytes = static_cast<size_t>(d.k0) * d.nHid * d.elemSz;
+    d.szABytes = static_cast<size_t>(d.k0) * d.nHid * d.elemSz;
+    d.szBBytes = static_cast<size_t>(d.k0) * d.mTok * d.elemSz;
 
-    d.consAPaddedRows = d.paddedRows;
-    d.consAPaddedCols = d.paddedCols;
-    d.consAScaleSz    = d.scaleBufSz;
+    d.consAPaddedRows = ((d.nOut + 31) / 32) * 32;
+    d.consAPaddedCols = ((d.nHid / d.blockSize + 7) / 8) * 8;
+    d.consAScaleSz    = static_cast<size_t>(d.consAPaddedRows) * d.consAPaddedCols;
 
-    d.consBPaddedRows = ((d.nOut + 31) / 32) * 32;
-    d.consBPaddedCols = ((d.nHid / d.blockSize + 7) / 8) * 8;
-    d.consBScaleSz    = static_cast<size_t>(d.consBPaddedRows) * d.consBPaddedCols;
+    d.consBPaddedRows = d.paddedRows;
+    d.consBPaddedCols = d.paddedCols;
+    d.consBScaleSz    = d.scaleBufSz;
 
     return d;
 }
@@ -1661,20 +1706,28 @@ static void launchProducerAndReadback(hipblasLtHandle_t                         
                                       void*                                     dResidualOut = nullptr)
 {
     int algoCount = 0;
+    // Translate GEMM1 to hipBLASLt API descriptors.
+    const int64_t M = d.nHid;
+    const int64_t N = d.mTok;
+    const int64_t K = d.k0;
+    void* const   A = dA;
+    void* const   B = dB;
+    void* const   D = dD1;
+    void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
+
     if(dMxScaleA != nullptr && dMxScaleB != nullptr)
     {
         ASSERT_EQ(runTnFusedMatmul(handle,
                                    {gemm1InType, gemm1InType, HIP_R_8F_E4M3},
-                                   d.mTok,
-                                   d.nHid,
-                                   d.k0,
-                                   dA,
-                                   d.k0,
+                                   M,
+                                   N,
+                                   K,
+                                   A,
                                    dMxScaleA,
-                                   dB,
+                                   B,
                                    dMxScaleB,
-                                   dD1,
-                                   dD1,
+                                   C,
+                                   D,
                                    prod,
                                    dWs,
                                    wsSize,
@@ -1685,14 +1738,13 @@ static void launchProducerAndReadback(hipblasLtHandle_t                         
     else
     {
         ASSERT_EQ(runTypedTnFusedMatmulFp8D(handle,
-                                            d.mTok,
-                                            d.nHid,
-                                            d.k0,
-                                            dA,
-                                            d.k0,
-                                            dB,
-                                            dD1,
-                                            dD1,
+                                            M,
+                                            N,
+                                            K,
+                                            A,
+                                            B,
+                                            C,
+                                            D,
                                             gemm1InType,
                                             prod,
                                             dWs,
@@ -1736,14 +1788,14 @@ static void validateProducer(const TypedTestDims&         d,
                              std::vector<float>&          h1Out,
                              const std::vector<uint16_t>* hResidual = nullptr)
 {
-    // CPU reference: h1[mt, nh] = sum_k aF32[k + mt*k0] * bF32[k + nh*k0].
+    // CPU reference: h1[mt, nh] = sum_k bF32[k + mt*k0] * aF32[k + nh*k0].
     h1Out.assign(static_cast<size_t>(d.mTok) * d.nHid, 0.0f);
     for(int64_t mt = 0; mt < d.mTok; ++mt)
         for(int64_t nh = 0; nh < d.nHid; ++nh)
         {
             float acc = 0.0f;
             for(int64_t k = 0; k < d.k0; ++k)
-                acc += aF32[k + mt * d.k0] * bF32[k + nh * d.k0];
+                acc += bF32[k + mt * d.k0] * aF32[k + nh * d.k0];
             if(hResidual != nullptr)
                 acc += bf16_to_f32((*hResidual)[mt * d.nHid + nh]);
             h1Out[mt * d.nHid + nh] = acc;
@@ -1795,7 +1847,7 @@ static void validateProducer(const TypedTestDims&         d,
 }
 
 // Build consumer A+B MX buffers for GEMM2.
-// The producer's fp8 D and pre-swizzled scale are passed through directly as consumer A.
+// The producer's fp8 D and pre-swizzled scale are passed through directly as consumer B.
 static ConsumerQuantData buildConsumerQuantData(const TypedTestDims&         d,
                                                 const std::vector<uint16_t>& hW1,
                                                 const std::vector<uint8_t>&  hD1,
@@ -1803,16 +1855,16 @@ static ConsumerQuantData buildConsumerQuantData(const TypedTestDims&         d,
 {
     ConsumerQuantData cq;
 
-    // Pass the producer's fp8 D and pre-swizzled scale directly to the consumer.
-    cq.consAFp8   = hD1;
-    cq.consAScale = hMxScale;
+    // Pass the producer's fp8 D and pre-swizzled scale directly to the consumer as B.
+    cq.consBFp8   = hD1;
+    cq.consBScale = hMxScale;
 
     // Dequant the producer's fp8 D for the CPU reference computation.
-    cq.consADequant.assign(static_cast<size_t>(d.nHid) * d.mTok, 0.0f);
+    cq.consBDequant.assign(static_cast<size_t>(d.nHid) * d.mTok, 0.0f);
     for(int64_t nh = 0; nh < d.nHid; ++nh)
         for(int64_t mt = 0; mt < d.mTok; ++mt)
         {
-            const int64_t kj        = nh / d.blockSize; // N_hidden block (col).
+            const int64_t kj        = nh / d.blockSize; // nHid block (col).
             const int64_t d0        = mt >> 5;           // row = M_token (free1).
             const int64_t d1        = (mt >> 4) & 1;
             const int64_t d2        = mt & 0xF;
@@ -1828,15 +1880,15 @@ static ConsumerQuantData buildConsumerQuantData(const TypedTestDims&         d,
                 const uint32_t bits = static_cast<uint32_t>(sb) << 23;
                 std::memcpy(&dqMult, &bits, sizeof(dqMult));
             }
-            cq.consADequant[nh + mt * d.nHid] = unpackF8(hD1[nh + mt * d.nHid]) * dqMult;
+            cq.consBDequant[nh + mt * d.nHid] = unpackF8(hD1[nh + mt * d.nHid]) * dqMult;
         }
 
-    // Quantize hW1 (bf16) to fp8 B with consumer B MX scale (blocks of K=nh at N=no).
-    cq.consBFp8.resize(static_cast<size_t>(d.nHid) * d.nOut);
-    cq.consBDequant.assign(static_cast<size_t>(d.nHid) * d.nOut, 0.0f);
-    std::vector<uint8_t> consBScalePlain(d.consBScaleSz, 0);
+    // Quantize W1 to fp8 A with one MX scale per nHid block and output column.
+    cq.consAFp8.resize(static_cast<size_t>(d.nHid) * d.nOut);
+    cq.consADequant.assign(static_cast<size_t>(d.nHid) * d.nOut, 0.0f);
+    std::vector<uint8_t> consAScalePlain(d.consAScaleSz, 0);
     for(int64_t no = 0; no < d.nOut; ++no)
-        for(int64_t nhBlock = 0; nhBlock < d.consBPaddedCols; ++nhBlock)
+        for(int64_t nhBlock = 0; nhBlock < d.consAPaddedCols; ++nhBlock)
         {
             float amax = 0.0f;
             for(int64_t j = 0; j < d.blockSize; ++j)
@@ -1854,18 +1906,19 @@ static ConsumerQuantData buildConsumerQuantData(const TypedTestDims&         d,
                 const uint32_t bits = static_cast<uint32_t>(sb) << 23;
                 std::memcpy(&dqMult, &bits, sizeof(dqMult));
             }
-            consBScalePlain[no * d.consBPaddedCols + nhBlock] = sb;
+            consAScalePlain[no * d.consAPaddedCols + nhBlock] = sb;
             for(int64_t j = 0; j < d.blockSize; ++j)
             {
                 const int64_t nh = nhBlock * d.blockSize + j;
                 if(nh >= d.nHid)
                     break;
-                cq.consBFp8[nh + no * d.nHid] = packF8(bf16_to_f32(hW1[nh + no * d.nHid]) * qmult);
-                cq.consBDequant[nh + no * d.nHid]
-                    = unpackF8(cq.consBFp8[nh + no * d.nHid]) * dqMult;
+                cq.consAFp8[nh + no * d.nHid]
+                    = packF8(bf16_to_f32(hW1[nh + no * d.nHid]) * qmult);
+                cq.consADequant[nh + no * d.nHid]
+                    = unpackF8(cq.consAFp8[nh + no * d.nHid]) * dqMult;
             }
         }
-    cq.consBScale = swizzleGfx950(consBScalePlain, d.consBPaddedRows, d.consBPaddedCols);
+    cq.consAScale = swizzleGfx950(consAScalePlain, d.consAPaddedRows, d.consAPaddedCols);
 
     return cq;
 }
@@ -1901,18 +1954,26 @@ static void runConsumerAndValidate(hipblasLtHandle_t                         han
     hipblasLtFusedEpilogueDescriptor_t cons = nullptr;
     ASSERT_NO_FATAL_FAILURE(createScaleApplyDescriptor(stats, &cons));
 
+    // Translate GEMM2 to hipBLASLt API descriptors.
+    const int64_t M = d.nOut;
+    const int64_t N = d.mTok;
+    const int64_t K = d.nHid;
+    void* const   A = dConsA;
+    void* const   B = dConsB;
+    void* const   D = dD2;
+    void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
+
     int                   consAlgoCount = 0;
     const hipblasStatus_t consStatus    = runFp8Fp8TnFusedMatmulBf16D(handle,
-                                                                      d.mTok,
-                                                                      d.nOut,
-                                                                      d.nHid,
-                                                                      dConsA,
-                                                                      d.nHid,
+                                                                      M,
+                                                                      N,
+                                                                      K,
+                                                                      A,
                                                                       dConsScaleA,
-                                                                      dConsB,
+                                                                      B,
                                                                       dConsScaleB,
-                                                                      dD2,
-                                                                      dD2,
+                                                                      C,
+                                                                      D,
                                                                       cons,
                                                                       dWs,
                                                                       wsSize,
@@ -1926,7 +1987,7 @@ static void runConsumerAndValidate(hipblasLtHandle_t                         han
     ASSERT_EQ(hipMemcpy(hD2.data(), dD2, hD2.size() * sizeof(uint16_t), hipMemcpyDeviceToHost),
               hipSuccess);
 
-    // Reference: y[mt,no] = rstd[mt] * sum_nh(consADequant[nh,mt]*consBDequant[nh,no]).
+    // Reference: y[mt,no] = rstd[mt] * sum_nh(consBDequant[nh,mt]*consADequant[nh,no]).
     std::vector<float> refRstd2(static_cast<size_t>(d.mTok));
     for(int64_t mt = 0; mt < d.mTok; ++mt)
     {
@@ -1941,7 +2002,8 @@ static void runConsumerAndValidate(hipblasLtHandle_t                         han
         {
             float acc = 0.0f;
             for(int64_t nh = 0; nh < d.nHid; ++nh)
-                acc += cq.consADequant[nh + mt * d.nHid] * cq.consBDequant[nh + no * d.nHid];
+                acc += cq.consBDequant[nh + mt * d.nHid]
+                       * cq.consADequant[nh + no * d.nHid];
             refY[mt * d.nOut + no] = refRstd2[mt] * acc;
         }
 
@@ -1977,53 +2039,57 @@ static void runConsumerAndValidate(hipblasLtHandle_t                         han
 // Exercises the pure-bf16 PartialRMSStoreBf16D path through the decomposed producer chain
 // RESIDUAL_ADD -> PARTIAL_RMSNORM_STATS with a separate residual-out buffer set via
 // HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER. The K1 kernel writes the gamma-scaled bf16 D
-// and stashes the per-row rstd in the handoff, AND additionally stores the pre-normalization value
+// and stashes the per-token rstd in the handoff, AND additionally stores the pre-normalization value
 // H+residual as bf16 in the residual-out buffer. Verifies residualOut against the CPU reference
-// dot(A,B) + residual (no gamma, no invRms). gfx950-only.
+// mat1 @ mat2 + residual (no gamma, no invRms). gfx950-only.
 
 TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
 {
     if(!deviceIsGfx950())
         GTEST_SKIP() << "partialRMSStoreBf16D bf16 epilogue is wired for gfx950 only";
 
-    // M_tokens=256 (multiple of MacroTile1=128), N_hidden=512 (multiple of MacroTile0=64).
-    const int64_t M   = 256;
-    const int64_t N   = 512;
-    const int64_t K   = 64;
+    // Operation:
+    //   mat1[mTok,K] row-major @ mat2[K,nHid] column-major -> mat3[mTok,nHid] row-major.
+    // Pass mat2 as A and mat1 as B so hipBLASLt computes mat2^T @ mat1^T = mat3^T.
+    // mTok=256 is a multiple of MacroTile1=128; nHid=512 is a multiple of MacroTile0=64.
+    const int64_t mTok = 256;
+    const int64_t nHid = 512;
+    const int64_t K    = 64;
     const float   eps = 1e-5f;
 
-    std::vector<uint16_t> hA(static_cast<size_t>(K) * M);
-    std::vector<uint16_t> hB(static_cast<size_t>(K) * N);
-    std::vector<uint16_t> hGamma(N);
-    std::vector<uint16_t> hResidual(static_cast<size_t>(M) * N);
+    std::vector<uint16_t> hMat1(static_cast<size_t>(K) * mTok);
+    std::vector<uint16_t> hMat2(static_cast<size_t>(K) * nHid);
+    std::vector<uint16_t> hGamma(nHid);
+    std::vector<uint16_t> hResidual(static_cast<size_t>(mTok) * nHid);
 
     std::mt19937                          rng(2031);
     std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
     std::uniform_real_distribution<float> gdist(0.5f, 1.5f);
-    fillRandomBf16(hA, rng, dist);
-    fillRandomBf16(hB, rng, dist);
+    fillRandomBf16(hMat1, rng, dist);
+    fillRandomBf16(hMat2, rng, dist);
     fillRandomBf16(hGamma, rng, gdist);
     fillRandomBf16(hResidual, rng, dist);
 
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dGamma = nullptr,
-         *dResidual = nullptr, *dResidualOut = nullptr, *dRstd = nullptr, *dWs = nullptr;
+    void *dMat1 = nullptr, *dMat2 = nullptr, *dD = nullptr, *dGamma = nullptr, *dResidual = nullptr,
+         *dResidualOut = nullptr, *dRstd = nullptr, *dWs = nullptr;
     const size_t wsSize        = size_t(256) * 1024 * 1024;
-    const size_t dSz           = static_cast<size_t>(M) * N * sizeof(uint16_t);
-    const size_t residualOutSz = static_cast<size_t>(M) * N * sizeof(uint16_t);
-    ASSERT_EQ(hipMalloc(&dA, hA.size() * sizeof(uint16_t)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, hB.size() * sizeof(uint16_t)), hipSuccess);
+    const size_t dSz           = static_cast<size_t>(mTok) * nHid * sizeof(uint16_t);
+    const size_t residualOutSz = static_cast<size_t>(mTok) * nHid * sizeof(uint16_t);
+    ASSERT_EQ(hipMalloc(&dMat1, hMat1.size() * sizeof(uint16_t)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMat2, hMat2.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dD, dSz), hipSuccess);
     ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dResidualOut, residualOutSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dRstd, size_t(M) * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dRstd, size_t(mTok) * sizeof(float)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD; // beta = 0, C unused numerically but must be a valid pointer.
 
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), hA.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), hB.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
-              hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(dMat1, hMat1.data(), hMat1.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
+    ASSERT_EQ(
+        hipMemcpy(dMat2, hMat2.data(), hMat2.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
+        hipSuccess);
     ASSERT_EQ(
         hipMemcpy(dGamma, hGamma.data(), hGamma.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
         hipSuccess);
@@ -2042,7 +2108,7 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
     hipblasLtFusedEpilogueRMSNormDescriptor_t stats = nullptr;
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorCreate(&stats), HIPBLAS_STATUS_SUCCESS);
     ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
-                  stats, dRstd, size_t(M) * sizeof(float)),
+                  stats, dRstd, size_t(mTok) * sizeof(float)),
               HIPBLAS_STATUS_SUCCESS);
 
     // Producer chain: residual-add + partial RMSNorm stats + gamma + eps + handoff + residual-out.
@@ -2071,29 +2137,36 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
                                                  sizeof(dResidualOut)),
               HIPBLAS_STATUS_SUCCESS);
 
+    // Translate to hipBLASLt API descriptors.
+    const int64_t M = nHid;
+    const int64_t N = mTok;
+    void* const   A = dMat2;
+    void* const   B = dMat1;
+    void* const   D = dD;
+    void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
+
     int algoCount = 0;
-    ASSERT_EQ(
-        runBf16TnFusedMatmul(handle, M, N, K, dA, K, dB, dC, dD, fused, dWs, wsSize, algoCount),
-        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(runBf16TnFusedMatmul(handle, M, N, K, A, B, C, D, fused, dWs, wsSize, algoCount),
+              HIPBLAS_STATUS_SUCCESS);
     ASSERT_GT(algoCount, 0) << "no PartialRMSStoreBf16D bf16 producer solution selected";
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // Copy back the bf16 residual-out buffer produced by the kernel.
-    std::vector<uint16_t> hResidualOut(static_cast<size_t>(M) * N);
+    std::vector<uint16_t> hResidualOut(static_cast<size_t>(mTok) * nHid);
     ASSERT_EQ(hipMemcpy(hResidualOut.data(), dResidualOut, residualOutSz, hipMemcpyDeviceToHost),
               hipSuccess);
 
-    // CPU reference: residualOut[row][col] = dot(A_row, B_col) + residual[row][col].
+    // CPU reference: residualOut[row][col] = dot(mat1_row, mat2_col) + residual[row][col].
     // This is the pre-gamma, pre-invRms value H that the kernel stores as bf16.
-    std::vector<float> refResidualOut(static_cast<size_t>(M) * N, 0.0f);
-    for(int64_t row = 0; row < M; ++row)
-        for(int64_t col = 0; col < N; ++col)
+    std::vector<float> refResidualOut(static_cast<size_t>(mTok) * nHid, 0.0f);
+    for(int64_t row = 0; row < mTok; ++row)
+        for(int64_t col = 0; col < nHid; ++col)
         {
             float acc = 0.0f;
             for(int64_t kk = 0; kk < K; ++kk)
-                acc += bf16_to_f32(hA[kk + row * K]) * bf16_to_f32(hB[kk + col * K]);
-            acc += bf16_to_f32(hResidual[row * N + col]);
-            refResidualOut[row * N + col] = acc;
+                acc += bf16_to_f32(hMat1[kk + row * K]) * bf16_to_f32(hMat2[kk + col * K]);
+            acc += bf16_to_f32(hResidual[row * nHid + col]);
+            refResidualOut[row * nHid + col] = acc;
         }
 
     // Relaxed tolerances: bf16 rounding is up to 0.5 ULP and parallel GPU accumulation can
@@ -2103,8 +2176,8 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
     hipblasLtFusedEpilogueDestroy(fused);
     hipblasLtFusedEpilogueRMSNormDescriptorDestroy(stats);
     hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dMat1));
+    static_cast<void>(hipFree(dMat2));
     static_cast<void>(hipFree(dD));
     static_cast<void>(hipFree(dGamma));
     static_cast<void>(hipFree(dResidual));
@@ -2113,13 +2186,13 @@ TEST(FusedEpilogueE2E, partialRmsBf16ResidualOutMatchesReference)
     static_cast<void>(hipFree(dWs));
 }
 
-// ---- End-to-end: PartialRMS MXFP8, fp8-e4m3 A/B inputs with MX input scales ----
+// ---- End-to-end: PartialRMS MXFP8, fp8-e4m3 mat1/mat2 inputs with MX input scales ----
 //
-// Exercises the RESIDUAL_ADD -> RMSNORM -> REQUANT fused chain with fp8-e4m3 A and B
+// Exercises the RESIDUAL_ADD -> RMSNORM -> REQUANT fused chain with fp8-e4m3 mat1 and mat2
 // inputs scaled by input MX block-32 UE8M0 scales (DataTypeMXSA/B path). Uniform-127
 // input scales (scale=1.0) exercise the MXSA/B path without altering the numeric reference.
 // The output D is MXFP8-quantised fp8-e4m3. The selected kernel also writes a bf16
-// residual-out buffer (pre-quantisation H = GEMM+residual), which is verified against
+// residual-out buffer (pre-quantisation H = mat1 @ mat2 + residual), which is verified against
 // the CPU reference H below.
 
 TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
@@ -2127,64 +2200,65 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
     if(!deviceIsGfx950())
         GTEST_SKIP() << "partialRMS MXFP8-input MXFP8-quant epilogue is wired for gfx950 only";
 
-    const int64_t M         = 256;
-    const int64_t N         = 512;
+    // Operation:
+    //   mat1[mTok,K] row-major @ mat2[K,nHid] column-major -> mat3[mTok,nHid] row-major.
+    // Pass mat2 as A and mat1 as B so hipBLASLt computes mat2^T @ mat1^T = mat3^T.
+    const int64_t mTok      = 256;
+    const int64_t nHid      = 512;
     const int64_t K         = 256;
     const int32_t blockSize = 32;
     const float   eps       = 1e-5f;
 
-    // Output MX scale geometry (post-PartialRMS transpose: free0=N_hidden, free1=M_tokens).
-    const int64_t kBlockTiles = (N + blockSize - 1) / blockSize;
-    const int64_t freeTiles   = M;
+    // Output MX scale geometry (free0=D.M, free1=D.N).
+    const int64_t kBlockTiles = (nHid + blockSize - 1) / blockSize;
+    const int64_t freeTiles   = mTok;
     const int64_t paddedRows  = ((freeTiles + 31) / 32) * 32;
     const int64_t paddedCols  = ((kBlockTiles + 7) / 8) * 8;
     const size_t  scaleBufSz  = static_cast<size_t>(paddedRows) * paddedCols;
 
     // Input MX scale geometry: blocks of 32 along K, one scale per (row or col, K/32 block).
     const int64_t inputScaleColsK = ((K / blockSize + 7) / 8) * 8;
-    const size_t  aScaleSz        = static_cast<size_t>(((M + 31) / 32) * 32) * inputScaleColsK;
-    const size_t  bScaleSz        = static_cast<size_t>(((N + 31) / 32) * 32) * inputScaleColsK;
+    const size_t  mat1ScaleSz     = static_cast<size_t>(((mTok + 31) / 32) * 32) * inputScaleColsK;
+    const size_t  mat2ScaleSz     = static_cast<size_t>(((nHid + 31) / 32) * 32) * inputScaleColsK;
 
-    const size_t szA = static_cast<size_t>(K) * M;
-    const size_t szB = static_cast<size_t>(K) * N;
+    const size_t mat1Sz = static_cast<size_t>(K) * mTok;
+    const size_t mat2Sz = static_cast<size_t>(K) * nHid;
 
-    std::vector<uint8_t>  hA(szA), hB(szB);
-    std::vector<uint16_t> hGamma(N), hResidual(static_cast<size_t>(M) * N);
+    std::vector<uint8_t>  hMat1(mat1Sz), hMat2(mat2Sz);
+    std::vector<uint16_t> hGamma(nHid), hResidual(static_cast<size_t>(mTok) * nHid);
 
     std::mt19937                          rng(2100);
     std::uniform_real_distribution<float> dist(-0.1f, 0.1f);
     std::uniform_real_distribution<float> gdist(0.5f, 1.5f);
-    fillRandomF8(hA, rng, dist);
-    fillRandomF8(hB, rng, dist);
+    fillRandomF8(hMat1, rng, dist);
+    fillRandomF8(hMat2, rng, dist);
     fillRandomBf16(hGamma, rng, gdist);
     fillRandomBf16(hResidual, rng, dist);
 
     // Unpack fp8 bytes to float for the CPU reference accumulation.
-    std::vector<float> aF32(szA), bF32(szB);
-    for(size_t i = 0; i < szA; ++i)
-        aF32[i] = unpackF8(hA[i]);
-    for(size_t i = 0; i < szB; ++i)
-        bF32[i] = unpackF8(hB[i]);
+    std::vector<float> mat1F32(mat1Sz), mat2F32(mat2Sz);
+    for(size_t i = 0; i < mat1Sz; ++i)
+        mat1F32[i] = unpackF8(hMat1[i]);
+    for(size_t i = 0; i < mat2Sz; ++i)
+        mat2F32[i] = unpackF8(hMat2[i]);
 
-    void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr;
+    void *dMat1 = nullptr, *dMat2 = nullptr, *dD = nullptr;
     void *dGamma = nullptr, *dResidual = nullptr, *dMxScale = nullptr;
-    void *dMxScaleA = nullptr, *dMxScaleB = nullptr, *dResidualOut = nullptr, *dWs = nullptr;
+    void *dMxScale1 = nullptr, *dMxScale2 = nullptr, *dResidualOut = nullptr, *dWs = nullptr;
     const size_t wsSize       = size_t(256) * 1024 * 1024;
-    const size_t residualOutSz = static_cast<size_t>(M) * N * sizeof(uint16_t);
-    ASSERT_EQ(hipMalloc(&dA, szA), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dB, szB), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(M) * N), hipSuccess);
+    const size_t residualOutSz = static_cast<size_t>(mTok) * nHid * sizeof(uint16_t);
+    ASSERT_EQ(hipMalloc(&dMat1, mat1Sz), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMat2, mat2Sz), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dD, static_cast<size_t>(mTok) * nHid), hipSuccess);
     ASSERT_EQ(hipMalloc(&dGamma, hGamma.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dResidual, hResidual.size() * sizeof(uint16_t)), hipSuccess);
     ASSERT_EQ(hipMalloc(&dMxScale, scaleBufSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dMxScaleA, aScaleSz), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dMxScaleB, bScaleSz), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMxScale1, mat1ScaleSz), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dMxScale2, mat2ScaleSz), hipSuccess);
     ASSERT_EQ(hipMalloc(&dResidualOut, residualOutSz), hipSuccess);
     ASSERT_EQ(hipMalloc(&dWs, wsSize), hipSuccess);
-    dC = dD;
-
-    ASSERT_EQ(hipMemcpy(dA, hA.data(), szA, hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dB, hB.data(), szB, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dMat1, hMat1.data(), mat1Sz, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dMat2, hMat2.data(), mat2Sz, hipMemcpyHostToDevice), hipSuccess);
     ASSERT_EQ(
         hipMemcpy(dGamma, hGamma.data(), hGamma.size() * sizeof(uint16_t), hipMemcpyHostToDevice),
         hipSuccess);
@@ -2193,16 +2267,18 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
                         hResidual.size() * sizeof(uint16_t),
                         hipMemcpyHostToDevice),
               hipSuccess);
-    ASSERT_EQ(hipMemset(dD, 0, static_cast<size_t>(M) * N), hipSuccess);
+    ASSERT_EQ(hipMemset(dD, 0, static_cast<size_t>(mTok) * nHid), hipSuccess);
     ASSERT_EQ(hipMemset(dMxScale, 0, scaleBufSz), hipSuccess);
     ASSERT_EQ(hipMemset(dResidualOut, 0, residualOutSz), hipSuccess);
 
     // UE8M0 byte 127 encodes scale 2^(127-127)=1.0; uniform-127 input scales exercise the
     // MXSA/B path without changing the values the accumulator sees.
-    const std::vector<uint8_t> hScaleA(aScaleSz, 127u);
-    const std::vector<uint8_t> hScaleB(bScaleSz, 127u);
-    ASSERT_EQ(hipMemcpy(dMxScaleA, hScaleA.data(), aScaleSz, hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dMxScaleB, hScaleB.data(), bScaleSz, hipMemcpyHostToDevice), hipSuccess);
+    const std::vector<uint8_t> hMxScale1(mat1ScaleSz, 127u);
+    const std::vector<uint8_t> hMxScale2(mat2ScaleSz, 127u);
+    ASSERT_EQ(hipMemcpy(dMxScale1, hMxScale1.data(), mat1ScaleSz, hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dMxScale2, hMxScale2.data(), mat2ScaleSz, hipMemcpyHostToDevice),
+              hipSuccess);
 
     hipblasLtHandle_t handle = nullptr;
     ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
@@ -2241,12 +2317,20 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
         hipblasLtFusedEpilogueSetAttribute(
             fused, HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE, &outType, sizeof(outType)),
         HIPBLAS_STATUS_SUCCESS);
-    // The kernel writes the pre-quantisation bf16 H = GEMM+residual into this buffer.
+    // The kernel writes pre-quantisation bf16 H = mat1 @ mat2 + residual into this buffer.
     ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(fused,
                                                  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER,
                                                  &dResidualOut,
                                                  sizeof(dResidualOut)),
               HIPBLAS_STATUS_SUCCESS);
+
+    // Translate to hipBLASLt API descriptors.
+    const int64_t M = nHid;
+    const int64_t N = mTok;
+    void* const   A = dMat2;
+    void* const   B = dMat1;
+    void* const   D = dD;
+    void* const   C = D; // beta == 0; hipBLASLt still requires non-null C.
 
     int algoCount = 0;
     ASSERT_EQ(runTnFusedMatmul(handle,
@@ -2254,13 +2338,12 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
                                M,
                                N,
                                K,
-                               dA,
-                               K,
-                               dMxScaleA,
-                               dB,
-                               dMxScaleB,
-                               dC,
-                               dD,
+                               A,
+                               dMxScale2,
+                               B,
+                               dMxScale1,
+                               C,
+                               D,
                                fused,
                                dWs,
                                wsSize,
@@ -2269,34 +2352,34 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
     ASSERT_GT(algoCount, 0) << "no MXFP8-input PartialRMS MXFP8-quant solution selected";
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    std::vector<uint8_t> hD(static_cast<size_t>(M) * N);
+    std::vector<uint8_t> hD(static_cast<size_t>(mTok) * nHid);
     std::vector<uint8_t> hMxScale(scaleBufSz);
     ASSERT_EQ(hipMemcpy(hD.data(), dD, hD.size(), hipMemcpyDeviceToHost), hipSuccess);
     ASSERT_EQ(hipMemcpy(hMxScale.data(), dMxScale, scaleBufSz, hipMemcpyDeviceToHost), hipSuccess);
 
     // CPU reference: the K1 PartialRMS kernel stores MXFP8_quant(gamma * H) as fp8 D,
-    // where H = A*B + residual. The invRms is computed internally but not applied to D;
+    // where H = mat1 @ mat2 + residual. The invRms is computed internally but not applied to D;
     // it is used only in the subsequent row_div step (consumer side).
-    std::vector<float> h1(static_cast<size_t>(M) * N, 0.0f);
-    for(int64_t mt = 0; mt < M; ++mt)
-        for(int64_t nh = 0; nh < N; ++nh)
+    std::vector<float> h1(static_cast<size_t>(mTok) * nHid, 0.0f);
+    for(int64_t mt = 0; mt < mTok; ++mt)
+        for(int64_t nh = 0; nh < nHid; ++nh)
         {
             float acc = 0.0f;
             for(int64_t kk = 0; kk < K; ++kk)
-                acc += aF32[kk + mt * K] * bF32[kk + nh * K];
-            acc += bf16_to_f32(hResidual[mt * N + nh]);
-            h1[mt * N + nh] = acc;
+                acc += mat1F32[kk + mt * K] * mat2F32[kk + nh * K];
+            acc += bf16_to_f32(hResidual[mt * nHid + nh]);
+            h1[mt * nHid + nh] = acc;
         }
     const MxFp8Ref ref
-        = referenceProducerMxfp8(h1, hGamma, M, N, blockSize, paddedRows, paddedCols);
+        = referenceProducerMxfp8(h1, hGamma, mTok, nHid, blockSize, paddedRows, paddedCols);
     expectMxScaleEqual(hMxScale, ref.mxScale);
     ASSERT_EQ(hD.size(), ref.dFp8.size());
     const size_t mismatches = countFp8Mismatches(hD, ref.dFp8);
     EXPECT_EQ(mismatches, 0u) << "D e4m3 output has " << mismatches << " mismatches";
 
     // Verify the bf16 residual-out dual-store: it holds the pre-quantisation
-    // H = A*B + residual (same value as h1), stored as bf16.
-    std::vector<uint16_t> hResidualOut(static_cast<size_t>(M) * N);
+    // H = mat1 @ mat2 + residual (same value as h1), stored as bf16.
+    std::vector<uint16_t> hResidualOut(static_cast<size_t>(mTok) * nHid);
     ASSERT_EQ(hipMemcpy(hResidualOut.data(), dResidualOut, residualOutSz, hipMemcpyDeviceToHost),
               hipSuccess);
     // Relaxed tolerances: bf16 rounding (~0.5 ULP) plus parallel-vs-sequential fp accumulation.
@@ -2304,14 +2387,14 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
 
     hipblasLtFusedEpilogueDestroy(fused);
     hipblasLtDestroy(handle);
-    static_cast<void>(hipFree(dA));
-    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dMat1));
+    static_cast<void>(hipFree(dMat2));
     static_cast<void>(hipFree(dD));
     static_cast<void>(hipFree(dGamma));
     static_cast<void>(hipFree(dResidual));
     static_cast<void>(hipFree(dMxScale));
-    static_cast<void>(hipFree(dMxScaleA));
-    static_cast<void>(hipFree(dMxScaleB));
+    static_cast<void>(hipFree(dMxScale1));
+    static_cast<void>(hipFree(dMxScale2));
     static_cast<void>(hipFree(dResidualOut));
     static_cast<void>(hipFree(dWs));
 }
@@ -2320,7 +2403,7 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
 //
 // GEMM1 is F8F8S with MXAE8B32/MXBE8B32 input scales (uniform-127, i.e. scale=1).
 // The epilogue chain is RESIDUAL_ADD -> PARTIAL_RMSNORM_STATS -> REQUANT(MX) with a bf16
-// residualOut dual-store.  GEMM2 (consumer) applies the per-row rstd, producing bf16 D2.
+// residualOut dual-store.  GEMM2 (consumer) applies the per-token rstd, producing bf16 D2.
 // This exercises the partialrms_residual_mxfp8quant_residualout_scaled_mxfp8_k1 kernel.
 TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesReference)
 {
@@ -2330,13 +2413,20 @@ TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesRefer
     const TypedTestDims d      = makeTypedTestDims(HIP_R_8F_E4M3);
     const size_t        wsSize = size_t(256) * 1024 * 1024;
 
+    // Operation:
+    //   mat1[d.mTok,d.k0] row-major @ mat2[d.k0,d.nHid] column-major
+    //       -> intermediate[d.mTok,d.nHid] row-major;
+    //   intermediate[d.mTok,d.nHid] row-major @ W1[d.nHid,d.nOut] column-major
+    //       -> out[d.mTok,d.nOut] row-major.
+    // Each call passes its weight as A and activation as B.
+
     // Input MX scale geometry: one UE8M0 byte per (row-block, k-block), k-block cols
     // padded to a multiple of 8 as required by the GFX950 swizzle.
     const int64_t inputScaleColsK = ((d.k0 / d.blockSize + 7) / 8) * 8;
-    const size_t  aScaleSz
-        = static_cast<size_t>(((d.mTok + 31) / 32) * 32) * inputScaleColsK;
-    const size_t bScaleSz
+    const size_t aScaleSz
         = static_cast<size_t>(((d.nHid + 31) / 32) * 32) * inputScaleColsK;
+    const size_t bScaleSz
+        = static_cast<size_t>(((d.mTok + 31) / 32) * 32) * inputScaleColsK;
     const size_t residualOutSz = static_cast<size_t>(d.mTok) * d.nHid * sizeof(uint16_t);
 
     std::vector<uint8_t>  hA(d.szABytes), hB(d.szBBytes);

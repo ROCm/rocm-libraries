@@ -156,6 +156,8 @@ BenchmarkProblems:
             - Exact: [8192, 8192, 1, 8192]
             - Exact: [16384, 2048, 1, 2048]
             - Exact: [2048, 16384, 1, 2048]
+            - Exact: [4096, 16384, 1, 4096]
+            - Exact: [8192, 16384, 1, 8192]
 
 LibraryLogic:
   ScheduleName: "partialrms_residual_mxfp8quant_residualout_scaled_mxfp8_k1"
