@@ -26,7 +26,7 @@ from rocisa.instruction import (
     BufferLoadB128,
     SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
     SNop, SOrB32, SSubI32, SSubU32, SXorB32,
-    SCBranchSCC1, SCmpEQU32, SEndpgm,
+    SCBranchSCC1, SCmpEQU32, SCmpLeU32, SCSelectB32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
@@ -116,7 +116,40 @@ def _emitGRPtrUpdate(tag, tile, ti, writer, kernel):
   raise NotImplementedError(f"emitGRPtrUpdate not implemented for {type(tag).__name__}")
 
 # Stubs for tags not yet implemented.
-_stub = lambda tag, tile, ti, writer, kernel: None
+_stub = lambda *args, **kwargs: None
+
+
+def emitSrdAdvance(module, tc, inc, writer, holdOnLastIter=False):
+  """Advance Srd{tc}'s base pointer by inc bytes.
+
+  holdOnLastIter suppresses the advance when LoopCounterL <= 1. It is set only
+  for the PGR=2 pre-loop advance that sits between the two prefetch clusters.
+  With a single unroll iteration the pre-loop branches straight to the NLL, which
+  reads only cluster 1's LDS buffer, so cluster 2 prefetches a K-block that does
+  not exist. Its loads still have to issue -- the pre-loop's vmcnt(N) counts on
+  them -- so instead of skipping them we leave the SRD in place and let them
+  re-read cluster 1's K-block. Srd+2 is a fixed tile-boundary limit rather than a
+  distance to the end of the tensor, so nothing else would clip them and they run
+  off the end of the allocation (hipErrorIllegalAddress on the MX scale tensors,
+  whose allocations are small enough to end on a mapping boundary).
+  """
+  if not holdOnLastIter:
+    module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
+                       comment=f"{tc}: advance SRD by {inc} bytes"))
+    module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                        comment=f"{tc}: carry"))
+    return
+
+  tmp = writer.sgprPool.checkOut(1, tag=f"emitSrdAdvance_{tc}", preventOverflow=False)
+  module.add(SCmpLeU32(src0=sgpr("LoopCounterL"), src1=1,
+                       comment="single unroll iteration? (cluster 2 is a dead prefetch)"))
+  module.add(SCSelectB32(dst=sgpr(tmp), src0=0, src1=inc,
+                         comment=f"{tc}: hold SRD rather than read past the tensor"))
+  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(tmp),
+                     comment=f"{tc}: advance SRD by {inc} bytes"))
+  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                      comment=f"{tc}: carry"))
+  writer.sgprPool.checkIn(tmp)
 _emitGlobalReadOffset.register(GRTag_TLU1)(_stub)
 _allocGROffsetRegisters.register(GRTag_TLU1)(_stub)
 _deallocGROffsetRegisters.register(GRTag_TLU1)(_stub)
@@ -554,7 +587,7 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRPtrUpdate.register(GRTag_1x1)
 @_emitGRPtrUpdate.register(GRTag_1x2)
 @_emitGRPtrUpdate.register(GRTag_2x2)
-def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
+def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
   tc = ti.tc
   # TDM path: advance Address{tc} and sync the TDM descriptor instead of SRD.
@@ -573,10 +606,7 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
   # tile, so advancing one DepthU consumes 16 contiguous row fragments.
   rowMultiplier = ti.mmaTileShape[0] if ti.isPreShuffled else 1
   inc = int(ti.depthUBytes * rowMultiplier)
-  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
-             comment=f"{tc}: advance SRD by {inc} bytes"))
-  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
-             comment=f"{tc}: carry"))
+  emitSrdAdvance(module, tc, inc, writer, holdOnLastIter)
   return module
 
 
@@ -1408,6 +1438,6 @@ def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
 ##################################################
 # Subroutine to update ptrs
 #
-def globalReadPtrUpdates(tc, writer, kernel):
+def globalReadPtrUpdates(tc, writer, kernel, holdOnLastIter=False):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return ti_.emitGRPtrUpdate(writer, kernel)
+  return ti_.emitGRPtrUpdate(writer, kernel, holdOnLastIter)
