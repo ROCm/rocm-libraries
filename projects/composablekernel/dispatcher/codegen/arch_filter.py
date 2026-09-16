@@ -159,7 +159,8 @@ try:
         WARP_TILE_SUPPORTED_COMBINATIONS,
         PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS,
         PRESHUFFLE_PIPELINES,
-        LDS_CAPACITY_LIMITS,
+        LDS_CAPACITY_LIMITS_BY_ARCH,
+        get_lds_limit,
         TRAIT_UNSUPPORTED_COMBINATIONS,
         DTYPE_COMBINATIONS,
     )
@@ -241,7 +242,34 @@ except ImportError:
 
     PRESHUFFLE_PIPELINES = ["preshufflev2"]
 
-    LDS_CAPACITY_LIMITS = {"compv4": 32768, "preshufflev2": 32768, "default": 65536}
+    # Conservative fallback: the historical 64 KB / 32 KB budget, applied to
+    # every architecture. It deliberately understates gfx950 and gfx1250 rather
+    # than overstating anything, because a budget larger than the silicon
+    # produces kernels that cannot launch. The generated module carries the
+    # real per-architecture numbers; regenerate it rather than relying on this.
+    _FALLBACK_LDS_BUDGET = {
+        "mem": 65536,
+        "compv1": 65536,
+        "compv2": 65536,
+        "compv3": 65536,
+        "compv4": 32768,
+        "compv5": 65536,
+        "compv6": 32768,
+        "preshufflev1": 32768,
+        "preshufflev2": 32768,
+        "default": 65536,
+    }
+
+    LDS_CAPACITY_LIMITS_BY_ARCH = {
+        arch: dict(_FALLBACK_LDS_BUDGET) for arch in ARCH_FAMILY_MAP
+    }
+
+    def get_lds_limit(gpu_arch: str, pipeline: str) -> int:
+        """Get the LDS staging budget in bytes for an architecture and pipeline."""
+        per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(
+            gpu_arch.lower(), _FALLBACK_LDS_BUDGET
+        )
+        return per_pipeline.get(pipeline.lower(), per_pipeline["default"])
 
     TRAIT_UNSUPPORTED_COMBINATIONS = {
         ("compv3", "cshuffle", "interwave"),
@@ -713,13 +741,15 @@ class ArchFilter:
         matrix_b_size = config.tile_n * config.tile_k * elem_size_b
         total_lds = matrix_a_size + matrix_b_size
 
-        max_lds = LDS_CAPACITY_LIMITS.get(
-            config.pipeline, LDS_CAPACITY_LIMITS["default"]
-        )
+        # The budget depends on the target, not just the pipeline: a tile that
+        # overflows one architecture's LDS may fit comfortably in another's.
+        max_lds = get_lds_limit(self.gpu_arch, config.pipeline)
 
         if total_lds > max_lds:
             result.add_error(
-                f"LDS capacity exceeded: {total_lds} bytes > {max_lds} bytes limit. "
+                f"LDS capacity exceeded on {self.gpu_arch} "
+                f"(pipeline={config.pipeline}): "
+                f"{total_lds} bytes > {max_lds} bytes limit. "
                 f"Matrix A: {config.tile_m}x{config.tile_k}x{elem_size_a}={matrix_a_size}B, "
                 f"Matrix B: {config.tile_n}x{config.tile_k}x{elem_size_b}={matrix_b_size}B"
             )

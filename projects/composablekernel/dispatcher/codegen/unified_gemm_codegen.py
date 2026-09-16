@@ -2197,7 +2197,7 @@ def _show_arch_info(gpu_target: str, datatype: str):
             get_supported_archs,
             WARP_SUPPORTED_COMBINATIONS,
             WARP_TILE_SUPPORTED_COMBINATIONS,
-            LDS_CAPACITY_LIMITS,
+            LDS_CAPACITY_LIMITS_BY_ARCH,
             TRAIT_UNSUPPORTED_COMBINATIONS,
         )
 
@@ -2236,8 +2236,8 @@ def _show_arch_info(gpu_target: str, datatype: str):
             print(f"  {dtype}")
 
         # LDS limits
-        print("\nLDS capacity limits:")
-        for pipeline, limit in LDS_CAPACITY_LIMITS.items():
+        print(f"\nLDS staging budget on {gpu_target}:")
+        for pipeline, limit in LDS_CAPACITY_LIMITS_BY_ARCH[gpu_target.lower()].items():
             print(f"  {pipeline}: {limit // 1024}KB")
 
         # Unsupported trait combinations
