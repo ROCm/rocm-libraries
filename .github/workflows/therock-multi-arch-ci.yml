@@ -287,6 +287,54 @@ jobs:
       # TODO(newling): Add gfx1151 after validating a target-specific workload.
       # Restore gfx950 when TheRock multi-arch presubmit publishes its artifact.
 
+  rocjitsu_tensilelite_gfx125x:
+    name: rocjitsu tensilelite (gfx125X-dcgpu)
+    # A caller cannot depend on an individual job inside a reusable workflow,
+    # so start after the Linux workflow has finished publishing its artifacts.
+    # This sidecar remains advisory and is not part of the required summary.
+    # gfx125X is the emulation-only target (rocjitsu CPU emulation, no HW).
+    needs: [ci-env, configure, linux_build_and_test]
+    if: >-
+      ${{
+        !cancelled() &&
+        github.event_name == 'pull_request' &&
+        (
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
+        ) &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-tensilelite-linux.yml
+    with:
+      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
+      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
+      amdgpu_families: gfx125X-dcgpu
+
+  rocjitsu_tensilelite_gfx94x:
+    name: rocjitsu tensilelite (gfx94X-dcgpu)
+    # A caller cannot depend on an individual job inside a reusable workflow,
+    # so start after the Linux workflow has finished publishing its artifacts.
+    # This sidecar remains advisory and is not part of the required summary.
+    # gfx94X is the HW-baseline leg: cross-checks the emulator against real hardware.
+    needs: [ci-env, configure, linux_build_and_test]
+    if: >-
+      ${{
+        !cancelled() &&
+        github.event_name == 'pull_request' &&
+        (
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
+          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
+          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
+        ) &&
+        needs.linux_build_and_test.result != 'skipped'
+      }}
+    uses: ./.github/workflows/therock-rocjitsu-tensilelite-linux.yml
+    with:
+      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
+      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
+      amdgpu_families: gfx94X-dcgpu
+
   multi_arch_ci_summary:
     name: Multi-Arch CI Summary
     if: always()
