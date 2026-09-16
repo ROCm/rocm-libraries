@@ -173,8 +173,17 @@ namespace TensileLite
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
-                const bool swMatch = softwarePredicate(
-                    SolutionLibrarySearchType::DEFAULT, task, hardware, *solution, problem);
+                // With uniform summation order off, the filter stays
+                // hardwarePredicate && problemPredicate. The extra conjuncts in
+                // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
+                // real filters, so they stay behind the check.
+                const bool swMatch = problem.getParams().uniformSummationOrder()
+                                         ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                             task,
+                                                             hardware,
+                                                             *solution,
+                                                             problem)
+                                         : (*(solution->problemPredicate))(problem);
                 const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)

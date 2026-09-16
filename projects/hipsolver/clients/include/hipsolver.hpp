@@ -5332,7 +5332,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     float*              A,
                                                     int                 lda,
                                                     int*                lworkOnDevice,
-                                                    int*                lworkOnHost)
+                                                    int*                lworkOnHost,
+                                                    int                 bc)
 {
     *lworkOnHost = 0;
     switch(API)
@@ -5357,7 +5358,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     double*             A,
                                                     int                 lda,
                                                     int*                lworkOnDevice,
-                                                    int*                lworkOnHost)
+                                                    int*                lworkOnHost,
+                                                    int                 bc)
 {
     *lworkOnHost = 0;
     switch(API)
@@ -5382,7 +5384,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     hipsolverComplex*   A,
                                                     int                 lda,
                                                     int*                lworkOnDevice,
-                                                    int*                lworkOnHost)
+                                                    int*                lworkOnHost,
+                                                    int                 bc)
 {
     *lworkOnHost = 0;
     switch(API)
@@ -5408,7 +5411,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t               API,
                                                     hipsolverDoubleComplex* A,
                                                     int                     lda,
                                                     int*                    lworkOnDevice,
-                                                    int*                    lworkOnHost)
+                                                    int*                    lworkOnHost,
+                                                    int                     bc)
 {
     *lworkOnHost = 0;
     switch(API)
@@ -5434,7 +5438,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     float*              A,
                                                     int64_t             lda,
                                                     size_t*             lworkOnDevice,
-                                                    size_t*             lworkOnHost)
+                                                    size_t*             lworkOnHost,
+                                                    int                 bc)
 {
     switch(API)
     {
@@ -5456,7 +5461,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     double*             A,
                                                     int64_t             lda,
                                                     size_t*             lworkOnDevice,
-                                                    size_t*             lworkOnHost)
+                                                    size_t*             lworkOnHost,
+                                                    int                 bc)
 {
     switch(API)
     {
@@ -5478,7 +5484,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
                                                     hipsolverComplex*   A,
                                                     int64_t             lda,
                                                     size_t*             lworkOnDevice,
-                                                    size_t*             lworkOnHost)
+                                                    size_t*             lworkOnHost,
+                                                    int                 bc)
 {
     switch(API)
     {
@@ -5500,7 +5507,8 @@ inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t               API,
                                                     hipsolverDoubleComplex* A,
                                                     int64_t                 lda,
                                                     size_t*                 lworkOnDevice,
-                                                    size_t*                 lworkOnHost)
+                                                    size_t*                 lworkOnHost,
+                                                    int                     bc)
 {
     switch(API)
     {
@@ -5913,6 +5921,247 @@ inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
                                  workOnHost,
                                  lworkOnHost,
                                  info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+// batched
+inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
+                                                    hipsolverHandle_t   handle,
+                                                    hipsolverDnParams_t params,
+                                                    int                 m,
+                                                    int                 n,
+                                                    float*              A[],
+                                                    int                 lda,
+                                                    int*                lworkOnDevice,
+                                                    int*                lworkOnHost,
+                                                    int                 bc)
+{
+    *lworkOnHost = 0;
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverSgetrfBatched_bufferSize(
+            handle, m, n, A, lda, std::min(m, n), lworkOnDevice, bc);
+    default:
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
+                                                    hipsolverHandle_t   handle,
+                                                    hipsolverDnParams_t params,
+                                                    int                 m,
+                                                    int                 n,
+                                                    double*             A[],
+                                                    int                 lda,
+                                                    int*                lworkOnDevice,
+                                                    int*                lworkOnHost,
+                                                    int                 bc)
+{
+    *lworkOnHost = 0;
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverDgetrfBatched_bufferSize(
+            handle, m, n, A, lda, std::min(m, n), lworkOnDevice, bc);
+    default:
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t           API,
+                                                    hipsolverHandle_t   handle,
+                                                    hipsolverDnParams_t params,
+                                                    int                 m,
+                                                    int                 n,
+                                                    hipsolverComplex*   A[],
+                                                    int                 lda,
+                                                    int*                lworkOnDevice,
+                                                    int*                lworkOnHost,
+                                                    int                 bc)
+{
+    *lworkOnHost = 0;
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverCgetrfBatched_bufferSize(
+            handle, m, n, (hipFloatComplex**)A, lda, std::min(m, n), lworkOnDevice, bc);
+    default:
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrf_bufferSize(testAPI_t               API,
+                                                    hipsolverHandle_t       handle,
+                                                    hipsolverDnParams_t     params,
+                                                    int                     m,
+                                                    int                     n,
+                                                    hipsolverDoubleComplex* A[],
+                                                    int                     lda,
+                                                    int*                    lworkOnDevice,
+                                                    int*                    lworkOnHost,
+                                                    int                     bc)
+{
+    *lworkOnHost = 0;
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverZgetrfBatched_bufferSize(
+            handle, m, n, (hipDoubleComplex**)A, lda, std::min(m, n), lworkOnDevice, bc);
+    default:
+        *lworkOnDevice = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
+                                         bool                NPVT,
+                                         hipsolverHandle_t   handle,
+                                         hipsolverDnParams_t params,
+                                         int                 m,
+                                         int                 n,
+                                         float*              A[],
+                                         int                 lda,
+                                         int                 stA,
+                                         int*                ipiv,
+                                         int                 stP,
+                                         float*              workOnDevice,
+                                         int                 lworkOnDevice,
+                                         float*              workOnHost,
+                                         int                 lworkOnHost,
+                                         int*                info,
+                                         int                 bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverSgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      A,
+                                      lda,
+                                      workOnDevice,
+                                      lworkOnDevice,
+                                      NPVT ? nullptr : ipiv,
+                                      stP,
+                                      info,
+                                      bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
+                                         bool                NPVT,
+                                         hipsolverHandle_t   handle,
+                                         hipsolverDnParams_t params,
+                                         int                 m,
+                                         int                 n,
+                                         double*             A[],
+                                         int                 lda,
+                                         int                 stA,
+                                         int*                ipiv,
+                                         int                 stP,
+                                         double*             workOnDevice,
+                                         int                 lworkOnDevice,
+                                         double*             workOnHost,
+                                         int                 lworkOnHost,
+                                         int*                info,
+                                         int                 bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverDgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      A,
+                                      lda,
+                                      workOnDevice,
+                                      lworkOnDevice,
+                                      NPVT ? nullptr : ipiv,
+                                      stP,
+                                      info,
+                                      bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrf(testAPI_t           API,
+                                         bool                NPVT,
+                                         hipsolverHandle_t   handle,
+                                         hipsolverDnParams_t params,
+                                         int                 m,
+                                         int                 n,
+                                         hipsolverComplex*   A[],
+                                         int                 lda,
+                                         int                 stA,
+                                         int*                ipiv,
+                                         int                 stP,
+                                         hipsolverComplex*   workOnDevice,
+                                         int                 lworkOnDevice,
+                                         hipsolverComplex*   workOnHost,
+                                         int                 lworkOnHost,
+                                         int*                info,
+                                         int                 bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverCgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      (hipFloatComplex**)A,
+                                      lda,
+                                      (hipFloatComplex*)workOnDevice,
+                                      lworkOnDevice,
+                                      NPVT ? nullptr : ipiv,
+                                      stP,
+                                      info,
+                                      bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_getrf(testAPI_t               API,
+                                         bool                    NPVT,
+                                         hipsolverHandle_t       handle,
+                                         hipsolverDnParams_t     params,
+                                         int                     m,
+                                         int                     n,
+                                         hipsolverDoubleComplex* A[],
+                                         int                     lda,
+                                         int                     stA,
+                                         int*                    ipiv,
+                                         int                     stP,
+                                         hipsolverDoubleComplex* workOnDevice,
+                                         int                     lworkOnDevice,
+                                         hipsolverDoubleComplex* workOnHost,
+                                         int                     lworkOnHost,
+                                         int*                    info,
+                                         int                     bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverZgetrfBatched(handle,
+                                      m,
+                                      n,
+                                      (hipDoubleComplex**)A,
+                                      lda,
+                                      (hipDoubleComplex*)workOnDevice,
+                                      lworkOnDevice,
+                                      NPVT ? nullptr : ipiv,
+                                      stP,
+                                      info,
+                                      bc);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
