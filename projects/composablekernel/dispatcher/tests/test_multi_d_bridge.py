@@ -174,7 +174,7 @@ class TestMultiDShippedConfigs(unittest.TestCase):
 class TestMultiDGfx1250Config(unittest.TestCase):
     """The gfx1250 (MI400) CI config must use WMMA warp tiles.
 
-    gfx1250 has no MFMA units: it runs the RDNA4 WMMA path whose fp16/bf16 warp
+    gfx1250 has no MFMA units: it runs the WMMA path whose fp16/bf16 warp
     tile is 16x16x32 (see arch_specs_generated.py). The merged multi_d bridge
     (#9308) shipped only an MFMA CI config (32x32x16, valid on gfx942/gfx950),
     which the kernel reports as unsupported (status -2/-1) on gfx1250. The

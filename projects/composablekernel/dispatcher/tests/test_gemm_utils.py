@@ -287,7 +287,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-# --- gfx1250 (MI400 / RDNA4-WMMA) enablement -------------------------------
+# --- gfx1250 (MI400 / CDNA5, WMMA) enablement ------------------------------
 # The regular-GEMM bridge historically allow-listed only CDNA (gfx90a/942/950)
 # and carried FNUZ-only fp8 codecs. gfx1250 uses WMMA + OCP fp8, so it needs an
 # arch entry and an OCP codec path. These CPU-only tests lock that surface in.
