@@ -673,6 +673,13 @@ struct problem_t {
   /// Number of query heads (for attention workloads).
   std::size_t q_heads = 32;
 
+  /// Causal masking flag for attention workloads. When true, each query only
+  /// attends to keys at or before its own position, so the score matrix is
+  /// (block-)triangular. This reduces the FLOP/iteration count and changes the
+  /// KV-tile reuse pattern (and hence L2/MALL hit rates). Default false
+  /// preserves the legacy non-causal behaviour.
+  bool causal = false;
+
   /// Transpose types (TT, TN, NT, TT.)
   transpose_t a_transpose = transpose_t::N;
   transpose_t b_transpose = transpose_t::N;
