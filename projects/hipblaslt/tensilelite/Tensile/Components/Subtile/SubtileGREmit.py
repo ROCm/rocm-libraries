@@ -51,6 +51,25 @@ from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileItera
 from ...Common.DataType import DataType
 
 
+def _ldsRowBankSize(writer) -> int:
+  """Bytes spanned by one full row of LDS banks."""
+  archCaps = writer.states.archCaps
+  return archCaps["LDSBankCount"] * archCaps["LDSBankWidth"]
+
+
+def _grRowTiling(writer, tileInfo):
+  """(loads per subIterK row, subIterK rows per LDS bank row) for a row-major operand.
+
+  A subIterK row has to divide into whole loads and fit inside one bank row.
+  Both hold for every geometry Solution.py admits.
+  """
+  subIterKBytes = tileInfo.subIterKBytes
+  ldsRowBankSize = _ldsRowBankSize(writer)
+  assert subIterKBytes % tileInfo.loadWidthGR == 0
+  assert subIterKBytes <= ldsRowBankSize
+  return subIterKBytes // tileInfo.loadWidthGR, ldsRowBankSize // subIterKBytes
+
+
 ################################################################################
 # 1. Dispatch bases
 ################################################################################
@@ -125,7 +144,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
   bpe = ti.bpe
   bpeBits = int(8 * bpe)
   strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
-  ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
+  ldsRowBankSize = _ldsRowBankSize(writer)
 
   wg_m       = ti.waveGroupSize
   numWaves   = ti.numWaves
@@ -877,14 +896,9 @@ def _graTileAssignment_rowMajorSingle(writer, kernel, module, tileInfo):
   Mirrors the interleaved A+B path, but every parameter comes from this
   tensor's own geometry so it can be paired with a TLU=1 operand (NN / TT).
   """
-  subIterKBytes = tileInfo.subIterKBytes
   wavesize = kernel["WavefrontSize"]
-  ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
   loadWidth = tileInfo.loadWidthGR
-  assert subIterKBytes % loadWidth == 0
-  assert subIterKBytes <= ldsRowBankSize
-  blockSize = subIterKBytes // loadWidth
-  numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
+  blockSize, numRowsPerLDSBanks = _grRowTiling(writer, tileInfo)
   tmpVgpr = writer.vgprPool.checkOut(5, tag="_graTileAssignment_rowMajorSingle_tmpVgpr")
   colId, rowId, rowOffset, waveId, laneId = range(tmpVgpr, tmpVgpr + 5)
   module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
@@ -928,14 +942,9 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
         _graTileAssignment_rowMajorSingle(writer, kernel, module, ti)
         _grComputeSubtileOffsets_legacy(writer, module, ti)
     return module
-  subIterKBytes = tileInfoA.subIterKBytes
   wavesize = kernel["WavefrontSize"]
-  ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
   loadWidth = tileInfoA.loadWidthGR
-  assert subIterKBytes % loadWidth == 0
-  assert subIterKBytes <= ldsRowBankSize
-  blockSize = subIterKBytes // loadWidth
-  numRowsPerLDSBanks = ldsRowBankSize // subIterKBytes
+  blockSize, numRowsPerLDSBanks = _grRowTiling(writer, tileInfoA)
   tmpVgpr = writer.vgprPool.checkOut(7, tag="_graTileAssignment_legacy_tmpVgpr")
   colIdA = tmpVgpr
   colIdB = tmpVgpr + 1

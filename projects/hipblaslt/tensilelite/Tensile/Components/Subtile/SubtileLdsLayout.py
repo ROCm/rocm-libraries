@@ -134,8 +134,15 @@ class SubtileLdsLayout:
   offsets: Dict[str, int] = field(default_factory=dict)
   totalSize: int = 0
 
-  def offsetOf(self, tc: str, default: int = -1) -> int:
-    return self.offsets.get(tc, default)
+
+# Writer attribute each region publishes.  Spelled out rather than built from a
+# format string so the names the emit paths read are greppable to their source.
+_LDS_START_ATTR = {
+    'A':    "ldsStartOffsetA",
+    'B':    "ldsStartOffsetB",
+    'MXSA': "ldsStartOffsetMXSA",
+    'MXSB': "ldsStartOffsetMXSB",
+}
 
 
 def computeLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
@@ -170,7 +177,7 @@ def applyLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
 
   layout = computeLdsLayout(writer, kernel)
   for tc, offset in layout.offsets.items():
-    setattr(writer, "ldsStartOffset%s" % tc, offset)
+    setattr(writer, _LDS_START_ATTR[tc], offset)
   writer.ldsTotalSize = layout.totalSize
 
   kernel["LdsNumBytes"] = max(1, int(layout.totalSize * kernel["NumLdsBlk"]))
