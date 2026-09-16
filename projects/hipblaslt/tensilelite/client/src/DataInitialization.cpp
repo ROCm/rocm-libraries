@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <iostream>
 #include <list>
 #include <map>
@@ -2233,35 +2234,47 @@ namespace TensileLite
                               scalePtr, tiledFree, compactKBlocks, paddedKBlocks, scaleElemSize);
                   }
 
-                  // When the kernel needs a swizzled scale, regenerate it with the
-                  // requested layout straight into gpuInput.valid; the cpuInput.valid
-                  // copy stays canonical for the CPU reference.
+                  // When the kernel needs a swizzled scale, populate gpuInput.valid
+                  // with that layout; cpuInput.valid stays canonical for the CPU
+                  // reference.
                   if(swizzleLayout != MXScaleLayout::None && pristineScale.gpuInput.valid)
                   {
-                      // The swizzle happens inside generateMXInput, leaving no seam
-                      // at which to collapse a 2D tile -- and the in-device layout
-                      // of a 2D-tiled scale is defined by the scaled-WMMA path that
-                      // consumes it, which does not exist yet. Refuse loudly rather
-                      // than hand the GPU an unspecified layout.
-                      if(mxBlockFree > 1)
+                      // GFX950 2D has no defined in-device layout yet. gfx1250 2D
+                      // is the 1D dimk permute on the compressed (tiledFree ×
+                      // K/MXBlock) tensor, which TDM already consumes.
+                      if(mxBlockFree > 1 && swizzleLayout != MXScaleLayout::GFX1250)
                           throw std::runtime_error(
                               "MXScaleFormat pre-swizzle is not supported with "
-                              "MXBlockFree > 1; the in-device layout for a 2D MX "
-                              "scaling tile is not defined yet.");
+                              "MXBlockFree > 1 except GFX1250 InMemorySwizzle.");
 
                       size_t const eltSize
                           = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                       size_t const canonicalScaleElems = scaleDesc.totalAllocatedElements();
 
                       // gfx1250 dimk pads the fast dim up to dimk = 128/mxBlock.
-                      // The scale tensor is allocated unpadded on gfx1250, so size
-                      // the staging buffer for the padded worst case.
+                      // 1xK: slow = data free dim, fast = K/MXBlock.
+                      // 2D: same permute on the compressed free dim.
+                      size_t slowDim = static_cast<size_t>(cols);
+                      size_t fastDim = (mxBlock > 0)
+                          ? static_cast<size_t>(rows) / static_cast<size_t>(mxBlock)
+                          : 0;
+                      if(mxBlockFree > 1)
+                      {
+                          if(kFast)
+                          {
+                              slowDim = tiledFree;
+                              fastDim = paddedKBlocks;
+                          }
+                          else
+                          {
+                              slowDim = paddedKBlocks;
+                              fastDim = tiledFree;
+                          }
+                      }
+
                       size_t swizzledScaleElems = canonicalScaleElems;
                       if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
                       {
-                          size_t const slowDim = static_cast<size_t>(cols);
-                          size_t const fastDim
-                              = static_cast<size_t>(rows) / static_cast<size_t>(mxBlock);
                           size_t const dimk = 128u / static_cast<size_t>(mxBlock);
                           size_t const paddedFast
                               = (dimk == 0) ? fastDim
@@ -2273,27 +2286,55 @@ namespace TensileLite
                       }
                       size_t const gpuScaleBytes = swizzledScaleElems * eltSize;
                       std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
-                      for(size_t b = 0; b < batchCount; b++)
+                      size_t const elemsPerBatch
+                          = (batchCount > 0) ? (swizzledScaleElems / batchCount)
+                                             : swizzledScaleElems;
+                      if(mxBlockFree > 1)
                       {
-                          auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
-                                          + b * dataBatchStrideBytes;
-                          auto* scalePtr = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
-                          generateMXInput(hipDataT,
-                                          hipScaleT,
-                                          dataPtr,
-                                          scalePtr,
-                                          rows,
-                                          cols,
-                                          stride,
-                                          transposed,
-                                          isMatrixA ? mxBlock : 1,
-                                          isMatrixA ? 1 : mxBlock,
-                                          isMatrixA,
-                                          swizzleLayout,
-                                          initModeToMXMethod(dataInitMode),
-                                          -1.0f,
-                                          1.0f,
-                                          initModeToMXMethod(scaleInitMode));
+                          // generateMXInput has no 2D seam. Canonical cpuInput is
+                          // already downsampled; swizzle that tensor for the GPU.
+                          for(size_t b = 0; b < batchCount; b++)
+                          {
+                              auto* dst = gpuScaleBuf.data() + b * elemsPerBatch * eltSize;
+                              auto* src
+                                  = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
+                                    + b * scaleBatchStrideBytes;
+                              size_t const srcBytes = (batchCount > 1)
+                                  ? scaleBatchStrideBytes
+                                  : scaleDesc.totalAllocatedBytes();
+                              std::memcpy(dst, src, std::min(srcBytes, elemsPerBatch * eltSize));
+                              applyMXScaleLayoutInPlace(dst,
+                                                        slowDim * fastDim,
+                                                        swizzleLayout,
+                                                        slowDim,
+                                                        fastDim,
+                                                        mxBlock);
+                          }
+                      }
+                      else
+                      {
+                          for(size_t b = 0; b < batchCount; b++)
+                          {
+                              auto* dataPtr = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
+                                              + b * dataBatchStrideBytes;
+                              auto* scalePtr = gpuScaleBuf.data() + b * scaleBatchStrideBytes;
+                              generateMXInput(hipDataT,
+                                              hipScaleT,
+                                              dataPtr,
+                                              scalePtr,
+                                              rows,
+                                              cols,
+                                              stride,
+                                              transposed,
+                                              isMatrixA ? mxBlock : 1,
+                                              isMatrixA ? 1 : mxBlock,
+                                              isMatrixA,
+                                              swizzleLayout,
+                                              initModeToMXMethod(dataInitMode),
+                                              -1.0f,
+                                              1.0f,
+                                              initModeToMXMethod(scaleInitMode));
+                          }
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),

@@ -164,6 +164,30 @@ class TestGetMxsTileSpanInfoGate:
         info = _info(_make_kernel(mi_wave_tile=(8, 4)))
         assert info == {"vectorWidth": 1, "numGroups": 4}
 
+    def test_mxtile_2d_does_not_extra_gate_geometry(self):
+        """2D MXBlockFree uses the original TileSpan geometry only.
+
+        VW=1/2 (MIWG=2 → Δ=32/64) and MIWG=1 VW=4 (Δ=64) stay on: partner
+        half-waves may share a scale row after / MXBlockFree.
+        """
+        cases = [
+            dict(vector_width=1, mi_wave_tile=(4, 4), expect={"vectorWidth": 1, "numGroups": 2}),
+            dict(vector_width=2, mi_wave_tile=(4, 4), expect={"vectorWidth": 2, "numGroups": 1}),
+            dict(vector_width=4, mi_wave_tile=(8, 8), expect={"vectorWidth": 4, "numGroups": 1}),
+            dict(vector_width=4, mi_wave_tile=(8, 8), mi_wave_group=(1, 1),
+                 expect={"vectorWidth": 4, "numGroups": 1}),
+            dict(vector_width=8, mi_wave_tile=(16, 16), mi_wave_group=(1, 1),
+                 expect={"vectorWidth": 8, "numGroups": 1}),
+        ]
+        for case in cases:
+            expect = case.pop("expect")
+            kernel, tc, tile01 = _make_kernel(tc="MXSA", tile01=0, **case)
+            kernel["ProblemType"] = {"MXBlockFreeA": 128, "MXBlockA": 128}
+            assert LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01, _CAPS_V3) == expect
+            kernelB, tcB, tile01B = _make_kernel(tc="MXSB", tile01=1, **case)
+            kernelB["ProblemType"] = {"MXBlockFreeB": 128, "MXBlockB": 128}
+            assert LocalReadMFMA.getMxsTileSpanInfo(kernelB, tcB, tile01B, _CAPS_V3) == expect
+
 
 class TestGetMxsTileSpanInfoAxisNeutral:
     """The gate is axis-neutral: tile01 selects axis, MatrixInst, and wave group."""
@@ -197,9 +221,11 @@ def _lra_tile_span(kernel, tc, tile01):
         return False
     ratio = kernel["MIWaveTile"][tile01] // kernel["VectorWidth%s" % tc]
     matrix_inst_t = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
-    return (ratio >= 2
+    if not (ratio >= 2
             and ratio % 2 == 0
-            and matrix_inst_t == kernel["WavefrontSize"] // 2)
+            and matrix_inst_t == kernel["WavefrontSize"] // 2):
+        return False
+    return True
 
 
 def _lra_wave_split(kernel, tc, tile01):
@@ -234,6 +260,22 @@ class TestGateMatchesLraTileSpan:
         assert _lra_wave_split(kernel, tc, tile01) == (
             (info is not None) and wave_group[tile01] > 1
         )
+
+    def test_gates_agree_with_mxtile_2d(self):
+        """2D MXBlockFree does not extra-disable: gate still matches original geometry."""
+        cases = [
+            dict(vector_width=1, mi_wave_tile=(4, 4), mi_wave_group=(2, 2), expect=True),
+            dict(vector_width=4, mi_wave_tile=(8, 8), mi_wave_group=(2, 2), expect=True),
+            dict(vector_width=4, mi_wave_tile=(8, 8), mi_wave_group=(1, 1), expect=True),
+            dict(vector_width=8, mi_wave_tile=(16, 16), mi_wave_group=(1, 1), expect=True),
+            dict(vector_width=4, mi_wave_tile=(4, 4), mi_wave_group=(2, 2), expect=False),
+        ]
+        for case in cases:
+            expect = case.pop("expect")
+            kernel, tc, tile01 = _make_kernel(tc="MXSA", tile01=0, **case)
+            kernel["ProblemType"] = {"MXBlockFreeA": 128, "MXBlockA": 128}
+            info = LocalReadMFMA.getMxsTileSpanInfo(kernel, tc, tile01, _CAPS_V3)
+            assert (info is not None) == expect == _lra_tile_span(kernel, tc, tile01), case
 
 
 def _make_scalesel_kernel(vector_width=1, mi_wave_tile=(4, 4), mxscale_format="InMemorySwizzle"):
@@ -344,3 +386,28 @@ class TestScaleSelectEffect:
         kernel = _make_scalesel_kernel(vector_width=1, mi_wave_tile=(4, 4))
         for idx in range(4):
             assert _scale_sel(stub, kernel, "A", 0, idx) == (idx, 0)
+
+    def test_mxtile_2d_folds_vw_without_tilespan(self, scalesel_writer):
+        """MXBlockFree=128 WT=4 VW=4: TileSpan off (ratio=1); idx // VW share one VGPR."""
+        stub = scalesel_writer(has_wmma_v3=True)
+        kernel = _make_scalesel_kernel(vector_width=4, mi_wave_tile=(4, 4))
+        kernel["ProblemType"] = {"MXBlockFreeA": 128, "MXBlockA": 128}
+        mapping = [_scale_sel(stub, kernel, "MXSA", 0, idx) for idx in range(4)]
+        assert mapping == [(0, 0), (0, 0), (0, 0), (0, 0)]
+
+    def test_mxtile_2d_tilespan_partner_uses_scale_select(self, scalesel_writer):
+        """VW=4 WT=8 MXBlockFree=128: one VGPR, first VW scaleSel 0, partner VW scaleSel 1."""
+        stub = scalesel_writer(has_wmma_v3=True)
+        kernel = _make_scalesel_kernel(vector_width=4, mi_wave_tile=(8, 8))
+        kernel["ProblemType"] = {"MXBlockFreeA": 128, "MXBlockA": 128}
+        mapping = [_scale_sel(stub, kernel, "MXSA", 0, idx) for idx in range(8)]
+        assert mapping == [(0, 0), (0, 0), (0, 0), (0, 0), (0, 1), (0, 1), (0, 1), (0, 1)]
+        assert len({m[0] for m in mapping}) == 1
+
+    def test_mxtile_2d_vw1_uses_tilespan_scale_select(self, scalesel_writer):
+        """2D VW=1 WT=4 is TileSpan after the partner-Δ gate was dropped."""
+        stub = scalesel_writer(has_wmma_v3=True)
+        kernel = _make_scalesel_kernel(vector_width=1, mi_wave_tile=(4, 4))
+        kernel["ProblemType"] = {"MXBlockFreeA": 128, "MXBlockA": 128}
+        mapping = [_scale_sel(stub, kernel, "MXSA", 0, idx) for idx in range(4)]
+        assert mapping == [(0, 0), (0, 1), (1, 0), (1, 1)]
