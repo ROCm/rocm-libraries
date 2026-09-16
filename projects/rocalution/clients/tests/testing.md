@@ -16,27 +16,27 @@ about and closed.
 
 rocALUTION is a sparse linear algebra library for **iterative solvers and preconditioners**, built in
 C++ and HIP with a portable, backend-agnostic design. It provides Krylov solvers,
-direct solvers, algebraic multigrid, and a large family of preconditioners on top of the ROCm math
+direct solvers, algebraic multigrid, and a large family of preconditioners on top of the ROCm mathematics
 stack.
 
-**Where it sits in the ROCm stack:** an Expansion-SDK-level solver library. When GPU support is
+**Where it sits in the ROCm stack:** it is an Expansion-SDK-level solver library. When GPU support is
 enabled it links against **rocSPARSE**, **rocBLAS**, **rocPRIM**, and **rocRAND**
 (package minimums: `rocsparse >= 1.12.10`, `rocblas >= 2.22.0`, `rocrand >= 2.1.0`,
 `hip-runtime-amd >= 4.5.0`).
 
-**Backends (selectable at configure time):**
+**Backends (selectable at configuration time):**
 
 | Backend | Flag | Notes |
 |---|---|---|
-| Host | always built | `src/base/host/` |
-| OpenMP | `SUPPORT_OMP` (default ON if found) | multi-threaded host |
+| Host | Always built | `src/base/host/` |
+| OpenMP | `SUPPORT_OMP` (default ON if found) | Multi-threaded host |
 | HIP / GPU | `SUPPORT_HIP` (default ON if found) | `src/base/hip/`; initializes rocBLAS/rocSPARSE |
-| MPI / multi-node | `SUPPORT_MPI` (default OFF) | compile def `SUPPORT_MULTINODE`, links `MPI::MPI_CXX` |
+| MPI / multi-node | `SUPPORT_MPI` (default OFF) | Compiles def `SUPPORT_MULTINODE`, links `MPI::MPI_CXX` |
 
 **Key architectural constraint that shapes testing:** rocALUTION runs the *same* solver/preconditioner
 algorithms across host, OpenMP, and HIP backends. Correctness is therefore validated by running each
 algorithm on each available backend and cross-checking, which makes the suite backend-parameterized
-rather than GPU-only. Much of the solver logic *can* run on the host backend without a GPU, but the
+rather than GPU-specific. Much of the solver logic *can* run on the host backend without a GPU, but the
 GPU paths and the low-level `local_matrix`/`local_vector` structures require real hardware.
 
 ---
@@ -74,9 +74,9 @@ ROCALUTION_EMULATION_REGRESSION=1 HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-tes
 
 > When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`local_matrix_*`,
 > `local_vector`, `local_stencil`, `backend`, `preconditioner`, MPI infra) call `GTEST_SKIP()`, and
-> solver suites shrink their parameter lists. Unset means the full parameter combinations.
+> solver suites shrink their parameter lists. If no emulation variables are set, the full set of parameter combinations is exercised.
 
-**3. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
+**3. Add the right kind of test:** see [Choosing the Right Test Type](#choosing-the-right-test-type).
 
 **4. Open the PR** targeting `develop`. A team member reviews and approves.
 
@@ -95,27 +95,27 @@ every solver and preconditioner has a host backend, so its algorithm can be run 
 machine with no GPU (`./install.sh -c --host`). These cases live in the same `rocalution-test`
 binary (there is no `clients/unittests/` split like rocSPARSE) and use a mix of GoogleTest styles:
 
-* **Parameterized** (`INSTANTIATE_TEST_CASE_P` + `TestWithParam<tuple>`) — the solver/preconditioner
+* **Parameterized** (`INSTANTIATE_TEST_CASE_P` + `TestWithParam<tuple>`): the solver/preconditioner
   suites (float and double as separate `TEST_P` cases, e.g. `cg_float`, `cg_double`).
-* **Fixture** (`TEST_F`) — structure tests such as `local_vector_test`, `local_matrix` ops.
-* **Plain** (`TEST`) — e.g. `backend_init_order.backend`.
+* **Fixture** (`TEST_F`): structure tests such as `local_vector_test`, `local_matrix` ops.
+* **Plain** (`TEST`): e.g., `backend_init_order.backend`.
 
 There are no `TYPED_TEST` suites.
 
-**Framework:** GoogleTest (`find_package(GTest REQUIRED)`); main at
+**Framework:** GoogleTest (`find_package(GTest REQUIRED)`). `main` at
 `clients/tests/rocalution_host_gtest_main.cpp`, which calls `init_rocalution()` before
 `RUN_ALL_TESTS()` and accepts `--device <id>` / `--version`.
 
 **Location / naming:** `clients/tests/test_<component>.cpp` with implementation headers in
-`clients/include/testing_<component>.hpp`. Shared helpers in `clients/include/` (`utility.hpp`,
+`clients/include/testing_<component>.hpp`. Shared helpers are in `clients/include/` (`utility.hpp`,
 `random.*`, `common.hpp`, `validate.hpp`). There is no `clients/common/` directory — shared client
 code is provided by rocm-cmake's `ROCMClients` module.
 
 **How to run without a GPU:** build `--host` and run `./rocalution-test`; the host backend paths for
 solvers and preconditioners execute on CPU.
 
-**What is NOT covered as host unit tests:** the HIP backend kernels, and the GPU-only structure
-suites (`local_matrix_*`, `local_vector`, `local_stencil`) which are skipped under emulation tiers and
+**What is NOT covered as host unit tests:** the HIP backend kernels and the GPU-only structure
+suites (`local_matrix_*`, `local_vector`, `local_stencil`), which are skipped under emulation tiers as they
 require hardware.
 
 **Coverage expectation:** the long-term ROCm-wide goal is >95% line coverage of hardware-independent
@@ -128,8 +128,8 @@ host-side instrumentation does not capture. See [Coverage](#coverage).
 ### Integration Testing Strategy
 
 **Purpose:** validate the HIP (and MPI) backends against the host reference — that each solver,
-preconditioner, and structure operation produces correct results on-device, and that host↔device
-transfers and multi-node communication behave.
+preconditioner, and structure operation produces correct results on-device, and that host–device
+transfers and multi-node communication behave as expected.
 
 **What is covered** (all as parameterized/fixture GoogleTest cases, per backend and per precision):
 
@@ -160,14 +160,18 @@ env vars. The legacy `*checkin*` / `*nightly*` filters in `rtest.xml` and Jenkin
 current test names.
 
 **What requires GPU hardware:** the HIP-backend runs of every suite and the `local_*` structure
-suites. **What runs CPU-only:** the host-backend runs (build `--host`). **What requires MPI:** the
+suites.
+
+**What runs on CPU-only:** the host-backend runs (build `--host`).
+
+**What requires MPI:** the
 `global_*` and `parallel_manager` suites (`SUPPORT_MPI`).
 
 **Managed-memory (HMM) cases:** on gfx90a, run with `HSA_XNACK=0` and `HSA_XNACK=1`.
 
 **Test-size / coverage guidance:** solvers are validated on small representative systems (e.g.
 Laplacian) across backends and both precisions; the emulation tiers shrink parameter lists rather than
-running exhaustive size sweeps. Prefer cross-backend correctness over large problem sizes.
+running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
 ---
 
@@ -199,7 +203,7 @@ numbers are not comparable across GFX targets.
 
 ---
 
-## Why We Test This Way
+## Why rocALUTION is Tested This Way
 
 rocALUTION implements the same solver and preconditioner algorithms across host, OpenMP, and HIP
 backends. The cheapest, strongest signal is cross-backend agreement: run an algorithm on the host
@@ -210,7 +214,7 @@ hardware.
 Tiering is driven by environment variables (`ROCALUTION_EMULATION_*`) rather than GTest name prefixes
 because the same test bodies serve every tier — the tier just shrinks parameter lists and skips the
 GPU-heavy infrastructure suites. This keeps one set of test definitions honest across quick, standard,
-and comprehensive runs, at the cost of the tier being invisible in the test name (a readability gap).
+and comprehensive runs, although the selected tier is not reflected in the test name (thus a readability gap).
 
 ---
 
@@ -220,7 +224,7 @@ The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 (`.github/workflows/therock-ci*.yml`), which runs on every pull request and push to `develop`
 (`.github/scripts/therock_configure_ci.py`) and tests only changed projects
 (`-DTHEROCK_ENABLE_ROCALUTION=ON` + sparse + rand). By default it runs the CTest **`standard`**
-category, which sets `ROCALUTION_EMULATION_REGRESSION=1` — the regression subset, where GPU-heavy
+category, which sets `ROCALUTION_EMULATION_REGRESSION=1` — the regression subset in which GPU-heavy
 infrastructure suites (`local_matrix_*`, `local_vector`, `local_stencil`, `backend`, MPI infra) skip
 themselves and solver suites use reduced parameter sets. The other categories map to the emulation
 vars: `quick` → `ROCALUTION_EMULATION_SMOKE=1`, `comprehensive` → `ROCALUTION_EMULATION_EXTENDED=1`,
@@ -265,7 +269,7 @@ MPI `./install.sh -c --host --mpi=on --no-openmp`. Test path:
 
 **Flaky / known-bug policy:** rocALUTION has **no `known_bugs.yaml`** and no tests use a `known_bug`
 name; the `-*known_bug*` filter referenced in the Jenkins coverage job matches nothing. There is no
-tracked quarantine list — this is a gap. A flaky test is not an accepted permanent state; when one
+tracked quarantine list — this is a gap. A flaky test is not an acceptable permanent state; when one
 appears it should be tagged and ticketed.
 
 ---
@@ -290,7 +294,7 @@ and is **required for `test_itersolver`** (skipped otherwise). lcov exclusions c
 `src/base/host/host_io.*`, `clients/*`, `build/*`, `/opt/*`, `/usr/*`. Jenkins `codecov.groovy`
 uploads `lcoverage/main_coverage.info`.
 
-**Code coverage vs. test coverage** are distinct:
+**Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.
 * *Test coverage* = fraction of intended functionality exercised (solvers × preconditioners × formats
   × backends × precisions × MPI). Host-side gcov does not capture the HIP device kernels, so measured
@@ -324,8 +328,12 @@ Default GPU targets come from `GPU_TARGETS` in the root `CMakeLists.txt`.
 | gfx103x / gfx110x / gfx1200 / gfx1201 | Partial | Nightly | RDNA |
 | ASAN (gfx908/gfx90a/gfx942 `xnack+`) | Partial | On demand | AddressSanitizer, xnack+ only |
 
-**Explicitly not tested / guaranteed:** complex-number paths are disabled under coverage builds;
-non-listed gfx targets; Windows coverage; global (MPI) stencil tests (`test_global_stencil.cpp` is
+**Explicitly not tested / guaranteed:**
+
+- Complex-number paths are disabled under coverage builds
+- Non-listed gfx targets
+- Windows coverage
+- Global (MPI) stencil tests (`test_global_stencil.cpp` is
 commented out).
 
 ---
@@ -372,10 +380,10 @@ device configurations are not ASAN-covered.
 
 ## Owners and Review Cadence
 
-**Review this document when:**
+**Review this document and the described testing strategy when:**
 * A new solver, preconditioner, backend, or CI lane is added.
 * The emulation-tier or CTest-category wiring changes.
 * A regression escapes to a downstream consumer or a release.
 * Before a major release, alongside the known-gap review.
 
-The measure of whether this document is working: the Known Gaps table shrinks over time.
+The effectiveness of this testing strategy is measured by the reduction of entries in the Known Gaps Summary table over time.

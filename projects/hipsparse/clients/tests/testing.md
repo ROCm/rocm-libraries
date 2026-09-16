@@ -23,7 +23,7 @@ interface that does not change regardless of the chosen backend. It currently su
 * **CUDA backend** → NVIDIA cuSPARSE (`library/src/nvidia_detail/`, package `hipsparse-alt`).
 
 **Where it sits in the ROCm stack:** portability layer above rocSPARSE (and cuSPARSE). It is API-
-compatible with cuSPARSE v2, so porting a CUDA application is largely mechanical.
+compatible with cuSPARSE v2, allowing CUDA applications to be ported with minimal code changes.
 
 **Key architectural constraint that shapes testing:** hipSPARSE is thin.
 Its job is to translate the hipSPARSE API to the backend correctly, so testing is dominated by
@@ -52,20 +52,20 @@ cmake --build build --parallel
 Presets are also available: `cmake --preset default:release`, `debug`, `coverage`, `asan`.
 Test binaries land in `build/<release|debug|release-debug>/clients/staging/`.
 
-**2. Provision the test matrices** (functional suites read `.bin` matrices): the build in step 1
-(`./install.sh -dc`) downloads and converts them automatically, so no separate step is required.
+**2. Provision the test matrices** (functional suites read `.bin` matrices): The build in step 1
+(`./install.sh -dc`) downloads and converts them automatically, so a separate step is not required.
 
 > **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_to_matrices>`
 > to the install script to reuse them and avoid re-downloading on a rebuild:
 >
 > ```bash
-> ./install.sh -dc --matrices-dir <path>/hipsparse_matrices
+> ./install.sh -dc --matrices-dir <path_to_matrices>/hipsparse_matrices
 > ```
 >
 > To populate such a folder once (e.g. a shared location outside the build tree), use `--matrices-dir-install`:
 >
 > ```bash
-> ./install.sh --matrices-dir-install <path>/hipsparse_matrices
+> ./install.sh --matrices-dir-install <path_to_matrices>/hipsparse_matrices
 > ```
 
 **3. Run the tests that match what you touched:**
@@ -78,9 +78,9 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./hipsparse-test --gtest_filter='*checkin*-*known_
 ./hipsparse-test --gtest_filter='*csrmv*-*known_bug*'
 ```
 
-**4. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
+**4. Add the right kind of test:** See [Choosing the Right Test Type](#choosing-the-right-test-type).
 
-**5. Open the PR** targeting `develop`. The merge gate on the HIP backend is the TheRock CTest
+**5. Open the PR targeting `develop`:** The merge gate on the HIP backend is the TheRock CTest
 `standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`). Internal Jenkins
 `precheckin` still uses the narrower `*checkin*` filter. The CUDA backend has its own reduced
 Jenkins lane (`*checkin*csrmv*`), not part of TheRock.
@@ -91,8 +91,8 @@ Jenkins lane (`*checkin*csrmv*`), not part of TheRock.
 
 ### Unit Testing Strategy
 
-**Purpose:** validate hardware-independent logic — descriptor/handle construction, enum/type
-marshalling, and argument validation — that can be checked without dispatching a compute kernel.
+**Purpose:** validate hardware-independent logic that can be checked without dispatching a compute kernel, e.g., descriptor/handle construction, enum/type
+marshalling, and argument validation.
 
 hipSPARSE does not maintain a separate host-only unit-test binary (`clients/unittests/` is a
 rocSPARSE-only layout). Kernel and internal-primitive coverage belongs in rocSPARSE's
@@ -105,7 +105,7 @@ pattern. Hardware-independent checks live inside the single `hipsparse-test` Goo
 * **`<routine>_bad_arg` cases** — YAML `function: <routine>_bad_arg` dispatches to
   `testing_<routine>_bad_arg`, checking status-code marshalling for invalid inputs.
 
-**Framework:** GoogleTest (`find_package(GTest REQUIRED)`); main at
+**Framework:** GoogleTest (`find_package(GTest REQUIRED)`); `main` at
 `clients/tests/hipsparse_gtest_main.cpp`, which defines `GOOGLE_TEST`.
 
 **Location / structure:** per-routine `clients/tests/test_<routine>.cpp` (registration via
@@ -131,8 +131,8 @@ integration tests. Repo Codecov target is 80% (`codecov.yml`, flag `hipSPARSE`).
 ### Integration Testing Strategy
 
 **Purpose:** validate that the hipSPARSE API correctly marshals to the backend and returns correct
-results — for ~110 routines across sparse level 1/2/3, conversions, preconditioners, reordering, and
-the generic API — by running on a GPU and comparing against a host reference.
+results for ~110 routines across sparse level 1/2/3, conversions, preconditioners, reordering, and
+the generic API, by running on a GPU and comparing against a host reference.
 
 Integration tests are overwhelmingly `TEST_P` / `INSTANTIATE_TEST_SUITE_P`, parameterized from the
 binary `hipsparse_test.data`. Type dispatch uses `TEST_ROUTINE_WITH_CONFIG`. A few suites use other
@@ -151,7 +151,7 @@ GoogleTest styles: a matrix-file `TestWithParam` in `test_csrilusv.cpp`, and a t
 
 **Per-routine time budgets (rough guidelines):** each tier has a target maximum wall-clock time for
 a *single routine's* cases in that tier. The budget applies to the total time of one routine's cases
-at one tier — e.g. `./hipsparse-test --gtest_filter=*quick*csrmv*` should finish in under 1000 ms.
+at one tier — e.g., `./hipsparse-test --gtest_filter=*quick*csrmv*` should finish in under 1000 ms.
 
 | Tier | Target max time per routine | Example filter |
 |---|---|---|
@@ -160,8 +160,8 @@ at one tier — e.g. `./hipsparse-test --gtest_filter=*quick*csrmv*` should fini
 | `nightly` | < 100000 ms (100 s) | `--gtest_filter=*nightly*csrmv*` |
 
 > These budgets are rough guidelines, not hard limits: actual run time depends on the hardware. They
-> exist to keep any one routine from dominating a tier's total run time; a routine that consistently
-> and substantially exceeds its budget is a signal to trim redundant cases (see the test-size guidance
+> exist to keep any one routine from dominating a tier's total run time; when a routine consistently
+> and substantially exceeds its budget, that is a signal to trim redundant cases (see the test-size guidance
 > below).
 
 > Note: the Jenkins `*checkin*` filter matches the `pre_checkin` tier only; the `quick` tier is
@@ -180,14 +180,18 @@ at one tier — e.g. `./hipsparse-test --gtest_filter=*quick*csrmv*` should fini
 **Test data / matrices:** `cmake/ClientMatrices.cmake` downloads **19 SuiteSparse** matrices (e.g.
 `scircuit`, `nos1`–`nos7`, `amazon0312`, `webbase-1M`) as `.bin` (mirror overridable via
 `HIPSPARSE_TEST_MIRROR`). Runtime resolution: installed data path `../share/hipsparse/test/` or the
-executable directory; matrices via `--matrices-dir` or `HIPSPARSE_CLIENTS_MATRICES_DIR`.
+executable directory, and matrices via `--matrices-dir` or `HIPSPARSE_CLIENTS_MATRICES_DIR`.
 
-**What requires GPU hardware:** all numerical-correctness cases. **What runs without a compute
+**What requires GPU hardware:** all numerical-correctness cases.
+
+**What runs without a compute
 kernel:** descriptor and `*bad_arg*` cases.
 
 **What runs on PRs:** the CTest `standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`)
 on the HIP backend, via TheRock CI (default `test_type: standard`); a reduced `*checkin*csrmv*` on the
-CUDA backend (legacy Jenkins `precheckin-cuda.groovy`). **What runs nightly:** the `comprehensive`
+CUDA backend (legacy Jenkins `precheckin-cuda.groovy`).
+
+**What runs nightly:** the `comprehensive`
 category (adds the `nightly` tier).
 
 **Test-size / coverage guidance:** since hipSPARSE mostly forwards to the backend, exhaustive
@@ -227,7 +231,7 @@ cuSPARSE, whose perf regression is tracked outside this repo.
 
 ---
 
-## Why We Test This Way
+## Why hipSPARSE is Tested This Way
 
 hipSPARSE owns almost no compute — it marshals to rocSPARSE or cuSPARSE. The failure modes that
 matter are marshalling mistakes: wrong enum/type translation, mishandled descriptors, incorrect
@@ -288,10 +292,10 @@ runs the narrow `*checkin*csrmv*`, `extended.groovy` runs `*nightly*`, and `code
 | Informational | Coverage upload (Codecov); nightly `*nightly*` / comprehensive results; legacy Jenkins CUDA `*checkin*csrmv*` lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
-**Flaky / known-bug policy:** hipSPARSE has no `known_bugs.yaml`. A known bug is declared as a
+**Flaky / known-bug policy:** hipSPARSE has no `known_bugs.yaml`. A known bug is declared in the
 `Known bugs:` section inside a routine's YAML — a small number of routines carry such rules — and
 `hipsparse_gentest.py` moves matching cases into the `known_bug` category. Every gating run excludes
-`*known_bug*`. A known-bug tag is not an accepted permanent state; per-case owner/ticket tracking is a
+`*known_bug*`. A known-bug tag is not an acceptable permanent state; the absence of per-case ownership and ticket tracking is a process
 gap.
 
 ---
@@ -316,7 +320,7 @@ uploads `lcoverage/main_coverage.info` to Codecov with flag `hipSPARSE`.
 > Preset caveat: the `coverage` CMake preset sets `HIPSPARSE_BUILD_COVERAGE`, which the build does not
 > define. Use `HIPSPARSE_ENABLE_COVERAGE` (or the `install.sh` flag) instead.
 
-**Code coverage vs. test coverage** are distinct:
+**Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.
 * *Test coverage* = fraction of intended functionality exercised (backends, routines, types, enums,
   platforms). A high line-coverage number on the marshalling layer can still leave backend-specific
@@ -328,7 +332,7 @@ uploads `lcoverage/main_coverage.info` to Codecov with flag `hipSPARSE`.
 
 ## Nightly Validation
 
-Beyond the PR `standard` category, nightly runs the `comprehensive` category (adds the `nightly`
+Beyond the PR `standard` category, the nightly validation runs the `comprehensive` category (adds the `nightly`
 tier) on the HIP backend via the TheRock nightly workflows; the legacy Jenkins `extended.groovy`
 mirrors this with `*nightly*`. The CUDA backend's lane is intentionally narrow (`*checkin*csrmv*`);
 broader CUDA validation is not part of the per-PR gate.
@@ -346,9 +350,12 @@ broader CUDA validation is not part of the per-PR gate.
 | gfx1151 (Strix Halo) | Partial | Nightly | `f64_r` / `f64_c` cases excluded (`exclude_gpu_gfx1151`) |
 | Windows | Partial | — | Fortran clients off on Windows |
 
-**Explicitly not tested / guaranteed:** enabling HIP and CUDA backends simultaneously is unsupported
-(mutually exclusive); CUDA toolkit versions other than 12.8 / 13.x generate no test data; multi-GPU
-validation; non-listed gfx targets.
+**Explicitly not tested / guaranteed:**
+
+- Enabling HIP and CUDA backends simultaneously is unsupported (mutually exclusive)
+- CUDA toolkit versions other than 12.8 / 13.x generate no test data
+- Multi-GPU validation
+- Non-listed gfx targets.
 
 ---
 
@@ -370,7 +377,7 @@ sanitizing follows the backend's constraints.
 Fortran is **sample-only** — there is no Fortran path in `hipsparse-test`. `HIPSPARSE_ENABLE_FORTRAN`
 (default ON on non-Windows, OFF on Windows) builds the `hipsparse_fortran` object library from
 `library/src/hipsparse.f90` / `hipsparse_enums.f90` and Fortran example binaries under
-`clients/samples/` and `documentation_examples/` (e.g. `example_fortran_csrsv2`,
+`clients/samples/` and `documentation_examples/` (e.g., `example_fortran_csrsv2`,
 `example_fortran_spmv`). Fortran samples require the HIP backend and are disabled under ASAN. This is
 a build/compile check of the Fortran bindings rather than a correctness test suite.
 
@@ -405,10 +412,10 @@ a build/compile check of the Fortran bindings rather than a correctness test sui
 
 ## Owners and Review Cadence
 
-**Review this document when:**
+**Review this document and the described testing strategy when:**
 * A new backend, CUDA toolkit version, test tier, or CI lane is added.
 * A cuSPARSE API-compatibility change lands.
 * A regression escapes to an application consumer or is traced to a marshalling error.
 * Before a major release, alongside the known-gap review.
 
-The measure of whether this document is working: the Known Gaps table shrinks over time.
+The effectiveness of this testing strategy is measured by the reduction of entries in the Known Gaps Summary table over time.

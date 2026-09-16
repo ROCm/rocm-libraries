@@ -56,13 +56,13 @@ The functional suites that read `.csr` inputs need the SuiteSparse test matrices
 > **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_to_matrix_folder>` to the install script to reuse them and avoid re-downloading on a rebuild:
 >
 > ```bash
-> ./install.sh -c -a gfx942 --matrices-dir <my_matrix_folder>
+> ./install.sh -c -a gfx942 --matrices-dir <path_to_matrix_folder>
 > ```
 >
-> To populate such a folder once (e.g. a shared location outside the build tree), use `--matrices-dir-install`:
+> To populate such a folder once (e.g., a shared location outside the build tree), use `--matrices-dir-install`:
 >
 > ```bash
-> ./install.sh --matrices-dir-install <my_matrix_folder>
+> ./install.sh --matrices-dir-install <path_to_matrix_folder>
 > ```
 
 **2. Run the tests that match what you touched:**
@@ -85,9 +85,9 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-test --gtest_filter='*
 > rocSPARSE auto-skips large configs with "Insufficient memory" on memory-constrained cards. That is
 > the suite's memory guard, not a failure.
 
-**3. Add the right kind of test** — see [Choosing the Right Test Type](#choosing-the-right-test-type).
+**3. Add the right kind of test:** See [Choosing the Right Test Type](#choosing-the-right-test-type).
 
-**4. Open the PR** targeting `develop`. The merge gate is the TheRock CTest `standard` category
+**4. Open the PR targeting `develop`:** The merge gate is the TheRock CTest `standard` category
 (`quick` + `pre_checkin` on `rocsparse-test`, excluding `*known_bug*`). Internal Jenkins
 `precheckin` also runs the CPU `rocsparse-unit-test` binary first. Another rocSPARSE team member
 reviews and approves.
@@ -113,15 +113,15 @@ headers/sources under `library/src`, this layer only builds **in-tree** (it is s
 split into two binaries:
 
 * **`rocsparse-unit-test`** — fast, **GPU-independent** (CPU-only) unit tests with a minimal gtest
-  main. Exercises host-pure components (e.g. enum-trait, index-type and data-type utilities, the
+  main. Exercises host-pure components (e.g., enum-trait, index-type and data-type utilities, the
   csrmv-adaptive analysis logic). Registered with CTest as `rocsparse-unit-test` (no labels). Run
-  it with `ctest -R '^rocsparse-unit-test$'` — a bare `-R rocsparse-unit-test` also matches
-  `rocsparse-unit-test-device`. Legacy Jenkins `precheckin.groovy` runs this binary as an early
+  it with `ctest -R '^rocsparse-unit-test$'` (a bare `-R rocsparse-unit-test` also matches
+  `rocsparse-unit-test-device`). Legacy Jenkins `precheckin.groovy` runs this binary as an early
   no-GPU gate; it is **not** included in TheRock's CTest `standard` category (that YAML only
   labels `rocsparse-test` suites named `quick/*` / `pre_checkin/*`).
 * **`rocsparse-unit-test-device`** — **GPU** unit tests that link `hip::device` and launch individual
   library kernels/primitives in isolation, or drive public C-API host paths that need a device
-  (e.g. internal scan/find/sort/RLE primitives, collectives, info structs, conversion, preconditioner,
+  (e.g., internal scan/find/sort/RLE primitives, collectives, info structs, conversion, preconditioner,
   reordering, generic paths, and host-path level-1/2/3 extras). It must run on a GPU through the
   serializer and is CTest-labeled `gpu` only, so it is **not** part of the fast CPU gate and is
   **not** invoked by Jenkins `precheckin` today.
@@ -129,11 +129,11 @@ split into two binaries:
 In addition, the integration binary `rocsparse-test` carries the hardware-independent cases that are
 naturally expressed through its YAML pipeline rather than as standalone units:
 
-* **Bad-argument tests** — routines in the YAML suite have a `testing_<routine>_bad_arg`
+* **Bad-argument tests:** routines in the YAML suite have a `testing_<routine>_bad_arg`
   implementation (`clients/testings/testing_<routine>.cpp`) exercised through YAML
   `function: <routine>_bad_arg` entries. These validate null-pointer handling, invalid sizes,
   unsupported types, and status-code propagation, and do not require a kernel launch.
-* **Auxiliary API tests** — `clients/tests/test_auxiliary.cpp` (`TEST(auxiliary_pre_checkin, ...)`)
+* **Auxiliary API tests:** `clients/tests/test_auxiliary.cpp` (`TEST(auxiliary_pre_checkin, ...)`)
   covers handle create/destroy and descriptor management directly.
 
 **Framework:** GoogleTest (pinned to `v1.15.2` in `deps/external-gtest.cmake`; auto-downloaded when
@@ -190,7 +190,7 @@ standard case matrix rather than requiring hand-written variants.
 
 **Per-routine time budgets (rough guidelines):** each tier has a target maximum wall-clock time for
 a *single routine's* cases in that tier. The budget applies to the total time of one routine's cases
-at one tier — e.g. `./rocsparse-test --gtest_filter=*quick/csrmv*` should finish in under 1000 ms.
+at one tier — e.g., `./rocsparse-test --gtest_filter=*quick/csrmv*` should finish in under 1000 ms.
 
 | Tier | Target max time per routine | Example filter |
 |---|---|---|
@@ -198,9 +198,9 @@ at one tier — e.g. `./rocsparse-test --gtest_filter=*quick/csrmv*` should fini
 | `pre_checkin` | < 10000 ms (10 s) | `--gtest_filter=*pre_checkin/csrmv*` |
 | `nightly` | < 100000 ms (100 s) | `--gtest_filter=*nightly/csrmv*` |
 
-> These budgets are rough guidelines, not hard limits: actual run time depends on the hardware. They
-> exist to keep any one routine from dominating a tier's total run time; a routine that consistently
-> and substantially exceeds its budget is a signal to trim redundant cases (see the test-size guidance
+> These budgets are rough guidelines, not hard limits: actual runtime depends on the hardware. They
+> exist to keep any one routine from dominating a tier's total runtime; when a routine consistently
+> and substantially exceeds its budget, that is a signal to trim redundant cases (see the test-size guidance
 > below).
 
 **Test data / matrices:** functional suites read `.csr` matrices converted from **24 SuiteSparse**
@@ -208,7 +208,9 @@ matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`) downloaded and MD5-v
 `cmake/ClientMatrices.cmake` (mirror overridable via `ROCSPARSE_TEST_MIRROR`). The runtime matrix
 directory is set with `--matrices-dir` or `ROCSPARSE_CLIENTS_MATRICES_DIR`.
 
-**What requires GPU hardware:** all numerical-correctness and conversion cases. **What runs without
+**What requires GPU hardware:** all numerical-correctness and conversion cases.
+
+**What runs without
 a compute kernel:** `*bad_arg*` and auxiliary API cases.
 
 **Managed-memory (HMM) coverage:** on gfx90a/gfx942 the legacy Jenkins lane executes the entire
@@ -218,14 +220,16 @@ memory. `rtest.xml` also defines a dedicated `hmm` set (`--gtest_filter=*csrmv_m
 
 **What runs on PRs:** the CTest `standard` category (`quick` + `pre_checkin`, excluding `*known_bug*`)
 on changed projects, via TheRock CI (default `test_type: standard`).
+
 **What runs nightly:** the `comprehensive` category (adds the `nightly` tier) via the TheRock nightly
 workflows; the legacy Jenkins `extended.groovy` mirrors this with `*nightly*` (timeout ~600 min).
+
 **What runs at release / on demand:** `full` category (adds the `stress` tier), and the emulation
 `smoke`/`regression`/`extended` YAML subsets driven through `rtest.py`.
 
-**Test-size / coverage guidance:** prefer a small set of representative sizes over exhaustive
+**Test-size / coverage guidance:** choose a small set of representative sizes over exhaustive
 numerical variants — the typed/parameterized suites already sweep type and index combinations, so
-adding many near-duplicate sizes increases run time without adding meaningful coverage. Large configs
+adding many near-duplicate sizes increases run time without adding meaningful coverage. Large configurations
 are intentionally guarded and skipped with "Insufficient memory" on small cards.
 
 ---
@@ -261,16 +265,16 @@ visible or reproducible from this repository.
 
 ---
 
-## Why We Test This Way
+## Why rocSPARSE is Tested This Way
 
 rocSPARSE owns its kernels, but nearly all numerical behavior is only observable on real AMD
 hardware, so the strategy is still integration-dominant: a large YAML-driven GoogleTest suite runs
 each routine on-device and validates against a host reference. The hardware-independent surface
 (argument validation, handle/descriptor lifecycle, auxiliary API) is exercised by the `*bad_arg*`
-and auxiliary cases inside that integration binary. Alongside it, a dedicated unit-test layer
-(`clients/unittests/`) tests individual components in isolation — a fast CPU-only
+and auxiliary cases inside that integration binary. Alongside this, a dedicated unit-test layer
+(`clients/unittests/`) tests individual components in isolation: a fast CPU-only
 `rocsparse-unit-test` for host-pure logic and a `rocsparse-unit-test-device` that launches
-single kernels/primitives (or public C-API host paths) on the GPU — reaching internal code that the
+single kernels/primitives (or public C-API host paths) on the GPU, reaching internal code that the
 end-to-end suite exercises only indirectly.
 
 The tier system (`quick` → `stress`) is a sampling strategy over a large combinatorial space (routine
@@ -285,7 +289,7 @@ type or index combination extends coverage without new hand-written cases.
 The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 (`.github/workflows/therock-ci*.yml`), which runs on every pull request and push to `develop`
 (`.github/scripts/therock_configure_ci.py`). It builds and tests only the projects whose files
-changed and, by default, runs the CTest **`standard`** category — i.e. `quick` + `pre_checkin`,
+changed and, by default, runs the CTest **`standard`** category — i.e., `quick` + `pre_checkin`,
 excluding `*known_bug*` (see `clients/tests/test_categories.yaml`). Those patterns apply only to
 the `rocsparse-test` binary; `rocsparse-unit-test` and `rocsparse-unit-test-device` are separate
 CTest names and are not in the `standard` (or any other) category. The scope can be widened per PR
@@ -293,7 +297,7 @@ with labels (`test:rocsparse`, `test_type:comprehensive` / `test_type:full`); do
 (`*.md`, `docs/*`) skip CI. rocSPARSE and hipSPARSE share TheRock's `sparse` component
 (`projects_to_test: [rocsparse, hipsparse]` in `.github/scripts/therock_matrix.py`), so a PR touching
 either one builds and tests both. Broader tiers run in the TheRock nightly workflows
-(`therock-ci-nightly.yml`, `therock-multi-arch-ci-nightly.yml`) and dedicated ASAN workflows
+(`therock-ci-nightly.yml` and `therock-multi-arch-ci-nightly.yml`) and dedicated ASAN workflows
 (`therock-multi-arch-ci-asan*.yml`). Repo-wide quality workflows (`pre-commit`, `clang-tidy`,
 `codeql`) apply to all components.
 
@@ -338,9 +342,9 @@ filters exclude `*known_bug*`. The device unit binary is not invoked by `prechec
 **Flaky / known-bug policy:** rocSPARSE has no `known_bugs.yaml`. A case that exposes a tracked
 defect is tagged `category: known_bug` (either directly in the routine's YAML or reassigned by
 `rocsparse_gentest.py` from a `Known bugs` note in `rocsparse_common.yaml`), and every gating run
-excludes `*known_bug*`. This keeps known failures out of blocking runs but does not by itself carry an
-owner or ticket per case — a tracked quarantine list with expiry is a gap (see
-[Known Gaps](#known-gaps-summary)). A known-bug tag is not an accepted permanent state.
+excludes `*known_bug*`. This keeps known failures out of blocking runs but does not create an
+owner or ticket per case — a tracked quarantine list with expiry remains a gap (see
+[Known Gaps](#known-gaps-summary)). A known-bug tag is not an acceptable permanent state.
 
 ---
 
@@ -360,14 +364,14 @@ make coverage_cleanup coverage GTEST_FILTER='*quick*:*pre_checkin*-*known_bug*'
 # targets: coverage_analysis -> coverage (llvm-profdata merge -> llvm-cov export lcov -> filter -> genhtml)
 ```
 
-The report is produced under `coverage-report/`; exclusions are applied by
+The report is generated under `coverage-report/`, with exclusions applied by
 `scripts/filter_lcov_exclusions.py`. The `coverage_analysis` target also runs
-`rocsparse-unit-test` and `rocsparse-unit-test-device` (best-effort: failures are `|| true` so they
-cannot abort the coverage upload) and passes those binaries as extra `llvm-cov` `-object`s so
-compile-in library TUs are attributed. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov
+`rocsparse-unit-test` and `rocsparse-unit-test-device` on a best-effort basis; test failures are ignored (`|| true`) so they
+do not abort the coverage upload. Both binaries are passed as extra `llvm-cov` `-object`s, to
+attribute coverage to library translation units compiled into the test executables. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov
 with flag `rocSPARSE`.
 
-**Code coverage vs. test coverage** are distinct:
+**Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
 * *Test coverage* = fraction of intended functionality exercised (types, index types, formats, sizes,
   platforms). Host-side instrumentation of `rocsparse-test` still misses most device kernels.
@@ -390,7 +394,7 @@ at runtime based on the wavefront size (32 vs. 64), so in any given coverage run
 
 Beyond PR validation (the `standard` category), the TheRock nightly workflows run the
 `comprehensive` category and additional GPU families; the legacy Jenkins `extended.groovy` mirrors
-this. Nightly adds:
+this. The nightly workflow adds:
 
 * The `nightly` tier — larger shapes and broader type/format coverage (Jenkins `extended.groovy`
   timeout ~600 min).
@@ -404,8 +408,8 @@ this. Nightly adds:
 ## Supported Configurations
 
 `DEFAULT_GPU_TARGETS` in the root `CMakeLists.txt` is the **compile** list (when
-`rocm_check_target_ids` succeeds it includes gfx803 through gfx1250, including gfx1030 / gfx110x /
-gfx1200). The table below is **CI validation**, not that compile list.
+`rocm_check_target_ids` succeeds, it includes gfx803 through gfx1250, including the gfx1030, gfx110x, and
+gfx1200 families). The table below is about **CI validation** — it is not the compile list.
 
 | Configuration | Linux | Windows | Notes |
 |---|---|---|---|
@@ -416,8 +420,12 @@ gfx1200). The table below is **CI validation**, not that compile list.
 | gfx900 / gfx906 | Not tested | Not tested | Older CDNA/GCN |
 | gfx1030 / gfx110x / gfx1200 / gfx1250 | Not tested | Not tested | In `DEFAULT_GPU_TARGETS`; no dedicated validation lane |
 
-**Explicitly not tested / guaranteed:** non-listed gfx targets; any
-configuration marked "Not tested" above (including gfx900 / gfx906, gfx1250, and most RDNA parts). Note that
+**Explicitly not tested / guaranteed:**
+
+- Non-listed gfx targets
+- Any configuration marked "Not tested" above (including gfx900 / gfx906, gfx1250, and most RDNA parts).
+
+Note that
 Linux and Windows validation cover disjoint sets of targets — the CDNA parts and gfx1201 are validated
 on Linux only, while gfx1151 is validated on Windows only. Configurations are guarded at runtime by the
 "Insufficient memory" skip on small cards.
@@ -434,7 +442,7 @@ errors: out-of-bounds and use-after-free.
 
 **Runtime (Jenkins `asan.groovy`):** `ASAN_OPTIONS=detect_leaks=1`,
 `LSAN_OPTIONS=suppressions=suppr.txt` (suppresses leaks in `libhsa-runtime64`, `libamd_comgr`,
-`libamdhip64`, `libhsakmt`), `ASAN_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer`. The ASAN lane
+`libamdhip64`, and `libhsakmt`), and `ASAN_SYMBOLIZER_PATH=/opt/rocm/llvm/bin/llvm-symbolizer`. The ASAN lane
 runs `*quick*:*pre_checkin*`.
 
 **What is explicitly not covered:** TSAN, UBSAN, and MSAN are not wired into rocSPARSE; non-xnack
@@ -474,10 +482,10 @@ device configurations are not ASAN-covered.
 
 ## Owners and Review Cadence
 
-**Review this document when:**
+**Review this document and the described testing strategy when:**
 * A new test tier, CTest category, or CI lane is added.
 * Unit-test CTest labels or TheRock wiring for `rocsparse-unit-test*` change.
 * A regression escapes to a downstream consumer (e.g. hipSPARSE) — direct evidence of a gap here.
 * Before a major release, alongside the known-gap review.
 
-The measure of whether this document is working: the Known Gaps table shrinks over time.
+The effectiveness of this testing strategy is measured by the reduction of entries in the Known Gaps Summary table over time.
