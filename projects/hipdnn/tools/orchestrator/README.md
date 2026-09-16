@@ -267,6 +267,55 @@ That is the difference between a run that leaves a verdict and one that leaves t
 reasoning behind it. Ask the session why it chose a tile size; the result file cannot
 tell you.
 
+## Driving flows from Graph Studio
+
+`flowmcp/` is an MCP server over the same engine: it launches a flow, supervises
+the worker, and serves the run as it happens. Graph Studio's **Implement** tab is
+one client of it; a Claude Code session with the server registered is another,
+and drives the same flows with no app running.
+
+The SDK it needs is deliberately not in `requirements.txt` — `runner/` stays
+PyYAML-only and the test suite runs without it. Install the extra into the same
+virtualenv:
+
+```bash
+$P -m pip install -r requirements-mcp.txt
+```
+
+Then point Graph Studio at this checkout and start it:
+
+```bash
+cd ../graph-studio
+bun install
+bun run electron:start
+```
+
+The tab resolves this orchestrator by walking up from its own directory, so a
+normal checkout needs no configuration. `HIPDNN_ORCHESTRATOR_DIR` overrides it.
+The registry it passes the server is `configs/tools.local.yaml` when that exists,
+otherwise `configs/tools.yaml` — so a machine-local registry is picked up without
+editing the shared one.
+
+**If the tab's controls are disabled**, it is telling you which of those is
+missing: it reports the reason rather than failing silently. The usual answer is
+that `requirements-mcp.txt` was never installed, or that `tools.yaml` points at
+an executable this machine does not have.
+
+`fast-converge` is the flow to try first. It runs no agent, finishes in about two
+seconds, and exercises the whole path — launch, live timeline, artifacts,
+cancellation — without spending a session.
+
+Run the server by hand to see what a client sees:
+
+```bash
+$P -m flowmcp.server --tools configs/tools.local.yaml \
+   --flows-dir configs/flows --run-root runs
+```
+
+It speaks MCP on stdio, so it is not meant to be read directly; `--help` lists
+the options, of which `--max-concurrent` and `--max-iterations-ceiling` are the
+two worth knowing. Both bound what a caller can spend.
+
 ## Writing a flow
 
 Step keys: `id`, `tool`, `args`, `env`, `cwd`, `timeout`, `stdin` | `prompt_file`,
