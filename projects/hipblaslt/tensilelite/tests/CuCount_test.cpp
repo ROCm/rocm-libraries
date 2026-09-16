@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
+#include <sstream>
+#include <utility>
 
 #include <hip/hip_runtime.h>
 
@@ -19,6 +21,8 @@
 #include <origami/streamk.hpp>
 
 #include "FallbackTestUtils.hpp"
+#include "LogReporter.hpp"
+#include "SolutionIterator.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::testing;
@@ -248,6 +252,7 @@ TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
     solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
 
     auto problem = dummyProblem();
     auto device  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
@@ -267,6 +272,7 @@ TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
     solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
 
     auto problem       = dummyProblem();
     auto device        = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
@@ -288,6 +294,7 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
     solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
     solution.sizeMapping.workspaceSizePerElemC = 4;
 
     auto problem = dummyProblem();
@@ -360,6 +367,7 @@ namespace
         solution.sizeMapping.streamK           = 5;
         solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU            = 64;
+        solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
         solution.sizeMapping.CUOccupancy       = 1;
     }
@@ -441,6 +449,7 @@ namespace
         solution.sizeMapping.streamK            = streamK;
         solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
         solution.sizeMapping.depthU             = 16;
+        solution.sizeMapping.workGroupSize      = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.matrixInstruction  = {16, 16, 4, 1};
         solution.sizeMapping.workGroupMapping   = 1;
         solution.sizeMapping.CUOccupancy        = -1;
@@ -900,6 +909,34 @@ namespace
             makeGfx942HardwareWithXcd(numXCD));
         return device;
     }
+
+    class TestSolutionIterator : public Client::SolutionIterator
+    {
+    public:
+        explicit TestSolutionIterator(std::shared_ptr<Hardware> hardware)
+            : SolutionIterator(nullptr, std::move(hardware), false)
+        {
+        }
+
+        bool accepts(ContractionSolution&    solution,
+                     ContractionProblemGemm& problem,
+                     bool                    reportResult)
+        {
+            return checkSolution(solution, problem, reportResult);
+        }
+
+        void postProblem() override {}
+        void preSolution(ContractionSolution* const) override {}
+        void postSolution() override {}
+        bool moreSolutionsInProblem() const override
+        {
+            return false;
+        }
+        std::shared_ptr<ContractionSolution> getSolution() override
+        {
+            return nullptr;
+        }
+    };
 } // namespace
 
 TEST(StreamKDynamicQueueXcdGateTest, RejectsMi300aSixXcd)
@@ -998,6 +1035,34 @@ TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
         << "Non-StreamK solution must remain selectable on MI300A";
     EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwA))
         << "SK3-static solution must remain selectable on MI300A";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, ClientIteratorFiltersOnlyUnsupportedDynamicQueue)
+{
+    auto mi300a = std::make_shared<hip::HipAMDGPU>(makeGfx942DeviceWithXcd(6));
+    TestSolutionIterator iterator(mi300a);
+    auto                 problem = makeGemmProblem(512, 512, 512);
+    std::ostringstream   reportOutput;
+    auto reporter = std::make_shared<Client::LogReporter>(
+        Client::LogLevel::Terse,
+        std::initializer_list<std::string>{Client::ResultKey::Validation},
+        reportOutput,
+        false,
+        false);
+    iterator.setReporter(reporter);
+
+    ContractionSolution dynamicSolution;
+    initEquality512Solution(dynamicSolution, 4);
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, true))
+        << "The explicit all-solutions client path must not launch an eight-queue "
+           "dynamic kernel on a six-XCD MI300A";
+    EXPECT_FALSE(iterator.accepts(dynamicSolution, problem, false))
+        << "Topology filtering must also apply during non-reporting prediction checks";
+
+    ContractionSolution staticSolution;
+    initEquality512Solution(staticSolution, 3);
+    EXPECT_TRUE(iterator.accepts(staticSolution, problem, true))
+        << "The topology guard must retain static StreamK coverage on MI300A";
 }
 
 // ===========================================================================

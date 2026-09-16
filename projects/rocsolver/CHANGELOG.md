@@ -8,17 +8,20 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 
 * Orthonormal/Unitary matrix generator routines from Hessenberg reduction
-    - ORGHR and UNGHR
+    * ORGHR and UNGHR
+
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
 
 ### Changed
-
 ### Removed
-
 ### Optimized
-
 ### Resolved issues
-
 ### Known issues
+### Upcoming changes
+
+
 
 ## rocSOLVER 3.37.0 for ROCm 10.1.0
 
