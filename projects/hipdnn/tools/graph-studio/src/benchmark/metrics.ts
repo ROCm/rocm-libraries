@@ -1,4 +1,4 @@
-import type { BenchmarkReport, Correctness, EngineResult } from "./types";
+import type { BenchmarkReport, Correctness, EngineResult, TraceInfo } from "./types";
 
 /** Comparable quantities derived from a single engine result. */
 export interface MetricDef {
@@ -149,4 +149,21 @@ export function summarize(report: BenchmarkReport): ReportSummary {
 export function pluginKind(pluginPath: string): string {
   const parts = pluginPath.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? "";
+}
+
+/**
+ * Whether a row's trace can actually be handed to Perfetto. Every field has to
+ * have landed: a descriptor that records a skip, a profiler error, or a
+ * non-zero exit describes a trace that was never written.
+ */
+export function traceAvailable(row: EngineResult): boolean {
+  const trace: TraceInfo | null = row.extra_metrics?.trace ?? null;
+  if (!trace || row.status !== "success") return false;
+  return (
+    trace.format === "pftrace" &&
+    Boolean(trace.path) &&
+    !trace.skipped &&
+    !trace.error_tail &&
+    (trace.returncode === null || trace.returncode === 0)
+  );
 }

@@ -1,4 +1,10 @@
-import { VALIDATION_LABEL, formatBytes, formatMagnitude, validationState } from "../benchmark/metrics";
+import {
+  VALIDATION_LABEL,
+  formatBytes,
+  formatMagnitude,
+  traceAvailable,
+  validationState,
+} from "../benchmark/metrics";
 import type {
   BenchmarkReport,
   Correctness,
@@ -6,7 +12,6 @@ import type {
   EngineResult,
   GraphResults,
   Oracle,
-  TraceInfo,
 } from "../benchmark/types";
 import { PerfettoFrame } from "./PerfettoFrame";
 
@@ -237,18 +242,6 @@ function OracleSection({ row }: { row: EngineResult }) {
   );
 }
 
-/** A trace only reads as available when every field the Perfetto handoff needs actually landed. */
-function traceAvailable(trace: TraceInfo | null): boolean {
-  if (!trace) return false;
-  return (
-    trace.format === "pftrace" &&
-    Boolean(trace.path) &&
-    !trace.skipped &&
-    !trace.error_tail &&
-    (trace.returncode === null || trace.returncode === 0)
-  );
-}
-
 function ProfilingSection({
   row,
   frameKey,
@@ -260,7 +253,7 @@ function ProfilingSection({
 }) {
   const extra = row.extra_metrics ?? null;
   const trace = extra?.trace ?? null;
-  const available = row.status === "success" && traceAvailable(trace);
+  const available = traceAvailable(row);
 
   return (
     <div className="report__profiling">

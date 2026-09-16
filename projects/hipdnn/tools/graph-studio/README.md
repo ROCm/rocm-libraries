@@ -150,6 +150,27 @@ path does not grant access to that file. Trace bytes go to a sandboxed
 access; report viewing does not. Confirm **Open trace?** inside the frame if asked.
 The parent reports byte handoff only; Perfetto owns parsing and trace diagnostics.
 
+### Checking the trace viewer without a GPU
+
+`tests/fixtures/report-with-trace.json` and `tests/fixtures/traces/sample.pftrace`
+exist for this. The trace is a real Perfetto protobuf trace with three slices on a
+`hipdnn` thread track; `bun run tests/fixtures/traces/make-trace.ts` regenerates it.
+
+1. `bun run dev`, then open the **Verify** tab.
+2. **Open report…** → `tests/fixtures/report-with-trace.json`.
+3. **Inspect** on the `MIOPEN_ENGINE` row, then expand **Profiling trace & artifacts**.
+4. Select `tests/fixtures/traces/sample.pftrace` in the picker, or drop it there.
+
+Perfetto then shows `conv_fwd`, `bias_add`, and `relu`. The second row in the same
+report records a skipped trace, so the suppressed state is visible beside it.
+To confirm the file itself outside the browser:
+
+```bash
+curl -LO https://get.perfetto.dev/trace_processor && chmod +x trace_processor
+echo 'select ts, dur, name from slice' > q.sql
+./trace_processor -q q.sql tests/fixtures/traces/sample.pftrace
+```
+
 ## Turning on the GPU engine
 
 The GPU support lives in a small native add-on that links hipDNN. The easiest
