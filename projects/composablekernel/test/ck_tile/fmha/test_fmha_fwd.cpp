@@ -478,24 +478,47 @@ TEST_P(General, DataTypeConfig)
 // Every other suite pins the scale to TestConfigs<T>::qscale_str, leaving the rest untested.
 // Only gfx125x has more than one, so the sweep is compiled in there alone.
 #ifdef CK_TILE_TEST_FMHA_QSCALE_SWEEP
+enum class sink_kind
+{
+    none,
+    gptoss,
+    streamllm
+};
+
+// Full causal (left=-1) makes y == y_total, so x_start is 0 and the sink phase collapses.
+// This row checks that the has_sink instantiation matches the sinkless answer; the live
+// sink phase is carried by the local-window tuples below instead.
+constexpr auto kStreamLlmMask = "b:-1,0,2";
+
 class QuantScale
-    : public TestWithParam<
-          std::tuple<mode_enum, const char*, std::tuple<int, int, int, int, int, std::string>>>
+    : public TestWithParam<std::tuple<mode_enum,
+                                      const char*,
+                                      sink_kind,
+                                      std::tuple<int, int, int, int, int, std::string>>>
 {
 };
 
-// hdim 128 is where perhead and blockscale exist; the non-multiple seqlens select the
-// seqlen-padded instances. No fp8 pipeline is generated with bias.
+// hdim 128 is where perhead and blockscale exist. The non-multiple seqlens select the
+// seqlen-padded instances; the last tuple is a tile multiple so the unpadded pack-GQA path
+// is covered too. No fp8 pipeline is generated with bias.
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QuantScale,
     Combine(ModeValues,
             QScaleValues,
-            Values(std::tuple{2, 2, 1, 55, 256, "0"},     // GQA, seqlen_q << seqlen_k
-                   std::tuple{1, 3, -1, 100, 51, "0"},    // plain MHA, seqlen_q > seqlen_k
-                   std::tuple{2, 1, -1, 99, 256, "1"},    // causal
-                   std::tuple{1, 2, 1, 1024, 256, "2"},   // GQA, causal bottom-right
-                   std::tuple{1, 4, 2, 256, 256, "0"}))); // Pack-GQA: ratio 2, no mask, s%128==0
+            Values(sink_kind::none, sink_kind::gptoss, sink_kind::streamllm),
+            Values(std::tuple{2, 2, 1, 55, 256, "0"},   // GQA, seqlen_q << seqlen_k
+                   std::tuple{1, 3, -1, 100, 51, "0"},  // plain MHA, seqlen_q > seqlen_k
+                   std::tuple{2, 1, -1, 99, 256, "1"},  // causal
+                   std::tuple{1, 2, 1, 1024, 256, "2"}, // GQA, causal bottom-right
+                   std::tuple{1, 4, 2, 256, 256, "0"},  // Pack-GQA: ratio 2, no mask, s%128==0
+                   // The two local-window tuples below are the only non-empty sink phases
+                   // here; causal masks collapse it, and only then does the descale index
+                   // leave k_origin. sink=128 == kN0 is the prologue jump.
+                   std::tuple{1, 2, 1, 1024, 1024, "t:128,30,128"},
+                   // sink=512 gives num_sink_loop 4, reaching the mainloop jump that
+                   // sink <= kN0 never does; GQA ratio 2 crosses it with the descale stride.
+                   std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512"})));
 
 // init=3 fills Q/K/V up to the fp8 maximum, which only stands for a real tensor when a
 // descale maps that maximum back to qkv_max. Without a descale the values stay at the fp8
@@ -510,41 +533,50 @@ const char* qscale_init_method(std::string_view qscale)
 
 TEST_P(QuantScale, DataTypeConfig)
 {
-    auto [mode, qscale, dims_mask]                             = GetParam();
+    auto [mode, qscale, sink, dims_mask]                       = GetParam();
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
 
-    auto result = fmha_fwd_run<DataTypeConfig>(mode,
-                                               batch,
-                                               nhead,
-                                               nhead_k,
-                                               {adjust_seqlen(seqlen_q)},
-                                               {adjust_seqlen(seqlen_k)},
-                                               adjust_hdim(128),
-                                               adjust_hdim(128),
-                                               0,    // seqlen_knew
-                                               {-1}, // seqlen_qpads
-                                               {-1}, // seqlen_kpads
-                                               {},   // q_eff_lens_per_batch
-                                               {},   // kv_eff_lens_per_batch
-                                               0,    // rotary_dim
-                                               true, // i_perm
-                                               true, // o_perm
-                                               0,    // scale_s
-                                               0,    // logits_soft_cap
-                                               def_is_v_rowmajor,
-                                               def_lse,
-                                               0,     // page_block_size
-                                               false, // use_cache_batch_idx
-                                               "n",   // bias_str
-                                               0.0f,  // p_drop
-                                               0,     // drop_seed
-                                               0,     // drop_offset
-                                               false, // drop_prefs
-                                               mask_str,
-                                               qscale,
-                                               true, // is_rotary_interleaved
-                                               1,    // num_splits
-                                               COMMON_ARGS_INIT(qscale_init_method(qscale)));
+    const std::string mask = sink == sink_kind::streamllm ? kStreamLlmMask : mask_str;
+    const int init_sink    = sink == sink_kind::gptoss ? 1 : 0;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        def_is_v_rowmajor,
+        def_lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,         // do_validation
+        init_sink, // init_sink_value
+        1,         // pack_gqa
+        stream_config);
     CHECK_RESULT(result);
 }
 #endif
