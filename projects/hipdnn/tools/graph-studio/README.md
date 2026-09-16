@@ -121,11 +121,11 @@ normal download.
 
 ## Viewing benchmark results
 
-Open the **Verify** tab. **Open run folder…** takes a whole run directory — one
-written by `dnn-benchmark --run-dir DIR` — finds `results.json` inside it, and
-resolves every trace and tensor capture from that same folder. One pick, nothing
-else to choose. **Open report…** stays for a bare JSON, a raw timing export, or
-a run folder holding several reports. An import stays in memory: it survives tab
+Open the **Verify** tab. **Open results folder…** takes the folder that holds a
+`results.json` — one written by `dnn-benchmark --run-dir DIR` — finds the report
+inside it, and resolves every trace and tensor capture from that same folder. One
+pick, nothing else to choose. **Open report…** stays for a bare JSON, a raw timing
+export, or a folder holding several reports. An import stays in memory: it survives tab
 switches, a reload discards it, and it never enters graph autosave or command
 settings. Viewing a report needs no GPU, Python, native add-on, or backend service.
 
@@ -148,10 +148,10 @@ the opened report. Use **Export hipDNN JSON**, not ordinary Save, for the existi
 benchmarking handoff.
 
 Traces and captured tensors load themselves whenever the app can resolve the
-paths the report names, which is what **Open run folder…** establishes. The
+paths the report names, which is what **Open results folder…** establishes. The
 desktop build always can: it knows where the report came from and reads beside
 it, so **Open report…** is enough there. The browser cannot read by path at all,
-so a folder grant is the only bridge — **Use run folder…** appears after a report
+so a folder grant is the only bridge — **Use results folder…** appears after a report
 opened from a bare file. Manual pickers stay as an override, and a report can
 never reach outside its own directory: a path that escapes it is refused, and a
 failed read names the file and folder instead of quietly showing an empty picker.
@@ -168,7 +168,7 @@ exist for this. The trace is a real Perfetto protobuf trace with three slices on
 `hipdnn` thread track; `bun run tests/fixtures/run/traces/make-trace.ts` regenerates it.
 
 1. `bun run dev`, then open the **Verify** tab.
-2. **Open run folder…** → `tests/fixtures/run`. The report opens and the trace
+2. **Open results folder…** → `tests/fixtures/run`. The report opens and the trace
    starts loading by itself; **Tensors** on the `MIOPEN_ENGINE` row shows both
    captures already read, with the reference comparison filled in.
 3. **Details** on that row, then expand **Profiling trace & artifacts**.

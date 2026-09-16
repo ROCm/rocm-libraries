@@ -196,7 +196,7 @@ export async function readRelatedFromDirectory(
     // The browser's own NotFoundError names neither path nor folder, which
     // hides the usual cause: a folder granted below the one the run wrote from.
     throw new Error(
-      `${relativePath} not found under ${dir.name}/ — grant the directory the benchmark ran from`,
+      `${relativePath} not found under ${dir.name}/ — the report's artifacts must sit beside it`,
     );
   }
 }

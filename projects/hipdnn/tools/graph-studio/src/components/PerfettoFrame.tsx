@@ -219,13 +219,18 @@ export function PerfettoFrame(props: {
         Report trace path: <code>{tracePath}</code>
       </p>
       {offerGrant && (
-        <button type="button" className="grant-button" onClick={() => void onGrantDirectory()}>
-          Use run folder…
+        <button
+          type="button"
+          className="grant-button"
+          title="Pick the folder that holds results.json, so its artifacts resolve."
+          onClick={() => void onGrantDirectory()}
+        >
+          Use results folder…
         </button>
       )}
       <p>
         {session?.source === "auto"
-          ? "Loaded from the run folder. Pick a file only to override it."
+          ? "Loaded from the results folder. Pick a file only to override it."
           : "Choose the .pftrace file to load this profiling result."}
       </p>
       <div

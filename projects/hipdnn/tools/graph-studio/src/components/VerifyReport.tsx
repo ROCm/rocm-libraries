@@ -105,8 +105,12 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
     <div className="verify">
       <div className="verify__bar">
         {platform.canGrantDirectory() && (
-          <button type="button" onClick={() => void openRunFolder()}>
-            Open run folder…
+          <button
+            type="button"
+            title="Pick the folder that holds results.json — its traces and tensor captures load with it."
+            onClick={() => void openRunFolder()}
+          >
+            Open results folder…
           </button>
         )}
         <button type="button" onClick={() => void openReport()}>
@@ -122,11 +126,15 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
           </button>
         )}
         {!shown.sample && !platform.canReadRelated(base) && platform.canGrantDirectory() && (
-          <button type="button" onClick={() => void requestDirectory()}>
-            Use run folder…
+          <button
+            type="button"
+            title="Pick the folder that holds results.json, so its traces and tensor captures resolve."
+            onClick={() => void requestDirectory()}
+          >
+            Use results folder…
           </button>
         )}
-        {granted && <span className="verify__note">run folder: {granted.name}</span>}
+        {granted && <span className="verify__note">results folder: {granted.name}</span>}
         {shown.sample && <span className="verify__note">showing bundled sample data</span>}
         {error && (
           <span className="verify__note" data-tone="error">

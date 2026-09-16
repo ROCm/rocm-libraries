@@ -231,8 +231,13 @@ export function TensorView({ hints, onBack, base = null, onGrantDirectory = asyn
       )}
 
       {(primary.grant || secondary.grant) && (
-        <button type="button" className="grant-button" onClick={() => void onGrantDirectory()}>
-          Use run folder…
+        <button
+          type="button"
+          className="grant-button"
+          title="Pick the folder that holds results.json, so its artifacts resolve."
+          onClick={() => void onGrantDirectory()}
+        >
+          Use results folder…
         </button>
       )}
 
@@ -503,7 +508,7 @@ function SlotPicker({ title, hint, slot, onFiles }: SlotPickerProps) {
         {slot.busy
           ? "Reading…"
           : slot.set
-            ? "Loaded from the run folder. Pick files only to override it."
+            ? "Loaded from the results folder. Pick files only to override it."
             : `${hint} Click anywhere here, or drop in manifest.json and its .bin files.`}
       </p>
       {slot.set && <p className="tensors__slot-state">{describeSet(slot.set)}</p>}
