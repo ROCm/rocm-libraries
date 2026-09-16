@@ -94,7 +94,7 @@ The following table lists all operations currently supported in hipDNN:
 
 ## Deterministic Engine Support
 
-The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
+The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution, unary activation, and binary pointwise operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
 
 To use the deterministic engine, set it as the preferred engine on your graph before building:
 
