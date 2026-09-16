@@ -47,6 +47,578 @@ GlobalParameters:
   CpuThreads: 1
   RotatingBufferSize: 0
 
+# NT, power-of-two macro tiles across wave groups.
+.Pow2Tiles: &pow2_tiles
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.Pow2TilesFork: &pow2_tiles_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
+      - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1 (2x2 strips)
+      - [16, 16, 128, 1,  1, 8, 8,  1, 1]   # MT128x128 wg1x1
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+      - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+      - [16, 16, 128, 1,  1, 4, 4,  1, 4]   # MT64x256  wg1x4
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [32, 32, 1, 256]
+      - Exact: [32, 32, 1, 512]
+      - Exact: [128, 128, 1, 512]
+      - Exact: [256, 256, 1, 256]
+      - Exact: [256, 256, 1, 512]   # two K windows
+      - Exact: [96, 96, 1, 256]     # M,N inside one macro tile
+
+# NT, tall and skewed macro tiles, up to 8:1.  Two shapes the non-MX suite
+# carried do not survive the scales: a stack of 16 at one wave cannot fetch
+# its MXSA scales in a single load per wave, and MT512 on the contiguous dim
+# runs the LDS past 160KB once the scale buffers are in.  The skew itself is
+# fine -- MT256x32 at wg2x1 is 8:1 and builds -- so keep the aspect ratios
+# and drop the two sizes, rather than the case.
+.SkewedTiles: &skewed_tiles
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.SkewedTilesFork: &skewed_tiles_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 8,  2,  1, 1]   # MT128x32  wg1x1 (4:1)
+      - [16, 16, 128, 1,  1, 8,  2,  2, 1]   # MT256x32  wg2x1 (8:1)
+      - [16, 16, 128, 1,  1, 16, 2,  1, 2]   # MT256x64  wg1x2 (stack 16, 2 waves)
+      - [16, 16, 128, 1,  1, 8,  2,  2, 2]   # MT256x64  wg2x2
+      - [16, 16, 128, 1,  1, 8,  4,  2, 2]   # MT256x128 wg2x2
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [512, 64, 1, 256]
+      - Exact: [1024, 128, 1, 512]
+
+# NT on a skewed tile at DepthU 512.  Two K windows per iteration against a
+# 2:1 tile; the deeper unroll doubles the scale bytes per window, so this is
+# where a scale span that is sized off a stride instead of off K shows up.
+# The stack has to stay at 4 here -- 8 at DepthU 512 hits the same one-load-
+# per-wave limit on MXSA as the tall tiles above.
+.SkewedDepthU512: &skewed_depthu512
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.SkewedDepthU512Fork: &skewed_depthu512_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 4,  2,  2, 2]   # MT128x64 wg2x2
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [512]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [256, 128, 1, 512]
+      - Exact: [512, 256, 1, 1024]
+
+# NT, macro tile 96 on either dim: MIWaveTile 6, 3 strips per wave.  A 192
+# dim appears as MT128x192 / MT192x128: it needs one wave on the 192 side
+# and a second wave elsewhere, and 96 cannot supply one without going odd.
+.MacroTile96: &macro_tile_96
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.MacroTile96Fork: &macro_tile_96_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 2, 6,  1, 1]   # MT32x96 wg1x1
+      - [16, 16, 128, 1,  1, 4, 6,  1, 1]   # MT64x96 wg1x1
+      - [16, 16, 128, 1,  1, 2, 6,  2, 1]   # MT64x96 wg2x1
+      - [16, 16, 128, 1,  1, 6, 2,  1, 1]   # MT96x32 wg1x1
+      - [16, 16, 128, 1,  1, 6, 4,  1, 1]   # MT96x64 wg1x1
+      - [16, 16, 128, 1,  1, 6, 2,  1, 2]   # MT96x64 wg1x2
+      - [16, 16, 128, 1,  1, 6, 6,  1, 1]   # MT96x96 wg1x1
+      - [16, 16, 128, 1,  1, 6, 8,  1, 1]   # MT96x128 wg1x1
+      - [16, 16, 128, 1,  1, 6, 4,  1, 2]   # MT96x128 wg1x2
+      - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
+      - [16, 16, 128, 1,  1, 4, 12, 2, 1]   # MT128x192 wg2x1 (12 tiles, one wave)
+      - [16, 16, 128, 1,  1, 6, 8,  1, 2]   # MT96x256 wg1x2
+      - [16, 16, 128, 1,  1, 6, 4,  1, 4]   # MT96x256 wg1x4
+      - [16, 16, 128, 1,  1, 8, 6,  1, 1]   # MT128x96 wg1x1
+      - [16, 16, 128, 1,  1, 4, 6,  2, 1]   # MT128x96 wg2x1
+      - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
+      - [16, 16, 128, 1,  1, 12, 4, 1, 2]   # MT192x128 wg1x2 (12 tiles, one wave)
+      - [16, 16, 128, 1,  1, 6, 6,  2, 2]   # MT192x192 wg2x2 (12 tiles both dims, shared strip)
+      - [16, 16, 128, 1,  1, 8, 6,  2, 1]   # MT256x96 wg2x1
+      - [16, 16, 128, 1,  1, 4, 6,  4, 1]   # MT256x96 wg4x1
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [384, 768, 1, 512]
+
+# NT, non-power-of-two macro tiles at four waves in N.  MT224 is 14 MI
+# tiles, which no power-of-two stack covers at any M wave group above 1, so
+# it pins that group to 1.  MT256x224 moves the odd dim to N, freeing M to
+# take all four waves.  Both NT operands are TLU=1, so the 14-tile dim is
+# stacked here where in TT only B is.
+.NonPow2Tiles: &non_pow2_tiles
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.NonPow2TilesFork: &non_pow2_tiles_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 12, 4,  1, 4]   # MT192x256 wg1x4
+      - [16, 16, 128, 1,  1, 14, 4,  1, 4]   # MT224x256 wg1x4
+      - [16, 16, 128, 1,  1, 4,  14, 4, 1]   # MT256x224 wg4x1
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [192, 256, 1, 256]
+      - Exact: [224, 256, 1, 256]
+      - Exact: [256, 224, 1, 256]
+      - Exact: [224, 256, 1, 512]
+      - Exact: [384, 512, 1, 512]
+      - Exact: [448, 512, 1, 512]
+
+# NT prefetch cross product.  PGR double-buffers LDS, PLR double-buffers the
+# MFMA operand registers, so both change the GR/LR schedule and the LDS
+# buffer swap rather than the subtile layout itself.
+.PrefetchCross: &prefetch_cross
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.PrefetchCrossFork: &prefetch_cross_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT64x64   1 wave
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+      - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+    - PrefetchGlobalRead: [0, 1, 2]
+    - PrefetchLocalRead: [0, 1]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [256, 256, 1, 256]
+      - Exact: [512, 512, 1, 512]
+
+# M/N edge coverage: every other block uses whole macro tiles.  The K tail
+# here once returned NaN, because the scale swizzle built its grid as if the
+# row axis were always K -- transposed for a free-dim contiguous operand.
+# Odd M/N cannot live here: two fp4 share a byte, so the subtile geometry
+# raises AssertFree0/1ElementMultiple to 2 on any TLU=1 operand.  Those
+# sizes are covered by the TN groups above, where K is contiguous.
+.EdgeAndTail: &edge_and_tail
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.EdgeAndTailFork: &edge_and_tail_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [224, 256, 1, 256]   # M edge
+      - Exact: [256, 224, 1, 256]   # N edge
+      - Exact: [224, 224, 1, 512]   # M and N edge together, two K windows
+      - Exact: [256, 256, 1, 320]   # K tail (320 = DepthU + 64)
+      - Exact: [256, 256, 1, 384]   # K tail (384 = DepthU + 128)
+      - Exact: [224, 224, 1, 320]   # M and N edge with a K tail
+      - Exact: [256, 256, 1, 288]   # K tail 32 -- the ASEM floor itself
+      - Exact: [224, 224, 1, 352]   # M and N edge with a 32-element K tail
+      - Exact: [32, 32, 1, 256]   # smallest free dim a TLU=1 operand can take
+      - Exact: [544, 544, 1, 256]   # past a power of two without being tile-aligned
+      # K below one DepthU: the unroll loop never runs a whole iteration, so
+      # the tail carries the entire GEMM.  Every case above has at least one
+      # full window before its tail, which leaves the zero-window path untested.
+      - Exact: [256, 256, 1, 32]    # K = ASEM floor, no full window at all
+      - Exact: [256, 256, 1, 128]   # half a window
+      - Exact: [256, 256, 1, 224]   # one element short of a window
+      - Exact: [224, 224, 1, 96]   # M and N edge with no full window
+      - Exact: [32, 32, 1, 32]      # smallest problem the layout accepts
+
+# NT, macro tile 96 at 4 waves, DepthU 512: the fetch group is spread over
+# both the K slices of a window AND several K windows, so a wave issues
+# more than one window at a per-wave window offset.
+# 
+# K=1024 is 32 K blocks, which is where the scale buffer's padded extent
+# first differs between the two orientations; it used to abort in the
+# client's scale swizzle.  K=512 brackets it from below.
+.MacroTile96DepthU512: &macro_tile_96_depthu512
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.MacroTile96DepthU512Fork: &macro_tile_96_depthu512_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
+      - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
+    - PrefetchGlobalRead: [0, 2]
+    - PrefetchLocalRead: [0, 1]
+    - DepthU: [512]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [384, 768, 1, 512]
+      - Exact: [384, 768, 1, 1024]
+
+# The free-dim tail of the buffer window.  The last workgroup owns fewer
+# than a macro tile when the size leaves a remainder, so the window runs
+# past the tensor.  Faulting needs the operand to end on a page too:
+# 2048 over a tile of 96 leaves 32 rows and an A of exactly 2MB.
+# Keep the sizes -- the shapes make this reachable, not the tiles.
+# 
+# At K=2048 these are also the largest scale buffers here, so they cover
+# the padded-extent path that used to abort in the client's scale swizzle.
+.BufferWindowTail: &buffer_window_tail
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.BufferWindowTailFork: &buffer_window_tail_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128  wg1x4
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [2048, 2048, 1, 2048]   # M tail vs tile 96, operand ends on a page
+      - Exact: [1920, 2048, 1, 2048]   # same scale shape, no tail -- the control
+      - Exact: [2048, 2016, 1, 2048]   # N tail on the other operand
+
+# Batch and Stream-K: the GR base away from the batch-0 tile-0 origin every
+# other block starts at.
+.BatchStreamK: &batch_streamk
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.BatchStreamKFork: &batch_streamk_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+      - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
+    - PrefetchGlobalRead: [0]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0, 3]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [256, 256, 2, 256]   # batch 2, whole tiles
+      - Exact: [256, 256, 3, 512]   # batch 3, two K windows
+      - Exact: [224, 256, 2, 256]   # batch 2 with an M edge
+      - Exact: [256, 256, 2, 288]   # batch 2 with a 32-element K tail
+
+# Mapped workgroup order, crossed with Stream-K.
+.WgmStreamK: &wgm_streamk
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.WgmStreamKFork: &wgm_streamk_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+    - PrefetchGlobalRead: [0, 2]
+    - PrefetchLocalRead: [0]
+    - DepthU: [256, 512]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [0, 3]
+    - StaggerU: [0]
+    - WorkGroupMapping: [16]
+    - WorkGroupMappingXCC: [4]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [256, 256, 1, 768]    # K past two DepthU-512 windows
+      - Exact: [256, 256, 1, 1536]   # three of them
+      - Exact: [224, 256, 1, 800]   # M edge with a 32-element K tail
+      - Exact: [256, 256, 2, 768]    # batch through the mapped order
+
+# NT: the epilogue and scheduler knobs the TN groups vary -- bias,
+# activation, scaleAlphaVec, 1LDSBuffer, NonTemporalD (TransposeLDS needs a K-contiguous operand, so not here).
+.EpilogueKnobs: &epilogue_knobs
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+  Activation: True
+  ActivationType: hipblaslt_all
+  ActivationFuncCall: True
+  UseBias: 1
+  BiasDataTypeList: [s]
+  UseScaleAlphaVec: 1
+
+.EpilogueKnobsFork: &epilogue_knobs_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+    - PrefetchGlobalRead: [0, 1, 2]
+    - PrefetchLocalRead: [1]
+    - ActivationFuncCall: [false]
+    - DepthU: [256, 512]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [3]
+    - StaggerU: [0]
+    - 1LDSBuffer: [0]
+    - NonTemporalD: [4]
+    - WorkGroupMapping: [16]
+    - WorkGroupMappingXCC: [4]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Range: [[256], [256], [1], [64, 64, 512]]
+    - BiasTypeArgs: ['s']
+
+# K deep enough to split a tile.  Everything else here runs K <= 2304,
+# where StreamKLocalStart stays 0 and a wrong partial-tile K stride is
+# multiplied away before it can be seen.  Do not shrink K.
+.SkPartialTiles: &sk_partial_tiles
+  OperationType: GEMM
+  DataType: F4
+  DestDataType: S
+  ComputeDataType: S
+  HighPrecisionAccumulate: True
+  MXBlockA: 32
+  MXBlockB: 32
+  TransposeA: False
+  TransposeB: True
+  UseBeta: True
+  Batched: True
+
+.SkPartialTilesFork: &sk_partial_tiles_fork
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+    - PrefetchGlobalRead: [2]
+    - PrefetchLocalRead: [1]
+    - DepthU: [256]
+    - ScheduleIterAlg: [3]
+    - DirectToLds: [1]
+    - StreamK: [3]
+    - StaggerU: [0]
+    - UseSubtileImpl: [true]
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [256, 256, 1, 4096]   # 4 tiles, 16 iters each
+
 BenchmarkProblems:
   ########################################
   # FP4 TN — no bias, DU = 2*MI_K = 256
@@ -781,1121 +1353,632 @@ BenchmarkProblems:
   # ---- NT, DestDataType S: the template cell.  Every group below is
   # anchored and replayed for the other eight (layout, out-type) cells.
   -
-    - &prob0 # NT, power-of-two macro tiles across wave groups.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench0
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  1, 1]   # MT32x32   wg1x1
-          - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT64x64   wg1x1 (2x2 strips)
-          - [16, 16, 128, 1,  1, 8, 8,  1, 1]   # MT128x128 wg1x1
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
-          - [16, 16, 128, 1,  1, 4, 4,  1, 4]   # MT64x256  wg1x4
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [32, 32, 1, 256]
-          - Exact: [32, 32, 1, 512]
-          - Exact: [128, 128, 1, 512]
-          - Exact: [256, 256, 1, 256]
-          - Exact: [256, 256, 1, 512]   # two K windows
-          - Exact: [96, 96, 1, 256]     # M,N inside one macro tile
+    - <<: *pow2_tiles
+    - *pow2_tiles_fork
   -
-    - &prob1 # NT, tall and skewed macro tiles, up to 8:1.  Two shapes the non-MX suite
-      # carried do not survive the scales: a stack of 16 at one wave cannot fetch
-      # its MXSA scales in a single load per wave, and MT512 on the contiguous dim
-      # runs the LDS past 160KB once the scale buffers are in.  The skew itself is
-      # fine -- MT256x32 at wg2x1 is 8:1 and builds -- so keep the aspect ratios
-      # and drop the two sizes, rather than the case.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench1
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 8,  2,  1, 1]   # MT128x32  wg1x1 (4:1)
-          - [16, 16, 128, 1,  1, 8,  2,  2, 1]   # MT256x32  wg2x1 (8:1)
-          - [16, 16, 128, 1,  1, 16, 2,  1, 2]   # MT256x64  wg1x2 (stack 16, 2 waves)
-          - [16, 16, 128, 1,  1, 8,  2,  2, 2]   # MT256x64  wg2x2
-          - [16, 16, 128, 1,  1, 8,  4,  2, 2]   # MT256x128 wg2x2
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [512, 64, 1, 256]
-          - Exact: [1024, 128, 1, 512]
+    - <<: *skewed_tiles
+    - *skewed_tiles_fork
   -
-    - &prob2 # NT on a skewed tile at DepthU 512.  Two K windows per iteration against a
-      # 2:1 tile; the deeper unroll doubles the scale bytes per window, so this is
-      # where a scale span that is sized off a stride instead of off K shows up.
-      # The stack has to stay at 4 here -- 8 at DepthU 512 hits the same one-load-
-      # per-wave limit on MXSA as the tall tiles above.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench2
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 4,  2,  2, 2]   # MT128x64 wg2x2
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [512]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 128, 1, 512]
-          - Exact: [512, 256, 1, 1024]
+    - <<: *skewed_depthu512
+    - *skewed_depthu512_fork
   -
-    - &prob3 # NT, macro tile 96 on either dim: MIWaveTile 6, 3 strips per wave.  A 192
-      # dim appears as MT128x192 / MT192x128: it needs one wave on the 192 side
-      # and a second wave elsewhere, and 96 cannot supply one without going odd.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench3
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 6,  1, 1]   # MT32x96 wg1x1
-          - [16, 16, 128, 1,  1, 4, 6,  1, 1]   # MT64x96 wg1x1
-          - [16, 16, 128, 1,  1, 2, 6,  2, 1]   # MT64x96 wg2x1
-          - [16, 16, 128, 1,  1, 6, 2,  1, 1]   # MT96x32 wg1x1
-          - [16, 16, 128, 1,  1, 6, 4,  1, 1]   # MT96x64 wg1x1
-          - [16, 16, 128, 1,  1, 6, 2,  1, 2]   # MT96x64 wg1x2
-          - [16, 16, 128, 1,  1, 6, 6,  1, 1]   # MT96x96 wg1x1
-          - [16, 16, 128, 1,  1, 6, 8,  1, 1]   # MT96x128 wg1x1
-          - [16, 16, 128, 1,  1, 6, 4,  1, 2]   # MT96x128 wg1x2
-          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
-          - [16, 16, 128, 1,  1, 4, 12, 2, 1]   # MT128x192 wg2x1 (12 tiles, one wave)
-          - [16, 16, 128, 1,  1, 6, 8,  1, 2]   # MT96x256 wg1x2
-          - [16, 16, 128, 1,  1, 6, 4,  1, 4]   # MT96x256 wg1x4
-          - [16, 16, 128, 1,  1, 8, 6,  1, 1]   # MT128x96 wg1x1
-          - [16, 16, 128, 1,  1, 4, 6,  2, 1]   # MT128x96 wg2x1
-          - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
-          - [16, 16, 128, 1,  1, 12, 4, 1, 2]   # MT192x128 wg1x2 (12 tiles, one wave)
-          - [16, 16, 128, 1,  1, 6, 6,  2, 2]   # MT192x192 wg2x2 (12 tiles both dims, shared strip)
-          - [16, 16, 128, 1,  1, 8, 6,  2, 1]   # MT256x96 wg2x1
-          - [16, 16, 128, 1,  1, 4, 6,  4, 1]   # MT256x96 wg4x1
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [384, 768, 1, 512]
+    - <<: *macro_tile_96
+    - *macro_tile_96_fork
   -
-    - &prob4 # NT, non-power-of-two macro tiles at four waves in N.  MT224 is 14 MI
-      # tiles, which no power-of-two stack covers at any M wave group above 1, so
-      # it pins that group to 1.  MT256x224 moves the odd dim to N, freeing M to
-      # take all four waves.  Both NT operands are TLU=1, so the 14-tile dim is
-      # stacked here where in TT only B is.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench4
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 12, 4,  1, 4]   # MT192x256 wg1x4
-          - [16, 16, 128, 1,  1, 14, 4,  1, 4]   # MT224x256 wg1x4
-          - [16, 16, 128, 1,  1, 4,  14, 4, 1]   # MT256x224 wg4x1
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [192, 256, 1, 256]
-          - Exact: [224, 256, 1, 256]
-          - Exact: [256, 224, 1, 256]
-          - Exact: [224, 256, 1, 512]
-          - Exact: [384, 512, 1, 512]
-          - Exact: [448, 512, 1, 512]
+    - <<: *non_pow2_tiles
+    - *non_pow2_tiles_fork
   -
-    - &prob5 # NT prefetch cross product.  PGR double-buffers LDS, PLR double-buffers the
-      # MFMA operand registers, so both change the GR/LR schedule and the LDS
-      # buffer swap rather than the subtile layout itself.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench5
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 4, 4,  1, 1]   # MT64x64   1 wave
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
-        - PrefetchGlobalRead: [0, 1, 2]
-        - PrefetchLocalRead: [0, 1]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 256]
-          - Exact: [512, 512, 1, 512]
+    - <<: *prefetch_cross
+    - *prefetch_cross_fork
   -
-    - &prob6 # M/N edge coverage: every other block uses whole macro tiles.  The K tail
-      # here once returned NaN, because the scale swizzle built its grid as if the
-      # row axis were always K -- transposed for a free-dim contiguous operand.
-      # Odd M/N cannot live here: two fp4 share a byte, so the subtile geometry
-      # raises AssertFree0/1ElementMultiple to 2 on any TLU=1 operand.  Those
-      # sizes are covered by the TN groups above, where K is contiguous.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench6
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [224, 256, 1, 256]   # M edge
-          - Exact: [256, 224, 1, 256]   # N edge
-          - Exact: [224, 224, 1, 512]   # M and N edge together, two K windows
-          - Exact: [256, 256, 1, 320]   # K tail (320 = DepthU + 64)
-          - Exact: [256, 256, 1, 384]   # K tail (384 = DepthU + 128)
-          - Exact: [224, 224, 1, 320]   # M and N edge with a K tail
-          - Exact: [256, 256, 1, 288]   # K tail 32 -- the ASEM floor itself
-          - Exact: [224, 224, 1, 352]   # M and N edge with a 32-element K tail
-          - Exact: [32, 32, 1, 256]   # smallest free dim a TLU=1 operand can take
-          - Exact: [544, 544, 1, 256]   # past a power of two without being tile-aligned
-          # K below one DepthU: the unroll loop never runs a whole iteration, so
-          # the tail carries the entire GEMM.  Every case above has at least one
-          # full window before its tail, which leaves the zero-window path untested.
-          - Exact: [256, 256, 1, 32]    # K = ASEM floor, no full window at all
-          - Exact: [256, 256, 1, 128]   # half a window
-          - Exact: [256, 256, 1, 224]   # one element short of a window
-          - Exact: [224, 224, 1, 96]   # M and N edge with no full window
-          - Exact: [32, 32, 1, 32]      # smallest problem the layout accepts
+    - <<: *edge_and_tail
+    - *edge_and_tail_fork
   -
-    - &prob7 # NT, macro tile 96 at 4 waves, DepthU 512: the fetch group is spread over
-      # both the K slices of a window AND several K windows, so a wave issues
-      # more than one window at a per-wave window offset.
-      #
-      # K=1024 is 32 K blocks, which is where the scale buffer's padded extent
-      # first differs between the two orientations; it used to abort in the
-      # client's scale swizzle.  K=512 brackets it from below.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench7
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128 wg1x4
-          - [16, 16, 128, 1,  1, 2, 6,  4, 1]   # MT128x96 wg4x1
-        - PrefetchGlobalRead: [0, 2]
-        - PrefetchLocalRead: [0, 1]
-        - DepthU: [512]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [384, 768, 1, 512]
-          - Exact: [384, 768, 1, 1024]
+    - <<: *macro_tile_96_depthu512
+    - *macro_tile_96_depthu512_fork
   -
-    - &prob8 # The free-dim tail of the buffer window.  The last workgroup owns fewer
-      # than a macro tile when the size leaves a remainder, so the window runs
-      # past the tensor.  Faulting needs the operand to end on a page too:
-      # 2048 over a tile of 96 leaves 32 rows and an A of exactly 2MB.
-      # Keep the sizes -- the shapes make this reachable, not the tiles.
-      #
-      # At K=2048 these are also the largest scale buffers here, so they cover
-      # the padded-extent path that used to abort in the client's scale swizzle.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench8
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 6, 2,  1, 4]   # MT96x128  wg1x4
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [2048, 2048, 1, 2048]   # M tail vs tile 96, operand ends on a page
-          - Exact: [1920, 2048, 1, 2048]   # same scale shape, no tail -- the control
-          - Exact: [2048, 2016, 1, 2048]   # N tail on the other operand
+    - <<: *buffer_window_tail
+    - *buffer_window_tail_fork
   -
-    - &prob9 # Batch and Stream-K: the GR base away from the batch-0 tile-0 origin every
-      # other block starts at.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench9
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
-          - [16, 16, 128, 1,  1, 8, 8,  2, 2]   # MT256x256 wg2x2
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0, 3]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 2, 256]   # batch 2, whole tiles
-          - Exact: [256, 256, 3, 512]   # batch 3, two K windows
-          - Exact: [224, 256, 2, 256]   # batch 2 with an M edge
-          - Exact: [256, 256, 2, 288]   # batch 2 with a 32-element K tail
+    - <<: *batch_streamk
+    - *batch_streamk_fork
   -
-    - &prob10 # Mapped workgroup order, crossed with Stream-K.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench10
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
-        - PrefetchGlobalRead: [0, 2]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256, 512]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [0, 3]
-        - StaggerU: [0]
-        - WorkGroupMapping: [16]
-        - WorkGroupMappingXCC: [4]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 768]    # K past two DepthU-512 windows
-          - Exact: [256, 256, 1, 1536]   # three of them
-          - Exact: [224, 256, 1, 800]   # M edge with a 32-element K tail
-          - Exact: [256, 256, 2, 768]    # batch through the mapped order
+    - <<: *wgm_streamk
+    - *wgm_streamk_fork
   -
-    - &prob11 # NT: the epilogue and scheduler knobs the TN groups vary -- bias,
-      # activation, scaleAlphaVec, 1LDSBuffer, NonTemporalD (TransposeLDS needs a K-contiguous operand, so not here).
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-      Activation: True
-      ActivationType: hipblaslt_all
-      ActivationFuncCall: True
-      UseBias: 1
-      BiasDataTypeList: [s]
-      UseScaleAlphaVec: 1
-
-    - &bench11
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 2, 2,  2, 2]   # MT64x64   wg2x2
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
-        - PrefetchGlobalRead: [0, 1, 2]
-        - PrefetchLocalRead: [1]
-        - ActivationFuncCall: [false]
-        - DepthU: [256, 512]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [3]
-        - StaggerU: [0]
-        - 1LDSBuffer: [0]
-        - NonTemporalD: [4]
-        - WorkGroupMapping: [16]
-        - WorkGroupMappingXCC: [4]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Range: [[256], [256], [1], [64, 64, 512]]
-        - BiasTypeArgs: ['s']
-
+    - <<: *epilogue_knobs
+    - *epilogue_knobs_fork
   # ---- NT, DestDataType B ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: False
       TransposeB: True
       DestDataType: B
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- NT, DestDataType H ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: False
       TransposeB: True
       DestDataType: H
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- NN, DestDataType S ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: False
       TransposeB: False
       DestDataType: S
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- NN, DestDataType B ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: False
       TransposeB: False
       DestDataType: B
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- NN, DestDataType H ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: False
       TransposeB: False
       DestDataType: H
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- TT, DestDataType S ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: True
       TransposeB: True
       DestDataType: S
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- TT, DestDataType B ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: True
       TransposeB: True
       DestDataType: B
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- TT, DestDataType H ----
   -
-    - <<: *prob0
+    - <<: *pow2_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench0
+    - *pow2_tiles_fork
   -
-    - <<: *prob1
+    - <<: *skewed_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench1
+    - *skewed_tiles_fork
   -
-    - <<: *prob2
+    - <<: *skewed_depthu512
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench2
+    - *skewed_depthu512_fork
   -
-    - <<: *prob3
+    - <<: *macro_tile_96
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench3
+    - *macro_tile_96_fork
   -
-    - <<: *prob4
+    - <<: *non_pow2_tiles
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench4
+    - *non_pow2_tiles_fork
   -
-    - <<: *prob5
+    - <<: *prefetch_cross
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench5
+    - *prefetch_cross_fork
   -
-    - <<: *prob6
+    - <<: *edge_and_tail
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench6
+    - *edge_and_tail_fork
   -
-    - <<: *prob7
+    - <<: *macro_tile_96_depthu512
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench7
+    - *macro_tile_96_depthu512_fork
   -
-    - <<: *prob8
+    - <<: *buffer_window_tail
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench8
+    - *buffer_window_tail_fork
   -
-    - <<: *prob9
+    - <<: *batch_streamk
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench9
+    - *batch_streamk_fork
   -
-    - <<: *prob10
+    - <<: *wgm_streamk
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench10
+    - *wgm_streamk_fork
   -
-    - <<: *prob11
+    - <<: *epilogue_knobs
       TransposeA: True
       TransposeB: True
       DestDataType: H
-    - *bench11
+    - *epilogue_knobs_fork
 
   # ---- per-layout extras: odd free-dim extents, which the shared matrix
   # cannot carry.  NT forces even M and N because both operands are TLU=1;
@@ -2229,52 +2312,20 @@ BenchmarkProblems:
   # StreamK partial tiles, all four layouts
   ########################################
   -
-    - &prob12 # K deep enough to split a tile.  Everything else here runs K <= 2304,
-      # where StreamKLocalStart stays 0 and a wrong partial-tile K stride is
-      # multiplied away before it can be seen.  Do not shrink K.
-      OperationType: GEMM
-      DataType: F4
-      DestDataType: S
-      ComputeDataType: S
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: False
-      TransposeB: True
-      UseBeta: True
-      Batched: True
-
-    - &bench12
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - DepthU: [256]
-        - ScheduleIterAlg: [3]
-        - DirectToLds: [1]
-        - StreamK: [3]
-        - StaggerU: [0]
-        - UseSubtileImpl: [true]
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [256, 256, 1, 4096]   # 4 tiles, 16 iters each
+    - <<: *sk_partial_tiles
+    - *sk_partial_tiles_fork
   -
-    - <<: *prob12
+    - <<: *sk_partial_tiles
       TransposeA: False
       TransposeB: False
-    - *bench12
+    - *sk_partial_tiles_fork
   -
-    - <<: *prob12
+    - <<: *sk_partial_tiles
       TransposeA: True
       TransposeB: True
-    - *bench12
+    - *sk_partial_tiles_fork
   -
-    - <<: *prob12
+    - <<: *sk_partial_tiles
       TransposeA: True
       TransposeB: False
-    - *bench12
+    - *sk_partial_tiles_fork
