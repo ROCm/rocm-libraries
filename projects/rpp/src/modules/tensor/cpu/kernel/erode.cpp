@@ -1959,7 +1959,9 @@ RppStatus erode_float_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                 /* exclude (2 * padLength) number of columns from alignedLength calculation
                    since padLength number of columns from the beginning and end of each row will be
                    computed using raw c code */
-                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 16) * 16;
+                // must stay a multiple of the loop's per-pass increment (12) to avoid overshooting
+                // past the ROI right edge
+                Rpp32u alignedLength = ((bufferLength - (2 * padLength)) / 12) * 12;
                 for (int c = 0; c < srcDescPtr->c; c++) {
                     srcPtrRow[0] = srcPtrChannel;
                     for (int k = 1; k < 5; k++)
