@@ -49,8 +49,8 @@ if _codegen_dir not in sys.path:
 # their name builders, and keeps the shared tile/trait defaults in one place so this
 # module's default_*_config() cannot drift from the codegen's _default_config().
 from codegen_common import (  # noqa: E402
-    ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
     ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
+    rowcol_tensor_quant_default_tile,
     make_tensorquant_kernel_name,
 )
 
@@ -337,6 +337,19 @@ class TensorQuantGpuGemmRunner:
         BQ   shape: (1,)     dtype: float    (per-tensor B scale)
         c_dtype numpy dtype for the output C buffer. Defaults to np.float16.
         Returns TensorQuantGemmResult with C shape (M, N).
+
+        Shape constraints enforced by the bridge (validated on gfx1250 with the
+        default config). Violations raise RuntimeError; no output is written:
+
+          K % 16 == 0     Required even though the default config sets pad_k=True --
+                          pad_k covers the K-loop tail, not the global-load vector
+                          width.
+          N % 64 == 0     Required because the default config sets pad_n=False, so N
+                          must be a whole number of N-tiles (tile_n=64).
+
+        There is no M constraint: TensorQuant applies scalar A/B scales rather than a
+        per-row scale vector, so it is unaffected by the unpadded per-row AQ tail that
+        restricts the RowColQuant bridge to M % 4 == 0 on gfx12.
         """
         import numpy as np
 
@@ -395,9 +408,16 @@ class TensorQuantGpuGemmRunner:
         )
 
         if rc != 0:
+            # rc alone is not actionable, and the C++ explanation goes to stderr, which
+            # a caller capturing only the exception never sees. Restate the constraints
+            # here so the traceback is self-contained.
             raise RuntimeError(
                 f"dispatcher_run_gemm failed with code {rc} "
-                f"for kernel {self.kernel_name}"
+                f"for kernel {self.kernel_name} at M={M} N={N} K={K}. "
+                f"(-1 = rejected by the bridge, -2 = rejected by the kernel, "
+                f"-3 = launch threw.) Shape constraints: K % 16 == 0 (required even "
+                f"with pad_k=True); N % 64 == 0 when pad_n=False. "
+                f"See stderr for the exact reason."
             )
 
         return TensorQuantGemmResult(C=C, time_ms=time_ms, kernel_name=self.kernel_name)
@@ -664,7 +684,7 @@ def _default_config(dtype: str, gfx_arch: str) -> TensorQuantKernelConfig:
         pipeline=traits["pipeline"],
         epilogue=traits["epilogue"],
         scheduler=traits["scheduler"],
-        **ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
+        **rowcol_tensor_quant_default_tile(gfx_arch),
         pad_m=traits["pad_m"],
         pad_n=traits["pad_n"],
         pad_k=traits["pad_k"],

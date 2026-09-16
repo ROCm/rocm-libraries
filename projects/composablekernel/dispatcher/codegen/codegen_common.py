@@ -392,6 +392,203 @@ def needs_pipeline_expansion(config: dict) -> bool:
 
 
 # ============================================================================
+# Central arch-validity filter (single source of truth for sweep expansion)
+# ============================================================================
+#
+# THE authoritative answer to "may this (arch, warp map, warp tile, dtype,
+# pipeline/scheduler) combination be emitted?". Every sweep expansion in the
+# dispatcher -- gemm_utils.expand_sweep, batched_contraction_utils.expand_sweep,
+# the quant codegens' _build_specs(), unified_contraction_multi_abd_codegen's
+# build_specs() -- must route its arch decision through arch_config_supported()
+# rather than re-deriving one. It lives here, next to valid_wave_configs() /
+# valid_warp_configs(), because this module is already the codegen-side owner of
+# the arch tables loaded from arch_specs_generated.py (which is generated from
+# arch_specs.json, the single data source).
+#
+# SCOPE, up front: this filter narrows gfx1250 and nothing else. Which arches it
+# may narrow is a single explicit table (ARCH_VALIDITY_RULES below) rather than a
+# property derived from the arch data, so no arch acquires a restriction by
+# implication. See that table for the rule schema and the evidence per row.
+#
+# Why this exists (measured on gfx1250 / MI400, grouped rowcolquant+tensorquant
+# default_config sweep, 11,840 result rows):
+#
+#   * 2,908 rows returned wrong numbers. 100% of them were warp_tile 32x32x32 --
+#     a wave64 MFMA fragment shape. Every 16x16x64 row (the arch's real 8-bit
+#     WMMA fragment) was correct: 3,760 PASS / 0 FAIL. The sweep config lists
+#     warp_tile_m in {4,16,32} and warp_tile_n in {16,32,64}, which are gfx9
+#     values, and nothing filtered them per arch.
+#   * 3,220 rows aborted at launch ("device symbol missing from .so"). 100% of
+#     them were 8-warp blocks (warp_m*warp_n == 8), the known gfx1250 8-warp
+#     limitation.
+#
+# Both are enumeration defects, not kernel defects.
+
+
+# ---------------------------------------------------------------------------
+# The opt-in table -- the ONLY thing that turns any rule on
+# ---------------------------------------------------------------------------
+#
+# An arch is gated if and only if it has a row here. There is no family closure,
+# no wave32/wave64 inference, no "the table would have allowed it anyway"
+# reasoning: an arch that is absent from this dict exits arch_config_supported()
+# on the first statement and can never be narrowed by any rule below, present or
+# future. That is a structural guarantee, not a property of the current table
+# contents, and it is what keeps gfx90a / gfx942 / gfx950 byte-identical.
+#
+# An earlier revision of this filter derived the warp-tile rule from a family
+# closure (ARCH_FAMILY_MAP -> "rdna*" => the table is exhaustive) and applied the
+# warp-map rule to *every* arch. The family closure was correct for the warp-tile
+# rule but the unconditional warp-map rule was not: measured on a raw expansion of
+# the grouped rowcolquant/tensorquant default_config ranges it deleted 9,144 of
+# 35,496 gfx942 candidates and 6,624 of 35,496 on gfx950, because
+# WARP_SUPPORTED_COMBINATIONS is a curated Old-TE whitelist (gfx942 has no
+# [4,2,1] / [2,4,1] / [4,4,1] row) rather than the set of warp maps the hardware
+# can run. Losing gfx9 coverage to fix gfx1250 is not an acceptable trade, so the
+# gate is now opt-in per arch instead of opt-out per rule.
+#
+# Row schema:
+#   "warp_map"            : bool -- [warp_m, warp_n, warp_k] must be in
+#                           WARP_SUPPORTED_COMBINATIONS[arch].
+#   "warp_tile"           : bool -- [warp_tile_m, warp_tile_n, warp_tile_k] must
+#                           be in WARP_TILE_SUPPORTED_COMBINATIONS[arch][key].
+#                           Only set this where the arch's row of that table is a
+#                           hardware closure, i.e. an absent entry really cannot
+#                           execute. True for gfx1250: WMMA has one fragment
+#                           family, M = N = 16, so a 32x32 warp tile is not an
+#                           instruction. NOT true of the CDNA rows, which is
+#                           precisely why no CDNA arch has a row here at all.
+#   "max_warps_per_block" : {(pipeline, scheduler): cap, None: cap} -- warp_m *
+#                           warp_n cap. The ``None`` key is the arch-wide default:
+#                           it applies to every (pipeline, scheduler) pair with no
+#                           more specific entry, including callers that pass
+#                           neither. Use a pair key only where the evidence really
+#                           is pipeline-specific.
+#
+# gfx1250 evidence, both rules (grouped rowcolquant + tensorquant default_config
+# sweep on MI400, 11,840 result rows):
+#   * warp_tile: 2,908 rows returned wrong numbers and 100% of them were
+#     32x32x32; 0 of the 3,760 16x16x64 rows were wrong.
+#   * max_warps_per_block: 3,220 rows aborted at launch and 100% of them were
+#     warp_m*warp_n == 8. The failure is "cannot find symbol" -- no launchable
+#     kernel entry was emitted at all -- which is a wave32 block-size property of
+#     the target, not a property of the pipeline that was scheduled into it. The
+#     cap is therefore registered arch-wide (None) rather than for
+#     (compv3, intrawave) only; a pair-keyed cap would leave the mem pipeline
+#     admitting exactly the maps that were measured to abort. This matches what
+#     the Tile Engine whitelist for gfx1250 already asserts unconditionally in
+#     tile_engine/ops/gemm/gemm_validation_utils.py.
+#     Corroborated on device by ROCm/rocm-libraries#11161 for compv3 specifically
+#     (max_rel 0.14-0.87 vs an fp32 CPU reference).
+#     Deliberately not extended to gfx1100/gfx1200/gfx1201: no measurement exists
+#     for those parts and their whole warp table is 8-warp.
+ARCH_VALIDITY_RULES: Dict[str, Dict[str, Any]] = {
+    "gfx1250": {
+        "warp_map": True,
+        "warp_tile": True,
+        "max_warps_per_block": {None: 4},
+    },
+}
+
+
+def arch_warp_tile_key(dtype_a: str, dtype_b: Optional[str] = None) -> str:
+    """Table key for a dtype pair: ``{a}_{b}_{acc}`` with acc int32 for int8."""
+    b = dtype_b or dtype_a
+    acc = "int32" if dtype_a == "int8" else "fp32"
+    return f"{dtype_a}_{b}_{acc}"
+
+
+def arch_config_supported(
+    arch: Optional[str],
+    *,
+    dtype: Optional[str] = None,
+    dtype_b: Optional[str] = None,
+    warp_m: Optional[int] = None,
+    warp_n: Optional[int] = None,
+    warp_k: Optional[int] = None,
+    warp_tile_m: Optional[int] = None,
+    warp_tile_n: Optional[int] = None,
+    warp_tile_k: Optional[int] = None,
+    pipeline: Optional[str] = None,
+    scheduler: Optional[str] = None,
+) -> bool:
+    """Return True iff this configuration may be emitted for *arch*.
+
+    *arch* is normalized with :func:`normalize_gfx_arch` before anything is
+    looked up. Callers hand us whatever ``rocm_agent_enumerator`` or
+    ``hipDeviceProp_t::gcnArchName`` reported, and on a real part that is
+    routinely ``"gfx1250:xnack-"``. Looking that string up raw finds no row and
+    returns True, i.e. the gate would be inert on the single most common
+    real-world spelling of the only architecture it gates. Normalizing here also
+    keeps the ARCH_VALIDITY_RULES / WARP_SUPPORTED_COMBINATIONS /
+    WARP_TILE_SUPPORTED_COMBINATIONS lookups consistent, since all three are
+    keyed by the bare target.
+
+    **The gate is opt-in per arch.** If the normalized *arch* is falsy, unknown,
+    or simply has no row in ARCH_VALIDITY_RULES, this returns True immediately
+    and no rule can run. Today only gfx1250 has a row, so on gfx90a / gfx942 /
+    gfx950 -- and on every other arch -- this function is a constant-True no-op
+    by construction, whatever the arch tables happen to contain. Adding an arch
+    to the gate is a deliberate, evidence-backed edit to ARCH_VALIDITY_RULES; it
+    never happens as a side effect of a table gaining or losing a row.
+
+    Rules, applied only to a gated arch and only where its row enables them:
+
+    1. **Warp map** (``"warp_map"``) -- ``[warp_m, warp_n, warp_k]`` must appear
+       in WARP_SUPPORTED_COMBINATIONS[arch].
+    2. **Warp tile** (``"warp_tile"``) -- ``[warp_tile_m, warp_tile_n,
+       warp_tile_k]`` must appear in
+       WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key].
+    3. **Warps-per-block cap** (``"max_warps_per_block"``) -- ``warp_m *
+       warp_n`` must not exceed the cap recorded for (pipeline, scheduler), or
+       the arch-wide ``None`` cap when that pair has no entry of its own.
+
+    Within a gated arch the rules still never reject on absence of data: a
+    missing table row leaves the corresponding rule inert.
+    """
+    arch = normalize_gfx_arch(arch or "")
+    rules = ARCH_VALIDITY_RULES.get(arch)
+    if not rules:
+        return True
+
+    data = _get_arch_data()
+
+    if (
+        rules.get("warp_map")
+        and warp_m is not None
+        and warp_n is not None
+        and warp_k is not None
+    ):
+        allowed = data["warp_combos"].get(arch)
+        if allowed and [warp_m, warp_n, warp_k] not in allowed:
+            return False
+
+    if (
+        rules.get("warp_tile")
+        and dtype is not None
+        and warp_tile_m is not None
+        and warp_tile_n is not None
+        and warp_tile_k is not None
+    ):
+        key = arch_warp_tile_key(dtype, dtype_b)
+        table = data["warp_tile_combos"].get(arch, {}).get(key)
+        if table and [warp_tile_m, warp_tile_n, warp_tile_k] not in table:
+            return False
+
+    if warp_m is not None and warp_n is not None:
+        caps = rules.get("max_warps_per_block", {})
+        # Pair-specific entry first, then the arch-wide default. Deliberately not
+        # conditioned on pipeline/scheduler being supplied: on gfx1250 the cap
+        # describes what the target can launch, so a caller that omits its trait
+        # pair must not thereby escape it.
+        cap = caps.get((pipeline, scheduler), caps.get(None))
+        if cap is not None and warp_m * warp_n > cap:
+            return False
+
+    return True
+
+
+# ============================================================================
 # Block-scale quant type mappings
 # ============================================================================
 #
@@ -630,6 +827,26 @@ def make_gemm_rowcolquant_kernel_name(
 
 
 # ============================================================================
+# Arch string normalization
+# ============================================================================
+
+
+def normalize_gfx_arch(arch: str) -> str:
+    """Strip feature suffixes from a gfx target string.
+
+    ``rocm_agent_enumerator`` and ``hipDeviceProp_t::gcnArchName`` may report the
+    target with trailing feature flags, e.g. ``"gfx942:sramecc+:xnack-"`` or
+    ``"gfx1250:xnack-"``. Every arch comparison in the codegen/runtime path (and
+    the ``--offload-arch`` we hand to hipcc) wants the bare target, so normalize
+    once at the boundary instead of scattering substring tests that happen to
+    tolerate the suffix.
+
+    This is the single source of truth for that rule; do not re-implement it.
+    """
+    return arch.split(":", 1)[0]
+
+
+# ============================================================================
 # Arch-derived warp tile K
 # ============================================================================
 
@@ -754,6 +971,25 @@ def iter_quant_axes(
         tile = tile_config_from_dict(tile_dict)
         if not tile.is_valid():
             logger.debug("Invalid tile config %s -- skipping", tile)
+            continue
+
+        # Central arch gate, shared by every quant family that routes through
+        # this iterator. tile.is_valid() above is pure divisibility and knows
+        # nothing about the target; this is the one place that does. Disabled
+        # when ``config`` carries no "arch", so existing callers are unaffected.
+        if not arch_config_supported(
+            config.get("arch") or None,
+            dtype=variant_key,
+            warp_m=tile.warp_m, warp_n=tile.warp_n, warp_k=tile.warp_k,
+            warp_tile_m=tile.warp_tile_m,
+            warp_tile_n=tile.warp_tile_n,
+            warp_tile_k=tile.warp_tile_k,
+            pipeline=pipeline,
+            scheduler=config.get("scheduler"),
+        ):
+            logger.debug(
+                "Tile %s invalid for arch %s -- skipping", tile, config.get("arch")
+            )
             continue
 
         yield variant_key, layout, tile, extra
@@ -979,6 +1215,35 @@ ROWCOL_TENSOR_QUANT_DEFAULT_TILE = {
     "warp_m": 2, "warp_n": 2, "warp_k": 1,
     "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
 }
+
+# gfx1250 (RDNA-style WMMA, MI400) cannot use the tile above: it is sized
+# for the gfx9 MFMA 32x32x16 fragment, which does not exist on WMMA hardware, so the
+# kernel compiles but produces all-zero output. The 8-bit WMMA fragment is 16x16x128,
+# and the FlatMM 8-bit tile below is the shape validated against it.
+ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250 = {
+    "tile_m": 16, "tile_n": 64, "tile_k": 256,
+    "warp_m": 1, "warp_n": 4, "warp_k": 1,
+    "warp_tile_m": 16, "warp_tile_n": 16, "warp_tile_k": 128,
+}
+
+
+def rowcol_tensor_quant_default_tile(gfx_arch: str = "") -> dict:
+    """Return the default RowColQuant/TensorQuant tile for `gfx_arch`.
+
+    Kept here, next to the tile dicts themselves, so the rowcolquant and tensorquant
+    runtime helpers select the arch-specific tile through one shared code path rather
+    than each carrying its own copy of the gfx1250 shape.
+
+    The gfx1250 test is EXACT, not a ``gfx12`` family test. gfx1200/gfx1201 are
+    also WMMA parts, but their 8-bit warp fragment is 16x16x16, not the 16x16x64 /
+    16x16x128 of gfx1250, so handing them the gfx1250 tile would compile cleanly
+    and return garbage. Contrast the OCP-FP8 define in the rowcolquant/tensorquant
+    runtime helpers, which *is* correctly family-wide.
+    """
+    if normalize_gfx_arch(gfx_arch) == "gfx1250":
+        return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE_GFX1250)
+    return dict(ROWCOL_TENSOR_QUANT_DEFAULT_TILE)
+
 
 # Default traits, shared for the same reason as the tile above. pad_m is enabled
 # because these kernels are used with M values that are not tile-aligned.
