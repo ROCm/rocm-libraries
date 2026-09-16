@@ -56,16 +56,16 @@ constexpr Flash2Variant K_FLASH2_W8Q3K4{"w8q3k4", 512, 384}; // BK=64, D=64 larg
 /// with a 64-query tile. Used when no per-variant object is installed.
 constexpr Flash2Variant K_FLASH2_LEGACY{"", 64, 64};
 
-/// Whether split-K is actually executed. buildPlan() currently forces
-/// splitK = 1 because execute() has no merge-pass launch or workspace pointer,
-/// so selection must NOT credit a split that will not happen: doing so shifts
-/// the variant choice for shapes whose CTA count only clears the tiny-grid
-/// threshold once multiplied by the split factor. Measured over a 560-shape
-/// sweep, 90 D=128 shapes with ctas256 in [32, 96] change variant purely from
-/// that credit, and the only such shape we have measured runs 0.478x.
+/// Whether split-K is actually executed. execute() launches the split and
+/// merge passes when the plan carries splitK > 1, so selection may credit the
+/// split when judging whether a grid is starved: a shape with 64 CTAs really
+/// does run 256 of them at splitK = 4, and 256 CTAs want the 8-wave variant.
 ///
-/// Flip this to true in the same change that wires split-K through execute().
-constexpr bool K_FLASH2_SPLITK_EXECUTES = false;
+/// This must track execute() exactly. While it was false, crediting an
+/// unexecuted split shifted the variant for 90 D=128 shapes with ctas256 in
+/// [32, 96] onto a tiling chosen for a grid that never materialised.
+/// SplitKCreditMatchesExecutionReality guards the pairing.
+constexpr bool K_FLASH2_SPLITK_EXECUTES = true;
 
 /// Result of variant selection, including any split-K decision.
 struct Flash2Selection
