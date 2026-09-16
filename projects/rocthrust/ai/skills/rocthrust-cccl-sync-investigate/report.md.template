@@ -1,0 +1,154 @@
+# CCCL → rocThrust Sync Investigation: <CURRENT_TAG> → <TO_TAG>
+
+Step 0 pre-sync investigation. This report catalogs everything that changed in
+the targeted CCCL release(s) so a future rocThrust code sync can be planned
+and scoped. It is descriptive intelligence — it does **not** merge any code.
+
+> **No downstream pipeline yet.** Unlike the RCCL/NCCL sync, there is currently
+> no `rocthrust-cccl-sync` / `-resolve` / `-finalize` / `-tickets` skill to hand
+> this report off to. This is a known gap; treat §5 and Handoff below as
+> forward-compatible scaffolding for when those skills exist.
+
+## Summary
+
+- **JIRA ticket**: <JIRA_TICKET>
+- **Repo**: `ROCm/rocm-libraries` — rocThrust lives at `projects/rocthrust/`
+- **Base branch**: `<SYNC_BASE>` (default `origin/develop`)
+- **Targeted CCCL tag(s)**: `<PENDING_TAGS>` (one merge per tag, oldest-first —
+  once a sync driver exists; for now this is just scoping)
+- **Upstream commit range**: `<CURRENT_TAG>..<TO_TAG>` scoped to `thrust/thrust/`
+  — `<N_COMMITS>` commits, `<N_FILES>` files changed
+- **Maintenance-branch drift**: `<BRANCH_DRIFT_STATUS>` (from
+  `cccl-branch-drift-check.sh` — commits on CCCL's `branch/X.Y.x` for
+  `<TO_TAG>`'s minor line that landed after `<TO_TAG>` was cut and are NOT in
+  the range above; corroboration only, not authoritative)
+- **Path alignment note**: CCCL's Thrust source lives at `thrust/thrust/*.h`;
+  rocThrust's is `projects/rocthrust/thrust/*.h` (one extra nested `thrust/`
+  segment in upstream). Diffs must strip/adjust this prefix — see Phase B of
+  the skill.
+
+### Deriving the Current Version of rocThrust
+
+- **Current version signal A — required libcu++/libhipcxx version (corroboration/fallback)**:
+  `<LIBCXX_MAJOR>.<LIBCXX_MINOR>` (from `thrust/detail/config/libcxx.h`;
+  provenance commit [`<LIBCXX_H_COMMIT>`](https://github.com/ROCm/rocm-libraries/commit/<LIBCXX_H_COMMIT>) —
+  a rocm-libraries-local commit, not upstream CCCL)
+- **Current version signal B — CHANGELOG.md CCCL mention (corroboration)**: `<CHANGELOG_CCCL_MENTION>`
+- **Current version signal A/B agreement**: `<VERSION_SIGNAL_AGREEMENT>`
+- **Current version signal C — hot-file fingerprint check (corroboration)**: `<SIGNAL_C_STATUS>`
+  (floor tag from matched fingerprints, if any: `<SIGNAL_C_FLOOR_TAG>`; see
+  `version-fingerprints.tsv`)
+- **Current version signal D — THRUST_VERSION macro (primary)**: `<THRUST_VERSION_RAW>` decodes
+  to `<THRUST_VERSION_TAG>` (from `thrust/version.h`); status:
+  `<SIGNAL_D_STATUS>`. An exact, first-party, self-declared version — drives
+  the derived current-tag guess below whenever present.
+- **Derived current tag guess**: `<CURRENT_TAG>` — **UNVERIFIED, confirm with a
+  human.** When Current version signal D is present this is an exact decoded tag, not a
+  major.minor guess — but it is still not infallible on its own. None of the
+  four signals is authoritative the way `version.mk` is for RCCL — Signals A
+  and B agreeing is not sufficient on its own; check Signals C and D
+  explicitly for corroborating or contradicting evidence before trusting this
+  guess.
+
+> One-paragraph human summary of the headline changes and the expected
+> difficulty/risk of this sync.
+
+---
+
+## 1. New features
+
+Per upstream tag, what CCCL/Thrust added (from CCCL release notes + commit log
+scoped to `thrust/thrust/` + new files/APIs). For each feature, note the
+rocThrust relevance and how a user turns it on (CMake option / macro / API).
+Hyperlink the introducing PR when known:
+`[PR #<n>](https://github.com/NVIDIA/cccl/pull/<n>)`.
+
+### <TAG>
+- **<feature>** ([PR #<n>](https://github.com/NVIDIA/cccl/pull/<n>)) — <what
+  it is>. Controlled by `<CMake option / macro / API>`. rocThrust relevance:
+  <does AMD have an equivalent? likely-disabled? needs libhipcxx work?>.
+
+---
+
+## 2. New CMake options / feature macros
+
+Replaces "new env vars" from the RCCL/NCCL report — Thrust/CCCL surfaces new
+capabilities mostly via CMake `option()`s and `_CCCL_*` / `USE_LIB*CXX`-style
+preprocessor feature macros, not runtime env vars.
+
+| Option / macro | Default | Introduced in | Defined/read in | Notes / rocThrust disposition |
+|----------------|---------|----------------|------------------|--------------------------------|
+| `<CCCL_OPTION_OR_MACRO>` | <default> | <tag> | `<file>` | <new feature gate / needs libhipcxx / N/A on AMD> |
+
+---
+
+## 3. Test / benchmark coverage gaps
+
+Replaces "rccl-tests flags needed" — checks whether rocThrust's own ported
+`testing/` and `benchmark/` directories already exercise new upstream APIs.
+
+| Feature | How exercised upstream | rocThrust `testing/`/`benchmark/` coverage today | Action needed |
+|---------|--------------------------|----------------------------------------------------|----------------|
+| <feature> | `<upstream test/benchmark file>` | <yes/no — file> | <none / port test / file follow-up ticket> |
+
+---
+
+## 4. Potentially problematic commits
+
+Commits in `<CURRENT_TAG>..<TO_TAG>` (scoped to `thrust/thrust/`) that touch
+files listed in `sensitive-files.md` (AMD-heavily-customized areas), rename/
+move files, change public APIs/ABI, or add CUDA intrinsics / inline PTX. These
+are the conflict and build-break hot spots for a future sync. When a commit
+deletes a file rocThrust has an AMD-only equivalent for (or vice versa), state
+that explicitly rather than assuming either side is authoritative. Hyperlink
+each commit: `[<short-sha>](https://github.com/NVIDIA/cccl/commit/<full-sha>)`.
+
+| Commit | Subject | Why risky (touched rocThrust-sensitive area) | Notes |
+|--------|---------|-----------------------------------------------|-------|
+| [`<sha>`](https://github.com/NVIDIA/cccl/commit/<sha>) | <subject> | <e.g. modifies thrust/system/hip/ equivalent upstream path> | <details> |
+
+### File renames / moves (build-break risk)
+- `<old path>` → `<new path>` — check `projects/rocthrust/CMakeLists.txt` and
+  any generated file lists.
+
+### Public API / ABI changes
+- <e.g. new required libcu++/libhipcxx version bump; new thrust:: API surface>
+
+---
+
+## 5. JIRA work breakdown (forward-compatible — no `rocthrust-cccl-sync-tickets` skill yet)
+
+Decisions (not just descriptions) that a future ticket-filing skill would need.
+Captured now so this report is ready to consume once that skill exists.
+
+### Headline scope roll-up
+- <TAG>: <feature themes, one bullet each>
+
+### NVIDIA-only exclusions
+- <NV-only item, e.g. CUDA-graph-specific Thrust execution policies>
+
+### Per-feature disposition → line-item tasks
+| Feature (from §1) | Disposition | Proposed task summary (verb-prefixed) |
+|--------------------|--------------|------------------------------------------|
+| <feature> | port-validate / enable / track-N-A | `Validate / port …` \| `Enable / port …` \| `Track … — …` |
+
+### Upstream bug fixes needing test coverage
+- [`<sha>`](https://github.com/NVIDIA/cccl/commit/<sha>) <fix subject> — <what test exercises it>
+
+---
+
+## Handoff
+
+- **No `rocthrust-cccl-sync` driver skill exists yet** — this is a known gap.
+  For now, this report is the scoping artifact a human uses to plan a manual
+  sync attempt (see [PR #10464](https://github.com/ROCm/rocm-libraries/pull/10464)
+  for the last real attempt, later reverted).
+- Recommended sync order (once a driver exists): <PENDING_TAGS> (oldest-first).
+- Expected hot-spot files (pre-seed for a future resolver): see
+  `sensitive-files.md` (DRAFT).
+- Open questions for the human: <list>, including whether Current version signal A/B agreement
+  above is trustworthy enough to commit to `<CURRENT_TAG>` as the true
+  baseline. If **Maintenance-branch drift** above reported `DRIFT`, this must
+  include an explicit decision: bump `<TO_TAG>` to a later patch tag that
+  already covers the drifted commits, or accept them as a deliberate,
+  recorded exclusion from this sync's scope — don't leave it implicit.

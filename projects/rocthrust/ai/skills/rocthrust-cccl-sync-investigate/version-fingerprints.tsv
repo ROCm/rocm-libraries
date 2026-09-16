@@ -1,0 +1,17 @@
+# version-fingerprints.tsv — Signal C for cccl-version-delta.sh (DRAFT)
+#
+# Curated, growing list of "we know for a fact rocThrust already contains
+# this specific upstream fix" fingerprints. Each row maps a fixed-string
+# code pattern to the CCCL tag it was introduced in. cccl-version-delta.sh
+# greps rocThrust's local tree for each pattern (no network/remote needed)
+# and reports the highest tag whose fingerprint is already present — this
+# is Signal C, a local-only corroborating/contradicting check against
+# Signals A (libcxx.h) and B (CHANGELOG.md).
+#
+# Add a new row whenever a human (or this skill) discovers rocThrust's tree
+# already contains a fingerprinted upstream fix ahead of what Signals A/B
+# reported — this is exactly how the first row below was discovered.
+#
+# Format: tab-separated, comments start with '#', blank lines ignored.
+# TAG	ROCTHRUST_PATH	PATTERN	NOTE
+v2.8.1	projects/rocthrust/thrust/system/hip/detail/find.h	transform_input_iterator_t	nvc++-hang workaround for find_if_n (cccl PR #3899/#3901); discovered already present on rocThrust develop despite Signals A/B both reporting current=v2.8.0

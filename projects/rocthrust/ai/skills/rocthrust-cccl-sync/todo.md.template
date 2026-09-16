@@ -1,0 +1,53 @@
+# CCCL → rocThrust Sync: <CURRENT_TAG> → <TO_TAG> — TODO
+
+We are in the middle of a manual-port sync of upstream CCCL/Thrust commits
+into rocThrust. There is no git merge in progress and never will be — this
+sync is a series of hand-ported commits, landed as a single commit at the
+end by `rocthrust-cccl-sync-finalize`. This file tracks which upstream
+commits still need to be ported.
+
+## Sync parameters
+
+- **JIRA ticket**: <JIRA_TICKET> (if any — no fixed project exists for
+  rocThrust syncs)
+- **Repo**: `ROCm/rocm-libraries` — rocThrust lives at `projects/rocthrust/`
+- **Sync base branch** (`$SYNC_BASE`): <SYNC_BASE>
+- **Confirmed current tag** (`$CURRENT_TAG`): <CURRENT_TAG>
+- **Target tag** (`$TO_TAG`): <TO_TAG>
+- **Sync branch** (`$SYNC_BRANCH`, currently checked out): <SYNC_BRANCH>
+- **Investigation report**: <INVESTIGATION_REPORT_PATH_OR_NONE>
+- **Path-prefix reminder**: upstream commits touch `thrust/thrust/*`
+  (headers), `thrust/testing/*`, and/or `thrust/examples/*` — three siblings,
+  not one path with the other two nested inside it. Each translates to the
+  same-named local path under `projects/rocthrust/` (e.g. `thrust/testing/*`
+  → `projects/rocthrust/testing/*`). Translate every path before applying.
+
+## ⚠ Ordering rule
+
+Commits below are listed **strictly oldest-first**. Only the first unticked
+(`- [ ]`) item may be worked next. Do not skip ahead, reorder, or batch
+multiple commits together — a later commit may assume an earlier one is
+already applied (it may reference symbols the earlier commit introduces, or
+fix a bug the earlier commit itself introduced).
+
+## State of the sync
+
+- No `git merge` is in progress. There is no `MERGE_HEAD`, and no conflict
+  markers will ever appear as part of this process.
+- Ticked (`- [X]`) items below mean the commit's changes are **staged**
+  (`git add`), not committed. Everything lands in a single commit at the end
+  of `rocthrust-cccl-sync-finalize`.
+- Because this state can persist across sessions with nothing enforcing it
+  (unlike RCCL's open merge, which git itself blocks you from abandoning
+  silently), avoid `git reset --hard` on this branch, and consider a backup
+  branch if the sync spans many sessions.
+
+## Commits to port
+
+<!-- One line per upstream commit, oldest-first, never reordered:
+     - [ ] <sha> <subject> [SCOPE: HEADER,TEST,EXAMPLE] [⚠ touches <sensitive-files.md pattern>]
+     SCOPE is a comma-joined subset of HEADER/TEST/EXAMPLE from
+     rocthrust-commit-list.sh, naming which of thrust/thrust/,
+     thrust/testing/, thrust/examples/ the commit touches. A TEST-only or
+     EXAMPLE-only commit usually needs no CUDA/HIP source-level porting
+     judgment — see rocthrust-cccl-sync-resolve/SKILL.md. -->
