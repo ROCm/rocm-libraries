@@ -2077,8 +2077,35 @@ class KernelWriterAssembly(KernelWriter):
 
     self.vgprPool.checkFinalState()
 
+  ##############################################################################
+  # deferSgprOverflowForAllocation
+  ##############################################################################
+  def deferSgprOverflowForAllocation(self, kernel) -> None:
+    """Reopen an SGPR overflow verdict, so allocation gets to settle it.
+
+    Only under force apply. checkResources has to judge before allocation runs,
+    so an over-budget pool is really a proposal; resolveDeferredSgprOverflow
+    re-judges it against the count allocation emits.
+    """
+    if self.states.overflowedResources != 2:
+      return
+    if self.stinkyTofuRegisterAllocationMode(kernel) < 3:
+      return
+    self.states.sgprOverflowPendingRA = self.sgprPool.size()
+    self.states.overflowedResources = 0
+
+  ##############################################################################
+  # applyOverflowVerdict
+  ##############################################################################
+  def applyOverflowVerdict(self, kernel, mkb: KernelBody) -> None:
+    """Report the recorded overflow and stub the body out.  No-op when it fits.
+
+    The acting half of checkResources, hoisted to the caller so a deferral can
+    happen in between: reporting "too many sgprs" for a kernel that is about to
+    be handed to allocation would be a lie, and stubbing it would defeat the
+    point.
+    """
     if self.states.overflowedResources:
-      mkb.body.add(ValueEndif("overflowed resources"))
       if self.states.overflowedResources == 1:
         msg = "too many vgprs"
       elif self.states.overflowedResources == 2:
@@ -2105,8 +2132,25 @@ class KernelWriterAssembly(KernelWriter):
         printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", vgprs=%u, sgprs=%u" \
           % (self.states.kernelName, self.states.overflowedResources, msg, \
           self.vgprPool.size(), self.sgprPool.size()))
-      mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
-      mkb.body.add(ValueIf(value="0"), 1)
+      self.applyOverflowStub(mkb)
+
+  ##############################################################################
+  # applyOverflowStub
+  ##############################################################################
+  def applyOverflowStub(self, mkb: KernelBody) -> None:
+    """Replace the kernel body with `s_endpgm`, so a rejected kernel is harmless.
+
+    Called from applyOverflowVerdict, and from kernelBody when the resolver
+    rejects a deferred overflow -- `ForceGenerateKernel` builds a rejected
+    source anyway, and the real body names registers the chip does not have.
+
+    The `.if 0`/`.endif` pair is safe only because a stubbed body never meets a
+    StinkyTofu pass: one erasing the dead block holding the `.endif` is what once
+    left the assembler an unmatched `.if`.
+    """
+    mkb.body.add(ValueEndif("overflowed resources"))
+    mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
+    mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
   # updateOccupancyFromMaxVgpr
@@ -2149,6 +2193,41 @@ class KernelWriterAssembly(KernelWriter):
     kernel["CUOccupancy"] = self.getOccupancy(
       kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
       self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
+
+  ##############################################################################
+  # resolveDeferredSgprOverflow
+  ##############################################################################
+  def resolveDeferredSgprOverflow(self, kernel, mkb, declaredSgprs: int) -> int:
+    """Judge a deferred SGPR overflow now that allocation has run.
+
+    The verdict is on what allocation emitted, not the pool estimate
+    checkResources saw: under the cap the kernel is accepted and its occupancy
+    recomputed, over it code 2 is reinstated.  Returns 0 to accept, 2 to reject.
+
+    declaredSgprs:
+        The emitted .amdhsa_next_free_sgpr, lowered by emitAssembly() to what the
+        final code uses.  Non-positive means unreadable, which rejects.
+    """
+    pending = self.states.sgprOverflowPendingRA
+    self.states.sgprOverflowPendingRA = 0
+    if not pending:
+      return 0
+
+    cap = self.states.regCaps["MaxSgpr"]
+    if declaredSgprs <= 0 or declaredSgprs > cap:
+      if self.debugConfig.printSolutionRejectionReason:
+        printWarning("%s overflowed resources.  errorCode=2, msg=\"too many sgprs after "
+          "register allocation\", sgprs=%u, declared=%d, max=%u" \
+          % (self.states.kernelName, pending, declaredSgprs, cap))
+      self.states.overflowedResources = 2
+      return 2
+
+    mkb.setGprs(totalVgprs=self.vgprPool.size(), totalAgprs=self.agprPool.size(),
+                totalSgprs=declaredSgprs)
+    kernel["CUOccupancy"] = self.getOccupancy(
+      kernel["NumThreads"], self.vgprPool.size(), declaredSgprs,
+      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+    return 0
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer
