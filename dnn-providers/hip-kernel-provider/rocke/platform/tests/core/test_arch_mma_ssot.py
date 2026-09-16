@@ -161,6 +161,24 @@ class TestIndexedMmaOperands(unittest.TestCase):
         self.assertEqual(result.type.count, op.dst.frag_len)
         self.assertEqual(result.type.elem.name, "i32")
 
+    def test_scaled_wmma_catalog_preserves_scale_contracts(self):
+        catalog = ArchTarget.from_gfx("gfx1250").mma
+        for family, block_size in (("wmma_scale", 32), ("wmma_scale16", 16)):
+            with self.subTest(family=family):
+                op = catalog.by_op_id(f"{family}_f32_16x16x128_fp8_fp8")
+                self.assertIsNotNone(op)
+                self.assertEqual(op.family, family)
+                self.assertEqual(op.shape, (16, 16, 128))
+                for src in op.srcs[:2]:
+                    self.assertEqual(src.dtype, "fp8e4m3")
+                    self.assertEqual(src.frag_len, 16)
+                    self.assertEqual(src.scale, MmaScaleOperand("e8m0", block_size))
+                self.assertIsNone(op.srcs[2].scale)
+                self.assertEqual(op.srcs[2].frag_len, 8)
+                self.assertEqual(op.dst.frag_len, 8)
+                self.assertEqual(op.src_layout(2).role, "src2")
+                self.assertEqual(op.dst_layout().role, "dst")
+
     def test_scale_format_and_block_size_are_independent_per_source(self):
         # Synthetic rows exercise the descriptor without admitting new hardware
         # operations into the shipped catalog.

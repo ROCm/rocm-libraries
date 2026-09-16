@@ -49,6 +49,8 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_f32_16x16x96_fp6", "acc6"},
     {"mfma_f32_16x16x128_fp8", "acc128"},
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
+    {"wmma_scale_f32_16x16x128_fp8_fp8", "mxacc"},
+    {"wmma_scale16_f32_16x16x128_fp8_fp8", "mxacc"},
 };
 
 /* dst fragment length for op_id, from the arch SSOT
@@ -650,6 +652,32 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
     return rocke_b_mma(b, "mfma_scale_f32_16x16x128_f8f6f4", a, bb, c, extra, 2);
 }
 
+rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                        rocke_value_t* a,
+                                                        rocke_value_t* bb,
+                                                        rocke_value_t* c,
+                                                        rocke_value_t* a_scale,
+                                                        rocke_value_t* b_scale)
+{
+    rocke_value_t* extra[2];
+    extra[0] = a_scale;
+    extra[1] = b_scale;
+    return rocke_b_mma(b, "wmma_scale_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
+}
+
+rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                          rocke_value_t* a,
+                                                          rocke_value_t* bb,
+                                                          rocke_value_t* c,
+                                                          rocke_value_t* a_scale,
+                                                          rocke_value_t* b_scale)
+{
+    rocke_value_t* extra[2];
+    extra[0] = a_scale;
+    extra[1] = b_scale;
+    return rocke_b_mma(b, "wmma_scale16_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
+}
+
 /* ===================================================================== */
 /*  register-fragment reshape (P13)                                       */
 /* ===================================================================== */
@@ -757,6 +785,58 @@ rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
      * given result_types reproduces the emission for any N. */
     return rocke_b_inline_asm(
         b, asm_template, constraints, operands, num_operands, result_types, num_results, opts);
+}
+
+static void rocke_b_gfx1250_scalar_control(rocke_ir_builder_t* b, const char* mnemonic, int imm)
+{
+    rocke_inline_asm_opts_t opts;
+    rocke_op_t* op;
+    const char* text;
+    if(!rocke_i_live(b))
+        return;
+    if(imm < 0 || imm > 0xFFFF)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s imm must fit an unsigned i16 (0..65535), got %d",
+                        mnemonic,
+                        imm);
+        return;
+    }
+    text = rocke_arena_printf(&b->arena, "%s %d", mnemonic, imm);
+    if(!text)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "%s inline-asm text allocation failed", mnemonic);
+        return;
+    }
+    memset(&opts, 0, sizeof(opts));
+    opts.sideeffect = true;
+    opts.sideeffect_set = true;
+    op = rocke_b_inline_asm(b, text, "", NULL, 0, NULL, 0, &opts);
+    if(!op)
+        return;
+    rocke_attr_set_str(b, &op->attrs, "required_arch", "gfx1250");
+    rocke_attr_set_str(b, &op->attrs, "required_llvm_flavor", "llvm23");
+}
+
+void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_delay_alu", imm);
+}
+
+void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_alu", imm);
+}
+
+void rocke_b_s_clause(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_clause", imm);
+}
+
+void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm)
+{
+    rocke_b_gfx1250_scalar_control(b, "s_wait_xcnt", imm);
 }
 
 /* ---- tile.exec_* -- wavelet pipeline exec-mask split (MFMA path) ----

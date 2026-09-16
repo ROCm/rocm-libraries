@@ -1055,6 +1055,8 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
+    {"wmma_scale_f32_16x16x128_fp8_fp8", 8},
+    {"wmma_scale16_f32_16x16x128_fp8_fp8", 8},
 };
 
 int rocke_arch_mma_dst_frag_len(const char* op_id)
@@ -1582,6 +1584,26 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      16,
      64,
      "wmma_gfx1250_f32_16x16x64_bf8_bf8",
+     32},
+    {"wmma_scale",
+     {{"fp8e4m3", 16, NULL, "e8m0", 32},
+      {"fp8e4m3", 16, NULL, "e8m0", 32},
+      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
+     16,
+     16,
+     128,
+     "wmma_scale_f32_16x16x128_fp8_fp8",
+     32},
+    {"wmma_scale16",
+     {{"fp8e4m3", 16, NULL, "e8m0", 16},
+      {"fp8e4m3", 16, NULL, "e8m0", 16},
+      {"fp32", 8, &lm_wmma_gfx12_src2}},
+     {"fp32", 8, &lm_wmma_gfx12_dst},
+     16,
+     16,
+     128,
+     "wmma_scale16_f32_16x16x128_fp8_fp8",
      32},
 };
 

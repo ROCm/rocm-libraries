@@ -35,6 +35,7 @@ namespace ckc
 static void _op_tile_wmma_f32_16x16x16_f16(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* op);
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id);
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, bool scale16);
 static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op);
@@ -133,6 +134,14 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
          * reject (Python ISABackend.emit_wmma raises NotImplementedError). The
          * gfx12-specific op_ids ("wmma_gfx12_*") can only occur on RDNA4. */
     }
+    else if(strcmp(op_id, "wmma_scale_f32_16x16x128_fp8_fp8") == 0)
+    {
+        _emit_wmma_scale(L, op, false);
+    }
+    else if(strcmp(op_id, "wmma_scale16_f32_16x16x128_fp8_fp8") == 0)
+    {
+        _emit_wmma_scale(L, op, true);
+    }
     else if(strncmp(op_id, "wmma_", 5) == 0)
     {
         if(L->backend && L->backend->kind == ROCKE_LL_ISA_RDNA)
@@ -162,6 +171,84 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "tile.mma: unsupported op_id '%s'", op_id);
     }
+}
+
+/* gfx1250 native MX FP8 WMMA. ROCm 7.13 introduced the LLVM 23 ABI:
+ * matrix operands are <16 x i32>; SCALE carries four packed E8M0 bytes in
+ * each i32 scale operand and SCALE16 carries eight in i64. */
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, bool scale16)
+{
+    const char* intrinsic;
+    const char* decl_key;
+    const char* scale_ty;
+    const char* op_name;
+
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    op_name = scale16 ? "tile.wmma_scale16_f32_16x16x128_fp8_fp8"
+                      : "tile.wmma_scale_f32_16x16x128_fp8_fp8";
+    if(!L->backend || strcmp(L->backend->gfx, "gfx1250") != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "%s is only available on gfx1250 (got %s)",
+                      op_name,
+                      L->backend ? L->backend->gfx : "(unknown)");
+    }
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM23)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "%s requires llvm23 (ROCm 7.13+), got %s",
+                      op_name,
+                      rocke_llvm_flavor_name(L->flavor));
+    }
+    if(op->num_operands != 5)
+    {
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "%s expects 5 operands, got %d", op_name, op->num_operands);
+    }
+
+    scale_ty = scale16 ? "i64" : "i32";
+    if(strcmp(op->operands[3]->type->name, scale_ty) != 0
+       || strcmp(op->operands[4]->type->name, scale_ty) != 0)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s expects %s scale operands, got %s/%s",
+                      op_name,
+                      scale_ty,
+                      op->operands[3]->type->name,
+                      op->operands[4]->type->name);
+    }
+
+    if(scale16)
+    {
+        decl_key = "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8";
+        intrinsic = "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32";
+    }
+    else
+    {
+        decl_key = "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8";
+        intrinsic = "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32";
+    }
+    rocke_ll_need(L, decl_key);
+    rocke_ll_emitf(L,
+                   "  %s = call <8 x float> @%s("
+                   "i32 0, <16 x i32> %s, i32 0, <16 x i32> %s, "
+                   "i16 0, <8 x float> %s, i32 0, i32 0, %s %s, "
+                   "i32 0, i32 0, %s %s, i1 false, i1 false)",
+                   mma_result_name(L, op),
+                   intrinsic,
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]),
+                   rocke_ll_operand(L, op->operands[2]),
+                   scale_ty,
+                   rocke_ll_operand(L, op->operands[3]),
+                   scale_ty,
+                   rocke_ll_operand(L, op->operands[4]));
 }
 
 /* ====================================================================== */

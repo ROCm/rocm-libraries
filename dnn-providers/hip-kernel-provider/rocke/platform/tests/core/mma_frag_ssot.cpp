@@ -60,6 +60,33 @@ static void check_atom(rocke_ir_builder_t* b, const char* op_id, int expect_frag
     }
 }
 
+static void check_catalog_fragments(const rocke_mma_catalog_t* catalog,
+                                    const char* op_id,
+                                    int scale_block_size)
+{
+    const rocke_mma_op_t* op = rocke_mma_catalog_by_op_id(catalog, op_id);
+    CHECK(op != NULL, op_id);
+    if(!op)
+    {
+        return;
+    }
+    CHECK(op->srcs[0].frag_len == 16, op_id);
+    CHECK(op->srcs[1].frag_len == 16, op_id);
+    CHECK(op->srcs[2].frag_len == 8, op_id);
+    CHECK(op->dst.frag_len == 8, op_id);
+    for(int i = 0; i < 2; ++i)
+    {
+        CHECK(strcmp(op->srcs[i].dtype, "fp8e4m3") == 0, op_id);
+        CHECK(op->srcs[i].scale_dtype != NULL, op_id);
+        if(op->srcs[i].scale_dtype)
+        {
+            CHECK(strcmp(op->srcs[i].scale_dtype, "e8m0") == 0, op_id);
+        }
+        CHECK(op->srcs[i].scale_block_size == scale_block_size, op_id);
+    }
+    CHECK(op->srcs[2].scale_dtype == NULL && op->srcs[2].scale_block_size == 0, op_id);
+}
+
 int main(void)
 {
     const char* cpu_targets[] = {"gfx950", "gfx1250"};
@@ -149,6 +176,17 @@ int main(void)
     /* Integer WMMA: 8-wide i32 accumulator. */
     check_atom(&b, "wmma_i32_16x16x16_iu8", 8, true);
     check_atom(&b, "wmma_i32_16x16x16_iu4", 8, true);
+
+    /* Keep the C catalog in parity with Python _MMA_FRAGMENT_INFO. The scaled
+     * matrix operands are <16 x i32>, so fragment length is 16 elements, not
+     * the equivalent 64-byte storage width. */
+    const rocke_arch_target_t* gfx1250 = rocke_arch_target_from_gfx("gfx1250");
+    CHECK(gfx1250 != NULL, "gfx1250 target");
+    if(gfx1250)
+    {
+        check_catalog_fragments(&gfx1250->mma, "wmma_scale_f32_16x16x128_fp8_fp8", 32);
+        check_catalog_fragments(&gfx1250->mma, "wmma_scale16_f32_16x16x128_fp8_fp8", 16);
+    }
 
     /* Unknown op_id must be rejected. The engine's error path either returns
      * NULL with a sticky builder error or raises (ckc::ValueError) depending on
