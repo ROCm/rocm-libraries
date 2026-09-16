@@ -655,11 +655,15 @@ def draw_phase_legend(fig, nreg, *, base_accent=5):
 
 
 def render_conflict_dataflow(out_path, *, datum, shown_lanes, half, nreg, nbanks, fix_bank_fn, wtag,
-                             suptitle, subject_bank=0, cpa=None):
+                             suptitle, subject_bank=0, cpa=None, watermark=None):
     """Compose the two-row (conflicted | fixed) x 3-panel register->LDS conflict figure and save it.
     Pure drawing: the caller (`lds_conflict.render_conflict_3panel`) supplies VALIDATED, gated data.
     `shown_lanes` is the SAME representative thread set drawn in both rows (piled on top, fanned out
-    conflict-free on the bottom); `subject_bank` is the representative colliding bank. Returns out_path."""
+    conflict-free on the bottom); `subject_bank` is the representative colliding bank.
+
+    `watermark` stamps a diagonal banner across the whole figure -- set by the caller when the numbers
+    come from the MODEL and not from hardware counters, so a stray PNG can never be mistaken for a
+    measured one. Returns out_path."""
     plt = _plt()
     fig = plt.figure(figsize=(15, 8.6))
     gs = fig.add_gridspec(2, 3, width_ratios=[1.1, 1.3, 2.2], height_ratios=[1, 1],
@@ -678,6 +682,9 @@ def render_conflict_dataflow(out_path, *, datum, shown_lanes, half, nreg, nbanks
                            fixed=True, fix_bank_fn=fix_bank_fn, subject_bank=subject_bank, cpa=0.0)
     fig.suptitle(suptitle, fontsize=9.5, y=0.99)
     draw_phase_legend(fig, nreg)
+    if watermark:
+        fig.text(0.5, 0.5, watermark, fontsize=54, fontweight="bold", color="0.45", alpha=0.20,
+                 ha="center", va="center", rotation=28, zorder=1000)
     return _save_fig(fig, out_path, 150, tight=True)
 
 

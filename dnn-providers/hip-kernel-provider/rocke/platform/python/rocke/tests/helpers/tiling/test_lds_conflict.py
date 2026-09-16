@@ -6,6 +6,8 @@ The gates previously tripped on a case the validation corpus never covered -- a 
 tile_free=128, b128 at tile_free=128). The MODEL was correct at depth 16; the gates were coded/tuned
 against depth 8. These tests pin the depth-16 regime so selftest + pytest guard it going forward.
 """
+import pathlib
+
 import pytest
 
 from rocke.helpers.tiling import lds_conflict as lc
@@ -100,7 +102,7 @@ def test_analyze_store_runs_both_gates_end_to_end_at_depth16(tmp_path):
     depth-aware GATE 2. Previously this raised `A fix pad16 not conflict-free by the validated rule`."""
     descs = _a_descs()
     rep = lc.analyze_store(
-        descs, tile_free=TILE_FREE, wtag=WTAG, arch=lc.GFX90A,
+        descs, mode="investigate", tile_free=TILE_FREE, wtag=WTAG, arch=lc.GFX90A,
         kernel_label="CRC", operand_label="A", dims_label="M", tile_k=32, n_waves=16,
         macro_label="macro 256x256, waves 4x4, tile_k=32", strides=(TILE_FREE, 1),
         dtype_name="f16", origin=(0, 0), lds_swizzle=False,
@@ -113,3 +115,73 @@ def test_analyze_store_runs_both_gates_end_to_end_at_depth16(tmp_path):
     assert rep.located["nway"] == DEPTH16 and rep.located["bank"] == 0
     import pathlib
     assert pathlib.Path(rep.png).exists() and pathlib.Path(rep.png).stat().st_size > 0
+
+
+def test_simulate_mode_needs_no_hardware_and_labels_itself(tmp_path):
+    """SIMULATE mode on the same geometry: no `measure`, no GPU. It still runs both model gates and
+    produces the same conflicts/access -- but the verdict says SIMULATED, so the number can never be
+    read as a hardware result."""
+    rep = lc.analyze_store(
+        _a_descs(), mode="simulate", tile_free=TILE_FREE, wtag=WTAG, arch=lc.GFX90A,
+        kernel_label="CRC", operand_label="A", dims_label="M", tile_k=32, n_waves=16,
+        macro_label="macro 256x256, waves 4x4, tile_k=32", strides=(TILE_FREE, 1),
+        dtype_name="f16", origin=(0, 0), lds_swizzle=False,
+        render_to=str(tmp_path / "sim_A_store.png"))
+    assert rep.measured is None and rep.gate_passed is False and rep.model_validated
+    assert rep.verdict.startswith("SIMULATED")
+    assert rep.conflicts_per_access == pytest.approx(3.0, abs=1e-9)
+    assert rep.fix_pad == 16
+    rows = rep.facts_table()
+    assert "simulated" in rows["hard_facts_row"], "a simulated row must never look like counters"
+
+
+def test_simulate_mode_full_stops_on_an_arch_with_no_validated_model():
+    """The headline rule: an arch we have not validated is a STOP, never an extrapolation from
+    gfx90a's constants."""
+    with pytest.raises(ValueError, match="no validated LDS model"):
+        lc.analyze_store(
+            _a_descs(), mode="simulate", tile_free=TILE_FREE, wtag=WTAG, arch="gfx942",
+            kernel_label="CRC", operand_label="A", dims_label="M", tile_k=32, n_waves=16,
+            macro_label="macro 256x256, waves 4x4, tile_k=32", strides=(TILE_FREE, 1),
+            dtype_name="f16", origin=(0, 0), lds_swizzle=False)
+
+
+def test_the_two_modes_do_not_blur_into_each_other():
+    """investigate without hardware, or simulate WITH it, are both caller confusion -- refuse rather
+    than silently downgrade/upgrade the provenance of the answer."""
+    common = dict(mode="investigate", tile_free=TILE_FREE, wtag=WTAG, arch=lc.GFX90A,
+                  kernel_label="CRC", operand_label="A", dims_label="M", tile_k=32, n_waves=16,
+                  macro_label="macro 256x256, waves 4x4, tile_k=32", strides=(TILE_FREE, 1),
+                  dtype_name="f16", origin=(0, 0), lds_swizzle=False)
+    with pytest.raises(lc.ConflictModelError, match="investigate mode requires"):
+        lc.analyze_store(_a_descs(), **common)
+    with pytest.raises(ValueError, match="simulate mode takes no"):
+        lc.analyze_store(_a_descs(), **{**common, "mode": "simulate", "measure": _hw_stub})
+
+
+def test_render_refuses_a_measured_figure_without_a_measurement(tmp_path):
+    """The provenance fork is enforced, not advisory: asking for a MEASURED figure with no measured
+    number must refuse rather than quietly draw the simulator's value under a 'MEASURED' title."""
+    store = _transpose_desc(_macro_coop_descs_crc(128, 16, 8))
+    with pytest.raises(lc.ConflictModelError, match="refusing to render"):
+        lc.render_conflict_3panel(str(tmp_path / "nope.png"), store_desc=store, tile_free=128,
+                                  wtag="b64", subject_pad=0, measured_cpa=None,
+                                  fix_pad=16, fix_label="pad+16 -> 0", provenance="measured",
+                                  arch=lc.GFX90A, kernel_label="CRC", operand_label="A",
+                                  dims_label="M", macro_label="macro 128x256, waves 2x4, tile_k=16",
+                                  strides=(128, 1), dtype_name="f16", origin=(0, 0),
+                                  lds_swizzle=False)
+
+
+def test_render_simulated_is_watermarked_and_needs_no_hardware(tmp_path):
+    """SIMULATE mode: no measured number at all, gated only on selftest(arch), and the figure carries
+    the SIMULATED watermark so a stray PNG can never be read as a hardware result."""
+    store = _transpose_desc(_macro_coop_descs_crc(128, 16, 8))
+    p = lc.render_conflict_3panel(str(tmp_path / "conf_sim.png"), store_desc=store, tile_free=128,
+                                  wtag="b64", subject_pad=0, fix_pad=16, fix_label="pad+16 -> 0",
+                                  provenance="simulated", arch=lc.GFX90A, kernel_label="CRC",
+                                  operand_label="A", dims_label="M",
+                                  macro_label="macro 128x256, waves 2x4, tile_k=16",
+                                  strides=(128, 1), dtype_name="f16", origin=(0, 0),
+                                  lds_swizzle=False)
+    assert pathlib.Path(p).stat().st_size > 0

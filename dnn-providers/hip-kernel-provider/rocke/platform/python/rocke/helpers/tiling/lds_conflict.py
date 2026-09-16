@@ -15,9 +15,17 @@ each time -- this module stores the METHOD, never a kernel's answer. The `_MECHA
 are the model's VALIDATION CORPUS (the reference measurements that PROVE the write-port mechanism
 reproduces hardware to the integer); they are not a substitute for measuring a new case.
 
-THE CARDINAL RULE (unchanged): never state a conflict number until (1) you have rocprof hardware
-counters for it AND (2) this simulator predicts those exact counters from the address map. If the
-sim does not reproduce the measurement, the MODEL is wrong -- fix it, do not "meet in the middle".
+THE CARDINAL RULE: never state a conflict number that is not backed by a model VALIDATED on that
+arch, and never state one without its PROVENANCE. Two ways to earn a number, and they are not equal:
+  investigate (VALIDATED) -- rocprof hardware counters for THIS case AND this simulator predicting
+      those exact counters from the address map. Requires the host GPU to BE that arch. If the sim
+      does not reproduce the measurement, the MODEL is wrong -- fix it, do not "meet in the middle".
+  simulate   (SIMULATED)  -- no per-case hardware; the gate is `selftest(arch)`, i.e. the arch's
+      model reproduces the arch's OWN measured corpus. Cheap, no GPU, and honest ONLY if every number
+      and every figure is labelled SIMULATED. An arch with no validated model is a FULL STOP, not a
+      guess: `arch_lds` raises and `selftest` refuses to validate one arch with another's corpus.
+Never let a SIMULATED number be read as a measured one -- that is what the watermark and the third
+verdict state exist to prevent.
 
 NO DANGEROUS DEFAULTS (a hard rule for anyone editing this module)
 -----------------------------------------------------------------
@@ -73,18 +81,19 @@ PUBLIC API & CONTRACTS
 Preferred entry point is `analyze_store`; the rest are the layers it composes (usable directly for
 custom access patterns). Every function that could emit a mislabeled artifact GATES internally.
 
-  analyze_store(descs, *, tile_free, wtag, arch, kernel_label, operand_label, dims_label,
+  analyze_store(descs, *, mode, tile_free, wtag, arch, kernel_label, operand_label, dims_label,
                 macro_label, strides, dtype_name, origin, lds_swizzle, measure=None, ...)
-      -> ConflictReport. Chains: store_datum -> simulate -> (measure on GPU + HARD gate sim==HW) ->
-      recommend_pad -> (optional verify_fix on GPU) -> render. CONTRACT: with `measure` it returns a
-      VALIDATED report; without it the report is UNVALIDATED and `render_to` is REFUSED (cardinal
-      rule). RAISES ConflictModelError if the probe is not bit-exact or sim != HW; RAISES ValueError
-      for an arch with no registered model.
+      -> ConflictReport. Chains: selftest(arch) -> store_datum -> simulate -> (investigate: measure on
+      GPU + HARD gate sim==HW) -> recommend_pad -> (optional verify_fix on GPU) -> render.
+      CONTRACT: mode='investigate' REQUIRES `measure` and yields a VALIDATED report; mode='simulate'
+      forbids it and yields a SIMULATED report with a watermarked figure. Either way `selftest(arch)`
+      must PASS. RAISES ConflictModelError if the probe is not bit-exact, sim != HW, or the model
+      fails its own corpus; RAISES ValueError for an arch with no registered model.
   measure callable (INJECTED by the caller): `measure(pad:int, mode='store') -> dict` with keys
       BC, IDX, conflicts_per_access (+ optional ADDR, max_abs_diff). Encapsulates the container
       rocprof run; keeps this module container-agnostic. It is the ONLY host-specific glue.
-  ConflictReport: dataclass. `.verdict`, `.conflicts_per_access`, `.fix_pad`, `.located`, `.png`,
-      `.facts_table()` -> the skill's markdown rows.
+  ConflictReport: dataclass. `.verdict` (VALIDATED | SIMULATED | MODEL MISMATCH | UNVALIDATED),
+      `.conflicts_per_access`, `.fix_pad`, `.located`, `.png`, `.facts_table()` -> the skill's rows.
 
   selftest(arch) -> bool           GATE: model reproduces THAT arch's measured corpus; refuses an
                                    arch with no corpus. Run before trusting any number.
@@ -720,8 +729,8 @@ def collision_lanes(datum, arch, bank, phase):
 
 def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fix_label, arch,
                            kernel_label, operand_label, dims_label, macro_label, strides, dtype_name,
-                           subject_pad, origin, lds_swizzle, measured_cpa, measured_bc=None,
-                           max_banks=1, max_lanes=16, full=False):
+                           subject_pad, origin, lds_swizzle, provenance, measured_cpa=None,
+                           measured_bc=None, max_banks=1, max_lanes=16, full=False):
     """Render a two-row, 3-panel register->LDS dataflow figure for one operand's store conflict.
 
     ROW 1 (CONFLICTED, at `subject_pad`): (1) register file tid x reg, the shown threads highlighted;
@@ -741,9 +750,23 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fi
     DRAWING is delegated to `layout_render.render_conflict_dataflow` -- this module never touches
     matplotlib, so the figure is machine/model-independent. Returns out_path.
 
+    `provenance` picks WHICH gate the figure's number must pass, and labels it accordingly:
+      'measured'  (investigate mode) -- `measured_cpa` is REQUIRED and the sim must reproduce it.
+      'simulated' (simulate mode)    -- no per-case hardware exists, so the gate is instead that
+                                       `selftest(arch)` PASSES (the arch's model reproduces its own
+                                       measured corpus). The figure is WATERMARKED 'SIMULATED' and
+                                       its title names the provenance. Gating the sim against its own
+                                       output would be a tautology, so it is skipped -- the arch
+                                       selftest is the real gate.
     """
     from rocke.helpers.tiling.visualization.layout_render import render_conflict_dataflow
 
+    if provenance not in ("measured", "simulated"):
+        raise ValueError(f"provenance must be 'measured' or 'simulated', got {provenance!r}")
+    if provenance == "measured" and measured_cpa is None:
+        raise ConflictModelError(
+            "refusing to render a 'measured' figure with no measured conflicts/access -- pass "
+            "measured_cpa, or render with provenance='simulated' to get a watermarked model figure.")
     a = arch_lds(arch)
     dtype_bytes = dtype_bytes_of(dtype_name)
     per_dword = 4 // dtype_bytes
@@ -751,13 +774,23 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fi
     acc, vw, datum = store_datum(store_desc, tile_free, a, strides, dtype_name, origin=origin,
                                  lds_swizzle=lds_swizzle)
 
-    # --- GATE 1: reproduce the SUBJECT collision via the validated write-port sim. The gate is on
-    # conflicts/access (scale-invariant: per-served-group sim vs whatever scale the caller measured);
-    # `measured_bc`, when given, is an OPTIONAL per-served-group BC cross-check (do NOT pass a whole-run
-    # counter here -- it is a different scale). ---
+    # --- GATE 1: the figure's number must survive the gate its PROVENANCE demands. ---
+    # measured : the validated write-port sim must reproduce the MEASURED conflicts/access. The gate is
+    #            on conflicts/access (scale-invariant: per-served-group sim vs whatever scale the caller
+    #            measured); `measured_bc`, when given, is an OPTIONAL per-served-group BC cross-check (do
+    #            NOT pass a whole-run counter here -- it is a different scale).
+    # simulated: there is no per-case hardware, so checking the sim against its own output would be a
+    #            tautology. The real gate is that THIS ARCH's model reproduces THIS ARCH's measured
+    #            corpus -- `selftest`. The figure is then watermarked so it can never read as measured.
     r = simulate(acc, arch=a, dtype_bytes=dtype_bytes)
-    gate({"conflicts_per_access": r["BC"] / (r["IDX"] - r["BC"]) if (r["IDX"] - r["BC"]) else 0.0},
-         {"conflicts_per_access": measured_cpa}, label=f"{operand_label} render subject")
+    cpa0 = r["BC"] / (r["IDX"] - r["BC"]) if (r["IDX"] - r["BC"]) else 0.0
+    if provenance == "measured":
+        gate({"conflicts_per_access": cpa0}, {"conflicts_per_access": measured_cpa},
+             label=f"{operand_label} render subject")
+    elif not selftest(a, verbose=False):
+        raise ConflictModelError(
+            f"refusing to render a simulated figure: the {a.name} LDS model does NOT reproduce its "
+            f"own measured corpus (selftest FAILED). Fix the model before drawing anything from it.")
     if measured_bc is not None:
         assert r["BC"] == measured_bc, (
             f"{operand_label} sim per-group BC {r['BC']} != supplied {measured_bc} (per-group scale?)")
@@ -805,9 +838,18 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fi
 
     nway = len(occ[subject_bank])
     subj = f"pad{subject_pad}" if subject_pad else "pad0"
-    prov_line = (f"MEASURED (rocprof, real {a.name}) conflicts/access = {measured_cpa:.2f}  "
-                 f"(sim reproduces to the integer: BC={r['BC']}, IDX={r['IDX']}, "
-                 f"productive={r['productive']})")
+    # The provenance line is the figure's own claim about where its number came from. It is built from
+    # the SAME branch that gated it above, so a watermarked figure can never carry a "MEASURED" line.
+    if provenance == "measured":
+        cpa, watermark = measured_cpa, None
+        prov_line = (f"MEASURED (rocprof, real {a.name}) conflicts/access = {measured_cpa:.2f}  "
+                     f"(sim reproduces to the integer: BC={r['BC']}, IDX={r['IDX']}, "
+                     f"productive={r['productive']})")
+    else:
+        cpa, watermark = cpa0, "SIMULATED"
+        prov_line = (f"SIMULATED ({a.name} model, selftest PASS -- NO per-case hardware) "
+                     f"conflicts/access = {cpa0:.2f}  (BC={r['BC']}, IDX={r['IDX']}, "
+                     f"productive={r['productive']})")
     suptitle = (
         f"{kernel_label} {operand_label}-store LDS bank conflict  ({wtag}, {macro_label}, "
         f"{a.name} NB={a.NB})\nK-alias: LDS row stride = {per_dword * (tile_free + subject_pad)} "
@@ -819,7 +861,7 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fi
     return render_conflict_dataflow(out_path, datum=datum, shown_lanes=shown_lanes, half=a.HALF,
                                     nreg=vw // per_dword, nbanks=a.NB, fix_bank_fn=fix_bank,
                                     wtag=wtag, suptitle=suptitle, subject_bank=subject_bank,
-                                    cpa=measured_cpa)
+                                    cpa=cpa, watermark=watermark)
 
 
 # ==================================================================================================
@@ -838,6 +880,7 @@ class ConflictReport:
     sim: dict                      # {IDX, BC, productive, conflicts_per_access}
     measured: dict | None          # parse_counter_csv output, or None if HW not yet gathered
     gate_passed: bool              # sim reproduced HW to the number (False if no HW yet)
+    model_validated: bool          # selftest(arch) PASSED: the arch's model reproduces its corpus
     conflicts_per_access: float    # authoritative value (HW when present, else sim)
     fix_pad: int | None            # smallest conflict-free pad (elems), closed-form
     fix_verified_hw: bool          # True only if the fix pad was ALSO measured conflict-free on GPU
@@ -847,13 +890,32 @@ class ConflictReport:
 
     @property
     def verdict(self):
-        if self.measured is None:
-            return "UNVALIDATED (no hardware counters yet -- do NOT ship this number)"
-        return "VALIDATED (sim == hardware)" if self.gate_passed else "MODEL MISMATCH"
+        """THREE states, never two. The middle one is the whole point of simulate mode: a number the
+        arch's VALIDATED model produced is not hardware truth, but it is not a guess either -- and it
+        must never be conflated with the bottom state, where no validated model exists at all."""
+        if self.measured is not None:
+            return "VALIDATED (sim == hardware)" if self.gate_passed else "MODEL MISMATCH"
+        if self.model_validated:
+            return (f"SIMULATED ({self.arch} model validated by selftest; "
+                    f"no per-case hardware -- label every number as simulated)")
+        return (f"UNVALIDATED (no validated LDS model for {self.arch} -- do NOT ship this number)")
 
     def facts_table(self):
-        """Markdown rows for the skill's 'Hard facts' + 'Model validation' tables."""
-        m = self.measured or {}
+        """Markdown rows for the skill's facts + model-validation tables. In SIMULATE mode there are
+        no counters to report, so the facts row carries the SIMULATOR's prediction, explicitly marked,
+        and the validation row reports the arch selftest instead of a per-case sim-vs-HW comparison.
+        Never emit a measured-looking '?' where a counter would be."""
+        if self.measured is None:
+            state = "selftest PASS" if self.model_validated else "NO VALIDATED MODEL"
+            return {
+                "hard_facts_row": (f"| {self.operand_label} store pad0 | n/a (simulated) | "
+                                   f"n/a (simulated) | {self.sim['conflicts_per_access']:.4f} | "
+                                   f"n/a (simulated) |"),
+                "model_validation_row": (f"| {self.operand_label} store pad0 | "
+                                         f"{self.sim['conflicts_per_access']:.4f} | "
+                                         f"n/a (no hardware) | {state} |"),
+            }
+        m = self.measured
         hard = (f"| {self.operand_label} store pad0 | {m.get('BC', '?')} | {m.get('IDX', '?')} | "
                 f"{self.conflicts_per_access:.4f} | {m.get('ADDR', '?')} |")
         val = (f"| {self.operand_label} store pad0 | {self.sim['conflicts_per_access']:.4f} | "
@@ -876,7 +938,7 @@ def _locate_collision(datum, arch, phase=0):
             "cells": [f"T{l}R0" for l in cells]}
 
 
-def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch, kernel_label, operand_label,
+def analyze_store(descs: ProbeDescs, *, mode, tile_free, wtag, arch, kernel_label, operand_label,
                   dims_label, macro_label, strides, dtype_name, origin, lds_swizzle, measure=None,
                   verify_fix=False, render_to=None, **probe_kwargs) -> ConflictReport:
     """One call that runs the whole store analysis and returns a gated ConflictReport:
@@ -885,21 +947,43 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch, kernel_label, ope
       recommend the conflict-free pad (closed form) -> [optionally verify the fix on GPU] ->
       render the 3-panel figure.
 
+    `mode` is stated by the caller, never inferred:
+      'investigate' -- REQUIRES `measure`, and `arch` must be the host GPU's arch (`run_probe`
+                       enforces that). Produces a VALIDATED report: sim gated against real counters.
+      'simulate'    -- no GPU. Gated on `selftest(arch)`: the arch must have a validated model, else
+                       this RAISES. Produces a SIMULATED report; every number is labelled as such and
+                       the figure is watermarked. `measure` must NOT be passed.
+
     NO DEFAULTS on the analysis config (arch, labels, strides, dtype, origin, swizzle): each is
     load-bearing -- it either changes the bank map or is PRINTED ON THE FIGURE AS FACT. A default here
     silently analyzes a kernel other than yours and stamps your kernel's name on the result.
 
     `measure` is an INJECTED callable `measure(pad:int, mode:str='store') -> dict` (with BC / IDX /
     conflicts_per_access, optionally ADDR / max_abs_diff). It encapsulates the container rocprof run
-    so THIS module stays container-agnostic; the /bank-conflict skill supplies it. If `measure` is
-    None the report is returned UNVALIDATED (sim only) and rendering is refused -- a number without
-    hardware must never be presented (the cardinal rule).
+    so THIS module stays container-agnostic; the /bank-conflict skill supplies it.
 
     `probe_kwargs` (tile_k, n_waves, warp_free, ...) are forwarded to the measure callable's probe.
     """
+    if mode not in ("investigate", "simulate"):
+        raise ValueError(f"mode must be 'investigate' or 'simulate', got {mode!r}")
+    if mode == "investigate" and measure is None:
+        raise ConflictModelError(
+            "investigate mode requires a `measure` callable (the hardware is the arbiter). To analyze "
+            "without a GPU, pass mode='simulate' -- the result is then labelled SIMULATED.")
+    if mode == "simulate" and measure is not None:
+        raise ValueError("simulate mode takes no `measure` callable; use mode='investigate'.")
+
     a = arch_lds(arch)   # RAISES if this arch has no registered LDS model -- the full stop
     dtype_bytes = dtype_bytes_of(dtype_name)
     per_dword = 4 // dtype_bytes
+
+    # 0) the arch's model must reproduce the arch's OWN measured corpus before it predicts anything.
+    #    This is the ONLY gate simulate mode has, so it is not optional in either mode.
+    model_validated = selftest(a, verbose=False)
+    if not model_validated:
+        raise ConflictModelError(
+            f"the {a.name} LDS model does NOT reproduce its own measured corpus (selftest FAILED). "
+            f"Fix the model before trusting any number it produces.")
 
     # 1) bit-exact address map + simulated prediction (shared builder -> renderer sees the same datum)
     acc, vw, datum = store_datum(descs.coop_store, tile_free, a, strides, dtype_name, origin=origin,
@@ -907,7 +991,7 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch, kernel_label, ope
     sim = simulate(acc, arch=a, dtype_bytes=dtype_bytes)
     located = _locate_collision(datum, a)
 
-    # 2) measure on the GPU + HARD gate (skipped only if no measure callable was supplied)
+    # 2) measure on the GPU + HARD gate (investigate mode only)
     measured = None
     gate_passed = False
     bit_exact = None
@@ -952,13 +1036,11 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch, kernel_label, ope
                 f"hardware disagree; fix the model.")
         fix_verified_hw = True
 
-    # 4) render (only with HW-gated numbers -- never present a figure over an ungated number)
+    # 4) render. The figure states its own provenance and is watermarked when it is model-only, so a
+    #    stray PNG can never be mistaken for a measured one. A subject pad of 0 is the analysis strides
+    #    themselves -- derived, not assumed.
     png = None
     if render_to is not None:
-        if measured is None:
-            raise ConflictModelError(
-                f"refusing to render {operand_label}: no hardware counters. Supply `measure` so the "
-                f"figure carries a GPU-gated number, not a simulated one.")
         fix_label = (f"pad +{fix_pad} {dtype_name} -> 0-way / BC=0 (closed-form; "
                      f"{'HW-verified' if fix_verified_hw else 'stripe-rule validated'})")
         # NOTE: pass only the scale-invariant measured conflicts/access -- NOT measured["BC"], which is a
@@ -966,14 +1048,17 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch, kernel_label, ope
         # reconciles on conflicts/access; the figure annotates the sim's own per-group BC/IDX.
         png = render_conflict_3panel(
             render_to, store_desc=descs.coop_store, tile_free=tile_free, wtag=wtag,
-            measured_cpa=measured["conflicts_per_access"], fix_pad=fix_pad, fix_label=fix_label, arch=a, kernel_label=kernel_label,
+            provenance=("measured" if measured is not None else "simulated"),
+            measured_cpa=(measured["conflicts_per_access"] if measured is not None else None),
+            fix_pad=fix_pad, fix_label=fix_label, arch=a, kernel_label=kernel_label,
             operand_label=operand_label, dims_label=dims_label, macro_label=macro_label,
             strides=strides, dtype_name=dtype_name, subject_pad=0, origin=origin,
             lds_swizzle=lds_swizzle)
 
     return ConflictReport(
         operand_label=operand_label, arch=a.name, wtag=wtag, tile_free=tile_free, vw=vw, sim=sim,
-        measured=measured, gate_passed=gate_passed, conflicts_per_access=cpa, fix_pad=fix_pad, fix_verified_hw=fix_verified_hw, located=located,
+        measured=measured, gate_passed=gate_passed, model_validated=model_validated,
+        conflicts_per_access=cpa, fix_pad=fix_pad, fix_verified_hw=fix_verified_hw, located=located,
         bit_exact=bit_exact, png=png)
 
 

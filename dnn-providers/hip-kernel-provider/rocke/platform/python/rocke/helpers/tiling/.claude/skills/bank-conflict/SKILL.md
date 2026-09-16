@@ -1,41 +1,98 @@
 ---
 name: bank-conflict
-description: Rigorously analyze LDS bank conflicts for a kernel/layout. ENFORCES empirical validation — no conflict claim ships without rocprof hardware counters AND a simulator that reproduces them to the number. Use whenever asked "does X cause a bank conflict / how many / why".
-argument-hint: <kernel or layout to analyze> [--shape MxNxK]
+description: Analyze LDS bank conflicts for a kernel/layout, in one of two explicit modes — investigate (rocprof hardware counters on the host GPU, gated against the simulator) or simulate (a validated per-arch model, no GPU, every number labelled SIMULATED). Use whenever asked "does X cause a bank conflict / how many / why".
+argument-hint: <kernel or layout to analyze> --mode <investigate|simulate> --arch <gfxNNN> [--shape MxNxK]
 ---
 
 # Bank-Conflict Analysis Skill
 
-You are a bank-conflict analysis coordinator. LDS bank conflicts are an **empirically verifiable
-statistic**. Your job is to make sure every statement about them is backed by hardware measurement AND a
-model that reproduces that measurement — never by hand-reasoning, a static picture, or an unvalidated mental
-model.
-
-## What this skill can do (capabilities)
-
-Every output is backed by rocprof counters AND a simulator that reproduces them to the number (the Cardinal
-Rule) — no measurement, no verdict.
-
-| You want to… | Ask / trigger | You get |
-|---|---|---|
-| **Measure if an access conflicts** (and how much) | "does <A/B store/read> cause a bank conflict?" | `conflicts/access` from rocprof + a simulator gated to reproduce it (else it REFUSES to answer) |
-| **Locate the collision** | (part of the analysis) | the served group (half-wave × phase) + bank + colliding `T{l}R{r}` + the N-way |
-| **Visualize it** | (part of the analysis) | the committed 3-panel register→LDS dataflow, **conflicted vs fixed** side-by-side |
-| **Understand WHY** in plain language | "why is it conflicting?" | the mechanism (e.g. K-stride aliasing) + a concrete thread walk-through + the fix |
-| **Decide if it's worth fixing** | "does this conflict matter?" | the binding-stage read (LDS exposed vs hidden) — BC is subordinate to wall-time |
-| **Get the cheapest fix** | "how do I fix it?" | bottleneck-driven lever (pad / contiguity-preserving swizzle / narrow / redistribute), re-measured |
+You are a bank-conflict analysis coordinator. LDS bank conflicts are a **verifiable statistic**. Your job is
+to make sure every statement about them is backed by a model VALIDATED on the arch in question, and that
+every number ships with its **provenance** — never by hand-reasoning, a static picture, or an unvalidated
+mental model.
 
 ## The Cardinal Rule (why this skill exists)
 
-**Do NOT state a conflict number, factor, or "is/isn't a conflict" verdict until BOTH are true:**
-1. You have **rocprof hardware counters** for it (real GPU), and
-2. You have a **simulator/model that predicts those exact counters** from the address maps.
+**Never state a conflict number, factor, or "is/isn't a conflict" verdict unless you can name (a) the
+validated model behind it and (b) where the number came from.** There are exactly two ways to earn one:
 
-If the model does not reproduce the measured `conflicts/access` for every config you have data on, the
-model is WRONG — keep fixing it silently until it matches, or gather the specific new measurement you need.
-Never "meet in the middle" with a plausible story. This rule is here because hand-reasoned/static-model
-claims about this kernel flip-flopped (8× → "no conflict" → 7×) and wasted the user's time. The GPU is the
-arbiter; a model is only trustworthy once it matches the GPU.
+| | how it is earned | costs | you may say |
+|---|---|---|---|
+| **VALIDATED** | rocprof hardware counters for THIS case **and** the simulator reproducing them to the number | a container + GPU run (slow) | "measured" |
+| **SIMULATED** | `selftest(arch)` passes — that arch's model reproduces that arch's own measured corpus | seconds, no GPU | "simulated", always labelled |
+
+Anything else is a **full stop**, not a guess. The GPU is the arbiter; a model is only trustworthy once it
+matches the GPU, and a model's output is only honest once it is labelled as a model's output.
+
+### When the model does not match the hardware
+
+If the simulator does not reproduce the measured `conflicts/access` for every config you have data on, the
+model is WRONG. **Do not quietly patch it until it matches, and do not "meet in the middle" with a plausible
+story** — either one buries a real disagreement between the model and the hardware.
+
+Instead: **STOP, tell the user, and OFFER TO REPAIR IT.** Concretely:
+1. **Report the mismatch** explicitly — which config, sim value vs measured value, and what you think it
+   implies about the model (which constant or rule looks wrong).
+2. **Offer to fix it**, with the options laid out: repair the model now, gather a specific additional
+   measurement first to disambiguate, or record it as a known gap and move on.
+3. **Repair only on their go-ahead** — then re-run `selftest(arch)` and show that it passes.
+
+If they decline the repair, that is their call: continue the work they asked for, but the model is now
+known-inconsistent, so **every simulated result on that target is untrustworthy** and you must say so
+every time you report one. A model mismatch is a finding to surface and offer to fix — never a bug to
+hide, and never something to patch quietly mid-analysis so the numbers line up.
+
+✗ "the A store is 3× conflicted" (provenance unstated — the reader will assume measured)
+✗ "target B should behave the same as target A here" (no model for B = STOP, not an extrapolation)
+✓ "A store, **simulated** on the validated <gfx target> model: 3.0 conflicts/access (no hardware this run)"
+✓ "A store, **measured** on <gfx target>: 3.0 conflicts/access, simulator reproduces it exactly"
+✓ "sim says 1.0, hardware says 3.0 on <config> — the model is wrong, most likely <constant/rule>. I've
+   stopped. Want me to repair the model, take one more measurement first, or log it as a known gap?
+   Until it's fixed, nothing simulated on this target is trustworthy."
+
+## Modes — ASK if the user did not say which
+
+**If the user did not name a mode, STOP and ask.** Do not infer one. Guessing `simulate` risks a modelled
+number being read as measured; guessing `investigate` silently commits the user to a long container run.
+
+| | **simulate** | **investigate** |
+|---|---|---|
+| question it answers | "does this layout conflict, and why?" (design time) | "what does this kernel actually do on this GPU?" |
+| arch | **user must supply it**; no arch ⇒ STOP and ask | must equal the **host GPU**; detect, state it, STOP on mismatch |
+| precondition | arch has a registered `ArchLDS` **and** `selftest(arch)` passes | same, **plus** a working ROCm container (7.10+) + GPU |
+| gate | `selftest(arch)` | `selftest(arch)` **and** sim == rocprof counters, to the number |
+| GPU needed | no | yes |
+| runtime | seconds | long (container bring-up, probe builds, pad sweep) |
+| verdict | `SIMULATED` | `VALIDATED` |
+| figure | rendered, **watermarked SIMULATED** | rendered, titled MEASURED |
+| binding stage ("is it worth fixing?") | **N/A — cannot answer.** Needs counters. Say so. | answered |
+
+**Full stops, in both modes** — these are hard refusals, not warnings:
+- **No arch given** → ask. Never assume a gfx target because it is the one we happen to have a model for.
+- **No validated model for the requested arch** → stop. `lc.arch_lds(arch)` raises for you; report it and
+  offer to build+validate a model for that arch (a fresh probe sweep on that hardware — see the
+  "EXTENDING TO A NEW ARCH" section of `lds_conflict.py`). Never extrapolate one target's constants to
+  another — NB, wave size, write-port width and combine depth all differ across CDNA/RDNA generations.
+- **investigate, arch ≠ host GPU** → stop. `run_probe` raises for you. Offer simulate mode for the
+  requested arch *if* a validated model for it exists; otherwise the previous rule applies.
+- **`selftest(arch)` fails** → stop, tell the user the model no longer reproduces its own corpus, and
+  **offer to repair it** (see "When the model does not match the hardware"). Repair on their go-ahead,
+  never silently mid-analysis.
+
+Detect the host arch with `rocminfo | grep -m1 gfx` (or `get_device_arch(0)`) and **state it up front**,
+before doing any work, so a wrong target is caught in the first line and not after a 20-minute run.
+
+## What this skill can do (capabilities)
+
+| You want to… | Ask / trigger | You get |
+|---|---|---|
+| **Find if an access conflicts** (and how much) | "does <A/B store/read> cause a bank conflict?" | `conflicts/access`, measured (investigate) or modelled (simulate) — never ungated |
+| **Locate the collision** | (part of the analysis) | the served group (half-wave × phase) + bank + colliding `T{l}R{r}` + the N-way |
+| **Visualize it** | (part of the analysis) | the committed 3-panel register→LDS dataflow, **conflicted vs fixed** side-by-side |
+| **Understand WHY** in plain language | "why is it conflicting?" | the mechanism (e.g. K-stride aliasing) + a concrete thread walk-through + the fix |
+| **Compare layouts before writing a kernel** | "would interleaving conflict on <gfx target>?" | simulate mode — fast, no GPU, labelled |
+| **Decide if it's worth fixing** | "does this conflict matter?" | the binding-stage read (LDS exposed vs hidden) — **investigate only** |
+| **Get the cheapest fix** | "how do I fix it?" | bottleneck-driven lever (pad / contiguity-preserving swizzle / narrow / redistribute), re-measured |
 
 ## Prerequisites (Read First)
 
@@ -45,7 +102,7 @@ arbiter; a model is only trustworthy once it matches the GPU.
 ## Experts to dispatch (via the dispatch table)
 
 - **LDS Expert** (`lds_expert.md`) — OWNS the LDS: bank geometry, the address→bank map, the per-arch bank
-  count/width and access-serialization rules (gfx90a/gfx942/RDNA differ), swizzle/padding mechanics, and the
+  count/width and access-serialization rules (these differ by gfx target), swizzle/padding mechanics, and the
   conflict model itself. This is the primary expert for this skill.
 - **Profiling Expert**, domain hint `"hardware counters"` → **rocProf Expert** (`rocprof_expert.md`) — owns
   the rocprofv3 invocation, counter selection, and counter semantics.
@@ -73,43 +130,64 @@ Two operational facts this skill's mechanics need (everything else: read `lds_ba
 
 The validated simulator, the bit-exact address map, the isolation micro-probes, the rocprof CSV parser,
 and the 3-panel register→LDS renderer are **committed once** at
-`rocke.helpers.tiling.lds_conflict` (arch-parameterized; **gfx90a validated**). Import and use
+`rocke.helpers.tiling.lds_conflict` (arch-parameterized; see `lc.ARCHS` for which targets currently have a
+validated model). Import and use
 them — do NOT re-implement these as fresh `tmp/` scripts each investigation (that burned tokens and let the
 model drift). The MECHANISM and the TOOLING are stable; only the per-CASE measured numbers change.
 
 ### Preferred path — one call: `analyze_store` (chains + gates everything)
 
 Use the orchestrator; it removes the hand-wired, error-prone steps (loose gating, hand-built tables, "which
-pad fixes it" guesswork). You supply only a `measure` callable that runs rocprof in the container and returns
-the counters — the module does the rest and HARD-FAILS if the sim doesn't match hardware.
+pad fixes it" guesswork). It takes an explicit `mode` and hard-fails rather than guessing.
+
+**No dangerous defaults.** `analyze_store` requires every load-bearing parameter — arch, dtype, strides,
+origin, swizzle, and all four labels. That is deliberate: a defaulted value does not error, it silently
+analyzes a *different* kernel than yours and prints your kernel's name on the answer. Fill each from the
+kernel under analysis; never carry one over from a sibling kernel or an example.
 
 ```python
 from rocke.helpers.tiling import lds_conflict as lc
 
-assert lc.selftest(lc.GFX90A)                        # gate the model on this arch first
+ARCH = "<gfx target>"        # REQUIRED: from the user (simulate) or the host GPU (investigate)
+CFG = dict(                  # the subject, stated once, explicitly
+    tile_free=TF, wtag="b64", arch=ARCH, kernel_label="<kernel>", operand_label="A",
+    dims_label="M", macro_label="<macro MxN, waves WxW, tile_k=K>", strides=(TF, 1),
+    dtype_name="<f16|f32|...>", origin=(0, 0), lds_swizzle=False,
+)
+descs = lc.ProbeDescs.from_coop(coop_native, wave_native, transpose=_transpose_desc)  # both transposes
 
-descs = lc.ProbeDescs.from_coop(coop_native, wave_native, transpose=_transpose_desc)  # both transposes, correct
+# ---- SIMULATE: no GPU. Gated on selftest(ARCH); raises if ARCH has no validated model. ----
+rep = lc.analyze_store(descs, mode="simulate", render_to=out_png, **CFG)
+# rep.verdict -> "SIMULATED (<arch> model validated by selftest; no per-case hardware ...)"
+# figure is watermarked SIMULATED. rep.measured is None. Binding stage is NOT answerable.
 
+# ---- INVESTIGATE: host GPU must BE ARCH (run_probe enforces it). ----
 def measure(pad, mode="store"):
     """Run ONE probe under rocprof in the container; return its counters. This is the only host/
     container-specific glue — everything else is in the module."""
-    r = lc.run_probe(descs, mode, tile_free=TF, lds_pad=pad, arch="gfx90a")   # bit-exact round-trip
-    assert r["max_abs_diff"] == 0.0
+    r = lc.run_probe(descs, mode, arch=ARCH, dtype=DTYPE, tile_free=TF, tile_k=TK, n_waves=NW,
+                     warp_free=WF, lds_pad=pad, lds_swizzle=False, block_lanes=WAVE)
+    assert r["max_abs_diff"] == 0.0                   # bit-exact or the counters are meaningless
     # ... docker exec rocprofv3 (lc.COUNTER_PMC / lc.ROCPROF_RECIPE) on a runner that calls run_probe ...
     hw = lc.parse_counter_csv(outdir)                 # {BC, IDX, conflicts_per_access, ADDR, ...}
     hw["max_abs_diff"] = r["max_abs_diff"]
     return hw
 
-rep = lc.analyze_store(descs, tile_free=TF, wtag="b64", operand_label="A", dims_label="M",
-                       measure=measure, verify_fix=True, render_to=out_png)
+rep = lc.analyze_store(descs, mode="investigate", measure=measure, verify_fix=True,
+                       render_to=out_png, **CFG)
 # rep.verdict / rep.conflicts_per_access / rep.fix_pad / rep.located / rep.png / rep.facts_table()
 ```
 
-`analyze_store` does: address-map → `simulate` → **`measure` on GPU + HARD `gate(sim==HW)`** →
-`recommend_pad` (closed-form conflict-free pad) → *(optional)* verify the fix on GPU → `render_conflict_3panel`.
-It returns a `ConflictReport` whose `.facts_table()` yields the "Hard facts" + "Model validation" markdown
-rows directly. **No `measure` ⇒ the report is `UNVALIDATED` and rendering is REFUSED** — a number without
-hardware is never presented (the cardinal rule, enforced in code).
+`analyze_store` does: **`selftest(arch)`** → address-map → `simulate` → *(investigate)* **`measure` on GPU +
+HARD `gate(sim==HW)`** → `recommend_pad` (closed-form conflict-free pad) → *(optional)* verify the fix on
+GPU → `render_conflict_3panel`. It returns a `ConflictReport` whose `.facts_table()` yields the facts +
+model-validation markdown rows directly, already labelled for the mode it ran in.
+
+Enforced in code, so you cannot get it wrong by accident:
+- `mode="investigate"` without `measure` → raises. `mode="simulate"` *with* `measure` → raises.
+- An arch with no registered model → raises (`no validated LDS model for ...`).
+- `selftest(arch)` failing → raises. Surface it and **offer to repair the model**; do not patch it quietly.
+- A simulated figure is **watermarked**; a "measured" figure with no measurement → refuses to render.
 
 ### Low-level primitives (for custom flows / new access patterns)
 
@@ -121,35 +199,40 @@ mislabeled artifact is possible — e.g. `render_conflict_3panel` asserts sim re
 BC/c-a, the fix pad is conflict-free by the stripe rule, and the fixed panel is drawn collision-free. This is
 the guardrail against the meaningless hand-drawn diagrams that motivated this module.
 - **New arch (gfx942/RDNA):** add an `ArchLDS(...)` to `lc.ARCHS`, then re-validate `lc.selftest(arch)`
-  against a freshly measured corpus for that arch before use — do NOT assume gfx90a constants carry over.
+  against a freshly measured corpus for that arch before use — constants never carry over between targets.
   Extend the module in place; never fork it into `tmp/`.
 - Only drop to a bespoke `tmp/` script when the module genuinely lacks a capability the case needs — and
   then fold that capability BACK into the module so the next investigation inherits it.
 
-## Environment — the ONLY way to profile these kernels (validated recipe)
+## Environment — investigate mode only; profile in a container, never bare-metal
 
-Bare-metal `rocprofv3` on this host is **HSA 8.19** and CRASHES on the in-process ctypes HIP load
-(`rocprofiler_at_intercept_table_registration ... error 16`, SIGABRT). Profile inside a **ROCm 7.14
-container** instead:
+Bare-metal `rocprofv3` on this host CRASHES on the in-process ctypes HIP load
+(`rocprofiler_at_intercept_table_registration ... error 16`, SIGABRT) because the host HSA runtime and the
+profiler disagree. Profile inside a **ROCm container, 7.10 or newer** instead.
+
+Container images and their internal paths CHANGE — treat everything below as a shape to fill in, not a
+recipe to paste. Discover the actual image and paths on the machine you are on (`docker images | grep -i
+rocm`), and confirm the container's GPU arch matches the analysis target before measuring anything.
 
 ```bash
 docker run -d --name lds_prof --device=/dev/kfd --device=/dev/dri --group-add video \
   --security-opt seccomp=unconfined --ipc=host \
-  -v <repo-root>:/work -w /work/dnn-providers/hip-kernel-provider/rocke/platform \
-  fmha-build-a:rocm714 sleep infinity
-# inside every exec:
-export LD_LIBRARY_PATH=/opt/venv/lib/python3.14/site-packages/_rocm_sdk_devel/lib:/opt/venv/lib/python3.14/site-packages/_rocm_sdk_core/lib:$LD_LIBRARY_PATH
+  -v <repo-root>:/work -w /work/<path-to>/rocke/platform \
+  <rocm-7.10+ image> sleep infinity
+# inside every exec — locate the ROCm SDK libs in THIS image rather than assuming the path:
+export LD_LIBRARY_PATH=<sdk_devel>/lib:<sdk_core>/lib:$LD_LIBRARY_PATH
 export PYTHONPATH=python ROCKE_CPP_QUIET_FALLBACK=1
 ```
-- Container python is `/opt/venv/bin/python3` (rocprofv3 1.3.2, numpy present). gfx90a = MI210.
-- Invoke `rocprofv3 ... -- python3 <script>` directly. **Do NOT wrap in `env` / `bash -c` chains that
+- Find the container's python (it is usually a venv, not the system one) and check `rocprofv3 --version`
+  and that numpy is importable before building probes.
+- Invoke `rocprofv3 ... -- <python> <script>` directly. **Do NOT wrap in `env` / `bash -c` chains that
   re-exec** — the double-exec re-registers the tool and SIGABRTs.
 - Counter file (`lds_counters.txt`), one pass:
   `pmc: SQ_LDS_BANK_CONFLICT SQ_LDS_ADDR_CONFLICT SQ_LDS_IDX_ACTIVE SQ_INSTS_LDS SQ_WAVES`
 - `rocprofv3 -i lds_counters.txt --kernel-include-regex '<kernel-name>' --truncate-kernels --output-format csv -d <out> -- python3 <script>`
   → CSV at `<out>/pmc_1/*/*_counter_collection.csv` (root-owned; `rm` it from inside the container).
 
-## Isolating store vs read (aggregate counters can't; gfx90a has no read/write-split LDS counter; ATT decoder absent)
+## Isolating store vs read (aggregate counters can't split read from write on these targets; ATT decoder absent)
 
 Use `lds_conflict.build_probe` / `run_probe` (above) — they build the isolation micro-kernels for you. Feed
 them a `ProbeDescs(coop_native, coop_store, wave_read)` built from the kernel's EXACT descriptors (e.g.
@@ -166,25 +249,44 @@ implements both isolation modes:
 
 ## Workflow
 
-1. **Read prerequisites; settle the output/temp location** (temp-file policy). Confirm the target arch and
-   `NB` (do not assume 32).
+**Step 0 — settle mode and arch BEFORE anything else.** This is the first thing you do and the first thing
+you tell the user, because both other branches are expensive to unwind:
+- Mode not stated → **ask**. Arch not stated (simulate) → **ask**.
+- Resolve the host arch (`rocminfo | grep -m1 gfx`) and **state it**: "host GPU is <X>; analyzing <Y> in
+  <mode> mode." In investigate mode X must equal Y — if not, stop and offer simulate for Y.
+- `lc.arch_lds(arch)` then `lc.selftest(arch)`. No model → stop and offer to build one. Selftest fails →
+  stop, report it, and **offer to repair the model**.
+
+Then:
+
+1. **Read prerequisites; settle the output/temp location** (temp-file policy). Confirm `NB` and the wave
+   size for the target from its `ArchLDS` — do not assume 32/64.
 2. **Dispatch the LDS Expert** for: the bank geometry, the address→bank map, WHICH accesses to analyze
-   (store, read, B, C), and the conflict hypothesis. Dispatch the **rocProf Expert** for the rocprofv3
-   command + counter semantics. Consult the **MMA Expert** for how the layout choice drives the access
-   pattern (which descriptor / interleave). Pass them the concrete kernel/shape.
-3. **Measure (hard facts first).** Bring up the container, build the isolation probes with
-   `lds_conflict.build_probe`/`run_probe` (kernel's EXACT descriptors), run the pad sweep, collect the
-   counters (`lds_conflict.parse_counter_csv`). Verify bit-exactness (`max_abs_diff==0.0`). Record every number.
-4. **Model + VALIDATE.** The simulator already exists — `lds_conflict.simulate` (+ `simulate_hist`). First
-   run `lds_conflict.selftest(arch)` to confirm the model still reproduces the validation corpus, then compute
-   its predicted `conflicts/access` for EVERY measured config. **Gate:** simulator == hardware (to the number)
-   across all configs, or the model is wrong — fix it *in the module* and re-check. Do not proceed past this gate.
+   (store, read, B, C), and the conflict hypothesis. Consult the **MMA Expert** for how the layout choice
+   drives the access pattern (which descriptor / interleave). In investigate mode also dispatch the
+   **rocProf Expert** for the rocprofv3 command + counter semantics. Pass them the concrete kernel/shape,
+   **and the mode** — an expert reasoning about a simulate-mode question should not propose a counter plan.
+3. **Gather the numbers.** This is the step that forks:
+
+   | | simulate | investigate |
+   |---|---|---|
+   | | `analyze_store(..., mode="simulate")` — the address map + validated model, seconds, no GPU. | Bring up the container, build the isolation probes with `build_probe`/`run_probe` (kernel's EXACT descriptors), run the pad sweep, collect counters (`parse_counter_csv`), verify bit-exactness (`max_abs_diff==0.0`). Record every number. |
+
+4. **Gate.** Simulate: `selftest(arch)` is the gate and it already ran — nothing further, but the result
+   stays labelled SIMULATED. Investigate: compute the simulator's predicted `conflicts/access` for EVERY
+   measured config and require **simulator == hardware, to the number**. On mismatch, STOP and follow
+   "When the model does not match the hardware" — report it and offer to repair. Do not proceed past this
+   gate with a story.
 5. **Locate + visualize the conflict** (see "Visualize the conflict" below). Call
-   `lds_conflict.render_conflict_3panel` — it extracts the EXACT colliding group from the validated simulator
-   and gates internally that the picture shows the SAME collision the counters proved. Do NOT hand-draw.
+   `lds_conflict.render_conflict_3panel` (or let `analyze_store` do it) — it extracts the EXACT colliding
+   group from the validated simulator and gates internally that the picture matches the mode's evidence.
+   A simulate-mode figure comes out **watermarked SIMULATED**. Do NOT hand-draw.
 6. **Explain WHY, in plain language, with a concrete example** (see the explanation template). Then show the
    fix (from the pad/swizzle sweep) as a second, side-by-side diagram where the highlight is gone.
-7. **Cleanup.** Remove probes, CSVs, containers per the temp-file policy.
+7. **Binding stage — investigate only.** In simulate mode you have no counters, so you CANNOT say whether
+   the conflict is worth fixing. Say that plainly rather than implying it: "simulated — whether this costs
+   wall-time needs an investigate run." Offer the investigate run as the next step.
+8. **Cleanup.** Remove probes, CSVs, containers per the temp-file policy (investigate mode).
 
 ## Visualize the conflict — the register→LDS dataflow (committed renderer; ✗ do NOT hand-draw)
 
@@ -234,7 +336,7 @@ Distinguish for the user, in plain terms, the **throughput floor** ("64 threads 
 passes are unavoidable — not a bug") from the **fixable pile-up** ("these 8 all chose the same bank — that's
 the part padding removes"). Only the second is *fixable*.
 
-## Binding stage — collect these; the LDS Expert makes the fix call (do NOT chase BC→0)
+## Binding stage — investigate only; the LDS Expert makes the fix call (do NOT chase BC→0)
 
 BC is a diagnostic, not the objective — **wall-time is.** Collect these alongside BC so the LDS Expert can
 judge whether the conflict is even worth fixing (the decision framework + the "conflict-free can be slower"
@@ -245,48 +347,66 @@ tradeoff live in `lds_banks.md` §7 / `lds_expert.md` — do not restate them he
 Hand these to the LDS Expert with the conflict data; report whether **TFLOPS actually moved**, not just whether
 BC dropped.
 
+**In simulate mode this section is not available** — it needs counters. Do not substitute a plausible story
+about whether the conflict matters. State "needs an investigate run" and offer it.
+
 ## Output Format
+
+Lead with the provenance line. Everything below inherits it, and a reader who sees only the header must
+already know whether they are looking at hardware or a model.
 
 ```
 ## Bank-Conflict Analysis — <kernel / access>
 
-- arch / NB:     <gfx90a / 32 (confirmed)>
-- access:        <A store / A read / ...>, descriptor <name>, VW <b128/b64>
+- mode / provenance: <investigate → MEASURED | simulate → SIMULATED (model only, no hardware this run)>
+- arch / NB / wave:  <gfx target / NB / wave (confirmed from its ArchLDS, not assumed)>
+- host GPU:          <gfx target>   <"(matches" | "(N/A — simulate mode)">
+- model gate:        selftest(<arch>) <PASS | FAIL → STOP, offer repair>
+- access:            <A store / A read / ...>, descriptor <name>, VW <b128/b64>, dtype <..>
 
-### Hard facts (rocprof, real GPU)   [bit-exact: yes]
-| config | SQ_LDS_BANK_CONFLICT | SQ_LDS_IDX_ACTIVE | conflicts/access | ADDR_CONFLICT |
-| ...    | ...                  | ...               | ...              | 0             |
+### Facts
+investigate → | config | SQ_LDS_BANK_CONFLICT | SQ_LDS_IDX_ACTIVE | conflicts/access | ADDR_CONFLICT |
+               (header: "Hard facts (rocprof, real GPU)  [bit-exact: yes]")
+simulate    → | config | conflicts/access (SIMULATED) | served | productive |
+               (header: "Predicted (<arch> model — NO hardware this run)"; never print an empty
+                counter column with "?" in it, which reads as a failed measurement)
 
-### Model validation (simulator vs hardware)
-| config | simulator conflicts/access | measured | match? |
-| ...    | ...                        | ...      | ✓      |
-(If any row is ✗, the analysis is NOT done — the model is wrong.)
+### Model validation
+investigate → | config | simulator conflicts/access | measured | match? |   (any ✗ ⇒ STOP, offer repair)
+simulate    → selftest(<arch>): PASS — the model reproduces <arch>'s own measured corpus.
+               No per-case hardware comparison exists; that is the limit of this mode.
 
-### Mechanism (only stated because the model matches)
+### Mechanism (only stated because the model is validated)
 - <e.g. K-stride aliasing: bank index independent of K because K-stride = k·NB dwords>
 
 ### Diagram — register→LDS dataflow, conflict located (conflicted | fixed, side by side)
 - <path>: 3-panel register file → arrows → LDS bank grid; red box on the <N>-way bank; fixed panel alongside
 - located: served group <half-wave/phase>, bank <b>, colliding cells <T{l}R{r}, ...>
+- <simulate: note the figure is watermarked SIMULATED>
 
 ### Why it happens (plain language, with the walk-through example)
 - <the fill-in-the-blank template: what's happening / why / walk it through / the fix — everyday words>
-- floor vs fixable: <what part is the unavoidable 64>NB floor vs the fixable pile-up>
+- floor vs fixable: <what part is the unavoidable wave>NB floor vs the fixable pile-up>
 
 ### Binding stage (is it worth fixing?)
-- wait-on-LDS <..> / MFMA-busy <..> / HBM <..> -> <LDS-exposed | MFMA-bound | HBM-bound | balanced>
+investigate → wait-on-LDS <..> / MFMA-busy <..> / HBM <..> -> <LDS-exposed | MFMA-bound | HBM-bound | balanced>
+simulate    → NOT ANSWERABLE without counters. <offer the investigate run>
 
-### Recommendation (bottleneck-driven; conflicts/access AND TFLOPS)
-- <do-nothing (hidden) | cheapest bandwidth-keeping lever (pad/free swizzle) | narrower swizzle (adds instrs,
-  may regress) | redistribute>; report achieved conflicts/access AND the measured TFLOPS change (re-measured)
+### Recommendation
+investigate → bottleneck-driven: <do-nothing (hidden) | cheapest bandwidth-keeping lever (pad/free swizzle) |
+  narrower swizzle (adds instrs, may regress) | redistribute>; report achieved conflicts/access AND the
+  measured TFLOPS change (re-measured).
+simulate    → the conflict-free lever the model predicts (e.g. pad +<p>), explicitly marked as a
+  PREDICTION whose wall-time benefit is unverified.
 ```
 
 ## No stored results — regenerate per case
 
-Do **NOT** persist measured conflict numbers, per-kernel results, or "known" conflict factors in this skill,
-the experts, or memory. Every situation (arch, tile, dtype, layout, pad, pipeline) is different; baking in a
-number invites stale/wrong reuse. Each invocation MUST generate its own hard data on the real GPU and gate
-against the simulator. This file stores only the METHOD and the environment recipe — never the answers.
+Do **NOT** persist measured OR simulated conflict numbers, per-kernel results, or "known" conflict factors
+in this skill, the experts, or memory. Every situation (arch, tile, dtype, layout, pad, pipeline) is
+different; baking in a number invites stale/wrong reuse — and a stored *simulated* number is worse still,
+because the label that made it honest does not survive the copy. Each invocation MUST generate its own data
+and pass its mode's gate. This file stores only the METHOD and the environment shape — never the answers.
 
 **Exception (not a violation):** the `_MECHANISM_*` validation corpus baked into `lds_conflict.py` is the
 proof that the write-port model reproduces hardware — it validates the *mechanism*, it is NOT a per-case
