@@ -29,7 +29,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .scaled_wmma import SCALED_WMMA_OPS
+from .scaled_wmma import SCALED_WMMA_OPS, scale_formats
 
 # ----------------------------- Types --------------------------------------
 
@@ -1831,6 +1831,8 @@ class IRBuilder:
         b: Value,
         c: Value,
         *extra: Value,
+        scale_dtype_a: str | None = None,
+        scale_dtype_b: str | None = None,
     ) -> Value:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
@@ -1855,6 +1857,20 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
+        attrs = {"op_id": op_id}
+        if scale_dtype_a is not None or scale_dtype_b is not None:
+            if op_id not in SCALED_WMMA_OPS:
+                raise ValueError(
+                    "scale dtype selectors require a gfx1250 scaled WMMA atom"
+                )
+            _, fa, fb = SCALED_WMMA_OPS[op_id]
+            da = scale_dtype_a if scale_dtype_a is not None else "e8m0"
+            db = scale_dtype_b if scale_dtype_b is not None else "e8m0"
+            sa, sb = scale_formats(fa, fb, da, db)
+            if sa:
+                attrs["scale_dtype_a"] = da
+            if sb:
+                attrs["scale_dtype_b"] = db
         c_frag_len = (
             op.c_frag_len
             if hasattr(op, "c_frag_len") and op.c_frag_len
@@ -1871,7 +1887,7 @@ class IRBuilder:
             "tile.mma",
             [a, b, c, *extra],
             [VectorType(c_elem, c_frag_len)],
-            attrs={"op_id": op_id},
+            attrs=attrs,
             result_name_hint=hint,
         ).result
 

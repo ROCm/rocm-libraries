@@ -74,7 +74,7 @@ def _wmma_k64(a_kind, b_kind):
     return build
 
 
-def _wmma_scaled(a_kind, b_kind, scale_mode):
+def _wmma_scaled(a_kind, b_kind, scale_mode, sa="e8m0", sb="e8m0"):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
     op_id = f"wmma_{scale_mode}_f32_16x16x128_{a_kind}_{b_kind}"
@@ -105,7 +105,7 @@ def _wmma_scaled(a_kind, b_kind, scale_mode):
         bb = b.vec_concat(b_lo, b_hi)
         c = b.global_load_vN(c_ptr, tid, dtype=F32, n=8)
         scale = b.global_load(scale_ptr, tid, dtype=scale_ty)
-        d = b.mma(op_id, a, bb, c, scale, scale)
+        d = b.mma(op_id, a, bb, c, scale, scale, scale_dtype_a=sa, scale_dtype_b=sb)
         b.global_store(c_ptr, tid, d)
         b.ret()
 
@@ -256,17 +256,30 @@ CONFIGS = [
 ]
 
 
-# Matrix pairs with E8M0 scales; retain the original config indices above.
-_SCALED_PAIRS = [
-    (a, b)
-    for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
-    for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
-    if (a, b) not in (("fp8", "fp8"), ("fp4", "fp4"))
-]
+# Legal mixed matrix/scale pairs; retain the original config indices above.
+_SCALED_PAIRS = (
+    [
+        (a, b, "e8m0", "e8m0")
+        for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+        if (a, b) not in (("fp8", "fp8"), ("fp4", "fp4"))
+    ]
+    + [
+        (a, "fp4", "e8m0", scale)
+        for a in ("fp8", "bf8", "fp6", "bf6")
+        for scale in ("e5m3", "e4m3")
+    ]
+    + [
+        ("fp4", b, scale, "e8m0")
+        for b in ("fp8", "bf8", "fp6", "bf6")
+        for scale in ("e5m3", "e4m3")
+    ]
+    + [("fp4", "fp4", scale, scale) for scale in ("e5m3", "e4m3")]
+)
 CONFIGS.extend(
-    (_wmma_scaled(a, b, mode), "gfx1250")
+    (_wmma_scaled(a, b, mode, sa, sb), "gfx1250")
     for mode in ("scale", "scale16")
-    for a, b in _SCALED_PAIRS
+    for a, b, sa, sb in _SCALED_PAIRS
 )
 
 

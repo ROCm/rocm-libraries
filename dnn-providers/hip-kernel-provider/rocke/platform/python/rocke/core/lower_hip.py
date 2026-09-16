@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from .scaled_wmma import SCALED_WMMA_OPS
+from .scaled_wmma import SCALED_WMMA_OPS, scale_formats
 
 from .ir import (
     KernelDef,
@@ -689,7 +689,12 @@ class _Lowerer:
             dtype = "fp4" if fmt == 4 else "fp8"
             op_id = f"{mode}_f32_16x16x128_{dtype}_{dtype}"
         scale16, fmt_a, fmt_b = SCALED_WMMA_OPS[op_id]
-
+        sa, sb = scale_formats(
+            fmt_a,
+            fmt_b,
+            op.attrs.get("scale_dtype_a", "e8m0"),
+            op.attrs.get("scale_dtype_b", "e8m0"),
+        )
         self._require_wmma_arch(op_id)
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
@@ -700,7 +705,7 @@ class _Lowerer:
         self._emit(
             f"f32x8 {_name(op.result)} = {builtin}("
             f"{fmt_a}, {_name(a)}, {fmt_b}, {_name(b)}, (int16_t)0, {_name(c)}, "
-            f"0, 0, {_name(a_scale)}, 0, 0, {_name(b_scale)}, false, false);"
+            f"0, {sa}, {_name(a_scale)}, 0, {sb}, {_name(b_scale)}, false, false);"
         )
 
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
