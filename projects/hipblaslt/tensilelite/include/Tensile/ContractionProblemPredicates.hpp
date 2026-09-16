@@ -1542,6 +1542,9 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
+                // Legacy field, retained only for on-disk (msgpack/YAML) schema
+                // compatibility with already-exported logic files, which store
+                // MacroTile1 here. It is no longer used by operator() below.
                 size_t value;
 
                 BufferStoreOffsetLimitCheck() = default;
@@ -1555,17 +1558,38 @@ namespace TensileLite
                     return "BufferStoreOffsetLimitCheck";
                 }
 
-                // The min operator is used to handle cases where size_N is smaller than the value(usually is MacroTile1)
+                // Guards against dispatching BufferStore=True solutions whose
+                // post-loop store SRD cannot address the full output tensor.
+                // allocPostLoopSrd (KernelWriterAssembly.py) initializes that SRD
+                // once, with the base address fixed at D's start for the life of
+                // the kernel; it is never re-based per workgroup. The byte offset
+                // a workgroup's buffer store issues is therefore an absolute
+                // coordinate into the full D tensor, so the true worst-case
+                // reachable offset is the full column extent, stride[1]*size[1],
+                // not one tile's worth of it. Checking the full extent, uncapped,
+                // is conservative for the rarer case of a solution whose SRD base
+                // is re-based per workgroup, which would only need the tighter
+                // per-tile bound.
+                //
+                // The threshold mirrors KernelWriterAssembly.py's BufferOOB
+                // sentinel (0xfffff000, ~4 GiB - 4 KiB) that allocPostLoopSrd
+                // programs as the SRD's num_records; at or past that offset a
+                // hardware buffer store/load is out of range and is silently
+                // dropped rather than faulting. This does not reuse
+                // BufferLoadOffsetLimitCheck's 2^32 constant, which is looser
+                // than the real hardware ceiling by ~4 KiB.
+                static constexpr uint64_t BufferOOBBytes = 0xfffff000ull;
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    const uint64_t TWO_POW_32 = 4294967296;
-                    return multiplyElementSize(problem.d().strides()[1] * std::min(value, problem.d().sizes()[1]), problem.d().elementBytes())
-                           < TWO_POW_32;
+                    return multiplyElementSize(problem.d().strides()[1] * problem.d().sizes()[1],
+                                               problem.d().elementBytes())
+                           < BufferOOBBytes;
                 }
 
                 virtual std::string toString() const override
                 {
-                    return concatenate(this->type(), "(MT1:", value, ")");
+                    return concatenate(this->type(), "(MT1(unused):", value, ")");
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -1573,8 +1597,8 @@ namespace TensileLite
                 {
                     bool rv = (*this)(problem);
                     std::ostringstream details;
-                    details << "D:" << problem.d().strides()[1] << "*"
-                            << problem.d().elementBytes() << "*" << value << "<2^32";
+                    details << "D:" << problem.d().strides()[1] << "*" << problem.d().sizes()[1]
+                            << "*" << problem.d().elementBytes() << "<0xfffff000";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }

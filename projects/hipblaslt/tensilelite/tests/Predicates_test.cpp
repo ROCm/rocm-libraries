@@ -127,3 +127,125 @@ TEST(Predicates, WorkgroupMappingXCCCheck_FallbackTreatsXCCAs1)
     problem.setParams().setFallbackStatus(true);
     EXPECT_TRUE((*pred)(problem)) << "With fallback status, effective XCC=1 so 38 % 1 == 0";
 }
+
+// ----------------------------------------------------------------------------
+// BufferStoreOffsetLimitCheck: silent-store-drop guard for BufferStore=True
+// solutions (ROCM-31016 / https://github.com/ROCm/hipBLASLt/issues/2299).
+//
+// allocPostLoopSrd (KernelWriterAssembly.py) programs the post-loop store SRD
+// with a fixed BufferOOB num_records (0xfffff000) and a base address that is
+// never advanced per workgroup, so the true worst-case store byte offset for
+// such a kernel is the D tensor's full extent (stride[1] * size[1]), not one
+// workgroup's tile. The previous formula here capped the checked extent to
+// min(MacroTile1, size[1]), which silently passed large-M/modest-N problems
+// whose full extent exceeds the addressable range while one tile's worth does
+// not. Confirmed on real gfx950 (MI350X) hardware: an MT16x16x256
+// BufferStore=True kernel for this shape family left ~99.9996% of a 16 GiB
+// bf16 D tensor unwritten (~32K of ~8.59B elements) at a shape the old,
+// buggy check reported as supported.
+// ----------------------------------------------------------------------------
+
+TEST(Predicates, BufferStoreOffsetLimitCheck_LargeM_ModestN_Rejected_ROCM31016)
+{
+    using namespace TensileLite;
+    // MacroTile1=64 matches the confirmed-broken kernel family in
+    // gfx950_Cijk_Ailk_Bljk_BBS_BH_Bias_BiasSrcD_GradB_AS_SAV_UserArgs.yaml.
+    constexpr size_t macroTile1 = 64;
+    // M chosen so the true worst-case D byte offset for bf16
+    // (m * n * 2 bytes) exceeds the BufferOOB sentinel (0xfffff000, ~4 GiB -
+    // 4 KiB) while m * macroTile1 * 2 -- what the old, buggy check computed
+    // -- does not. This is the exact class of shape that silently corrupted
+    // output on hardware.
+    constexpr size_t m = 8900000;
+    constexpr size_t n = 256;
+    static_assert(m * n * 2 > 0xfffff000ull,
+                  "true D extent must exceed the BufferOOB sentinel");
+    static_assert(m * macroTile1 * 2 < 4294967296ull,
+                  "old buggy formula (capped to MacroTile1) must stay under 2^32, "
+                  "or this test would not distinguish the fix from the bug");
+
+    auto problem = ContractionProblemGemm::GEMM_Strides(false,
+                                                         false,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         m,
+                                                         n,
+                                                         /*k=*/48,
+                                                         /*batchSize=*/1,
+                                                         /*lda=*/m,
+                                                         /*aStride=*/-1,
+                                                         /*ldb=*/48,
+                                                         /*bStride=*/-1,
+                                                         /*ldc=*/m,
+                                                         /*cStride=*/-1,
+                                                         /*ldd=*/m,
+                                                         /*dStride=*/-1,
+                                                         /*beta=*/0.0);
+
+    auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n << " bf16: true D size is "
+        << (double)(m * n * 2) / (1ull << 30)
+        << " GiB, past the ~4 GiB - 4 KiB BufferOOB sentinel allocPostLoopSrd programs "
+           "for BufferStore=True kernels; the guard must reject this shape instead of "
+           "silently allowing a kernel that drops most of D (confirmed on gfx950 hardware).";
+}
+
+TEST(Predicates, BufferStoreOffsetLimitCheck_OrdinaryProblem_StillAccepted)
+{
+    using namespace TensileLite;
+    // Negative/sanity check: an ordinary, well-within-range problem must
+    // still be accepted by the corrected predicate.
+    auto problem = ContractionProblemGemm::GEMM_Strides(false,
+                                                         false,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         1024,
+                                                         1024,
+                                                         1024,
+                                                         /*batchSize=*/1,
+                                                         /*lda=*/1024,
+                                                         /*aStride=*/-1,
+                                                         /*ldb=*/1024,
+                                                         /*bStride=*/-1,
+                                                         /*ldc=*/1024,
+                                                         /*cStride=*/-1,
+                                                         /*ldd=*/1024,
+                                                         /*dStride=*/-1,
+                                                         /*beta=*/0.0);
+    auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(64);
+    EXPECT_TRUE((*pred)(problem));
+}
+
+TEST(Predicates, BufferStoreOffsetLimitCheck_JustUnderCeiling_Accepted)
+{
+    using namespace TensileLite;
+    // Boundary check: a D just under the BufferOOB sentinel must still pass.
+    constexpr size_t n = 256;
+    constexpr size_t m = (0xfffff000ull / 2 / n) - 1; // comfortably under the line
+    auto             problem = ContractionProblemGemm::GEMM_Strides(false,
+                                                         false,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         m,
+                                                         n,
+                                                         /*k=*/48,
+                                                         /*batchSize=*/1,
+                                                         /*lda=*/m,
+                                                         /*aStride=*/-1,
+                                                         /*ldb=*/48,
+                                                         /*bStride=*/-1,
+                                                         /*ldc=*/m,
+                                                         /*cStride=*/-1,
+                                                         /*ldd=*/m,
+                                                         /*dStride=*/-1,
+                                                         /*beta=*/0.0);
+    auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(64);
+    EXPECT_TRUE((*pred)(problem));
+}
