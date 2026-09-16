@@ -93,18 +93,22 @@ accesses get different treatment and you must say which one you analyzed:
 Why the read cannot simply reuse `simulate()`: applying write constants to a read emits a confidently wrong
 number, the exact failure this skill exists to prevent. What IS sound without a read-port model is the
 address map — "these lanes of a served group address DIFFERENT dwords in the SAME bank" is a property of the
-map, independent of how the hardware serializes the pile. So `analyze_read` reports the pile and refuses the
-cost.
+map, independent of how the hardware serializes the pile. So **where no read model applies**,
+`analyze_read` reports the pile and refuses the cost.
 
 **This matters for design work:** on an interleaved layout the conflict often lives in the *read*, not the
-store. A simulate run that reports only the store has NOT cleared the design — say so. Use the read geometry
-to FLAG an access for `--mode investigate`, never to price it.
+store. A simulate run that reports only the store has NOT cleared the design — say so. Outside the envelope,
+use the read geometry to FLAG an access for `--mode investigate`, never to price it.
 
-**Arch scope.** gfx90a's read model ships registered (its corpus is in `read_hists`, gated by `selftest`).
-Any OTHER target has no measured read port: `analyze_read` there reports geometry and REFUSES a cost — never
-carry gfx90a's read constants across. To add a target, measure its own read corpus (`run_probe(descs,
-mode="read", ...)` + the `n_reads` slope), derive that port's rule, and `register_read_model` it, which
-refuses unless `selftest` passes.
+**Arch scope — two DIFFERENT stops.** gfx90a's read model ships registered (corpus in `read_hists`, gated
+by `selftest`). For any other target:
+- **No LDS model at all** (not in `lc.ARCHS`) → `arch_lds` RAISES before anything is analyzed. No geometry,
+  no cost. That is the full stop.
+- **A write model but no read model** → geometry only; asking for `conflicts_per_access` RAISES.
+
+Never carry gfx90a's read constants across. To add a target, measure its own read corpus
+(`run_probe(descs, mode="read", ...)` + the `n_reads` slope), derive that port's rule, and
+`register_read_model` it, which refuses unless `selftest` passes.
 
 **The envelope is gated, not advisory.** `dwords_per_lane` is a REQUIRED argument taken from the
 disassembly — the emit declares `vw=1` and the backend merges, so the emit cannot tell you. Deriving it from
@@ -122,7 +126,7 @@ before doing any work, so a wrong target is caught in the first line and not aft
 | You want to… | Ask / trigger | You get |
 |---|---|---|
 | **Find if the STORE conflicts** (and how much) | "does the <A/B> store cause a bank conflict?" | `conflicts/access`, measured (investigate) or modelled (simulate) — never ungated |
-| **Find if the READ collides** (geometry only) | "does the wave read conflict?" | `analyze_read` — WHETHER and WHERE lanes collide. **No cost number**: `PORT_BANKS`/`COMBINE` are write-side, so a read's replay count needs hardware (see "Store vs read coverage") |
+| **Find if the READ conflicts** | "does the wave read conflict?" | `analyze_read` — `conflicts/access = max_depth − 1` when the arch has a registered read model AND the access is in envelope (gfx90a; 2 dwords/lane; no broadcast; uniform per-instruction depth). Otherwise geometry only — WHETHER and WHERE lanes collide — and asking for a cost RAISES. See "Store vs read coverage" |
 | **Locate the collision** | (part of the analysis) | the served group (half-wave × phase) + bank + colliding `T{l}R{r}` + the N-way |
 | **Visualize it** | (part of the analysis) | the committed 3-panel register→LDS dataflow, **conflicted vs fixed** side-by-side |
 | **Understand WHY** in plain language | "why is it conflicting?" | the mechanism (e.g. K-stride aliasing) + a concrete thread walk-through + the fix |
@@ -243,7 +247,7 @@ Enforced in code, so you cannot get it wrong by accident:
 `addr_map` (bit-exact map from the real emit) · `simulate` / `simulate_hist` (the write-port model) ·
 `predict_pad_sweep` / `recommend_pad` / `conflict_free_bank_of` (stripe rule) · `run_probe` / `build_probe` /
 `ProbeDescs` (isolation probes) · `parse_counter_csv` + `COUNTER_PMC` / `ROCPROF_RECIPE` (rocprof harness) ·
-`gate` (hard sim==HW assert) · `render_conflict_3panel` (the 3-panel figure). All gate internally where a
+`gate` (hard sim==HW assert) · `analyze_read` / `read_datum` / `simulate_read_hist` / `register_read_model` (the READ side) · `render_conflict_3panel` (the 3-panel figure). All gate internally where a
 mislabeled artifact is possible — e.g. `render_conflict_3panel` asserts sim reproduces the supplied measured
 BC/c-a, the fix pad is conflict-free by the stripe rule, and the fixed panel is drawn collision-free. This is
 the guardrail against the meaningless hand-drawn diagrams that motivated this module.
@@ -457,7 +461,7 @@ different; baking in a number invites stale/wrong reuse — and a stored *simula
 because the label that made it honest does not survive the copy. Each invocation MUST generate its own data
 and pass its mode's gate. This file stores only the METHOD and the environment shape — never the answers.
 
-**Exception (not a violation):** the `_MECHANISM_*` validation corpus baked into `lds_conflict.py` is the
+**Exception (not a violation):** the `_VALIDATION_CORPUS` validation corpus baked into `lds_conflict.py` is the
 proof that the write-port model reproduces hardware — it validates the *mechanism*, it is NOT a per-case
 answer to reuse. `selftest()` is a gate on the model's correctness, not a shortcut around measuring a new
 case. A new kernel/tile/dtype still gets freshly measured + freshly gated.

@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Reusable LDS bank-conflict tooling: validated write-port model + simulator, bit-exact
+"""Reusable LDS bank-conflict tooling: validated write- AND read-port models + simulators, bit-exact
 address map, isolation micro-probes, rocprof harness, and the 3-panel register->LDS
 dataflow renderer.
 
@@ -108,11 +108,29 @@ custom access patterns). Every function that could emit a mislabeled artifact GA
   COUNTER_PMC / ROCPROF_RECIPE / parse_counter_csv   the rocprof harness.
   render_conflict_3panel(...)      the figure; GATES sim==measured, fix conflict-free, fixed panel
                                    collision-free before drawing (refuses a mislabeled figure).
-  register_arch(arch, hists, pad_sweep)   add + store a new arch's model and its own corpus.
+  register_arch(arch, hists, pad_sweep[, read_hists, read_provenance])   add an arch + its corpora
+      (merges: omitted keys are left untouched, so a read corpus survives a write re-registration).
+
+  READ SIDE (a structurally DIFFERENT port -- see THE READ-PORT RULE below and lds_banks.md §1.5)
+  analyze_read(descs, *, tile_free, arch, operand_label, strides, dtype_name, origin, lds_swizzle,
+               dwords_per_lane) -> ReadCollisionReport. Prices the read when the arch has a registered
+      read model AND the access is in-envelope; otherwise reports GEOMETRY and RAISES on
+      `.conflicts_per_access`. `dwords_per_lane` is the ISA width from the DISASSEMBLY -- it is not
+      derivable from the address map and is recorded on the report as caller-asserted provenance.
+  read_datum(desc, tile_free, arch, strides, dtype_name, *, origin, lds_swizzle)  the read's address
+      map, modelling the MERGED instruction (the emit declares vw=1; the backend merges).
+  simulate_read_hist(hists, footprint, arch)   the read predictor: max_bank_depth per group, SUMMED.
+  register_read_model(arch_name)   register a MEASURED read model; refuses unless selftest passes.
+  ReadCollisionReport  `.verdict` (SIMULATED | GEOMETRY ONLY), `.conflicts_per_access` (raises when
+      geometry-only), `.detail` (the model's own input histograms), `.facts_table()`.
+  READ_MODEL_REGISTRATION_ERROR  None on success; the reason string if gfx90a failed to register at
+      import (registration does NOT raise -- an unimportable module is worse than an unpriced read).
 
 EXTENDING TO A NEW ARCH
 -----------------------
-Call `register_arch(ArchLDS(name, NB, HALF, PORT_BANKS, COMBINE, WAVE), hists, pad_sweep)` where the
+For the WRITE side call `register_arch(ArchLDS(name, NB, HALF, PORT_BANKS, COMBINE, WAVE), hists,
+pad_sweep)`; for the READ side measure that arch's OWN read corpus (`run_probe(mode="read")` + the
+n_reads slope) and `register_read_model(name)`, which refuses unless `selftest` passes. Where the
 constants come from that arch's ISA + a probe sweep and `hists`/`pad_sweep` are FRESHLY MEASURED on
 that arch (same format as gfx90a's `_VALIDATION_CORPUS` entry). Then run `selftest(name)` until it
 PASSES. `selftest` REFUSES an arch that has no corpus of its own -- gfx90a's numbers must never be
@@ -458,6 +476,39 @@ def addr_map(tile_desc, strides, *, origin, n_lanes, dtype_name, lds_swizzle):
     return accesses, vw
 
 
+def desc_extents(tile_desc, n_lanes, origin=(0, 0)):
+    """Per-axis extent (max coordinate + 1) a descriptor actually addresses, replaying the real emit.
+
+    Used to bound a fragment against its window PER AXIS. A product check (`rows*cols == elems`) is
+    NOT sufficient: compensating per-axis errors cancel (a 32x16 descriptor "fits" a 16x32 window by
+    element count while addressing rows that do not exist), and it says nothing about the LDS
+    allocation, whose accesses are UNCLIPPED by design (see emit.py: "LDS loads are unclipped (the
+    buffer is exactly sized)") -- so an out-of-range LDS index is not masked, it reads another
+    workgroup's memory."""
+    from rocke.helpers.tiling.emit import emit_tensor_coordinates
+
+    ext = None
+    for lane in range(n_lanes):
+        nb = NumBuilder(lane)
+        for reg in range(tile_desc.register_count):
+            coords = emit_tensor_coordinates(nb, tile_desc.layout, lane, reg)
+            if ext is None:
+                ext = [0] * len(coords)
+            for ax, c in enumerate(coords):
+                ext[ax] = max(ext[ax], origin[ax] + c)
+    return tuple(e + 1 for e in (ext or []))
+
+
+def _fits(what, desc, n_lanes, window, where):
+    """Raise unless every axis of `desc` fits `window`. `where` names the buffer for the message."""
+    ext = desc_extents(desc, n_lanes)
+    if len(ext) != len(window) or any(e > w for e, w in zip(ext, window)):
+        raise ValueError(
+            f"{what} addresses {ext} but {where} is {tuple(window)} -- "
+            f"{'OVERRUN: the kernel would read/write outside the allocation. ' if any(e > w for e, w in zip(ext, window)) else ''}"
+            f"Size the probe to the DESCRIPTOR, per axis.")
+
+
 # ==================================================================================================
 # Isolation micro-probes (generic -- caller supplies the exact kernel descriptors)
 # ==================================================================================================
@@ -465,6 +516,7 @@ def addr_map(tile_desc, strides, *, origin, n_lanes, dtype_name, lds_swizzle):
 # the probe's correctness gate is `max_abs_diff == 0.0`, which is only meaningful if the host buffer
 # round-trips bit-for-bit. bf16/fp8 need an exact host representation before they can be added.
 _NP_DTYPE = {"f16": "float16", "f32": "float32"}
+_DTYPE_BYTES = {"f16": 2, "bf16": 2, "f32": 4, "fp8e4m3": 1, "bf8e5m2": 1}
 
 
 @dataclass
@@ -498,7 +550,10 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
 
     mode="store": loop{ store(coop); sync; read(store-layout); sync } -- read keeps the store live,
                   measures the store pattern (write + read of it).
-    mode="read" : store once; loop{ read(wave); sync } -- isolates the read pattern.
+    mode="read" : store once, then `n_reads` LIVE barrier-separated wave reads to distinct output
+                  slices. The measurement is the SLOPE `(n=2)-(n=1)`, which is one wave read with the
+                  coop store cancelled -- NOT the loop, whose body is dead code (its result is unused,
+                  so the compiler removes it; n_iter does not move the counters in this mode).
 
     force_vw (elems) forces a narrower access width via an identity swizzle; lds_swizzle installs a
     real position swizzle. Every probe is a round-trip identity (verified max_abs_diff==0.0)."""
@@ -522,6 +577,11 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
 
     vwtag = ("_swz" if lds_swizzle else f"_vw{force_vw}" if force_vw else "")
     kname = name or f"lds_probe_{mode}_pad{lds_pad}{vwtag}_{tile_free}x{tile_k}"
+    lds_bytes = tile_k * (tile_free + lds_pad) * _DTYPE_BYTES[dtype.name]
+    if lds_bytes > 65536:
+        raise ValueError(
+            f"probe LDS tile is {lds_bytes} B ({tile_k} x {tile_free}+{lds_pad} x "
+            f"{_DTYPE_BYTES[dtype.name]} B) -- over the 64 KiB per-workgroup LDS budget.")
     b = IRBuilder(kname)
     b.kernel.attrs["max_workgroup_size"] = wave_size
 
@@ -554,6 +614,12 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
 
     n_c = b.const_i32(n_iter)
     if mode == "store":
+        # Same per-axis guard for the store path: the coop store writes the UNCLIPPED LDS tile, and
+        # the band load/store address a global buffer sized exactly (coop_free, tile_k).
+        _fits("the coop_store descriptor", descs.coop_store, wave_size,
+              (tile_k, tile_free + lds_pad), "the LDS tile")
+        _fits("the coop_native descriptor", descs.coop_native, wave_size, (coop_free, tile_k),
+              "the band buffer")
         band = _load_band()
         loop = b.scf_for_iter(zero, n_c, b.const_i32(1), [], iv_name="i")
         with loop:
@@ -577,15 +643,19 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
             b.sync_lds_only()
             b.scf_yield()
         # n_reads LIVE wave reads, each to its OWN output slice, separated by barriers.
-        # (There is deliberately NO "store_only" mode to subtract: an LDS store with no consumer
-        # is dead code and the compiler deletes it -- measured, 0 LDS instructions. The slope
-        # below cancels the store term instead of trying to measure it separately.)
         # WHY: the read cost cannot be isolated by subtracting a "store only" probe -- an LDS store with
         # no consumer is dead code and the compiler deletes it (measured: 0 LDS instructions). Instead
         # vary the number of LIVE reads and take the SLOPE: (n=2) - (n=1) is exactly one wave read, and
         # the single coop store cancels identically. Distinct output slices stop DCE; the barriers stop
         # the identical loads being CSE'd into one. Verify the design held by checking SQ_INSTS_LDS
         # actually scales with n_reads -- if it does not, the reads were merged and the slope is invalid.
+        rd = _read_wave()
+        # GUARDRAIL (per axis, both the LDS source and the global destination). The earlier product
+        # equality was not enough: it bounded only the global window, and only by element count.
+        _fits("the wave_read descriptor", descs.wave_read, wave_size, (tile_k, tile_free + lds_pad),
+              "the LDS tile")
+        _fits("the wave_read descriptor", descs.wave_read, wave_size, (tile_k, warp_free),
+              "the out2 window")
         rd = _read_wave()
         # GUARDRAIL: the output window must EXACTLY hold the fragment the read produces. A window that is
         # too small is a device-side buffer OVERRUN (the kernel writes past the allocation) and the
@@ -621,7 +691,9 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
 def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_waves, warp_free,
               lds_pad, lds_swizzle, block_lanes, n_iter=64, grid_ctas=512, verify=True,
               force_vw=0, n_reads=1):
-    """Compile, launch and verify a probe on the real GPU. Returns a dict incl. max_abs_diff
+    """Compile, launch and verify a probe on the real GPU. `n_reads` (read mode) emits that many live
+    wave reads to distinct output slices; take `(n=2)-(n=1)` to isolate one read -- and check
+    SQ_INSTS_LDS actually scales with it, or the reads were merged and the slope is invalid. Returns a dict incl. max_abs_diff
     (None when the config masks lanes so a full-band compare would false-flag untouched cells).
 
     `dtype` is the probe's element type (an `ir.Type`, e.g. F16). It drives the kernel, the launch
@@ -689,10 +761,22 @@ def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_wave
             # store writes the read back in that same order, so the golden is the band TRANSPOSED.
             # Verified bit-exact on gfx90a before this check was added; without it a read probe's
             # counters would be unverified, which the cardinal rule forbids.
-            ov = out_h[:tile_k, :coop_free].astype(np.float32)
-            diff = float(np.abs(ov - in_h.T.astype(np.float32)).max())
+            # EVERY slice: with n_reads>1 the extra reads are the whole basis of the slope, and a
+            # read that got merged or eliminated would read back as the zeroed buffer -- trivially
+            # detectable here, and invisible if only slice 0 is compared.
+            if warp_free < coop_free:
+                raise ValueError(f"warp_free {warp_free} < coop_free {coop_free}: the golden's "
+                                 f"verified region is wider than the output window.")
+            gold = in_h.T.astype(np.float32)
+            diff = 0.0
+            for i in range(n_reads):
+                sl = out_h[i * tile_k:(i + 1) * tile_k, :coop_free].astype(np.float32)
+                diff = max(diff, float(np.abs(sl - gold).max()))
     return {"mode": mode, "pad": lds_pad, "force_vw": force_vw, "lds_swizzle": bool(lds_swizzle),
-            "block_lanes": block_lanes, "kernel": kernel.name, "max_abs_diff": diff}
+            "block_lanes": block_lanes, "kernel": kernel.name, "max_abs_diff": diff,
+            # n_reads is returned so the caller can CHECK the slope's validity condition in code
+            # (SQ_INSTS_LDS must scale with it) instead of being told to eyeball it.
+            "n_reads": n_reads}
 
 
 # ==================================================================================================
@@ -760,7 +844,8 @@ def store_datum(store_desc, tile_free, arch, strides, dtype_name, *, origin, lds
         d0 = ac["base"] // per_dword
         for ph in range(vw // per_dword):
             elem = ac["base"] + per_dword * ph
-            datum[(ac["lane"], ph)] = (elem // tile_free, elem % tile_free, d0 + ph, (d0 + ph) % a.NB)
+            datum[(ac["lane"], ph)] = (elem // strides[0], elem % strides[0], d0 + ph,
+                                       (d0 + ph) % a.NB)
     return acc, vw, datum
 
 
@@ -770,7 +855,8 @@ def collision_lanes(datum, arch, bank, phase):
     REQUIRED and must be DERIVED from the data (the most-piled bank), never assumed to be bank 0 --
     which bank the pile lands on is a property of the store's address map, not a constant."""
     a = arch_lds(arch)
-    return [l for l in range(a.HALF) if datum[(l, phase)][3] == bank]
+    return [l for l in range(a.HALF)
+            if (cell := datum.get((l, phase))) is not None and cell[3] == bank]
 
 
 def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fix_label, arch,
@@ -968,14 +1054,25 @@ _READ_MODELS: dict[str, object] = {}       # arch name -> validated read-port mo
 def register_read_model(arch_name, model=True):
     """Register a VALIDATED read-port model for `arch_name`, measured on that arch. REFUSES unless the
     arch has a read corpus and `selftest` passes on it -- a registered read model with no corpus is
-    strictly worse than no read model, because it silently licenses numbers."""
+    strictly worse than no read model, because it silently licenses numbers.
+
+    `model` is a presence marker only: `analyze_read` dispatches to `simulate_read_hist` for every
+    registered arch. It is NOT a per-arch rule object, so registering a second arch would give it
+    gfx90a's RULE with its own corpus -- only the corpus gate stops that being wrong. Carry a real
+    rule object here before registering an arch whose port differs structurally."""
+    had, prior = arch_name in _READ_MODELS, _READ_MODELS.get(arch_name)
     _READ_MODELS[arch_name] = model
     try:
         if not selftest(arch_name, verbose=False):
             raise ConflictModelError(
                 f"refusing to register a read model for {arch_name}: selftest FAILED.")
     except Exception:
-        _READ_MODELS.pop(arch_name, None)
+        # RESTORE, don't pop: a failed RE-registration must not destroy a model that was already
+        # validated and working.
+        if had:
+            _READ_MODELS[arch_name] = prior
+        else:
+            _READ_MODELS.pop(arch_name, None)
         raise
 
 
@@ -992,6 +1089,7 @@ def read_datum(read_desc, tile_free, arch, strides, dtype_name, *, origin, lds_s
     SAME dword is a broadcast, not a conflict -- which is why the caller counts DISTINCT dwords."""
     a = arch_lds(arch)
     per_dword = 4 // dtype_bytes_of(dtype_name)
+    row_stride = strides[0]
     acc, vw = addr_map(read_desc, strides, origin=origin, n_lanes=a.WAVE, dtype_name=dtype_name,
                        lds_swizzle=lds_swizzle)
     per_lane = defaultdict(list)
@@ -1012,8 +1110,21 @@ def read_datum(read_desc, tile_free, arch, strides, dtype_name, *, origin, lds_s
                                 # counting per-element runs would report 2x the phases the hardware
                                 # issues and halve the per-instruction footprint. The ISA is the truth.
                 seen.add(d)
-                datum[(lane, ph)] = (elem // tile_free, elem % tile_free, d, d % a.NB)
+                # Decode with the ROW STRIDE, not tile_free: LDS holds (K, free) at
+                # `elem = K*stride + free`, so a padded row (stride = tile_free + lds_pad) decodes to
+                # the wrong K and free if tile_free is used. Only the renderer reads these two fields,
+                # which is why it went unnoticed -- the cost path discards them.
+                datum[(lane, ph)] = (elem // row_stride, elem % row_stride, d, d % a.NB)
                 ph += 1
+    # A lane that legitimately re-reads a dword in a later instruction loses that phase to the dedup,
+    # so its phase indices shift and `(lane, ph)` stops meaning the same instruction/phase across
+    # lanes -- silently wrong histograms. Latent on today's descriptors; refuse it rather than model it.
+    counts = {lane: sum(1 for (l, _p) in datum if l == lane) for lane in {l for (l, _p) in datum}}
+    if len(set(counts.values())) > 1:
+        raise ValueError(
+            f"lanes touch different numbers of distinct dwords ({sorted(set(counts.values()))}) -- "
+            f"phase indices are not comparable across lanes, so the served-group histograms would be "
+            f"wrong. This access re-reads a dword within a lane; it is outside what the model covers.")
     return acc, vw, datum
 
 
@@ -1033,6 +1144,9 @@ class ReadCollisionReport:
     max_nway: int                  # max_depth: the sole cost determinant for gfx90a reads
     n_instr: int                   # read instructions this access issues
     footprint_dwords: int
+    dwords_per_lane: int           # ISA instruction width, CALLER-ASSERTED from the disassembly --
+                                   # not derivable from the address map, and wrong values change the
+                                   # answer, so it is recorded as part of the result's provenance
     model_validated: bool          # a validated READ-port model exists AND selftest passes
     in_envelope: bool              # 2 dwords/lane, no broadcast -- where the model was validated
     out_of_envelope_reason: str | None
@@ -1055,9 +1169,10 @@ class ReadCollisionReport:
     @property
     def verdict(self):
         if self.sim is not None:
-            return (f"SIMULATED ({self.arch} read model, selftest PASS; in envelope) "
-                    f"conflicts/access = {self.sim['conflicts_per_access']:.4f} "
-                    f"(max_depth {self.max_nway} - 1)")
+            return (f"SIMULATED ({self.arch} read model, selftest PASS; in envelope, "
+                    f"{self.dwords_per_lane} dwords/lane caller-asserted) conflicts/access = "
+                    f"{self.sim['conflicts_per_access']:.4f} over {self.sim['n_instr']} instruction(s) "
+                    f"at max_depth {self.sim['per_instruction_max_depth'][0]}")
         if not self.model_validated:
             return (f"GEOMETRY ONLY: no validated read-port model for {self.arch}. "
                     f"{self.max_nway}-way on {self.n_piled_banks} bank(s) is the ADDRESS MAP, not a "
@@ -1113,9 +1228,14 @@ def analyze_read(descs: ProbeDescs, *, tile_free, arch, operand_label, strides, 
                 if any(cnt[b] > len(occ[b]) for b in occ):
                     broadcast = True
 
-    max_nway = max((max(h.values()) for h in detail.values() if h), default=1)
-    n_piled = max((sum(1 for d in h.values() if d > 1) for h in detail.values()), default=0)
-    located = _locate_collision(datum, a)
+    # Report the WORST group and describe THAT group -- max_nway, the piled-bank count and the located
+    # cells must all come from one served group, or the sentence splices three different groups'
+    # numbers into one claim.
+    worst = max(detail, key=lambda k: max(detail[k].values(), default=0), default=None)
+    worst_hist = detail.get(worst, {})
+    max_nway = max(worst_hist.values(), default=1)
+    n_piled = sum(1 for d in worst_hist.values() if d > 1)
+    located = _locate_collision(datum, a, phase=(worst[1] if worst else 0))
 
     # The model is validated PER INSTRUCTION. In envelope an instruction is 2 dwords/lane, so phases
     # pair up: (0,1) is instruction 0, (2,3) instruction 1, ...
@@ -1127,8 +1247,24 @@ def analyze_read(descs: ProbeDescs, *, tile_free, arch, operand_label, strides, 
             f"this access maps to {n_phases_total} dword-phases per lane, not a whole number of "
             f"{dwords_per_lane}-dword instructions. Either dwords_per_lane is wrong (check the "
             f"disassembly) or the address map is not what you think it is.")
-    n_instr = max(1, n_phases_total // dwords_per_lane)
-    footprint = len({d for (_k, _f, d, _b) in datum.values()}) // n_instr
+    n_instr = n_phases_total // dwords_per_lane
+
+    # Split the phases into instructions of the declared width and price EACH one. Pricing only
+    # instruction 0 and multiplying would report a cost the model never computed for the other
+    # instructions, and would print a max_depth taken from the whole access next to it.
+    #
+    # NOTE ON WHAT CANNOT BE CHECKED: `dwords_per_lane` is the ISA instruction width and is NOT
+    # derivable from the address map -- the backend's merge depends on register allocation, not
+    # addresses (a lane with 8 CONTIGUOUS dwords still issues 4 x ds_read2_b32 here). So it is a
+    # caller assertion from the disassembly, it changes the answer materially if wrong, and it is
+    # recorded on the report rather than pretended to be verified.
+    per_instr = []
+    for i in range(n_instr):
+        h = {k: v for k, v in detail.items() if i * dwords_per_lane <= k[1] < (i + 1) * dwords_per_lane}
+        fp = len({datum[(l, ph)][2] for (l, ph) in datum
+                  if i * dwords_per_lane <= ph < (i + 1) * dwords_per_lane})
+        per_instr.append((h, fp))
+    instr_depths = [max((max(g.values()) for g in h.values() if g), default=1) for h, _fp in per_instr]
 
     reason = None
     if dwords_per_lane != VALIDATED_DWORDS_PER_LANE:
@@ -1136,19 +1272,31 @@ def analyze_read(descs: ProbeDescs, *, tile_free, arch, operand_label, strides, 
                   f"{VALIDATED_DWORDS_PER_LANE} (ds_read2_b32)")
     elif broadcast:
         reason = "broadcast present (two lanes on one dword); untested by the corpus"
+    elif len(set(instr_depths)) > 1:
+        reason = (f"per-instruction max_depth is not uniform ({instr_depths}); every corpus row has "
+                  f"one depth for the whole access, so an aggregate cost here is extrapolation")
     model_ok = a.name in _READ_MODELS and selftest(a, verbose=False)
 
     sim = None
     if model_ok and reason is None:
-        instr = {k: v for k, v in detail.items() if k[1] < dwords_per_lane}
-        sim = simulate_read_hist(instr, footprint, a)
-        sim["conflicts_per_access"] = (sim["BC"] / sim["productive"]) if sim["productive"] else 0.0
+        idx = bc = prod = 0
+        for h, fp in per_instr:
+            r = simulate_read_hist(h, fp, a)
+            idx += r["IDX"]; bc += r["BC"]; prod += r["productive"]
+        if prod <= 0:
+            # A zero productive floor means the map carried no distinct dwords. Returning 0.0 here
+            # would read as "conflict-free" -- a confident verdict on no data. Refuse instead.
+            raise ConflictModelError(
+                f"{operand_label} read: productive floor is 0 (no distinct dwords in the address "
+                f"map). Refusing to report a conflicts/access; the map or the descriptor is wrong.")
+        sim = {"IDX": idx, "BC": bc, "productive": prod, "conflicts_per_access": bc / prod,
+               "n_instr": n_instr, "per_instruction_max_depth": instr_depths}
 
     return ReadCollisionReport(
         operand_label=operand_label, arch=a.name, vw=vw, wave_origin=tuple(origin), located=located,
         detail=detail, n_piled_banks=n_piled, max_nway=max_nway, n_instr=n_instr,
-        footprint_dwords=footprint, model_validated=model_ok, in_envelope=(reason is None),
-        out_of_envelope_reason=reason, sim=sim)
+        footprint_dwords=per_instr[0][1], model_validated=model_ok, in_envelope=(reason is None),
+        out_of_envelope_reason=reason, sim=sim, dwords_per_lane=dwords_per_lane)
 
 
 # ==================================================================================================
@@ -1218,7 +1366,11 @@ def _locate_collision(datum, arch, phase=0):
     a = arch_lds(arch)
     occ = defaultdict(list)
     for lane in range(a.HALF):
-        occ[datum[(lane, phase)][3]].append(lane)
+        cell = datum.get((lane, phase))          # inactive/masked lanes are simply absent
+        if cell is not None:
+            occ[cell[3]].append(lane)
+    if not occ:
+        return {"half_wave": 0, "phase": phase, "bank": None, "nway": 0, "cells": []}
     bank = max(sorted(occ), key=lambda b: len(occ[b]))
     cells = collision_lanes(datum, a, bank=bank, phase=phase)
     return {"half_wave": 0, "phase": phase, "bank": bank, "nway": len(cells),
@@ -1437,12 +1589,24 @@ _VALIDATION_CORPUS = {
 }
 
 
-def register_arch(arch: ArchLDS, hists, pad_sweep):
+def register_arch(arch: ArchLDS, hists, pad_sweep, read_hists=None, read_provenance=None):
     """Store a NEW arch's model + its own validation corpus, the same way gfx90a is stored. `hists`
     and `pad_sweep` must be freshly MEASURED on that arch (see `_VALIDATION_CORPUS` format). After
-    registering, `selftest(arch.name)` must PASS before the model is trusted for any number."""
+    registering, `selftest(arch.name)` must PASS before the model is trusted for any number.
+
+    `read_hists`/`read_provenance` are that arch's READ corpus, if it has one -- without them
+    `register_read_model` for a fresh arch can only ever raise "NO read corpus". Omitted keys are left
+    untouched rather than cleared, so a read corpus survives a write-model re-registration."""
     ARCHS[arch.name] = arch
-    _VALIDATION_CORPUS[arch.name] = {"hists": list(hists), "pad_sweep": list(pad_sweep)}
+    # MERGE, don't replace: re-registering an arch must not silently delete a read corpus that was
+    # measured separately (`read_hists`/`read_provenance`), which a wholesale rewrite would do.
+    entry = _VALIDATION_CORPUS.setdefault(arch.name, {})
+    entry["hists"] = list(hists)
+    entry["pad_sweep"] = list(pad_sweep)
+    if read_hists is not None:
+        entry["read_hists"] = list(read_hists)
+    if read_provenance is not None:
+        entry["read_provenance"] = list(read_provenance)
 
 
 def _uniform(banks, depth, n_half, n_phase):
@@ -1511,22 +1675,53 @@ def selftest(arch, verbose=True):
                 banks = sum(dist.values())
                 print(f"{name:34s} | {banks:>5} {max(dist):>4} | {r['IDX']:>3} {hidx:>3} | "
                       f"{r['BC']:>3} {hbc:>3} | {'OK' if row_ok else 'FAIL'}")
+        # PROVENANCE cross-check: read_provenance is the audit trail that licenses every read_hists
+        # row (each row is a SLOPE / instrs_per_read). Nothing read it, so it could drift from the
+        # corpus silently. Re-derive here: the slope must reproduce the row, and SQ_INSTS_LDS must
+        # scale by exactly instrs_per_read -- the condition that makes the slope design valid at all.
+        prov = corpus.get("read_provenance") or []
+        for (lbl, _w, _pad, ipr, idx1, idx2, bc1, bc2, i1, i2, addr, *_rest) in prov:
+            slope_idx, slope_bc, slope_i = (idx2 - idx1) // ipr, (bc2 - bc1) // ipr, i2 - i1
+            if slope_i != ipr:
+                ok = False
+                if verbose:
+                    print(f"  PROVENANCE FAIL {lbl}: SQ_INSTS_LDS slope {slope_i} != "
+                          f"instrs_per_read {ipr} -- the reads merged; the slope is invalid")
+            if addr != 0:
+                ok = False
+                if verbose:
+                    print(f"  PROVENANCE FAIL {lbl}: ADDR_CONFLICT {addr} != 0 (broadcast present)")
+            if not any(r[4] == slope_idx and r[5] == slope_bc for r in rows):
+                ok = False
+                if verbose:
+                    print(f"  PROVENANCE FAIL {lbl}: slope IDX/BC {slope_idx}/{slope_bc} matches no "
+                          f"read_hists row -- the audit trail has drifted from the corpus")
+
         # STRUCTURAL minima -- the gate checks the CORPUS can constrain the rule, instead of trusting
         # whoever wrote it. Without these a corpus of look-alike rows reproduces any cost function.
         depths = {max(d) for _n, d, *_ in rows}
+        # DISCRIMINATION: a uniform row cannot separate `max_depth` from `mean depth` or
+        # `accesses/banks_used` -- on it they are numerically identical. So requiring "two rows with
+        # the same max_depth but different banks_used" is NOT enough: all-uniform rows satisfy it and
+        # the corpus still cannot tell the rules apart. Demand a genuinely NON-UNIFORM row, and a pair
+        # sharing a max_depth whose MEAN depths differ -- that pair is what makes MAX a measurement.
+        non_uniform = [d for _n, d, *_ in rows if len(d) >= 2]
         by_depth = defaultdict(set)
         for _n, d, *_ in rows:
-            by_depth[max(d)].add(sum(d.values()))
-        discriminating = any(len(b) >= 2 for b in by_depth.values())
+            mean = sum(k * v for k, v in d.items()) / sum(d.values())
+            by_depth[max(d)].add(round(mean, 9))
+        discriminating = bool(non_uniform) and any(len(m) >= 2 for m in by_depth.values())
         problems = []
         if len(depths) < 4:
             problems.append(f"only {len(depths)} distinct max_depth values (need >=4: the ladder)")
         if 1 not in depths:
             problems.append("no max_depth==1 row (the conflict-free floor is unpinned)")
         if not discriminating:
-            problems.append("no two rows share a max_depth while differing in banks_used -- MAX is "
-                            "then an ASSUMPTION, not a measurement (uniform rows cannot separate "
-                            "max from mean/accesses-per-bank)")
+            problems.append(
+                "corpus cannot discriminate max_depth from mean depth: needs at least one "
+                "NON-UNIFORM row (len(dist) >= 2) AND two rows sharing a max_depth with DIFFERENT "
+                "mean depths. Uniform rows have mean == max, so they fit both rules identically "
+                "and MAX stays an assumption rather than a measurement.")
         if len({r[2] for r in rows}) != 1:
             problems.append("rows mix n_phases; register one phase count per model")
         if problems:
@@ -1542,9 +1737,19 @@ def selftest(arch, verbose=True):
 
 # gfx90a's read model is VALIDATED (see the read corpus above) so it ships REGISTERED -- a validated
 # model that a caller must remember to switch on is a model that silently reports geometry instead of
-# cost. `register_read_model` re-runs selftest here, so an import fails loudly if the corpus ever
-# stops reproducing. Other arches remain unregistered until measured on their own hardware.
-register_read_model("gfx90a")
+# cost. Other arches remain unregistered until measured on their own hardware.
+#
+# It does NOT raise at import. `register_read_model` re-runs selftest, and letting that propagate would
+# turn a read-corpus regression into an ImportError for every consumer of this module -- the recorder,
+# the pipeline renderer, `kernel_stages`, `layout_optimizer` -- none of which touch the read port. An
+# unimportable module is a worse failure than an unpriced read. Instead the failure is recorded here
+# and the arch is left UNREGISTERED, so `analyze_read` degrades to GEOMETRY ONLY (the module's own
+# designed fallback) and a dedicated test asserts this sentinel is None.
+READ_MODEL_REGISTRATION_ERROR: str | None = None
+try:
+    register_read_model("gfx90a")
+except Exception as _exc:                                    # noqa: BLE001 - recorded, not swallowed
+    READ_MODEL_REGISTRATION_ERROR = f"{type(_exc).__name__}: {_exc}"
 
 
 if __name__ == "__main__":

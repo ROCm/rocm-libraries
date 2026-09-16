@@ -189,8 +189,9 @@ def test_render_simulated_is_watermarked_and_needs_no_hardware(tmp_path):
 
 
 # --------------------------------------------------------------------------------------------------
-# READ-side geometry. The write-port constants do NOT apply to reads, so these tests pin that the read
-# path reports GEOMETRY and refuses to state a cost -- the honesty gate, not just a feature.
+# READ-side. The write-port constants do NOT apply to reads. These tests pin the two tiers: a COST when
+# the arch has a validated read model and the access is in envelope, and GEOMETRY-with-a-refusal
+# otherwise -- the honesty gate, not just a feature.
 # --------------------------------------------------------------------------------------------------
 def test_read_datum_handles_a_sub_dword_read_that_store_datum_silently_drops():
     """The MMA-operand read is vw=1 f16 -- HALF a dword. store_datum's `vw // per_dword` floors to 0
@@ -224,15 +225,17 @@ def test_analyze_read_refuses_a_cost_for_an_arch_with_no_read_model():
         with pytest.raises(lc.ConflictModelError, match="no conflicts/access"):
             _ = bare.conflicts_per_access
     finally:
-        if saved is not None:
-            lc._READ_MODELS["gfx90a"] = saved
+        # UNCONDITIONAL restore: `if saved is not None` skips the restore whenever the pop returned
+        # None, leaving the global deleted for every later test in the process.
+        lc._READ_MODELS["gfx90a"] = saved if saved is not None else True
 
 
 def test_analyze_read_origin_is_load_bearing_not_defaulted():
     """Each wave reads a different slice; a defaulted origin would analyze another wave's access."""
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="origin"):
         lc.analyze_read(_a_descs(), tile_free=TILE_FREE, arch=lc.GFX90A, operand_label="A",
-                        strides=(TILE_FREE, 1), dtype_name="f16", lds_swizzle=False)
+                        strides=(TILE_FREE, 1), dtype_name="f16", lds_swizzle=False,
+                        dwords_per_lane=2)
 
 
 def test_analyze_read_full_stops_on_an_arch_with_no_model():
@@ -318,9 +321,12 @@ def test_read_datum_models_the_MERGED_instruction_not_the_declared_vw():
 
 
 def test_out_of_envelope_refuses_a_number_rather_than_extrapolating():
-    """The read model is validated ONLY at 2 dwords/lane. A 4-dword access must be REFUSED, not
-    priced with the 2-dword rule. The assertion is unconditional on purpose: guarding it with
-    `if not r.in_envelope` would let it pass for free the moment the gate stops firing."""
+    """The read model is validated ONLY at 2 dwords/lane, so a caller declaring any other width must
+    be REFUSED rather than priced with the 2-dword rule. NOTE the width is an ISA property that is NOT
+    derivable from the address map (a lane with 8 contiguous dwords still issues 4 x ds_read2_b32), so
+    it is a caller assertion -- this pins the refusal, not a detection. The assertion is unconditional
+    on purpose: guarding it with `if not r.in_envelope` would let it pass the moment the gate stops
+    firing."""
     lc.register_read_model("gfx90a")
     descs = lc.ProbeDescs.from_coop(_macro_coop_descs_crc(256, 32, 16),
                                     _wave_descs_interleaved(4, 4, 2)[0], transpose=_transpose_desc)
@@ -343,3 +349,178 @@ def test_dwords_per_lane_is_required_and_checked_against_the_map():
     with pytest.raises(ValueError, match="not a whole number"):
         lc.analyze_read(descs, tile_free=256, arch=lc.GFX90A, operand_label="A", strides=(264, 1),
                         dtype_name="f16", origin=(0, 0), lds_swizzle=False, dwords_per_lane=3)
+
+
+# --------------------------------------------------------------------------------------------------
+# The machinery that decides whether the model is APPLIED AT ALL. Mutation testing found these
+# unpinned: deleting the import-time registration, or the registration gate, left the suite green.
+# --------------------------------------------------------------------------------------------------
+def test_gfx90a_read_model_is_registered_at_import():
+    """The headline behaviour: callers get COST without opting in.
+
+    This MUST run in a fresh interpreter. Asserting on the in-process module is vacuous, because
+    sibling tests call `register_read_model` themselves -- so the state under test is repaired by
+    whoever ran first, and deleting the module-scope registration leaves the suite green."""
+    import subprocess
+    import sys
+    probe = (
+        "from rocke.helpers.tiling import lds_conflict as lc;"
+        "assert lc.READ_MODEL_REGISTRATION_ERROR is None, lc.READ_MODEL_REGISTRATION_ERROR;"
+        "assert 'gfx90a' in lc._READ_MODELS, 'read model NOT registered at import';"
+        "print('ok')"
+    )
+    r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert r.returncode == 0, f"fresh import did not register the read model:\n{r.stderr}"
+
+
+def test_a_corpus_regression_does_not_break_the_module_import():
+    """Registration failure must NOT raise at import: this module is imported by the recorder, the
+    pipeline renderer and layout_optimizer, none of which touch the read port. An unimportable module
+    is a worse failure than an unpriced read, so the error is recorded in a sentinel instead."""
+    import importlib
+    corpus = lc._VALIDATION_CORPUS["gfx90a"]
+    saved = list(corpus["read_hists"])
+    try:
+        corpus["read_hists"] = []                      # the regression
+        with pytest.raises(lc.ConflictModelError, match="NO read corpus"):
+            lc.register_read_model("gfx90a")
+        # A failed RE-registration must RESTORE the model that was already validated, not destroy it.
+        assert "gfx90a" in lc._READ_MODELS, "a failed re-registration wiped a working model"
+    finally:
+        corpus["read_hists"] = saved
+        importlib.reload(lc)                            # restore module state for later tests
+
+
+def test_register_read_model_refuses_an_arch_with_no_corpus():
+    """gfx942 has no LDS model at all, so `arch_lds` refuses first with ValueError -- an earlier and
+    stricter stop than the read-corpus check. Either way registration must not stick."""
+    with pytest.raises(ValueError, match="no validated LDS model"):
+        lc.register_read_model("gfx942")
+    assert "gfx942" not in lc._READ_MODELS
+
+
+# --------------------------------------------------------------------------------------------------
+# Probe guardrails. These need NO GPU -- they are build-time refusals -- and the device buffer
+# overrun that motivated this work would have been caught by the first one in 0.1s.
+# --------------------------------------------------------------------------------------------------
+def _probe_descs(tf, tk, nw, m_sub=4, k_sub=2):
+    return lc.ProbeDescs.from_coop(_macro_coop_descs_crc(tf, tk, nw),
+                                   _wave_descs_interleaved(m_sub, m_sub, k_sub)[0],
+                                   transpose=_transpose_desc)
+
+
+def _build(descs, mode, tf, tk, nw, wf):
+    from rocke.core.ir import F16
+    return lc.build_probe(descs, mode, tile_free=tf, tile_k=tk, n_waves=nw, warp_free=wf,
+                          lds_pad=0, lds_swizzle=False, dtype=F16, wave_size=lc.GFX90A.WAVE)
+
+
+def test_read_probe_refuses_the_geometry_that_overran_the_device_buffer():
+    """tile_k=16 with a k_sub=2 read descriptor: the fragment addresses 32 rows of a 16-row window.
+    This ran on real hardware before the guard existed."""
+    with pytest.raises(ValueError, match="OVERRUN"):
+        _build(_probe_descs(128, 16, 8), "read", 128, 16, 8, 64)
+
+
+def test_probe_guard_catches_compensating_per_axis_errors():
+    """A product check (rows*cols == elems) passes when two axes are wrong in opposite directions.
+    The guard is per-axis for exactly this reason."""
+    with pytest.raises(ValueError, match="addresses"):
+        _build(_probe_descs(256, 16, 16), "read", 256, 16, 16, 128)
+
+
+def test_probe_builds_at_a_matched_geometry():
+    """Guard must not be a blanket refusal -- the measured geometry still builds."""
+    assert _build(_probe_descs(256, 32, 16), "read", 256, 32, 16, 64) is not None
+    assert _build(_probe_descs(256, 32, 16), "store", 256, 32, 16, 64) is not None
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 2.0, "2"])
+def test_dwords_per_lane_rejects_non_positive_ints(bad):
+    """Without the type guard, 0 raises ZeroDivisionError from deep inside instead of saying why."""
+    with pytest.raises(ValueError, match="positive int"):
+        lc.analyze_read(_read_descs(2), tile_free=256, arch=lc.GFX90A, operand_label="A",
+                        strides=(264, 1), dtype_name="f16", origin=(0, 0), lds_swizzle=False,
+                        dwords_per_lane=bad)
+
+
+def test_a_failed_FIRST_registration_does_not_stick():
+    """The mirror of the restore case: if the arch was not registered before, a failed attempt must
+    leave it unregistered rather than half-on."""
+    corpus = lc._VALIDATION_CORPUS["gfx90a"]
+    saved_rows, saved_model = list(corpus["read_hists"]), lc._READ_MODELS.pop("gfx90a", None)
+    try:
+        corpus["read_hists"] = []
+        with pytest.raises(lc.ConflictModelError):
+            lc.register_read_model("gfx90a")
+        assert "gfx90a" not in lc._READ_MODELS
+    finally:
+        corpus["read_hists"] = saved_rows
+        if saved_model is not None:
+            lc._READ_MODELS["gfx90a"] = saved_model
+
+
+def test_register_arch_does_not_wipe_an_existing_read_corpus():
+    """register_arch used to rewrite the corpus entry wholesale, silently deleting read_hists /
+    read_provenance measured separately."""
+    before = len(lc._VALIDATION_CORPUS["gfx90a"]["read_hists"])
+    saved = dict(lc._VALIDATION_CORPUS["gfx90a"])
+    try:
+        lc.register_arch(lc.GFX90A, saved["hists"], saved["pad_sweep"])
+        assert len(lc._VALIDATION_CORPUS["gfx90a"]["read_hists"]) == before
+        assert "read_provenance" in lc._VALIDATION_CORPUS["gfx90a"]
+    finally:
+        lc._VALIDATION_CORPUS["gfx90a"] = saved
+
+
+def test_broadcast_is_detected_and_pushes_the_read_out_of_envelope():
+    """The broadcast arm of the envelope gate was completely untested -- two mutants (disabling the
+    detection, and removing the arm) both survived. No shipped descriptor broadcasts, so drive it
+    through the same code path with a datum that does."""
+    import types
+    real = lc.read_datum
+
+    def broadcasting(*a, **k):
+        acc, vw, datum = real(*a, **k)
+        # put two lanes of half-wave 0 on the SAME dword at phase 0 -> a broadcast, not a conflict
+        if (0, 0) in datum and (1, 0) in datum:
+            datum[(1, 0)] = datum[(0, 0)]
+        return acc, vw, datum
+
+    lc.read_datum = broadcasting
+    try:
+        r = lc.analyze_read(_read_descs(2), tile_free=256, arch=lc.GFX90A, operand_label="A",
+                            strides=(264, 1), dtype_name="f16", origin=(0, 0), lds_swizzle=False,
+                            dwords_per_lane=2)
+        assert not r.in_envelope, "a broadcasting read must not be priced"
+        assert "broadcast" in r.out_of_envelope_reason
+        assert r.sim is None
+        with pytest.raises(lc.ConflictModelError):
+            _ = r.conflicts_per_access
+    finally:
+        lc.read_datum = real
+
+
+@pytest.mark.parametrize("rows,expect", [
+    ([("d1", {1: 32}, 2, 128, 4, 0), ("d2", {2: 16}, 2, 128, 8, 4),
+      ("d2b", {2: 20}, 2, 128, 8, 4), ("d4", {4: 8}, 2, 128, 16, 12),
+      ("d8", {8: 4}, 2, 128, 32, 28)], "discriminate"),
+    ([("d2", {2: 16}, 2, 128, 8, 4), ("d2nu", {1: 16, 2: 8}, 2, 128, 8, 4),
+      ("d4", {4: 8}, 2, 128, 16, 12), ("d8", {8: 4}, 2, 128, 32, 28)], "depth==1"),
+    ([("d1", {1: 32}, 2, 128, 4, 0), ("d2nu", {1: 16, 2: 8}, 2, 128, 8, 4)], "distinct max_depth"),
+    ([("d1", {1: 32}, 2, 128, 4, 0), ("d2", {2: 16}, 2, 128, 8, 4),
+      ("d2nu", {1: 16, 2: 8}, 2, 128, 8, 4), ("d4", {4: 8}, 2, 128, 16, 12),
+      ("d8p4", {8: 4}, 4, 128, 32, 28)], "n_phases"),
+])
+def test_each_structural_minimum_is_separately_enforced(rows, expect, capsys):
+    """Asserting only `not selftest(...)` lets the four minima mask each other -- three could be
+    deleted and the test would stay green. Pin WHICH check fires for each corpus."""
+    corpus = lc._VALIDATION_CORPUS["gfx90a"]
+    saved = list(corpus["read_hists"])
+    try:
+        corpus["read_hists"] = rows
+        assert not lc.selftest(lc.GFX90A, verbose=True)
+        out = capsys.readouterr().out
+        assert expect in out, f"expected the {expect!r} minimum to fire; got:\n{out}"
+    finally:
+        corpus["read_hists"] = saved

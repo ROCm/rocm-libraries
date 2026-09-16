@@ -44,14 +44,15 @@ LDS bank conflicts are an **empirically verifiable statistic**. Do NOT state a c
   target the **same bank at different addresses**, the bank can serve only one/cycle → the instruction
   **replays** the extra ones. Each replay is one extra cycle. `SQ_LDS_BANK_CONFLICT` counts replay cycles.
   - *N-way conflict* = N distinct addresses stacked on one bank in one served group/phase = N cycles (N−1
-    replays). **This naive per-address replay rule is the READ-side model — now confirmed on gfx90a,
+    replays). **This naive per-address replay rule is the READ-side model — confirmed on gfx90a
+    within a gated envelope (§1.5),
     with one addition §1 alone does not give you: the dword-phases of a read instruction SERIALIZE
     (SUM), where a write instruction's phases PIPELINE (MAX). See §1.5. For WRITES the rule also
     OVER-COUNTS (~8–9× on K-aliased coop stores) — the write port has a different serialization; §1.4.**
   - **Same-address** in a group is a **broadcast** (free) — a *separate* pathology counted by
     `SQ_LDS_ADDR_CONFLICT`, not bank conflict. Report it separately (it should be ~0 in a pure bank study).
 
-### 1.4 The CDNA2 LDS **write-port** rule (validated gfx90a MI210, `tmp/lds_sim.py`)
+### 1.4 The CDNA2 LDS **write-port** rule (validated gfx90a MI210, `lds_conflict.simulate_hist` + `_VALIDATION_CORPUS`)
 The write datapath is NOT the naive `Σ_bank (distinct − 1)` replay counter (that over-counts stores ~8–9×).
 It has **two hardware constants**, both confirmed by the fit being integer-exact on all measured store
 configs **and** by independently reproducing the measured `productive` (= footprint/NB) it was not fit to:
@@ -81,18 +82,21 @@ pad+32 f16 gives stride 144 dwords, `s=16=1×16` → BC=0. `s=0` (any bank-multi
 worst case. **A `b32` narrowing swizzle does NOT fix a b128 store** — measured `conflicts/access = 3.00`
 (worse, 4× the LDS instructions): HW is the arbiter, and padding to the odd-half-stripe is the cheap fix.
 
-### 1.5 The CDNA2 LDS **read-port** rule (validated gfx90a MI210, `lds_conflict.read_hists`)
+### 1.5 The CDNA2 LDS **read-port** rule (validated gfx90a MI210, `lds_conflict._VALIDATION_CORPUS["gfx90a"]["read_hists"]`)
 
 ```
 served_read(half_wave, phase) = max_bank_depth(half_wave, phase)   # NO port cap, NO combine
 IDX_read   = SUM over half_waves SUM over phases  served_read      # read phases SERIALIZE
-productive = ceil(distinct_dwords_in_instruction / NB)             # same as writes
-BC         = IDX − productive        =>   conflicts/access = max_depth − 1
+productive = ceil(distinct_dwords_in_instruction / NB)             # carried over from writes
+BC         = IDX − productive
+                     =>  conflicts/access = max_depth − 1   [in-envelope COROLLARY, not the rule]
 ```
 
-**ZERO free constants.** A general `min(banks,P)·depth/min(banks,C)` must satisfy `min(b,P) = min(b,C)`
-at b = 4, 8, 16, 32, so the terms cancel identically: `PORT_BANKS`/`COMBINE` are **not features of the
-read path**. The two ports differ in BOTH the per-group cost function AND the phase rule — writes cap
+**No fitted PORT constants.** A general `min(banks,P)·depth/min(banks,C)` must satisfy
+`min(b,P) = min(b,C)` at b = 4, 8, 16, 32, so the terms cancel identically: `PORT_BANKS`/`COMBINE` are
+**not features of the read path**. This is narrower than "zero constants": the **served-group size**
+multiplies `IDX` directly and this corpus does not measure it — 8 and 16 are ruled out, 32 and 64 both
+fit, and 32 is retained by convention from §1.2. The two ports differ in BOTH the per-group cost function AND the phase rule — writes cap
 at an 8-bank stripe and pipeline their phases; reads serve all banks in parallel and serialize theirs.
 At depth 2 the two rules are numerically identical, which is why a single histogram point cannot
 separate them; the depth-8 row is what decides it.
@@ -102,6 +106,25 @@ separate them; the depth-8 row is what decides it.
 depth 2.00 → 1.14) while the measured cost stays CONSTANT at 8 IDX / 4 BC per instruction. That
 refutes every rule reading `banks_used` or the depth *distribution* — accesses-per-bank, mean depth,
 and bandwidth terms alike. Only `max_depth` holds still, and the cost holds still with it.
+
+**The `max_depth − 1` identity is a COROLLARY, not the rule.** The rule is `BC/productive`. The
+identity holds only when the number of served groups equals `productive` — a full wave, every lane on a
+distinct dword, `HALF == NB`. A partially-active or dword-reusing read gives a different number; the
+code reports `BC/productive` in every case.
+
+**LIMITATION — `productive` is unvalidated for reads.** Every read corpus row has
+`footprint_dwords = 128`, so `productive = 4` throughout and a constant 4 fits identically. Since
+`conflicts/access = BC/productive`, the denominator of the headline result is measured at exactly one
+value; the `ceil(distinct/NB)` form is carried over from the write side, not established here. Closing
+it needs one read row at a different footprint.
+
+**LIMITATION (write side, surfaced by this work) — §1.4 is wrong for odd-dword row strides.** The read
+corpus's n=0 intercepts at pads 2 and 6 measure IDX/BC = 64/0 where the write model predicts 16/12 and
+8/4. Cause: the LDS row stride is ≡ 4 (mod 8) bytes, so odd K rows are 4-mod-8 and the hardware
+**splits** the `ds_write_b64` — which `simulate` does not model. The write `pad_sweep` corpus only ever
+tested pads ≡ 0 (mod 8), so this was invisible. Blast radius is small because `recommend_pad`'s
+alignment never *recommends* such a pad, but a hand-passed odd-dword pad is priced wrongly under a
+VALIDATED-looking verdict.
 
 **Conflict-free CONDITION for reads:** BC = 0 iff every served group is a full NB-bank permutation —
 `max_depth = 1` **and** all NB banks used (§2). `max_depth = 1` on fewer than NB banks is not free: it
@@ -114,8 +137,10 @@ retained per §1.2.
 
 **Measured corpus:** depth ladder 1/2/4/8 (m_sub 2/4/8/16) plus four depth-2 rows at banks_used
 16/20/24/28. Isolated by the **n_reads slope** design (N live barrier-separated reads to distinct
-outputs; `(n=2)−(n=1)` cancels the coop store), so no store model is appealed to — and the n=0
-intercept independently reproduces the §1.4 write model. `selftest` enforces the structural minima
+outputs; `(n=2)−(n=1)` cancels the coop store), so no store model is appealed to. At the three
+**8-byte-aligned** pads (0, 4, 8) the n=0 intercept independently reproduces the §1.4 write model
+(16/12, 16/12, 8/4) — a real cross-check, though a manual one that no committed code performs. It does
+NOT hold at pads 2 and 6; see the write-side limitation below. `selftest` enforces the structural minima
 that make MAX a measurement: ≥4 distinct depths, a depth-1 floor row, and ≥2 rows sharing a depth
 while differing in `banks_used`.
 

@@ -46,6 +46,15 @@ reproduces it, and name the cheapest fix. Every number you bless is backed by ma
 
 ### The bank model — state it, then VALIDATE per arch (full model: `lds_banks.md`)
 
+**The two ports are DIFFERENT and you own both.** Writes: an 8-bank stripe cap + write-combine, phases
+PIPELINE (MAX) -- `lds_banks.md` §1.4. Reads: no port cap, no combine, phases SERIALIZE (SUM), so
+`served = max_bank_depth` per served group and `conflicts/access = BC/productive` (which reduces to
+`max_depth - 1` only for a full-wave, distinct-dword access) -- §1.5. Never price a read with the write
+constants. The read model is **gfx90a only** and **envelope-gated**: 2 dwords/lane (`ds_read2_b32`), no
+broadcast, uniform per-instruction depth. Outside that, `analyze_read` reports GEOMETRY and refuses a
+cost -- back it, do not argue past it.
+
+
 Two things you must operate; everything else (conflict-free ⇔ per-phase permutation, the contiguity floor +
 width ladder, order-independence, the served-group sizing, arch variants, the modeling trap) is in `lds_banks.md`:
 
@@ -72,7 +81,7 @@ width ladder, order-independence, the served-group sizing, arch variants, the mo
 
 - **Isolate the access** — aggregate counters mix A-store/A-read/B/C and gfx90a has no read/write-split
   counter. Build a micro-kernel doing ONLY that access with the kernel's EXACT descriptor (store-mirror to keep
-  stores live; read-only = store-once/loop-reads). Every probe **bit-exact**.
+  stores live; read-only = store-once + n_reads live reads, measured as the (n=2)-(n=1) slope). Every probe **bit-exact**.
 - **The pad/swizzle sweep is the control** proving the counter is live and the conflict fixable: vary
   `lds_pad`/swizzle (keep b128 alignment); BC moves → real; a pad drives BC→0 → that layout was conflicted.
   Nothing moves BC → question the measurement.

@@ -298,7 +298,8 @@ The report is the primary user-facing output; Iterate updates sections in place 
 ```
 ## Tiling-API Kernel Design — <kernel>
 
-- arm/phase: <NEW|EXISTING / Design&Emit|Iterate N|Finish> ; goal: <...> ; arch+wave: <...>
+- arm/phase: <NEW: Frame | Design&Emit | Iterate N | Finish   /   EXISTING: Recover | Iterate N | Finish>
+             goal: <...> ; arch+wave: <...>
 - inputs: GIVEN <...> | ASSUMED-confirmed <...> | DERIVED by <expert> <...> | OPEN <...>
 - validation: rungs 1-4 <witness mem n/n mma n/n · round-trip halves per space · soundness n/n ·
               arith+budget pass/fail>   (empty/zero = NOT RUN, not pass)
@@ -346,3 +347,10 @@ Appended in Finish: `### Kernel` (bit-exact yes/skipped) · `### Learnings persi
   store-friendly order; may use its own LDS space.
 - **Rs/Hs/Ps/Ys** — the encoding factorisation of a tile distribution.
 - **L0/L1/L2/L3** — `/layout-viz` levels: overview · flows · analyses (coalescing, bank-conflict) · single panels.
+- **BC** — `SQ_LDS_BANK_CONFLICT`, the hardware counter of LDS replay cycles. A diagnostic, never the objective.
+- **NB** — number of LDS banks on the target (32 on CDNA). `bank(dword d) = d mod NB`.
+- **vw / access width (`b32`/`b64`/`b128`)** — how many bits one lane moves per memory instruction:
+  b32 = 1 dword, b64 = 2, b128 = 4. Wider is fewer instructions but a coarser bank pattern.
+- **wtag** — the access-width tag (`"b64"`, `"b128"`) a bank-conflict config carries.
+- **coalescing** — whether the lanes of one instruction hit a contiguous global range, so the memory
+  system serves them in as few transactions as possible.
