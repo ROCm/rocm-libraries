@@ -166,8 +166,9 @@ __host__ __device__ inline I get_tmpz_size(const I n)
     // 7    S cd[n];             // sorted and compacted d values
     // 8    S cz[n];             // sorted and compacted z values
     // 9    S r1p[n];            // p component of the rank-1 modification
+    // 10   S rescale[n];        // factor undoing the normalization (only [0] used)
     // };
-    return 10 * n;
+    return 11 * n;
 }
 
 template <typename S, typename I>
@@ -220,6 +221,11 @@ __host__ __device__ inline S* ptr_r1p(I n, S* tmpz)
 {
     return tmpz + 9 * n;
 }
+template <typename S, typename I>
+__host__ __device__ inline S* ptr_rescale(I n, S* tmpz)
+{
+    return tmpz + 10 * n;
+}
 
 template <typename I>
 __host__ __device__ inline I get_tempgemm_size(const I n)
@@ -261,7 +267,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_divide_kernel(const I 
                                                                         S* EE,
                                                                         const rocblas_stride strideE,
                                                                         const I batch_count,
-                                                                        I* splitsA)
+                                                                        I* splitsA,
+                                                                        S* tmpzA)
 {
     // threads and groups indices
     I bid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -277,6 +284,20 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_divide_kernel(const I 
         I* splits = splitsA + bid * get_splits_size(n);
         I* msz = ptr_msz(n, splits);
         I* mps = ptr_mps(n, splits);
+        S* rescale = ptr_rescale(n, tmpzA + bid * get_tmpz_size(n));
+
+        // Normalize before dividing, as LAPACK SSTEDC does via ORGNRM; the merge
+        // phase is not scale invariant without it. A power of two keeps the
+        // scaling and its inverse exact.
+        rescale[0] = 1;
+        S anorm = find_max_tridiag(I(0), n - 1, D, E);
+        if(anorm > 0)
+        {
+            int expo;
+            std::frexp(anorm, &expo);
+            rescale[0] = std::ldexp(S(1), expo);
+            scale_tridiag(I(0), n - 1, D, E, std::ldexp(S(1), -expo));
+        }
 
         // find sizes of sub-blocks
         msz[0] = n;
@@ -304,6 +325,23 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_divide_kernel(const I 
             D[p2 - 1] -= p;
         }
     }
+}
+
+//--------------------------------------------------------------------------------------//
+/** STEDC_RESCALE_KERNEL undoes the normalization applied by STEDC_DIVIDE_KERNEL.
+    Only the eigenvalues need it; eigenvectors are scale invariant.
+        - Call this kernel with batch_count groups in y. Groups are size STEDC_BDIM **/
+template <typename S, typename I>
+ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
+    stedc_rescale_kernel(const I n, S* DD, const rocblas_stride strideD, S* tmpzA)
+{
+    I bid = hipBlockIdx_y;
+
+    S* D = DD + bid * strideD;
+    S scale = ptr_rescale(n, tmpzA + bid * get_tmpz_size(n))[0];
+
+    for(I i = hipThreadIdx_x; i < n; i += hipBlockDim_x)
+        D[i] *= scale;
 }
 
 //--------------------------------------------------------------------------------------//
@@ -2010,7 +2048,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         I groups = (batch_count - 1) / STEDC_BDIM + 1;
         ROCSOLVER_LAUNCH_KERNEL((stedc_divide_kernel<S>), dim3(groups), dim3(STEDC_BDIM), (I)0,
                                 stream, levs, blks, n, D + shiftD, strideD, E + shiftE, strideE,
-                                batch_count, splits);
+                                batch_count, splits, tmpz);
 
         // 2. solve phase
         //-----------------------------
@@ -2155,6 +2193,12 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     dim3(STEDC_BDIM), 0, stream, k, n, D + shiftD, strideD, V, 0,
                                     ldv, strideV, tmpz, tempgemm, splits);
         }
+
+        // 3b. undo normalization
+        //-----------------------
+        // Before the sort, which reuses tmpz as a flat buffer.
+        ROCSOLVER_LAUNCH_KERNEL((stedc_rescale_kernel<S>), dim3(1, batch_count), dim3(STEDC_BDIM),
+                                (I)0, stream, n, D + shiftD, strideD, tmpz);
 
         // 4. update and sort
         //----------------------
