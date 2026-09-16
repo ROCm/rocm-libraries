@@ -103,7 +103,8 @@ Completion requires all of:
 
 - A written operation specification derived from frontend attributes and the
   matched `*_attributes.fbs`, with every schema field consumed, explicitly rejected,
-  or proven inert; and every tensor UID classified input, output, or virtual.
+  or proven inert — per enumerator where the field is an enum — and every tensor UID
+  classified input, output, or virtual.
 - HIP source that compiles through hipRTC for each target architecture, with the
   exact compile options used, and the entry-point signature stated verbatim.
 - A named decomposition: one kernel, a legal fusion, or — only when the ABI is unbound —
@@ -112,7 +113,10 @@ Completion requires all of:
   are on the wrong branch, not a plan.
 - Reference-vs-kernel numerics from a run that actually executed both sides on
   byte-identical inputs, with per-output tolerance and its provenance, on named
-  shapes, on a named device.
+  shapes, on a named device — and the coverage run reported against the coverage
+  claimed: each boundary case, dtype and architecture in the claimed envelope either
+  run and passed, or named NOT RUN. An unreported gap is the failure; a reported one
+  is a limitation.
 - An explicit does-not-prove list: untested shapes, untested dtypes, untested
   architectures, reference features that declined, and any performance silence.
 

@@ -54,20 +54,47 @@ production set, in order:
 3. `-D` pairs only.
 
 The defines always present — **every one of them is emitted unconditionally, with a
-value of `1` or `0`**, by `KernelCompileOptions::addDataTypeAndLayoutOptions`:
-`HIP_PLUGIN_USE_FP32` / `FP16` / `BFP16` (`:73`, `:75`, `:77` — all three are always
+value of `1` or `0`**, by `KernelCompileOptions`'s `addDataTypeAndLayoutOptions`
+(`dnn-providers/hip-kernel-provider/src/compilation/KernelCompileOptions.hpp:113-130`):
+`HIP_PLUGIN_USE_FP32` / `FP16` / `BFP16` (`:119`, `:121`, `:123` — all three are always
 defined; exactly one is set to `1` for the tensor dtype and the other two to `0`),
 `HIP_PLUGIN_USE_RNE_BFLOAT16=1`, `HIP_PLUGIN_USE_FPMIX=0`, `HIP_PLUGIN_USE_BFPMIX=0`,
-`HIP_PLUGIN_LAYOUT_NHWC` (`:82`), `HIP_PLUGIN_USE_AMDGCN=0`, and the
-`HIP_PLUGIN_GFX103X` / `110X` / `115X` / `120X` prefix flags (`:89`). Callers add their
-own with `.add(name, value)`.
+`HIP_PLUGIN_LAYOUT_NHWC` (`:128`), `HIP_PLUGIN_USE_AMDGCN=0`, and the
+`HIP_PLUGIN_GFX103X` / `110X` / `115X` / `120X` prefix flags (`addArchName`, `:132-145`).
+Callers add their own with `.add(name, value)`.
 
 **Select on these with `#if`, never `#ifdef`.** Because the name is always defined,
 `#ifdef HIP_PLUGIN_USE_FP16` is **always true** and will compile the wrong dtype path
 with no diagnostic from hipRTC, the loader or the harness. Write
 `#if HIP_PLUGIN_USE_FP16` / `#elif HIP_PLUGIN_USE_BFP16` / `#else`. The same applies to
 `HIP_PLUGIN_LAYOUT_NHWC` and every prefix flag: `add(name, bool)`
-(`KernelCompileOptions.hpp:39`) renders a bool as `1`/`0`, not as presence/absence.
+(`:85-88`) renders a bool as `1`/`0`, not as presence/absence.
+
+**`HIP_PLUGIN_LAYOUT_NHWC` is the provider's assumption about the tensor, not the
+graph's statement about it.** It is one bool derived from the input tensor at compile
+time (`isChannelLastLayout`, `:117`, `:128`) and it is bound on every compile, so the
+`#ifndef` / `#error` discipline below cannot catch a kernel that branches on it: the
+token is always there and always means something. A kernel that selects its indexing
+with `#if HIP_PLUGIN_LAYOUT_NHWC` is therefore silently wrong for every NCHW graph that
+happens to be compiled with it set — and equally wrong the other way. Layout is not an
+enum in the schema; it exists only as the stride pattern, and the kernel must derive it
+from the graph's strides ([graph-analysis.md](graph-analysis.md)). Treat this macro as
+context about the caller, never as the layout.
+
+**There is no CDNA architecture macro in this set.** `addArchName` emits
+`HIP_PLUGIN_GFX103X`, `GFX110X`, `GFX120X` and `GFX115X` and nothing else (`:132-145`) —
+every one an RDNA family, every one therefore `0` on `gfx942` and `gfx950`. An author
+targeting CDNA has no provider macro to select on, and `#if HIP_PLUGIN_GFX103X` chains
+do not become a CDNA branch by elimination. What exists instead is the
+compiler-predefined architecture macro: the in-tree precedent is
+`#if defined(__gfx942__)`
+(`dnn-providers/hip-kernel-provider/src/engines/hip_flash2_engine/HipFlash2FwdPlan.hip:59`,
+`HipFlash2FwdPlanVariant.hip:86`). Both sites are AOT `hipcc` code objects, so — as with
+the MFMA builtins above — this tree establishes the form, not its availability under
+hipRTC. If the kernel needs to branch on the architecture, prove the macro on the
+target with the trivial per-`$ARCH` hipRTC compile the step-2 driver already runs, and
+report that proof. Either way, state in the handover which architecture tokens the
+source expects.
 
 **No optimization level, no fast-math and no warning flags are added by the
 production path.** `-O3` appears only in ad hoc test fixtures and in the AOT `hipcc`
@@ -108,6 +135,16 @@ hipconfig --version
 "$ARCH" --sweep-root <existing-writable-dir>` confirms the requested architecture
 string is present and a scratch root is writable. It is a feasibility gate; it
 reports no capability numbers.
+
+Read its exit code as three distinct answers, because it is written to keep them
+distinct: `0` observed; `1` a utility ran and contradicted the request — the
+architecture is not here; `3` **unobserved** — `ProbeUnavailable`, no inspection
+utility could be run at all
+(`projects/hipdnn/tools/IngestorGenerator/tools/device_probe.py:23-33`, `:122-130`).
+Exit 3 is a statement about the tooling, not about the host: *"a tool that cannot run
+has not reported a negative."* It is an acceptable outcome, carried forward as a
+stated limitation — see the RUNBOOK's step-5 gate — and the facts then come from the
+published specification table ([prior-art.md](prior-art.md)), declared as such.
 
 ## Authoring for an architecture you do not have
 
