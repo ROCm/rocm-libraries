@@ -186,6 +186,9 @@ struct Arguments
     int32_t                  bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
+    // hipblasLtInt4Encoding_t for the w4a16 path; ignored unless scaleA is a
+    // w4a16 group-scale mode.
+    int32_t                  int4_encoding;
     bool                     scaleC;
     bool                     scaleD;
     bool                     scaleE;
@@ -311,6 +314,7 @@ struct Arguments
     OPER(bias_stride) SEP            \
     OPER(scaleA) SEP                 \
     OPER(scaleB) SEP                 \
+    OPER(int4_encoding) SEP          \
     OPER(scaleC) SEP                 \
     OPER(scaleD) SEP                 \
     OPER(scaleE) SEP                 \

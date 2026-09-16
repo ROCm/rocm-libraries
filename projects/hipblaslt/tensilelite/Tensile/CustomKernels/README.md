@@ -19,3 +19,24 @@ Tensile/bin/TensileLogic --check-only-custom-kernels <path to logic file>
 
 where `<path to logic file>` is a path to a logic file containing a solution where
 `CustomKernelName` references the custom kernel requiring validation.
+
+# `Custom_Cijk_Alik_Bljk_I4*_SABB*` (w4a16, gfx1151)
+
+The ten `..._I4B_...` / `..._I4H_...` kernels are the w4a16 prototype: int4
+weights in A, bf16 or fp16 activations in B, and one 16-bit scale (optionally
+plus a packed int4 zero-point) per K group of a row of A. They are referenced
+from `library/.../Logic/asm_full/gfx1151/FreeSize/gfx1151_Cijk_Alik_Bljk_I4*.yaml`
+and are the only way to reach that path: the in-kernel dequantize is not part of
+TensileLite's code generator, so these are checked in as assembly rather than
+generated at build time.
+
+The name encodes the configuration: `SABB<G><scale type>[ZP][U8|U8X]`, where `G`
+is the K-group size, the scale type is `B` (bf16) or `H` (fp16), `ZP` marks the
+asymmetric variants, and `U8`/`U8X` mark the `UnsignedBias8` and
+`UnsignedBias8ExLlama` weight encodings (no suffix = `Signed`).
+
+Each `.s` overrides `LocalReadVectorWidth{A,B}` back to `-1` in its
+`custom.config`. Every reader of a solution state re-runs
+`assignDerivedParameters`, and `calLRVW` only tolerates
+`LocalReadVectorWidthA < MIInputPerThread` on the auto path; fed back its own
+derived value it rejects the solution.

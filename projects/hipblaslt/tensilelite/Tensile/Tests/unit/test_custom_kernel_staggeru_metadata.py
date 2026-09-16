@@ -471,17 +471,32 @@ def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
     assert unreachable is None, unreachable
 
 
-# Kernels that declare StaggerU: 0 and stagger anyway: their assembly was
-# generated with staggering enabled and the declaration edited down afterwards.
-# Each is safe only because it also inherits SupportCustomStaggerU: True and does
-# unpack the runtime argument.  Pinned so a new one has to be looked at by a
-# human rather than joining the exception quietly.
+# Kernels that declare StaggerU: 0 and contain a wrap site anyway.  Each is safe
+# only because it also inherits SupportCustomStaggerU: True and does unpack the
+# runtime argument, so what it actually staggers by is whatever the host packs --
+# zero, for a solution declaring zero.  Pinned so a new one has to be looked at
+# by a human rather than joining the exception quietly.
+#
+# The four gfx950 entries got there by editing a staggering kernel's declaration
+# down afterwards.  The ten gfx1151 w4a16 entries did not: they were generated
+# with StaggerU 0, and the wrap site is present only because
+# SupportCustomStaggerU emits the runtime path unconditionally.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Ailk_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Alik_Bljk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
         "Custom_Cijk_Alik_Bljk_BBS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname1_gfx950",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64ZP_UserArgs_MT64x64x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZP_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
     }
 )
 
@@ -489,7 +504,7 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # adding or retuning a custom kernel forces the reconciliation to be redone
 # rather than shifting the ground truth underneath the gate.
 EXPECTED_CENSUS = {
-    "kernels": 119,
+    "kernels": 129,
     # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
     "declaredNonZero": 28,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
@@ -497,7 +512,9 @@ EXPECTED_CENSUS = {
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
     "declaredNonZeroReadingPackedArgument": 4,
-    "declaredZero": 60,
+    # 60, plus the ten gfx1151 w4a16 kernels: their solutions set StaggerU 0,
+    # so they declare it rather than inheriting the default of 32.
+    "declaredZero": 70,
     # No StaggerU key at all, so they inherit the default of 32.
     "undeclared": 31,
 }

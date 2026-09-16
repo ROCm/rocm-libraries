@@ -152,6 +152,9 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
     case static_cast<hipDataType>(HIP_R_8F_E5M3_EXT):
 #pragma GCC diagnostic pop
         return "e5m3_r";
+    // w4a16 weights: signed int4, two elements per byte.
+    case HIP_R_4I:
+        return "i4_r";
     default:
         return "non-supported type";
     }
@@ -228,6 +231,7 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
         value == "bf8_r"                 ? HIP_R_8F_E5M2 :
         value == "e8_r"                  ? HIP_R_8F_UE8M0 :
         value == "e5m3_r"                ? static_cast<hipDataType>(HIP_R_8F_E5M3_EXT) :
+        value == "i4_r"                  ? HIP_R_4I :
         HIPBLASLT_DATATYPE_INVALID;
 }
 

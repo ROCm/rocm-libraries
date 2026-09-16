@@ -249,7 +249,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
-    problem.streamKFlags = streamKFlags;
+    problem.streamKFlags  = streamKFlags;
+    problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
@@ -447,6 +448,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         matmul_descr->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr, nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr)};
+    problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -750,6 +752,7 @@ rocblaslt_status
                                         matmul_descr[i]->streamk_tile_scheduling_ext,
                                         effective_sm_count_target(handle, matmul_descr[i], nullptr),
                                         effective_uniform_summation_order(handle, matmul_descr[i])});
+        problems.back().int4EncodingA = matmul_descr[i]->int4_encoding_a_ext;
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

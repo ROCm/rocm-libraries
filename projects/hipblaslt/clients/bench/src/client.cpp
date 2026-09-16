@@ -588,7 +588,16 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8. "
+         "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
+         "1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, 1010 = VEC64_ZP, "
+         "1011 = VEC128_ZP. The scale element type is --b_type.")
+
+        ("int4_encoding",
+         value<int32_t>(&arg.int4_encoding)->default_value(0),
+         "w4a16 only: encoding of the int4 weights in A (hipblasLtInt4Encoding_t). "
+         "0 = signed two's complement, 1 = unsigned with an implicit zero-point of 8 (GPTQ), "
+         "2 = as 1 with the ExLlama [0,2,4,6,1,3,5,7] dword shuffle.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
@@ -1144,6 +1153,9 @@ try
             return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
+        if(s >= 1006 && s <= 1011)
+            return static_cast<hipblaslt_scaling_format>(s);
         return hipblaslt_scaling_format::none;
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);
@@ -1205,6 +1217,27 @@ try
         if(arg.d_type != HIP_R_32F && arg.d_type != HIP_R_16F && arg.d_type != HIP_R_16BF)
             throw std::invalid_argument("Invalid d_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.d_type));
+    }
+
+    // w4a16: int4 A, 16-bit activations, and a group A-scale whose element type
+    // matches B's. All three travel together, so reject any partial request here
+    // rather than in the library.
+    {
+        const bool int4A = (arg.a_type == HIP_R_4I);
+        if(int4A != isW4A16Scaling(arg.scaleA))
+            throw std::invalid_argument(
+                "w4a16 needs --a_type i4_r together with --scaleA 1006..1011; got --a_type "s
+                + hip_datatype_to_string(arg.a_type) + " --scaleA "
+                + std::to_string(static_cast<int>(arg.scaleA)));
+        if(int4A)
+        {
+            if(arg.b_type != HIP_R_16BF && arg.b_type != HIP_R_16F)
+                throw std::invalid_argument("w4a16 requires --b_type bf16_r or f16_r, got "s
+                                            + hip_datatype_to_string(arg.b_type));
+            if(arg.int4_encoding < 0 || arg.int4_encoding > 2)
+                throw std::invalid_argument("Invalid --int4_encoding "s
+                                            + std::to_string(arg.int4_encoding));
+        }
     }
 
     if(arg.M[0] < 0)

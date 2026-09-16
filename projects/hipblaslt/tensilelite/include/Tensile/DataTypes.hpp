@@ -52,6 +52,7 @@
 #include <Tensile/DataTypes_Float6.hpp>
 #include <Tensile/DataTypes_BFloat6.hpp>
 #include <Tensile/DataTypes_Float4.hpp>
+#include <Tensile/DataTypes_Int4.hpp>
 #include <Tensile/DataTypes_E8.hpp>
 #include <Tensile/DataTypes_E5M3.hpp>
 
@@ -337,6 +338,12 @@ namespace TensileLite
     };
 #endif // TENSILE_USE_FP4
 #endif // _WIN32
+    // w4a16 weights. Plain storage (not a HIP arithmetic type), so unlike the
+    // fp4/fp6 types this is available on Windows too.
+    template <>
+    struct TypeInfo<Int4x2> : public BaseTypeInfo<Int4x2, rocisa::DataType::Int4, 2, false, true>
+    {
+    };
     template <>
     struct TypeInfo<E8>
         : public BaseTypeInfo<E8, rocisa::DataType::E8, 1, false, false>
