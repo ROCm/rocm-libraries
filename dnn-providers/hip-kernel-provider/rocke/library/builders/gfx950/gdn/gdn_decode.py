@@ -35,6 +35,7 @@ from typing import Dict, Tuple
 
 import torch
 
+from rocke.helpers.activations import SOFTPLUS_THRESHOLD
 from kernels.gfx950.gdn_decode import (
     GdnDecodeSpec,
     build_gdn_decode,
@@ -165,7 +166,7 @@ def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
         q = q * scale
 
     x = inp["a"][:, 0].float() + inp["dt_bias"].float()  # [B, HV]
-    softplus = torch.where(x > 20.0, x, torch.log1p(torch.exp(x)))
+    softplus = torch.where(x > SOFTPLUS_THRESHOLD, x, torch.log1p(torch.exp(x)))
     decay = torch.exp(-torch.exp(inp["A_log"].float()) * softplus)
     beta = torch.sigmoid(inp["b"][:, 0].float())
 
