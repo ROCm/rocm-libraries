@@ -125,6 +125,11 @@ namespace TensileLite
         return m_value & 0x400000;
     }
 
+    bool Debug::printWorkGroupMapping() const
+    {
+        return m_value & 0x80000;
+    }
+
     bool Debug::naivePropertySearch() const
     {
         return m_naivePropertySearch;
