@@ -2,7 +2,7 @@ import { detectElectronCommandRunner } from "./electron";
 import type { CommandRunner } from "./types";
 import { webCommandRunner } from "./web";
 
-export { GRAPH_PLACEHOLDER } from "./types";
+export { GRAPH_PLACEHOLDER, RESULTS_PLACEHOLDER, TENSORS_PLACEHOLDER } from "./types";
 export type { CommandChunk, CommandRequest, CommandResult, CommandRunner } from "./types";
 
 /**

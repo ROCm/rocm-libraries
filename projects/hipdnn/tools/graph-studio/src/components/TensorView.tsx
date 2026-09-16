@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   coordinates,
   compareTensors,
@@ -11,32 +11,61 @@ import {
   type LoadedTensor,
   type TensorSet,
 } from "../benchmark/tensors";
+import type { BenchmarkReport } from "../benchmark/types";
+import { platform } from "../platform";
 
 /**
  * Tensor artifact inspector: value distribution for one captured tensor, and an
  * element-wise comparison against a second capture (typically an engine's
  * output against the reference provider's).
  *
- * Artifacts are picked as files rather than resolved from the report, because
- * the manifest paths a report carries belong to the machine that ran the
- * benchmark. Select the whole artifact directory contents — `manifest.json`
- * plus its `.bin` files — in one go.
- *
- * ponytail: file-set picker; add a directory picker or Electron path
- * resolution if selecting the files ever becomes the annoying part.
+ * Captures this host wrote are read back by manifest path and loaded directly.
+ * Anything else — a report carried over from the machine that ran it, or a plain
+ * browser with no filesystem — is picked as files instead: `manifest.json` plus
+ * its `.bin` siblings, selected together.
  */
 
 const BUCKET_CHOICES = [16, 32, 64, 128] as const;
 
-/** Where a capture came from, shown so the right directory is easy to find. */
+/** One capture a report recorded, and what it holds. */
 export interface TensorHint {
   readonly label: string;
+  /** Path of the capture's `manifest.json`, as the producing host recorded it. */
   readonly path: string;
+  readonly role: "input" | "output" | "reference";
+}
+
+/** Every capture a report recorded: graph inputs, then each row's outputs. */
+export function reportTensorHints(report: BenchmarkReport): TensorHint[] {
+  const hints: TensorHint[] = [];
+  for (const graph of report.graphs) {
+    if (graph.input_tensor_manifest) {
+      hints.push({
+        label: `${graph.graph_name} inputs`,
+        path: graph.input_tensor_manifest,
+        role: "input",
+      });
+    }
+    for (const row of graph.results) {
+      if (!row.tensor_manifest) continue;
+      hints.push({
+        label: `${row.provider} ${row.role === "reference" ? "reference" : "output"}`,
+        path: row.tensor_manifest,
+        role: row.role === "reference" ? "reference" : "output",
+      });
+    }
+  }
+  return hints;
 }
 
 interface TensorViewProps {
-  /** Manifest paths recorded by the report, if a report is loaded. */
+  /** Captures the loaded report recorded, if there is one. */
   hints?: readonly TensorHint[];
+  /**
+   * Where the report itself lives. Hint paths are anchored to it, so loading a
+   * capture from the host needs it; without it only file picking works.
+   */
+  reportPath?: string;
   /** Returns to the report view. Omitted when the view stands alone. */
   onBack?: () => void;
 }
@@ -49,7 +78,7 @@ interface Slot {
 
 const EMPTY_SLOT: Slot = { set: null, error: null, busy: false };
 
-export function TensorView({ hints, onBack }: TensorViewProps) {
+export function TensorView({ hints, reportPath, onBack }: TensorViewProps) {
   const [primary, setPrimary] = useState<Slot>(EMPTY_SLOT);
   const [secondary, setSecondary] = useState<Slot>(EMPTY_SLOT);
   const [selectedUid, setSelectedUid] = useState("");
@@ -106,6 +135,36 @@ export function TensorView({ hints, onBack }: TensorViewProps) {
     }
   };
 
+  const loadFromHost = useCallback(
+    async (hint: TensorHint, into: (slot: Slot) => void) => {
+      const read = platform.readTensorArtifact;
+      if (!read || !reportPath) return;
+      into({ set: null, error: null, busy: true });
+      try {
+        const artifact = await read(hint.path, reportPath);
+        const bytes = new Map(Object.entries(artifact.files));
+        const set = await loadTensorSet(artifact.manifest, bytes, hint.label);
+        into({ set, error: null, busy: false });
+        setSelectedUid((uid) => uid || (set.tensors[0]?.entry.uid ?? ""));
+      } catch (error) {
+        into({ set: null, error: (error as Error).message, busy: false });
+      }
+    },
+    [reportPath],
+  );
+
+  const loadable = platform.readTensorArtifact != null && reportPath != null;
+
+  // A run's captures are on this machine, so load the pair worth comparing
+  // without making the user hunt for the directory.
+  useEffect(() => {
+    if (!loadable || !hints || hints.length === 0) return;
+    const output = hints.find((h) => h.role === "output") ?? hints[0];
+    const reference = hints.find((h) => h.role === "reference");
+    void loadFromHost(output, setPrimary);
+    if (reference && reference !== output) void loadFromHost(reference, setSecondary);
+  }, [hints, loadable, loadFromHost]);
+
   return (
     <div className="report tensors">
       <header className="report__head">
@@ -115,7 +174,9 @@ export function TensorView({ hints, onBack }: TensorViewProps) {
           <div className="report__sub">
             {primary.set
               ? describeSet(primary.set)
-              : "Select a manifest.json and its .bin files from one artifact directory."}
+              : loadable
+                ? "Pick a capture below, or select a manifest.json and its .bin files."
+                : "Select a manifest.json and its .bin files from one artifact directory."}
           </div>
         </div>
         {onBack && (
@@ -126,16 +187,28 @@ export function TensorView({ hints, onBack }: TensorViewProps) {
       </header>
 
       {hints && hints.length > 0 && (
-        <details className="report__env">
-          <summary>Manifest paths from the report</summary>
-          <dl className="report__env-grid">
+        <details className="report__env" open={loadable}>
+          <summary>{loadable ? "Captures from the run" : "Manifest paths from the report"}</summary>
+          <ul className="tensors__captures">
             {hints.map((hint) => (
-              <div key={`${hint.label}:${hint.path}`} style={{ display: "contents" }}>
-                <dt>{hint.label}</dt>
-                <dd>{hint.path}</dd>
-              </div>
+              <li className="tensors__capture" key={`${hint.label}:${hint.path}`}>
+                <div className="tensors__capture-ident">
+                  <strong>{hint.label}</strong>
+                  <span className="tensors__capture-path">{hint.path}</span>
+                </div>
+                {loadable && (
+                  <div className="tensors__capture-actions">
+                    <button type="button" onClick={() => void loadFromHost(hint, setPrimary)}>
+                      Load as capture
+                    </button>
+                    <button type="button" onClick={() => void loadFromHost(hint, setSecondary)}>
+                      Load as comparison
+                    </button>
+                  </div>
+                )}
+              </li>
             ))}
-          </dl>
+          </ul>
         </details>
       )}
 

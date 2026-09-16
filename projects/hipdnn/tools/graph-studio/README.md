@@ -119,12 +119,43 @@ bun run dev
 Saving to a file works best in Chrome or Edge; other browsers fall back to a
 normal download.
 
+## Benchmarking the canvas graph
+
+**Start Benchmarking** on the **Verify** tab runs the graph on the canvas and
+loads the report it produces. The command behind the button is
+
+```
+dnn-benchmark --graph ${current_graph} -o ${results_json} --tensor-output-dir ${tensor_dir}
+```
+
+`${current_graph}` is replaced with the canvas graph written out as hipDNN JSON,
+`${results_json}` with a path for the tool to write its report to, and
+`${tensor_dir}` with a directory for its tensor captures. All three live in a
+per-tab directory under the OS temp directory, and each run replaces the
+previous set. `dnn-benchmark` is resolved on the PATH the launcher establishes
+for child processes, which covers both an installed tree and the `.venv` console
+script.
+
+The button becomes **Stop** while the run is in flight, which kills the process
+tree. A run that leaves no readable report says so and falls back to what was
+there before — a stale file from an earlier run is cleared first, so it can
+never be mistaken for the current one.
+
+**Validate against pytorch** beside the button appends `--validate pytorch`, which
+runs the graph through PyTorch as a reference and compares the two. The report
+then carries a `pytorch` reference row and a pass/fail verdict per engine instead
+of timing alone. It needs PyTorch in the selected Python environment.
+
+**Output log** at the bottom holds the tool's terminal output. It starts
+collapsed and stays that way through a run; open it when a run needs explaining.
+
 ## Viewing benchmark results
 
-Open the **Verify** tab. Use **Open report…** to import a dnn-benchmarking suite
-`results.json` or a raw timing JSON. An import stays in memory: it survives tab
-switches, a reload discards it, and it never enters graph autosave or command
-settings. Viewing a report needs no GPU, Python, native add-on, or backend service.
+The tab starts empty and stays that way until a run produces a report. Use
+**Open report…** to import a dnn-benchmarking suite `results.json` or a raw
+timing JSON instead of running one. An import stays in memory: it survives tab
+switches and a reload discards it, and it never enters graph autosave. Viewing a
+report needs no GPU, Python, native add-on, or backend service.
 
 The comparison chart appears first, then the full result table. Pick a metric and
 an engine filter to compare; graph executions/s is derived from GPU mean time.
@@ -138,11 +169,11 @@ from rounding.
 resource metrics, correctness comparison, oracle tuning against the warm baseline,
 and profiling artifacts, each in its own section. **Back to report** returns.
 
-Native **Execute** on the Create tab publishes its snapshot to Verify as a Studio
-execution. Its single wall time is not a repeated benchmark or a correctness
-comparison, and later canvas edits are not included. **Close execution** returns to
-the opened report. Use **Export hipDNN JSON**, not ordinary Save, for the existing
-benchmarking handoff.
+Native **Execute** on the Create tab publishes its snapshot to Verify the same
+way a run does. Its single wall time is not a repeated benchmark or a correctness
+comparison, and later canvas edits are not included. **Close execution** returns
+to the opened report, as **Close benchmark run** does for a run. Use **Export
+hipDNN JSON**, not ordinary Save, for the existing benchmarking handoff.
 
 For an available profiling trace, select the `.pftrace` file explicitly. A report
 path does not grant access to that file. Trace bytes go to a sandboxed
@@ -170,6 +201,21 @@ curl -LO https://get.perfetto.dev/trace_processor && chmod +x trace_processor
 echo 'select ts, dur, name from slice' > q.sql
 ./trace_processor -q q.sql tests/fixtures/traces/sample.pftrace
 ```
+
+## Inspecting captured tensors
+
+The **Tensors** tab lists every capture the current report recorded — the graph
+inputs, each engine's output, and the reference output when validation ran. The
+engine output and the reference load on their own, so the comparison is there
+when the tab opens; **Load as capture** / **Load as comparison** re-target either
+slot. **Inspect tensors…** on the Verify tab reaches the same view scoped to one
+report row.
+
+A report anchors its artifact paths to its own directory, so a capture is only
+loaded when it resolves under that directory *and* under the Studio's own temp
+root. A report opened from another machine therefore falls back to picking the
+files by hand: select `manifest.json` together with its `.bin` siblings, or drop
+them onto a slot.
 
 ## Turning on the GPU engine
 

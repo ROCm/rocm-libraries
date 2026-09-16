@@ -19,6 +19,9 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const ROOT_DIR_NAME = "hipdnn-graph-studio";
+const GRAPH_SUFFIX = ".hipdnn.json";
+const RESULTS_SUFFIX = ".results.json";
+const TENSORS_SUFFIX = ".tensors";
 
 /** One path segment, safe on every platform; never empty, never a separator. */
 const sanitizeName = (name) =>
@@ -34,9 +37,29 @@ function scopeDir(scope, subdir) {
 async function writeGraphFile(scope, graphName, graphJson, subdir) {
   const dir = scopeDir(scope, subdir);
   await fs.mkdir(dir, { recursive: true });
-  const file = path.join(dir, `${sanitizeName(graphName)}.hipdnn.json`);
+  const file = path.join(dir, `${sanitizeName(graphName)}${GRAPH_SUFFIX}`);
   await fs.writeFile(file, graphJson ?? "", "utf8");
   return file;
+}
+
+// The command bridge hands the child somewhere to write its report and its
+// tensor captures. Keeping both beside the graph means one directory per scope
+// holds a run's whole input and output, and the next run replaces them together.
+function runArtifactBase(graphPath) {
+  return graphPath.endsWith(GRAPH_SUFFIX) ? graphPath.slice(0, -GRAPH_SUFFIX.length) : graphPath;
+}
+
+function resultsFileFor(graphPath) {
+  return runArtifactBase(graphPath) + RESULTS_SUFFIX;
+}
+
+function tensorsDirFor(graphPath) {
+  return runArtifactBase(graphPath) + TENSORS_SUFFIX;
+}
+
+/** Root every path the renderer may ask the main process to read must sit under. */
+function artifactRoot() {
+  return path.join(app.getPath("temp"), ROOT_DIR_NAME);
 }
 
 /**
@@ -69,4 +92,11 @@ async function sweepLaunchDirs(scope, maxAgeMs) {
   return removed;
 }
 
-module.exports = { sanitizeName, writeGraphFile, sweepLaunchDirs };
+module.exports = {
+  sanitizeName,
+  writeGraphFile,
+  resultsFileFor,
+  tensorsDirFor,
+  artifactRoot,
+  sweepLaunchDirs,
+};

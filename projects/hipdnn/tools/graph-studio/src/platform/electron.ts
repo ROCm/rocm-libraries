@@ -1,4 +1,10 @@
-import type { FileHandleRef, OpenResult, PlatformBridge, SaveOptions } from "./types";
+import type {
+  FileHandleRef,
+  OpenResult,
+  PlatformBridge,
+  SaveOptions,
+  TensorArtifact,
+} from "./types";
 
 /**
  * Electron platform. Active when a preload script has exposed `window.hipdnn`
@@ -16,6 +22,13 @@ export interface ElectronApi {
     contents: string,
     options?: { suggestedName?: string; path?: string },
   ): Promise<{ path: string; name: string } | null>;
+  readTensorArtifact(
+    manifestPath: string,
+    reportPath: string,
+  ): Promise<
+    | { ok: true; manifest: string; files: Record<string, Uint8Array> }
+    | { ok: false; error: string }
+  >;
   store: {
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
@@ -53,6 +66,11 @@ export function detectElectronPlatform(): PlatformBridge | null {
       });
       if (!result) return null;
       return { name: result.name, token: result.path };
+    },
+    async readTensorArtifact(manifestPath: string, reportPath: string): Promise<TensorArtifact> {
+      const result = await api.readTensorArtifact(manifestPath, reportPath);
+      if (!result.ok) throw new Error(result.error);
+      return { manifest: result.manifest, files: result.files };
     },
   };
 }

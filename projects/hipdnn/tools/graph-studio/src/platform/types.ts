@@ -28,6 +28,12 @@ export interface SaveOptions {
 
 export type PlatformKind = "web" | "electron";
 
+/** One tensor artifact directory: its manifest text and every sibling `.bin`. */
+export interface TensorArtifact {
+  readonly manifest: string;
+  readonly files: Readonly<Record<string, Uint8Array>>;
+}
+
 export interface PlatformBridge {
   readonly kind: PlatformKind;
 
@@ -39,6 +45,14 @@ export interface PlatformBridge {
    * created), or null if the user cancelled the dialog.
    */
   saveTextFile(contents: string, options?: SaveOptions): Promise<FileHandleRef | null>;
+
+  /**
+   * Read a tensor capture by the manifest path a report recorded, resolved
+   * against that report's own location. Present only where the host has a
+   * filesystem; absent means captures must be picked as files instead.
+   * Rejects when the path is not readable.
+   */
+  readTensorArtifact?(manifestPath: string, reportPath: string): Promise<TensorArtifact>;
 
   /** Best-effort key/value persistence for app state and preferences. */
   readonly store: KeyValueStore;

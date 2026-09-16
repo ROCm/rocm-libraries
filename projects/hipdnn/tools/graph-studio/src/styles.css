@@ -148,31 +148,34 @@ body,
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
 }
-.command__label {
+.command__option {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--text-dim);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
 }
-.command__input {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.command__option:hover {
   color: var(--text);
-  padding: 7px 10px;
-  font-family: ui-monospace, "Cascadia Mono", monospace;
-  font-size: 13px;
 }
-.command__input:focus {
-  outline: none;
-  border-color: var(--accent);
+.command__option input {
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
 }
-.command__input:disabled {
+.command__option:has(input:disabled) {
   color: var(--text-dim);
+  cursor: default;
+}
+.command__option input:disabled {
+  cursor: default;
+}
+.command__unavailable {
+  color: var(--text-dim);
+  font-size: 12px;
 }
 .command__run {
   flex: 0 0 auto;
@@ -207,7 +210,7 @@ body,
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  margin: 10px 12px 12px;
+  margin: 0 12px 12px;
   padding: 8px 10px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -228,16 +231,56 @@ body,
 .command__seg[data-stream="note"] {
   color: var(--text-dim);
 }
-/* With tab content present the terminal output docks below it, mirroring the
-   engine log on the Create tab. */
+/* With tab content present the log docks below it, mirroring the engine log on
+   the Create tab; collapsed, only its toggle takes room. */
 .command__main {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
-.command[data-docked="true"] .command__output {
-  flex: 0 0 168px;
-  margin-top: 0;
+.command__log {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.command[data-docked="true"] .command__log[data-open="true"] {
+  flex: 0 0 200px;
+}
+.command[data-docked="false"] .command__log[data-open="true"] {
+  flex: 1 1 auto;
+}
+.command__toggle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--bg-panel);
+  border: none;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.command__toggle:hover {
+  color: var(--text);
+}
+.command__chevron {
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+.command__log[data-open="true"] .command__chevron {
+  transform: rotate(90deg);
+}
+.command__running {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  color: var(--accent);
 }
 
 /* ── Benchmark report ────────────────────────────────── */
@@ -262,13 +305,6 @@ body,
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-.report__sample {
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  padding: 1px 8px;
-  color: #c7d2fe;
-  letter-spacing: 0.04em;
 }
 .report__title {
   margin: 4px 0 2px;
@@ -865,7 +901,7 @@ body,
 .verify {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 100%;
 }
 .verify__bar {
   display: flex;
@@ -886,6 +922,23 @@ body,
   border-color: var(--accent);
   color: var(--accent);
 }
+.verify__empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+.verify__empty p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+.verify__empty strong {
+  color: var(--text);
+  font-weight: 600;
+}
 .verify__note {
   color: var(--text-dim);
   font-size: 12px;
@@ -905,6 +958,54 @@ body,
   padding: 6px 12px;
   font-size: 12px;
   cursor: pointer;
+}
+.tensors__captures {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tensors__capture {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.tensors__capture-ident {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tensors__capture-path {
+  color: var(--text-dim);
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.tensors__capture-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+.tensors__capture-actions button {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tensors__capture-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .tensors__slots {
   display: grid;

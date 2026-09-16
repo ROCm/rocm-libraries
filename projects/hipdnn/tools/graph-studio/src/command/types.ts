@@ -10,6 +10,19 @@
 /** Placeholder replaced with the path of the written hipDNN JSON graph. */
 export const GRAPH_PLACEHOLDER = "${current_graph}";
 
+/**
+ * Placeholder replaced with a host-owned path the command is expected to write
+ * its `results.json` to. When it appears, the host clears any previous file
+ * before the run and reads back whatever the command produced.
+ */
+export const RESULTS_PLACEHOLDER = "${results_json}";
+
+/**
+ * Placeholder replaced with a host-owned directory for the command's tensor
+ * captures. Like the report, it is cleared before the run.
+ */
+export const TENSORS_PLACEHOLDER = "${tensor_dir}";
+
 export interface CommandRequest {
   /** Correlates streamed output and cancellation with this run. */
   readonly id: string;
@@ -39,6 +52,14 @@ export interface CommandResult {
   /** Command line after substitution, for echoing into the output pane. */
   readonly resolvedCommand?: string;
   readonly graphPath?: string;
+  /** Set when the command line used `${tensor_dir}`. */
+  readonly tensorsPath?: string;
+  /** Set when the command line used `${results_json}`. */
+  readonly resultsPath?: string;
+  /** Contents of `resultsPath` after the run; absent when nothing was written. */
+  readonly resultsJson?: string;
+  /** Why `resultsPath` could not be read, when the command asked for one. */
+  readonly resultsError?: string;
 }
 
 export interface CommandRunner {

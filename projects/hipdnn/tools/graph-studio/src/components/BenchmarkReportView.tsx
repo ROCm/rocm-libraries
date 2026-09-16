@@ -28,8 +28,6 @@ interface BenchmarkReportViewProps {
   report: BenchmarkReport;
   /** Where the report came from, shown as the heading. */
   sourceLabel: string;
-  /** Marks the view as showing bundled sample data rather than a real run. */
-  sample?: boolean;
   /** Opens the tensor inspector for one row. Omitted hides the row action. */
   onOpenTensors?: (graph: GraphResults, row: EngineResult) => void;
 }
@@ -37,7 +35,6 @@ interface BenchmarkReportViewProps {
 export function BenchmarkReportView({
   report,
   sourceLabel,
-  sample,
   onOpenTensors,
 }: BenchmarkReportViewProps) {
   const { metadata, graphs } = report;
@@ -74,7 +71,6 @@ export function BenchmarkReportView({
         <div className="report__ident">
           <div className="report__eyebrow">
             {KIND_LABEL[report.kind]}
-            {sample && <span className="report__sample">sample data</span>}
           </div>
           <h2 className="report__title">{sourceLabel}</h2>
           <div className="report__sub">

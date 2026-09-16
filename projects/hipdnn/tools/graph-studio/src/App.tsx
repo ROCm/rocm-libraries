@@ -17,9 +17,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImplementPanel } from "./components/ImplementPanel";
-import { TensorView } from "./components/TensorView";
-import { VerifyReport } from "./components/VerifyReport";
-import { CommandPanel } from "./components/CommandPanel";
+import { TensorView, reportTensorHints } from "./components/TensorView";
+import { VerifyReport, type ShownReport } from "./components/VerifyReport";
+import { CommandPanel, type CommandOption } from "./components/CommandPanel";
 import { Inspector } from "./components/Inspector";
 import { EnginePanel } from "./components/EnginePanel";
 import { MainTabs, TabPanel, type TabId } from "./components/MainTabs";
@@ -42,9 +42,21 @@ import type { ParamValue } from "./graph/model";
 import type { FileHandleRef } from "./platform";
 import { platform } from "./platform";
 import { fromNativeExecution, type NativeExecutionSnapshot } from "./benchmark/native";
-import type { BenchmarkReport } from "./benchmark/types";
+import { parseReport } from "./benchmark/report";
+import { GRAPH_PLACEHOLDER, RESULTS_PLACEHOLDER, TENSORS_PLACEHOLDER } from "./command";
 
 const AUTOSAVE_KEY = "hipdnn.graph.autosave";
+
+// The Verify tab benchmarks the canvas graph. `dnn-benchmark` is installed
+// beside Studio and is on the PATH the launcher establishes for child
+// processes, so the bare name resolves on both platforms.
+const VERIFY_COMMAND =
+  `dnn-benchmark --graph ${GRAPH_PLACEHOLDER} -o ${RESULTS_PLACEHOLDER}` +
+  ` --tensor-output-dir ${TENSORS_PLACEHOLDER}`;
+
+const VERIFY_OPTIONS: readonly CommandOption[] = [
+  { id: "validate", label: "Validate against pytorch", args: "--validate pytorch" },
+];
 
 function Studio() {
   const nodeTypes = useMemo(() => ({ [OP_NODE_TYPE]: OpNodeView }), []);
@@ -60,14 +72,45 @@ function Studio() {
   // any built plan and resets its Build/Execute state.
   const [engineResetKey, setEngineResetKey] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("create");
-  const [nativeReport, setNativeReport] = useState<BenchmarkReport | null>(null);
+  // The freshest result this session produced, from either the Create tab's
+  // native Execute or the Verify tab's benchmark run. Both read in Verify.
+  const [currentReport, setCurrentReport] = useState<ShownReport | null>(null);
+  const [currentError, setCurrentError] = useState<string | null>(null);
   const nextNativeId = useRef(0);
   const onExecutionResult = useCallback((snapshot: NativeExecutionSnapshot) => {
-    setNativeReport(fromNativeExecution(snapshot, `native-${++nextNativeId.current}`));
+    setCurrentReport({
+      report: fromNativeExecution(snapshot, `native-${++nextNativeId.current}`),
+      label: "execution",
+    });
+    setCurrentError(null);
   }, []);
-  const onResultsReset = useCallback(() => setNativeReport(null), []);
+  const onResultsReset = useCallback(() => {
+    setCurrentReport(null);
+    setCurrentError(null);
+  }, []);
   // An execution is read in the Verify tab, beside opened reports.
   const onShowResults = useCallback(() => setActiveTab("verify"), []);
+
+  const onVerifyResults = useCallback((json: string | null, reportPath: string) => {
+    if (json === null) {
+      setCurrentReport(null);
+      setCurrentError("The run produced no report.");
+      return;
+    }
+    try {
+      setCurrentReport({ report: parseReport(json), label: "benchmark run", source: reportPath });
+      setCurrentError(null);
+    } catch (failure) {
+      setCurrentReport(null);
+      setCurrentError(`Could not read the run's results: ${(failure as Error).message}`);
+    }
+  }, []);
+
+  // The Tensors tab inspects whatever the freshest report captured.
+  const runTensorHints = useMemo(
+    () => (currentReport ? reportTensorHints(currentReport.report) : undefined),
+    [currentReport],
+  );
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -362,12 +405,23 @@ function Studio() {
         <ImplementPanel getGraph={getGraph} active={activeTab === "implement"} />
       </TabPanel>
       <TabPanel id="verify" active={activeTab}>
-        <CommandPanel scope="verify" getGraph={getGraph}>
-          <VerifyReport native={nativeReport} onDismissNative={onResultsReset} />
+        <CommandPanel
+          scope="verify"
+          getGraph={getGraph}
+          command={VERIFY_COMMAND}
+          runLabel="Start Benchmarking"
+          options={VERIFY_OPTIONS}
+          onResults={onVerifyResults}
+        >
+          <VerifyReport
+            current={currentReport}
+            currentError={currentError}
+            onDismissCurrent={onResultsReset}
+          />
         </CommandPanel>
       </TabPanel>
       <TabPanel id="tensors" active={activeTab}>
-        <TensorView />
+        <TensorView hints={runTensorHints} reportPath={currentReport?.source} />
       </TabPanel>
     </div>
   );

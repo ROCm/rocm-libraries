@@ -188,9 +188,13 @@ ipcMain.handle("engine:setLogLevel", async (_event, level) => {
 // ── External commands (command bridge) ─────────────────────────────────
 // Each run writes the graph out as hipDNN JSON under the OS temp directory,
 // substitutes that path for ${current_graph}, and streams the child's output
-// back to the renderer as it arrives.
+// back to the renderer as it arrives. A command that also names
+// ${results_json} or ${tensor_dir} is given somewhere to write those to; both
+// are cleared before the run, and the report is read back after it.
 
 const GRAPH_PLACEHOLDER = "${current_graph}";
+const RESULTS_PLACEHOLDER = "${results_json}";
+const TENSORS_PLACEHOLDER = "${tensor_dir}";
 
 /** Running children by request id, so the renderer can cancel them. */
 const runningCommands = new Map();
@@ -199,16 +203,26 @@ const errorText = (err) => (err instanceof Error ? err.message : String(err));
 
 // The path is quoted unless the placeholder already sits between quotes, so a
 // temp directory containing spaces survives the shell either way.
-function substituteGraphPath(command, graphPath) {
+function substitutePath(command, placeholder, value) {
   let out = "";
   let from = 0;
   for (;;) {
-    const at = command.indexOf(GRAPH_PLACEHOLDER, from);
+    const at = command.indexOf(placeholder, from);
     if (at < 0) return out + command.slice(from);
-    const preQuoted =
-      command[at - 1] === '"' && command[at + GRAPH_PLACEHOLDER.length] === '"';
-    out += command.slice(from, at) + (preQuoted ? graphPath : `"${graphPath}"`);
-    from = at + GRAPH_PLACEHOLDER.length;
+    const preQuoted = command[at - 1] === '"' && command[at + placeholder.length] === '"';
+    out += command.slice(from, at) + (preQuoted ? value : `"${value}"`);
+    from = at + placeholder.length;
+  }
+}
+
+// A run that produced nothing is reported as such rather than as a read error:
+// the command may legitimately have failed before writing anything.
+async function readResultsFile(file) {
+  try {
+    return { resultsJson: await fs.readFile(file, "utf8") };
+  } catch (err) {
+    if (err?.code === "ENOENT") return { resultsError: "The command wrote no results file." };
+    return { resultsError: errorText(err) };
   }
 }
 
@@ -228,7 +242,28 @@ ipcMain.handle("command:execute", async (event, request) => {
     return { ok: false, error: `Failed to write the graph: ${errorText(err)}` };
   }
 
-  const resolvedCommand = substituteGraphPath(command, graphPath);
+  const resultsPath = command.includes(RESULTS_PLACEHOLDER)
+    ? graphfile.resultsFileFor(graphPath)
+    : undefined;
+  const tensorsPath = command.includes(TENSORS_PLACEHOLDER)
+    ? graphfile.tensorsDirFor(graphPath)
+    : undefined;
+
+  // Anything the previous run left must never be mistaken for this one's.
+  try {
+    if (resultsPath) await fs.rm(resultsPath, { force: true });
+    if (tensorsPath) await fs.rm(tensorsPath, { recursive: true, force: true });
+  } catch (err) {
+    return { ok: false, error: `Failed to clear the previous run's output: ${errorText(err)}` };
+  }
+
+  let resolvedCommand = substitutePath(command, GRAPH_PLACEHOLDER, graphPath);
+  if (resultsPath) {
+    resolvedCommand = substitutePath(resolvedCommand, RESULTS_PLACEHOLDER, resultsPath);
+  }
+  if (tensorsPath) {
+    resolvedCommand = substitutePath(resolvedCommand, TENSORS_PLACEHOLDER, tensorsPath);
+  }
   const send = (stream, text) => {
     if (!event.sender.isDestroyed()) event.sender.send("command:output", { id, stream, text });
   };
@@ -239,7 +274,12 @@ ipcMain.handle("command:execute", async (event, request) => {
       if (settled) return;
       settled = true;
       runningCommands.delete(id);
-      resolve({ ...result, resolvedCommand, graphPath });
+      const base = { ...result, resolvedCommand, graphPath, tensorsPath };
+      if (!resultsPath) {
+        resolve(base);
+        return;
+      }
+      resolve(readResultsFile(resultsPath).then((read) => ({ ...base, resultsPath, ...read })));
     };
 
     let child;
@@ -277,6 +317,60 @@ function killCommand(child) {
 ipcMain.handle("command:cancel", async (_event, id) => {
   const child = runningCommands.get(id);
   if (child) killCommand(child);
+});
+
+// ── Tensor artifacts ───────────────────────────────────────────────────
+// The renderer has no filesystem, so captures a run wrote are read here and
+// handed over as bytes.
+//
+// A report anchors its artifact paths to its own directory and leaves anything
+// outside that directory absolute, so a relative path resolves under the report
+// and an escaping one is refused. On top of that contract, only paths under the
+// studio's own temp root are served: a report opened from another machine must
+// not turn into an arbitrary file read.
+
+const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
+
+function within(root, target) {
+  const relative = path.relative(path.resolve(root), target);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+ipcMain.handle("tensors:read", async (_event, manifestPath, reportPath) => {
+  if (typeof manifestPath !== "string" || manifestPath === "") {
+    return { ok: false, error: "No manifest path was given." };
+  }
+  if (typeof reportPath !== "string" || reportPath === "") {
+    return { ok: false, error: "The report this capture belongs to has no path." };
+  }
+  const reportDir = path.dirname(path.resolve(reportPath));
+  const resolved = path.resolve(reportDir, manifestPath);
+  if (!within(reportDir, resolved)) {
+    return { ok: false, error: "That capture sits outside its own report's directory." };
+  }
+  if (!within(graphfile.artifactRoot(), resolved)) {
+    return { ok: false, error: "That capture was not written by this session." };
+  }
+
+  try {
+    const dir = path.dirname(resolved);
+    const manifest = await fs.readFile(resolved, "utf8");
+    const files = {};
+    let total = Buffer.byteLength(manifest);
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".bin")) continue;
+      const bytes = await fs.readFile(path.join(dir, entry.name));
+      total += bytes.byteLength;
+      if (total > MAX_ARTIFACT_BYTES) {
+        return { ok: false, error: "That capture is too large to inspect." };
+      }
+      files[entry.name] = bytes;
+    }
+    return { ok: true, manifest, files };
+  } catch (err) {
+    if (err?.code === "ENOENT") return { ok: false, error: "That capture is no longer on disk." };
+    return { ok: false, error: errorText(err) };
+  }
 });
 
 // ── Agent flows (flow bridge) ──────────────────────────────────────────

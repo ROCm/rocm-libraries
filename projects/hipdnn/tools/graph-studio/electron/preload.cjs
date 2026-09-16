@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld("hipdnn", {
   openTextFile: (accept) => ipcRenderer.invoke("platform:openTextFile", accept),
   saveTextFile: (contents, options) =>
     ipcRenderer.invoke("platform:saveTextFile", contents, options),
+  readTensorArtifact: (manifestPath, reportPath) =>
+    ipcRenderer.invoke("tensors:read", manifestPath, reportPath),
   store: {
     get: (key) => ipcRenderer.invoke("store:get", key),
     set: (key, value) => ipcRenderer.invoke("store:set", key, value),
