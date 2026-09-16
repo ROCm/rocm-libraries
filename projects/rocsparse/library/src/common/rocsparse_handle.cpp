@@ -31,7 +31,7 @@
 #include <hip/hip_runtime.h>
 
 ROCSPARSE_KERNEL(1) void init_kernel(){};
-static hipStream_t main_stream{};
+
 /*******************************************************************************
  * constructor
  *
@@ -84,7 +84,7 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
 
         size_t coomv_size = (((sizeof(rocsparse_int) + 16) * nblocks - 1) / 256 + 1) * 256;
 
-        // Allocate device buffer — stream-ordered so handle creation never blocks
+        // Allocate device buffer -- stream-ordered so handle creation never blocks
         // streams other than the one passed by the caller.
         buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
         THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, this->stream));
@@ -191,11 +191,7 @@ _rocsparse_handle::_rocsparse_handle()
 
         // Shared memory per block opt-in
         shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
-        if(main_stream == nullptr)
-        {
-            std::ignore = hipStreamCreate(&main_stream);
-        }
-        stream = main_stream;
+
 #if HIP_VERSION >= 307
         // ASIC revision
         asic_rev = properties.asicRevision;
