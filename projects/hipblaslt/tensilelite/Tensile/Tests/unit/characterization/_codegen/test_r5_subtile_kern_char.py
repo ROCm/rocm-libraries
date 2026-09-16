@@ -142,13 +142,18 @@ def test_r5_abgrtile_tlu1_branch():
     # Line 175: loadShape property.
     assert gr_tile.loadShape == gr_tile.config.loadShape
 
-    # Lines 188, 191, 194, 197: emit-dispatch methods invoked via TLU1 stubs
-    # (SubtileGREmit.py registers GRTag_TLU1 as stubs that return None).
-    # Calling them covers the dispatch lines without a real register/module.
-    assert gr_tile.emitGlobalReadOffset(ti, writer, kernel) is None  # line 188
-    assert gr_tile.emitGlobalRead(ti, writer, kernel) is None        # line 191
-    assert gr_tile.emitLocalWrite(ti, writer, kernel) is None        # line 194
-    assert gr_tile.emitDTLInit(ti, writer, kernel) is None           # line 197
+    # Emit-dispatch methods. GR offset/read/localWrite are still registered as
+    # TLU1 stubs returning None; DTL init is implemented, so it must emit a
+    # module. Asserting None there would silently pass if the NT path regressed
+    # back to a stub.
+    assert gr_tile.emitGlobalReadOffset(ti, writer, kernel) is None
+    assert gr_tile.emitGlobalRead(ti, writer, kernel) is None
+    assert gr_tile.emitLocalWrite(ti, writer, kernel) is None
+    # Under the mock writer the module has no instructions, so only the
+    # dispatch itself is characterised: it must return a Module, not None.
+    dtl = gr_tile.emitDTLInit(ti, writer, kernel)
+    assert dtl is not None, "TLU1 GR DTL init must emit a module, not None"
+    assert type(dtl).__name__ == "Module"
 
 
 def test_r5_ablrtile_tlu1_branch():
@@ -188,10 +193,12 @@ def test_r5_ablrtile_tlu1_branch():
     # Line 234: loadShape property.
     assert lr_tile.loadShape == lr_tile.config.loadShape
 
-    # Lines 247, 250, 253: LR emit-dispatch methods invoked via TLU1 stubs.
-    assert lr_tile.emitLocalReadOffset(ti, writer, kernel) is None  # line 247
-    assert lr_tile.emitLocalRead(ti, writer, kernel) is None        # line 250
-    assert lr_tile.emitDTLInit(ti, writer, kernel) is None          # line 253
+    # LR offset/read are still TLU1 stubs; DTL init is implemented.
+    assert lr_tile.emitLocalReadOffset(ti, writer, kernel) is None
+    assert lr_tile.emitLocalRead(ti, writer, kernel) is None
+    dtl = lr_tile.emitDTLInit(ti, writer, kernel)
+    assert dtl is not None, "TLU1 LR DTL init must emit a module, not None"
+    assert type(dtl).__name__ == "Module"
 
 
 def test_r5_tileinfo_tlu1_grids():

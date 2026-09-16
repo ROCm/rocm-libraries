@@ -362,10 +362,26 @@ std::vector<float> generateData(T                           dgen,
                                  : 0;
     size_t const scaleCols = static_cast<size_t>(sizes[1]);
 
+    bool const   kIsRows = (isMatrixA && isTranspose) || (!isMatrixA && !isTranspose);
+    size_t const kExtent = static_cast<size_t>(kIsRows ? sizes[0] : sizes[1]);
+    size_t const kBlocks
+        = (elementsPerMXBlock > 0)
+              ? (kExtent + static_cast<size_t>(elementsPerMXBlock) - 1)
+                    / static_cast<size_t>(elementsPerMXBlock)
+              : 0;
+
+    // The generator rounds MN up to a multiple of 32, so recover it from the
+    // emitted buffer rather than from the data extent.
+    size_t const mnExtent
+        = (kBlocks > 0 && scaleBytes.size() % kBlocks == 0)
+              ? scaleBytes.size() / kBlocks
+              : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
+
     switch(scaleLayout)
     {
     case MXScaleLayout::GFX950:
-        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
+        // takes {numScaleRows = MN, numScaleCols = K blocks}
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {mnExtent, kBlocks});
         break;
     case MXScaleLayout::GFX1250:
         if(elementsPerMXBlock > 0)
