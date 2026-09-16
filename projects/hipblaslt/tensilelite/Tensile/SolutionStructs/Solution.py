@@ -1283,23 +1283,18 @@ class Solution(collections.abc.Mapping):
       state["Use64bShadowLimitMX"] = False
 
       # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is
-      # the subtileShape K of the geometry picked below: 1 for fp8 (AB_B8) and for
-      # every TLU=1 geometry (column-major / free-dim contiguous, one MFMA-K per DU
-      # iteration), 2 for row-major fp4/bf16 (AB_B4/AB_B16).
+      # the subtileShape K of the geometry picked below.
       #
-      # DepthU is shared, so it has to satisfy whichever operand asks for more.  NN
-      # and TT mix the two layouts, so answering for A alone would under-size the
-      # unit on NN, where A is TLU=1 and asks for 1 while the row-major B still
-      # needs 2.
+      # DepthU is shared, so it has to satisfy whichever operand asks for more.
+      # NN and TT mix layouts, so answering for A alone under-sizes the unit on
+      # NN, where A is TLU=1 and asks for 1 while the row-major B still needs 2.
       def subIterKFor(tc):
+        if state["ProblemType"][f"MXBlock{tc}"]:
+          return 2  # a scale local read covers 2 scale MMA tiles in K
         if state["ProblemType"][f"TLU{tc}"]:
-          return 1
+          return 1  # one MFMA-K per DU iteration
         return 1 if state["ProblemType"][f"DataType{tc}"].is8bitFloat() else 2
       numSubIterK = max(subIterKFor('A'), subIterKFor('B'))
-      # An MX scale local read covers 2 scale MMA tiles in K, so the scales need
-      # two MatrixInstK per DepthU however few the data side needs.
-      if state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
-        numSubIterK = max(numSubIterK, 2)
       duUnit = numSubIterK * state["MatrixInstK"] * state["LocalSplitU"]
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
