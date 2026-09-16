@@ -1193,9 +1193,10 @@ namespace TensileLite
             bool m_mxPreswizzledA = false;
             bool m_mxPreswizzledB = false;
 
-            // Scale descriptor most recently swizzled into gpuInput.valid, per
-            // tensor index. The MX equivalent of g_swizzleCache.
-            std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
+            // What currently occupies gpuInput.valid for each MX scale tensor:
+            // whether it holds the canonical (NoSwizzle) layout, and the
+            // descriptor it was written for. Both must match to reuse it.
+            std::map<size_t, std::pair<bool, TensorDescriptor>> m_mxUploadedScale;
         };
 
         template <>
