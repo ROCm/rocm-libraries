@@ -19,6 +19,17 @@ THE CARDINAL RULE (unchanged): never state a conflict number until (1) you have 
 counters for it AND (2) this simulator predicts those exact counters from the address map. If the
 sim does not reproduce the measurement, the MODEL is wrong -- fix it, do not "meet in the middle".
 
+NO DANGEROUS DEFAULTS (a hard rule for anyone editing this module)
+-----------------------------------------------------------------
+A parameter that CHANGES A NUMBER (arch, dtype, wave size, strides, origin, swizzle, K-alias depth)
+or that is PRINTED ON AN ARTIFACT AS FACT (kernel_label, macro_label, operand_label, dims_label) has
+NO default. Every run states it. The reason is specific, not stylistic: a default here does not
+error -- it silently analyzes a DIFFERENT kernel than yours and stamps your kernel's name on the
+answer, which is exactly the class of confidently-wrong result this module exists to prevent. Wave
+size lives on `ArchLDS.WAVE` and element size in `dtype_bytes_of` so they are DERIVED from one home,
+never re-defaulted at a call site. Only presentation/verbosity knobs (max_banks, full, verbose,
+n_iter, grid_ctas) may default; they cannot change a verdict.
+
 THE MECHANISM (validated bit-exact, gfx90a; SOT: helpers/tiling/docs/lds_banks.md §1.4)
 --------------------------------------------------------------------------------------------
 The CDNA2 LDS *write* datapath is NOT the naive per-address replay counter. The naive rule
@@ -62,11 +73,13 @@ PUBLIC API & CONTRACTS
 Preferred entry point is `analyze_store`; the rest are the layers it composes (usable directly for
 custom access patterns). Every function that could emit a mislabeled artifact GATES internally.
 
-  analyze_store(descs, *, tile_free, wtag, measure=None, render_to=None, verify_fix=False, ...)
+  analyze_store(descs, *, tile_free, wtag, arch, kernel_label, operand_label, dims_label,
+                macro_label, strides, dtype_name, origin, lds_swizzle, measure=None, ...)
       -> ConflictReport. Chains: store_datum -> simulate -> (measure on GPU + HARD gate sim==HW) ->
       recommend_pad -> (optional verify_fix on GPU) -> render. CONTRACT: with `measure` it returns a
       VALIDATED report; without it the report is UNVALIDATED and `render_to` is REFUSED (cardinal
-      rule). RAISES ConflictModelError if the probe is not bit-exact or sim != HW.
+      rule). RAISES ConflictModelError if the probe is not bit-exact or sim != HW; RAISES ValueError
+      for an arch with no registered model.
   measure callable (INJECTED by the caller): `measure(pad:int, mode='store') -> dict` with keys
       BC, IDX, conflicts_per_access (+ optional ADDR, max_abs_diff). Encapsulates the container
       rocprof run; keeps this module container-agnostic. It is the ONLY host-specific glue.
@@ -90,7 +103,7 @@ custom access patterns). Every function that could emit a mislabeled artifact GA
 
 EXTENDING TO A NEW ARCH
 -----------------------
-Call `register_arch(ArchLDS(name, NB, HALF, PORT_BANKS, COMBINE), hists, pad_sweep)` where the
+Call `register_arch(ArchLDS(name, NB, HALF, PORT_BANKS, COMBINE, WAVE), hists, pad_sweep)` where the
 constants come from that arch's ISA + a probe sweep and `hists`/`pad_sweep` are FRESHLY MEASURED on
 that arch (same format as gfx90a's `_VALIDATION_CORPUS` entry). Then run `selftest(name)` until it
 PASSES. `selftest` REFUSES an arch that has no corpus of its own -- gfx90a's numbers must never be
@@ -119,9 +132,15 @@ class ArchLDS:
     HALF: int         # served-group size (half-wave lanes arbitrated together)
     PORT_BANKS: int   # write-port width: distinct banks served per cycle
     COMBINE: int      # write-combine depth: same-bank stores drained per cycle
+    WAVE: int         # lanes per wave (CDNA 64, RDNA 32) -- the ONE home for wave size
+
+    def __post_init__(self):
+        if self.WAVE % self.HALF:
+            raise ValueError(f"{self.name}: WAVE {self.WAVE} is not a whole number of "
+                             f"HALF-groups ({self.HALF})")
 
 
-GFX90A = ArchLDS("gfx90a", NB=32, HALF=32, PORT_BANKS=8, COMBINE=4)
+GFX90A = ArchLDS("gfx90a", NB=32, HALF=32, PORT_BANKS=8, COMBINE=4, WAVE=64)
 ARCHS = {"gfx90a": GFX90A}
 
 
@@ -139,7 +158,7 @@ def arch_lds(arch) -> ArchLDS:
 # ==================================================================================================
 # Write-port model (the authoritative conflict predictor)
 # ==================================================================================================
-def served_phase(banks_used, max_depth, arch=GFX90A):
+def served_phase(banks_used, max_depth, arch):
     """Served cycles for one (half-wave, phase): the write-port rule. Write-COMBINE folds accesses to
     distinct banks together, but it can only combine across banks that are ACTUALLY active -- a deep pile
     on fewer than COMBINE banks cannot combine across idle banks, so it drains at ~depth. Capping COMBINE
@@ -150,7 +169,7 @@ def served_phase(banks_used, max_depth, arch=GFX90A):
     return min(banks_used, a.PORT_BANKS) * max_depth / min(banks_used, a.COMBINE)
 
 
-def simulate_hist(hists, footprint_dwords, arch=GFX90A):
+def simulate_hist(hists, footprint_dwords, arch):
     """AUTHORITATIVE. `hists` = {(half_wave, phase): {bank: depth, ...}} for ONE instruction.
     `footprint_dwords` = distinct dwords THIS instruction writes (for the productive floor).
 
@@ -167,7 +186,7 @@ def simulate_hist(hists, footprint_dwords, arch=GFX90A):
     return {"IDX": served, "BC": served - productive, "productive": productive}
 
 
-def _dwords(access, dtype_bytes=2):
+def _dwords(access, dtype_bytes):
     """Dword indices this lane's op touches (vw*dtype_bytes/4 dwords, consecutive from base)."""
     per_dword = 4 // dtype_bytes  # f16 -> 2 elems per dword
     d0 = access["base"] // per_dword
@@ -175,7 +194,7 @@ def _dwords(access, dtype_bytes=2):
     return [d0 + i for i in range(ndw)]
 
 
-def _lane_dwords(accesses, dtype_bytes=2):
+def _lane_dwords(accesses, dtype_bytes):
     """Aggregate all run-entries per lane into the ordered list of dwords the lane writes."""
     per_lane = defaultdict(list)
     for a in accesses:
@@ -190,7 +209,7 @@ def _lane_dwords(accesses, dtype_bytes=2):
     return out
 
 
-def simulate(accesses, arch=GFX90A, dtype_bytes=2):
+def simulate(accesses, arch, dtype_bytes):
     """Address-map driver: build per-(half-wave, phase) histograms from the exact `accesses`
     ({lane, reg0, base, vw}) and apply the port rule via `simulate_hist`. Returns the per-instruction
     result plus `conflicts_per_access` and the `detail` histograms.
@@ -204,7 +223,7 @@ def simulate(accesses, arch=GFX90A, dtype_bytes=2):
 
     hists = {}
     footprint = set()
-    for hw in range(0, 64, a.HALF):
+    for hw in range(0, a.WAVE, a.HALF):
         for ph in range(ndw):
             seen = defaultdict(set)
             for lane in range(hw, hw + a.HALF):
@@ -224,12 +243,22 @@ def simulate(accesses, arch=GFX90A, dtype_bytes=2):
 # ==================================================================================================
 # Pad-sweep stripe-alignment model (the conflict-free fix)
 # ==================================================================================================
+def dtype_bytes_of(dtype_name):
+    """Bytes per element. EXPLICIT table, never a fallback: the old `2 if f16 else 4` silently gave
+    bf16 4 bytes, which halves the dword packing and produces a wrong bank map with no error."""
+    try:
+        return {"f16": 2, "bf16": 2, "f32": 4, "fp8e4m3": 1, "bf8e5m2": 1}[dtype_name]
+    except KeyError:
+        raise ValueError(f"unknown dtype {dtype_name!r}: add its element size to dtype_bytes_of "
+                         f"before analyzing it -- guessing the size gets the bank map wrong") from None
+
+
 def dwords_per_lane(wtag):
     """W = dwords a single lane writes per store op. b32 -> 1, b64 -> 2, b128 -> 4."""
     return {"b32": 1, "b64": 2, "b128": 4}[wtag]
 
 
-def predict_pad_sweep(stride_dwords, wtag, arch=GFX90A, *, pad0_depth=None):
+def predict_pad_sweep(stride_dwords, wtag, arch, *, pad0_depth):
     """Validated conflicts/access for a K-aliased coop store at LDS row stride `stride_dwords`
     (in dwords) and store width `wtag`. Reproduces the measured rocprof pad sweep to the number.
 
@@ -246,7 +275,12 @@ def predict_pad_sweep(stride_dwords, wtag, arch=GFX90A, *, pad0_depth=None):
     a = arch_lds(arch)
     W = dwords_per_lane(wtag)
     s = stride_dwords % a.NB
-    unit = (a.NB * W // pad0_depth) if pad0_depth else 4 * W
+    if not pad0_depth:
+        raise ValueError(
+            "pad0_depth is required: it sets the conflict-free stripe unit (NB*W/depth). Read it off "
+            "THIS store's pad0 address map (max bank depth of the sim histogram) -- assuming a depth "
+            "returns a pad the GPU does not agree is conflict-free (e.g. depth-16 fixes at +16, not +32).")
+    unit = a.NB * W // pad0_depth
     if unit and s % unit == 0 and (s // unit) % 2 == 1:
         return 0.0
     if wtag == "b64" and s == 0:
@@ -254,11 +288,11 @@ def predict_pad_sweep(stride_dwords, wtag, arch=GFX90A, *, pad0_depth=None):
     return 1.0      # throughput floor (64 lanes > 32 banks): unavoidable, not fixable
 
 
-def is_conflict_free(stride_dwords, wtag, arch=GFX90A, *, pad0_depth=None):
+def is_conflict_free(stride_dwords, wtag, arch, *, pad0_depth):
     return predict_pad_sweep(stride_dwords, wtag, arch, pad0_depth=pad0_depth) == 0.0
 
 
-def conflict_free_bank_of(lane, arch=GFX90A):
+def conflict_free_bank_of(lane, arch):
     """The served group's bank for `lane` in a CONFLICT-FREE store: a full permutation, one lane per
     bank (bank = lane mod NB). This is the physical meaning of BC=0 (SOT lds_banks.md §2) and is what
     the FIXED-panel bank grid must draw -- NOT the naive `dword mod NB` map, which is inverted vs HW
@@ -266,16 +300,21 @@ def conflict_free_bank_of(lane, arch=GFX90A):
     return lane % arch_lds(arch).NB
 
 
-def recommend_pad(tile_free, wtag, arch=GFX90A, *, pad0_depth=None, max_extra_pad=None, align=8,
-                  dtype_bytes=2):
+def recommend_pad(tile_free, wtag, arch, *, dtype_bytes, pad0_depth, max_extra_pad=None,
+                  align=None):
     """Smallest trailing row pad (in elems) that makes a K-aliased store CONFLICT-FREE by the
-    validated stripe-alignment rule -- closed-form, no GPU. `align` keeps the pad a multiple of the
-    store's alignment (8 f16 = b128) so it does not narrow the access width. `pad0_depth` (the pad0 K-alias
-    depth read off the address map) sets the stripe unit, so the fix pad is correct at any geometry -- e.g.
-    a depth-16 alias fixes at +16 while the depth-8 default fixes at +32. Returns the pad, or None if no
-    conflict-free pad exists within `max_extra_pad` (default: one full NB stripe)."""
+    validated stripe-alignment rule -- closed-form, no GPU. `pad0_depth` (the pad0 K-alias depth read
+    off the address map) sets the stripe unit, so the fix pad is correct at any geometry -- e.g. a
+    depth-16 alias fixes at +16 while a depth-8 one fixes at +32. Returns the pad, or None if no
+    conflict-free pad exists within `max_extra_pad` (default: one full NB stripe).
+
+    `align` keeps the pad a whole number of store-widths so the pad cannot NARROW the access width.
+    It is DERIVED from this store (`W dwords/lane x elems-per-dword`, e.g. b128 f16 -> 8 elems); pass
+    it only to override. A hardcoded 8 is an f16-b128 constant and silently mis-aligns anything else."""
     a = arch_lds(arch)
     per_dword = 4 // dtype_bytes
+    if align is None:
+        align = dwords_per_lane(wtag) * per_dword
     limit = max_extra_pad if max_extra_pad is not None else a.NB * per_dword
     for pad in range(0, limit + 1, align):
         if is_conflict_free((tile_free + pad) // per_dword, wtag, a, pad0_depth=pad0_depth):
@@ -363,7 +402,7 @@ class NumBuilder:
         return int(a) << int(b)
 
 
-def access_width(tile_desc, strides, dtype_name="f16", lds_swizzle=False):
+def access_width(tile_desc, strides, dtype_name, lds_swizzle):
     """The vw the emit would choose for this LDS access (drives the per-access dword count)."""
     from rocke.helpers.tiling.emit import _contiguous_run, _swizzle_vw
 
@@ -383,7 +422,7 @@ def access_width(tile_desc, strides, dtype_name="f16", lds_swizzle=False):
     return vw
 
 
-def addr_map(tile_desc, strides, origin=(0, 0), n_lanes=64, dtype_name="f16", lds_swizzle=False):
+def addr_map(tile_desc, strides, *, origin, n_lanes, dtype_name, lds_swizzle):
     """Return (accesses, vw). Each access = one (lane, register-run) wide op:
         {lane, reg0, vw, base}   where base is the element address of the run start.
 
@@ -413,6 +452,12 @@ def addr_map(tile_desc, strides, origin=(0, 0), n_lanes=64, dtype_name="f16", ld
 # ==================================================================================================
 # Isolation micro-probes (generic -- caller supplies the exact kernel descriptors)
 # ==================================================================================================
+# Host verification dtypes for `run_probe`. Only types with an EXACT numpy counterpart are listed:
+# the probe's correctness gate is `max_abs_diff == 0.0`, which is only meaningful if the host buffer
+# round-trips bit-for-bit. bf16/fp8 need an exact host representation before they can be added.
+_NP_DTYPE = {"f16": "float16", "f32": "float32"}
+
+
 @dataclass
 class ProbeDescs:
     """The exact descriptors an LDS store/read probe needs, supplied by the caller so the probe
@@ -438,8 +483,8 @@ class ProbeDescs:
                    wave_read=transpose(wave_native))
 
 
-def build_probe(descs: ProbeDescs, mode: str, *, name=None, tile_free=128, tile_k=16, n_waves=8,
-                warp_free=64, lds_pad=0, n_iter=64, force_vw=0, lds_swizzle=False, dtype=None):
+def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, warp_free, lds_pad,
+                lds_swizzle, dtype, wave_size, name=None, n_iter=64, force_vw=0):
     """Build a store-mirror or read-only probe KernelDef using the caller's exact descriptors.
 
     mode="store": loop{ store(coop); sync; read(store-layout); sync } -- read keeps the store live,
@@ -448,12 +493,12 @@ def build_probe(descs: ProbeDescs, mode: str, *, name=None, tile_free=128, tile_
 
     force_vw (elems) forces a narrower access width via an identity swizzle; lds_swizzle installs a
     real position swizzle. Every probe is a round-trip identity (verified max_abs_diff==0.0)."""
-    from rocke.core.ir import F16, I32, IRBuilder, PtrType
+    from rocke.core.ir import I32, IRBuilder, PtrType
     from rocke.helpers.tiling import (
         load_fragment, make_fragment, make_tensor_desc, make_window, store_fragment,
     )
 
-    dt = dtype or F16
+    dt = dtype
     coop_free = tile_free // n_waves
 
     if lds_swizzle:
@@ -469,7 +514,7 @@ def build_probe(descs: ProbeDescs, mode: str, *, name=None, tile_free=128, tile_
     vwtag = ("_swz" if lds_swizzle else f"_vw{force_vw}" if force_vw else "")
     kname = name or f"lds_probe_{mode}_pad{lds_pad}{vwtag}_{tile_free}x{tile_k}"
     b = IRBuilder(kname)
-    b.kernel.attrs["max_workgroup_size"] = 64
+    b.kernel.attrs["max_workgroup_size"] = wave_size
 
     in_ptr = b.param("IN", PtrType(dt, "global"), noalias=True, readonly=True, align=16)
     out_ptr = b.param("OUT", PtrType(dt, "global"), noalias=True, writeonly=True, align=16)
@@ -533,13 +578,23 @@ def build_probe(descs: ProbeDescs, mode: str, *, name=None, tile_free=128, tile_
     return b.kernel
 
 
-def run_probe(descs: ProbeDescs, mode, *, arch="gfx90a", tile_free=128, tile_k=16, n_waves=8,
-              warp_free=64, lds_pad=0, n_iter=64, grid_ctas=512, verify=True, force_vw=0,
-              block_lanes=64, lds_swizzle=False):
+def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_waves, warp_free,
+              lds_pad, lds_swizzle, block_lanes, n_iter=64, grid_ctas=512, verify=True,
+              force_vw=0):
     """Compile, launch and verify a probe on the real GPU. Returns a dict incl. max_abs_diff
-    (None when the config masks lanes so a full-band compare would false-flag untouched cells)."""
+    (None when the config masks lanes so a full-band compare would false-flag untouched cells).
+
+    `dtype` is the probe's element type (an `ir.Type`, e.g. F16). It drives the kernel, the launch
+    signature AND the host verification buffers -- it is NOT defaulted, because the element size sets
+    the dword packing and therefore the bank map: probing f16 while the kernel is f32 measures a
+    DIFFERENT conflict. Must match the dtype the analysis (`store_datum`/`addr_map`) was built with.
+
+    `block_lanes` is the launch block size. A block NARROWER than the arch's wave masks lanes, so the
+    full-band verify would false-flag untouched cells -- it is skipped and `max_abs_diff` returns None.
+    That is a deliberate, narrow escape hatch; a full-wave probe always verifies."""
     import numpy as np
 
+    a = arch_lds(arch)
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.hip_module import Runtime, get_device_arch
@@ -548,20 +603,30 @@ def run_probe(descs: ProbeDescs, mode, *, arch="gfx90a", tile_free=128, tile_k=1
         DeviceMem, KernelLauncher, LaunchConfig, synchronize_and_release,
     )
 
-    if get_device_arch(0) != arch:
-        raise RuntimeError(f"need {arch}")
+    host_arch = get_device_arch(0)
+    if host_arch != arch:
+        raise RuntimeError(
+            f"probe requested arch {arch!r} but this host's GPU is {host_arch!r}. Hardware\n"
+            f"measurement can only ever be done on the arch you are standing on -- run the probe on\n"
+            f"a {arch} host, or analyze {arch} in SIMULATE mode (model only, no counters).")
+    if dtype.name not in _NP_DTYPE:
+        raise ValueError(
+            f"run_probe has no exact host verification dtype for {dtype.name!r}; supported: "
+            f"{sorted(_NP_DTYPE)}. Add one (and check the round-trip is exact) before probing it.")
+    np_dtype = _NP_DTYPE[dtype.name]
     kernel = build_probe(descs, mode, tile_free=tile_free, tile_k=tile_k, n_waves=n_waves,
                          warp_free=warp_free, lds_pad=lds_pad, n_iter=n_iter, force_vw=force_vw,
-                         lds_swizzle=lds_swizzle)
+                         lds_swizzle=lds_swizzle, dtype=dtype, wave_size=a.WAVE)
     art = compile_kernel(kernel, arch=arch)
-    sig = SignatureBuilder().ptr("IN", "f16").ptr("OUT", "f16").scalar("N", "i32").build()
+    sig = (SignatureBuilder().ptr("IN", dtype.name).ptr("OUT", dtype.name)
+           .scalar("N", "i32").build())
     launcher = KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig)
 
     coop_free = tile_free // n_waves
     rng = np.random.default_rng(0)
-    in_h = rng.integers(-5, 6, size=(coop_free, tile_k)).astype(np.float16)
-    out_h = (np.zeros((coop_free, tile_k), dtype=np.float16) if mode == "store"
-             else np.zeros((tile_k, warp_free), dtype=np.float16))
+    in_h = rng.integers(-5, 6, size=(coop_free, tile_k)).astype(np_dtype)
+    out_h = (np.zeros((coop_free, tile_k), dtype=np_dtype) if mode == "store"
+             else np.zeros((tile_k, warp_free), dtype=np_dtype))
 
     rt = Runtime()
     in_d, out_d = DeviceMem(in_h.nbytes), DeviceMem(out_h.nbytes)
@@ -573,7 +638,7 @@ def run_probe(descs: ProbeDescs, mode, *, arch="gfx90a", tile_free=128, tile_k=1
     rt.memcpy_d2h(as_u8_buffer(out_h), out_d.ptr(), out_h.nbytes)
 
     diff = None
-    if verify and mode == "store" and block_lanes == 64:
+    if verify and mode == "store" and block_lanes == a.WAVE:
         diff = float(np.abs(out_h.astype(np.float32) - in_h.astype(np.float32)).max())
     return {"mode": mode, "pad": lds_pad, "force_vw": force_vw, "lds_swizzle": bool(lds_swizzle),
             "block_lanes": block_lanes, "kernel": kernel.name, "max_abs_diff": diff}
@@ -627,14 +692,14 @@ def parse_counter_csv(outdir):
 # ==================================================================================================
 # 3-panel register->LDS dataflow renderer
 # ==================================================================================================
-def store_datum(store_desc, tile_free, arch=GFX90A, strides=None, dtype_name="f16"):
+def store_datum(store_desc, tile_free, arch, strides, dtype_name, *, origin, lds_swizzle):
     """The single source of the per-slot store picture, shared by the simulator driver, the renderer,
     and the orchestrator so they can never diverge. Returns (acc, vw, datum) where
     `datum[(lane, phase)] = (K, free, dword, bank)` for each dword-phase the lane writes."""
     a = arch_lds(arch)
-    strides = strides or (tile_free, 1)
-    per_dword = 4 // (2 if dtype_name == "f16" else 4)
-    acc, vw = addr_map(store_desc, strides, n_lanes=64, dtype_name=dtype_name)
+    per_dword = 4 // dtype_bytes_of(dtype_name)
+    acc, vw = addr_map(store_desc, strides, origin=origin, n_lanes=a.WAVE, dtype_name=dtype_name,
+                       lds_swizzle=lds_swizzle)
     datum = {}
     for ac in acc:
         d0 = ac["base"] // per_dword
@@ -644,17 +709,19 @@ def store_datum(store_desc, tile_free, arch=GFX90A, strides=None, dtype_name="f1
     return acc, vw, datum
 
 
-def collision_lanes(datum, arch=GFX90A, bank=0, phase=0):
-    """The lanes of the representative served group (half-wave 0, `phase`) that pile on `bank` -- the
-    collision the counters/sim prove. Single definition, used by the renderer and `_locate_collision`."""
+def collision_lanes(datum, arch, bank, phase):
+    """The lanes of served group (half-wave 0, `phase`) that pile on `bank` -- the collision the
+    counters/sim prove. Single definition, used by the renderer and `_locate_collision`. `bank` is
+    REQUIRED and must be DERIVED from the data (the most-piled bank), never assumed to be bank 0 --
+    which bank the pile lands on is a property of the store's address map, not a constant."""
     a = arch_lds(arch)
     return [l for l in range(a.HALF) if datum[(l, phase)][3] == bank]
 
 
-def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, measured_cpa, measured_bc=None,
-                           fix_pad, fix_label, arch="gfx90a", operand_label="A", dims_label="M",
-                           macro_label="macro 128x256, waves 2x4, tile_k=16", strides=None,
-                           dtype_name="f16", subject_pad=0, max_banks=1, max_lanes=16, full=False):
+def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fix_label, arch,
+                           kernel_label, operand_label, dims_label, macro_label, strides, dtype_name,
+                           subject_pad, origin, lds_swizzle, measured_cpa, measured_bc=None,
+                           max_banks=1, max_lanes=16, full=False):
     """Render a two-row, 3-panel register->LDS dataflow figure for one operand's store conflict.
 
     ROW 1 (CONFLICTED, at `subject_pad`): (1) register file tid x reg, the shown threads highlighted;
@@ -672,23 +739,25 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, measured_cp
     not hardcoded. EVERY number is gated: the subject panel's BC/c-a must equal the supplied MEASURED
     values via the validated simulator, and the fix pad must be conflict-free by the stripe rule. ALL
     DRAWING is delegated to `layout_render.render_conflict_dataflow` -- this module never touches
-    matplotlib, so the figure is machine/model-independent. Returns out_path."""
+    matplotlib, so the figure is machine/model-independent. Returns out_path.
+
+    """
     from rocke.helpers.tiling.visualization.layout_render import render_conflict_dataflow
 
     a = arch_lds(arch)
-    per_dword = 4 // (2 if dtype_name == "f16" else 4)
-    strides = strides or (tile_free + subject_pad, 1)  # subject pad sets the LDS row stride
+    dtype_bytes = dtype_bytes_of(dtype_name)
+    per_dword = 4 // dtype_bytes
 
-    acc, vw, datum = store_datum(store_desc, tile_free, a, strides, dtype_name)
+    acc, vw, datum = store_datum(store_desc, tile_free, a, strides, dtype_name, origin=origin,
+                                 lds_swizzle=lds_swizzle)
 
     # --- GATE 1: reproduce the SUBJECT collision via the validated write-port sim. The gate is on
     # conflicts/access (scale-invariant: per-served-group sim vs whatever scale the caller measured);
     # `measured_bc`, when given, is an OPTIONAL per-served-group BC cross-check (do NOT pass a whole-run
     # counter here -- it is a different scale). ---
-    r = simulate(acc, arch=a, dtype_bytes=(4 // per_dword))
-    cpa0 = r["BC"] / (r["IDX"] - r["BC"]) if (r["IDX"] - r["BC"]) else 0.0
-    gate({"conflicts_per_access": cpa0}, {"conflicts_per_access": measured_cpa},
-         label=f"{operand_label} render subject")
+    r = simulate(acc, arch=a, dtype_bytes=dtype_bytes)
+    gate({"conflicts_per_access": r["BC"] / (r["IDX"] - r["BC"]) if (r["IDX"] - r["BC"]) else 0.0},
+         {"conflicts_per_access": measured_cpa}, label=f"{operand_label} render subject")
     if measured_bc is not None:
         assert r["BC"] == measured_bc, (
             f"{operand_label} sim per-group BC {r['BC']} != supplied {measured_bc} (per-group scale?)")
@@ -736,14 +805,15 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, measured_cp
 
     nway = len(occ[subject_bank])
     subj = f"pad{subject_pad}" if subject_pad else "pad0"
+    prov_line = (f"MEASURED (rocprof, real {a.name}) conflicts/access = {measured_cpa:.2f}  "
+                 f"(sim reproduces to the integer: BC={r['BC']}, IDX={r['IDX']}, "
+                 f"productive={r['productive']})")
     suptitle = (
-        f"CRC {operand_label}-store LDS bank conflict  ({wtag}, {macro_label}, {a.name} NB={a.NB})\n"
-        f"K-alias: LDS row stride = {per_dword * (tile_free + subject_pad)} {dtype_name} = "
-        f"{(tile_free + subject_pad) // per_dword} dwords -> {nway}-way {dims_label} piles "
-        f"(showing {len(show_banks)} of {len(piled)} conflicted banks)\nMEASURED (rocprof) "
-        f"conflicts/access = {measured_cpa:.2f}  (sim reproduces to the integer: BC={r['BC']}, "
-        f"IDX={r['IDX']}, productive={r['productive']})   |   TOP=conflicted ({subj})  "
-        f"BOTTOM={fix_label}")
+        f"{kernel_label} {operand_label}-store LDS bank conflict  ({wtag}, {macro_label}, "
+        f"{a.name} NB={a.NB})\nK-alias: LDS row stride = {per_dword * (tile_free + subject_pad)} "
+        f"{dtype_name} = {(tile_free + subject_pad) // per_dword} dwords -> {nway}-way {dims_label} "
+        f"piles (showing {len(show_banks)} of {len(piled)} conflicted banks)\n{prov_line}   |   "
+        f"TOP=conflicted ({subj})  BOTTOM={fix_label}")
 
     # All matplotlib drawing lives in the viz module (one visual language, model-independent).
     return render_conflict_dataflow(out_path, datum=datum, shown_lanes=shown_lanes, half=a.HALF,
@@ -792,23 +862,32 @@ class ConflictReport:
         return {"hard_facts_row": hard, "model_validation_row": val}
 
 
-def _locate_collision(datum, arch):
-    """The representative served group the counters/sim proved: half-wave 0, phase 0, the lanes
-    piling on bank 0."""
-    cells = collision_lanes(datum, arch)
-    return {"half_wave": 0, "phase": 0, "bank": 0, "nway": len(cells),
+def _locate_collision(datum, arch, phase=0):
+    """The representative served group: half-wave 0, `phase`, and the MOST-PILED bank in it. The bank
+    is DERIVED from the address map, not assumed to be bank 0 -- which bank a store piles on is a
+    property of its layout, and a fixed 0 reports an empty collision for any map that piles elsewhere."""
+    a = arch_lds(arch)
+    occ = defaultdict(list)
+    for lane in range(a.HALF):
+        occ[datum[(lane, phase)][3]].append(lane)
+    bank = max(sorted(occ), key=lambda b: len(occ[b]))
+    cells = collision_lanes(datum, a, bank=bank, phase=phase)
+    return {"half_wave": 0, "phase": phase, "bank": bank, "nway": len(cells),
             "cells": [f"T{l}R0" for l in cells]}
 
 
-def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch="gfx90a", operand_label="A",
-                  dims_label="M", measure=None, verify_fix=False, render_to=None,
-                  macro_label="macro 128x256, waves 2x4, tile_k=16", strides=None, dtype_name="f16",
-                  **probe_kwargs) -> ConflictReport:
+def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch, kernel_label, operand_label,
+                  dims_label, macro_label, strides, dtype_name, origin, lds_swizzle, measure=None,
+                  verify_fix=False, render_to=None, **probe_kwargs) -> ConflictReport:
     """One call that runs the whole store analysis and returns a gated ConflictReport:
 
       address map (bit-exact from emit) -> simulate -> [measure on GPU + HARD gate sim==HW] ->
       recommend the conflict-free pad (closed form) -> [optionally verify the fix on GPU] ->
       render the 3-panel figure.
+
+    NO DEFAULTS on the analysis config (arch, labels, strides, dtype, origin, swizzle): each is
+    load-bearing -- it either changes the bank map or is PRINTED ON THE FIGURE AS FACT. A default here
+    silently analyzes a kernel other than yours and stamps your kernel's name on the result.
 
     `measure` is an INJECTED callable `measure(pad:int, mode:str='store') -> dict` (with BC / IDX /
     conflicts_per_access, optionally ADDR / max_abs_diff). It encapsulates the container rocprof run
@@ -818,13 +897,14 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch="gfx90a", operand_
 
     `probe_kwargs` (tile_k, n_waves, warp_free, ...) are forwarded to the measure callable's probe.
     """
-    a = arch_lds(arch)
-    strides = strides or (tile_free, 1)
-    per_dword = 4 // (2 if dtype_name == "f16" else 4)
+    a = arch_lds(arch)   # RAISES if this arch has no registered LDS model -- the full stop
+    dtype_bytes = dtype_bytes_of(dtype_name)
+    per_dword = 4 // dtype_bytes
 
     # 1) bit-exact address map + simulated prediction (shared builder -> renderer sees the same datum)
-    acc, vw, datum = store_datum(descs.coop_store, tile_free, a, strides, dtype_name)
-    sim = simulate(acc, arch=a, dtype_bytes=(4 // per_dword))
+    acc, vw, datum = store_datum(descs.coop_store, tile_free, a, strides, dtype_name, origin=origin,
+                                 lds_swizzle=lds_swizzle)
+    sim = simulate(acc, arch=a, dtype_bytes=dtype_bytes)
     located = _locate_collision(datum, a)
 
     # 2) measure on the GPU + HARD gate (skipped only if no measure callable was supplied)
@@ -849,7 +929,9 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch="gfx90a", operand_
     #    fix pad is correct at any geometry (deep alias -> nearer pad). (Assumes the analysis strides are
     #    pad0, the default; `sim` is then the pad0 histogram.)
     pad0_depth = max((d for h in sim.get("detail", {}).values() for d in h.values()), default=None)
-    fix_pad = recommend_pad(tile_free, wtag, a, pad0_depth=pad0_depth, dtype_bytes=per_dword)
+    # NOTE: dtype_BYTES, not per_dword. These are equal for f16 (2) and differ for everything
+    # else (f32: bytes 4, per_dword 1), so the old `dtype_bytes=per_dword` was right by accident.
+    fix_pad = recommend_pad(tile_free, wtag, a, pad0_depth=pad0_depth, dtype_bytes=dtype_bytes)
     # MODEL-SIDE fix gate (== render GATE 2). The conflict-FREE verdict is a half-stripe PARITY property, which
     # the address-map `simulate` (naive bank=dword mod NB histogram) is structurally blind to -- it reproduces
     # the magnitude of CONFLICTED pads but can never reach 0 at the parity-resolved pads (e.g. a depth-16 b128
@@ -884,14 +966,15 @@ def analyze_store(descs: ProbeDescs, *, tile_free, wtag, arch="gfx90a", operand_
         # reconciles on conflicts/access; the figure annotates the sim's own per-group BC/IDX.
         png = render_conflict_3panel(
             render_to, store_desc=descs.coop_store, tile_free=tile_free, wtag=wtag,
-            measured_cpa=measured["conflicts_per_access"],
-            fix_pad=fix_pad, fix_label=fix_label, arch=a, operand_label=operand_label,
-            dims_label=dims_label, macro_label=macro_label, strides=strides, dtype_name=dtype_name)
+            measured_cpa=measured["conflicts_per_access"], fix_pad=fix_pad, fix_label=fix_label, arch=a, kernel_label=kernel_label,
+            operand_label=operand_label, dims_label=dims_label, macro_label=macro_label,
+            strides=strides, dtype_name=dtype_name, subject_pad=0, origin=origin,
+            lds_swizzle=lds_swizzle)
 
     return ConflictReport(
         operand_label=operand_label, arch=a.name, wtag=wtag, tile_free=tile_free, vw=vw, sim=sim,
-        measured=measured, gate_passed=gate_passed, conflicts_per_access=cpa, fix_pad=fix_pad,
-        fix_verified_hw=fix_verified_hw, located=located, bit_exact=bit_exact, png=png)
+        measured=measured, gate_passed=gate_passed, conflicts_per_access=cpa, fix_pad=fix_pad, fix_verified_hw=fix_verified_hw, located=located,
+        bit_exact=bit_exact, png=png)
 
 
 # ==================================================================================================
@@ -961,7 +1044,7 @@ def _uniform(banks, depth, n_half, n_phase):
             for hw in range(n_half) for ph in range(n_phase)}
 
 
-def selftest(arch=GFX90A, verbose=True):
+def selftest(arch, verbose=True):
     """Gate: the write-port model + stripe-alignment rule must reproduce THIS arch's OWN measured
     corpus to the integer / to the number. Returns True iff the model is valid for `arch`. Refuses
     (raises) an arch that has no measured corpus -- no cross-arch validation."""
@@ -1001,4 +1084,4 @@ def selftest(arch=GFX90A, verbose=True):
 
 if __name__ == "__main__":
     import sys
-    sys.exit(0 if selftest() else 1)
+    sys.exit(0 if selftest(GFX90A) else 1)

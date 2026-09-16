@@ -77,7 +77,10 @@ def test_witness_reconciles_memory_and_flags_direct_mma():
 
 def test_addressing_roundtrip_passes_on_toy():
     _kernel, pipeline = _record_toy()
-    verified = tr.verify_roundtrip(pipeline)
+    # The toy calls b.mma directly, so it records no TileMma and `pipeline.wave_size` is unset --
+    # the wave must be stated rather than assumed (a wrong wave "verifies" a round-trip that never
+    # happened). This toy is a 64-lane (CDNA) wave.
+    verified = tr.verify_roundtrip(pipeline, n_lanes=64)
     names = sorted(pipeline.spaces[s] for s in verified)
     assert len(verified) == 2
     assert names[0].startswith("%lds_a") and names[1].startswith("%lds_b")
@@ -96,7 +99,7 @@ def test_roundtrip_catches_a_corrupted_read():
     bad = dataclasses.replace(a_read, origin=(1, 0))
     pipeline.nodes[pipeline.nodes.index(a_read)] = bad
     with pytest.raises(AssertionError, match="round-trip"):
-        tr.verify_roundtrip(pipeline)
+        tr.verify_roundtrip(pipeline, n_lanes=64)
 
 
 def test_recorded_build_is_byte_identical():

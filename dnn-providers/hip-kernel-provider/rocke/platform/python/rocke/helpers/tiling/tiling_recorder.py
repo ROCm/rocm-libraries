@@ -388,7 +388,7 @@ def witness(pipeline: RecordedPipeline, kernel: Any, *, raise_on_gap: bool = Tru
 # --------------------------------------------------------------------------------------------------
 
 
-def _elem_addresses(t: PipelineTransaction, n_lanes: int = 64) -> dict[tuple[int, int], int]:
+def _elem_addresses(t: PipelineTransaction, n_lanes: int) -> dict[tuple[int, int], int]:
     """(lane, register) -> element address for an LDS transaction, replaying the real emit map."""
     from .lds_conflict import addr_map
 
@@ -402,7 +402,7 @@ def _elem_addresses(t: PipelineTransaction, n_lanes: int = 64) -> dict[tuple[int
     return out
 
 
-def _labels(t: PipelineTransaction, n_lanes: int = 64) -> dict[tuple[int, int], tuple[int, ...]]:
+def _labels(t: PipelineTransaction, n_lanes: int) -> dict[tuple[int, int], tuple[int, ...]]:
     """(lane, register) -> the logical tile coordinate the encoding places there."""
     from .register_mapper import RegisterMapper
 
@@ -414,7 +414,7 @@ def _labels(t: PipelineTransaction, n_lanes: int = 64) -> dict[tuple[int, int], 
     }
 
 
-def verify_roundtrip(pipeline: RecordedPipeline, *, n_lanes: int = 64) -> list[int]:
+def verify_roundtrip(pipeline: RecordedPipeline, *, n_lanes: int | None = None) -> list[int]:
     """For each LDS space with a store then a read, assert the read recovers, at each address, the
     logical label the store placed there. Returns the space_ids verified. Raises AssertionError with
     the first offending ``(lane, reg)`` on failure.
@@ -423,6 +423,15 @@ def verify_roundtrip(pipeline: RecordedPipeline, *, n_lanes: int = 64) -> list[i
     every K-iteration's pair is identical). The buffer-half key + MMA-soundness gate arrive in the
     Phase-C driver.
     """
+    # Wave size is a property of the recorded pipeline's MMA, never a constant: assuming 64 silently
+    # replays half a wave on a 32-lane (RDNA) target and "verifies" a round-trip that never happened.
+    if n_lanes is None:
+        n_lanes = pipeline.wave_size
+    if not n_lanes:
+        raise ValueError(
+            "verify_roundtrip needs the wave size: this pipeline recorded no TileMma, so "
+            "`pipeline.wave_size` is unset. Pass n_lanes= explicitly for the target you are checking.")
+
     verified: list[int] = []
     for space_id in pipeline.lds_spaces():
         stores = [t for t in pipeline.transactions if t.space_id == space_id and t.kind == "store"]

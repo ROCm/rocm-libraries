@@ -26,7 +26,8 @@ def _a_descs():
 def _sim_pad0():
     """The write-port simulator on the pad0 address map -> conflicts/access (the value the GPU confirmed)."""
     a = lc.GFX90A
-    acc, vw, datum = lc.store_datum(_a_descs().coop_store, TILE_FREE, a, (TILE_FREE, 1), "f16")
+    acc, vw, datum = lc.store_datum(_a_descs().coop_store, TILE_FREE, a, (TILE_FREE, 1), "f16",
+                                    origin=(0, 0), lds_swizzle=False)
     r = lc.simulate(acc, arch=a, dtype_bytes=2)
     return r["BC"] / (r["IDX"] - r["BC"]) if (r["IDX"] - r["BC"]) else 0.0
 
@@ -71,7 +72,10 @@ def test_conflict_free_rule_is_depth_aware_for_b128_into_a_wide_tile():
     a = lc.GFX90A
     assert lc.predict_pad_sweep(FIX_STRIDE_DW, WTAG, a, pad0_depth=DEPTH16) == 0.0
     assert lc.is_conflict_free(FIX_STRIDE_DW, WTAG, a, pad0_depth=DEPTH16)
-    assert lc.predict_pad_sweep(FIX_STRIDE_DW, WTAG, a) != 0.0     # depth-agnostic default: WRONG here
+    # The depth-agnostic default used to answer here -- WRONGLY (it assumed depth 8). A silently wrong
+    # answer is worse than none, so omitting the depth is now a hard error instead of a guess.
+    with pytest.raises(ValueError, match="pad0_depth is required"):
+        lc.predict_pad_sweep(FIX_STRIDE_DW, WTAG, a, pad0_depth=None)
 
 
 def test_the_two_predictors_split_by_design_do_not_try_to_unify_them():
@@ -82,7 +86,8 @@ def test_the_two_predictors_split_by_design_do_not_try_to_unify_them():
     predictor (matches the GPU: pad16 -> BC=0). Do NOT 'fix' simulate to return 0 -- the split is intentional;
     `analyze_store`/`render` gate the fix on `is_conflict_free`, never on simulate at a padded stride."""
     a = lc.GFX90A
-    acc, _vw, _d = lc.store_datum(_a_descs().coop_store, TILE_FREE, a, (TILE_FREE + 16, 1), "f16")
+    acc, _vw, _d = lc.store_datum(_a_descs().coop_store, TILE_FREE, a, (TILE_FREE + 16, 1), "f16",
+                                  origin=(0, 0), lds_swizzle=False)
     r = lc.simulate(acc, arch=a, dtype_bytes=2)
     sim_ca = r["BC"] / (r["IDX"] - r["BC"]) if (r["IDX"] - r["BC"]) else 0.0
     assert sim_ca > 0.0, "simulate is expected to be parity-blind here (structural), NOT a conflict-free oracle"
@@ -95,11 +100,14 @@ def test_analyze_store_runs_both_gates_end_to_end_at_depth16(tmp_path):
     depth-aware GATE 2. Previously this raised `A fix pad16 not conflict-free by the validated rule`."""
     descs = _a_descs()
     rep = lc.analyze_store(
-        descs, tile_free=TILE_FREE, wtag=WTAG, operand_label="A", dims_label="M", tile_k=32, n_waves=16,
+        descs, tile_free=TILE_FREE, wtag=WTAG, arch=lc.GFX90A,
+        kernel_label="CRC", operand_label="A", dims_label="M", tile_k=32, n_waves=16,
         macro_label="macro 256x256, waves 4x4, tile_k=32", strides=(TILE_FREE, 1),
+        dtype_name="f16", origin=(0, 0), lds_swizzle=False,
         measure=_hw_stub, verify_fix=True,
         render_to=str(tmp_path / "lds_conflict_A_store.png"))
     assert rep.gate_passed and rep.fix_verified_hw
+    assert rep.verdict.startswith("VALIDATED")
     assert rep.conflicts_per_access == pytest.approx(3.0, abs=1e-9)
     assert rep.fix_pad == 16
     assert rep.located["nway"] == DEPTH16 and rep.located["bank"] == 0

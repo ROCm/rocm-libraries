@@ -143,9 +143,10 @@ def test_lds_conflict_served_model_general():
     assert r["IDX"] == 32 and r["BC"] == 24 and r["BC"] / r["productive"] == 3.0
     # 4) Stripe rule is geometry-general: the conflict-free unit is set by the pad0 alias DEPTH read off the
     #    address map (unit = NB*W/depth), no per-config constant. Default (depth NB/4) == legacy 4*W.
-    assert lc.predict_pad_sweep(8, "b128", a) == lc.predict_pad_sweep(8, "b128", a, pad0_depth=a.NB // 4)
-    assert lc.recommend_pad(256, "b128", a) == 32                           # depth 8 (default) -> +32
-    assert lc.recommend_pad(256, "b128", a, pad0_depth=16) == 16            # depth 16 (deeper alias) -> +16
+    assert (lc.predict_pad_sweep(8, "b128", a, pad0_depth=a.NB // 4)
+            == lc.predict_pad_sweep(8, "b128", a, pad0_depth=8))
+    assert lc.recommend_pad(256, "b128", a, pad0_depth=8, dtype_bytes=2) == 32    # depth 8  -> +32
+    assert lc.recommend_pad(256, "b128", a, pad0_depth=16, dtype_bytes=2) == 16   # deeper alias -> +16
 def test_gate_is_scale_invariant():
     import pytest
     # The gate must reconcile PER-SERVED-GROUP sim vs WHOLE-RUN measured counters -- the invariant is
@@ -206,7 +207,7 @@ def test_lds_bank_view_renders_flow_and_thread(tmp_path):
 
 # ---------------------------------------------------------------- lds-conflict tooling
 def test_lds_conflict_selftest_green():
-    assert lc.selftest(verbose=False)
+    assert lc.selftest(lc.GFX90A, verbose=False)
 
 
 def test_ge2_axis_key_rule(tmp_path):
