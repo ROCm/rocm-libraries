@@ -191,6 +191,8 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             -DBUILD_LAPACK_DEPRECATED=OFF
             -DBUILD_TESTING=OFF
             -DBUILD_BENCHMARKS=OFF
+            # Use OpenBLAS's suppression of unused/uninitialized C warnings.
+            -DQUIET_MAKE=ON
             -DUSE_OPENMP=OFF
             -DUSE_THREAD=OFF
             -DCMAKE_C_VISIBILITY_PRESET=hidden
@@ -225,20 +227,9 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
         endif()
 
-        # Silence warnings from third-party OpenBLAS/LAPACK sources without
-        # changing hipSOLVER's own warning settings.
-        set(LAPACK_C_FLAGS "")
-        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-            set(LAPACK_C_FLAGS "-w")
-        elseif(MSVC)
-            set(LAPACK_C_FLAGS "/w")
-        endif()
         # Downgrade incompatible-pointer-types errors to warnings when using Clang.
         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-            string(APPEND LAPACK_C_FLAGS " -Wno-error=incompatible-pointer-types")
-        endif()
-        if(LAPACK_C_FLAGS)
-            list(APPEND LAPACK_CMAKE_ARGS "-DCMAKE_C_FLAGS=${LAPACK_C_FLAGS}")
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types)
         endif()
 
         include(ExternalProject)
