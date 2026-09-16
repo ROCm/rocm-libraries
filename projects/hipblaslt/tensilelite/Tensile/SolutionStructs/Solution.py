@@ -167,6 +167,18 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
              "MXLoadInst=TDM currently always produces MXScaleFormat=InMemorySwizzle "
              "(got %s)" % state["MXScaleFormat"])
       return False
+    # The subtile scale path derives its group span from the swizzled layout --
+    # KernelWriter computes roundUp(ceil(K/mxBlock), 8) * 32, which is the host
+    # pre-swizzle padding and grouping, not anything the canonical layout has.
+    # Measured on gfx950, NoSwizzle under UseSubtileImpl faults or returns NaN on
+    # all four layouts, and nothing selects it there (Auto gives HostPreSwizzle),
+    # so refuse it rather than emit a kernel that reads the wrong scales.
+    if state["MXScaleFormat"] == "NoSwizzle" and state.get("UseSubtileImpl", False):
+      reject(state, printRejectionReason,
+             "MXScaleFormat=NoSwizzle is not implemented for UseSubtileImpl=1 "
+             "(the subtile scale group span assumes the swizzled layout)")
+      return False
+
     # gfx1250 MX scales require a swizzled format (InMemorySwizzle via TDM).
     # NoSwizzle is not supported on this arch.
     if state["ISA"] == (12, 5, 0) and state["MXScaleFormat"] == "NoSwizzle":
