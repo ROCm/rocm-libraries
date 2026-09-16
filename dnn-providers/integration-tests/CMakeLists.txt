@@ -227,7 +227,16 @@ target_compile_options(${GOLDEN_DATA_TESTS_EXE}
 
 clang_tidy_check(${GOLDEN_DATA_TESTS_EXE})
 
-add_integration_test_target(${GOLDEN_DATA_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR})
+# SKIP_NAME_VALIDATION: every test this binary registers is named after a bundle's
+# directory path (deriveTestName() in BundleDiscovery.hpp), so the names are
+# lower_snake_case by construction -- `quick_SdpaFwd_bhsd_bf16_hd128_causal_batch_
+# Small_CpuRef.Small`. The PascalCase convention the validator enforces is for
+# hand-written C++ test names; satisfying it here would mean renaming the checked-in
+# bundle tree, which is the data, not the test code. hipdnn_integration_tests
+# registers the same bundle-derived names and is likewise absent from the validated
+# set, because it is not a tiered ctest target (see the note below).
+add_integration_test_target(${GOLDEN_DATA_TESTS_EXE} ${CMAKE_CURRENT_BINARY_DIR}
+    SKIP_NAME_VALIDATION)
 
 add_subdirectory(src/integration-tests)
 
