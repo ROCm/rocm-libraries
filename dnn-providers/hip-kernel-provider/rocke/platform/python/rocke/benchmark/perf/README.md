@@ -6,8 +6,9 @@
 Reusable building blocks for measuring rocKE GPU kernels: hardware **counters**
 (cycles, cache, waves, instructions, stalls) via `rocprofv3`, static **occupancy**
 (VGPR/LDS/...) from a kernel's ELF notes, plus real-world (**wall**) and profiled timing - composed into one
-`measurement/v1` record. The primary metric is cycle-based (`busy_cycles`), which is
-clock-invariant and so much less noisy than milliseconds.
+`measurement/v1` record. The primary metric is cycle-based (`busy_cycles`).
+Compare repeated runs under comparable clocks, cache state and system load;
+cycle counts and the spread-based comparison gate do not eliminate measurement bias.
 
 ## Quick start (for testers)
 
@@ -166,33 +167,40 @@ groups, selection and profiler status (`complete`, `failed`, or `unavailable`).
 
 `manifest.status=complete` means measurement export finished, not that all
 counters were available or performance improved. Check per-sample profiler
-status and `captured_counters`. Failures retain partial files and a failed
-manifest; interrupted processes may leave `running`, which is not complete.
+status and `captured_counters`. A profiler failure can still yield a complete
+wall-only export; its retained CSVs are troubleshooting evidence, not import candidates.
+Export failures retain partial files and a failed manifest; interrupted processes
+may leave `running`, which is not complete.
 Failed exports must not be consumed as finalized baselines. A regression still
 exports a complete bundle and exits 1. `--no-store` suppresses history writes,
 not an explicitly requested bundle. Without the flag, behavior is unchanged.
 
-**WaveScope CSV import:** open the ATT trace and upload a raw counter CSV from one
-sample through Bottlenecks, or copy that sample's relevant counter files beside
-`code.json`. Original pass directories and filenames are preserved, not flattened
-or merged. Use the JSON manifest to locate every pass; a single uploaded CSV may
-contain only part of the counter set. Do not combine repeats into one PMC import.
-These are separate captures: confirm the same workload, GPU and binary yourself;
-the bundle explicitly claims no ATT binding.
+**WaveScope CSV import:** open the ATT trace and upload a CSV recommended by the
+utility from a successful profiler sample. Each upload replaces the previous one.
+With the full CDNA selection, `pmc_1` holds all inputs for the three PMC rules,
+including the MFMA guard; `pmc_2` holds `SQ_INSTS_LDS` and `SQ_WAIT_ANY`.
+Use `profile_capture.counter_groups` to check the actual selection on your GPU.
+For folder import, place copies of the relevant files from one repeat directly
+beside `code.json`, preserving distinct names ending in `_counter_collection.csv`.
+The viewer does not recursively scan the bundle's pass directories. Keep the
+original bundle intact and do not combine repeats into one PMC import.
+Confirm workload, GPU and binary before correlating separate PMC and ATT captures;
+the bundle records their association as UNBOUND.
 
 **JSON readers:** consume `measurement.json` using its existing schema, the sample
 records and the manifest. They retain normalized counter medians, sample count,
 spread, correctness and separate `wall`/`profiled` timing with `timing_source`.
-`--per-dispatch` adds samples with repeat and counter-pass identity. WaveScope can
-add a reader for this published contract without another rocKE output change.
+`--per-dispatch` adds samples with repeat and counter-pass identity. Consumers use
+the versioned manifest and measurement schemas to interpret the bundle.
 
 **Do not equate CSV and JSON totals.** Raw CSVs retain all profiler dispatches,
 including warmup and other kernels. JSON counter medians select one target and
 drop warmup per pass. Optional `counter_samples` retain warmup for inspection.
-Raw PMC import sums and JSON medians therefore need not agree. Existing counter
-coverage is unchanged; exporting cannot supply uncollected LDS-bank-conflict or
-full roofline counters. No launcher environment variables are serialized; raw
-profiler files may contain kernel names, paths or workload-specific information.
+Raw PMC import sums and JSON medians therefore need not agree. Ratios use the
+same definitions, but a ratio of medians can differ from a ratio of raw sums.
+The selected counters include LDS-conflict and CDNA VALU/MFMA diagnostic inputs;
+full roofline analysis requires additional counters. Raw profiler files may
+contain kernel names, paths or workload-specific information.
 
 ## 3. The GEMM sweep integration (`examples/`)
 
@@ -228,12 +236,34 @@ python -m rocke.benchmark.perf.examples.profile_gemm_sweep --arch gfx950 --shape
 
 ## Per-arch counter coverage
 
-Counter names differ by family, so the harness probes and normalizes them - never
-hardcode a counter list. On CDNA (gfx94x/gfx950) the full panel populates. On RDNA4
-(gfx1201, verified on-box 2026-07) the instruction and L2 counters read 0 - a
-`rocprofv3` support gap, not a parse error - so the panel there is clock/wave-only;
-the primary cycle metric works on both. `captured_counters` in each record lists
-exactly which counters populated, so a record never overstates coverage.
+Counter names differ by family; the harness intersects its normalized selection
+with `rocprofv3 --list-avail`. The full selection contains 14 counters on CDNA
+and 11 on RDNA. Per-block budgets split CDNA into two replay passes and RDNA into
+one. Overlapping ratio constraints form indivisible groups; a group that exceeds
+its block budget is rejected. Availability can reduce the selected set.
+
+Derived ratios are `busy_cycles / total_clocks`, `l2_hit / (l2_hit + l2_miss)`,
+`lds_bank_conflict / lds_idx_active`, `valu_active_cycles / cu_busy_cycles`, and
+`mfma_insts / valu_insts`. Missing inputs or unusable denominators omit the ratio.
+Values are ratios, not percentages, and are not universally bounded by one.
+
+On 2026-09-15, gfx90a captures produced nonzero LDS, L2 and VALU diagnostics in
+two passes. gfx1201 captures completed in one pass but returned zero for the LDS,
+instruction and L2 inputs exercised by the probe; `busy_fraction` remained usable.
+These are observations of those machines and profiler installations, not a
+guarantee for every GPU in either family. `captured_counters` lists returned
+numeric keys, including zeros; it does not certify meaningful hardware support.
+
+Each pass reruns the launcher. Keep inputs, launch geometry and workload state
+repeatable. Ratio inputs share a requested pass, but separate replays and repeated
+runs can still differ in cache state, scheduling, clocks or data-dependent work.
+`lds_insts` is useful for comparing executed LDS work; it is an instruction count,
+not bytes transferred or a guarantee of deterministic behavior.
+
+Hardware CSV import was exercised in WaveScope using explicitly synthetic trace
+fixtures. This verifies parsing and PMC rule behavior, not real ATT/PMC correlation.
+A vector-only fixture and a CSV control with the MFMA counter removed isolate
+the counter-based matrix guard from the ATT fallback.
 
 ## Tests
 

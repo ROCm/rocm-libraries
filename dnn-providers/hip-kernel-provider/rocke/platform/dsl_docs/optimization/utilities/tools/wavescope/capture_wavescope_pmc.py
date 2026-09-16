@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Capture PMC artifacts for WaveScope using rocKE's perf primitives.
 
-Every capture writes both formats: the original profiler CSVs, which WaveScope's
-Bottlenecks tab imports, and versioned measurement JSON entered through
-`manifest.json`. Each consumer reads the format it understands and ignores the
-rest, so the same bundle serves them all. Capture runs standalone: neither a
-WaveScope installation nor an ATT decoder is involved.
+Capture retains original profiler CSVs and writes versioned measurement JSON.
+WaveScope's Bottlenecks tab imports the recommended CSVs from successful profiler
+samples; `manifest.json` indexes the artifacts and records each sample's status.
+Wall-only measurements retain their timing JSON and any profiler troubleshooting
+artifacts. Capture runs through the adjacent rocKE perf package.
 
 Run from any directory; the adjacent platform/python package is selected for
 both the perf subprocess and its launcher. The launcher's working directory and
@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         return result.returncode or 1
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     print(f"\nWaveScope PMC bundle: {output}", file=sys.stderr)
-    print(f"Status: {manifest['status']}", file=sys.stderr)
+    print(f"Export status: {manifest['status']}", file=sys.stderr)
     if manifest["status"] != "complete":
         print(
             "Incomplete capture: retained files are for diagnosis, not a finalized baseline.",
@@ -102,13 +102,22 @@ def main(argv: list[str] | None = None) -> int:
         return result.returncode or 1
     print(f"JSON entry point: {manifest_path}", file=sys.stderr)
     print(f"Measurement JSON: {output / manifest['measurement']}", file=sys.stderr)
+    successful_raw_dirs = set()
     for sample in manifest["samples"]:
         capture = sample.get("profile_capture") or {}
+        if capture.get("status") == "complete":
+            successful_raw_dirs.add(Path(sample["raw_dir"]))
         print(
             f"Sample {sample['sample_index']}: profiler {capture.get('status', 'unknown')}",
             file=sys.stderr,
         )
-    csvs = [item for item in manifest["files"] if item["kind"] == "pmc_csv"]
+    csvs = [
+        item
+        for item in manifest["files"]
+        if item["kind"] == "pmc_csv"
+        and any(parent in successful_raw_dirs for parent in Path(item["path"]).parents)
+        and (output / item["path"]).is_file()
+    ]
     if csvs:
         print(
             "WaveScope: open the ATT trace, then upload a CSV in Bottlenecks:",
@@ -122,11 +131,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print(
-            "No raw PMC CSVs were captured; JSON timing may still be available. This is not a PMC capture success.",
+            "CSV upload requires a successful profiler capture with raw PMC CSVs. Retained profiler output is available for diagnosis; measurement JSON records timing.",
             file=sys.stderr,
         )
     print(
-        "ATT association: UNBOUND. Verify the workload, GPU and binary. Both formats are exported; upload a CSV for WaveScope's Bottlenecks tab.",
+        "ATT association: UNBOUND. Verify the workload, GPU and binary.",
         file=sys.stderr,
     )
     return result.returncode

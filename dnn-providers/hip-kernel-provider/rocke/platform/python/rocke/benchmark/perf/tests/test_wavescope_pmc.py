@@ -93,6 +93,11 @@ class TestWaveScopePmc(unittest.TestCase):
             csv = output / "pmc_1/results_counter_collection.csv"
             csv.parent.mkdir(parents=True)
             csv.write_bytes(Path(os.environ["CAPTURE_RAW"]).read_bytes())
+            sample = next(part for part in output.parts if part.isdigit())
+            if sample in os.environ.get("CAPTURE_FAIL_SAMPLES", "").split(","):
+                raise SystemExit(7)
+            if os.environ.get("CAPTURE_NO_CSV"):
+                csv.unlink()
             """
             )
         )
@@ -227,6 +232,55 @@ class TestWaveScopePmc(unittest.TestCase):
         self.assertEqual(len(csvs), 1)
         self.assertEqual((destination / csvs[0]["path"]).read_bytes(), RAW)
         self.assertFalse((self.cache / "history.jsonl").exists())
+
+    def test_failed_profiler_csv_is_retained_without_upload_guidance(self):
+        self.env["CAPTURE_FAIL_SAMPLES"] = "0000"
+        destination = self.root / "failed-profiler"
+        result = self.capture(destination, "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = self.read_json(destination / "manifest.json")
+        self.assertEqual(manifest["status"], "complete")
+        self.assertEqual(manifest["samples"][0]["profile_capture"]["status"], "failed")
+        csvs = [item for item in manifest["files"] if item["kind"] == "pmc_csv"]
+        self.assertEqual(len(csvs), 1)
+        self.assertEqual((destination / csvs[0]["path"]).read_bytes(), RAW)
+        self.assertNotIn(str(destination / csvs[0]["path"]), result.stderr)
+        self.assertNotIn("upload a CSV", result.stderr)
+        self.assertIn("diagnosis", result.stderr)
+        self.assertEqual(json.loads(result.stdout)["record"]["wall"]["ms_median"], 1)
+
+    def test_mixed_repeats_recommend_only_successful_profiler_csv(self):
+        self.env["CAPTURE_FAIL_SAMPLES"] = "0000"
+        destination = self.root / "mixed-profiler"
+        result = self.capture(destination, "--repeats", "2", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = self.read_json(destination / "manifest.json")
+        self.assertEqual(manifest["status"], "complete")
+        self.assertEqual(
+            [sample["profile_capture"]["status"] for sample in manifest["samples"]],
+            ["failed", "complete"],
+        )
+        csvs = [item for item in manifest["files"] if item["kind"] == "pmc_csv"]
+        self.assertEqual(len(csvs), 2)
+        for item in csvs:
+            self.assertEqual((destination / item["path"]).read_bytes(), RAW)
+            csv_path = str(destination / item["path"])
+            if Path(manifest["samples"][0]["raw_dir"]) in Path(item["path"]).parents:
+                self.assertNotIn(csv_path, result.stderr)
+            else:
+                self.assertIn(csv_path, result.stderr)
+        self.assertIn("upload a CSV", result.stderr)
+
+    def test_wall_only_export_has_no_csv_upload_guidance(self):
+        self.env["CAPTURE_NO_CSV"] = "1"
+        destination = self.root / "wall-only"
+        result = self.capture(destination, "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = self.read_json(destination / "manifest.json")
+        self.assertEqual(manifest["status"], "complete")
+        self.assertFalse(any(item["kind"] == "pmc_csv" for item in manifest["files"]))
+        self.assertEqual(json.loads(result.stdout)["record"]["wall"]["ms_median"], 1)
+        self.assertNotIn("upload a CSV", result.stderr)
 
     def test_opt_in_history_preserves_regression_exit_and_complete_bundle(self):
         baseline = self.capture(self.root / "baseline", "--store-history", "--json")

@@ -41,7 +41,7 @@ SCHEMA_VERSION = "rocke.bench.measurement/v1"
 # (GEMM: M/N/K; conv: N/H/W/C/...; attention: batch/heads/seqlen/...), so no op is
 # privileged. Callers that need configuration-specific identities should use a
 # configuration-specific kernel_name.
-# Primary regression metric is clock-invariant (cycles); wall time is the fallback
+# Primary regression metric is cycle-based; wall time is the fallback
 # when the profiler was unavailable, and the profiler's own kernel duration is the
 # last resort when the launcher prints no PerfJSON line (so there is no wall run).
 # The three are never interchangeable, so `metric()` reports which one it used.
@@ -54,6 +54,9 @@ PROFILED_METRIC = "profiled_ms_median"  # from record["profiled"]
 PANEL_KEYS = (
     "busy_fraction",
     "l2_hit_rate",
+    "lds_bank_conflict_rate",
+    "valu_utilization",
+    "matrix_share",
     "waves",
     "wait_cycles",
     "occupancy",

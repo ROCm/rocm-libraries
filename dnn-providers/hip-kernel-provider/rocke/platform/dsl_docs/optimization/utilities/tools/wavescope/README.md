@@ -104,7 +104,7 @@ The adjacent perf package is added to the child `PYTHONPATH`; existing entries
 are preserved. Add the rocKE `library` path yourself if your launcher needs it.
 The output directory must be new. No prior capture or ATT files are modified.
 
-**Both formats are always emitted when measurement succeeds:**
+**A successful PMC capture produces this CSV and JSON bundle:**
 
 ```text
 gemm-pmc-before/
@@ -119,37 +119,40 @@ gemm-pmc-before/
 ```
 
 To import counters into **WaveScope**, open the ATT dispatch, select
-**Bottlenecks**, and upload one of the printed CSV paths. Each repeat stays
-separate. A replay pass may hold only part of the counter set; keep all relevant
-pass files from one repeat when colocating them with a trace, without overwriting
-identically named files. Do not combine multiple repeats into one CSV import. The
-raw files retain warmup and other-kernel dispatches, while JSON medians select the
-target and exclude warmup.
+**Bottlenecks**, and upload a recommended CSV from a successful profiler sample.
+Each upload replaces the previous one. With the full CDNA selection, `pmc_1`
+contains the LDS, L2, VALU and MFMA rule inputs; `pmc_2` contains LDS instructions
+and wait cycles. Check `profile_capture.counter_groups` for the actual selection.
+For folder import, copy relevant files from one repeat directly beside `code.json`
+with distinct names ending in `_counter_collection.csv`; the viewer does not scan
+nested pass directories. Preserve the original bundle. Keep repeats separate.
+Raw files retain warmup and other-kernel dispatches; JSON medians select the target
+and exclude warmup. Ratios of raw sums and ratios of medians can differ.
 
 To consume the **JSON contract**, retain the entire bundle and read
 `manifest.json`. It uses `rocke.bench.artifacts/v1`; measurements use
 `rocke.bench.measurement/v1`.
 See the [artifact contract](../../../../../python/rocke/benchmark/perf/README.md#portable-artifacts-counter-csvs-and-measurement-json)
 for selection, repeat identity, SHA-256 inventory and timing-source semantics.
-Every capture writes both formats, so a bundle already satisfies a JSON consumer
-the moment one exists. The utility emits one fixed layout and each consumer reads
-the part it understands.
+The bundle layout contains original profiler artifacts and versioned measurements;
+each consumer reads the corresponding entries in the manifest.
 
 The utility defaults to **export-only** (no history writes). Add `--store-history`
 to compare later captures against stored baselines; `--cache`, `--threshold`,
 `--noise-k` and `--json` pass through to the perf CLI. Progress and import paths
 go to stderr so `--json` stdout stays machine-readable. Regressions retain exit 1.
 
-The manifest distinguishes complete measurement export from actual profiler
-availability. Without usable PMC collection, a launcher emitting `PerfJSON:` may
-still produce wall-only JSON: the utility explicitly reports no PMC CSVs rather
-than claiming a successful counter capture. Failed captures retain partial
-artifacts and do not report a finalized baseline.
+The manifest distinguishes complete measurement export from profiler success.
+A launcher emitting `PerfJSON:` can yield a complete wall-only export when the
+profiler fails. Failed profiler files remain available for troubleshooting;
+upload guidance selects CSVs only from successful profiler samples. An export
+failure leaves a failed or incomplete manifest rather than a finalized baseline.
 
 **Association is UNBOUND.** These counters were collected separately from ATT.
 Check workload, shape, GPU and build before correlating them. File hashes prove
-artifact integrity, not that two captures ran the same binary. Export retains the
-existing perf counter set; it does not add the full roofline or LDS-conflict set.
+artifact integrity, not that two captures ran the same binary. The counter set
+includes LDS-conflict and CDNA VALU/MFMA inputs; full roofline analysis requires
+additional counters. Returned zero-valued counters do not establish hardware support.
 
 ## Open it
 

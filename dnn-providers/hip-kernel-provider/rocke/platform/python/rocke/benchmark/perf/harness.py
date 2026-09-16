@@ -189,17 +189,19 @@ def _duration_ms_median(samples: list[dict], warmup: int) -> Optional[float]:
     duration and the counters describe the same set of dispatches. Returns None when
     rocprofv3 emitted no usable timestamps (older builds omit them).
     """
-    by_pass: dict[str, list[tuple[int, int]]] = {}
+    by_pass: dict[str, list[tuple[int, Optional[int]]]] = {}
     for s in samples:
         ns = s.get("duration_ns")
-        if ns is None:
-            continue
         by_pass.setdefault(str(s.get("counter_pass", "pmc_0")), []).append(
-            (int(s.get("dispatch_id", 0)), int(ns))
+            (int(s.get("dispatch_id", 0)), int(ns) if ns is not None else None)
         )
     kept: list[int] = []
     for _, pairs in sorted(by_pass.items()):
-        kept.extend(ns for _, ns in sorted(pairs)[warmup:])
+        kept.extend(
+            ns
+            for _, ns in sorted(pairs, key=lambda pair: pair[0])[warmup:]
+            if ns is not None
+        )
     m = _median(kept)
     return m / 1e6 if m is not None else None
 
@@ -384,7 +386,9 @@ def profile(
         groups: list = []
         if sel:
             pmc = tmp / "pmc.txt"
-            groups = _counters.group_counters(list(sel.values()))
+            groups = _counters.group_counters(
+                list(sel.values()), keep_together=_counters.ratio_units(sel)
+            )
             _write_pmc_input(groups, pmc)
             ran, prof_stdout = _run_rocprofv3(cmd, pmc, outdir, env, timeout)
             if not ran:
@@ -476,15 +480,7 @@ def profile(
             "perfjson" if profiled.get("ms_median") or wall.get("ms_median") else "none"
         )
 
-    derived: dict = {}
-    busy = counters_out.get("busy_cycles")
-    total = counters_out.get("total_clocks")
-    if busy is not None and total:
-        derived["busy_fraction"] = busy / total
-    hits = counters_out.get("l2_hit")
-    misses = counters_out.get("l2_miss")
-    if hits is not None and misses is not None and (hits + misses) > 0:
-        derived["l2_hit_rate"] = hits / (hits + misses)
+    derived: dict = _counters.derive(counters_out)
     if profiled.get("ms_median") and wall.get("ms_median"):
         derived["profiler_overhead_pct"] = (
             (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0

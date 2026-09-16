@@ -332,6 +332,49 @@ class TestCounterSamples(unittest.TestCase):
         self.assertEqual(harness._counter_samples(rows, {"H": "l2_hit"}), [])
 
 
+class TestDurationMedian(unittest.TestCase):
+    def test_missing_warmup_timestamp_does_not_drop_measured_dispatch(self):
+        rows = [
+            {
+                "Dispatch_Id": str(dispatch_id),
+                "Counter_Name": "C1",
+                "Counter_Value": str(dispatch_id),
+                **timestamps,
+            }
+            for dispatch_id, timestamps in (
+                (3, {"Start_Timestamp": "0", "End_Timestamp": "3000000"}),
+                (1, {}),
+                (2, {"Start_Timestamp": "0", "End_Timestamp": "1000000"}),
+            )
+        ]
+        samples = harness._counter_samples(rows, {"C1": "busy_cycles"})
+        self.assertEqual(harness._duration_ms_median(samples, warmup=1), 2.0)
+        self.assertEqual(
+            harness._counter_medians(rows, {"C1": "busy_cycles"}, warmup=1),
+            {"busy_cycles": 2.5},
+        )
+
+    def test_warmup_boundary_is_ordered_independently_per_pass(self):
+        samples = [
+            {"counter_pass": counter_pass, "dispatch_id": did, "duration_ns": ns}
+            for counter_pass, values in (
+                ("pmc_2", ((3, 7000000), (1, 99000000), (2, 5000000))),
+                ("pmc_1", ((3, 3000000), (1, None), (2, 1000000))),
+            )
+            for did, ns in values
+        ]
+        self.assertEqual(harness._duration_ms_median(samples, warmup=1), 4.0)
+
+    def test_no_usable_measured_timestamps_returns_none(self):
+        for samples in (
+            [],
+            [{"dispatch_id": 1}],
+            [{"dispatch_id": 1, "duration_ns": 1000000}, {"dispatch_id": 2}],
+        ):
+            with self.subTest(samples=samples):
+                self.assertIsNone(harness._duration_ms_median(samples, warmup=1))
+
+
 class TestPickTarget(unittest.TestCase):
     def _rows(self, *names):
         return [{"Kernel_Name": n} for n in names]
