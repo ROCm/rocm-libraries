@@ -239,35 +239,105 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivationPureFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivationPureFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivationPureBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivationPureFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivationPureFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivationPureBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivationPureFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivationPureFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivationPureBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivationMixedFp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivationMixedBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormQuickTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivationMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivationMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivationMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivationMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormComprehensiveTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
@@ -351,33 +421,103 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivation3dPureFp32,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivation3dPureFp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivation3dPureBfp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivation3dPureFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivation3dPureFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivation3dPureBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivation3dPureFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivation3dPureFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivation3dPureBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivation3dMixedFp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuRMSNormBackwardActivation3dMixedBfp16,
     testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
-                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dTestCases()),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dQuickTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivation3dMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    IntegrationGpuRMSNormBackwardActivation3dMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dStandardTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivation3dMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases()),
+                     testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Comprehensive,
+    IntegrationGpuRMSNormBackwardActivation3dMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm3dComprehensiveTestCases()),
                      testing::ValuesIn(test_activation_common::createBwdActivationSmokeCases())));
