@@ -21,3 +21,5 @@ __pycache__/
 
 # Python package
 *.egg-info/
+# Wheel output
+dist/
