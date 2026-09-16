@@ -377,16 +377,22 @@ std::vector<float> generateData(T                           dgen,
               ? scaleBytes.size() / kBlocks
               : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
 
+    // The device takes the swizzled order, but the reference below indexes scales
+    // canonically (getAlignedFloat uses scale_id = kBlock * M + m), and the layouts
+    // that skip the early return reach it.  Swizzle a copy so scaleBytes keeps the
+    // generator's natural order.  Left empty when no swizzle applies.
+    std::vector<uint8_t> swizzledScaleBytes;
+
     switch(scaleLayout)
     {
     case MXScaleLayout::GFX950:
         // takes {numScaleRows = MN, numScaleCols = K blocks}
-        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {mnExtent, kBlocks});
+        swizzledScaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {mnExtent, kBlocks});
         break;
     case MXScaleLayout::GFX1250:
         if(elementsPerMXBlock > 0)
         {
-            scaleBytes
+            swizzledScaleBytes
                 = DGen::preSwizzleScalesGFX1250(scaleBytes,
                                                 /*slowDim=*/scaleCols,
                                                 /*fastDim=*/scaleRows,
@@ -398,7 +404,9 @@ std::vector<float> generateData(T                           dgen,
         break;
     }
 
-    std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
+    std::vector<uint8_t> const& deviceScaleBytes
+        = swizzledScaleBytes.empty() ? scaleBytes : swizzledScaleBytes;
+    std::memcpy(scale, deviceScaleBytes.data(), deviceScaleBytes.size() * sizeof(uint8_t));
 
     if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
     {
