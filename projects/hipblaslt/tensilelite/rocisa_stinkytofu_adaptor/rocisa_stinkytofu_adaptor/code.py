@@ -1111,7 +1111,7 @@ class Module(Item):
     Left-path entry point::
 
         asm_module = code_module.to_stinky_asm([12, 5, 0])
-        # Or with Tensile-style kernel label:
+        # Or with TensileLite-style kernel label:
         # asm_module = code_module.to_stinky_asm([12, 5, 0], logical_name="my_kernel")
         print(asm_module.emitAssembly())
 
@@ -1595,7 +1595,7 @@ class Module(Item):
 #     str(sm)  # emits header + middle + footer (in that order)
 #
 # Why this exists:
-#   The Tensile SIA (Scheduling Iterations Ahead) pass needs to
+#   The TensileLite SIA (Scheduling Iterations Ahead) pass needs to
 #   distinguish "load issue" (header), "decomposable middle body"
 #   (the chunk it can reorder for latency hiding), and "guard /
 #   bookkeeping tail" (footer). By giving each chunk its own named

@@ -16,7 +16,7 @@ Modes:
     input   Input YAMLs (human-authored test/benchmark configs).
     both    Both (default).
 
-The mismatch patterns are derived from Tensile.Common.ValidParameters and apply
+The mismatch patterns are derived from tensilelite.Common.ValidParameters and apply
 in both logic and input contexts; the mode flag documents intent and lets
 callers limit the sweep when only one tree needs touching.
 
@@ -32,7 +32,7 @@ import sys
 
 # Known mismatch patterns ----------------------------------------------------
 #
-# Derived from Tensile.Common.ValidParameters.validParameters.  Each group
+# Derived from tensilelite.Common.ValidParameters.validParameters.  Each group
 # lists parameters whose YAML values have the wrong Python type after
 # yaml.safe_load().
 
