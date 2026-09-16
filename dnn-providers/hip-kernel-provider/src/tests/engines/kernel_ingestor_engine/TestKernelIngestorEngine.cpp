@@ -357,11 +357,15 @@ TEST(TestKernelIngestorEngine, ResolvesAModuleDirectoryFromAnAddressWithinIt)
 /// second entry. HIPDNN_DESCRIPTOR_RUNTIME_DIR may already be set from an outer shell,
 /// so it's cleared here the same way FallsBackToAModuleRelativeOrInstalledPath clears
 /// HIPDNN_DESCRIPTOR_DIR: an explicit empty value, which the empty() check treats as
-/// absent.
+/// absent. HIPDNN_DESCRIPTOR_PATH is cleared for the same reason and one more: main()
+/// publishes the production root there for the pack census cases, so these three count
+/// roots against a list this binary always sets.
 TEST(TestKernelIngestorEngine, ReturnsOnlyTheProviderTreeWhenRuntimeDirIsUnset)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
         "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noPath(
+        "HIPDNN_DESCRIPTOR_PATH", "");
 
     const auto roots = descriptorSearchDirectories();
 
@@ -378,6 +382,8 @@ TEST(TestKernelIngestorEngine, AppendsHipdnnDescriptorRuntimeDirAfterTheProvider
         std::filesystem::temp_directory_path() / "hip_kernel_provider_descriptor_runtime");
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
         "HIPDNN_DESCRIPTOR_RUNTIME_DIR", runtimeDir.path().string());
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noPath(
+        "HIPDNN_DESCRIPTOR_PATH", "");
 
     const auto roots = descriptorSearchDirectories();
 
@@ -392,6 +398,8 @@ TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorRuntimeDirThatDoesNotExis
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter stale(
         "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "/nowhere/in/particular");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter noPath(
+        "HIPDNN_DESCRIPTOR_PATH", "");
 
     const auto roots = descriptorSearchDirectories();
 

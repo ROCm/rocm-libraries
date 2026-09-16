@@ -373,6 +373,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
          "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
          "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}")
 
+    # And to the production tree. The unit binary pins the test root as its
+    # HIPDNN_DESCRIPTOR_DIR, which REPLACES discovery rather than extending it, so the
+    # shipped packs would be invisible to a test that asserts what this build ships.
+    # Published so main() can name the production root on HIPDNN_DESCRIPTOR_PATH, which is
+    # additive. Unlike the test roots this one is only populated when a production source
+    # root was configured, so its absence is not an error.
+    file(RELATIVE_PATH HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
+         "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
+         "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+
     # No HIPDNN_DESCRIPTOR_DIR is published for the test suites: the integration binary loads
     # the plugin and resolves the tree from that module, and the unit binary resolves it
     # from its own module in main().

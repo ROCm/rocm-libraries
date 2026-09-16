@@ -42,20 +42,20 @@ const hipdnn_plugin_sdk::ingestor::DescriptorSet* loadedSetOrNull()
 /// Binds `set` to the engine's installed descriptor set, or skips with a reason a
 /// reader can act on.
 ///
-/// ABSENT IS NOT A FAILURE HERE. The gfx942 attention_dense descriptors under
-/// `descriptor-packaging/examples/` are AUTHORED form: `kind: rocke`, which the runtime
-/// loader rejects by design (`kernelSourceKindFromString` knows `kpack`, `hip`,
-/// `embedded_source` and `hsaco_file` -- there is no rocKE adapter and never will be).
-/// They become loadable only after `hkp_pack` lowers the builder through comgr and
-/// rewrites them to `kind: kpack`, which needs rocKE and hipcc and therefore happens
-/// only for a wired-up source root. No build wires this example in: packaging stages
-/// `testfixture` always and `product` when a production root is configured, so on an
-/// ordinary build the set is legitimately not there.
+/// ABSENT IS NOT A FAILURE HERE. This set lives in the PRODUCTION descriptor tree, which
+/// packaging stages only when a production source root is configured -- `testfixture` is
+/// staged always, `product` is not. On a build without one the set is legitimately not
+/// there, and failing would assert the developer's build configuration rather than a
+/// property of the descriptors.
 ///
-/// Failing in that case asserts the developer's build configuration rather than a
-/// property of the descriptors, which is what these six tests were doing on every
-/// platform. The census below is about the SHAPE of a packaged bundle, so it runs when
-/// there is one and skips, loudly, when there is not.
+/// When it IS staged, main() names the production root on HIPDNN_DESCRIPTOR_PATH so it
+/// reaches this census additively. That is deliberate rather than incidental: this binary
+/// pins the unit test root as HIPDNN_DESCRIPTOR_DIR, which REPLACES discovery, so without
+/// the additive root every case here would skip on a build that packaged the set
+/// perfectly.
+///
+/// The census below is about the SHAPE of a packaged bundle, so it runs when there is one
+/// and skips, loudly, when there is not.
 class TestGfx942AttentionDensePacks : public ::testing::Test
 {
 protected:
@@ -65,9 +65,9 @@ protected:
         if(loaded == nullptr)
         {
             GTEST_SKIP() << "descriptor set 'hipkernel:Gfx942AttentionDense' is not in the "
-                            "descriptor tree: the example bundle is authored form "
-                            "(kind: rocke) and is only loadable once hkp_pack lowers it to "
-                            "kind: kpack, which this build does not do";
+                            "descriptor tree: it ships from the production descriptor root, "
+                            "which packaging stages only for a build configured with a "
+                            "production source root";
         }
         _mSet = loaded;
     }

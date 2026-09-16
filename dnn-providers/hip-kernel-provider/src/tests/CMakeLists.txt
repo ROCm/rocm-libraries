@@ -127,6 +127,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPDNN_TEST_DESCRIPTOR_DIR="${HIPKERNELPROVIDER_UNIT_BUILD_DIR}"
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
+        # The shipped packs, which the pack census cases assert against. Separate from the
+        # unit root above because the two are reached by different mechanisms: the unit root
+        # replaces discovery and this one extends it.
+        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
     # The kpack adapter's tests. Gated with the sources they exercise, and kept together
