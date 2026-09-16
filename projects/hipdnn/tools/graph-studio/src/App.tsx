@@ -41,9 +41,8 @@ import { parseGraph, serializeGraph } from "./graph/serialize";
 import type { ParamValue } from "./graph/model";
 import type { FileHandleRef } from "./platform";
 import { platform } from "./platform";
-import { ResultsWorkspace } from "./results/ResultsWorkspace";
-import { fromNativeExecution, type NativeExecutionSnapshot, type ResultDocument } from "./results/model";
-import "./results/results.css";
+import { fromNativeExecution, type NativeExecutionSnapshot } from "./benchmark/native";
+import type { BenchmarkReport } from "./benchmark/types";
 
 const AUTOSAVE_KEY = "hipdnn.graph.autosave";
 
@@ -61,19 +60,14 @@ function Studio() {
   // any built plan and resets its Build/Execute state.
   const [engineResetKey, setEngineResetKey] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("create");
-  const [nativeDocument, setNativeDocument] = useState<ResultDocument | null>(null);
+  const [nativeReport, setNativeReport] = useState<BenchmarkReport | null>(null);
   const nextNativeId = useRef(0);
-  const resultsDialog = useRef<HTMLDialogElement>(null);
-  const resultsOpener = useRef<HTMLElement | null>(null);
   const onExecutionResult = useCallback((snapshot: NativeExecutionSnapshot) => {
-    setNativeDocument(fromNativeExecution(snapshot, `native-${++nextNativeId.current}`));
+    setNativeReport(fromNativeExecution(snapshot, `native-${++nextNativeId.current}`));
   }, []);
-  const onResultsReset = useCallback(() => setNativeDocument(null), []);
-  const onShowResults = useCallback(() => {
-    resultsOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    resultsDialog.current?.showModal();
-  }, []);
-  const closeResults = useCallback(() => resultsDialog.current?.close(), []);
+  const onResultsReset = useCallback(() => setNativeReport(null), []);
+  // An execution is read in the Verify tab, beside opened reports.
+  const onShowResults = useCallback(() => setActiveTab("verify"), []);
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -369,25 +363,12 @@ function Studio() {
       </TabPanel>
       <TabPanel id="verify" active={activeTab}>
         <CommandPanel scope="verify" getGraph={getGraph}>
-          <VerifyReport />
+          <VerifyReport native={nativeReport} onDismissNative={onResultsReset} />
         </CommandPanel>
       </TabPanel>
       <TabPanel id="tensors" active={activeTab}>
         <TensorView />
       </TabPanel>
-      <dialog
-        ref={resultsDialog}
-        className="results results--dialog"
-        aria-labelledby="results-dialog-title"
-        onCancel={(event) => { event.preventDefault(); closeResults(); }}
-        onClose={() => resultsOpener.current?.focus()}
-      >
-        <div className="results__dialog-header">
-          <h2 id="results-dialog-title" className="panel__title">Benchmark results</h2>
-          <button type="button" onClick={closeResults}>Close results</button>
-        </div>
-        <ResultsWorkspace nativeDocument={nativeDocument} />
-      </dialog>
     </div>
   );
 }

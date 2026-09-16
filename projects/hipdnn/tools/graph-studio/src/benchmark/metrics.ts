@@ -22,6 +22,14 @@ export function formatBytes(bytes: number): string {
   return `${decimal(bytes / 1024 ** exp)} ${units[exp]}`;
 }
 
+/** A value that is either a finite number or Unavailable — never a raw null/NaN. */
+export function formatMagnitude(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "Unavailable";
+  // Tolerances and diffs live near 1e-8; rounding them to "0" reads as exact.
+  if (v !== 0 && Math.abs(v) < 1e-3) return v.toExponential(2);
+  return decimal(v);
+}
+
 export const METRICS: readonly MetricDef[] = [
   {
     id: "executions_per_s",

@@ -121,31 +121,28 @@ normal download.
 
 ## Viewing benchmark results
 
-Open **Results…** in the engine panel, or visit `/results.html` on the development
-or preview server. The standalone page needs no GPU, Python, native add-on, or
-backend service.
+Open the **Verify** tab. Use **Open report…** to import a dnn-benchmarking suite
+`results.json` or a raw timing JSON. An import stays in memory: it survives tab
+switches, a reload discards it, and it never enters graph autosave or command
+settings. Viewing a report needs no GPU, Python, native add-on, or backend service.
 
-Use **Open report…** or the dedicated drop target to import dnn-benchmarking suite
-JSON or raw timing JSON. Imports stay separate and in memory. Closing the Studio
-dialog keeps them; reloading the page discards them. Reports do not enter graph
-autosave or command settings.
+The comparison chart appears first, then the full result table. Pick a metric and
+an engine filter to compare; graph executions/s is derived from GPU mean time.
+Rows that never ran report no timing, a reference provider is marked as such and
+is not a correctness pass, and a derived TFLOP/s built from partial analytical
+coverage is shown as a lower bound. Reported suite counters stay separate from the
+viewer's own row counts. Use a current browser to keep large integer engine IDs
+from rounding.
 
-Select a graph and engine to inspect GPU and host timings, correctness, analytical
-metrics, and oracle results. Graph executions/s is derived from GPU mean time.
-Unchecked and reference rows are not correctness passes. Reported suite counters
-remain separate from the viewer's row counts. Use a current browser to retain
-large integer engine IDs without rounding.
+**Inspect** in the Details column opens one engine: identity, timing statistics,
+resource metrics, correctness comparison, oracle tuning against the warm baseline,
+and profiling artifacts, each in its own section. **Back to report** returns.
 
-The comparison appears first. Select a bar or **Inspect** to open grouped engine
-details; **Back to comparison** returns to the chart. Expand **Environment &
-report counts** for metadata and producer counters, or **Engine coverage across
-graphs** for the report-wide engine summary. Timing statistics, oracle tuning,
-profiling artifacts, and original JSON have separate expandable sections.
-
-Native **Execute** publishes the latest built-plan snapshot. Its single wall time
-is not a repeated benchmark or correctness comparison. Later canvas edits are not
-included. New, Open, and a new build clear native results without removing reports.
-Use **Export hipDNN JSON**, not ordinary Save, for the existing benchmarking handoff.
+Native **Execute** on the Create tab publishes its snapshot to Verify as a Studio
+execution. Its single wall time is not a repeated benchmark or a correctness
+comparison, and later canvas edits are not included. **Close execution** returns to
+the opened report. Use **Export hipDNN JSON**, not ordinary Save, for the existing
+benchmarking handoff.
 
 For an available profiling trace, select the `.pftrace` file explicitly. A report
 path does not grant access to that file. Trace bytes go to a sandboxed
@@ -271,7 +268,7 @@ CMakeLists.txt  Superbuild hook (the hipdnn-graph-studio component)
 | `bun run dev` | Web version with live reload |
 | `bun run build` | Type-check and bundle the web assets |
 | `bun run typecheck` | Type-check only |
-| `bun run preview` | Serve the built editor and `/results.html` |
+| `bun run preview` | Serve the built editor |
 | `bun test tests/results.test.ts` | Check result parsing and metric boundaries |
 | `bun run electron:dev` | Desktop app with live reload |
 | `bun run electron:start` | Build, then open the desktop app |

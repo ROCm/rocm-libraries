@@ -19,7 +19,13 @@ interface Loaded {
 
 const SAMPLE: Loaded = { report: sampleReport, label: SAMPLE_LABEL, sample: true };
 
-export function VerifyReport() {
+interface VerifyReportProps {
+  /** A Studio execution, shown in place of the opened report until dismissed. */
+  readonly native?: BenchmarkReport | null;
+  onDismissNative?(): void;
+}
+
+export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
   const [loaded, setLoaded] = useState<Loaded>(SAMPLE);
   const [error, setError] = useState<string | null>(null);
   // Non-null means the tensor inspector is showing; the array carries the
@@ -32,11 +38,16 @@ export function VerifyReport() {
     try {
       setLoaded({ report: parseReport(opened.contents), label: opened.handle.name, sample: false });
       setError(null);
+      onDismissNative?.();
       setHints(null);
     } catch (failure) {
       setError((failure as Error).message);
     }
   };
+
+  const shown: Loaded = native
+    ? { report: native, label: "current execution", sample: false }
+    : loaded;
 
   if (hints) return <TensorView hints={hints} onBack={() => setHints(null)} />;
 
@@ -46,10 +57,16 @@ export function VerifyReport() {
         <button type="button" onClick={() => void openReport()}>
           Open report…
         </button>
-        <button type="button" data-primary="true" onClick={() => setHints([])}>
-          Inspect tensors…
-        </button>
-        {loaded.sample && <span className="verify__note">showing bundled sample data</span>}
+        {native ? (
+          <button type="button" onClick={onDismissNative}>
+            Close execution
+          </button>
+        ) : (
+          <button type="button" data-primary="true" onClick={() => setHints([])}>
+            Inspect tensors…
+          </button>
+        )}
+        {shown.sample && <span className="verify__note">showing bundled sample data</span>}
         {error && (
           <span className="verify__note" data-tone="error">
             {error}
@@ -57,9 +74,9 @@ export function VerifyReport() {
         )}
       </div>
       <BenchmarkReportView
-        report={loaded.report}
-        sourceLabel={loaded.label}
-        sample={loaded.sample}
+        report={shown.report}
+        sourceLabel={shown.label}
+        sample={shown.sample}
         onOpenTensors={(graph, row) => setHints(tensorHints(graph, row))}
       />
     </div>
