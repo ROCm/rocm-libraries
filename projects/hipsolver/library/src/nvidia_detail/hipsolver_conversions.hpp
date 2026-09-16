@@ -70,6 +70,8 @@ cusolverStorevMode_t hip2cuda_storev(hipsolverStorevMode_t storev);
 
 hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus);
 
+hipsolverStatus_t cuda2hip_status(cublasStatus_t cuStatus);
+
 // Dense API
 cusolverDnFunction_t hip2cuda_function(hipsolverDnFunction_t func);
 
