@@ -30,17 +30,35 @@
 //   * realloc(nullptr, n) behaves like malloc(n),
 //   * realloc(p, 0)       frees p and returns nullptr,
 //   * growing preserves every byte of the old block (no over-read),
-//   * shrinking preserves the retained prefix.
+//   * shrinking preserves the retained prefix,
+//   * reallocarray rejects an overflowing product and leaves the block intact.
 //
 // Interposed allocations are backed by hipMallocManaged, so the storage is
 // host-accessible and the payload can be validated directly on the host.
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 
 namespace
 {
+__attribute__((noinline)) void* runtime_malloc(std::size_t size)
+{
+  return std::malloc(size);
+}
+
+__attribute__((noinline)) void* runtime_realloc(void* p, std::size_t size)
+{
+  return std::realloc(p, size);
+}
+
+__attribute__((noinline)) void* runtime_reallocarray(void* p, std::size_t count, std::size_t size)
+{
+  return reallocarray(p, count, size);
+}
+
 // Deterministic, size-dependent fill so a stale/short copy is detectable.
 std::uint8_t pattern(std::size_t i)
 {
@@ -74,7 +92,7 @@ int main()
   {
     // realloc(nullptr, n) must behave like malloc(n).
     {
-      auto p = static_cast<std::uint8_t*>(std::realloc(nullptr, 64));
+      auto p = static_cast<std::uint8_t*>(runtime_realloc(nullptr, 64));
       if (!p)
       {
         return EXIT_FAILURE;
@@ -89,12 +107,12 @@ int main()
 
     // realloc(p, 0) must free p and return nullptr.
     {
-      auto p = std::malloc(64);
+      auto p = runtime_malloc(64);
       if (!p)
       {
         return EXIT_FAILURE;
       }
-      if (std::realloc(p, 0) != nullptr)
+      if (runtime_realloc(p, 0) != nullptr)
       {
         return EXIT_FAILURE;
       }
@@ -105,14 +123,14 @@ int main()
       constexpr std::size_t old_size = 32;
       constexpr std::size_t new_size = 8192;
 
-      auto p = static_cast<std::uint8_t*>(std::malloc(old_size));
+      auto p = static_cast<std::uint8_t*>(runtime_malloc(old_size));
       if (!p)
       {
         return EXIT_FAILURE;
       }
       fill(p, old_size);
 
-      auto q = static_cast<std::uint8_t*>(std::realloc(p, new_size));
+      auto q = static_cast<std::uint8_t*>(runtime_realloc(p, new_size));
       if (!q)
       {
         return EXIT_FAILURE;
@@ -130,14 +148,14 @@ int main()
       constexpr std::size_t old_size = 8192;
       constexpr std::size_t new_size = 32;
 
-      auto p = static_cast<std::uint8_t*>(std::malloc(old_size));
+      auto p = static_cast<std::uint8_t*>(runtime_malloc(old_size));
       if (!p)
       {
         return EXIT_FAILURE;
       }
       fill(p, old_size);
 
-      auto q = static_cast<std::uint8_t*>(std::realloc(p, new_size));
+      auto q = static_cast<std::uint8_t*>(runtime_realloc(p, new_size));
       if (!q)
       {
         return EXIT_FAILURE;
@@ -148,6 +166,43 @@ int main()
         return EXIT_FAILURE;
       }
       std::free(q);
+    }
+
+    // An overflowing reallocarray must be rejected. Left unchecked, the wrapped
+    // product is passed to realloc, which either shrinks the block to a few
+    // bytes and reports success or, when it wraps to zero, frees the block and
+    // hands the caller back a dangling pointer.
+    {
+      constexpr std::size_t old_size = 64;
+      constexpr auto max_size        = (std::numeric_limits<std::size_t>::max)();
+      const auto wrap_to_two         = max_size / 2 + 2;
+
+      auto p = static_cast<std::uint8_t*>(runtime_malloc(old_size));
+      if (!p)
+      {
+        return EXIT_FAILURE;
+      }
+      fill(p, old_size);
+
+      errno = 0;
+      if (auto q = runtime_reallocarray(p, wrap_to_two, 2))
+      {
+        std::free(q);
+        return EXIT_FAILURE;
+      }
+      if (errno != ENOMEM)
+      {
+        std::free(p);
+        return EXIT_FAILURE;
+      }
+
+      // A rejected request must leave the original block owned and intact.
+      if (!verify(p, old_size))
+      {
+        std::free(p);
+        return EXIT_FAILURE;
+      }
+      std::free(p);
     }
   }
   catch (...)
