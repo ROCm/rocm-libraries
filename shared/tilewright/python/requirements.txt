@@ -1,0 +1,11 @@
+# Runtime dependencies
+nanobind>=2.0.0
+
+# Build dependencies
+scikit-build-core>=0.5
+
+# Test dependencies
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Note: tilewright is framework-agnostic and has no ROCm/HIP dependency.

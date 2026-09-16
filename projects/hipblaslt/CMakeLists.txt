@@ -287,6 +287,18 @@ else()
     endblock()
 endif()
 
+# tilewright is ours and is supplied by NO upstream path -- not the superbuild,
+# not TheRock, not the vendored branch -- while tensilelite and rocroller link
+# roc::tilewright-hipblaslt unconditionally. So add it here, after every branch
+# above has provided origami (the backend needs roc::origami-headers).
+if(NOT TARGET roc::tilewright-hipblaslt)
+    block(SCOPE_FOR VARIABLES)
+        set(TILEWRIGHT_ENABLE_INSTALL OFF)
+        set(TILEWRIGHT_ENABLE_HIPBLASLT_BACKEND ON)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tilewright" tilewright)
+    endblock()
+endif()
+
 add_library(hipblaslt-headers INTERFACE)
 add_library(hipblaslt::headers ALIAS hipblaslt-headers)
 target_include_directories(hipblaslt-headers
@@ -566,6 +578,59 @@ if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_ENABLE_ROCROLLER)
         # lib/, separate from executables (no extension) in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
+    # Co-locate tilewright weights with the per-arch Tensile library so they are
+    # discovered exactly like the kernel library (via the logic file's own
+    # directory) and packaged/installed together -- no env var, no separate tree.
+    # Dropped into the build-tree library dir; the rocm_install above then ships
+    # them alongside the .co/.dat. (Weights are Git LFS; a release build must
+    # `git lfs pull` so the real binaries -- not pointers -- get copied.)
+    # Source weights mirror the library-logic layout: weights/<arch>/<arch>/.
+    set(_tw_weights_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/tilewright/backends/hipblaslt/weights")
+    set(_tw_lib_root "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library")
+    set(_tw_cmds COMMAND ${CMAKE_COMMAND} -E true)
+    set(_tw_any FALSE)
+    foreach(_arch IN LISTS GPU_TARGETS)
+        string(REGEX REPLACE ":.*" "" _arch_base "${_arch}")
+        set(_tw_arch_dir "${_tw_weights_dir}/${_arch_base}/${_arch_base}")
+        if(EXISTS "${_tw_arch_dir}/tilewright_index")
+            file(GLOB _tw_bins "${_tw_arch_dir}/*.tilewright.bin")
+            list(APPEND _tw_cmds
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${_tw_lib_root}/${_arch_base}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_tw_arch_dir}/tilewright_index" "${_tw_lib_root}/${_arch_base}/")
+            if(_tw_bins)
+                list(APPEND _tw_cmds
+                    COMMAND ${CMAKE_COMMAND} -E copy ${_tw_bins} "${_tw_lib_root}/${_arch_base}/")
+            endif()
+            set(_tw_any TRUE)
+        endif()
+    endforeach()
+    # The gfx1250 v0 GEMM tree builds into its OWN library directory (see
+    # device-library/CMakeLists.txt), which is NOT under Tensile/library/, so the
+    # loop above -- which iterates GPU_TARGETS and writes under _tw_lib_root --
+    # never reaches it. Weight discovery looks ONLY in the directory the logic
+    # file (.dat) was loaded from, so without this the v0 library silently falls
+    # back to the analytical path and the deployed model is dead weight. That is
+    # invisible at runtime: no error, just worse picks.
+    get_property(_tw_v0_lib_dir GLOBAL PROPERTY HIPBLASLT_GFX1250V0_LIBRARY_DIR)
+    if(_tw_v0_lib_dir)
+        set(_tw_v0_src "${_tw_weights_dir}/gfx1250v0/gfx1250v0")
+        if(EXISTS "${_tw_v0_src}/tilewright_index")
+            file(GLOB _tw_v0_bins "${_tw_v0_src}/*.tilewright.bin")
+            list(APPEND _tw_cmds
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${_tw_v0_lib_dir}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${_tw_v0_src}/tilewright_index" "${_tw_v0_lib_dir}/")
+            if(_tw_v0_bins)
+                list(APPEND _tw_cmds
+                    COMMAND ${CMAKE_COMMAND} -E copy ${_tw_v0_bins} "${_tw_v0_lib_dir}/")
+            endif()
+            set(_tw_any TRUE)
+        endif()
+    endif()
+    if(_tw_any)
+        add_custom_target(tilewright_colocate ALL ${_tw_cmds}
+            COMMENT "Co-locating tilewright weights with the Tensile library")
+    endif()
+
     rocm_install(
         DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}

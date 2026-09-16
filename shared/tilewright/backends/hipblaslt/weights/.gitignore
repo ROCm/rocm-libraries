@@ -1,0 +1,8 @@
+# Confidential: the deploy manifest/summary carry per-cell performance numbers
+# (selection-efficiency, latencies). They must NOT be committed to the branch.
+# Only the model parameters are tracked here: one .tilewright.bin per library-logic
+# file (named after its Tensile logic stem) plus the tilewright_index that maps
+# stems -> binaries. The manifest and summary live in the pipeline run output,
+# not in this repo.
+*.manifest.json
+*.summary.txt

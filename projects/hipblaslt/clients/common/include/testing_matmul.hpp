@@ -5658,8 +5658,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 << std::setprecision(2) << "Skip solution: " << sol
                                 << " (best warm-up = " << best_warm_time / number_cold_calls
                                 << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                                << " us, skip ratio = " << arg.skip_slow_solution_ratio
+                                << ", solution index = "
+                                << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                << ")" << std::endl;
                             continue;
                         }
                     }
@@ -5735,8 +5737,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 << std::setprecision(2) << "Skip solution: " << sol
                                 << " (best warm-up = " << best_warm_time / number_cold_calls
                                 << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                                << " us, skip ratio = " << arg.skip_slow_solution_ratio
+                                << ", solution index = "
+                                << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                << ")" << std::endl;
                             continue;
                         }
                     }
@@ -5833,8 +5837,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 << std::setprecision(2) << "Skip solution: " << sol
                                 << " (best warm-up = " << best_warm_time / number_cold_calls
                                 << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                                << " us, skip ratio = " << arg.skip_slow_solution_ratio
+                                << ", solution index = "
+                                << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                << ")" << std::endl;
                             continue;
                         }
                     }
@@ -5928,8 +5934,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 << std::setprecision(2) << "Skip solution: " << sol
                                 << " (best warm-up = " << best_warm_time / number_cold_calls
                                 << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                                << " us, skip ratio = " << arg.skip_slow_solution_ratio
+                                << ", solution index = "
+                                << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                << ")" << std::endl;
                             continue;
                         }
                     }
@@ -5987,8 +5995,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 << std::setprecision(2) << "Skip solution: " << sol
                                 << " (best warm-up = " << best_warm_time / number_cold_calls
                                 << " us , warm-up = " << gpu_time_used / number_cold_calls
-                                << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
-                                << std::endl;
+                                << " us, skip ratio = " << arg.skip_slow_solution_ratio
+                                << ", solution index = "
+                                << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo)
+                                << ")" << std::endl;
                             continue;
                         }
                     }

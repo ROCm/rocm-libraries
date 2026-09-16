@@ -204,6 +204,17 @@ namespace TensileLite
         int nonTemporalA = 0;
         int nonTemporalB = 0;
 
+        // TH-DISABLED(24145512bf): TemporalHint counterparts of nonTemporalA/B. gfx1250 expresses
+        // the cache-residency hint through TemporalHint* rather than
+        // NonTemporal*, so without these the three TH kernel variants are
+        // byte-identical in every serialized field and collapse into one
+        // candidate. Upstream 24145512bf dropped the TH variant trees for
+        // kernel-load overhead, so there is nothing to carry; re-enable this
+        // block (and the matching ones in Contractions.py, the serializer and
+        // tilewright model.cpp) if the variants come back.
+        // int temporalHintA = 0;
+        // int temporalHintB = 0;
+
         int adaptiveGemmNTAB = 0;
 
         int customMainLoopScheduling = 0;

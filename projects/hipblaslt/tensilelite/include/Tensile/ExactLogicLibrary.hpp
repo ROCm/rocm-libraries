@@ -281,9 +281,16 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
+                // TENSILE_PREDICTION_LIB means "use the Prediction library and
+                // nothing else". Skipping only Equality and Range left
+                // GridBased and FreeSize rows contributing solutions, so
+                // callers still saw non-Origami kernels (typically two per
+                // problem) and had to filter them out downstream.
                 if(predictionLib
                    && ((row.first.value->type() == "EqualityMatching")
-                       || (row.first.value->type() == "RangeMatching")))
+                       || (row.first.value->type() == "RangeMatching")
+                       || (row.first.value->type() == "GridBasedMatching")
+                       || (row.first.value->type() == "FreeSizeMatching")))
                     continue;
 
                 if(row.first(problem, hardware))

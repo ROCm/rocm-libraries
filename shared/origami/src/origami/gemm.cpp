@@ -1917,13 +1917,19 @@ double compute_total_latency(const problem_t& problem,
     size_t K_mod_128bytes    = K * a_bits % 1024;
     size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
     if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+      // gfx1250 ships no NonTemporal/TemporalHint kernel variants, so every
+      // config there has cache_hints == 0. Requiring a hinted kernel below
+      // would then reject the entire candidate pool for skinny shapes rather
+      // than steering within it. Architectures that do ship the variants
+      // (gfx950 Origami_nta4 / Origami_ntb4) keep the original requirement.
+      const bool has_cache_hint_variants = hardware.arch != hardware_t::architecture_t::gfx1250;
       // avoid division by 0 if K == 0
       if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
         // Use nontemporal B
-        if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
+        if (has_cache_hint_variants && !(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
       } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
         // Use Non Temporal A
-        if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
+        if (has_cache_hint_variants && !(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
       } else {
         // Never use Non Temporal
         if (config.cache_hints_a || config.cache_hints_b) {

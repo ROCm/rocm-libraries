@@ -135,6 +135,10 @@ namespace TensileLite
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
+                // TH-DISABLED(24145512bf): mapOptional, NOT mapRequired -- a required field would
+                // make every previously-generated .dat fail to load.
+                // iot::mapOptional(io, "temporalHintA", s.temporalHintA);
+                // iot::mapOptional(io, "temporalHintB", s.temporalHintB);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
