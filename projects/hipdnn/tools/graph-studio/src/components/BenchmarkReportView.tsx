@@ -156,9 +156,9 @@ export function BenchmarkReportView({
             <span>Engine filter</span>
             <select value={engineFilter} onChange={(e) => setEngineFilter(e.target.value)}>
               <option value={ALL_ENGINES}>All engines</option>
-              {results.map((r) => (
-                <option key={r.provider} value={r.provider}>
-                  {r.provider}
+              {Array.from(new Set(results.map((r) => r.provider))).map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
                 </option>
               ))}
             </select>
@@ -174,11 +174,11 @@ export function BenchmarkReportView({
           {shown.length === 0 ? (
             <div className="report__empty">No results for this selection.</div>
           ) : (
-            shown.map((result) => {
+            shown.map((result, i) => {
               const value = metric.value(result);
               const state = validationState(result.correctness);
               return (
-                <div className="bar" key={result.provider}>
+                <div className="bar" key={rowKey(result, i)}>
                   <div className="bar__name">
                     <span className="bar__engine">{result.provider}</span>
                     <span className="bar__kind">{pluginKind(result.plugin_path)}</span>
@@ -225,14 +225,17 @@ export function BenchmarkReportView({
               </tr>
             </thead>
             <tbody>
-              {results.map((r) => {
+              {results.map((r, i) => {
                 const state = validationState(r.correctness);
                 const mean = r.gpu_kernel_stats.mean_ms;
                 return (
-                  <tr key={r.provider}>
+                  <tr key={rowKey(r, i)}>
                     <td>
                       <div className="report__engine">{r.provider}</div>
-                      <div className="report__engine-ver">{r.engine_version}</div>
+                      <div className="report__engine-ver">
+                        {r.engine_name && r.engine_name !== r.provider ? `${r.engine_name} · ` : ""}
+                        {r.engine_version}
+                      </div>
                     </td>
                     <td>
                       <span className="badge" data-status={r.status}>
@@ -291,6 +294,14 @@ function Card({ label, value, tone }: { label: string; value: number; tone?: "ok
       </span>
     </div>
   );
+}
+
+/**
+ * One provider can appear several times in a graph, once per engine, so the
+ * provider alone is not a row identity.
+ */
+function rowKey(result: EngineResult, index: number): string {
+  return `${result.provider}#${result.engine_id}#${index}`;
 }
 
 function Fact({ label, value }: { label: string; value: string | null }) {

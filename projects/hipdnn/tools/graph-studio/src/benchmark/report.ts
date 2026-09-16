@@ -170,11 +170,50 @@ function parseMetadata(value: unknown): ReportMetadata {
   };
 }
 
+const NON_FINITE_TOKEN = /^(-?Infinity|NaN)/;
+
+/**
+ * A failed row can carry bare `NaN` or `Infinity`, which Python writes and
+ * `JSON.parse` rejects. Replace those tokens outside string literals so the
+ * rest of the report still opens; the values themselves read as unavailable.
+ */
+function sanitizeNonFinite(text: string): string {
+  if (!/\b(NaN|Infinity)\b/.test(text)) return text;
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      out += char;
+      if (char === "\\") {
+        out += text[++i] ?? "";
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      out += char;
+      continue;
+    }
+    const token = NON_FINITE_TOKEN.exec(text.slice(i))?.[0];
+    if (token) {
+      // 1e999 parses as Infinity; both read as unavailable downstream.
+      out += token === "NaN" ? "null" : `${token[0] === "-" ? "-" : ""}1e999`;
+      i += token.length - 1;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
 
 export function parseReport(text: string): BenchmarkReport {
   let doc: unknown;
   try {
-    doc = JSON.parse(text);
+    doc = JSON.parse(sanitizeNonFinite(text.replace(/^\uFEFF/, "")));
   } catch (error) {
     throw new ReportParseError(`invalid report JSON: ${(error as Error).message}`);
   }
