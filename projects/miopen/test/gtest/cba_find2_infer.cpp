@@ -61,6 +61,12 @@ struct GPU_ConvBiasActivFind2Infer_FP16 : ConvBiasActivInferFind2Test<half_float
 {
 };
 
+// Dedicated bf16 fixture: only the Rage fused test is registered on it, so no other
+// fusion solver is invoked with bf16.
+struct GPU_ConvBiasActivFind2Infer_BFP16 : ConvBiasActivInferFind2Test<bfloat16>
+{
+};
+
 template <typename Solver, typename TestCase>
 void RunSolver(miopen::FusedProblem& problem,
                const miopen::AnyInvokeParams& invoke_ctx,
@@ -147,6 +153,11 @@ TEST_P(GPU_ConvBiasActivFind2Infer_FP16, ConvWinoRageRxSf2x3Find2Fused)
     RunSolver<miopen::solver::fusion::ConvWinoRageRxSFused<2, 3>>(
         fused_problem, invoke_params, conv_config, test_skipped);
 }
+TEST_P(GPU_ConvBiasActivFind2Infer_BFP16, ConvWinoRageRxSf2x3Find2Fused)
+{
+    RunSolver<miopen::solver::fusion::ConvWinoRageRxSFused<2, 3>>(
+        fused_problem, invoke_params, conv_config, test_skipped);
+}
 
 TEST_P(GPU_ConvBiasActivFind2Infer_FP16, ConvCKIgemmFwdBiasActivFind2Fused)
 {
@@ -209,6 +220,18 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvBiasActivFind2Infer_FP16,
+                         testing::Combine(testing::Values(miopenActivationPASTHRU,
+                                                          miopenActivationLOGISTIC,
+                                                          miopenActivationTANH,
+                                                          miopenActivationRELU,
+                                                          miopenActivationLEAKYRELU),
+                                          testing::ValuesIn(GetNetwork1<ConvTestCaseBase>()),
+                                          testing::Values(miopenTensorNCHW)));
+
+// BFP16: Rage fused only (dedicated fixture). Non-applicable devices/configs are
+// skipped by ConvWinoRageRxSFused::IsApplicable.
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvBiasActivFind2Infer_BFP16,
                          testing::Combine(testing::Values(miopenActivationPASTHRU,
                                                           miopenActivationLOGISTIC,
                                                           miopenActivationTANH,
