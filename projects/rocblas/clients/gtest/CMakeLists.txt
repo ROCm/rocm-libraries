@@ -46,6 +46,7 @@ set(rocblas_no_tensile_test_source
     set_get_atomics_mode_gtest.cpp
     set_get_alpha_beta_stride_gtest.cpp
     logging_mode_gtest.cpp
+    kernel_select_test.cpp
     ostream_threadsafety_gtest.cpp
     set_get_vector_gtest.cpp
     set_get_matrix_gtest.cpp
