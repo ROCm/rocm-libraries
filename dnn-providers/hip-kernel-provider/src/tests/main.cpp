@@ -40,6 +40,23 @@ int main(int argc, char** argv)
     }
 #endif
 
+#if defined(HIPDNN_DESCRIPTOR_SUBDIR) && defined(HIPDNN_INSTALL_PLUGIN_ENGINE_DIR)
+    // Fallback for installed / repackaged layouts (e.g. TheRock CI): the build-tree
+    // path above does not exist, and the statically-linked engine cannot resolve via
+    // dladdr. Resolve descriptors relative to the test executable instead:
+    //   <prefix>/bin/<exe>  →  <prefix>/<HIPDNN_INSTALL_PLUGIN_ENGINE_DIR>/<DESCRIPTOR_SUBDIR>
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR").empty())
+    {
+        auto candidate = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / ".."
+                         / HIPDNN_INSTALL_PLUGIN_ENGINE_DIR / HIPDNN_DESCRIPTOR_SUBDIR;
+        std::error_code ec;
+        if(std::filesystem::is_directory(candidate, ec))
+        {
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", candidate.string());
+        }
+    }
+#endif
+
     // Initialize test logging infrastructure to forward logs to std::cerr based
     // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
     // NOTE: Logs are not routed to the backend by the recordingCallback returned here

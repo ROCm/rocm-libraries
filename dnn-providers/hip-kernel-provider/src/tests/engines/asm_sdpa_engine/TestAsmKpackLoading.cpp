@@ -16,8 +16,14 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+
 #ifndef ASM_KPACK_TEST_DIR
 #error "ASM_KPACK_TEST_DIR must be defined (set via CMake compile definition)"
+#endif
+
+#ifndef ASM_KPACK_INSTALL_DIR
+#define ASM_KPACK_INSTALL_DIR ""
 #endif
 
 namespace asm_sdpa_engine::asm_kernels
@@ -53,10 +59,35 @@ void verifyKernelExtraction(const std::string& archivePath,
     kpack_close(archive);
 }
 
+/// Return the directory containing the per-arch kpack archives. Prefers the
+/// build-tree path; falls back to an exe-relative installed layout path so that
+/// TheRock CI (which runs from an install prefix) can locate the archives too.
+std::string kpackDir()
+{
+    // Build-tree path (works for local developer builds)
+    if(std::error_code ec; std::filesystem::is_directory(ASM_KPACK_TEST_DIR, ec))
+    {
+        return ASM_KPACK_TEST_DIR;
+    }
+    // Installed layout: resolve relative to the test executable
+    //   <prefix>/bin/<exe> → <prefix>/<ASM_KPACK_INSTALL_DIR>
+    if(std::string_view installDir{ASM_KPACK_INSTALL_DIR}; !installDir.empty())
+    {
+        auto candidate = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / ".."
+                         / std::string(installDir);
+        std::error_code ec;
+        if(std::filesystem::is_directory(candidate, ec))
+        {
+            return candidate.string();
+        }
+    }
+    // Return build-tree path so the assertion reports the expected location
+    return ASM_KPACK_TEST_DIR;
+}
+
 std::string kpackPath(const std::string& arch)
 {
-    return std::string(ASM_KPACK_TEST_DIR) + "/" + arch + "/hip_kernel_provider_sdpa_" + arch
-           + ".kpack";
+    return kpackDir() + "/" + arch + "/hip_kernel_provider_sdpa_" + arch + ".kpack";
 }
 
 // =============================================================================
