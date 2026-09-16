@@ -63,27 +63,8 @@ class CheckParam:
         static_assert(sizeof(sharedmem_storage) < TUNING_SHARED_MEMORY_MAX, "exceeds LDS");
         """
 
-    def find_max_params(self):
-        VALUE_TYPES = COMMON_VALUE_TYPES + ["rocprim::empty_type"]
-        for key_type in COMMON_KEY_TYPES:
-            for value_type in VALUE_TYPES:
-                for bs in BLOCK_SIZES:
-                    for rb in RADIX_BITS:
-                        for algo in ALGOS:
-                            l, r, out = 0, len(IPT) - 1, -1
-                            while l <= r:
-                                m = (l + r) // 2
-                                if self.check_valid(key_type, value_type , bs, IPT[m], rb, f'rocprim::{algo}'):
-                                    out = m
-                                    l = m + 1
-                                else:
-                                    r = m - 1
-
-                            if out != -1:
-                                self.v_params[(key_type, value_type, bs, rb, algo)] = IPT[out] 
-
     def check_valid(self, key, value, bs, ipt, rb, algo) -> bool:
-        param = (key, value, bs, ipt, rb, algo)
+        param = (TYPE_CONFIGS[key].size, TYPE_CONFIGS[value].size, bs, ipt, rb, algo)
         if param in self.cache:
             return self.cache[param]
 
@@ -96,7 +77,7 @@ class CheckParam:
             f'-I{self.rocm_include}',
             f'-DPROBE_Key={key}', f'-DPROBE_Value={value}',
             f'-DPROBE_BlockSize={bs}', f'-DPROBE_ItemsPerThread={ipt}',
-            f'-DPROBE_RadixBits={rb}', f'-DPROBE_RadixRankAlgorithm={algo}',
+            f'-DPROBE_RadixBits={rb}', f'-DPROBE_RadixRankAlgorithm=rocprim::{algo}',
             src,
         ]
         compiled = subprocess.run(cmd, capture_output=True, text=True)
@@ -106,6 +87,7 @@ class CheckParam:
         if not valid and "exceeds LDS" not in compiled.stderr:
             print(f"[probe] unexpected failure for {param}:\n{compiled.stderr[:500]}")
         self.cache[param] = valid
+
         return valid
 
 class Tuner(BaseTuner):
@@ -115,7 +97,6 @@ class Tuner(BaseTuner):
 
     def __init__(self, args: TunerArgs) -> None:
         self.param_checker = CheckParam()
-        self.param_checker.find_max_params()
         super().__init__(args)
 
     def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
@@ -133,13 +114,12 @@ class Tuner(BaseTuner):
         self, key_type: str, val_type: Optional[str] = None
     ) -> Callable[[dict], bool]:
         def validate(params):
-            bs, rb, algo = params['block_size_x'], params['radix_bits'], params['algo']
-            if bs != params['sort_block_size_x'] or  params['ipt'] != params['sort_ipt']:
+            bs, ipt, rb, algo = params['block_size_x'], params['ipt'], params['radix_bits'], params['algo']
+            print(f'Checking: key: {key_type}, val: {val_type}, bs: {bs}, ipt: {ipt}, rb: {rb}, algo: {algo}')
+            if bs != params['sort_block_size_x'] or  ipt != params['sort_ipt']:
                 return False
-            if (key_type, val_type, bs, rb, algo) in self.param_checker.v_params:
-                return params['ipt'] <= self.param_checker.v_params[(key_type, val_type, bs, rb, algo)]
-            else:
-                return False
+
+            return self.param_checker.check_valid(key_type, val_type, bs, ipt, rb, algo)
 
         return validate
 
