@@ -40,7 +40,7 @@ BLOCK_LOAD_FUNCS = ["::rocprim::block_load_method::block_load_vectorize", "::roc
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_run_length_encode')
+        return TunerArgs(algo_full_name='device_run_length_encode_non_trivial')
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)

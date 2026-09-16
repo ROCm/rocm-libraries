@@ -20,60 +20,23 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable
 import sys
 import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
+sys.path.append(f"{os.path.dirname(__file__)}")
 
-from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
+from tuner.base_tuner import TunerArgs
+from tuning_device_topk_air import Tuner
 
-"""
-Inclusive range for params tuning, edit these to adjust tuning grid range.
-"""
-RADIX_BITS = [6, 7, 8]
-BLOCK_SIZES = [64, 128, 256]
-IPT = [2, 3, 4, 5, 6, 10]
-ADAPT_COEFF = [256]
-LIMIT = [32]
-
-class Tuner(BaseTuner):
+class SegmentedTopkAirTuner(Tuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_topk_air')
+        return TunerArgs(algo_full_name='device_segmented_topk_air')
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
-    def _get_tune_params(self, key_type: str, value_type: Optional[str] = None) -> OrderedDict:
-        params = OrderedDict()
-        params['block_size_x'] = BLOCK_SIZES
-        params['ipt'] = IPT
-        params['radix_bits'] = RADIX_BITS
-        params['adapt_coeff'] = ADAPT_COEFF
-        params['limit'] = LIMIT
-
-        return params
-
-    def _get_restrictions(
-        self, key_type: str, val_type: Optional[str] = None
-    ) -> Callable[[dict], bool]:
-
-        def validate(params):
-            return True
-
-        return validate
-
-    def tune_all(self) -> None:
-        """Tune for all value type combinations"""
-
-        VALUE_TYPES = COMMON_VALUE_TYPES + ["rocprim::empty_type"]
-
-        for key_type in COMMON_KEY_TYPES:
-            for value_type in VALUE_TYPES:
-                self.tune_type(key_type, value_type)
-
-
 if __name__ == "__main__":
-    Tuner.cli()
+    SegmentedTopkAirTuner.cli()
     
