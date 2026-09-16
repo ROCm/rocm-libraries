@@ -123,7 +123,10 @@ class Tuner(BaseTuner):
     ) -> Callable[[dict], bool]:
         def validate(params):
             bs, ipt, rb, algo = params['block_size_x'], params['ipt'], params['radix_bits'], params['algo']
-            if bs != params['sort_block_size_x'] or  ipt != params['sort_ipt']:
+            if  ipt < params['sort_ipt']:
+                return False
+
+            if bs != params['sort_block_size_x']:
                 return False
 
             print(f'Checking: key: {key_type}, val: {val_type}, bs: {bs}, ipt: {ipt}, rb: {rb}, algo: {algo}')
