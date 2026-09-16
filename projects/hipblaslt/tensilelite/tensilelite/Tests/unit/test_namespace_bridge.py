@@ -74,6 +74,7 @@ else:
 """
     _run_script(script)
 
+
 @pytest.mark.parametrize("alias_first", [False, True])
 def test_legacy_namespace_maps_to_canonical_modules(alias_first):
     script = f"""
@@ -93,8 +94,4 @@ assert canonical_module.__name__ == "tensilelite.resources"
 assert canonical_module.__package__ == "tensilelite"
 assert canonical_module.__spec__.name == "tensilelite.resources"
 """
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(_PACKAGE_ROOT), env.get("PYTHONPATH", "")]
-    ).rstrip(os.pathsep)
-    subprocess.run([sys.executable, "-c", script], check=True, env=env)
+    _run_script(script)
