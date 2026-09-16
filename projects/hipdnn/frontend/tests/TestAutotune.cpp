@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -271,6 +272,44 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
     EXPECT_FLOAT_EQ(covByIteration[0], 0.0f);
     EXPECT_FLOAT_EQ(covByIteration[1], 0.0f);
     EXPECT_FLOAT_EQ(covByIteration[2], 0.0f);
+}
+
+// ============================================================================
+// Malformed elapsed-time rejection: a non-finite or negative sample from the
+// timing callback must fail the benchmark rather than enter the timings
+// vector, the CoV convergence check, or averaging. Zero is a valid sample.
+// ============================================================================
+
+TEST(TestAutotune, RunUntilStableRejectsNegativeElapsed)
+{
+    ScriptedTimer timer{{10.0f, 10.0f, -1.0f}, -1, 0};
+    auto outcome = autotune::detail::runUntilStable(
+        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    EXPECT_FALSE(outcome.converged);
+    EXPECT_TRUE(outcome.benchmarkFailed);
+    EXPECT_EQ(static_cast<int>(outcome.timings.size()), 2);
+    EXPECT_NE(outcome.errorMessage.find("non-finite or negative"), std::string::npos);
+}
+
+TEST(TestAutotune, RunUntilStableAcceptsZeroElapsed)
+{
+    ScriptedTimer timer{{0.0f}, -1, 0};
+    auto outcome = autotune::detail::runUntilStable(
+        MAX_ITERATIONS, WINDOW_SIZE, STABILITY_THRESHOLD, timer, noopRunUntilStableLog);
+    EXPECT_TRUE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_EQ(static_cast<int>(outcome.timings.size()), 3);
+    EXPECT_FLOAT_EQ(outcome.timings[0], 0.0f);
+}
+
+TEST(TestAutotune, RunFixedAverageRejectsNaNElapsed)
+{
+    ScriptedTimer timer{{std::numeric_limits<float>::quiet_NaN()}, -1, 0};
+    auto outcome
+        = autotune::detail::runFixedAverage(/*timedIterations=*/3, timer, noopFixedAverageLog);
+    EXPECT_FALSE(outcome.converged);
+    EXPECT_TRUE(outcome.benchmarkFailed);
+    EXPECT_TRUE(outcome.timings.empty());
 }
 
 // ============================================================================

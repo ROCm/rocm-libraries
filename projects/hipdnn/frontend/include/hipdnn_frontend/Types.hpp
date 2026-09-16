@@ -1760,4 +1760,36 @@ inline std::pair<PaddingMode, Error> fromHipdnnPaddingMode(hipdnnPaddingMode_t m
     }
 }
 
+/**
+ * @enum TimingQuality
+ * @brief Classifies how a device-time measurement from execute_timed_ext() was obtained
+ *
+ * @see hipdnn_frontend::graph::Graph::execute_timed_ext
+ */
+enum class TimingQuality
+{
+    DEVICE_ONLY, ///< Stream was stalled: elapsed time excludes host submission overhead.
+    UNSTALLED, ///< Stalling was not used (unsupported device, or disabled for this shared
+    ///< object after an earlier watchdog timeout). The measurement was taken without the
+    ///< stall gate; it may or may not include host submission overhead depending on the
+    ///< backend and engine, so it must not be ranked against a DEVICE_ONLY measurement.
+    INVALID ///< No usable measurement: the stall watchdog fired, or execution did not
+    ///< complete successfully.
+};
+
+/**
+ * @struct ExecutionTiming
+ * @brief Device-time measurement produced by execute_timed_ext()
+ *
+ * @c elapsedMs is empty whenever @c quality is TimingQuality::INVALID, and whenever the
+ * owning call returned a bad Error.
+ *
+ * @see hipdnn_frontend::graph::Graph::execute_timed_ext
+ */
+struct ExecutionTiming
+{
+    std::optional<float> elapsedMs; ///< Elapsed device time in milliseconds, or empty if invalid.
+    TimingQuality quality = TimingQuality::INVALID; ///< How the measurement was obtained.
+};
+
 } // namespace hipdnn_frontend
