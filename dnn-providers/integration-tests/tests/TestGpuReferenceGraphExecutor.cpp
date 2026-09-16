@@ -1064,7 +1064,6 @@ TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfIsApplicable)
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
-
 TEST(TestGpuReferenceGraphExecutor, BatchnormFwdInfWithActivationIsApplicable)
 {
     SKIP_IF_NO_DEVICES();

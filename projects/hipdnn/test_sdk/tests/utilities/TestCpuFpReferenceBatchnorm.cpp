@@ -216,7 +216,7 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdInferenceNdhwc)
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceComputeFp32)
+TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceComputeUpscale)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<half> inputTensor({4, 3});
@@ -239,7 +239,7 @@ TEST(TestCpuFpReferenceBatchnormFp16, BatchnormFwdInferenceComputeFp32)
         inputTensor, scaleTensor, biasTensor, meanTensor, invVarianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceComputeFp32)
+TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormFwdInferenceComputeUpscale)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<bfloat16> inputTensor({4, 3});
