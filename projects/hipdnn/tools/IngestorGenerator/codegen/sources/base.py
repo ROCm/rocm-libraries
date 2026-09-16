@@ -42,11 +42,10 @@ class SourceAdapter(Protocol):
 
     Implementations: ``InteractiveAdapter`` (a human/skill fills every
     field directly, no inference), ``HiprtcAdapter`` (scans one or more
-    ``.cpp``/``.hip`` files for ``__global__`` entry points). ``rocke`` is
-    a later adapter behind this same protocol, added once the packer and
-    kpack launcher land -- there is deliberately no ``RockeAdapter`` here
-    yet; adding one later requires no change to this protocol or to any
-    other adapter.
+    ``.cpp``/``.hip`` files for ``__global__`` entry points) and
+    ``RockeAdapter`` (introspects a rocKE builder's spec surface). Each sits
+    behind this protocol alone, so adding another requires no change here
+    or to any existing adapter.
     """
 
     def infer(self, *sources: Path) -> SourceAdapterResult: ...

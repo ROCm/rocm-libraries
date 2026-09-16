@@ -123,9 +123,8 @@ def _same_value(shape_value, metadata_value) -> bool:
 def applicable(metadata: dict, shape: dict, divides: dict) -> bool:
     """True when `metadata` (a variant, defaults resolved) is legal for `shape`.
 
-    Two kinds of shape-valued field, matching the two kinds the real matcher
-    tests exercise (see TestGfx942AttentionDenseMatchers.cpp's
-    RefusesATileThatDoesNotDivideTheSequence / AcceptsEitherShippedTileForA...):
+    Two kinds of shape-valued field, matching the two kinds a real matcher
+    decides between:
 
       * a metadata field sharing a name with a shape field must be EQUAL to it,
         unless that field is declared as a divisor (divisor fields never compare

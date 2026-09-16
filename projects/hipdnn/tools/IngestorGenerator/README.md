@@ -529,17 +529,24 @@ plugin/data/flatbuffers SDK and provider sources beside this checkout, plus
 for CMake-configured `version.h`/`CacheRootDefaults.h` headers from their real
 templates. Missing prerequisites produce an explicit skip, not compiler proof.
 
-### Fragment/struct arity (`tests/test_fragment_struct_arity.py`)
+### Fragment contracts (`tests/test_fragment_contracts.py`)
 
 ```bash
-.venv/bin/python -m pytest tests/test_fragment_struct_arity.py
+.venv/bin/python -m pytest tests/test_fragment_contracts.py
 ```
 
-`fragments/ingestor_packs_cpp.j2` once emitted a two-field `s_packs` row against a
-three-field `IngestorPack` struct (the mismatch did not compile as spliced and was
-fixed by hand during a real integration run). This parses the REAL field count out
-of the provider's `IngestorPacks.hpp` and asserts the emitted row's arity matches it
--- not a hardcoded `3`, which would just re-freeze today's coincidental agreement.
-Skips if the provider source is not found beside this checkout. Also checks that the
-`.hpp`/`.cpp` fragment pair name the same register-function symbol, and that
-`cmake_test_sources.txt` names files this generator's own run actually wrote.
+Contracts between the fragments this generator emits, checked against each other.
+`IngestorPacks.hpp` and the `IngestorPacks.cpp` `s_packs` row must name the same
+register function; a packaged engine must carry a real reset pointer whose symbol is
+defined somewhere, and a direct-load engine must define none and stay non-owning;
+`cmake_test_sources.txt` must name files this generator's own run actually wrote.
+The census case pin must be exactly the case set the emitted suite renders, must
+follow the suite's conditional arms, and must survive the wire to the binary. The
+placeholder scan must see every emitted file across the two provider trees, report an
+unlocatable one as missing, and treat two files at one spliced path as ambiguous
+rather than picking one.
+
+A fragment's agreement with the provider's own headers is deliberately not checked
+here. The compiler catches that at the splice with the struct in hand, and parsing
+those headers would couple this suite to source it does not own and redden it for a
+mismatch the build already reports.

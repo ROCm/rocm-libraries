@@ -14,9 +14,9 @@ from pathlib import Path
 
 from .base import CandidateKernel, SourceAdapterResult
 
-#: ``extern "C" __global__ void Name(...)`` -- the shape every shipped
-#: kernel in ``kernel_ingestor_engine/kernels/*.cpp`` uses (ConvFwd.cpp,
-#: PointwiseAdd.cpp, ...).
+#: ``extern "C" __global__ void Name(...)`` -- the shape the HIP kernel
+#: fixtures under ``kernel_ingestor_engine/test_descriptors/*/*/kernels/``
+#: use (ConvFwd.cpp, PointwiseAdd.cpp).
 _ENTRY_POINT_PATTERN = re.compile(
     r'extern\s+"C"\s+__global__\s+void\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\('
 )
