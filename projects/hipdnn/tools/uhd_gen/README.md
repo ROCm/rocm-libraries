@@ -23,16 +23,16 @@ pip install -e .
 ## The pipeline
 
 ```
-  sweep  ->  export-benchmarks  ->  results_import  ->  train  ->  evaluate  ->  promote
-   |              |                       |              |           |             |
-   |              |                       |              |           |             `- writes the UED's
-   |              |                       |              |           |                role/architecture reference
-   |              |                       |              |           `- eval_report.json (§11.2/§11.4 regret)
-   |              |                       |              `- <stem>.uhd.json + model.bin
-   |              |                       `- dataset.parquet: §8.3's checks applied, the
-   |              |                          collector's is_valid/skip_reason rewritten as
-   |              |                          `error`, tflops/gbs derived from the opmeta
-   |              `- §8.3 collection CSV: appendable, resumable, one per shard
+  sweep  ->  export-benchmarks  ->  dataset  ->  train  ->  evaluate  ->  promote
+   |          |                      |            |          |             |
+   |          |                      |            |          |             `- writes the UED's
+   |          |                      |            |          |                role/architecture reference
+   |          |                      |            |          `- eval_report.json (§11.2/§11.4 regret)
+   |          |                      |            `- <stem>.uhd.json + model.bin
+   |          |                      `- dataset.parquet: §8.3's checks applied, the
+   |          |                         collector's is_valid/skip_reason rewritten as
+   |          |                         `error`, tflops/gbs derived from the engine's counts
+   |          `- §8.3 collection CSV: appendable, resumable, one per shard
    `- ingestor benchmark log
 ```
 
@@ -43,13 +43,13 @@ HIPDNN_LOG_LEVEL=info HIPDNN_LOG_FILE=sweep.log <run your graphs>
 # 2. export-benchmarks: log -> the §8.3 collection CSV, one per shard, appendable
 python -m uhd_gen export-benchmarks sweep.log -o bench.csv
 
-# 3. results_import: the collected shards -> the published §8.3 dataset. This is where
+# 3. uhd_gen.dataset: the collected shards -> the published §8.3 dataset. This is where
 #    §8.3's checks are applied, where a failed candidate's is_valid/skip_reason becomes
-#    the dataset's `error`, and where tflops and gbs are derived from the operation's
-#    declaration -- the collector measures times, it does not know an op's flop count.
-python -m results_import.importer \
+#    the dataset's `error`, and where tflops and gbs are derived from the `<root>.flops`
+#    and `<root>.bytes` the engine published beside the problem (RFC 0019 §13.6) -- the
+#    collector measures times, the engine that ran the graph knows what work it did.
+python -m uhd_gen.dataset \
     --csv bench.csv \
-    --opmeta ../corpus_gen/operations/matmul.opmeta.json \
     --out dataset.parquet
 
 # 4. train: dataset -> descriptor + model artifact. A collected .csv works too, with a
@@ -414,7 +414,7 @@ sanity floor does not move between runs.
 
 | Suffix | What it is | When |
 |--------|------------|------|
-| `.parquet` | The dataset `tools/results_import` publishes from collected shards (§8.3) | The route a model anyone ships should come by |
+| `.parquet` | The dataset `uhd_gen/dataset` publishes from collected shards (§8.3) | The route a model anyone ships should come by |
 | `.csv` | A collected corpus, read directly | A quick local run |
 | `.json` | The same rows as records | Hand-written corpora and fixtures |
 
@@ -424,14 +424,13 @@ its footer last, so a run killed mid-flight leaves a file that cannot be read at
 against §8's requirement that the benchmark step be resumable from a partial result;
 and a Parquet file cannot be appended to, so §8.8's "shard outputs merge by appending"
 would become a full rewrite. CSV has both properties. So `hipdnn_bench` and
-`export-benchmarks` keep writing CSV, and `results_import` reads the merged shards
-once, derives `tflops` and `gbs` from the operation's declaration, and writes the
+`export-benchmarks` keep writing CSV, and `uhd_gen.dataset` reads the merged shards
+once, derives `tflops` and `gbs` from the engine's published counts, and writes the
 typed dataset:
 
 ```bash
-python -m results_import.importer \
+python -m uhd_gen.dataset \
     --csv shards/*.csv \
-    --opmeta ../corpus_gen/operations/matmul.opmeta.json \
     --out dataset.parquet
 
 python -m uhd_gen train --input dataset.parquet ...
@@ -449,7 +448,7 @@ translated.** The collector writes what the runtime record carries at the moment
 failure: `is_valid=False`, a `skip_reason`, and empty timing columns. §8.3's published
 dataset carries no validity flag at all -- a failed candidate is a null measurement plus
 a non-empty `error` -- so that no two columns can disagree about whether a row was
-measured. `results_import` rewrites the one into the other and then drops `is_valid` and
+measured. `uhd_gen.dataset` rewrites the one into the other and then drops `is_valid` and
 `skip_reason` as collection bookkeeping, which is why the chain above composes: a sweep
 containing a failure is a normal sweep, not a corpus the importer refuses.
 
@@ -546,10 +545,10 @@ engine's — Mode B then falls back to the engine's L1 prediction.
 
 `generate` takes the work count from the engine's own published `graph.flops`, which is
 the effective count the runtime computed for the graph it just ran. A corpus that was
-collected as CSV and published by `results_import` instead carries `tflops` and `gbs`
-derived from the operation's `.opmeta.json` declaration and the same `avgTimeMs`. The
-two paths agree on the arithmetic and differ only in where the count comes from: a
-measured graph knows its own, a CSV row needs its operation to declare one.
+collected as CSV and published by `uhd_gen.dataset` instead carries `tflops` and `gbs`
+derived from the `<root>.flops` and `<root>.bytes` that same engine logged beside the
+problem, and the row's own `minTimeMs`. Both paths take the count from the engine and
+differ only in which of its outputs they read.
 
 ### Engine-level immediate predictions
 

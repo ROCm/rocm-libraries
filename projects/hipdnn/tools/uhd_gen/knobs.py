@@ -51,13 +51,14 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 #: Knob columns live under this prefix. `$kernel.*` is the KMD's variant space, which is
-#: exactly what an AOT build enumerates; `$q.*` describes the problem and cannot be
-#: chosen away.
-
-#: The problem namespace. A `kernel.*` field with a twin here was bound by the matcher
-#: to the graph; one without was pinned by whoever generated the pack.
-_QUERY_PREFIX = "q."
+#: exactly what an AOT build enumerates; the problem columns describe the problem and cannot
+#: be chosen away.
 _KERNEL_PREFIX = "kernel."
+
+#: Roots that are not the problem. The problem's own root is the operation's name
+#: (`attention_dense.*`), so it can only be identified by what it is not -- see
+#: `uhd_gen.dataset.publish._query_columns`, which draws the same line.
+_RESERVED_PREFIXES = (_KERNEL_PREFIX, "device.")
 
 #: Identity columns that share the prefix without being knobs.
 _NOT_KNOBS = frozenset({"kernel"})
@@ -108,10 +109,15 @@ class KnobAblation:
     #: Whether the column varies among the candidates of a single problem. False means
     #: no AOT choice exists for it, and its pin cost is meaningless.
     tunable: bool = True
-    #: Whether the problem namespace carries the same name. Separates a field the
+    #: Whether a problem column carries the same short name. Separates a field the
     #: matcher bound to the graph from one the pack's generator pinned per geometry --
     #: identical in the data, different in what the author can do about it.
     graph_bound: bool = False
+    #: That column, in full. The advice for a matched knob tells the author to read the
+    #: problem side instead, and a signature naming an unbound variable is a hard error at
+    #: score time -- so the name has to be the one the engine actually publishes rather
+    #: than a namespace assumed here.
+    bound_as: str | None = None
 
     @property
     def is_constant(self) -> bool:
@@ -138,6 +144,7 @@ class KnobAblation:
             "constant": self.is_constant,
             "tunable": self.tunable,
             "graph_bound": self.graph_bound,
+            "bound_as": self.bound_as,
             "per_value": [v.to_dict() for v in self.per_value],
             "best_value": None if best is None else best.value,
             "cost_of_pinning": None if best is None else best.p95_regret,
@@ -183,16 +190,19 @@ def analyse_knobs(
     # Two different causes produce that, and they need different answers, so they are
     # distinguished by whether the problem namespace carries the same name:
     #
-    #   * `q.seqlen_q` exists beside `kernel.seqlen_q`  -> the matcher binds it to the
-    #     graph. Nothing to do; the kernel was built for that shape.
-    #   * no `q.waves_per_eu` exists                    -> nothing bound it. The pack's
+    #   * a problem column named `seqlen_q` exists beside `kernel.seqlen_q` -> the matcher
+    #     binds it to the graph. Nothing to do; the kernel was built for that shape.
+    #   * nothing names `waves_per_eu` on the problem side -> nothing bound it. The pack's
     #     generator simply chose one value per geometry, so the model was never offered
     #     the choice. That is a decision the author can revisit: build both and re-sweep
     #     to find out whether it matters, or drop it from the KMD as unearned.
+    #
+    # Matched on the short name, since the two sides do not share a root: a knob is
+    # `kernel.seqlen_q` while its twin is `attention_dense.seqlen_q`.
     graph_bound = {
-        column[len(_QUERY_PREFIX):]
+        column.split(".", 1)[1]: column
         for column in usable.columns
-        if column.startswith(_QUERY_PREFIX)
+        if "." in column and not column.startswith(_RESERVED_PREFIXES)
     }
     within = usable.groupby(group, dropna=False)
     knobs = []
@@ -201,7 +211,11 @@ def analyse_knobs(
         values = sorted(usable[name].dropna().unique().tolist(), key=repr)
         tunable = bool((within[name].nunique(dropna=False) > 1).any())
         ablation = KnobAblation(
-            name=name, values=values, tunable=tunable, graph_bound=short in graph_bound
+            name=name,
+            values=values,
+            tunable=tunable,
+            graph_bound=short in graph_bound,
+            bound_as=graph_bound.get(short),
         )
         if len(values) > 1 and tunable:
             for value in values:
@@ -371,6 +385,7 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
             "problems_lost": knob["problems_lost_by_pinning"],
             "tunable": knob.get("tunable", True),
             "graph_bound": knob.get("graph_bound", False),
+            "bound_as": knob.get("bound_as"),
             "gain": imp.get("gain"),
             "split": imp.get("split"),
         }
@@ -388,7 +403,8 @@ def rank_knobs(report: dict, importance: dict[str, dict] | None = None) -> list[
                 f"bound to the graph: all {knob['distinct_values']} values exist across "
                 f"the corpus, but the matcher fixes it per problem, so every candidate "
                 f"shares one. Not an AOT choice. A model reading it from `$kernel.` "
-                f"needs a knob it should not have -- read `$q.{row['short_name']}` instead"
+                f"needs a knob it should not have -- read "
+                f"`${row['bound_as'] or row['short_name']}` instead"
             )
         elif not row["tunable"]:
             row["verdict"] = "PINNED"

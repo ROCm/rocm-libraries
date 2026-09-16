@@ -19,7 +19,7 @@ pandas is absent.
 
 from __future__ import annotations
 
-from results_import.descriptor import (
+from uhd_gen.dataset.config_features import (
     ABSENT,
     expand,
     numeric_slots,

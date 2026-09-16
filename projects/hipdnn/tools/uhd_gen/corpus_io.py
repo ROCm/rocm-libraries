@@ -57,7 +57,7 @@ def pin_identity_dtypes(frame: pd.DataFrame) -> pd.DataFrame:
 def read_corpus_frame(path: Path) -> pd.DataFrame:
     """Read a corpus, the suffix deciding the reader.
 
-    `.parquet` is the dataset `tools/results_import` publishes (§8.3) and the route a
+    `.parquet` is the dataset `uhd_gen/dataset` publishes (§8.3) and the route a
     shipped model should come by; `.csv` is the collected corpus read directly, the
     escape hatch for a quick local run on which none of §8.3's checks have been applied;
     `.json` is the same rows as records, for fixtures and hand-written corpora. A JSON

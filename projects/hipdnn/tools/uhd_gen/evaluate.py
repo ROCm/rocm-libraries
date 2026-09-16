@@ -78,6 +78,20 @@ BENCHMARK_COLUMN = "benchmark"
 #: one would make `evaluate` unusable on every corpus that exists.
 REGIME_COLUMN_CANDIDATES = ("regime", "corpus_regime", "q.regime", "problem.regime")
 
+
+def _regime_column(columns: Iterable[str]) -> str | None:
+    """The corpus's regime label, by name and then by suffix.
+
+    The named candidates first, then any namespaced `*.regime`: a corpus publishing the
+    label beside its other problem values carries it under the token that bound them, which
+    is the operation's name (`attention_dense.regime`) and so cannot be listed ahead of time.
+    """
+    columns = list(columns)
+    named = next((name for name in REGIME_COLUMN_CANDIDATES if name in columns), None)
+    if named is not None:
+        return named
+    return next((c for c in columns if c.endswith(".regime")), None)
+
 #: Two candidates whose measured times differ by less than this are treated as the same
 #: choice for top-k recall. See `_tie_mask` for why recall needs it and regret does not.
 DEFAULT_TIE_REL_TOLERANCE = 0.01
@@ -509,9 +523,7 @@ def evaluate_corpus(
     eval_keys = keys[slice_mask]
 
     if regime_column is None:
-        regime_column = next(
-            (name for name in REGIME_COLUMN_CANDIDATES if name in df.columns), None
-        )
+        regime_column = _regime_column(df.columns)
     elif regime_column not in df.columns:
         raise ValueError(
             f"--regime-column {regime_column!r} is not a column of this corpus"

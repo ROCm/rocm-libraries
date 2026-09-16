@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 CANDIDATE_EVENT = "ingestor.benchmark.candidate"
 
-# Envelope columns, in the order they are written. Feature columns (`q.*`,
-# `kernel.*`, `device.*`) are appended after these; RFC 0019.13 §8.3 reads columns
+# Envelope columns, in the order they are written. Feature columns (the problem's own
+# namespace, `kernel.*`, `device.*`) are appended after these; RFC 0019.13 §8.3 reads columns
 # by name and leaves order arbitrary, so this is only for readability.
 ENVELOPE_COLUMNS = (
     "benchmark",
@@ -67,7 +67,7 @@ ENVELOPE_COLUMNS = (
 )
 
 # What tells a feature key apart from an envelope key in a record. The runtime
-# namespaces every feature it logs (`q.seqlen`, `kernel.tile_m`) and every envelope
+# namespaces every feature it logs (`attention_dense.seqlen_kv`, `kernel.tile_m`) and every envelope
 # key is a bare word, so the dot is the whole test. Discovered rather than listed:
 # a sweep over a different operation binds different problem tokens and different KMD
 # fields, and a hardcoded set would silently drop the columns of any op but the one
@@ -154,7 +154,7 @@ def row_from_record(record: dict, provenance: SweepProvenance) -> dict[str, Any]
 
     `is_valid`/`skip_reason` are the COLLECTION spelling of a failure and go no further
     than this file. §8.3's published dataset records a failure once, as a null
-    measurement plus a non-empty `error`, and `results_import` performs that translation
+    measurement plus a non-empty `error`, and `uhd_gen.dataset` performs that translation
     on the way in. The boolean stays here because it is what the runtime record carries
     at the moment of failure, and because this CSV has to remain an appendable, resumable
     log (§8.8) rather than the place where the published encoding is decided.

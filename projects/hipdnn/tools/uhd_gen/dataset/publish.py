@@ -11,23 +11,29 @@ This is also the only place §8.3's checks are enforced. While training read the
 directly there was nothing between producer and consumer to apply them, so rules describing a
 merge spanning inconsistent candidate sets described a check nothing performed.
 
-Takes results from any producer, not only ours. The minimum a foreign CSV must carry is `q.*`,
-`kernel.*`, `device.*` and a measurement; everything else has a default, and the metrics are
-derived rather than demanded.
+Takes results from any producer, not only ours. The minimum a foreign CSV must carry is a problem
+namespace, `kernel.*`, `device.*` and a measurement; everything else has a default, and the
+metrics are derived rather than demanded.
+
+The problem namespace is not a fixed word. The runtime publishes each problem value under the
+token its matcher bound, which is the operation's own name (`attention_dense.seqlen_kv`), so a
+corpus of one op and a corpus of another do not share a root and neither is `q`. Nothing here
+needs them to: `kernel.*` and `device.*` are the two roots with a defined meaning, and a problem
+column is any other namespaced column. That also accepts the older `q.*` spelling and
+`corpus_gen`'s, without either being privileged.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import sys
 from typing import Iterable
 
 import pandas as pd
 
-from results_import.derive import derive_metrics
-from results_import.descriptor import ABSENT, expand, slots_used_by
+from .metrics import derive_metrics
+from .config_features import ABSENT, expand, slots_used_by
 
 __all__ = [
     "ValidationError",
@@ -92,8 +98,33 @@ def _apply_defaults(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+#: Roots whose meaning is defined: the variant space and the machine. Everything else that is
+#: namespaced describes the problem.
+_RESERVED_ROOTS = ("kernel.", "device.")
+
+
 def _query_columns(frame: pd.DataFrame) -> list[str]:
-    return [c for c in frame.columns if c.startswith("q.")]
+    """The columns describing the problem, whatever root the producer bound them under.
+
+    Identified by complement rather than by prefix, because there is no prefix to match: the
+    root is the bound token's own name, which is the operation's (`attention_dense.*`). A
+    dotless column is envelope -- the collector writes every envelope key as a bare word and
+    every feature key namespaced, which is what makes the dot sufficient here.
+    """
+    return [
+        c for c in frame.columns
+        if "." in c and not c.startswith(_RESERVED_ROOTS)
+    ]
+
+
+def _short_name(column: str) -> str:
+    """A problem column without its namespace: `attention_dense.seqlen_kv` -> `seqlen_kv`.
+
+    The namespace says which operation bound the value; the rest is the name the engine bound it
+    under. Split on the first dot so a nested token (`attention_dense.q.uid`) keeps the shape the
+    engine gave it.
+    """
+    return column.split(".", 1)[1]
 
 
 def _kernel_columns(frame: pd.DataFrame) -> list[str]:
@@ -105,7 +136,8 @@ def _problem_key_columns(frame: pd.DataFrame) -> list[str]:
 
     A problem is `(graph, device)`. The same shape on two GPUs is two problems with two
     different best kernels, which is why the runtime keys its winner cache on the pair and why
-    `uhd_gen.evaluate.resolve_grouping` groups on it; `q.*` alone is only the shape half.
+    `uhd_gen.evaluate.resolve_grouping` groups on it; the problem columns alone are only the
+    shape half.
 
     Keyed on that half, a corpus spanning two boards folds each shape's two measurements into
     one problem, and everything below reads that as a corrupt corpus rather than as two
@@ -204,7 +236,13 @@ def _translate_collector_failure(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _validate(frame: pd.DataFrame) -> None:
     """§8.3's checks, applied where they can finally be applied."""
-    for group in ("q.", "kernel.", "device."):
+    if not _query_columns(frame):
+        raise ValidationError(
+            "no problem columns; a corpus must identify its problem. Every value describing "
+            "one is published under the token that bound it (`attention_dense.seqlen_kv`), so "
+            "what is missing here is any namespaced column outside `kernel.*` and `device.*`"
+        )
+    for group in _RESERVED_ROOTS:
         if not any(c.startswith(group) for c in frame.columns):
             raise ValidationError(f"no {group}* columns; a corpus must identify its {group[:-1]}")
 
@@ -354,7 +392,7 @@ def resolve_duplicates(frame: pd.DataFrame, latest_column: str, best_column: str
     return frame.sort_index()
 
 
-def build_dataset(frame: pd.DataFrame, opmeta: dict) -> pd.DataFrame:
+def build_dataset(frame: pd.DataFrame) -> pd.DataFrame:
     """Validates, derives the metrics, and drops what was only ever collection bookkeeping."""
     frame = _apply_defaults(frame.copy())
     frame = _translate_collector_failure(frame)
@@ -364,9 +402,8 @@ def build_dataset(frame: pd.DataFrame, opmeta: dict) -> pd.DataFrame:
     query = _query_columns(frame)
     metrics = [
         derive_metrics(
-            {c[2:]: row[c] for c in query},
+            {_short_name(c): row[c] for c in query},
             None if pd.isna(row["minTimeMs"]) else float(row["minTimeMs"]),
-            opmeta,
         )
         for _, row in frame.iterrows()
     ]
@@ -382,10 +419,11 @@ def write_parquet(frame: pd.DataFrame, destination: pathlib.Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    # Named explicitly: argparse would otherwise take the program name from the file argv[0]
+    # points at and print `usage: __main__.py`, which is neither what anyone typed nor
+    # something they could type.
+    parser = argparse.ArgumentParser(prog="python -m uhd_gen.dataset", description=__doc__)
     parser.add_argument("--csv", nargs="+", required=True, type=pathlib.Path)
-    parser.add_argument("--opmeta", required=True, type=pathlib.Path,
-                        help="the operation's .opmeta.json, whose flops/elements are evaluated")
     parser.add_argument("--out", required=True, type=pathlib.Path)
     parser.add_argument(
         "--expand-descriptor", action="append", default=[], dest="expand_descriptor",
@@ -413,9 +451,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    with args.opmeta.open() as handle:
-        opmeta = json.load(handle)
-
     # The order is the point. Resolution happens first because it settles the very duplicates
     # validation would reject; expansion happens last so those checks see the producer's own
     # columns rather than this tool's derived ones.
@@ -428,15 +463,15 @@ def main(argv: list[str] | None = None) -> int:
                     "occasions by, and this corpus does not carry it"
                 )
             frame = resolve_duplicates(frame, args.resolve_duplicates, args.best_column)
-        dataset = build_dataset(frame, opmeta)
+        dataset = build_dataset(frame)
         if args.expand_descriptor:
             dataset = expand_descriptors(dataset, args.expand_descriptor, args.scope_by)
     except ValidationError as error:
-        print(f"results_import: {error}", file=sys.stderr)
+        print(f"uhd_gen.dataset: {error}", file=sys.stderr)
         return 1
 
     write_parquet(dataset, args.out)
-    print(f"results_import: wrote {len(dataset)} rows to {args.out}")
+    print(f"uhd_gen.dataset: wrote {len(dataset)} rows to {args.out}")
 
     return 0
 

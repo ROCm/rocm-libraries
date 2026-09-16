@@ -20,7 +20,7 @@ Collect, train and install:
     python -m uhd_gen train \\
         --input bench.csv \\
         --descriptor-tree ./descriptors --engine hipkernel:pointwise \\
-        --features q.seqlen_q kernel.block_size device.cu_count \\
+        --features pointwise.elements kernel.block_size device.cu_count \\
         --target tflops \\
         --group-by benchmark device \\
         --output-dir ./uhd_output \\
@@ -223,7 +223,7 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         "--input",
         required=True,
         help="Training corpus with feature columns and target: the .parquet dataset "
-        "tools/results_import publishes, or a collected .csv/.json corpus",
+        "uhd_gen/dataset publishes, or a collected .csv/.json corpus",
     )
     feature_source = parser.add_mutually_exclusive_group(required=True)
     feature_source.add_argument("--features", nargs="+", help="Full published feature column names")
@@ -304,7 +304,7 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         dest="report_regret",
         metavar="COL",
         help=(
-            "Columns identifying one problem (e.g. the q.* columns). Reports "
+            "Columns identifying one problem (e.g. benchmark device). Reports "
             "out-of-fold top-1 regret of the ranking the model induces, which is what "
             "RFC 0019.13 §11 asks for and what CV RMSE cannot answer."
         ),
@@ -457,7 +457,7 @@ def _run_train(args: argparse.Namespace) -> int:
             else:
                 raise ValueError("training requires --descriptor-tree or --provenance")
             # The suffix decides, in `corpus_io.read_corpus_frame` for every command
-            # alike. `.parquet` is what tools/results_import publishes (RFC 0019.13
+            # alike. `.parquet` is what uhd_gen/dataset publishes (RFC 0019.13
             # §8.3) and is the route a model anyone ships should come by: the dataset
             # carries its own types, so a column empty in one shard and populated in
             # another cannot concatenate to `object` and quietly change what the

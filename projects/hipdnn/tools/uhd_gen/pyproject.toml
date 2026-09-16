@@ -26,7 +26,7 @@ dependencies = [
     "flatbuffers>=24.3.0",
     "numpy>=1.24.0",
     "pandas>=2.0.0",
-    # `--input dataset.parquet` reads what results_import publishes, and pandas carries
+    # `--input dataset.parquet` reads what uhd_gen.dataset publishes, and pandas carries
     # no Parquet engine of its own. Declared rather than left to whatever an environment
     # happens to have, because its absence surfaces as an ImportError deep inside
     # read_parquet rather than as a missing dependency.
@@ -44,7 +44,13 @@ dev = [
 uhd-gen = "uhd_gen.__main__:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
+# Looks one level up and keeps only this package, because that is the only way to see it: this
+# file sits *inside* `uhd_gen/`, so searching `.` finds the subdirectories rather than the
+# package they belong to, and installs them as top-level `dataset` and `tests` while
+# `uhd_gen.__main__:main` above resolves to nothing. The filter is what keeps the wider search
+# from also picking up `corpus_gen` and the other tools sharing that directory.
+where = [".."]
+include = ["uhd_gen*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
