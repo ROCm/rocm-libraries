@@ -177,10 +177,18 @@ engines inside it below.
 
 The per-graph comparison chart comes next, then the full result table. Pick a
 metric and an engine filter to compare; graph executions/s is derived from GPU
-mean time. Bars are ordered best first and labelled with their distance from the
-winner, a percentage while it is close and a multiplier once it is not. On a
+mean time. Bars are ordered best first, coloured per provider so one engine
+keeps its colour across both charts, and labelled with their distance from the
+winner — a percentage while it is close, a multiplier once it is not. On a
 timing metric the hatched band over each bar is the measured range across
 iterations, so a fast mean built on a wide spread is not read as a clean win.
+
+**Scale** chooses the axis. *From zero* is the honest default and the one to
+compare magnitudes on. *Best to worst* drops the zero and spans the measured
+values instead, which is what makes a fraction of a percent visible; it is a
+truncated axis, so each value is marked with a dot rather than a bar length and
+both ends of the range are labelled underneath.
+
 Rows that never ran are absent from the chart and counted beside it — charting a
 row that measured nothing draws an empty bar, which reads as "infinitely slow";
 the table gives each such row the reason it was skipped where its numbers would

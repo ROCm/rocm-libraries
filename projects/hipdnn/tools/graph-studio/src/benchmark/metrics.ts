@@ -142,23 +142,54 @@ export const VALIDATION_LABEL: Record<ValidationState, string> = {
 export interface ReportSummary {
   readonly graphs: number;
   readonly rows: number;
+  /** Rows that produced timings, and the two ways a row can fail to. */
+  readonly measured: number;
+  readonly skipped: number;
+  readonly errored: number;
   readonly validationPassed: number;
   readonly validationFailed: number;
 }
 
 export function summarize(report: BenchmarkReport): ReportSummary {
   let rows = 0;
+  let measured = 0;
+  let skipped = 0;
+  let errored = 0;
   let validationPassed = 0;
   let validationFailed = 0;
   for (const graph of report.graphs) {
     for (const result of graph.results) {
       rows += 1;
+      if (measurable(result)) measured += 1;
+      else if (result.status === "skipped") skipped += 1;
+      else errored += 1;
       const state = validationState(result.correctness);
       if (state === "passed") validationPassed += 1;
       else if (state === "failed") validationFailed += 1;
     }
   }
-  return { graphs: report.graphs.length, rows, validationPassed, validationFailed };
+  return {
+    graphs: report.graphs.length,
+    rows,
+    measured,
+    skipped,
+    errored,
+    validationPassed,
+    validationFailed,
+  };
+}
+
+/**
+ * A stable hue per provider, so one engine keeps its colour across the suite
+ * overview and every graph's chart. Golden-angle steps off a string hash keep
+ * neighbouring providers far apart on the wheel instead of merely distinct.
+ */
+export function providerHue(provider: string): number {
+  let hash = 0;
+  for (let i = 0; i < provider.length; i++) {
+    hash = (hash * 31 + provider.charCodeAt(i)) >>> 0;
+  }
+  return (hash * 137.508) % 360;
 }
 
 /**

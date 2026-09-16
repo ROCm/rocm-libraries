@@ -6,6 +6,7 @@ import {
   formatBytes,
   measurable,
   pluginKind,
+  providerHue,
   relativeToBest,
   summarize,
   validationState,
@@ -55,6 +56,10 @@ export function BenchmarkReportView({
   );
   const [metricId, setMetricId] = useState(METRICS[0].id);
   const [engineFilter, setEngineFilter] = useState(ALL_ENGINES);
+  // Engines that differ by a fraction of a percent are one bar drawn twice on a
+  // zero axis. The spread scale drops the zero and shows best-to-worst instead,
+  // which is a truncated axis — so it is opt-in and its ends are labelled.
+  const [scaleMode, setScaleMode] = useState<"zero" | "spread">("zero");
   const [detail, setDetail] = useState<{ graph: GraphResults; row: EngineResult } | null>(null);
 
   const summary = useMemo(() => summarize(report), [report]);
@@ -77,19 +82,23 @@ export function BenchmarkReportView({
         : metric.value(a) - metric.value(b),
     );
 
-  // Bars are scaled by magnitude, including the whisker's reach, so a wide
-  // spread cannot overflow the track it is drawn in.
   const values = shown.map((r) => metric.value(r));
-  const scale = Math.max(
-    ...values,
-    ...shown.map((r) => metric.spread?.(r).hi ?? 0),
-    0,
-  );
   const best = values.length
     ? metric.higherIsBetter
       ? Math.max(...values)
       : Math.min(...values)
     : 0;
+  // The axis covers every value and the reach of every whisker, so nothing a
+  // bar draws can overflow the track it is drawn in.
+  const highest = Math.max(...values, ...shown.map((r) => metric.spread?.(r).hi ?? 0), 0);
+  const lowest = Math.min(
+    ...values,
+    ...shown.map((r) => metric.spread?.(r).lo ?? Infinity),
+    Infinity,
+  );
+  const axisLo = scaleMode === "spread" && Number.isFinite(lowest) ? lowest : 0;
+  const axisSpan = highest - axisLo;
+  const position = (value: number) => (axisSpan > 0 ? ((value - axisLo) / axisSpan) * 100 : 0);
   const graphBests = useMemo(
     () => (graphs.length > 1 ? bestPerGraph(report, metric) : []),
     [graphs.length, metric, report],
@@ -123,17 +132,6 @@ export function BenchmarkReportView({
             {metadata.hostname}
           </div>
         </div>
-        <div className="report__pills">
-          <span className="report__pill" data-tone="ok">
-            {metadata.pass_combinations} success
-          </span>
-          <span className="report__pill" data-tone="error">
-            {metadata.error_combinations} error
-          </span>
-          <span className="report__pill" data-tone="muted">
-            {metadata.skip_combinations} skipped
-          </span>
-        </div>
       </header>
 
       {report.warnings.length > 0 && (
@@ -144,9 +142,21 @@ export function BenchmarkReportView({
         </ul>
       )}
 
+      {/* One counter row. Execution status rides along with the row count it
+          divides, rather than repeating it as a second row of pills. */}
       <div className="report__cards">
         <Card label="Graphs" value={summary.graphs} />
-        <Card label="Result rows" value={summary.rows} />
+        <Card
+          label="Result rows"
+          value={summary.rows}
+          note={[
+            `${summary.measured} measured`,
+            summary.skipped > 0 && `${summary.skipped} skipped`,
+            summary.errored > 0 && `${summary.errored} errored`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        />
         <Card label="Validation passed" value={summary.validationPassed} tone="ok" />
         <Card label="Validation failed" value={summary.validationFailed} tone="error" />
       </div>
@@ -200,11 +210,14 @@ export function BenchmarkReportView({
                 className="bar bar--pick"
                 data-current={entry.graph.graph_name === graph?.graph_name}
                 key={entry.graph.graph_name}
+                style={{ "--bar-hue": providerHue(entry.row.provider) } as React.CSSProperties}
                 onClick={() => setGraphName(entry.graph.graph_name)}
               >
                 <div className="bar__name">
-                  <span className="bar__engine">{entry.graph.graph_name}</span>
-                  <span className="bar__kind">
+                  <span className="bar__engine" title={entry.graph.graph_name}>
+                    <Breakable text={entry.graph.graph_name} />
+                  </span>
+                  <span className="bar__kind" title={entry.row.provider}>
                     {entry.row.provider}
                     {entry.unmeasured > 0 && ` · ${entry.unmeasured} not measured`}
                   </span>
@@ -268,6 +281,16 @@ export function BenchmarkReportView({
               ))}
             </select>
           </label>
+          <label className="report__field">
+            <span>Scale</span>
+            <select
+              value={scaleMode}
+              onChange={(e) => setScaleMode(e.target.value as "zero" | "spread")}
+            >
+              <option value="zero">From zero</option>
+              <option value="spread">Best to worst</option>
+            </select>
+          </label>
         </div>
 
         <div className="report__chart-head">
@@ -290,34 +313,55 @@ export function BenchmarkReportView({
               const spread = metric.spread?.(result);
               const relative = relativeToBest(value, best, metric.higherIsBetter);
               return (
-                <div className="bar" data-role={result.role} key={rowKey(result, i)}>
+                <div
+                  className="bar"
+                  data-role={result.role}
+                  key={rowKey(result, i)}
+                  style={{ "--bar-hue": providerHue(result.provider) } as React.CSSProperties}
+                >
                   <div className="bar__name">
-                    <span className="bar__engine">{result.provider}</span>
+                    <span className="bar__engine" title={result.provider}>
+                      <Breakable text={result.provider} />
+                    </span>
                     <span className="bar__kind">
                       {isReference ? "Reference" : pluginKind(result.plugin_path)}
                     </span>
                   </div>
                   <div className="bar__track">
-                    {spread && spread.hi > spread.lo && scale > 0 && (
+                    {spread && spread.hi > spread.lo && axisSpan > 0 && (
                       <div
                         className="bar__spread"
                         title={`${metric.format(spread.lo)} – ${metric.format(spread.hi)} across iterations`}
                         style={{
-                          left: `${(spread.lo / scale) * 100}%`,
-                          width: `${((spread.hi - spread.lo) / scale) * 100}%`,
+                          left: `${position(spread.lo)}%`,
+                          width: `${position(spread.hi) - position(spread.lo)}%`,
                         }}
                       />
                     )}
-                    <div
-                      className="bar__fill"
-                      data-best={value === best}
-                      style={{ width: `${scale > 0 ? (value / scale) * 100 : 0}%` }}
-                    />
+                    {/* On a truncated axis the best value sits at the left edge,
+                        where a bar has no length to show: mark the value instead. */}
+                    {scaleMode === "spread" ? (
+                      <div
+                        className="bar__marker"
+                        data-best={value === best}
+                        style={{ left: `clamp(6px, ${position(value)}%, calc(100% - 6px))` }}
+                      />
+                    ) : (
+                      <div
+                        className="bar__fill"
+                        data-best={value === best}
+                        style={{ width: `${position(value)}%` }}
+                      />
+                    )}
                   </div>
                   <div className="bar__value">
                     {metric.id === "tflops" && result.analytical_flops_partial ? "≥ " : ""}
                     {metric.format(value)}
-                    {relative && <small data-best={relative === "best"}>{relative}</small>}
+                    {relative && (
+                      <small className="bar__relative" data-best={relative === "best"}>
+                        {relative}
+                      </small>
+                    )}
                     {metric.id === "tflops" && result.analytical_flops_partial && (
                       <small>Partial coverage</small>
                     )}
@@ -328,6 +372,18 @@ export function BenchmarkReportView({
                 </div>
               );
             })
+          )}
+          {shown.length > 0 && (
+            <div className="bar bar--axis" aria-hidden="true">
+              <div />
+              <div className="bar__axis">
+                <span>{metric.format(axisLo)}</span>
+                <span>{metric.format(axisLo + axisSpan / 2)}</span>
+                <span>{metric.format(highest)}</span>
+              </div>
+              <div />
+              <div />
+            </div>
           )}
         </div>
       </section>
@@ -443,13 +499,47 @@ export function BenchmarkReportView({
   );
 }
 
-function Card({ label, value, tone }: { label: string; value: number; tone?: "ok" | "error" }) {
+/**
+ * Engine and graph names are one long token with no spaces, so a browser breaks
+ * them mid-number — `16x16x16x16` split across two lines reads as a different
+ * shape. Offering a break after each underscore wraps them where they were
+ * already segmented. `<wbr>` contributes nothing to the text, so a copied name
+ * is still the name.
+ */
+function Breakable({ text }: { text: string }) {
+  const parts = text.split(/(?<=_)/);
+  return (
+    <>
+      {parts.map((part, index) => (
+        <span key={index}>
+          {part}
+          {index < parts.length - 1 && <wbr />}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function Card({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string;
+  value: number;
+  note?: string;
+  tone?: "ok" | "error";
+}) {
   return (
     <div className="report__card">
       <span className="report__card-label">{label}</span>
-      <span className="report__card-value" data-tone={tone}>
+      {/* A zero is not an event: "0 failed" in alarm red is the loudest thing
+          on a report where nothing was validated at all. */}
+      <span className="report__card-value" data-tone={value > 0 ? tone : undefined}>
         {value}
       </span>
+      {note && <span className="report__card-note">{note}</span>}
     </div>
   );
 }

@@ -3,7 +3,14 @@
 // which row wins each graph of a suite.
 import { expect, test } from "bun:test";
 
-import { METRICS, bestPerGraph, measurable, relativeToBest } from "../src/benchmark/metrics";
+import {
+  METRICS,
+  bestPerGraph,
+  measurable,
+  providerHue,
+  relativeToBest,
+  summarize,
+} from "../src/benchmark/metrics";
 import { parseReport } from "../src/benchmark/report";
 
 const metric = (id: string) => METRICS.find((m) => m.id === id)!;
@@ -117,4 +124,39 @@ test("a timing metric carries the measured range behind it", () => {
   expect(metric("gpu_mean_ms").spread?.(only)).toEqual({ lo: 0.017, hi: 0.08 });
   // A derived rate has no per-iteration range to draw.
   expect(metric("tflops").spread).toBeUndefined();
+});
+
+test("a provider keeps one hue, and neighbours do not collide", () => {
+  // The overview and every graph's chart colour the same engine the same way.
+  expect(providerHue("MIOPEN_ENGINE")).toBe(providerHue("MIOPEN_ENGINE"));
+
+  const names = ["MIOPEN_ENGINE", "MIOPEN_ENGINE_DETERMINISTIC", "HIP_MLOPS_ENGINE", "HIPBLASLT_ENGINE", "pytorch"];
+  const hues = names.map(providerHue);
+  expect(new Set(hues.map(Math.round)).size).toBe(names.length);
+  for (const hue of hues) {
+    expect(hue).toBeGreaterThanOrEqual(0);
+    expect(hue).toBeLessThan(360);
+  }
+  // Near-identical names must not land on near-identical colours.
+  expect(Math.abs(providerHue(names[0]) - providerHue(names[1]))).toBeGreaterThan(20);
+});
+
+test("the summary splits rows into what measured and what did not", () => {
+  const parsed = suite([
+    {
+      graph_name: "conv",
+      results: [
+        row("MIOPEN_ENGINE", 0.02),
+        { provider: "pytorch", status: "skipped" },
+        { provider: "BROKEN_ENGINE", status: "error" },
+      ],
+    },
+    { graph_name: "matmul", results: [row("HIPBLASLT_ENGINE", 0.03)] },
+  ]);
+
+  const summary = summarize(parsed);
+  expect(summary.rows).toBe(4);
+  expect(summary.measured).toBe(2);
+  expect(summary.skipped).toBe(1);
+  expect(summary.errored).toBe(1);
 });
