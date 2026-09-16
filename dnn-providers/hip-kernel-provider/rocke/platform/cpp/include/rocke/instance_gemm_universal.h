@@ -45,6 +45,15 @@
 extern "C" {
 #endif
 
+/* Direct-to-LDS copies a fixed 16 B (4 dwords) per lane per pass, i.e. 8 halves
+ * at the 2-byte operand width the path supports.
+ * rocke_gemm_universal_is_valid_spec and the chunk/pass arithmetic in
+ * rocke_build_universal_gemm must agree on this or the gate admits tiles the
+ * emitter addresses out of bounds. Mirrors the Python module constants
+ * _DTL_DWORDS_PER_LANE / _DTL_ELEMS_PER_LANE. */
+#define ROCKE_GEMM_DTL_DWORDS_PER_LANE 4
+#define ROCKE_GEMM_DTL_ELEMS_PER_LANE (ROCKE_GEMM_DTL_DWORDS_PER_LANE * 2)
+
 /* ------------------------------------------------------------------ TileSpec *
  *
  * Mirror of Python TileSpec. The three computed @property values

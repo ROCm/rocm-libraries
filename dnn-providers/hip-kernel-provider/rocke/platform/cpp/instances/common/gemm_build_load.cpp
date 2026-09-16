@@ -306,8 +306,11 @@ void rocke_gemm_build_populate_ctx(rocke_gemm_build_ctx_t* ctx)
     ctx->dtl = spec->trait.direct_to_lds;
     if(ctx->dtl)
     {
-        ctx->dtl_dwords = 4; /* _DTL_DWORDS         */
-        ctx->dtl_halves = ctx->dtl_dwords * 2; /* _DTL_HALVES         */
+        /* Shared with the rocke_gemm_universal_is_valid_spec gate that rejects
+         * tiles which do not fill whole passes; the loops below are
+         * unpredicated. */
+        ctx->dtl_dwords = ROCKE_GEMM_DTL_DWORDS_PER_LANE; /* _DTL_DWORDS         */
+        ctx->dtl_halves = ROCKE_GEMM_DTL_ELEMS_PER_LANE; /* _DTL_HALVES         */
         ctx->dtl_bytes_per_lane = ctx->dtl_dwords * 4; /* _DTL_BYTES_PER_LANE */
         if((ctx->block_k % ctx->dtl_halves) != 0)
         {

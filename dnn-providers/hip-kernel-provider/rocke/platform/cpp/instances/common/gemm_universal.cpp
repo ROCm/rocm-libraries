@@ -1370,8 +1370,11 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     ctx.dtl = spec->trait.direct_to_lds;
     if(ctx.dtl)
     {
-        ctx.dtl_dwords = 4;
-        ctx.dtl_halves = ctx.dtl_dwords * 2;
+        /* Shared with the rocke_gemm_universal_is_valid_spec gate that rejects
+         * tiles which do not fill whole passes; the loops below are
+         * unpredicated. */
+        ctx.dtl_dwords = ROCKE_GEMM_DTL_DWORDS_PER_LANE;
+        ctx.dtl_halves = ROCKE_GEMM_DTL_ELEMS_PER_LANE;
         ctx.dtl_bytes_per_lane = ctx.dtl_dwords * 4;
         if((ctx.block_k % ctx.dtl_halves) != 0)
         {

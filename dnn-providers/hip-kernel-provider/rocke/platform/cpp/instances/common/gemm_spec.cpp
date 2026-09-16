@@ -697,6 +697,45 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         CK_GEMM_REJECT("block too small for one element/thread/phase");
     }
 
+    /* Direct-to-LDS is coarser than one element per lane: every lane issues a
+     * fixed ROCKE_GEMM_DTL_ELEMS_PER_LANE-element copy, and the pass loop in
+     * rocke_build_universal_gemm is unpredicated -- it walks
+     * chunk_idx = tid + p * block_size for ceil(chunks / block_size) passes
+     * with no bound check. A tile that does not cover a whole number of passes
+     * therefore leaves lanes with chunk_idx >= chunks, which address past both
+     * the global tile and the LDS buffer (hipError 700, which poisons the
+     * context and aborts a sweep). The one-element/thread rule above is
+     * ROCKE_GEMM_DTL_ELEMS_PER_LANE times too weak to catch it. */
+    if(spec->trait.direct_to_lds)
+    {
+        int i;
+        if((t->tile_k % ROCKE_GEMM_DTL_ELEMS_PER_LANE) != 0)
+        {
+            CK_GEMM_REJECT("direct_to_lds needs tile_k %% %d == 0 (got %d)",
+                           ROCKE_GEMM_DTL_ELEMS_PER_LANE,
+                           t->tile_k);
+        }
+        for(i = 0; i < 2; ++i)
+        {
+            const int total = (i == 0) ? a_total : b_total;
+            const char* label = (i == 0) ? "A" : "B";
+            const int chunks = total / ROCKE_GEMM_DTL_ELEMS_PER_LANE;
+            if(chunks < threads || (chunks % threads) != 0)
+            {
+                CK_GEMM_REJECT("direct_to_lds needs the %s tile to fill whole "
+                               "%d-lane passes: %d elements / %d per lane = %d "
+                               "chunks, which is not a positive multiple of "
+                               "block_size %d",
+                               label,
+                               threads,
+                               total,
+                               ROCKE_GEMM_DTL_ELEMS_PER_LANE,
+                               chunks,
+                               threads);
+            }
+        }
+    }
+
     /* Split-K (over the production body): only static invariants are checked
      * here -- split_k >= 1, and the atomic-add epilogue is MFMA (CDNA) only.
      * The K % split_k and ks % tile_k divisibility are the caller's
