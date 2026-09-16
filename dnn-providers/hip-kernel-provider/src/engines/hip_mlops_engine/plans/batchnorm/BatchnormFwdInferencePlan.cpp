@@ -12,6 +12,8 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+using namespace hip_kernel_provider::core::utils;
+
 namespace hip_kernel_provider::batchnorm
 {
 
