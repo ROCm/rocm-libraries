@@ -92,6 +92,16 @@ def _derive(engine_name: str, repo: Path) -> dict:
     engine_toml = (
         repo / "dnn-providers/hip-kernel-provider/config" / f"{namespace}_{local}.toml"
     )
+    generated_tests_dir = (
+        repo
+        / "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs"
+    )
+    # Every generated test source this engine owns. The suites inside them all begin with
+    # `Test<PackClass>`, which is what makes one glob a complete filter; the count is what
+    # lets a gate notice that one of these files contributed no suite to a census run.
+    generated_test_sources = sorted(
+        path.name for path in generated_tests_dir.glob(f"Test{pack_class}*.cpp")
+    )
 
     descriptor_dir_exists = int(descriptor_dir.is_dir())
     native_file_exists = int(native_file.is_file())
@@ -141,8 +151,13 @@ def _derive(engine_name: str, repo: Path) -> dict:
         "descriptor_dir": descriptor_dir.as_posix(),
         "engine_toml": engine_toml.as_posix(),
         "external_test_target": f"{_PROJECT_NAME}-{namespace}-{kebab_local}-external-integration-check",
-        "census_suite": f"Test{pack_class}Packs",
-        "matcher_suite": f"Test{pack_class}Matchers",
+        # Every suite the engine's generated sources define, not one shard of them. A
+        # filter naming a single suite leaves its siblings built, linked and never run:
+        # a test file that cannot even start -- gtest rejects a suite mixing TEST with a
+        # parameterized fixture at runtime -- then reports nothing to any gate.
+        "census_filter": f"Test{pack_class}*.*",
+        "generated_test_sources": generated_test_sources,
+        "generated_test_source_count": len(generated_test_sources),
         "descriptor_dir_exists": descriptor_dir_exists,
         "native_file_exists": native_file_exists,
         "engine_toml_exists": engine_toml_exists,

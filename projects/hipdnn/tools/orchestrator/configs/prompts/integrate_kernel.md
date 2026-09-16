@@ -16,7 +16,7 @@ will be measured; it does not replace the runbook.
 - Descriptor dir:   ${steps.identity.outputs.descriptor_dir}
 - Engine TOML:      ${steps.identity.outputs.engine_toml}
 - CTest target:     ${steps.identity.outputs.external_test_target}
-- Census suite:     ${steps.identity.outputs.census_suite}
+- Census filter:    ${steps.identity.outputs.census_filter}
 - Source kind:      ${inputs.kernel_source_kind}
 - Target arch:      ${inputs.arch}
 - Graph:            ${inputs.graph}
@@ -243,9 +243,11 @@ the build tree and the gate tested the install.
   order.
 - `hipdnn_validate_descriptors <descriptor dir> --expect-engine ${inputs.engine_name} --json`
   must find your engine.
-- `hip_kernel_provider_tests --gtest_filter=${steps.identity.outputs.census_suite}.*` must
+- `hip_kernel_provider_tests --gtest_filter=${steps.identity.outputs.census_filter}` must
   run at least one case and pass, in a fresh process, because registration and discovery
-  are memoized.
+  are memoized. That filter spans every generated test source your engine owns, and the
+  gate also requires at least one suite per source: a generated test file that contributes
+  no suite has not run, and a test that cannot run cannot pass.
 - `ctest -N` from the **install** prefix must list exactly one entry named
   `${steps.identity.outputs.external_test_target}`, and its command line must name your
   engine.

@@ -15,7 +15,7 @@ gated on `tune` below.
 - Build directory:   ${vars.ingestor_build_dir}
 - Descriptor dir:    ${steps.identity.outputs.descriptor_dir}
 - CTest target:      ${steps.identity.outputs.external_test_target}
-- Census suite:      ${steps.identity.outputs.census_suite}
+- Census filter:     ${steps.identity.outputs.census_filter}
 - Target arch:       ${inputs.arch}
 - Corpus:            ${inputs.corpus_dir}
 - Dialect:           direct_load / ${inputs.kernel_source_kind}
@@ -114,8 +114,9 @@ acquires a capability nobody checked, and "it was on" is not a finding.
 
 The packaged census does not apply either: it covers **packaged** engines only, keys off
 `HKP_CENSUS_TEST_SUITES`, and this is a direct-load engine whose inventory evidence is its
-own generated suite `${steps.identity.outputs.census_suite}` against the arch-independent
-descriptor tree. Say that rather than reporting a census that was never registered.
+own generated suites, `${steps.identity.outputs.census_filter}`, against the
+arch-independent descriptor tree. Say that rather than reporting a census that was never
+registered.
 
 # Tuning
 

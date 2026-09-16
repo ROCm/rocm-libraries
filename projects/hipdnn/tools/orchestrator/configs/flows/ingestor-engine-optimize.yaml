@@ -184,13 +184,14 @@ steps:
     cwd: "${vars.repo_root}"
     result_file: "${vars.identity_file}"
     result_schema:
-      required: [engine_name, pack_class, descriptor_slug, register_symbol, native_file, descriptor_dir, engine_toml, external_test_target, census_suite, collisions]
+      required: [engine_name, pack_class, descriptor_slug, register_symbol, native_file, descriptor_dir, engine_toml, external_test_target, census_filter, generated_test_source_count, collisions]
     timeout: 120
     outputs:
       pack_class: { json_file: result, path: "$.pack_class" }
       descriptor_dir: { json_file: result, path: "$.descriptor_dir" }
       external_test_target: { json_file: result, path: "$.external_test_target" }
-      census_suite: { json_file: result, path: "$.census_suite" }
+      census_filter: { json_file: result, path: "$.census_filter" }
+      generated_test_source_count: { json_file: result, path: "$.generated_test_source_count", type: int }
       collisions: { json_file: result, path: "$.collisions", type: int }
     assert:
       - that: "${steps.identity.outputs.collisions} > 0"
@@ -613,7 +614,9 @@ steps:
           - "--path-prepend"
           - "${vars.rocm_bin}"
           - "--"
-          - "--gtest_filter=${steps.identity.outputs.census_suite}.*"
+          # Every suite the engine's generated sources define, not the pack shard alone:
+          # a suite that is built, linked and never run reports nothing to this gate.
+          - "--gtest_filter=${steps.identity.outputs.census_filter}"
         cwd: "${vars.build_bin}"
         expect_exit: [0, 1]
         timeout: 1800
@@ -623,9 +626,14 @@ steps:
           # a regex for it fails the step on a clean run. The exit code says the same
           # thing exactly -- non-zero iff a case failed -- and is always present.
           ran: { regex: '\[==========\] (\d+) test[s]? from', type: int }
+          # Suites, from the same footer. Each generated source contributes at least one,
+          # so fewer suites than sources means a whole file never ran.
+          suites: { regex: '(\d+) test suite[s]? ran', type: int }
         assert:
           - that: "${steps.census.outputs.ran} > 0"
             message: "the generated pack census ran no cases; tests built OFF or a filter that matches nothing is absence of evidence, not a pass"
+          - that: "${steps.census.outputs.suites} >= ${steps.identity.outputs.generated_test_source_count}"
+            message: "the census ran fewer suites than this engine has generated test sources, so at least one of those files contributed nothing; a generated test that never runs cannot fail, and its engine is ungraded on whatever it covers"
 
       # Pinned to the new engine and filtered to exactly the cases the integration says it
       # added, so "passed" is a statement about those graphs rather than about whatever the
