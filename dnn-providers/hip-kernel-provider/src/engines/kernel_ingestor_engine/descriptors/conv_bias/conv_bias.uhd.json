@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "ba683800-b1ce-45c6-bb1c-85e372bde166",
+  "name": "ConvBias selector",
+  "kind": "native",
+  "payload": "Hackweek.conv_bias.score"
+}

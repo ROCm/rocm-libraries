@@ -1,0 +1,78 @@
+{
+  "version": "1.0",
+  "id": "de49ec77-43d3-4cb7-ba56-d69b99d6b3f6",
+  "name": "Hackweek:conv_bias",
+  "matchers": [
+    "a1c356fb-08f4-42ec-baba-1b62d4973bd1"
+  ],
+  "engine": "02139f60-f0f6-4709-a750-07c4559a0732",
+  "dispatch": "fe96b572-48f4-4840-a538-4980cc98228d",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "02139f60-f0f6-4709-a750-07c4559a0732",
+          "kmd_id": "f2dc2604-a4bc-4510-b5c1-d9d357ff480d",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "block_size",
+            "dtype"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "34dbf2f7-bc7d-4152-a7f0-ea9eec791942",
+      "name": "conv_bias.f32_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvBiasFusedFwd.cpp",
+        "entry_point": "ConvBiasFusedFwd"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ac133a8d-fae5-4d2b-bed8-8836405f2896",
+      "name": "conv_bias.f32_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvBiasFusedFwd.cpp",
+        "entry_point": "ConvBiasFusedFwd"
+      },
+      "metadata": {
+        "block_size": 256,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "725a69ff-38e6-462c-ab1b-f61f8f1988db",
+      "name": "conv_bias.f32_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvBiasFusedFwd.cpp",
+        "entry_point": "ConvBiasFusedFwd"
+      },
+      "metadata": {
+        "block_size": 1024,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx1151"
+  ]
+}

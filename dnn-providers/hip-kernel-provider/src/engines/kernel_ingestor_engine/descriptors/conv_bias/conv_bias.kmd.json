@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "f2dc2604-a4bc-4510-b5c1-d9d357ff480d",
+  "name": "ConvBias variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

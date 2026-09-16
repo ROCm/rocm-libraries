@@ -24,6 +24,11 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerBatchnormInferenceSymbols,
          true,
          &resetBatchnormInferenceModuleCache},
+        // Same case as Pointwise and BatchnormInference: its dispatch handler routes
+        // through buildIngestorKernelCode, so it holds a KpackKernelLoader and owns a
+        // module cache. Its own descriptors are all embedded_source, so today the cache
+        // stays empty -- ownership follows the handler, not the dialect.
+        {"Hackweek:ConvBias", &registerConvBiasSymbols, true, &resetConvBiasModuleCache},
     };
     return s_packs;
 }

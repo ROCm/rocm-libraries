@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "fe96b572-48f4-4840-a538-4980cc98228d",
+  "name": "ConvBias dispatch",
+  "dispatch_symbol": "Hackweek.conv_bias.dispatch"
+}

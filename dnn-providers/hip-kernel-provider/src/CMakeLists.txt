@@ -345,6 +345,28 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             REFERENCE_EXECUTOR cpu
             ENVIRONMENT    "HIPDNN_TEST_VERIFICATION_MODE=cpu"
         )
+        # Hackweek:ConvBias: a fused ConvolutionFwd(CROSS_CORRELATION) whose y is virtual,
+        # consumed by the Pointwise(ADD) that follows it. The only two-node engine
+        # registered here.
+        #
+        # gpu, like the conv and pointwise entries above and unlike batchnorm: the GPU
+        # reference executor implements a plan per op family, and BOTH of this graph's
+        # families are on that list (GpuConvolutionFwdPlan and GpuPointwisePlan), so the
+        # fused graph's nodes are each independently reproducible by it. Named explicitly
+        # rather than left to `auto`, whose golden -> gpu -> cpu chain ends in a silent
+        # skip; none of these bundles carries golden data. The kernel's own numerics were
+        # proved upstream against the CPU reference on this same graph, so cpu is the
+        # fallback with evidence behind it if the GPU reference turns out to decline the
+        # virtual intermediate.
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-Hackweek-conv-bias-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    Hackweek:ConvBias
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/Hackweek_ConvBias.toml
+            REFERENCE_EXECUTOR gpu
+            ENVIRONMENT    "HIPDNN_TEST_VERIFICATION_MODE=gpu"
+        )
 
         # THIS TARGET IS A SMOKE GATE, NOT A COVERAGE GATE. Green here means the
         # `hiprtc_file` path loaded a descriptor set from HIPDNN_DESCRIPTOR_RUNTIME_DIR,

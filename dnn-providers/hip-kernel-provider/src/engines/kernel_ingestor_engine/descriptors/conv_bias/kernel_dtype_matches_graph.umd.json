@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "a1c356fb-08f4-42ec-baba-1b62d4973bd1",
+  "name": "kernel dtype matches the graph's dtype",
+  "scope": "kernel",
+  "match_symbol": "Hackweek.conv_bias.kernel_match"
+}

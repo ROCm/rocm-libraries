@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "case",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              31,
+              31
+            ],
+            "strides": [
+              30752,
+              961,
+              31,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              31,
+              31
+            ],
+            "strides": [
+              30752,
+              961,
+              31,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              32,
+              31,
+              31
+            ],
+            "strides": [
+              30752,
+              961,
+              31,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              2,
+              16,
+              32,
+              32
+            ],
+            "strides": [
+              16384,
+              1024,
+              32,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "Hackweek:ConvBias, authoring run 20260916T175821Z-db1d"
+      }
+    }
+  ]
+}

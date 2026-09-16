@@ -463,6 +463,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         batchnorm_inference/batchnorm_inference.ued.json
         batchnorm_inference/batchnorm_inference.uhd.json
         batchnorm_inference/kernel_dtype_matches_graph.umd.json
+        conv_bias/conv_bias.kdp.json
+        conv_bias/conv_bias.kmd.json
+        conv_bias/conv_bias.udd.json
+        conv_bias/conv_bias.ued.json
+        conv_bias/conv_bias.uhd.json
+        conv_bias/kernel_dtype_matches_graph.umd.json
         conv_fwd/conv_fwd.kdp.json
         conv_fwd/conv_fwd.kmd.json
         conv_fwd/conv_fwd.udd.json

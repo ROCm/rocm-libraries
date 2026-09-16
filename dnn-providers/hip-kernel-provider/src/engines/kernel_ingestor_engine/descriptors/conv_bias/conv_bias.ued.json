@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "02139f60-f0f6-4709-a750-07c4559a0732",
+  "name": "Hackweek:ConvBias",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "Hackweek.conv_bias.graph_match"
+  },
+  "metadata": "f2dc2604-a4bc-4510-b5c1-d9d357ff480d",
+  "heuristic": "ba683800-b1ce-45c6-bb1c-85e372bde166",
+  "knobs": [
+    "block_size"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

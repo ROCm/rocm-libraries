@@ -1,0 +1,50 @@
+# Integration test configuration for Hackweek:ConvBias
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# No entry of either kind, and that is a statement rather than an omission.
+#
+# SKIPS. This engine serves one fused shape: a two-node graph whose
+# ConvolutionFwd(CROSS_CORRELATION) has a virtual y consumed by a
+# Pointwise(ADD), FLOAT on all five tensors, rank 4. Every single-node
+# ConvolutionFwd and every single-node Pointwise case in the suite -- which is
+# the overwhelming majority of both sweeps -- is refused by this engine's
+# `graph_match` on node count alone. Those need no skip entry: `--test-engine`
+# pins the run to this engine, so a case its matcher refuses SKIPs on its own
+# rather than falling through to another loaded engine. A filter here would
+# duplicate the matcher and rot against it.
+#
+# The arch restriction is likewise already expressed, in the descriptor's own
+# `arch` list (gfx1151): the loader filters every candidate out elsewhere and
+# the case skips, so an `archs` entry would restate it in a second place.
+#
+# TOLERANCES. None, and this is the entry most worth not writing. The kernel's
+# numerics were proved upstream against the hipDNN CPU reference on eleven
+# cases at atol = rtol = 1e-5 -- the resolved MAX_ACROSS_NODES tolerance for
+# this fused graph, max(conv::getToleranceFwd<float>(),
+# pointwise::getTolerance<float>()) -- with a worst observed max_abs_err of
+# 3.8e-6, comfortably inside it. Nothing was loosened to get there. A per-case
+# override here exists to fund a shipping engine's measured drift budget; it
+# must never be used to absorb a hand-written kernel's first proof, because the
+# failure it would hide is precisely the one this engine is being gated on.
+# An entry belongs here only with a measured failure behind it.
