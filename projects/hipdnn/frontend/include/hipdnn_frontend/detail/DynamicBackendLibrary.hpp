@@ -230,7 +230,7 @@ HIPDNN_HIDDEN inline BackendLibraryResolution
 
         try
         {
-            resolution.handle = utilities::openLibrary(candidate.path);
+            resolution.handle = utilities::openLibraryWithOwnDirectoryFirst(candidate.path);
             resolution.path = candidate.path;
             return resolution;
         }

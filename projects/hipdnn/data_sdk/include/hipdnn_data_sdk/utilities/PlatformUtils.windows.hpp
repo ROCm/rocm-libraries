@@ -268,30 +268,44 @@ inline std::filesystem::path getCurrentExecutableDirectory()
     return std::filesystem::path(detail::moduleFileName(nullptr, "executable path")).parent_path();
 }
 
-inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
+namespace detail
 {
-    // LOAD_WITH_ALTERED_SEARCH_PATH searches the opened module's own directory for that
-    // module's dependents, and its behavior is documented as undefined for a relative
-    // path, so a relative path stays on plain LoadLibraryW. The alternate order
-    // substitutes that directory for the application directory rather than adding to it,
-    // so the application directory drops out of the dependent search.
-    HMODULE handle = nullptr;
-    if(libraryPath.is_absolute())
-    {
-        handle = LoadLibraryExW(libraryPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-    }
-    else
-    {
-        handle = LoadLibraryW(libraryPath.c_str());
-    }
+/// Opens @p libraryPath through @p flags; zero is the plain LoadLibraryW search order.
+inline SharedLibraryHandle openLibraryWithFlags(const std::filesystem::path& libraryPath,
+                                                DWORD flags)
+{
+    HMODULE handle = LoadLibraryExW(libraryPath.c_str(), nullptr, flags);
     if(handle == nullptr)
     {
         const DWORD error = GetLastError();
         // The error code is captured above, before any formatting that could fail.
-        throw std::runtime_error("Failed to load library: " + detail::pathForDiagnostic(libraryPath)
+        throw std::runtime_error("Failed to load library: " + pathForDiagnostic(libraryPath)
                                  + " (Error Code: " + std::to_string(error) + ")");
     }
     return handle;
+}
+} // namespace detail
+
+/// Opens @p libraryPath on the loader's standard search order, which resolves the opened
+/// module's own dependents from the application directory. Libraries that ship in a
+/// subdirectory of the application -- engine and heuristic plugins -- depend on that, since
+/// Windows has no RPATH equivalent to point them back at their dependents.
+inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
+{
+    return detail::openLibraryWithFlags(libraryPath, 0);
+}
+
+/// Opens @p libraryPath with its own directory searched first for its first-level
+/// dependents. The alternate order substitutes that directory for the application
+/// directory rather than adding to it, so a dependent shipped beside the executable and
+/// not beside @p libraryPath resolves through %PATH%; use openLibrary() unless the opened
+/// module is known to sit with its dependents. LOAD_WITH_ALTERED_SEARCH_PATH is documented
+/// as undefined for a relative path, so one stays on the standard order.
+inline SharedLibraryHandle
+    openLibraryWithOwnDirectoryFirst(const std::filesystem::path& libraryPath)
+{
+    return detail::openLibraryWithFlags(
+        libraryPath, libraryPath.is_absolute() ? LOAD_WITH_ALTERED_SEARCH_PATH : 0);
 }
 
 inline SharedLibraryHandle openLoadedLibrary(const std::filesystem::path& libraryPath)

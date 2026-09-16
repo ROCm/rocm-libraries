@@ -133,6 +133,15 @@ inline SharedLibraryHandle openLibrary(const std::filesystem::path& libraryPath)
     return handle;
 }
 
+/// Windows needs a distinct flag to search an opened module's own directory for its
+/// first-level dependents; dlopen() already honours the module's own DT_RUNPATH, so this
+/// is openLibrary().
+inline SharedLibraryHandle
+    openLibraryWithOwnDirectoryFirst(const std::filesystem::path& libraryPath)
+{
+    return openLibrary(libraryPath);
+}
+
 inline SharedLibraryHandle openLoadedLibrary(const std::filesystem::path& libraryPath)
 {
     return dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
