@@ -1229,8 +1229,8 @@ TEST(SKLaunchGridLimitsTest, CapsGridWithAnalyticalOrigamiPath)
 TEST(SKLaunchGridLimitsTest, StillUsesDpFallbackBelowTileThreshold)
 {
     ContractionSolution solution;
+    initBenchStreamK5Solution(solution, TensileLite::dim3(16, 16, 1), 32);
     solution.sizeMapping.workGroupSize = TensileLite::dim3(128, 1, 1);
-    initBenchStreamK5Solution(solution, TensileLite::dim3(16, 16, 1), 128);
     const size_t tpg               = threadsPerWorkGroup(solution);
     const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
 
