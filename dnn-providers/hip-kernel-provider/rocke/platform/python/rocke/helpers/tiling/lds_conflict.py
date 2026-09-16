@@ -576,6 +576,22 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
             _read_wave()
             b.sync_lds_only()
             b.scf_yield()
+        # GUARDRAIL: the output window must EXACTLY hold the fragment the read produces. A window that is
+        # too small is a device-side buffer OVERRUN (the kernel writes past the allocation), and the
+        # compiler responds by bounds-guarding and scalarizing the store -- so the probe silently stops
+        # measuring the descriptor's access and prices a branchy, mixed-width program instead. That is not
+        # a bad data point, it is a different experiment, and a partial-window golden will still pass on
+        # the corner it does cover. Concretely this fires when tile_k != the read descriptor's K extent.
+        need = descs.wave_read.register_count * wave_size
+        have = tile_k * warp_free
+        if need != have:
+            raise ValueError(
+                f"read probe output window mismatch: the wave_read fragment is {need} elems "
+                f"({descs.wave_read.register_count} regs x {wave_size} lanes) but out2 is "
+                f"tile_k*warp_free = {tile_k}*{warp_free} = {have}. "
+                f"{'OVERRUN -- the kernel would write past the buffer. ' if need > have else ''}"
+                f"Size the probe to the READ descriptor: tile_k must equal the descriptor's K extent "
+                f"(k_sub*16) and warp_free its free extent (m_sub*16).")
         rd = _read_wave()
         out2 = make_tensor_desc((tile_k, warp_free), (warp_free, 1), dt)
         store_fragment(b, out_ptr, make_window(out2, (zero, zero)),
