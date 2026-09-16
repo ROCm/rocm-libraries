@@ -33,6 +33,15 @@
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*sdpa*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/attention/**/*'
 
+"rocke-lib: conv":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*conv*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*wgrad*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*dgrad*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*implicit_gemm*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*img2col*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/conv*/**/*'
+
 # This label serves to distiguish work being done in RocKE platform, for the reviewing team and internal tools
 
 "rocke: platform":
