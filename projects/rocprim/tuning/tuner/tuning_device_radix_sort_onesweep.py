@@ -129,7 +129,6 @@ class Tuner(BaseTuner):
             if bs != params['sort_block_size_x']:
                 return False
 
-            print(f'Checking: key: {key_type}, val: {val_type}, bs: {bs}, ipt: {ipt}, rb: {rb}, algo: {algo}')
             return self.param_checker.check_valid(key_type, val_type, bs, ipt, rb, algo)
 
         return validate
