@@ -3680,6 +3680,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.codes.localWriteMXSB = Module()
           self.codes.globalReadMetadata = StructuredModule() # empty
 
+        # The gl2 prefetch modules are built for the unroll loop (_loopBody) and
+        # would otherwise be re-emitted here by makeSchedule, since nothing else
+        # rebuilds them. There is no load left for this workgroup to run ahead of
+        # once it reaches a no-load loop, and the address is only kept in range by
+        # the guards on the sites that do have one: the pre-loop skips itself when
+        # counterL <= PGR, and the unroll loop is only entered above that. Emitting
+        # them here reaches the start address without either guard, which for a
+        # short GSU chunk is PGR iterations past the end of K.
+        self.codes.gl2PrefetchIncrement = Module()
+        self.codes.gl2Prefetch = Module()
+
         callMakeSchedule = not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
           (kernel["PrefetchGlobalRead"] >= 3 and isNGLL) or \
           (self.states.doPackPreSchedulingNextLoop and isNGLL)

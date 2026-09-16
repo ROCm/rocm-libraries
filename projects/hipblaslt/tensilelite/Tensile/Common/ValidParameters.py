@@ -356,7 +356,10 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we do not support GSU, StaggerU, StreamK and general batch. May remove these limitations in the future.
+    # Currently we do not support StaggerU (forced off), general batch, 6-bit float,
+    # or Stream-K other than DP-first (StreamK==3). GSU is supported; with a
+    # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
+    # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
