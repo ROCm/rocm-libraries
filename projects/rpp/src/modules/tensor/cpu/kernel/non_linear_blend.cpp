@@ -963,15 +963,15 @@ RppStatus non_linear_blend_i8_i8_host_tensor(Rpp8s* srcPtr1, Rpp8s* srcPtr2, Rpp
                     Rpp32f jLocComponent = jLoc * jLoc * multiplier;
                     Rpp32f gaussianValue = std::exp(iLocComponent + jLocComponent);
 
-                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
+                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)srcPtr1Temp[0] - (Rpp32f)srcPtr2Temp[0]) * gaussianValue) +
-                        (Rpp32f)srcPtr2Temp[0]);
-                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)srcPtr2Temp[0]));
+                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)srcPtr1Temp[1] - (Rpp32f)srcPtr2Temp[1]) * gaussianValue) +
-                        (Rpp32f)srcPtr2Temp[1]);
-                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)srcPtr2Temp[1]));
+                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)srcPtr1Temp[2] - (Rpp32f)srcPtr2Temp[2]) * gaussianValue) +
-                        (Rpp32f)srcPtr2Temp[2]);
+                        (Rpp32f)srcPtr2Temp[2]));
 
                     srcPtr1Temp += 3;
                     srcPtr2Temp += 3;
@@ -1043,15 +1043,15 @@ RppStatus non_linear_blend_i8_i8_host_tensor(Rpp8s* srcPtr1, Rpp8s* srcPtr2, Rpp
                     Rpp32f jLocComponent = jLoc * jLoc * multiplier;
                     Rpp32f gaussianValue = std::exp(iLocComponent + jLocComponent);
 
-                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
+                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)*srcPtr1TempR - (Rpp32f)*srcPtr2TempR) * gaussianValue) +
-                        (Rpp32f)*srcPtr2TempR);
-                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)*srcPtr2TempR));
+                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)*srcPtr1TempG - (Rpp32f)*srcPtr2TempG) * gaussianValue) +
-                        (Rpp32f)*srcPtr2TempG);
-                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)*srcPtr2TempG));
+                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)*srcPtr1TempB - (Rpp32f)*srcPtr2TempB) * gaussianValue) +
-                        (Rpp32f)*srcPtr2TempB);
+                        (Rpp32f)*srcPtr2TempB));
 
                     srcPtr1TempR++;
                     srcPtr2TempR++;
@@ -1111,15 +1111,15 @@ RppStatus non_linear_blend_i8_i8_host_tensor(Rpp8s* srcPtr1, Rpp8s* srcPtr2, Rpp
                     Rpp32f jLocComponent = jLoc * jLoc * multiplier;
                     Rpp32f gaussianValue = std::exp(iLocComponent + jLocComponent);
 
-                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
+                    dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)srcPtr1Temp[0] - (Rpp32f)srcPtr2Temp[0]) * gaussianValue) +
-                        (Rpp32f)srcPtr2Temp[0]);
-                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)srcPtr2Temp[0]));
+                    dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)srcPtr1Temp[1] - (Rpp32f)srcPtr2Temp[1]) * gaussianValue) +
-                        (Rpp32f)srcPtr2Temp[1]);
-                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)srcPtr2Temp[1]));
+                    dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)srcPtr1Temp[2] - (Rpp32f)srcPtr2Temp[2]) * gaussianValue) +
-                        (Rpp32f)srcPtr2Temp[2]);
+                        (Rpp32f)srcPtr2Temp[2]));
 
                     srcPtr1Temp += 3;
                     srcPtr2Temp += 3;
@@ -1193,15 +1193,15 @@ RppStatus non_linear_blend_i8_i8_host_tensor(Rpp8s* srcPtr1, Rpp8s* srcPtr2, Rpp
                     Rpp32f jLocComponent = jLoc * jLoc * multiplier;
                     Rpp32f gaussianValue = std::exp(iLocComponent + jLocComponent);
 
-                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
+                    *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)*srcPtr1TempR - (Rpp32f)*srcPtr2TempR) * gaussianValue) +
-                        (Rpp32f)*srcPtr2TempR);
-                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)*srcPtr2TempR));
+                    *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)*srcPtr1TempG - (Rpp32f)*srcPtr2TempG) * gaussianValue) +
-                        (Rpp32f)*srcPtr2TempG);
-                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
+                        (Rpp32f)*srcPtr2TempG));
+                    *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)*srcPtr1TempB - (Rpp32f)*srcPtr2TempB) * gaussianValue) +
-                        (Rpp32f)*srcPtr2TempB);
+                        (Rpp32f)*srcPtr2TempB));
 
                     srcPtr1TempR++;
                     srcPtr2TempR++;
@@ -1263,9 +1263,9 @@ RppStatus non_linear_blend_i8_i8_host_tensor(Rpp8s* srcPtr1, Rpp8s* srcPtr2, Rpp
                     Rpp32s jLoc = vectorLoopCount - halfWidth;
                     Rpp32f jLocComponent = jLoc * jLoc * multiplier;
                     Rpp32f gaussianValue = std::exp(iLocComponent + jLocComponent);
-                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
+                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                         (((Rpp32f)*srcPtr1Temp - (Rpp32f)*srcPtr2Temp) * gaussianValue) +
-                        (Rpp32f)*srcPtr2Temp);
+                        (Rpp32f)*srcPtr2Temp));
                     srcPtr1Temp++;
                     srcPtr2Temp++;
                     dstPtrTemp++;

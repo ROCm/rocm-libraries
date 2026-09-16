@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <type_traits>
+
 #include "hip_tensor_executors.hpp"
 
 __device__ void brightness_hip_compute(uchar* srcPtr, d_float8* src_f8, d_float8* dst_f8,
@@ -81,7 +83,10 @@ __global__ void brightness_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
 
     rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
     brightness_hip_compute(srcPtr, &src_f8, &dst_f8, &alpha_f4, &beta_f4);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+    else
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 }
 
 template <typename T>
@@ -109,7 +114,10 @@ __global__ void brightness_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
 
     rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
     brightness_hip_compute(srcPtr, &src_f8, &dst_f8, &alpha_f4, &beta_f4);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+    else
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 
     if (channelsDst == 3) {
         srcIdx += srcStridesNCH.y;
@@ -117,14 +125,20 @@ __global__ void brightness_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
 
         rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
         brightness_hip_compute(srcPtr, &src_f8, &dst_f8, &alpha_f4, &beta_f4);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+        if constexpr (std::is_same<T, Rpp8s>::value)
+            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+        else
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
 
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
 
         rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
         brightness_hip_compute(srcPtr, &src_f8, &dst_f8, &alpha_f4, &beta_f4);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
+        if constexpr (std::is_same<T, Rpp8s>::value)
+            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &dst_f8);
+        else
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &dst_f8);
     }
 }
 
@@ -155,7 +169,11 @@ __global__ void brightness_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T
     brightness_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &alpha_f4, &beta_f4);
     brightness_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &alpha_f4, &beta_f4);
     brightness_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &alpha_f4, &beta_f4);
-    rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &dst_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &dst_f24);
 }
 
 template <typename T>
@@ -185,7 +203,10 @@ __global__ void brightness_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, 
     brightness_hip_compute(srcPtr, &src_f24.f8[0], &dst_f24.f8[0], &alpha_f4, &beta_f4);
     brightness_hip_compute(srcPtr, &src_f24.f8[1], &dst_f24.f8[1], &alpha_f4, &beta_f4);
     brightness_hip_compute(srcPtr, &src_f24.f8[2], &dst_f24.f8[2], &alpha_f4, &beta_f4);
-    rpp_hip_pack_float24_pkd3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pkd3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &dst_f24);
+    else
+        rpp_hip_pack_float24_pkd3_and_store24_pkd3(dstPtr + dstIdx, &dst_f24);
 }
 
 template <typename T>
