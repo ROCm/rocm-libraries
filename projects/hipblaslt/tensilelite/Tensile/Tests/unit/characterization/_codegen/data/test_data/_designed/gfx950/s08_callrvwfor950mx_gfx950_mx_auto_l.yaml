@@ -1,0 +1,72 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S08 calLRVWFor950MX: gfx950 MXFP8 auto-LRVW (LocalReadVectorWidth=-1).
+#
+# Target: Tensile/SolutionStructs/Solution.py line 3659 -- the AUTO branch of
+# calLRVWFor950MX (isAutoLRVW), reached only when the ISA is gfx950 AND
+# (MXBlockA or MXBlockB) AND LocalReadVectorWidth{A,B} == -1. Existing gfx950 MX
+# designed configs pin LocalReadVectorWidth=16 and take the != -1 validation arm
+# instead, never entering the auto arm.
+#
+# F8 (MacDataType not 6-bit float) + TransposeLDS=1 + DirectToLds off drives the
+# 3659 (16//numBytes) computation. assignDerivedParameters runs during emit, so
+# the target line fires while emitting the single forked kernel.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]
+        - DepthU: [256]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - LocalReadVectorWidth: [-1]
+        - LocalReadVectorWidthA: [-1]
+        - LocalReadVectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - GlobalSplitU: [1]
+        - UseSubtileImpl: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]

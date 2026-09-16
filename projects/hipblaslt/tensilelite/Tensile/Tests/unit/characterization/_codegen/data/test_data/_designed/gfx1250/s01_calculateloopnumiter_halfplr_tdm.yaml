@@ -1,0 +1,85 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S01 calculateLoopNumIter HalfPLR + TDM re-enable/LDS-align + TDMSplit-undo
+# cluster (KernelWriterAssembly.py:7555-7592).
+#
+# Target lines (all currently missing):
+#   7558/7560 single-wave HalfPLR "re-enable TDM & align LDS buffer"
+#             (SMovB32 tdmAGroup0 / tdmBGroup0 on the NumWaves<=1 arm)
+#   7573-7576 TDMSplit tail-undo guard (SkipUndoLabel + SCmpLeU32 + SCBranchSCC1)
+#   7585-7588 single-wave TDMSplit undo (SSubU32 tdm{A,B}Group0 +=split undo)
+#
+# How each guard is satisfied:
+#   HalfPLR:[1]        -> enters `if kernel["HalfPLR"]` (7554) and forces
+#                         SuppressNoLoadLoop=True in Solution.py:2740 (so the
+#                         outer `if SuppressNoLoadLoop` at 7553 is entered even
+#                         with PGR=2, per the guard-order note at Solution.py:1797).
+#   single-wave MI     -> MIWaveGroup (1,1) => NumWaves==1 => the else arm at
+#                         7557/7584 (7558,7560,7585-7588) instead of the >1 arm.
+#   TDMSplit:[True] + not Sparse + PGR>=2 -> enters the undo block at 7571
+#                         (7573-7589).
+#   TDMInst:[3]        -> enableTDMA and enableTDMB (HalfPLR requires TDM).
+#   StreamK:[0]        -> lets SIA=0 satisfy HalfPLR (SIA 0-or-4), and PAP off
+#                         so the "wave-separated (MIWaveGroup>1)" reject at
+#                         Solution.py:2673 does NOT fire -> single-wave allowed.
+#   UseSubtileImpl:[False] -> HalfPLR rejects UseSubtileImpl (Solution.py:2748).
+#   PrefetchLocalRead:[1], InnerUnroll default 1, even WaveTile (2,2).
+#
+# CPU-only; no GPU, no compile, no hardware.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # BF16 TN GEMM, gfx1250 TDM single-wave, HalfPLR + TDMSplit undo
+  ########################################
+  -
+    - # ProblemType: BF16 TN
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]   # MT 32x32 WG 1x1 (numWaves=1, even WaveTile)
+        - DepthU: [256]                         # LoopIters = 256/32 = 8 > 1
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - PrefetchGL2: [0]
+        - ScheduleIterAlg: [0]
+        - UseSubtileImpl: [False]
+        - HalfPLR: [1]
+        - TDMSplit: [True]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 1024]

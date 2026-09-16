@@ -1,0 +1,173 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# S08 depthUIteration cluster in Solution.py
+# Targets currently-missing lines in assignDerivedParameters depthUIteration
+# block (Solution.py ~3042-3135):
+#   Group A: TDMIterateMode auto (-1) resolution -> 3081-3094 (needs
+#            UnrollMajorLDS{A,B}=True so the per-tensor loop body runs, plus a
+#            DepthU large enough that LBSPP>1024 -> _TDMIterateMode set True).
+#   Group B: TDMIterateMode explicit-mask reject arms -> 3096-3105 (mask bit
+#            set but UnrollMajorLDS<tc>=False).
+#   Group C: fp6 LdsPad clamp / reject -> 3067-3075 (MacDataType fp6 with
+#            LdsPad -1 clamp and LdsPad nonzero reject).
+# Multi-DU (3042-3047) needs MXScaleFormat=HostPreSwizzle which Solution.py
+# rejects off gfx950 -> covered by a separate gfx950 probe, not here.
+# gfx1250 CPU-only derive; no GPU/compile.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # Group A: TDM auto (-1) iterate-mode resolution
+  ########################################
+  -
+    - # BF16 TN
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]
+        - DepthU: [1024]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchGL2: [0]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [True]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TransposeLDS: [2]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 1024]
+
+  ########################################
+  # Group B: TDM explicit-mask reject arms (mask bit set, UnrollMajorLDS False)
+  ########################################
+  -
+    - # BF16 TN
+      OperationType: GEMM
+      DataType: B
+      DestDataType: B
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  1, 1]
+        - DepthU: [256]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchGL2: [0]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [True]
+        - StreamK: [0]
+        - TDMInst: [3]
+        - TDMIterateMode: [1, 2]
+        - TransposeLDS: [0]
+        - StaggerU: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 256]
+
+  ########################################
+  # Group C: fp6 LdsPad clamp / reject
+  ########################################
+  -
+    - # FP6 NT
+      OperationType: GEMM
+      DataType: F6
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      UseBias: 0
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+        - TDMInst: [3]
+        - DepthU: [128]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - TransposeLDS: [-1]
+        - LDSTrInst: [True]
+        - LdsPadA: [-1, 8]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - 1LDSBuffer: [0]
+        - GlobalReadPerMfma: [1.0]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+        - GlobalSplitU: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 128]

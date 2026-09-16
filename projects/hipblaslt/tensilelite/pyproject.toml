@@ -29,11 +29,10 @@ sort = "Cover"
 # tox env reads it, so a job that runs that env fails when coverage drops below
 # this number, without the value being duplicated in tox.ini or CI YAML.
 # (coverage-unit measures with --fail-under=0 and does not gate; see tox.ini.)
-# Interim value: the GPU-less coverage-unit run currently measures ~79% and the
-# 80% target is aspirational. Set to 75 for now so the gate can land green while
-# the per-file ratchet (AIHPBLAS-3878) prevents regressions; ratchet this back
-# up toward 80 as coverage improves.
-fail_under = 75
+# The GPU-less coverage-unit run is stable at ~84%. Keep two percentage points
+# of headroom for run-to-run variation while the per-file ratchet
+# (AIHPBLAS-3878) protects the individual modules.
+fail_under = 82
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
