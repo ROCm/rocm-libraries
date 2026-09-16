@@ -1,14 +1,14 @@
-import { useState } from "react";
 import { parseReport } from "../benchmark/report";
 import type { BenchmarkReport, EngineResult, GraphResults } from "../benchmark/types";
 import { platform } from "../platform";
 import type { DirectoryRef, FileHandleRef, PlatformBridge, ReadBase } from "../platform/types";
 import { BenchmarkReportView } from "./BenchmarkReportView";
-import { TensorView, type TensorHint } from "./TensorView";
+import type { TensorHint } from "./TensorView";
 
 /**
- * Verify tab content: a benchmark report, and the tensor inspector reached from
- * a report row. Empty until a run produces a report or one is opened.
+ * Verify tab content: the benchmark report a run produced, or one opened from
+ * disk. Empty until either happens. The captures a report row recorded are
+ * inspected in the Tensors tab, not here.
  */
 
 /** A report on screen, and the file it came from if it has one. */
@@ -24,14 +24,14 @@ export interface ShownReport {
 }
 
 interface VerifyReportProps {
-  /**
-   * The freshest result this session produced — a Studio execution or a
-   * benchmark run — shown in place of the opened report until dismissed.
-   */
-  readonly current?: ShownReport | null;
-  /** Why the last run left no readable report. */
-  readonly currentError?: string | null;
-  onDismissCurrent?(): void;
+  /** The report on screen, owned by the app so every tab shows the same run. */
+  readonly shown?: ShownReport | null;
+  /** Why the last run or open left no readable report. */
+  readonly shownError?: string | null;
+  /** Publishes a report, or an error in place of one, to the whole app. */
+  onShow?(report: ShownReport | null, error: string | null): void;
+  /** Hands a row's captures to the Tensors tab. */
+  onOpenTensors?(hints: readonly TensorHint[]): void;
   /**
    * A folder granted this session, used once a report's own handle cannot
    * resolve relative paths (a web file handle names no parent directory). Held
@@ -42,32 +42,23 @@ interface VerifyReportProps {
 }
 
 export function VerifyReport({
-  current,
-  currentError,
-  onDismissCurrent,
+  shown = null,
+  shownError = null,
+  onShow,
+  onOpenTensors,
   granted = null,
   onGranted,
 }: VerifyReportProps) {
-  const [loaded, setLoaded] = useState<ShownReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Non-null means the tensor inspector is showing; the array carries the
-  // manifest paths the report recorded for the chosen row.
-  const [hints, setHints] = useState<readonly TensorHint[] | null>(null);
-
   const openReport = async () => {
     const opened = await platform.openTextFile(".json,application/json");
     if (!opened) return;
     try {
-      setLoaded({
-        report: parseReport(opened.contents),
-        label: opened.handle.name,
-        handle: opened.handle,
-      });
-      setError(null);
-      onDismissCurrent?.();
-      setHints(null);
+      onShow?.(
+        { report: parseReport(opened.contents), label: opened.handle.name, handle: opened.handle },
+        null,
+      );
     } catch (failure) {
-      setError((failure as Error).message);
+      onShow?.(null, (failure as Error).message);
     }
   };
 
@@ -77,7 +68,7 @@ export function VerifyReport({
   };
 
   /**
-   * One action for a run directory: grant it, find the report inside, and use
+   * One action for a results folder: grant it, find the report inside, and use
    * the folder as the base — so traces and tensors need no second pick.
    */
   const openRunFolder = async () => {
@@ -86,57 +77,42 @@ export function VerifyReport({
     onGranted?.(dir);
     try {
       const found = await findReportIn(platform, dir);
-      setLoaded({ report: parseReport(found.text), label: found.name, handle: null });
-      setError(null);
-      onDismissCurrent?.();
-      setHints(null);
+      onShow?.({ report: parseReport(found.text), label: found.name, handle: null }, null);
     } catch (failure) {
-      // The folder still stands as a base: a report picked by hand resolves
-      // its artifacts from it, which is the older two-step flow.
-      setError((failure as Error).message);
+      // The folder still stands as a base: a report picked by hand resolves its
+      // artifacts from it, which is the older two-step flow.
+      onShow?.(null, (failure as Error).message);
     }
   };
 
-  const shown = current ?? loaded;
-  const shownError = error ?? currentError ?? null;
   // A granted folder outlives whichever report is on screen; it wins once it
   // exists since it is the more general base (also good for tensor manifests).
   const base: ReadBase | null = granted ?? shown?.handle ?? null;
 
-  if (hints) {
-    return (
-      <TensorView
-        hints={hints}
-        onBack={() => setHints(null)}
-        base={base}
-        onGrantDirectory={requestDirectory}
-      />
-    );
-  }
-
   return (
     <div className="verify">
       <div className="verify__bar">
-        {platform.canGrantDirectory() && (
+        {/* One pick for a whole past run. A host that cannot grant a folder
+            falls back to the report file alone, which still renders — only its
+            traces and captures stay out of reach. */}
+        {platform.canGrantDirectory() ? (
           <button
             type="button"
             title="Pick the folder that holds results.json — its traces and tensor captures load with it."
             onClick={() => void openRunFolder()}
           >
-            Open results folder…
+            Open past run…
+          </button>
+        ) : (
+          <button type="button" onClick={() => void openReport()}>
+            Open report…
           </button>
         )}
-        <button type="button" onClick={() => void openReport()}>
-          Open report…
-        </button>
-        {current && (
-          <button type="button" onClick={onDismissCurrent}>
-            Close {current.label}
+        {shown && (
+          <button type="button" onClick={() => onShow?.(null, null)}>
+            Close {shown.label}
           </button>
         )}
-        <button type="button" data-primary="true" onClick={() => setHints([])}>
-          Inspect tensors…
-        </button>
         {shown && !platform.canReadRelated(base) && platform.canGrantDirectory() && (
           <button
             type="button"
@@ -157,7 +133,7 @@ export function VerifyReport({
         <BenchmarkReportView
           report={shown.report}
           sourceLabel={shown.label}
-          onOpenTensors={(graph, row) => setHints(tensorHints(graph, row))}
+          onOpenTensors={(graph, row) => onOpenTensors?.(tensorHints(graph, row))}
           base={base}
           onGrantDirectory={requestDirectory}
         />

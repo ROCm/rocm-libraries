@@ -125,26 +125,36 @@ normal download.
 loads the report it produces. The command behind the button is
 
 ```
-dnn-benchmark --graph ${current_graph} -o ${results_json} --tensor-output-dir ${tensor_dir}
+dnn-benchmark --graph ${current_graph} --run-dir ${run_dir}
 ```
 
 `${current_graph}` is replaced with the canvas graph written out as hipDNN JSON,
-`${results_json}` with a path for the tool to write its report to, and
-`${tensor_dir}` with a directory for its tensor captures. All three live in a
+and `${run_dir}` with one directory for the whole run: the tool writes
+`results.json`, `tensors/`, and `profiling-output/` inside it. Both live in a
 per-tab directory under the OS temp directory, and each run replaces the
-previous set. `dnn-benchmark` is resolved on the PATH the launcher establishes
-for child processes, which covers both an installed tree and the `.venv` console
-script.
+previous one. Keeping every artifact under the report is what lets a trace and
+its captures load with it — a path the report records outside that directory
+cannot be followed. `dnn-benchmark` is resolved on the PATH the launcher
+establishes for child processes, which covers both an installed tree and the
+`.venv` console script.
 
 The button becomes **Stop** while the run is in flight, which kills the process
 tree. A run that leaves no readable report says so and falls back to what was
-there before — a stale file from an earlier run is cleared first, so it can
-never be mistaken for the current one.
+there before — a stale run directory is cleared first, so it can never be
+mistaken for the current one.
 
-**Validate against pytorch** beside the button appends `--validate pytorch`, which
-runs the graph through PyTorch as a reference and compares the two. The report
-then carries a `pytorch` reference row and a pass/fail verdict per engine instead
-of timing alone. It needs PyTorch in the selected Python environment.
+The controls beside the button add arguments to that command line:
+
+| Control | Argument | Effect |
+| --- | --- | --- |
+| Validate against PyTorch | `--validate pytorch` | Runs the graph through PyTorch as a reference and compares the two. The report then carries a `pytorch` reference row and a pass/fail verdict per engine instead of timing alone. Needs PyTorch in the selected Python environment. |
+| Capture kernel trace | `--emit-trace pftrace` | Re-runs under rocprofv3 and records a Perfetto trace, opened from a row's **Details**. Costs about one extra run. |
+| CPU counters | `--perf` | Re-runs under `perf stat` for cycles, instructions and IPC, shown under a row's **Details**. Costs about one extra run. |
+| Autotune kernels | `--autotune` | Benchmarks every candidate kernel instead of serving the cold heuristic's first pick. Required for a best-vs-best comparison, and much slower. |
+| Iterations | `--iters N` | Timed iterations per engine. Fewer is faster and noisier. |
+| Warmup | `--warmup N` | Untimed iterations first, so compilation and clocks settle before measurement. |
+
+A blank number box leaves its flag off, so the tool's own default applies.
 
 **Output log** at the bottom holds the tool's terminal output. It starts
 collapsed and stays that way through a run; open it when a run needs explaining.
@@ -152,21 +162,32 @@ collapsed and stays that way through a run; open it when a run needs explaining.
 ## Viewing benchmark results
 
 The tab starts empty and stays that way until a run produces a report. To read
-one you did not just run, **Open results folder…** takes the folder that holds a
+one you did not just run, **Open past run…** takes the folder that holds a
 `results.json` — one written by `dnn-benchmark --run-dir DIR` — finds the report
 inside it, and resolves every trace and tensor capture from that same folder. One
-pick, nothing else to choose. **Open report…** stays for a bare JSON, a raw timing
-export, or a folder holding several reports. An import stays in memory: it survives
-tab switches, a reload discards it, and it never enters graph autosave. Viewing a
-report needs no GPU, Python, native add-on, or backend service.
+pick, nothing else to choose. A browser without the File System Access API offers
+**Open report…** instead, which reads a bare JSON or a raw timing export without
+its artifacts. An opened report stays in memory: it survives tab switches, a
+reload discards it, and it never enters graph autosave. Viewing a report needs no
+GPU, Python, native add-on, or backend service.
 
-The comparison chart appears first, then the full result table. Pick a metric and
-an engine filter to compare; graph executions/s is derived from GPU mean time.
-Rows that never ran report no timing, a reference provider is marked as such and
-is not a correctness pass, and a derived TFLOP/s built from partial analytical
-coverage is shown as a lower bound. Reported suite counters stay separate from the
-viewer's own row counts. Use a current browser to keep large integer engine IDs
-from rounding.
+A suite of several graphs leads with **Best engine per graph**: the winner of
+each graph under the chosen metric, as one bar each. Select one to compare the
+engines inside it below.
+
+The per-graph comparison chart comes next, then the full result table. Pick a
+metric and an engine filter to compare; graph executions/s is derived from GPU
+mean time. Bars are ordered best first and labelled with their distance from the
+winner, a percentage while it is close and a multiplier once it is not. On a
+timing metric the hatched band over each bar is the measured range across
+iterations, so a fast mean built on a wide spread is not read as a clean win.
+Rows that never ran are absent from the chart and counted beside it — charting a
+row that measured nothing draws an empty bar, which reads as "infinitely slow";
+the table gives each such row the reason it was skipped where its numbers would
+be. A reference provider is marked as such and is not a correctness pass, and a
+derived TFLOP/s built from partial analytical coverage is shown as a lower bound.
+Reported suite counters stay separate from the viewer's own row counts. Use a
+current browser to keep large integer engine IDs from rounding.
 
 **Details** on a row opens one engine: identity, timing statistics,
 resource metrics, correctness comparison, oracle tuning against the warm baseline,
@@ -179,13 +200,13 @@ to the opened report, as **Close benchmark run** does for a run. Use **Export
 hipDNN JSON**, not ordinary Save, for the existing benchmarking handoff.
 
 Traces and captured tensors load themselves whenever the app can resolve the
-paths the report names, which is what **Open results folder…** establishes. The
+paths the report names, which is what **Open past run…** establishes. The
 desktop build always can: it knows where the report came from and reads beside
-it, so **Open report…** is enough there. The browser cannot read by path at all,
-so a folder grant is the only bridge — **Use results folder…** appears after a report
-opened from a bare file. Manual pickers stay as an override, and a report can
-never reach outside its own directory: a path that escapes it is refused, and a
-failed read names the file and folder instead of quietly showing an empty picker.
+it. The browser cannot read by path at all, so a folder grant is the only bridge
+— **Use results folder…** appears after a report opened from a bare file. Manual
+pickers stay as an override, and a report can never reach outside its own
+directory: a path that escapes it is refused, and a failed read names the file
+and folder instead of quietly showing an empty picker.
 
 Trace bytes go to a sandboxed `https://ui.perfetto.dev/` iframe, not an upload
 endpoint. Perfetto requires network access; report viewing does not. Confirm
@@ -199,7 +220,7 @@ exist for this. The trace is a real Perfetto protobuf trace with three slices on
 `hipdnn` thread track; `bun run tests/fixtures/run/traces/make-trace.ts` regenerates it.
 
 1. `bun run dev`, then open the **Verify** tab.
-2. **Open results folder…** → `tests/fixtures/run`. The report opens and the trace
+2. **Open past run…** → `tests/fixtures/run`. The report opens and the trace
    starts loading by itself; **Tensors** on the `MIOPEN_ENGINE` row shows both
    captures already read, with the reference comparison filled in.
 3. **Details** on that row, then expand **Profiling trace & artifacts**.
@@ -216,11 +237,11 @@ echo 'select ts, dur, name from slice' > q.sql
 
 ## Inspecting captured tensors
 
-The **Tensors** tab lists every capture the latest run recorded — each engine's
-output, the reference output when validation ran, and the graph inputs. The
-first two fill the two slots on their own, so the comparison is there when the
-tab opens. **Inspect tensors…** on the Verify tab reaches the same view scoped
-to one report row.
+The **Tensors** tab lists every capture the report on screen recorded — each
+engine's output, the reference output when validation ran, and the graph inputs.
+The first two fill the two slots on their own, so the comparison is there when
+the tab opens. **Tensors** on a report row opens the same tab narrowed to that
+row's captures.
 
 Resolution and its refusals are the ones described above: a capture loads when
 the host can resolve the path the report names, a path that escapes the report's

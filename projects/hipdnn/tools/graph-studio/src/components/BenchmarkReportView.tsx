@@ -2,8 +2,11 @@ import { useMemo, useState } from "react";
 import {
   METRICS,
   VALIDATION_LABEL,
+  bestPerGraph,
   formatBytes,
+  measurable,
   pluginKind,
+  relativeToBest,
   summarize,
   validationState,
 } from "../benchmark/metrics";
@@ -45,7 +48,11 @@ export function BenchmarkReportView({
   onGrantDirectory,
 }: BenchmarkReportViewProps) {
   const { metadata, graphs } = report;
-  const [graphName, setGraphName] = useState(graphs[0]?.graph_name ?? "");
+  // A suite can lead with a graph every engine skipped; opening on it shows an
+  // empty chart for a report that has plenty to show.
+  const [graphName, setGraphName] = useState(
+    (graphs.find((g) => g.results.some(measurable)) ?? graphs[0])?.graph_name ?? "",
+  );
   const [metricId, setMetricId] = useState(METRICS[0].id);
   const [engineFilter, setEngineFilter] = useState(ALL_ENGINES);
   const [detail, setDetail] = useState<{ graph: GraphResults; row: EngineResult } | null>(null);
@@ -55,16 +62,39 @@ export function BenchmarkReportView({
   const graph = graphs.find((g) => g.graph_name === graphName) ?? graphs[0];
   const results = graph?.results ?? [];
 
-  const shown = engineFilter ? results.filter((r) => r.provider === engineFilter) : results;
+  // A skipped or errored row measured nothing: charting it draws an empty bar
+  // that reads as "infinitely slow". They stay in the table below, counted here.
+  const filtered = engineFilter ? results.filter((r) => r.provider === engineFilter) : results;
+  const unmeasured = filtered.length - filtered.filter(measurable).length;
+  // Best first, so the ranking is the shape of the chart rather than something
+  // to be read off the numbers.
+  const shown = filtered
+    .filter(measurable)
+    .slice()
+    .sort((a, b) =>
+      metric.higherIsBetter
+        ? metric.value(b) - metric.value(a)
+        : metric.value(a) - metric.value(b),
+    );
 
-  // Bars are scaled by magnitude; the winner is picked by the metric's direction.
+  // Bars are scaled by magnitude, including the whisker's reach, so a wide
+  // spread cannot overflow the track it is drawn in.
   const values = shown.map((r) => metric.value(r));
-  const scale = Math.max(...values, 0);
+  const scale = Math.max(
+    ...values,
+    ...shown.map((r) => metric.spread?.(r).hi ?? 0),
+    0,
+  );
   const best = values.length
     ? metric.higherIsBetter
       ? Math.max(...values)
       : Math.min(...values)
     : 0;
+  const graphBests = useMemo(
+    () => (graphs.length > 1 ? bestPerGraph(report, metric) : []),
+    [graphs.length, metric, report],
+  );
+  const overviewScale = Math.max(...graphBests.map((entry) => entry.value), 0);
 
   if (detail) {
     return (
@@ -152,6 +182,48 @@ export function BenchmarkReportView({
         </dl>
       </details>
 
+      {graphBests.length > 1 && (
+        <section className="report__panel">
+          <div className="report__panel-head">
+            <div>
+              <h3 className="report__panel-title">Best engine per graph</h3>
+              <p className="report__panel-sub">
+                Fastest row of each graph under the metric below. Select one to compare its engines.
+              </p>
+            </div>
+            <span className="report__count">{graphBests.length} graphs</span>
+          </div>
+          <div className="report__bars">
+            {graphBests.map((entry) => (
+              <button
+                type="button"
+                className="bar bar--pick"
+                data-current={entry.graph.graph_name === graph?.graph_name}
+                key={entry.graph.graph_name}
+                onClick={() => setGraphName(entry.graph.graph_name)}
+              >
+                <div className="bar__name">
+                  <span className="bar__engine">{entry.graph.graph_name}</span>
+                  <span className="bar__kind">
+                    {entry.row.provider}
+                    {entry.unmeasured > 0 && ` · ${entry.unmeasured} not measured`}
+                  </span>
+                </div>
+                <div className="bar__track">
+                  <div
+                    className="bar__fill"
+                    style={{
+                      width: `${overviewScale > 0 ? (entry.value / overviewScale) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+                <div className="bar__value">{metric.format(entry.value)}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="report__panel">
         <div className="report__panel-head">
           <div>
@@ -159,7 +231,8 @@ export function BenchmarkReportView({
             <p className="report__panel-sub">Select an engine to inspect its results.</p>
           </div>
           <span className="report__count">
-            {shown.length} result{shown.length === 1 ? "" : "s"}
+            {shown.length} measured
+            {unmeasured > 0 && ` · ${unmeasured} skipped or errored`}
           </span>
         </div>
 
@@ -204,12 +277,18 @@ export function BenchmarkReportView({
 
         <div className="report__bars">
           {shown.length === 0 ? (
-            <div className="report__empty">No results for this selection.</div>
+            <div className="report__empty">
+              {unmeasured > 0
+                ? "Nothing in this selection produced a measurement."
+                : "No results for this selection."}
+            </div>
           ) : (
             shown.map((result, i) => {
               const value = metric.value(result);
               const state = validationState(result.correctness);
               const isReference = result.role === "reference";
+              const spread = metric.spread?.(result);
+              const relative = relativeToBest(value, best, metric.higherIsBetter);
               return (
                 <div className="bar" data-role={result.role} key={rowKey(result, i)}>
                   <div className="bar__name">
@@ -219,6 +298,16 @@ export function BenchmarkReportView({
                     </span>
                   </div>
                   <div className="bar__track">
+                    {spread && spread.hi > spread.lo && scale > 0 && (
+                      <div
+                        className="bar__spread"
+                        title={`${metric.format(spread.lo)} – ${metric.format(spread.hi)} across iterations`}
+                        style={{
+                          left: `${(spread.lo / scale) * 100}%`,
+                          width: `${((spread.hi - spread.lo) / scale) * 100}%`,
+                        }}
+                      />
+                    )}
                     <div
                       className="bar__fill"
                       data-best={value === best}
@@ -228,6 +317,7 @@ export function BenchmarkReportView({
                   <div className="bar__value">
                     {metric.id === "tflops" && result.analytical_flops_partial ? "≥ " : ""}
                     {metric.format(value)}
+                    {relative && <small data-best={relative === "best"}>{relative}</small>}
                     {metric.id === "tflops" && result.analytical_flops_partial && (
                       <small>Partial coverage</small>
                     )}
@@ -287,18 +377,28 @@ export function BenchmarkReportView({
                         {r.status}
                       </span>
                     </td>
-                    <td className="num">{mean > 0 ? (1000 / mean).toFixed(3) : "—"}</td>
-                    <td className="num">{mean.toFixed(4)}</td>
-                    <td className="num">{r.gpu_kernel_stats.p95_ms.toFixed(4)}</td>
-                    <td className="num">{r.host_stats.mean_ms.toFixed(4)}</td>
-                    <td className="num">
-                      {r.analytical_flops_partial ? "≥ " : ""}
-                      {r.derived_tflops_per_s.toFixed(3)}
-                      {r.analytical_flops_partial && <small>Partial coverage</small>}
-                    </td>
-                    <td className="num">{r.derived_gbytes_per_s.toFixed(3)}</td>
-                    <td className="num">{r.cpu_build_time_ms.toFixed(3)}</td>
-                    <td className="num">{formatBytes(r.workspace_bytes)}</td>
+                    {measurable(r) ? (
+                      <>
+                        <td className="num">{mean > 0 ? (1000 / mean).toFixed(3) : "—"}</td>
+                        <td className="num">{mean.toFixed(4)}</td>
+                        <td className="num">{r.gpu_kernel_stats.p95_ms.toFixed(4)}</td>
+                        <td className="num">{r.host_stats.mean_ms.toFixed(4)}</td>
+                        <td className="num">
+                          {r.analytical_flops_partial ? "≥ " : ""}
+                          {r.derived_tflops_per_s.toFixed(3)}
+                          {r.analytical_flops_partial && <small>Partial coverage</small>}
+                        </td>
+                        <td className="num">{r.derived_gbytes_per_s.toFixed(3)}</td>
+                        <td className="num">{r.cpu_build_time_ms.toFixed(3)}</td>
+                        <td className="num">{formatBytes(r.workspace_bytes)}</td>
+                      </>
+                    ) : (
+                      // A row that never ran has zeros for every measurement.
+                      // The reason it did not run is the useful thing to show.
+                      <td className="report__norun" colSpan={8}>
+                        {r.skip_reason ?? r.error_message ?? "No measurement recorded."}
+                      </td>
+                    )}
                     <td>
                       <span
                         className="badge"

@@ -173,6 +173,27 @@ body,
 .command__option input:disabled {
   cursor: default;
 }
+.command__field {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  user-select: none;
+}
+.command__field input {
+  width: 68px;
+  padding: 3px 6px;
+  color: var(--text);
+  background: var(--bg-input, #0d1117);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+.command__field input:disabled {
+  opacity: 0.6;
+}
 .command__unavailable {
   color: var(--text-dim);
   font-size: 12px;
@@ -508,12 +529,28 @@ body,
   font-size: 11px;
 }
 .bar__track {
+  position: relative;
   height: 10px;
   border-radius: 999px;
   background: var(--bg-elev);
   overflow: hidden;
 }
+/* The measured range is drawn over the bar, translucent: a fast mean built on a
+   wide spread reads as one rather than as a clean win, and both ends stay
+   visible even where the mean sits near the top of the range. */
+.bar__spread {
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  height: 100%;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(226, 232, 240, 0.5) 0 3px,
+    rgba(226, 232, 240, 0.12) 3px 6px
+  );
+}
 .bar__fill {
+  position: relative;
   height: 100%;
   border-radius: 999px;
   background: #4b5573;
@@ -538,6 +575,30 @@ body,
   color: #f1c77e;
   font-size: 10px;
   font-weight: 500;
+}
+.bar__value small[data-best="true"] {
+  color: #a5b4fc;
+}
+/* A graph in the suite overview: same bar, but it selects the graph below. */
+.bar--pick {
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bar--pick:hover {
+  background: var(--bg-elev);
+}
+.bar--pick[data-current="true"] {
+  border-color: var(--accent);
+}
+.report__norun {
+  color: var(--text-dim);
+  font-size: 12px;
 }
 .badge {
   border: 1px solid var(--border);
