@@ -1508,6 +1508,12 @@ class Module(Item):
     def _populate_one_item(self, lm: Any, it: Any) -> None:
         """Emit a single ``itemList`` entry into *lm* (see ``_populate_logical_module``)."""
         if isinstance(it, Module):
+            if it.isCallable:
+                fn_name = it.callableName or it.name
+                lm.begin_callable(fn_name)
+                it._populate_logical_module(lm)
+                lm.end_callable(fn_name)
+                return
             if it.name:
                 lm.begin_group(it.name)
             it._populate_logical_module(lm)

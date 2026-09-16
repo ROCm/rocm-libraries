@@ -1183,6 +1183,12 @@ class _MockLogicalModule:
     def add_label(self, name, alignment, comment):
         self.items.append(("label", name, alignment, comment))
 
+    def begin_callable(self, name):
+        self.items.append(("begin_callable", name))
+
+    def end_callable(self, name):
+        self.items.append(("end_callable", name))
+
 
 class TestPopulateLogicalModule(unittest.TestCase):
     def _payloads(self, m):
@@ -1257,6 +1263,23 @@ class TestPopulateLogicalModule(unittest.TestCase):
         self.assertEqual(items[3], ("inst", "B"))
         self.assertEqual(items[4], ("set", "vgprBase", "UNDEF"))
 
+    def test_callable_module_emits_callable_markers(self):
+        outer = Module()
+        callable_module = Module("activation")
+        callable_module.isCallable = True
+        callable_module.callableName = "label_Activation_Relu_VW1"
+        callable_module.add(_FakeLogicalInst("BODY"))
+        outer.add(callable_module)
+
+        self.assertEqual(
+            self._payloads(outer),
+            [
+                ("begin_callable", "label_Activation_Relu_VW1"),
+                ("inst", "BODY"),
+                ("end_callable", "label_Activation_Relu_VW1"),
+            ],
+        )
+
 
 # ===========================================================================
 # to_stinky_asm -- end-to-end binding call (gated on built stinkytofu).
@@ -1269,6 +1292,7 @@ try:
         hasattr(_stinky, "LogicalModule")
         and hasattr(_stinky, "lower_logical_module")
         and hasattr(_stinky, "VMovB32")
+        and hasattr(_stinky.LogicalModule, "begin_callable")
     )
 except ImportError:
     _STINKY_OK = False
@@ -1335,6 +1359,22 @@ class TestToStinkyAsm(unittest.TestCase):
         text = asm.emitAssembly()
         # Two leaves were added, so two v_mov_b32 lines should emerge.
         self.assertEqual(text.count("v_mov_b32"), 2)
+
+    def test_callable_module_is_emitted_after_entry_function(self):
+        m = Module("kCallable")
+        callable_module = Module("activation")
+        callable_module.isCallable = True
+        callable_module.callableName = "label_Activation_Relu_VW1"
+        callable_module.add(Label("Activation_Relu_VW1", ""))
+        callable_module.add(self._make_fake_vmovb32())
+
+        m.add(self._make_fake_vmovb32())
+        m.add(callable_module)
+        m.add(Label("ASM_End", ""))
+
+        text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+
+        self.assertLess(text.index("label_ASM_End:"), text.index("label_Activation_Relu_VW1:"))
 
     def test_textblock_items_appear_in_output(self):
         # TextBlock items are emitted via add_textblock and appear in
