@@ -413,10 +413,10 @@ def TensileLibLogicToYaml(
 def parseArgs():
     argParser = argparse.ArgumentParser()
     argHelp = {
-        "input": "Library logic file to be converted to tensile input yaml file.",
+        "input": "Library logic file to be converted to TensileLite input YAML file.",
         "indices": "Comma-separated list of Solution indices from library logic File to extract. Ex: 0,3,4,5",
         "output": "Base Output file name.",
-        "skipMI": "Skips the MatrixInstruction field in the tensile yaml file",
+        "skipMI": "Skips the MatrixInstruction field in the TensileLite YAML file",
     }
 
     argParser.add_argument(
@@ -469,4 +469,4 @@ def main():
             tensileYamlFile = re.sub(".yaml", f"_{int(id)}.yaml", args.output)
         TensileLibLogicToYaml(args.input, int(id), tensileYamlFile, args.skipMI)
         tensileYamlFiles.append(tensileYamlFile)
-    tPrint(1, f"Tensile Files generated: {tensileYamlFiles}")
+    tPrint(1, f"TensileLite files generated: {tensileYamlFiles}")
