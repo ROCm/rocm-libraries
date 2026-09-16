@@ -40,6 +40,8 @@
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 
+#include <hipblaslt/hipblaslt-opt-in-features.h>
+
 #ifdef HIPBLASLT_USE_ROCROLLER
 #include "rocroller_host.hpp"
 #endif
@@ -49,6 +51,9 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+#include <Tensile/FusedA2AKernArg.hpp>
+#endif
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -82,6 +87,28 @@
 #endif
 
 #define INTERNAL_HIPHOSTMEM_SIZE 32768
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// Declared in rocblaslt-auxiliary.h, and defined here because this is the only
+// translation unit that may name the constant it forwards. Reporting the
+// kernel's own number is what keeps the flag region defined in one place; the
+// callers that allocate it name no Tensile identifier and gain no Tensile
+// include, which is the arrangement tensile_host.hpp's contract asks for.
+size_t rocblaslt_device_comm_flag_block_bytes(void)
+{
+    return TensileLite::FUSED_A2A_FLAG_BLOCK_BYTES;
+}
+
+// The maximum world is the one piece of the communicator's geometry the host has
+// to declare for itself: it is public API, and it sizes the per-rank arrays in
+// the handle, so it cannot be fetched at runtime the way the block size above is.
+// That leaves two independent declarations of one number, which is what this
+// reconciles.
+static_assert(HIPBLASLT_DEVICE_COMM_MAX_WORLD == TensileLite::FUSED_A2A_MAX_RANKS,
+              "the communicator's maximum world and the kernarg ABI's rank slot count have "
+              "diverged: peer slots would be allocated for ranks the kernel cannot address, or "
+              "the kernel would scan slots the host never filled");
+#endif
 
 RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                                          hipblasOperation_t     trans_b,
