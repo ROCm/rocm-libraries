@@ -169,6 +169,16 @@ rocKE-specific runtime dispatch
 Writing that pack is named as the next step in both sources, it is its own planned work
 with its own design, and **this skill does not authorize it.**
 
+**The `hiprtc_file` drop-in branch does not exist for you, but its condition does.** There
+is no runtime rocKE adapter — `ROCKE_BUILDER` falls through to the "no kernel source
+adapter" diagnostic (`IngestorKernelCode.hpp:354-359`) — so a rocKE kernel reaches the
+loader as `kind: kpack` and can never be dropped in as source. What carries over is the
+reason that branch is dangerous: borrowing another pack's symbols hands that pack's
+handler the launch geometry, the kernarg list and the number of launches, and every
+mismatch is silent, exactly as
+[hipdnn-kernel-authoring](../hipdnn-kernel-authoring/SKILL.md) states it for hipRTC. For
+rocKE that is not the exceptional branch: today it is the only one.
+
 Still owed, and owned by
 [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md), not by you:
 

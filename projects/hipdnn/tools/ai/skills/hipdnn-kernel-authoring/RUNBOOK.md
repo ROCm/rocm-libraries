@@ -84,7 +84,10 @@ ordered sequence of launches. Fusion is preferred where the producer/consumer ed
 elementwise-local or already tiled together; it is not preferred where it forces a
 global synchronization inside a kernel.
 
-A multi-launch decomposition is a legitimate answer, not a fallback to apologize for.
+A multi-launch decomposition is a legitimate answer whenever the launch ABI is unbound —
+the normal case, [SKILL.md](SKILL.md) — and not a fallback to apologize for; on a bound
+ABI it is a signal you are on the wrong branch, because there `prepare()` issues exactly
+one launch at a grid the installed handler chose.
 Record for each launch: its inputs and outputs by UID, its grid/block shape, and any
 scratch buffer it needs. Scratch is the decomposition's cost: an intermediate that
 the graph marks virtual has no caller-supplied buffer, so a multi-launch plan needs
@@ -105,10 +108,14 @@ Non-negotiables:
 
 - The entry point is `extern "C" __global__`. Its argument list is normally **yours to
   choose**, because the integration writes the handler's `launch()` around it. Only when
-  the ABI is bound — a pack that already exists and already ships a handler — is the list
-  that handler's `launch` argument list verbatim, in order, and then **wrong arity or
-  order is diagnosed nowhere**: hipRTC compiles it, symbol lookup resolves it, and the
-  launch passes whatever it has into whatever you declared.
+  the ABI is bound — the `hiprtc_file` drop-in branch, a pack that already exists and
+  already ships a handler — is the list that handler's `launch` argument list verbatim, in
+  order, and then **wrong arity or order is diagnosed nowhere**: hipRTC compiles it,
+  symbol lookup resolves it, and the launch passes whatever it has into whatever you
+  declared. On that branch the same handler also fixes the grid and block shape and issues
+  exactly one launch, with the same silence on a mismatch — take the geometry and the
+  launch count from its `prepare()` the way you take the list from its `launch()`
+  ([SKILL.md](SKILL.md)).
 - Index through the graph's **strides**, not an assumed contiguous layout. Layout is
   not an enum in the schema; it exists only as the stride pattern.
 - Accumulate in `float` regardless of storage dtype, and cast on store — the in-tree
