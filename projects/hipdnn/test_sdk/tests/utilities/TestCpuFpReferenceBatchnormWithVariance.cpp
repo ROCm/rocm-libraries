@@ -185,7 +185,7 @@ TYPED_TEST(CpuFpReferenceBatchnormWithVariance, ZeroVarianceHandling)
     EXPECT_NEAR(static_cast<double>(outputTensor.getHostValue(0, 0, 1, 1)), 0.5, tolerance);
 }
 
-TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, BatchnormFwdInferenceComputeFp32)
+TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, BatchnormFwdInferenceComputeUpscale)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<half> inputTensor({4, 3});
@@ -208,7 +208,7 @@ TEST(TestCpuFpReferenceBatchnormWithVarianceFp16, BatchnormFwdInferenceComputeFp
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-TEST(TestCpuFpReferenceBatchnormWithVarianceBfp16, BatchnormFwdInferenceComputeFp32)
+TEST(TestCpuFpReferenceBatchnormWithVarianceBfp16, BatchnormFwdInferenceComputeUpscale)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<bfloat16> inputTensor({4, 3});
