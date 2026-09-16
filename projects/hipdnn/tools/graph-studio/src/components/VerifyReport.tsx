@@ -100,7 +100,7 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
             Use run folder…
           </button>
         )}
-        {granted && <span className="verify__note">reading artifacts from {granted.name}</span>}
+        {granted && <span className="verify__note">run folder: {granted.name}</span>}
         {shown.sample && <span className="verify__note">showing bundled sample data</span>}
         {error && (
           <span className="verify__note" data-tone="error">

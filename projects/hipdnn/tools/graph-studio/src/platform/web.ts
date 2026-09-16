@@ -184,12 +184,20 @@ export async function readRelatedFromDirectory(
     throw new Error(`Invalid relative path: ${relativePath}`);
   }
   let cursor = dir;
-  for (const segment of segments.slice(0, -1)) {
-    cursor = await cursor.getDirectoryHandle(segment);
+  try {
+    for (const segment of segments.slice(0, -1)) {
+      cursor = await cursor.getDirectoryHandle(segment);
+    }
+    const fileHandle = await cursor.getFileHandle(segments[segments.length - 1]);
+    const file = await fileHandle.getFile();
+    return new Uint8Array(await file.arrayBuffer());
+  } catch {
+    // The browser's own NotFoundError names neither path nor folder, which
+    // hides the usual cause: a folder granted below the one the run wrote from.
+    throw new Error(
+      `${relativePath} not found under ${dir.name}/ — grant the directory the benchmark ran from`,
+    );
   }
-  const fileHandle = await cursor.getFileHandle(segments[segments.length - 1]);
-  const file = await fileHandle.getFile();
-  return new Uint8Array(await file.arrayBuffer());
 }
 
 export const webPlatform: PlatformBridge = {
