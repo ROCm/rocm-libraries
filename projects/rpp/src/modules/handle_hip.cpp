@@ -161,6 +161,13 @@ struct HandleImpl {
                                sizeof(Rpp32f) * 8294400);  // 3840 x 2160
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipHostMalloc failed for scratchBufferPinned");
+
+        // Scratch buffer used by the ROI XYWH<->LTRB conversion helpers so they can write the
+        // converted ROI into RPP-owned memory instead of mutating the caller's input ROI tensor.
+        status = hipMalloc(&(this->initHandle->mem.mgpu.roiConversionScratchHip),
+                           sizeof(RpptROI) * this->nBatchSize);
+        if (status != hipSuccess)
+            RPP_THROW_HIP_STATUS(status, "hipMalloc failed for roiConversionScratchHip");
     }
 };
 
@@ -203,6 +210,9 @@ void Handle::rpp_destroy_object_gpu() {
     status = hipHostFree(this->GetInitHandle()->mem.mgpu.scratchBufferPinned.floatmem);
     if (status != hipSuccess)
         RPP_THROW_HIP_STATUS(status, "hipHostFree failed for scratchBufferPinned");
+    status = hipFree(this->GetInitHandle()->mem.mgpu.roiConversionScratchHip);
+    if (status != hipSuccess)
+        RPP_THROW_HIP_STATUS(status, "hipFree failed for roiConversionScratchHip");
 
     delete this->GetInitHandle();
     this->impl = nullptr;

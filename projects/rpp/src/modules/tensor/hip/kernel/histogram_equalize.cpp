@@ -362,7 +362,8 @@ __global__ void convert_ycbcr_pln3_to_rgb_pkd3(
 RppStatus hip_exec_histogram_equalize_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                              RpptDescPtr dstDescPtr, RpptROIPtr roiTensorPtrSrc,
                                              RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int batchSize = dstDescPtr->n;
 

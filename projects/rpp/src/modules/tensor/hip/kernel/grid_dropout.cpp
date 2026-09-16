@@ -118,7 +118,8 @@ RppStatus hip_exec_grid_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dst
                                        Rpp32u boxesInEachImage, Rpp32u maxHoleW, Rpp32u maxHoleH,
                                        RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                        rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = maxHoleW;
     int globalThreads_y = maxHoleH;

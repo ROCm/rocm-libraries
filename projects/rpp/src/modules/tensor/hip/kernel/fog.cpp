@@ -277,7 +277,8 @@ RppStatus hip_exec_fog_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr, Rppt
                               Rpp32f* intensityFactor, Rpp32f* greyFactor, Rpp32u* maskLocOffsetX,
                               Rpp32u* maskLocOffsetY, RpptROIPtr roiTensorPtrSrc,
                               RpptRoiType roiType, rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     Rpp32s globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     Rpp32s globalThreads_y = dstDescPtr->h;

@@ -153,7 +153,8 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                          Rpp32u* numBoxesTensor, Rpp32u maxBoxesPerImage,
                                          RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                          rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = dstDescPtr->w;
     int globalThreads_y = dstDescPtr->h;
