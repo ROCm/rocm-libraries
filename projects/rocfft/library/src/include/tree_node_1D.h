@@ -181,6 +181,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
+    bool                CreateDeviceResources() override;
     std::vector<size_t> CollapsibleDims() override;
 };
 
