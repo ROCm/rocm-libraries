@@ -476,9 +476,13 @@ function createFlowBridge(deps = {}) {
       }
     },
 
-    // The graph is written once, under a directory unique to this launch,
-    // because the run holds that path for its whole life and re-reads it. Every
-    // name the renderer nominated gets that path; no input name is special here.
+    // The graph is written once, under a directory unique to this launch, because the
+    // run holds that path for its whole life and re-reads it. Every name the renderer
+    // nominated gets that path; no input name is special here.
+    //
+    // It is written beside the orchestrator's runs, not in temp: a run that outlives
+    // the OS's patience with its own temp directory is a run nobody can resume, and
+    // that has already happened once.
     "flow:launch": async (request) => {
       const { flow, inputs, graphInputs, graphJson, graphName, maxIterations, profile, label } =
         request;
@@ -492,9 +496,11 @@ function createFlowBridge(deps = {}) {
 
       let graphPath;
       if (names.length > 0) {
+        const resolved = flowpaths.resolve();
+        if (!resolved.ok) return { ok: false, error: resolved.reason };
         try {
-          graphPath = await graphfile.writeGraphFile(
-            GRAPH_SCOPE,
+          graphPath = await graphfile.writeLaunchGraphFile(
+            resolved.runRoot,
             graphName,
             graphJson,
             crypto.randomBytes(4).toString("hex")

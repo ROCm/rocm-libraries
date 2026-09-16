@@ -123,7 +123,13 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
     setValues(next);
     const firstPath = flow.inputs.find((input) => input.type === "path");
     setGraphInputs(firstPath ? [firstPath.name] : []);
-    setBudget(1);
+    // The flow's own budget, not 1. These loops exist to repair what their gates
+    // catch, and a budget of 1 means the first gate that fails ends the run with the
+    // feedback collected and nowhere to spend it -- the engine says so in as many
+    // words ("the loop was never allowed to act on the feedback it collected").
+    // Starting at the declared maximum makes the default behaviour the one the flow
+    // was written for; the control still lets you wind it down to 1 for a dry pass.
+    setBudget(flow.loops.reduce((most, loop) => Math.max(most, loop.maxIterations), 1));
   }, [flow]);
 
   const applyStatus = useCallback(async (runId: string) => {

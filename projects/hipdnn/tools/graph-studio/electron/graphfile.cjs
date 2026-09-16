@@ -20,6 +20,8 @@ const path = require("node:path");
 
 const ROOT_DIR_NAME = "hipdnn-graph-studio";
 const GRAPH_SUFFIX = ".hipdnn.json";
+//: Launch graphs live here, under the orchestrator's run root rather than in temp.
+const LAUNCH_GRAPH_DIR = "_launch-graphs";
 const RESULTS_SUFFIX = ".results.json";
 const TENSORS_SUFFIX = ".tensors";
 
@@ -36,6 +38,23 @@ function scopeDir(scope, subdir) {
 
 async function writeGraphFile(scope, graphName, graphJson, subdir) {
   const dir = scopeDir(scope, subdir);
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${sanitizeName(graphName)}${GRAPH_SUFFIX}`);
+  await fs.writeFile(file, graphJson ?? "", "utf8");
+  return file;
+}
+
+// A flow run's graph does not belong in the temp directory, whatever its lifetime.
+// The run records the path in its inputs and keeps reading it, agents are pointed at
+// it, and the run directory is the evidence someone opens days later -- yet the graph
+// was the one input living somewhere the OS is entitled to delete. It already cost a
+// run: stage 1 had succeeded, and it could not be resumed because the graph it was
+// launched with had been swept and nothing had copied it anywhere durable.
+//
+// So a launch writes beside the runs instead: same tree as the evidence, same
+// lifetime, and a run stays reproducible for as long as its directory exists.
+async function writeLaunchGraphFile(runRoot, graphName, graphJson, subdir) {
+  const dir = path.join(runRoot, LAUNCH_GRAPH_DIR, sanitizeName(subdir));
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, `${sanitizeName(graphName)}${GRAPH_SUFFIX}`);
   await fs.writeFile(file, graphJson ?? "", "utf8");
@@ -90,6 +109,7 @@ async function sweepLaunchDirs(scope, maxAgeMs) {
 module.exports = {
   sanitizeName,
   writeGraphFile,
+  writeLaunchGraphFile,
   resultsFileFor,
   tensorsDirFor,
   sweepLaunchDirs,
