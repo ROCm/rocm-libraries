@@ -955,6 +955,14 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    # Checked here rather than left to the slice: --csv-top is a bare bound on
+    # rocke_results, so 0 would write a headers-only CSV and a negative value
+    # would drop that many of the worst-ranked rows -- both after a full sweep
+    # and both exiting 0, which reads as a successful run that found nothing.
+    if args.csv_top < 1:
+        print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
+        return 2
+
     if args.miopen_cmd is None and args.miopen_file is None and args.json_file is None:
         if args.Di is not None and args.Z is None:
             print("--Z (filter depth) is required when --Di is set", file=sys.stderr)

@@ -98,7 +98,7 @@ From `platform/`, with `PYTHONPATH=$(pwd)/python`.
 Correctness — the bitwise A/B, and the full suite:
 
 ```bash
-python3 -m pytest tests/instances/test_conv_dgrad_correctness.py -q -rs -k KOuter
+python3 -m pytest tests/instances/test_conv_dgrad_correctness.py -q -rs -k LdsKOuter
 python3 -m pytest tests/instances/test_conv_dgrad_correctness.py -q
 ```
 
@@ -118,7 +118,7 @@ ROCKE_LLVM_FLAVOR=llvm22 python3 tools/check_byte_identity.py --only conv
 Dispatch-side policy (CPU-only, no GPU):
 
 ```bash
-python3 -m pytest library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py -q \
+python3 -m pytest ../library/tests/dispatch/test_grouped_conv_wgrad_dispatch.py -q \
     -k Dgrad
 ```
 
