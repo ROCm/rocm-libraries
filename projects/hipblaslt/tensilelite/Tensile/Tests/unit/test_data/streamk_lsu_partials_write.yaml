@@ -1,0 +1,92 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Stream-K (StreamK=3, non-atomic) HGEMM NT, ISA pinned to gfx950 so
+# --build-only compiles regardless of host GPU. NumElementsPerBatchStore=2
+# forces the partials write / fixup stores to span more than one batch.
+#
+# Two solution groups, distinguished in the emitted assembly by the
+# "LocalSplitU Reduction" section:
+#   * WorkGroup [4,4,4] -> LocalSplitU=4 (the accumulator-advance path)
+#   * WorkGroup [16,4,1] -> LocalSplitU=1 (control: must be unaffected)
+#
+# Consumed by test_streamk_lsu_partials_write.py; placed under test_data/ so
+# findConfigs() in test_config.py skips it.
+GlobalParameters:
+  ISA: [[9,5,0]]
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # LocalSplitU = 4
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 2, 1, 1]
+        - StreamK: [3]
+        - NumElementsPerBatchStore: [2]
+        - DepthU: [128]
+        - 1LDSBuffer: [-1]
+        - ClusterLocalRead: [1]
+        - ExpandPointerSwap: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+        - TransposeLDS: [-1]
+        - UseSgprForGRO: [0]
+        - WorkGroupMapping: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WorkGroup:
+          - [4, 4, 4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+    - # LocalSplitU = 1
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 2, 2, 1, 1]
+        - StreamK: [3]
+        - NumElementsPerBatchStore: [2]
+        - DepthU: [128]
+        - 1LDSBuffer: [-1]
+        - ClusterLocalRead: [1]
+        - ExpandPointerSwap: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+        - TransposeLDS: [-1]
+        - UseSgprForGRO: [0]
+        - WorkGroupMapping: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WorkGroup:
+          - [16, 4, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
