@@ -707,8 +707,11 @@ namespace TensileLite
             }
             else
             {
-                // gfx1250 padding
-                size_t dimk = 128 / mxBlockA;
+                // gfx1250 padding. A scale covers mxBlockA elements along K, and the
+                // scale tensor is padded so that K-blocks tile the 128-element K step of
+                // the scaled WMMA. At mxBlockA == 128 one scale already spans the whole
+                // step (dimk == 1, no padding); clamp so mxBlockA > 128 cannot yield 0.
+                size_t dimk = std::max<size_t>(1, 128 / mxBlockA);
                 saSizes[boundIdx] = RoundUpToMultiple(
                     CeilDivide(saSizes[boundIdx], (size_t)mxBlockA), dimk);
             }
@@ -735,8 +738,8 @@ namespace TensileLite
             }
             else
             {
-                // gfx1250 padding
-                size_t dimk = 128 / mxBlockB;
+                // gfx1250 padding. See setMXScaleA for the dimk rationale.
+                size_t dimk = std::max<size_t>(1, 128 / mxBlockB);
                 sbSizes[boundIdx] = RoundUpToMultiple(
                     CeilDivide(sbSizes[boundIdx], (size_t)mxBlockB), dimk);
             }

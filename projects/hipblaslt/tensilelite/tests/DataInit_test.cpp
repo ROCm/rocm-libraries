@@ -202,6 +202,16 @@ TEST(IsMXProblem, OnlyB_isMX_AIsBF16)
                          /*mxBlockA=*/0, /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
+TEST(IsMXProblem, BothFP8Block128)
+{
+    // 1x128 block scaling: mxBlock only has to be positive, so widening the
+    // block must not change MX-problem detection or the scale dtypes.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_EQ(p.mxBlockA(), 128);
+    EXPECT_EQ(p.mxBlockB(), 128);
+}
 TEST(IsMXProblem, NeitherIsMX)
 {
     auto p = makeProblem(rocisa::DataType::BFloat16, rocisa::DataType::BFloat16,
