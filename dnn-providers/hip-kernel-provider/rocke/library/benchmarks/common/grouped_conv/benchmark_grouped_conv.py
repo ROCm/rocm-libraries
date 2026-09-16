@@ -201,7 +201,7 @@ def parse_json_case(entry: dict):
     if dtype not in ("fp16", "bf16", "fp32"):
         raise ValueError(f"dtype={dtype!r} is not supported (only fp16, bf16, fp32)")
 
-    from rocke.instances.common.conv_implicit_gemm import ConvProblem
+    from kernels.common.conv_implicit_gemm import ConvProblem
 
     def _scalar_or_pair(val, idx_h=0, idx_w=1):
         if isinstance(val, (list, tuple)):
@@ -416,7 +416,7 @@ def parse_miopen_cmd(cmd: str):
             f"Layout {layout!r} is not supported; only NHWC/NWC inputs are accepted"
         )
 
-    from rocke.instances.common.conv_implicit_gemm import ConvProblem
+    from kernels.common.conv_implicit_gemm import ConvProblem
 
     problem = ConvProblem(
         N=miopen_args.N,
@@ -692,11 +692,11 @@ def main() -> int:
         ConvGroupedRequest,
         conv_grouped_sweep_space,
     )
-    from rocke.instances.common.conv_implicit_gemm import (
+    from kernels.common.conv_implicit_gemm import (
         ConvProblem,
         build_implicit_gemm_conv,
     )
-    from rocke.instances.common.conv_implicit_gemm_wgrad import (
+    from kernels.common.conv_implicit_gemm_wgrad import (
         build_implicit_gemm_conv_wgrad,
     )
     from rocke.runtime import synchronize_and_release, time_launches
@@ -952,7 +952,7 @@ def _run_fwd(
 
     ref_out: torch.Tensor | None = None
     if args.verify:
-        from rocke.benchmark.conv_reference import (
+        from builders.common.conv_reference import (
             conv_reference,
             conv_reference_gfx1250,
         )
@@ -1183,7 +1183,7 @@ def _run_wgrad(
 
     ref_out: torch.Tensor | None = None
     if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import wgrad_reference
+        from builders.common.conv_reference import wgrad_reference
 
         ref_out = wgrad_reference(_X_f32, _dY_f32, p)
         print(
