@@ -45,7 +45,7 @@ std::vector<T>
     std::default_random_engine gen(rd());
     std::vector<T>             data(items);
     std::generate(data.begin(),
-                  data.begin() + _HIPCUB_STD::min(items, max_random_size),
+                  data.begin() + std::min(items, max_random_size),
                   [&]()
                   {
                       // Reduce entropy by applying bitwise AND to random bits
@@ -60,7 +60,7 @@ std::vector<T>
                   });
     for(size_t i = max_random_size; i < items; i += max_random_size)
     {
-        std::copy_n(data.begin(), _HIPCUB_STD::min(items - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
     }
     return data;
 }
