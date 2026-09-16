@@ -242,3 +242,26 @@
 /projects/hipthreads/**/*.rst                       @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
 /projects/hipthreads/**/.readthedocs.yaml           @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
 /projects/hipthreads/docs/                          @ROCm/hipthreads-reviewers @ROCm/hipthreads-doc-reviewers
+
+# CI gating configuration for math libraries
+#
+# These files decide which test suites and which GPU families run on every
+# rocm-libraries pull request. A change here silently changes test coverage for
+# the math libraries teams, so they are owned by the math libraries build-infra
+# team rather than by the general /.github/ rule above.
+#
+# 1. This block must stay at the end of the file. CODEOWNERS is last-match-wins,
+#    so an earlier /.github/ rule would otherwise own these paths.
+# 2. Each path lists exactly one team on purpose. GitHub accepts an approval
+#    from ANY listed owner, so adding a second team here would restore the
+#    status quo rather than add a reviewer.
+/.github/workflows/therock-ci.yml                          @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-ci-linux.yml                    @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-ci-windows.yml                  @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-ci-nightly.yml                  @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-multi-arch-ci.yml               @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-multi-arch-ci-nightly.yml       @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-multi-arch-ci-asan.yml          @ROCm/rocm-math-lib-build-infra
+/.github/workflows/therock-multi-arch-ci-asan-nightly.yml  @ROCm/rocm-math-lib-build-infra
+/.github/scripts/therock_matrix.py                         @ROCm/rocm-math-lib-build-infra
+/.github/scripts/multi_arch_test_projects.py               @ROCm/rocm-math-lib-build-infra
