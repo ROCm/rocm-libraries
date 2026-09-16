@@ -1412,7 +1412,7 @@ Solutions:
   LocalWriteUseSgprB: false
   LoopIters: 4
   LoopUnroll: 64
-  MFMA_BF16_1K: false
+  MFMA_BF16_1K: true
   MIBlock: [16, 16, 16, 1, 1, 1]
   MIInputPerThread: 4
   MIInputPerThreadA: 4
