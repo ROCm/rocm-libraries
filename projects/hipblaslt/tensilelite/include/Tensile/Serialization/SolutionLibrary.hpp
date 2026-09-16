@@ -242,11 +242,11 @@ namespace TensileLite
                         iot::setError(io,
                                       concatenate("solution ",
                                                   index,
-                                                  " spans [",
+                                                  " has offset ",
                                                   offset,
-                                                  ", ",
-                                                  offset + length,
-                                                  ") past the ",
+                                                  " and length ",
+                                                  length,
+                                                  ", outside the ",
                                                   blobSize,
                                                   "-byte solutions_blob"));
                         return false;
@@ -362,4 +362,3 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
-

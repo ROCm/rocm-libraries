@@ -49,6 +49,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -68,6 +69,7 @@
 // For Serialization::objectToMap, used to walk a legacy document's top level.
 #include <Tensile/msgpack/MessagePack.hpp>
 
+#include "SolutionIterator.hpp"
 #include "TestData.hpp"
 
 namespace fs = std::filesystem;
@@ -879,22 +881,26 @@ TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)
         << "a shard reached from both sides must still register exactly once";
 }
 
-TEST_F(PlaceholderIndexedShardTest, EnumerationPublishesLoadedShardSolutions)
+TEST_F(PlaceholderIndexedShardTest, AllSolutionsIteratorLoadsUnvisitedIndexedShards)
 {
     if(!layOutLibrary())
         GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
 
     auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
     ASSERT_NE(lib, nullptr);
-    auto* master = dynamic_cast<Master*>(lib.get());
+    auto master = std::dynamic_pointer_cast<Master>(lib);
     ASSERT_NE(master, nullptr);
     ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
-    ASSERT_NE(master->resolveSolutionByIndex(shardIndices.front()), nullptr);
+    ASSERT_TRUE(master->solutions.empty());
+    ASSERT_TRUE(master->solutionSources.empty());
 
-    // What the benchmark client's enumeration iterator depends on: the solutions
-    // map it indexes has to be filled, which materializing the caches alone does
-    // not do, because leaves resolve through the cache and never touch that map.
-    master->materializeAllSolutions();
+    // Constructing the client's all-solutions iterator is the first access to
+    // this lazy master. It must load the mapped shard before materializing its
+    // cache, otherwise the iterator sees an empty solutions map and throws.
+    EXPECT_NO_THROW({
+        Client::AllSolutionsIterator iterator(
+            master, std::shared_ptr<Hardware>{}, 2.0, -1, -1, false);
+    });
 
     EXPECT_EQ(master->solutions.size(), shardIndices.size());
     for(int index : shardIndices)
