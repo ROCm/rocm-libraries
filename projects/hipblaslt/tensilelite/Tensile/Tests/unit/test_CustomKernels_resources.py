@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 from types import SimpleNamespace
+import os
 
 import pytest
 
 import Tensile.CustomKernels as CustomKernels
-
 
 pytestmark = pytest.mark.unit
 
@@ -134,3 +134,15 @@ def test_real_default_custom_kernel_resource_is_available():
 
     assert KNOWN_CUSTOM_KERNEL in names
     assert "custom.config" in CustomKernels.getCustomKernelContents(KNOWN_CUSTOM_KERNEL)
+
+
+def test_get_custom_kernel_filepath_none_resolves_bundled_kernel():
+    # ValidateMetadata during Tensile runs calls this with directory=None.
+    path = CustomKernels.getCustomKernelFilepath(KNOWN_CUSTOM_KERNEL)
+    assert os.path.basename(path) == KNOWN_CUSTOM_KERNEL + ".s"
+    assert os.path.isfile(path)
+
+
+def test_validate_custom_kernel_metadata_default_directory():
+    valid, msg = CustomKernels.validateCustomKernelMetadata(KNOWN_CUSTOM_KERNEL)
+    assert valid, msg

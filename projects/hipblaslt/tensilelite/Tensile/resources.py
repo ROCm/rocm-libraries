@@ -83,6 +83,17 @@ def _custom_kernels() -> Traversable:
     return _resource("CustomKernels")
 
 
+def _iter_custom_kernel_resources(root: Traversable = None):
+    """Yield bundled ``.s`` files, including those in vendor subdirectories."""
+    item = _custom_kernels() if root is None else root
+    children = sorted(item.iterdir(), key=lambda resource: resource.name)
+    for resource in children:
+        if resource.is_file() and resource.name.endswith(".s"):
+            yield resource
+        elif resource.is_dir():
+            yield from _iter_custom_kernel_resources(resource)
+
+
 def _validate_custom_kernel_resource_name(name: str) -> None:
     """Reject path-bearing names at the bundled-resource boundary."""
     if "/" in name or "\\" in name or PureWindowsPath(name).drive:
@@ -94,16 +105,18 @@ def _validate_custom_kernel_resource_name(name: str) -> None:
 def custom_kernel_names() -> List[str]:
     """Return bundled custom kernel names in deterministic order."""
     return sorted(
-        resource.name[:-2]
-        for resource in _custom_kernels().iterdir()
-        if resource.is_file() and resource.name.endswith(".s")
+        resource.name[:-2] for resource in _iter_custom_kernel_resources()
     )
 
 
 def custom_kernel_text(name: str) -> str:
     """Read a bundled custom kernel assembly resource."""
     _validate_custom_kernel_resource_name(name)
-    return _resource_text("CustomKernels", f"{name}.s")
+    target = f"{name}.s"
+    for resource in _iter_custom_kernel_resources():
+        if resource.name == target:
+            return resource.read_text(encoding="utf-8")
+    raise FileNotFoundError(target)
 
 
 def known_bugs_text() -> str:
