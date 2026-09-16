@@ -1,36 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the StreamKForceDPOnly SGPR-reduction changes (AIHPBLAS-4145).
-
-StreamKForceDPOnly is the SK3 DP-first path on gfx1250. Because every workgroup
-processes complete tiles and the reduction is always the single-kernel tree path,
-a family of StreamK SGPRs become dead / compile-time constants:
-
-  * ``StreamKLocalStart`` == 0 and ``StreamKLocalEnd`` == ItersPerTile always,
-    so both persistent SGPRs are dropped and their readers are constant-folded.
-  * ``AddressWS`` / ``AddressFlags`` / ``SrdWS`` (the workspace + synchronizer-flag
-    kernarg pointers / SRD) are never dereferenced, so they are dropped from the
-    kernarg SGPR define, the ``.kd`` signature metadata, and the host kernarg
-    builder (ContractionSolution.cpp, host-side, not unit-tested here).
-
-Each folded reader is gated on ``kernel["StreamKForceDPOnly"]``. These tests pin
-that behaviour by driving the individual emitter methods with both DP-only and
-non-DP-only kernels and asserting the DP-only path drops the dead SGPR reads while
-the non-DP-only path is unchanged.
-
-The component-level harness (SimpleNamespace / mock-writer + rocisa RegisterPool,
-introspecting emitted items) is reused from ``test_PrefetchAcrossPersistent``; the
-real-Solution gfx1250 fixtures (auto-skip without an amdclang++ that can target
-gfx1250) are reused from ``test_prefetchgl2_streamk_guard``.
-"""
+"""StreamKForceDPOnly SGPR reduction: DP-only drops dead StreamK SGPRs; non-DP-only is unchanged."""
 
 from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
 from rocisa.code import Label, Module
-from rocisa.container import sgpr, vgpr
-from rocisa.enum import RegisterType
+from rocisa.container import sgpr
 from rocisa.instruction import (
     SAndB32,
     SBranch,
@@ -51,9 +28,7 @@ from Tensile.Components.StreamK import StreamKTwoTileDPFirst
 from Tensile.Components.Subtile.SubtileGREmit import tdmApplyStreamKOffsetSubtile
 from Tensile.Contractions import SizeMapping
 
-# Reuse the established component-level harness helpers rather than reinventing
-# them (see test_segment_interleave_state / cms_validation_base for the in-repo
-# cross-test-module import idiom).
+# Component-level harness helpers (same idiom as test_segment_interleave_state).
 from test_PrefetchAcrossPersistent import (
     _StubLabels,
     _StubStreamK,
@@ -63,8 +38,7 @@ from test_PrefetchAcrossPersistent import (
     _tensor_parameters,
 )
 
-# Real-Solution gfx1250 toolchain fixtures. Imported so pytest resolves them as
-# fixtures in this module (they auto-skip when amdclang++ cannot target gfx1250).
+# gfx1250 toolchain fixtures; auto-skip when amdclang++ cannot target gfx1250.
 from test_prefetchgl2_streamk_guard import (  # noqa: F401  (fixtures used by name)
     _gp_gfx1250,
     assembler,
@@ -96,9 +70,7 @@ class _SimpleSgprPool:
 
 
 class _SKWriter:
-    """Mock writer sufficient to drive the StreamK.py Common methods and the
-    KernelWriterAssembly TDM StreamK-offset helpers, for both DP-only (constant
-    fold / early return) and non-DP-only (partial-tile) paths."""
+    """Mock writer sufficient to drive StreamK.py Common methods."""
 
     def __init__(self):
         self.labels = _StubLabels()
@@ -138,6 +110,20 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+    # These test kernels carry StreamK keys only; an absent TDM key means off.
+    def isTdmWaveSeparated(self, kernel):
+        return bool(
+            kernel.get("enableTDMA")
+            and kernel.get("enableTDMB")
+            and kernel.get("NumWaves", 1) > 1
+        )
+
+    def tdmFusePaired(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
+    def _tdmPairedParityOrder(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
 
 def _sk_common_kernel(dp_only):
     return {
@@ -157,10 +143,7 @@ def _sk():
 
 
 # ---------------------------------------------------------------------------
-# 1. classic PAP: the AddressFlags "parallel reduction: skip PAP" compare is
-#    folded out under DP-only. StreamKIter >= StreamKIterEnd lives in the
-#    papHasNextPersistentIteration seam (nested Module), not as a top-level
-#    instruction in prefetchAcrossPersistent.
+# Classic PAP: DP-only folds the AddressFlags skip-PAP compare.
 # ---------------------------------------------------------------------------
 def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
     _, dp_items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
@@ -181,7 +164,7 @@ def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 2. Subtile PAP (KernelWriter.prefetchAcrossPersistentSubtile): same fold.
+# Subtile PAP: same AddressFlags fold.
 # ---------------------------------------------------------------------------
 class _SubtilePapWriter:
     def __init__(self):
@@ -228,9 +211,7 @@ def test_subtile_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 3. general-batched flag check (StreamK.stridedBatchOrGeneralBatch): DP-only
-#    folds the AddressFlags synchronizer compare into an unconditional branch to
-#    the general-batched target.
+# General-batched: DP-only folds AddressFlags into an unconditional branch.
 # ---------------------------------------------------------------------------
 def _strided_or_general_items(dp_only):
     strided = Label("StridedBatchedGemmLoad", "")
@@ -261,9 +242,7 @@ def test_general_batched_flag_check_folded_under_dp_only():
 
 
 # ---------------------------------------------------------------------------
-# 4. calculateLoopNumIterCommon: DP-only loop count folds to ItersPerTile (an
-#    SMovB32) instead of StreamKLocalEnd - StreamKLocalStart (an SSubU32); and
-#    computeLoadSrd / declareStaggerParms / tailLoopNumIter become empty.
+# calculateLoopNumIterCommon: DP-only folds to ItersPerTile (SMovB32).
 # ---------------------------------------------------------------------------
 def _calc_loop_num_iter_items(dp_only):
     writer = _SKWriter()
@@ -304,8 +283,7 @@ def test_dp_only_streamk_common_helpers_emit_empty_modules():
 
 
 # ---------------------------------------------------------------------------
-# 5. graAddressesCommon: DP-only emits only VMovB32 of Address{tc}; no
-#    StreamKLocalStart-scaled partial-tile offset.
+# graAddressesCommon: DP-only is VMovB32 of Address{tc} only.
 # ---------------------------------------------------------------------------
 def _gra_addresses_items(dp_only):
     writer = _SKWriter()
@@ -329,8 +307,7 @@ def test_gra_addresses_dp_only_moves_only_base_address():
 
 
 # ---------------------------------------------------------------------------
-# 6. TDM StreamK-offset appliers: DP-only makes the wave-separated K-offset and
-#    the subtile K-offset no-ops, and the tail applier reads no StreamKLocalEnd.
+# TDM StreamK-offset appliers: DP-only no-ops; tail does not read StreamKLocalEnd.
 # ---------------------------------------------------------------------------
 def test_tdm_apply_streamk_offset_wave_separated_noop_under_dp_only():
     writer = _SKWriter()
@@ -345,6 +322,60 @@ def test_tdm_apply_streamk_offset_wave_separated_noop_under_dp_only():
 
     assert dp_mod.itemsSize() == 0
     assert _instruction_indices(_module_items(nodp_mod), SMulI32, src_contains="StreamKLocalStart")
+
+
+class _FuseAMxWriter(_SKWriter):
+    """_SKWriter that reports the TDMFuse=2 shared descriptor set."""
+
+
+    def tdmFusePaired(self, kernel):
+        return False
+
+
+def _tdm_setup_increment_items(dp_only):
+    writer = _FuseAMxWriter()
+    tpa, tpb = _tensor_parameters(with_mx=True)
+    # Keys so TDMFuse=2 actually resolves; the increment reads the grouping table.
+    kernel = {
+        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TDMFuse": 2,
+        "TDMInst": 3,
+        "NumWaves": 4,
+        "TDMSplit": False,
+        "UseSubtileImpl": False,
+        "enableTDMA": True,
+        "enableTDMB": True,
+        "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
+    }
+    return _module_items(
+        kwa_module.KernelWriterAssembly.tdmSetupIncrementWaveSeparated(writer, kernel, tpa, tpb)
+    )
+
+
+@pytest.mark.parametrize("dp_only", [True, False])
+def test_tdm_shared_set_increment_is_seeded_regardless_of_dp_only(dp_only):
+    """TDMFuse=2 shares one descriptor; a wave matching no arm still needs A's increment in tdmABIncs."""
+    items = _tdm_setup_increment_items(dp_only)
+    writes = [i for i in items if "tdmABIncs" in str(getattr(i, "dst", ""))]
+    assert writes, "tdmABIncs is never written"
+    first = writes[0]
+    srcs = [str(src) for src in getattr(first, "srcs", [])]
+    assert any("GlobalReadIncsA" in src for src in srcs), srcs
+    assert not any("tdmABIncs" in src for src in srcs), (
+        "the first write to tdmABIncs reads it back, so a wave taking no arm "
+        "advances the shared descriptor by whatever the register held: %s" % srcs)
+
+
+def test_tdm_streamk_offset_applier_never_writes_the_shared_set_increment():
+    writer = _SKWriter()
+    tpa, tpb = _tensor_parameters()
+    for dp_only in (0, 1):
+        items = _module_items(
+            kwa_module.KernelWriterAssembly.tdmApplyStreamKOffsetWaveSeparated(
+                writer, {"StreamKForceDPOnly": dp_only}, tpa, tpb
+            )
+        )
+        assert not [i for i in items if "tdmABIncs" in str(getattr(i, "dst", ""))]
 
 
 def test_tdm_apply_streamk_offset_subtile_noop_under_dp_only():
@@ -381,8 +412,7 @@ def test_tdm_apply_streamk_tail_offset_derives_iterspertile_under_dp_only():
 
 
 # ---------------------------------------------------------------------------
-# 9. SizeMapping seam: streamKForceDPOnly round-trips from the solution state
-#    (the host contract that keeps ContractionSolution.cpp in sync).
+# SizeMapping: streamKForceDPOnly round-trips from solution state.
 # ---------------------------------------------------------------------------
 def _minimal_size_mapping_state():
     from test_streamk_force_dp_only import minimal_size_mapping_state
@@ -405,23 +435,13 @@ def test_size_mapping_streamk_force_dp_only_round_trips():
 
 
 # ---------------------------------------------------------------------------
-# 7 + 8 + 10. Real gfx1250 SK3 kernel emit (CPU-only assembly text). Auto-skips
-# when amdclang++ cannot target gfx1250 (via the gfx1250_iim fixture). Proves the
-# dead workspace/flag SGPRs and the StreamK local-bound SGPRs are absent from the
-# emitted assembly (SGPR defines, .kd signature metadata) under DP-only, and
-# present under non-DP-only.
+# Real gfx1250 SK3 emit: dead SGPRs absent under DP-only, present otherwise.
 # ---------------------------------------------------------------------------
 _DEAD_SGPR_SYMBOLS = ["AddressWS", "AddressFlags", "SrdWS", "StreamKLocalStart", "StreamKLocalEnd"]
 
 
 def _sk3_gfx1250_params(gfx1250_iim, dp_only):
-    """A minimal, valid F16 TN SK3 gfx1250 solution config.
-
-    Kept intentionally SGPR-light (no MX, PrefetchAcrossPersistent=0,
-    PrefetchGL2=0) so the *non*-DP-only variant, which still defines
-    AddressWS/AddressFlags/SrdWS/StreamKLocalStart/StreamKLocalEnd, fits under the
-    gfx1250 SGPR budget and emits cleanly -- otherwise the non-DP baseline
-    overflows (which is exactly the pressure the DP-only reduction relieves)."""
+    """Minimal F16 TN SK3 gfx1250 config, SGPR-light so the non-DP-only baseline still emits."""
     from Tensile.Common.Architectures import gfxToIsa
     from Tensile.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,

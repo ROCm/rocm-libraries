@@ -1462,6 +1462,8 @@
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
+    'PrefetchGlobalReadA',
+    'PrefetchGlobalReadB',
     'PrefetchLocalRead',
     'PreloadKernArgs',
     'SFCWGM',
@@ -1488,6 +1490,7 @@
     'SuppressNoLoadLoop',
     'SwInstructionPrefetch',
     'SwapGlobalReadOrder',
+    'TDMFuse',
     'TDMInst',
     'TDMIterateMode',
     'TDMLoadWaveSync',
@@ -2438,6 +2441,24 @@
       'len': 17,
       'type': 'list',
     }),
+    'PrefetchGlobalReadA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
+    'PrefetchGlobalReadB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 18,
+      'type': 'list',
+    }),
     'PrefetchLocalRead': dict({
       'head': list([
         0,
@@ -2649,6 +2670,15 @@
         1,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'TDMFuse': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
       'type': 'list',
     }),
     'TDMInst': dict({

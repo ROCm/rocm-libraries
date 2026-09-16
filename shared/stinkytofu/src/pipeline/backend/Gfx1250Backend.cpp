@@ -260,6 +260,12 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
 
     mpm.addPass(createFunctionToModuleAdaptor(createAsmMovePropagationPass()));
 
+    // Verify immediately after move propagation: a dropped def is a tied dest
+    // with no definition, and later verifiers sit outside this manager.
+    if (moduleOptions.VerifyEach) {
+        mpm.addPass(createFunctionToModuleAdaptor(createStinkyIRVerifierPass()));
+    }
+
     // MSB is materialized for the entry function and every callable function
     // (each function owns its VGPR MSB hardware state).
     mpm.addPass(createFunctionToModuleAdaptor(createInsertVgprMsbPass()));

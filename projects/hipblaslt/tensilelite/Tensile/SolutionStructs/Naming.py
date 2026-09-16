@@ -214,6 +214,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
+  # TDMFuse=0 is the arrangement every shipped kernel already has, so naming it
+  # would rename all of them.
+  if state.get("TDMFuse", 0):
+    requiredParametersTemp.add("TDMFuse")
+  else:
+    requiredParametersTemp.discard("TDMFuse")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernelName":
       continue
