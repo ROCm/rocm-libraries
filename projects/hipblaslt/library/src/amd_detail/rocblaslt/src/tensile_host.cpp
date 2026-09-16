@@ -1072,6 +1072,14 @@ namespace
                                                     problem.computeInputTypeB(),
                                                     problem.a().dataType(),
                                                     problem.b().dataType()),
+            problem.computeInputTypeA() != problem.a().dataType() ? "--compute_input_typeA" : "",
+            problem.computeInputTypeA() != problem.a().dataType()
+                ? hipDataType_to_bench_string(tensile2HipType(problem.computeInputTypeA()))
+                : "",
+            problem.computeInputTypeB() != problem.b().dataType() ? "--compute_input_typeB" : "",
+            problem.computeInputTypeB() != problem.b().dataType()
+                ? hipDataType_to_bench_string(tensile2HipType(problem.computeInputTypeB()))
+                : "",
             "--algo_method",
             "index",
             "--solution_index",
@@ -1196,6 +1204,10 @@ namespace
                                                               problem.computeInputTypeB(),
                                                               problem.a().dataType(),
                                                               problem.b().dataType()),
+                    "compute_input_typeA",
+                    hipDataType_to_bench_string(tensile2HipType(problem.computeInputTypeA())),
+                    "compute_input_typeB",
+                    hipDataType_to_bench_string(tensile2HipType(problem.computeInputTypeB())),
                     "algo_method",
                     2,
                     "solution_index",
@@ -1313,6 +1325,10 @@ namespace
                                                               problem.computeInputTypeB(),
                                                               problem.a().dataType(),
                                                               problem.b().dataType()),
+                    "compute_input_typeA",
+                    hipDataType_to_bench_string(tensile2HipType(problem.computeInputTypeA())),
+                    "compute_input_typeB",
+                    hipDataType_to_bench_string(tensile2HipType(problem.computeInputTypeB())),
                     "activation_type",
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
@@ -1443,6 +1459,18 @@ namespace
                                                     problem.gemms[0].computeInputTypeB(),
                                                     problem.gemms[0].a().dataType(),
                                                     problem.gemms[0].b().dataType()),
+            problem.gemms[0].computeInputTypeA() != problem.gemms[0].a().dataType()
+                ? "--compute_input_typeA"
+                : "",
+            problem.gemms[0].computeInputTypeA() != problem.gemms[0].a().dataType()
+                ? hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].computeInputTypeA()))
+                : "",
+            problem.gemms[0].computeInputTypeB() != problem.gemms[0].b().dataType()
+                ? "--compute_input_typeB"
+                : "",
+            problem.gemms[0].computeInputTypeB() != problem.gemms[0].b().dataType()
+                ? hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].computeInputTypeB()))
+                : "",
             "--algo_method",
             "index",
             "--solution_index",
@@ -1602,6 +1630,10 @@ namespace
                                                       problem.gemms[0].computeInputTypeB(),
                                                       problem.gemms[0].a().dataType(),
                                                       problem.gemms[0].b().dataType()),
+            "compute_input_typeA",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].computeInputTypeA())),
+            "compute_input_typeB",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].computeInputTypeB())),
             "algo_method",
             2,
             "solution_index",
@@ -1752,6 +1784,10 @@ namespace
                                                       problem.gemms[0].computeInputTypeB(),
                                                       problem.gemms[0].a().dataType(),
                                                       problem.gemms[0].b().dataType()),
+            "compute_input_typeA",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].computeInputTypeA())),
+            "compute_input_typeB",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].computeInputTypeB())),
             "activation_type",
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
