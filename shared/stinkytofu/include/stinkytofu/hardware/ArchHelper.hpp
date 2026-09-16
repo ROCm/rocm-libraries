@@ -48,7 +48,7 @@ class STINKYTOFU_EXPORT ArchHelper {
         ArchInfo(std::string name, uint32_t major, uint32_t minor, uint32_t stepping,
                  uint32_t waveFrontSize, uint32_t totalVgprPerSimd = 0,
                  uint32_t vgprAllocGranule = 0, uint32_t maxWavesPerSimd = 0, uint32_t maxVGPR = 0,
-                 uint32_t maxSGPR = 0, uint32_t maxAGPR = 0)
+                 uint32_t maxSGPR = 0, uint32_t maxAGPR = 0, uint32_t packedWorkitemId = 0)
             : name(std::move(name)),
               major(major),
               minor(minor),
@@ -59,7 +59,8 @@ class STINKYTOFU_EXPORT ArchHelper {
               maxWavesPerSimd(maxWavesPerSimd),
               maxVGPR(maxVGPR),
               maxSGPR(maxSGPR),
-              maxAGPR(maxAGPR) {}
+              maxAGPR(maxAGPR),
+              packedWorkitemId(packedWorkitemId) {}
 
         virtual ~ArchInfo() = default;
 
@@ -100,6 +101,12 @@ class STINKYTOFU_EXPORT ArchHelper {
         const uint32_t maxVGPR;
         const uint32_t maxSGPR;
         const uint32_t maxAGPR;
+
+        // Nonzero when the dispatch packs the work-item ID dimensions into v0
+        // (X in bits 0:9, Y in 10:19, Z in 20:29), so one VGPR arrives filled
+        // whatever .amdhsa_system_vgpr_workitem_id says. Zero means the
+        // unpacked convention, one VGPR per enabled dimension from v0 upward.
+        const uint32_t packedWorkitemId;
     };
 
    public:
@@ -168,6 +175,15 @@ inline uint32_t getMaxWavesPerSimd(GfxArchID archID) {
     const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
     assert(archInfo && "Invalid GfxArchID");
     return archInfo->maxWavesPerSimd;
+}
+
+// True when the dispatch delivers all work-item ID dimensions in v0, so the
+// enabled-dimension count in the kernel descriptor says nothing about how many
+// VGPRs arrive filled -- the answer is one.
+inline bool hasPackedWorkitemId(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->packedWorkitemId != 0;
 }
 
 // Addressable registers per class, from the architecture's DEF_ARCH. Scalars

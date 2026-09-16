@@ -101,6 +101,10 @@ DEF_ARCH(GfxYourArch,
                                 // back is the granule at work.
     .maxWavesPerSimd = 8,       // wave slots per SIMD. Occupancy is capped here once
                                 // a kernel is small enough that registers stop binding
+    .packedWorkitemId = 1,      // 1 when the dispatch packs X, Y and Z into v0, so one
+                                // VGPR arrives filled however many dimensions are
+                                // enabled. 0 for the unpacked convention, one VGPR per
+                                // enabled dimension. LLVM calls this `packed-tid`.
     .defaultCycle = 4, .defaultLatency = 4)   // 4 for CDNA, 1 for RDNA
 ```
 

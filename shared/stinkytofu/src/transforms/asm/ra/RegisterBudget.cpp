@@ -9,6 +9,7 @@
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -96,14 +97,24 @@ uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
                     dispatchFilledSgprCount(numSgprPreload, workgroupIds));
 }
 
-uint32_t dispatchFilledVgprCount(int vgprWorkItem) {
-    // The field counts extra dimensions, so x alone is 0 and reaches v0.
+uint32_t dispatchFilledVgprCount(int vgprWorkItem, bool packedWorkitemId) {
+    // Packed: x, y and z share v0's bits 0:9, 10:19 and 20:29, so the enabled
+    // dimensions cost one register between them and the field says nothing.
+    if (packedWorkitemId) return 1u;
+    // Unpacked: one register per dimension from v0 up. The field counts extra
+    // dimensions, so x alone is 0 and reaches v0.
     return vgprWorkItem < 0 ? 1u : static_cast<uint32_t>(vgprWorkItem) + 1u;
 }
 
-uint32_t requiredVgprCount(const Function& function, int vgprWorkItem) {
+std::optional<uint32_t> settledDispatchFilledVgprCount(GfxArchID arch) {
+    if (!ArchHelper::getInstance().getArchInfo(arch)) return std::nullopt;
+    if (!hasPackedWorkitemId(arch)) return std::nullopt;
+    return 1u;
+}
+
+uint32_t requiredVgprCount(const Function& function, int vgprWorkItem, bool packedWorkitemId) {
     return std::max(highestRegisterCount(function, RegType::V),
-                    dispatchFilledVgprCount(vgprWorkItem));
+                    dispatchFilledVgprCount(vgprWorkItem, packedWorkitemId));
 }
 
 }  // namespace stinkytofu

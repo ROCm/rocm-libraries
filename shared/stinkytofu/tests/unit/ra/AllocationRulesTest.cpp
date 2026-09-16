@@ -71,6 +71,19 @@ AllocationRules twoPlacementRules(RuleStatus first, RuleStatus second) {
     return AllocationRules({even, low});
 }
 
+/// Forbids the one register the dispatch fills, for the case that needs a rule
+/// to collide with a pin rather than with an ordinary preference.
+AllocationRules zeroVBaseForbidden() {
+    AllocationRule rule;
+    rule.name = "NonZeroVBase";
+    rule.description = "a V block must not start at index 0";
+    rule.status = RuleStatus::Active;
+    rule.forbidsBase = [](RegType regClass, uint32_t base, uint32_t) {
+        return regClass == RegType::V && base == 0;
+    };
+    return AllocationRules({rule});
+}
+
 AllocationRules nothingIsLegal() {
     AllocationRule rule;
     rule.name = "NothingLegal";
@@ -352,10 +365,13 @@ TEST_F(AllocationRulesTest, PlacementAgainstAPinnedLiveInLeavesTheKernelUncolour
     // arrives in has no repair. That is why a new rule audits before it goes
     // Active.
     BasicBlock* entry = block("entry");
-    createVAddInBlock(entry, kRaTestArch, 2, 0, 1);  // v1 is a live-in at an odd index
+    // v0 is the register the dispatch fills, so the live-in there is pinned to
+    // the base this rule forbids. v1 is a live-in too, but nothing wrote it, so
+    // it is free to move to a base the rule allows.
+    createVAddInBlock(entry, kRaTestArch, 2, 0, 1);
     ASSERT_TRUE(liftForAllocation(*func));
 
-    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, evenVBasesOnly());
+    AllocationSetup setup(*func, RegClassSet::only(RegType::V), {}, zeroVBaseForbidden());
     const std::string error = colourError(setup);
     EXPECT_TRUE(contains(error, "live-in")) << error;
 }
