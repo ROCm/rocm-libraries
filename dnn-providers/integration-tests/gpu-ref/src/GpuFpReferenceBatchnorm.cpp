@@ -251,4 +251,78 @@ void GpuFpReferenceBatchnorm::launchFwdInfWithVar(const void* inputPtr,
     launchKernel(kernel.function(), geometry.localSize, geometry.gridSize, &args, sizeof(args));
 }
 
+void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
+                                             const std::vector<int64_t>& inputDims,
+                                             const std::vector<int64_t>& inputStrides,
+                                             const void* scalePtr,
+                                             const void* biasPtr,
+                                             void* outputPtr,
+                                             double epsilon,
+                                             double momentum,
+                                             void* meanPtr,
+                                             void* invVariancePtr,
+                                             const void* prevRunningMeanPtr,
+                                             const void* prevRunningVariancePtr,
+                                             void* nextRunningMeanPtr,
+                                             void* nextRunningVariancePtr,
+                                             std::vector<std::string>& defines)
+{
+    auto n = inputDims[0];
+    auto c = inputDims[1];
+    int64_t h = 0;
+    int64_t w = 0;
+    if(inputDims.size() == 3)
+    {
+        h = inputDims[2];
+        w = 1;
+    }
+    else if(inputDims.size() == 4)
+    {
+        h = inputDims[2];
+        w = inputDims[3];
+    }
+    else if(inputDims.size() == 5)
+    {
+        // For 5D, combine D*H*W into spatial dimension
+        auto d = inputDims[2];
+        h = d * inputDims[3];
+        w = inputDims[4];
+    }
+    else
+    {
+        throw std::invalid_argument(
+            "Batchnorm forward training requires input tensor rank to be 3, 4, or 5.");
+    }
+
+    constexpr unsigned int BLOCK_SIZE = 256;
+    const auto isLayoutNhwc = isChannelLastLayout(inputStrides);
+    defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(BLOCK_SIZE));
+    defines.emplace_back(std::string("-DIS_CHANNEL_LAST_LAYOUT=")
+                         + std::to_string(isLayoutNhwc ? 1 : 0));
+
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    const auto& kernel
+        = compiler.getOrCompile("GpuRefBatchnormFwdTrain.cpp", defines, "BatchnormFwdTrainRef");
+
+    BatchnormFwdTrainArgs args{};
+    args.input = inputPtr;
+    args.scale = scalePtr;
+    args.bias = biasPtr;
+    args.output = outputPtr;
+    args.epsilon = epsilon;
+    args.momentum = momentum;
+    args.mean = meanPtr;
+    args.invVariance = invVariancePtr;
+    args.prevResultRunningMean = prevRunningMeanPtr;
+    args.prevResultRunningVariance = prevRunningVariancePtr;
+    args.nextResultRunningMean = nextRunningMeanPtr;
+    args.nextResultRunningVariance = nextRunningVariancePtr;
+    args.n = static_cast<long long>(n);
+    args.c = static_cast<long long>(c);
+    args.hw = static_cast<long long>(h) * static_cast<long long>(w);
+
+    launchKernel(
+        kernel.function(), {BLOCK_SIZE, 1, 1}, {checkedNarrowToUInt(c), 1, 1}, &args, sizeof(args));
+}
+
 } // namespace hipdnn_gpu_ref
