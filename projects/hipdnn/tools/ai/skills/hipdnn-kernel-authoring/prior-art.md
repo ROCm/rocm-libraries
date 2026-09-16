@@ -93,5 +93,14 @@ before a kernel is tuned to it ([device-envelope.md](device-envelope.md)).
 
 In the report, per source used: what it gave you (algorithm, tiling scheme, masking
 convention, numeric edge case), and what you changed. One line each. A kernel whose
-provenance is "written from the operation specification" is a legitimate answer —
-say that rather than implying a source you did not read.
+provenance is "written from the operation specification" is a legitimate answer — but
+**declare it in those words**, as its own line, rather than leaving a mined-looking
+report with nothing behind it. The failure this prevents is provenance that reads like
+mining and is not: name the specification you wrote it from, and say that no
+implementation was consulted.
+
+The same declaration rule covers device facts. A number taken from the
+per-architecture specification table above because the device could not be observed is
+legitimate, and is written as exactly that — the table, the fact, and the probe
+outcome that sent you there ([device-envelope.md](device-envelope.md)). A documented
+fact reported as an observation is not.
