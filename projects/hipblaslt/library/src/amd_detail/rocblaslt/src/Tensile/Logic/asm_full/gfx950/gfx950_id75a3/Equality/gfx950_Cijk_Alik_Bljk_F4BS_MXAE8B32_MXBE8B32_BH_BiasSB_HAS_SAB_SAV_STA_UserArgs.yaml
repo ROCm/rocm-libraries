@@ -9,7 +9,7 @@ ProblemType:
   ActivationNoGuard: false
   ActivationType: hipblaslt_all
   AllowNoFreeDims: false
-  AssignedDerivedParameters: true
+  AssignedDerivedParameters: false
   Batched: true
   BetaOnlyUseBias: false
   BiasDataTypeList: [0, 7]
@@ -139,8 +139,8 @@ DefaultSolution:
   GlobalReadPerMfma: 1.0
   GlobalReadVectorWidthA: -1
   GlobalReadVectorWidthB: -1
-  GlobalSplitU: 1
-  GlobalSplitUAlgorithm: MultipleBuffer
+  GlobalSplitU: 0
+  GlobalSplitUAlgorithm: None
   GlobalSplitUCoalesced: false
   GlobalSplitUWorkGroupMappingRoundRobin: false
   GroupLoadStore: false
@@ -225,7 +225,7 @@ DefaultSolution:
   StoreRemapVectorWidth: 0
   StoreSyncOpt: 0
   StoreVectorWidth: -1
-  StreamK: 0
+  StreamK: 3
   StreamKAtomic: 0
   StreamKFixupTreeReduction: 0
   StreamKForceDPOnly: 0
@@ -282,7 +282,7 @@ Solutions:
   SolutionNameMin: Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STA_BH_Bias_HA_S_SAB_SAV_UserArgs_MT256x256x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM32_BL1_BS1_CD1_1_CLR1_CLS0_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA32_GRVWB32_GSU1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSSI0_LDSTI0_LBSPPA0_LBSPPB0_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA0_LPB0_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_8_MXLIBL_MXSFHPS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL0_PLSINSMW_PLSIN0_PAP0_PGL0_PGR2_PLR1_PKA1_PGRCS6_SGROB0_SIA3_SS0_SU32_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKFDPO0_SKWS0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMLWS0_TDMPLB0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL0_USLMX0_UDFMAC0_UIOFGRO0_UPLRP0_USFGRO0_USI1_VSn1_VWA1_VWB1_WGMBS1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
   ActivationFuncCall: false
   AssertSummationElementMultiple: 32
-  AssignedDerivedParameters: true
+  AssignedDerivedParameters: false
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_STA_BH_BiazZ0nQ8-jDvBdTkNx1lzlIPi_2YLs6cm7yqm4QDpttmw=
   CUCount: null
@@ -450,7 +450,7 @@ Solutions:
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
   PackedC1IndicesX: [1]
-  PostLoopStoreInNll: false
+  PostLoopStoreInNll: true
   PrefetchGlobalRead: 2
   ScheduleGROverBarrier: 0
   StoreSwapAddr: true
@@ -508,7 +508,7 @@ Solutions:
   _DepthUMXSA: 8
   _DepthUMXSB: 8
   _DepthUMetadata: 256
-  _GlobalAccumulation: MultipleBuffer
+  _GlobalAccumulation: PartialsBuffer
   _ScheduleIterAlg: 3
   _StinkyTofuOptLevel: 0
   _UseSgprForGRO: 0
