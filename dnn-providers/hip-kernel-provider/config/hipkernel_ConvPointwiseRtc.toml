@@ -1,0 +1,52 @@
+# Integration test configuration for hipkernel:ConvPointwiseRtc
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# No entry of either kind, and that is a statement rather than an omission.
+#
+# This engine's pack serves a TWO-node fusion: a rank-4 ConvolutionFwdAttributes whose
+# output tensor is virtual and declared FLOAT, immediately consumed by a unary
+# PointwiseAttributes in {RELU_FWD, ABS, NEG}, with FLOAT on all four tensors, arbitrary
+# positive strides, and an output tensor distinct from both inputs. The suite's
+# ConvolutionFwdPointwise sweeps also carry fp16 and bf16 cases, non-FLOAT intermediates
+# and a six-tensor bias variant; those need no skip entry, because `--test-engine` pins the
+# run to this engine and a case its `graph_match` refuses SKIPs on its own rather than
+# falling through to another loaded engine. A filter here would duplicate the matcher and
+# rot against it.
+#
+# The arch restriction is likewise already expressed, in the descriptor's own `arch` list
+# (gfx90a, the only architecture on which any of this kernel was compiled or run): the
+# loader filters the kernels out elsewhere and every case skips, so an `archs` entry would
+# restate it in a second place.
+#
+# Tolerances: the served cases pass at the suite's defaults against the GPU reference
+# executor. Both node families this fusion spans have a GPU plan builder
+# (GpuConvolutionFwdPlan.hpp and GpuPointwisePlan.hpp), so the reference materializes the
+# virtual intermediate at its declared FLOAT type and runs the two nodes in order -- which
+# is precisely the round trip this fusion elides, and precisely why the matcher requires
+# that intermediate to be FLOAT. ToleranceResolver's MAX_ACROSS_NODES rule takes the
+# loosest per-node number in the graph, and for float the conv and pointwise numbers are
+# both 1e-5, so the threshold is 1e-5 either way. The authoring round measured a worst-case
+# absolute error of 6.7e-6 across the proved shape envelope against the CPU reference at
+# the same numbers. An override belongs here only with a measured failure behind it, and
+# never to loosen a hand-written kernel's first proof.

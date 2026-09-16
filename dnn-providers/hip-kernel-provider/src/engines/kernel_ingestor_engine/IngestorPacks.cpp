@@ -24,6 +24,16 @@ const std::vector<IngestorPack>& ingestorPacks()
          &registerBatchnormInferenceSymbols,
          true,
          &resetBatchnormInferenceModuleCache},
+        // Same reason as the two above: its dispatch handler routes through
+        // buildIngestorKernelCode, which takes a KpackKernelLoader, so the handler holds
+        // one and owns the cache it reads. The generator's fragment keys this off the
+        // authored dialect instead and emitted `false, nullptr`; that would leave a routed
+        // pack unable to drop its modules, and TestIngestorPacksModuleCacheOwnership
+        // passes either way because it only checks the two fields agree.
+        {"hipkernel:ConvPointwiseRtc",
+         &registerConvPointwiseRtcSymbols,
+         true,
+         &resetConvPointwiseRtcModuleCache},
     };
     return s_packs;
 }

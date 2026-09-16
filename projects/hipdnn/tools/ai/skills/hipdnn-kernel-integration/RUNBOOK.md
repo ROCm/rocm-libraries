@@ -226,11 +226,22 @@ unit-test shapes, and a per-channel parameter dtype pinned to FLOAT
 (`BatchnormInferenceNative.cpp:103-107`). Hanging an unrelated kernel off it is not an
 extension, and if you did not ship it you are on the create path.
 
-Most requests have no pack at all: only `ConvNative.cpp`, `PointwiseNative.cpp` and
-`BatchnormInferenceNative.cpp` exist under
-`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`, and
-`IngestorPacks.cpp:16-26` registers exactly those three. Layernorm, RMSnorm and resample
-are `hip_mlops_engine` plan builders with no ingestor pack; batchnorm has both, the
+**A fourth, `hipkernel:ConvPointwiseRtc`, is the second conditional yes and the only
+pack serving a two-node graph.** A rank-4 `ConvolutionFwd` whose output tensor is
+virtual, consumed by a unary `Pointwise`, in one launch with no workspace
+(`packs/ConvPointwiseRtcNative.cpp`, `kernels/ConvFwdPointwiseFused.cpp`): nine variants
+over three block sizes and three activations, a matcher that answers every field of both
+attribute tables, and a handler that routes `kernel_source.kind` through
+`buildIngestorKernelCode`. Its open axes are its stated limits — gfx90a alone, FLOAT
+alone of the three `HKP_IO_DTYPE` tags that compile, and `{RELU_FWD, ABS, NEG}` of the
+four `HKP_ACTIVATION` tags — and extending it along one of them is for whoever shipped
+it, on the same ownership test batchnorm gets.
+
+Most requests have no pack at all: only `ConvNative.cpp`, `PointwiseNative.cpp`,
+`BatchnormInferenceNative.cpp` and `ConvPointwiseRtcNative.cpp` exist under
+`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`, and the
+`s_packs` table in `IngestorPacks.cpp` registers exactly those four. Layernorm, RMSnorm
+and resample are `hip_mlops_engine` plan builders with no ingestor pack; batchnorm has both, the
 hand-written builder still serving the same single-node graph
 (`BatchnormPlanBuilder.cpp:371-374`, `BatchnormPlanBuilder.cpp:550-554`). For the three
 without a pack the answer to "which existing pack" is **none**, and step 3 is where the

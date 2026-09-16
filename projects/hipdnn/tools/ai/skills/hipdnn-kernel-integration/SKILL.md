@@ -69,12 +69,22 @@ stated. Three things follow, and all are load-bearing:
   integration test wiring it, and 10 of 82 `BatchnormInference/Default` bundle cases
   that mirror its own unit-test shapes. A reader who did not ship it is still on the
   create path.
+- **A fourth, `hipkernel:ConvPointwiseRtc`, is the only pack serving a two-node graph,
+  and it is likewise available only to whoever shipped it.** A rank-4 `ConvolutionFwd`
+  whose output tensor is virtual, consumed by a unary `Pointwise`, computed in one
+  launch with no workspace (`packs/ConvPointwiseRtcNative.cpp`,
+  `kernels/ConvFwdPointwiseFused.cpp`). Nine shipped variants over three block sizes and
+  three activations; its handler routes `kernel_source.kind` through
+  `buildIngestorKernelCode`, so it can serve a `hiprtc_file` descriptor. Its live axes
+  are its stated limits: gfx90a alone, FLOAT alone of the three `HKP_IO_DTYPE` tags that
+  compile, and `{RELU_FWD, ABS, NEG}` of the four `HKP_ACTIVATION` tags.
 - **The operations people ask for mostly have no pack at all.** Only `ConvNative.cpp`,
-  `PointwiseNative.cpp` and `BatchnormInferenceNative.cpp` exist under
+  `PointwiseNative.cpp`, `BatchnormInferenceNative.cpp` and
+  `ConvPointwiseRtcNative.cpp` exist under
   `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`, and
-  the registration table names exactly those three (`IngestorPacks.cpp:16-26`).
-  Layernorm, RMSnorm and resample live on `hip_mlops_engine` as hand-written plan
-  builders with no ingestor pack; batchnorm now has both, because
+  the registration table names exactly those four (the `s_packs` table in
+  `IngestorPacks.cpp`). Layernorm, RMSnorm and resample live on `hip_mlops_engine` as
+  hand-written plan builders with no ingestor pack; batchnorm now has both, because
   `hip_mlops_engine`'s builder still claims the identical single-node graph
   (`BatchnormPlanBuilder.cpp:371-374`, `BatchnormPlanBuilder.cpp:550-554`). For the
   three with no pack, "write the symbols" is not a fallback, it is the job.

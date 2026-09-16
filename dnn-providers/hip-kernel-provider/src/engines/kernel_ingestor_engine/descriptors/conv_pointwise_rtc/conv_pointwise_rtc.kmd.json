@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "ce0be42d-b8f0-4595-bc66-9c396bd04db1",
+  "name": "ConvPointwiseRtc variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "io_dtype",
+      "type": "string"
+    },
+    {
+      "name": "activation",
+      "type": "string"
+    }
+  ]
+}

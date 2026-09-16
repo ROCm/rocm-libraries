@@ -32,19 +32,20 @@ handler's `prepare()` for that call before authoring anything: a handler that ca
 `_kernelCompiler.compile(kernel.source.sourceFile, …)` directly serves `embedded_source`
 only, and a `hiprtc_file` descriptor under it throws at `prepare()` no matter how correct
 the descriptor is. This is a per-pack property, not a property of the format: as of this
-writing Pointwise (`PointwiseNative.cpp:432-433`) and BatchnormInference
-(`BatchnormInferenceNative.cpp:632-633`) route; ConvFwd (`ConvNative.cpp:501-502`) does
-not. Routing a pack is a two-line handler change and a rebuild.
+writing Pointwise (`PointwiseNative.cpp:432-433`), BatchnormInference
+(`BatchnormInferenceNative.cpp:632-633`) and ConvPointwiseRtc
+(`ConvPointwiseRtcNative.cpp`, in `prepare()`) route; ConvFwd (`ConvNative.cpp:501-502`)
+does not. Routing a pack is a two-line handler change and a rebuild.
 
-**Three packs have installed symbols today, and this page still serves only the one you
+**Four packs have installed symbols today, and this page still serves only the one you
 shipped.** It adds no native symbol, so it can never widen the set of packs, and of the
-three only the two named above can serve a `hiprtc_file` descriptor at all. Two of the
-three are reference scaffolds in any case — `PointwiseAdd` computes one element under
+four only the three named above can serve a `hiprtc_file` descriptor at all. Two of the
+four are reference scaffolds in any case — `PointwiseAdd` computes one element under
 `if(blockIdx.x == 0 && threadIdx.x == 0)` (`kernels/PointwiseAdd.cpp:11-12`) and
 `ConvFwd` is a naive direct convolution serving 6 of 1218 `ConvolutionFwd` bundle cases —
-so the only pack here that is a real extension target is `BatchnormInference`, and only
-for the person who shipped it (`IngestorPacks.cpp:16-26`). If none of the three is a
-pack *you* shipped, this page is not the one you want.
+so the real extension targets here are `BatchnormInference` and `ConvPointwiseRtc`, each
+only for the person who shipped it (see the `s_packs` table in `IngestorPacks.cpp`). If
+none of the four is a pack *you* shipped, this page is not the one you want.
 
 **Within those bounds it is the cheapest vehicle for an exhaustive sweep.** A variant here
 costs a descriptor entry and a file in the bundle rather than a rebuild, so the whole

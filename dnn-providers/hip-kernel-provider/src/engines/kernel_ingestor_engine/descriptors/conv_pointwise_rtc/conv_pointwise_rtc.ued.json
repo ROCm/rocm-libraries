@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "id": "499fdc52-4aab-4d1a-884c-39ae48db749c",
+  "name": "hipkernel:ConvPointwiseRtc",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.conv_pointwise_rtc.graph_match"
+  },
+  "metadata": "ce0be42d-b8f0-4595-bc66-9c396bd04db1",
+  "heuristic": "fdbac032-9751-4bf2-a96c-2b33ac341c05",
+  "knobs": [
+    "block_size"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

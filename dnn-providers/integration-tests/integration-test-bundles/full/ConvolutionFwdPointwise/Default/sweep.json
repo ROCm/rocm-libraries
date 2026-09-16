@@ -46656,6 +46656,102 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Full/IntegrationGpuConvFwdBiasActiv3dFp32.Correctness_99"
       }
+    },
+    {
+      "id": "1_16_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1_d87e0d",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              1,
+              16,
+              8
+            ],
+            "strides": [
+              128,
+              128,
+              8,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              16,
+              8
+            ],
+            "strides": [
+              2048,
+              128,
+              8,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ],
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": 0.1,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1
+      }
     }
   ]
 }

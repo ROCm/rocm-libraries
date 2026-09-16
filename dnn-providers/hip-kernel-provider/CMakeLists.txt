@@ -470,6 +470,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         conv_fwd/conv_fwd.uhd.json
         conv_fwd/conv_fwd_f16_block64.ukd.json
         conv_fwd/kernel_dtype_matches_graph.umd.json
+        conv_pointwise_rtc/conv_pointwise_rtc.kdp.json
+        conv_pointwise_rtc/conv_pointwise_rtc.kmd.json
+        conv_pointwise_rtc/conv_pointwise_rtc.udd.json
+        conv_pointwise_rtc/conv_pointwise_rtc.ued.json
+        conv_pointwise_rtc/conv_pointwise_rtc.uhd.json
+        conv_pointwise_rtc/kernel_dtype_matches_graph.umd.json
         pointwise/kernel_dtype_matches_graph.umd.json
         pointwise/operation_is_add.umd.json
         pointwise/operation_is_mul.umd.json

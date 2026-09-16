@@ -11,5 +11,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestBatchnormInferencePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestBatchnormInferenceMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvPointwiseRtcPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvPointwiseRtcMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestHiprtcFileKernelSource.cpp
 )

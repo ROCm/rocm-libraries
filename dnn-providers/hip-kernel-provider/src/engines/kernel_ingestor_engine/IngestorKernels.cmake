@@ -11,7 +11,17 @@
 #
 # Resolved against this file's own directory, so an includer's location does not matter.
 set(HIPDNN_INGESTOR_PACK_KERNEL_DIR "${CMAKE_CURRENT_LIST_DIR}/kernels")
-set(HIPDNN_INGESTOR_PACK_KERNELS PointwiseAdd PointwiseMul PointwiseSub ConvFwd BatchnormInference)
+set(HIPDNN_INGESTOR_PACK_KERNELS
+    PointwiseAdd
+    PointwiseMul
+    PointwiseSub
+    ConvFwd
+    BatchnormInference
+    # ConvolutionFwd fused with a unary Pointwise epilogue, hipkernel:ConvPointwiseRtc.
+    # The stem of the SOURCE FILE, not the entry point (hkpConvFwdPointwiseFused): both
+    # consumers build `${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp` from this list.
+    ConvFwdPointwiseFused
+)
 
 # Headers those kernels include, embedded by the same mechanism: KernelEmbedding.cmake
 # routes a .h/.hpp into the provider's virtual-header list instead of its kernel-source

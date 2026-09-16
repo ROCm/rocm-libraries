@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "78b6f5ef-fd33-4793-affb-302ee09b8225",
+  "name": "ConvPointwiseRtc dispatch",
+  "dispatch_symbol": "hipkernel.conv_pointwise_rtc.dispatch"
+}

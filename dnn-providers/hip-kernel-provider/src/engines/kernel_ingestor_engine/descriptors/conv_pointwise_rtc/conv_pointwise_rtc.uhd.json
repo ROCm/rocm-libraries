@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "fdbac032-9751-4bf2-a96c-2b33ac341c05",
+  "name": "ConvPointwiseRtc selector",
+  "kind": "native",
+  "payload": "hipkernel.conv_pointwise_rtc.score"
+}

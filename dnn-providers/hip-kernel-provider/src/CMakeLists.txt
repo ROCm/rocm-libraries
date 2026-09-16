@@ -345,6 +345,26 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             REFERENCE_EXECUTOR cpu
             ENVIRONMENT    "HIPDNN_TEST_VERIFICATION_MODE=cpu"
         )
+        # hipkernel:ConvPointwiseRtc, the fused ConvolutionFwd + unary Pointwise pack. Back
+        # to gpu, unlike the batchnorm entry directly above, and checked rather than copied
+        # from a sibling: the mode question is whether the reference executor implements
+        # every op family in the graph, and this graph spans two. Both have a GPU plan
+        # builder -- gpu-graph-executor/detail/GpuConvolutionFwdPlan.hpp and
+        # GpuPointwisePlan.hpp -- and GpuPointwiseUnaryPlanBuilder::isApplicable admits
+        # RELU_FWD, ABS and NEG, which is exactly this pack's activation set. The GPU
+        # executor also materializes the virtual intermediate at its own declared type and
+        # runs the nodes in order, which is the round trip this fusion elides and therefore
+        # the comparison worth making. Named explicitly rather than left to `auto`, whose
+        # golden -> gpu -> cpu chain ends in a silent skip.
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-hipkernel-conv-pointwise-rtc-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    hipkernel:ConvPointwiseRtc
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_ConvPointwiseRtc.toml
+            REFERENCE_EXECUTOR gpu
+            ENVIRONMENT    "HIPDNN_TEST_VERIFICATION_MODE=gpu"
+        )
 
         # THIS TARGET IS A SMOKE GATE, NOT A COVERAGE GATE. Green here means the
         # `hiprtc_file` path loaded a descriptor set from HIPDNN_DESCRIPTOR_RUNTIME_DIR,

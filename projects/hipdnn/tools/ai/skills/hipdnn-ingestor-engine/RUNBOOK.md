@@ -199,12 +199,12 @@ to [extend.md](extend.md).
 
 **Inventory the packs before you choose a dialect.** Ask, in this order:
 
-1. **Does an ingestor pack already exist for this operation, and is it yours?** Three
-   packs exist — `ConvNative.cpp`, `PointwiseNative.cpp` and
-   `BatchnormInferenceNative.cpp` under
+1. **Does an ingestor pack already exist for this operation, and is it yours?** Four
+   packs exist — `ConvNative.cpp`, `PointwiseNative.cpp`,
+   `BatchnormInferenceNative.cpp` and `ConvPointwiseRtcNative.cpp` under
    `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`,
-   registered at `IngestorPacks.cpp:16-26`. The answer turns on **ownership**, with one
-   independent disqualifier on top of it:
+   registered in the `s_packs` table in `IngestorPacks.cpp`. The answer turns on
+   **ownership**, with one independent disqualifier on top of it:
    - **No pack for the operation** — layernorm, RMSnorm, resample and most requests.
      Those three are `hip_mlops_engine` plan builders with no ingestor pack. Create
      path.
@@ -230,6 +230,18 @@ to [extend.md](extend.md).
      that batchnorm now has *both* an ingestor pack and the `hip_mlops_engine` builder
      still claiming the same single-node graph (`BatchnormPlanBuilder.cpp:371-374`,
      `BatchnormPlanBuilder.cpp:550-554`).
+   - **The candidate is `ConvPointwiseRtc`** — the second conditional yes, and the only
+     pack serving a *two-node* graph: a rank-4 `ConvolutionFwd` whose output tensor is
+     virtual, consumed by a unary `Pointwise`, computed in one launch with no workspace
+     (`packs/ConvPointwiseRtcNative.cpp`, `kernels/ConvFwdPointwiseFused.cpp`). It is no
+     scaffold either — nine shipped variants over three block sizes and three
+     activations, a matcher that answers every field of both attribute tables, and a
+     handler that routes `kernel_source.kind` through `buildIngestorKernelCode`, so it
+     can serve a `hiprtc_file` descriptor. Its open axes are its stated limits: one
+     proved architecture (gfx90a), FLOAT alone of the three `HKP_IO_DTYPE` tags that
+     compile, and `{RELU_FWD, ABS, NEG}` of the four `HKP_ACTIVATION` tags — IDENTITY
+     compiles but the CPU reference declines it, so it is unmeasured rather than
+     refused on merit. Extending it means another of those, by whoever shipped it.
 2. **If no, this is the create path.** Go to
    [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) and return here for
    corpus, sweeps, tuning and packaging once the pack exists.

@@ -1,0 +1,178 @@
+{
+  "version": "1.0",
+  "id": "afb69789-850b-4b0d-a59c-89a3a6c94793",
+  "name": "hipkernel:conv_pointwise_rtc",
+  "matchers": [
+    "64162462-72a7-4d50-a89f-906b458855dc"
+  ],
+  "engine": "499fdc52-4aab-4d1a-884c-39ae48db749c",
+  "dispatch": "78b6f5ef-fd33-4793-affb-302ee09b8225",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "499fdc52-4aab-4d1a-884c-39ae48db749c",
+          "kmd_id": "ce0be42d-b8f0-4595-bc66-9c396bd04db1",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "block_size",
+            "io_dtype",
+            "activation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "89c842b1-6b30-4c70-8a4c-1875336a98ab",
+      "name": "conv_pointwise_rtc.f32_relu_fwd_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 64,
+        "io_dtype": "FLOAT",
+        "activation": "RELU_FWD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "aaf1d415-fabe-4f6d-af40-91148a2053a9",
+      "name": "conv_pointwise_rtc.f32_relu_fwd_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 256,
+        "io_dtype": "FLOAT",
+        "activation": "RELU_FWD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5e711e90-6de5-4910-b1f5-60492f6318af",
+      "name": "conv_pointwise_rtc.f32_relu_fwd_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 1024,
+        "io_dtype": "FLOAT",
+        "activation": "RELU_FWD"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ea7d4a18-d7b5-4e30-8572-94376d70943c",
+      "name": "conv_pointwise_rtc.f32_abs_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 64,
+        "io_dtype": "FLOAT",
+        "activation": "ABS"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0ddc8898-f355-4e78-a439-16445296911c",
+      "name": "conv_pointwise_rtc.f32_abs_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 256,
+        "io_dtype": "FLOAT",
+        "activation": "ABS"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1a24d29a-35c8-48b1-b2de-90b09156caf4",
+      "name": "conv_pointwise_rtc.f32_abs_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 1024,
+        "io_dtype": "FLOAT",
+        "activation": "ABS"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a52b060d-16a0-420d-a10a-f50e0943d7d1",
+      "name": "conv_pointwise_rtc.f32_neg_block64",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 64,
+        "io_dtype": "FLOAT",
+        "activation": "NEG"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "bf604bdb-317f-4d4f-81a0-4a0a3fe18ac2",
+      "name": "conv_pointwise_rtc.f32_neg_block256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 256,
+        "io_dtype": "FLOAT",
+        "activation": "NEG"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "aee12c95-97c2-47d0-9d77-cb1315e4f328",
+      "name": "conv_pointwise_rtc.f32_neg_block1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwdPointwiseFused.cpp",
+        "entry_point": "hkpConvFwdPointwiseFused"
+      },
+      "metadata": {
+        "block_size": 1024,
+        "io_dtype": "FLOAT",
+        "activation": "NEG"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx90a"
+  ]
+}
