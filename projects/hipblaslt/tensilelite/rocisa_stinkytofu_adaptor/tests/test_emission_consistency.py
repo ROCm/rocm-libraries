@@ -52,7 +52,8 @@ Notes:
     - Each test method spawns 2 or 3 fresh Python subprocesses (one per
       path). They inherit ``PYTHONPATH`` from the parent runner. Backend
       selection is via the ``ROCISA_BACKEND`` env var only.
-    - We always call ``rocIsa.getInstance().init(arch, "")`` then
+    - We resolve ``amdclang++`` from the selected ROCm installation, call
+      ``rocIsa.getInstance().init(arch, assembler)`` and then
       ``setKernel(arch, 64)`` in the preamble. ``init`` alone registers ISA
       metadata (caps); ``setKernel`` installs the per-thread ``KernelInfo``
       whose ``isaVersion`` ``ReadWriteInstruction::typeConvert()`` uses for
@@ -128,8 +129,10 @@ def _run_in_subproc(script: str, *, backend, timeout: float = 30) -> str:
     # PYTHONPATH is inherited from the parent runner (the test.sh wrapper
     # in this directory sets it; manual ``python3`` invocations need to
     # set it themselves).
+    # Ignore site initialization so an editable-install import hook cannot
+    # take precedence over the binding root supplied by test.sh via PYTHONPATH.
     proc = subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, "-S", "-c", script],
         env=env,
         capture_output=True,
         text=True,
@@ -161,9 +164,17 @@ def _run_in_subproc(script: str, *, backend, timeout: float = 30) -> str:
 # ``toString`` type suffixes) matches ``arch_tuple`` — same as real KernelWriter
 # flows (see ``KernelWriter`` / unit tests calling ``setKernel`` after ``init``).
 _INIT_PREAMBLE = textwrap.dedent("""\
+    import os
+    import shutil
     import rocisa
+    _rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    _search_path = os.pathsep.join([
+        os.path.join(_rocm_path, "bin"),
+        os.path.join(_rocm_path, "lib", "llvm", "bin"),
+    ])
+    _assembler = shutil.which("amdclang++", path=_search_path) or "amdclang++"
     _ri = rocisa.rocIsa.getInstance()
-    _ri.init({arch_tuple}, "", False)
+    _ri.init({arch_tuple}, _assembler, False)
     _ri.setKernel({arch_tuple}, 64)
 """)
 
