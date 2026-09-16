@@ -56,7 +56,7 @@ export function EnginePanel({
   const [handle, setHandle] = useState<BuildHandle | null>(null);
   const [selectedEngine, setSelectedEngine] = useState<EngineOption | null>(null);
   const [engines, setEngines] = useState<readonly EngineOption[]>([]);
-  // "" = let hipDNN's heuristics pick; otherwise a decimal engine id.
+  // "" = let hipDNN's heuristics pick; otherwise an engine name.
   const [engineChoice, setEngineChoice] = useState("");
   const [enginesBusy, setEnginesBusy] = useState(false);
   const [serializedGraph, setSerializedGraph] = useState<string | null>(null);
@@ -156,7 +156,7 @@ export function EnginePanel({
       }
       setEngines(result.engines);
       setEngineChoice((prev) =>
-        prev && !result.engines.some((e) => e.id === prev) ? "" : prev,
+        prev && !result.engines.some((e) => e.name === prev) ? "" : prev,
       );
       if (loud) note("INFO", `${result.engines.length} engine(s) available for this graph.`);
     },
@@ -205,15 +205,14 @@ export function EnginePanel({
       setStatusKind("info");
       note("INFO", `Build OK${result.selectedEngine ? ` on ${result.selectedEngine.name}` : ""}.`);
       // hipDNN ignores a pinned engine that has no solution for this graph.
-      if (engineChoice && result.selectedEngine && result.selectedEngine.id !== engineChoice) {
-        const requested = engines.find((e) => e.id === engineChoice)?.name ?? engineChoice;
+      if (engineChoice && result.selectedEngine && result.selectedEngine.name !== engineChoice) {
         note(
           "WARN",
-          `Engine ${requested} is not applicable to this graph; hipDNN used ${result.selectedEngine.name}.`,
+          `Engine ${engineChoice} is not applicable to this graph; hipDNN used ${result.selectedEngine.name}.`,
         );
       }
     },
-    [appendCaptured, note, engineChoice, engines, info],
+    [appendCaptured, note, engineChoice, info],
   );
 
   const startBuild = useCallback((): number => {
@@ -240,7 +239,7 @@ export function EnginePanel({
     };
     const generation = startBuild();
     try {
-      const result = await engine.build(pending.submittedGraphJson, engineChoice ? { engineId: engineChoice } : {});
+      const result = await engine.build(pending.submittedGraphJson, engineChoice ? { engineName: engineChoice } : {});
       applyBuildResult(result, pending, generation);
     } catch (error) {
       buildRejected(error, generation);
@@ -268,7 +267,7 @@ export function EnginePanel({
     const generation = startBuild();
     note("INFO", `Loading hipDNN JSON from ${file.handle.name}.`);
     try {
-      const result = await engine.buildHipdnnJson(file.contents, engineChoice ? { engineId: engineChoice } : {});
+      const result = await engine.buildHipdnnJson(file.contents, engineChoice ? { engineName: engineChoice } : {});
       applyBuildResult(result, pending, generation);
     } catch (error) {
       buildRejected(error, generation);
@@ -364,7 +363,7 @@ export function EnginePanel({
           >
             <option value="">Best (heuristics)</option>
             {engines.map((e, i) => (
-              <option key={e.id} value={e.id}>
+              <option key={e.name} value={e.name}>
                 {i === 0 ? `${e.name} (top ranked)` : e.name}
               </option>
             ))}

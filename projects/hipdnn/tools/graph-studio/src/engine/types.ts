@@ -53,8 +53,9 @@ export interface EngineInfo {
 }
 
 /**
- * A hipDNN engine applicable to a graph. `id` is the backend's 64-bit engine id
- * as a decimal string: it is a name hash and would lose precision as a number.
+ * A hipDNN engine applicable to a graph. `name` is the engine's unique name,
+ * which is what a build is pinned to; `id` is the backend's 64-bit engine id as
+ * a decimal string — a name hash that would lose precision as a number.
  */
 export interface EngineOption {
   readonly id: string;
@@ -62,8 +63,8 @@ export interface EngineOption {
 }
 
 export interface BuildOptions {
-  /** Pin the plan to this engine; omitted lets hipDNN's heuristics choose. */
-  readonly engineId?: string;
+  /** Pin the plan to this engine by name; omitted lets hipDNN's heuristics choose. */
+  readonly engineName?: string;
 }
 
 export interface ListEnginesResult {

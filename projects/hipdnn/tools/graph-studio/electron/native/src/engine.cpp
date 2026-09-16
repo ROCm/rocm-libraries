@@ -267,64 +267,73 @@ std::unique_ptr<BuiltGraph> prepareGraph(Napi::Env env,
     return built;
 }
 
+// The name a loaded engine carries. The backend answers for plugin-supplied
+// engines, which the frontend's static registry knows nothing about; that
+// registry, and finally the hexadecimal id, are the fallbacks.
+std::string engineNameFor(hipdnnHandle_t handle, int64_t id)
+{
+    size_t length = 0;
+    if(handle != nullptr
+       && hipdnn_frontend::detail::hipdnnBackend()->getEngineNameByIdExt(
+              handle, id, nullptr, &length)
+              == HIPDNN_STATUS_SUCCESS
+       && length > 0)
+    {
+        std::vector<char> name(length);
+        if(hipdnn_frontend::detail::hipdnnBackend()->getEngineNameByIdExt(
+               handle, id, name.data(), &length)
+           == HIPDNN_STATUS_SUCCESS)
+            return {name.data()};
+    }
+    return hipdnn_frontend::detail::resolveEngineName(id);
+}
+
 // Engine ids are 64-bit name hashes, so they cross the JS boundary as decimal
-// strings — a double would silently round them.
-Napi::Object engineToJs(Napi::Env env, int64_t id)
+// strings — a double would silently round them. The name is what the renderer
+// shows and pins builds to; the id is kept for display and report rows.
+Napi::Object engineToJs(Napi::Env env, hipdnnHandle_t handle, int64_t id)
 {
     Napi::Object eng = Napi::Object::New(env);
     eng.Set("id", std::to_string(id));
-    eng.Set("name", hipdnn_frontend::detail::resolveEngineName(id));
+    eng.Set("name", engineNameFor(handle, id));
     return eng;
 }
 
 // Heuristic-ranked engine candidates for a graph whose operation graph is built.
 // Index 0 is the heuristics' own pick. A query failure yields an empty list.
-Napi::Array rankedEnginesToJs(Napi::Env env, Graph& graph)
+Napi::Array rankedEnginesToJs(Napi::Env env, hipdnnHandle_t handle, Graph& graph)
 {
     std::vector<int64_t> ids;
     if(graph.get_ranked_engine_ids(ids).is_bad())
         ids.clear();
     Napi::Array arr = Napi::Array::New(env, ids.size());
     for(std::size_t i = 0; i < ids.size(); ++i)
-        arr.Set(i, engineToJs(env, ids[i]));
+        arr.Set(i, engineToJs(env, handle, ids[i]));
     return arr;
 }
 
-// Read options.engineId (a decimal string). Returns false and fills `result`
-// when the id is present but malformed.
-bool readEngineOption(Napi::Env env,
-                      const Napi::CallbackInfo& info,
-                      Napi::Object& result,
-                      std::vector<std::string>& log,
-                      std::optional<int64_t>& out)
+// Read options.engineName. Absent or empty means hipDNN's heuristics choose.
+std::optional<std::string> readEngineOption(const Napi::CallbackInfo& info)
 {
     if(info.Length() < 2 || !info[1].IsObject())
-        return true;
-    const Napi::Value idValue = info[1].As<Napi::Object>().Get("engineId");
-    if(!idValue.IsString())
-        return true;
-    const std::string idText = idValue.As<Napi::String>().Utf8Value();
-    try
-    {
-        out = static_cast<int64_t>(std::stoll(idText));
-    }
-    catch(const std::exception&)
-    {
-        setFailure(env, result, "INVALID_VALUE", "Invalid engine id: " + idText, log);
-        return false;
-    }
-    return true;
+        return std::nullopt;
+    const Napi::Value nameValue = info[1].As<Napi::Object>().Get("engineName");
+    if(!nameValue.IsString())
+        return std::nullopt;
+    std::string name = nameValue.As<Napi::String>().Utf8Value();
+    if(name.empty())
+        return std::nullopt;
+    return name;
 }
 
 void applyPreferredEngine(BuiltGraph& built,
-                          std::optional<int64_t> engineId,
+                          const std::optional<std::string>& engineName,
                           std::vector<std::string>& log)
 {
-    if(!engineId)
+    if(!engineName)
         return;
-    built.graph.set_preferred_engine_id_ext(engineId);
-    log.push_back("Requested engine " + hipdnn_frontend::detail::resolveEngineName(*engineId)
-                  + ".");
+    built.graph.set_preferred_engine_id_ext(*engineName);
+    log.push_back("Requested engine " + *engineName + ".");
 }
 
 // Compile the plan and fill the JS result: workspace, the engine hipDNN chose,
@@ -344,7 +353,8 @@ Napi::Value compileAndReport(Napi::Env env,
     log.push_back("Built execution plan.");
     built->graph.get_workspace_size(built->workspaceSize);
 
-    Napi::Array engines = rankedEnginesToJs(env, built->graph);
+    hipdnnHandle_t handle = *built->handle;
+    Napi::Array engines = rankedEnginesToJs(env, handle, built->graph);
 
     int64_t engineId = -1;
     const bool haveEngineId = built->graph.get_execution_plan_engine_id(engineId).is_good();
@@ -360,7 +370,7 @@ Napi::Value compileAndReport(Napi::Env env,
     result.Set("handle", token);
     result.Set("workspaceSize", Napi::Number::New(env, static_cast<double>(ws)));
     if(haveEngineId)
-        result.Set("selectedEngine", engineToJs(env, engineId));
+        result.Set("selectedEngine", engineToJs(env, handle, engineId));
     if(haveJson)
         result.Set("serializedGraph", canonicalJson);
     result.Set("engines", engines);
@@ -369,9 +379,9 @@ Napi::Value compileAndReport(Napi::Env env,
 }
 
 // ── build(graphJson, options) ──────────────────────────────────────────
-// options.engineId (decimal string) pins the engine; omitted means the
-// heuristics choose. A pinned engine that isn't applicable to this graph is
-// ignored by hipDNN, so the caller compares selectedEngine against its request.
+// options.engineName pins the engine; omitted means the heuristics choose. A
+// pinned engine that isn't applicable to this graph is ignored by hipDNN, so
+// the caller compares selectedEngine against its request.
 Napi::Value Build(const Napi::CallbackInfo& info)
 {
     Napi::Env env = info.Env();
@@ -379,15 +389,13 @@ Napi::Value Build(const Napi::CallbackInfo& info)
     std::vector<std::string> log;
     CaptureScope capture(env, result);
 
-    std::optional<int64_t> preferredEngineId;
-    if(!readEngineOption(env, info, result, log, preferredEngineId))
-        return result;
+    const std::optional<std::string> preferredEngine = readEngineOption(info);
 
     std::unique_ptr<BuiltGraph> built = prepareGraph(env, info, result, log);
     if(!built)
         return result;
 
-    applyPreferredEngine(*built, preferredEngineId, log);
+    applyPreferredEngine(*built, preferredEngine, log);
     return compileAndReport(env, result, log, std::move(built));
 }
 
@@ -408,9 +416,7 @@ Napi::Value BuildHipdnnJson(const Napi::CallbackInfo& info)
         return result;
     }
 
-    std::optional<int64_t> preferredEngineId;
-    if(!readEngineOption(env, info, result, log, preferredEngineId))
-        return result;
+    const std::optional<std::string> preferredEngine = readEngineOption(info);
 
     auto built = std::make_unique<BuiltGraph>();
     const Error handleErr = hipdnn_frontend::createHipdnnHandle(built->handle);
@@ -429,7 +435,7 @@ Napi::Value BuildHipdnnJson(const Napi::CallbackInfo& info)
     }
     log.push_back("Loaded hipDNN JSON graph.");
 
-    applyPreferredEngine(*built, preferredEngineId, log);
+    applyPreferredEngine(*built, preferredEngine, log);
     return compileAndReport(env, result, log, std::move(built));
 }
 
@@ -493,7 +499,7 @@ Napi::Value ListEngines(const Napi::CallbackInfo& info)
 
     Napi::Array engines = Napi::Array::New(env, ids.size());
     for(std::size_t i = 0; i < ids.size(); ++i)
-        engines.Set(i, engineToJs(env, ids[i]));
+        engines.Set(i, engineToJs(env, *built->handle, ids[i]));
 
     result.Set("ok", true);
     result.Set("engines", engines);
