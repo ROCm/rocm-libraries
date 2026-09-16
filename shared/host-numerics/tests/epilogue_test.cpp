@@ -43,6 +43,27 @@ void testReferenceEpilogue() {
             "Reference epilogue auxiliary output mismatch.");
     require(amax.loadAs<float>({0}) == 5, "Reference epilogue AMax mismatch.");
 
+    Tensor affineOutput(ScalarType::Float32, Shape{2, 2});
+    EpilogueOptions affineOptions(ScalarType::Float32);
+    affineOptions.inputScale = Tensor::scalar(ScalarType::Float32, 2.0f);
+    affineOptions.addend =
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{10, 20, 30, 40});
+    affineOptions.addendScale = Tensor::scalar(ScalarType::Float32, 0.5f);
+    referenceEpilogueInto(inputTensor, {.output = affineOutput}, affineOptions);
+    require(compare(affineOutput, Tensor::copyNativeValues<float>(
+                                      Shape{2, 2}, std::array<float, 4>{1, 12, 21, 12}))
+                .passed(),
+            "Reference epilogue fused input/addend scaling mismatch.");
+
+    Tensor aliasedAddend =
+        Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{10, 20, 30, 40});
+    affineOptions.addend = aliasedAddend;
+    referenceEpilogueInto(inputTensor, {.output = aliasedAddend}, affineOptions);
+    require(compare(aliasedAddend, Tensor::copyNativeValues<float>(
+                                       Shape{2, 2}, std::array<float, 4>{1, 12, 21, 12}))
+                .passed(),
+            "Reference epilogue rejected an identically mapped addend/output alias.");
+
     const std::array<float, 4> gradientInput{10, 20, 30, 40};
     const std::array<float, 4> activationInput{-1, 1, 2, -2};
     Tensor gradientOutput(ScalarType::Float32, Shape{2, 2});
