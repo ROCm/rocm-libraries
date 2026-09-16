@@ -4898,21 +4898,25 @@ inline OnlineTuningEqualityBlock reserveOnlineTuningEqualitySlots(
 //
 // Candidates the caller's workspace cannot cover are withheld from the tuner:
 // they rank, but runContractionProblem refuses to dispatch them. Filtering
-// preserves order, so the reserved block stays contiguous and is reported to
-// the tuner in the coordinates of the list it actually sees.
+// preserves order, so provenance is reported to the tuner in the coordinates of
+// the list it actually sees.
+//
+// A candidate is Equality-sourced if it filled a reserved slot or if the
+// Prediction pool it was ranked out of had the Equality row merged into it. The
+// two are independent knobs and either can put such a kernel in front of the
+// tuner, so the flags are the union; with both off nothing is flagged and the
+// vector stays empty.
 inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
     const TensileLite::Hardware&                                    hardware,
     const OnlineTuningEqualityBlock&                                equality)
 {
-    std::vector<int>    rankedSolutionIndices;
-    std::vector<size_t> rankedPositions;
+    std::vector<int>     rankedSolutionIndices;
+    std::vector<size_t>  rankedPositions;
+    std::vector<uint8_t> equalitySourced;
     rankedSolutionIndices.reserve(solutions.size());
     rankedPositions.reserve(solutions.size());
-
-    size_t equalityBegin = 0;
-    size_t equalityCount = 0;
 
     for(size_t i = 0; i < solutions.size(); ++i)
     {
@@ -4920,11 +4924,12 @@ inline void promoteOnlineTuningCandidate(
            > tensile_prob.workspaceSize())
             continue;
 
-        if(i >= equality.m_begin && i < equality.m_begin + equality.m_count)
+        const bool reserved = i >= equality.m_begin && i < equality.m_begin + equality.m_count;
+
+        if(reserved || solutions[i]->fromEqualityPool)
         {
-            if(equalityCount == 0)
-                equalityBegin = rankedSolutionIndices.size();
-            ++equalityCount;
+            equalitySourced.resize(rankedSolutionIndices.size() + 1, 0);
+            equalitySourced.back() = 1;
         }
 
         rankedSolutionIndices.push_back(solutions[i]->index);
@@ -4934,11 +4939,8 @@ inline void promoteOnlineTuningCandidate(
     // The measurement hook keys on this same identity.
     const size_t problemKey = onlineTuningProblemKey(tensile_prob);
 
-    const int promote
-        = rocblaslt::OnlineTuner::getInstance().selectCandidate(problemKey,
-                                                               rankedSolutionIndices,
-                                                               static_cast<int>(equalityBegin),
-                                                               static_cast<int>(equalityCount));
+    const int promote = rocblaslt::OnlineTuner::getInstance().selectCandidate(
+        problemKey, rankedSolutionIndices, equalitySourced);
     if(promote < 0)
         return;
 

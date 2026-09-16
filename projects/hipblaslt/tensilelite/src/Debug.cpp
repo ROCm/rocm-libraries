@@ -175,6 +175,11 @@ namespace TensileLite
         return m_predictionLib;
     }
 
+    bool Debug::mergeEqualityIntoPredictionPool() const
+    {
+        return m_mergeEqualityPool;
+    }
+
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;
@@ -247,6 +252,10 @@ namespace TensileLite
         const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
         if(prediction_only)
             m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
+
+        const char* merge_equality = std::getenv("TENSILE_MERGE_EQUALITY_POOL");
+        if(merge_equality)
+            m_mergeEqualityPool = strtol(merge_equality, nullptr, 0) != 0;
 
         const char* solution_index = std::getenv("TENSILE_SOLUTION_INDEX");
         if(solution_index)
