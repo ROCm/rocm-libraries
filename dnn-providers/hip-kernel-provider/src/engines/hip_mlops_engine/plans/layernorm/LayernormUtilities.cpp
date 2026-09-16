@@ -229,9 +229,6 @@ ProblemDescription::ProblemDescription(
     Direction direction)
     : _direction(direction)
     , _normalizedDim(guessNormalizedDim(ioAttr, affineAttr, statAttr))
-    , _outerSize(1)
-    , _innerSize(1)
-    , _stride(1)
 {
     const auto* dims = ioAttr->dims();
     const auto* strides = ioAttr->strides();

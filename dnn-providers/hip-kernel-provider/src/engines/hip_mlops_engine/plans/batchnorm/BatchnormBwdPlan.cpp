@@ -55,15 +55,15 @@ static ProblemDescription extractProblemDescription(const BatchnormBwdParams& pa
                                                            + std::to_string(xDims->size()));
     }
 
-    return ProblemDescription(n,
-                              c,
-                              h,
-                              w,
-                              isChannelLastLayout(params.x()),
-                              useFp16Mix,
-                              useBfp16Mix,
-                              Direction::BACKWARD,
-                              1);
+        return {n,
+            c,
+            h,
+            w,
+            isChannelLastLayout(params.x()),
+            useFp16Mix,
+            useBfp16Mix,
+            Direction::BACKWARD,
+            1};
 }
 
 BatchnormBwdParams::BatchnormBwdParams(

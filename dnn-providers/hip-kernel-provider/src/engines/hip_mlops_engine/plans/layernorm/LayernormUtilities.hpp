@@ -51,9 +51,9 @@ public:
 private:
     Direction _direction;
     size_t _normalizedDim;
-    int64_t _outerSize;
-    int64_t _innerSize;
-    int64_t _stride;
+    int64_t _outerSize{1};
+    int64_t _innerSize{1};
+    int64_t _stride{1};
 };
 
 size_t getMinNormalizedDimFromAffine(
