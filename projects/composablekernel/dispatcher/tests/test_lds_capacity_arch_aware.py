@@ -389,16 +389,136 @@ class TestCppPythonParity(unittest.TestCase):
             with self.subTest(arch=arch):
                 self.assertEqual(total, LDS_TOTAL_CAPACITY_BY_ARCH[arch])
 
-    def test_cpp_rejects_a_tile_that_python_rejects(self):
-        """End-to-end agreement on the tile at the heart of the defect.
+    def test_cpp_budget_brackets_the_96kb_tile(self):
+        """The budget accessor puts 96 KB of staging on opposite sides of the
+        line for gfx942 and gfx950.
 
-        96 KB of fp16 staging under compv3: over budget on gfx942, within it
-        on gfx950. Both validators must draw the line in the same place.
+        This compares accessor values only. TestCppValidateEndToEnd exercises
+        the validator itself.
         """
         staging = 128 * 128 * 2 + 256 * 128 * 2  # 98304 bytes
         cpp = self._run_cpp_probe()
         self.assertGreater(staging, cpp[("gfx942", "compv3")][0])
         self.assertLessEqual(staging, cpp[("gfx950", "compv3")][0])
+
+
+class TestCppValidateEndToEnd(unittest.TestCase):
+    """Drive the real C++ entry point, not just the budget accessor.
+
+    Builds a KernelKey and calls ArchFilter::validate(), so the LDS check is
+    reached the same way a caller reaches it. Scoped to gfx942 and gfx950:
+    they agree on warp tiles, so a rejection here can only come from the LDS
+    budget and not from an unrelated validator.
+    """
+
+    SOURCE = r"""
+#include "ck_tile/dispatcher/arch_filter.hpp"
+#include <iostream>
+using namespace ck_tile::dispatcher;
+
+static KernelKey make_key(int m, int n, int k)
+{
+    KernelKey key{};
+    key.signature.dtype_a        = DataType::FP16;
+    key.signature.dtype_b        = DataType::FP16;
+    key.signature.dtype_c        = DataType::FP16;
+    key.signature.dtype_acc      = DataType::FP32;
+    key.signature.layout_a       = LayoutTag::RowMajor;
+    key.signature.layout_b       = LayoutTag::ColMajor;
+    key.signature.layout_c       = LayoutTag::RowMajor;
+    key.signature.split_k        = 1;
+    key.signature.elementwise_op = "PassThrough";
+    key.signature.num_d_tensors  = 0;
+
+    key.algorithm.tile_shape      = {(std::uint16_t)m, (std::uint16_t)n, (std::uint16_t)k};
+    key.algorithm.wave_shape      = {2, 2, 1};
+    key.algorithm.warp_tile_shape = {32, 32, 16};
+    key.algorithm.pipeline        = Pipeline::CompV3;
+    key.algorithm.scheduler       = Scheduler::Intrawave;
+    key.algorithm.epilogue        = Epilogue::CShuffle;
+    key.algorithm.block_size      = 256;
+    key.algorithm.double_buffer   = false;
+    key.algorithm.persistent      = false;
+    key.algorithm.preshuffle      = false;
+    key.algorithm.transpose_c     = false;
+    key.algorithm.num_wave_groups = 1;
+    return key;
+}
+
+int main()
+{
+    // 128x256x128 fp16 -> 128*128*2 + 256*128*2 = 98304 bytes of staging.
+    for(const char* arch : {"gfx942", "gfx950"})
+    {
+        auto result = ArchFilter(arch, false).validate(make_key(128, 256, 128));
+        bool lds    = false;
+        for(const auto& e : result.errors)
+            if(e.find("LDS capacity exceeded") != std::string::npos)
+                lds = true;
+        std::cout << arch << " " << (result.valid ? 1 : 0) << " " << (lds ? 1 : 0) << "\n";
+    }
+    return 0;
+}
+"""
+
+    def _run(self):
+        compiler = shutil.which("g++") or shutil.which("c++")
+        if compiler is None:
+            self.skipTest("no host C++ compiler available")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "validate_probe.cpp"
+            exe = Path(tmp) / "validate_probe"
+            src.write_text(self.SOURCE)
+            cmd = [compiler, "-std=c++17"]
+            for inc in (DISPATCHER_DIR / "include", DISPATCHER_DIR.parent / "include"):
+                cmd += ["-I", str(inc)]
+            cmd += [str(src), "-o", str(exe)]
+
+            build = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(
+                build.returncode, 0, f"probe failed to compile:\n{build.stderr}"
+            )
+            run = subprocess.run([str(exe)], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+
+        out = {}
+        for line in run.stdout.strip().splitlines():
+            arch, valid, lds = line.split()
+            out[arch] = (valid == "1", lds == "1")
+        return out
+
+    def test_96kb_tile_rejected_on_gfx942_accepted_on_gfx950(self):
+        out = self._run()
+
+        valid_942, lds_942 = out["gfx942"]
+        self.assertFalse(valid_942, "98304 B of staging must not fit gfx942's 64 KB")
+        self.assertTrue(
+            lds_942, "rejection must come from the LDS check, not another validator"
+        )
+
+        valid_950, lds_950 = out["gfx950"]
+        self.assertTrue(
+            valid_950, "98304 B fits gfx950's 160 KB and must validate cleanly"
+        )
+        self.assertFalse(lds_950, "gfx950 must not raise an LDS error for this tile")
+
+    def test_agrees_with_python_validator(self):
+        """The same tile, through both validators, must reach the same verdict."""
+        config = TestLdsValidationEndToEnd._config("compv3")
+        out = self._run()
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                py_lds = bool(
+                    [
+                        e
+                        for e in ArchFilter(arch, strict_mode=False)
+                        .validate_kernel(config)
+                        .errors
+                        if "LDS capacity exceeded" in e
+                    ]
+                )
+                self.assertEqual(py_lds, out[arch][1])
 
 
 if __name__ == "__main__":
