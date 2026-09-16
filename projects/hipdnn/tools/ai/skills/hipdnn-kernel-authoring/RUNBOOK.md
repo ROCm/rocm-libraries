@@ -11,7 +11,7 @@ Resolve absolute paths first. These are explicit arguments, not implicit tool in
 ```bash
 REPO=/absolute/path/to/rocm-libraries
 HIPDNN="$REPO/projects/hipdnn"
-INSTALL=/absolute/path/to/hipdnn-install      # find_package root for the harness
+INSTALL=/absolute/path/to/hipdnn-install      # find_package root; produced by step 2
 WORK=/absolute/path/to/scratch                # kernel source + harness, outside product source
 GRAPH=/absolute/path/to/graph.json-or-.bin    # or a samples/ source path
 ARCH=gfx942
@@ -31,7 +31,54 @@ assumption you may make.
 
 **Gate:** a graph in hand, a named architecture, and a stated ABI position.
 
-## 2. Read the graph and specify the operation
+## 2. Build and install hipDNN, and run a minimal driver against it
+
+`$INSTALL` is declared in the Paths block and produced by no other step, yet three
+later gates are observable only from a program built against it: step 4 must *ask* a
+reference whether it can execute this graph, step 7 needs hipRTC compiling your
+source, and step 8 needs both. Do this before reading the graph — a reference that
+declines this graph changes the plan, and it is cheaper to learn that now than at
+step 4.
+
+If you already have an install, this step is a check, not a skip: an old install or a
+copied command is not an observation.
+
+**Build and install.** Use the workspace skills rather than a build system of this
+skill's own. `the repository build path` configures and builds `$HIPDNN` under a
+ROCm toolchain into its `build/` directory; `the repository install path` installs
+that build tree into the branch's install prefix beneath the workspace WIP root. Take
+the invocation and the prefix from those two pages. `$INSTALL` is then that prefix —
+the directory whose `lib/cmake/` holds `hipdnn_frontend/`, `hipdnn_data_sdk/` and
+`hipdnn_test_sdk/`, which is what [harness.md](harness.md)'s `find_package` calls
+resolve against.
+
+**The minimal driver.** The smallest program that makes the later gates observable —
+not the harness, which comes at step 8. Built against `$INSTALL`, it does two things:
+
+1. Loads `$GRAPH`, serializes it with `to_binary()`, constructs a
+   `hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor`, calls `isApplicable`
+   (`hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp:38`)
+   and **prints the answer**. `execute`
+   (`hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp:56-58`)
+   takes the same bytes plus the variant pack; its call shape is in
+   [harness.md](harness.md) under "The oracle" and is not repeated here.
+2. Compiles one trivial HIP source string through hipRTC once per `$ARCH`, in the
+   production envelope ([device-envelope.md](device-envelope.md)), and prints per
+   architecture the compile result and the program log.
+
+The test SDK is reachable from an install — it installs its targets, its headers, its
+generated version header and its export set (`projects/hipdnn/test_sdk/CMakeLists.txt:54`,
+`:57`, `:68`, `:74`). The integration tests' harness is not; [harness.md](harness.md)
+says what that costs you.
+
+**Gate:** the driver's own printed output — an `isApplicable` answer for *this* graph,
+and a hipRTC compile result for each `$ARCH`. A build that exited zero is not this
+gate, and neither is an install you inherited. Step 4 rests on the first half, step 7
+on the second, step 8 on both. A driver that was not run reports NOT RUN rather than a
+bare pass; `isApplicable` returning false is a real observation that feeds step 4's
+decline handling, not a result to hide.
+
+## 3. Read the graph and specify the operation
 
 Follow [graph-analysis.md](graph-analysis.md). Enumerate nodes, node types, tensor
 UIDs, dims, strides, dtypes and virtual status; reconstruct edges from the
@@ -47,7 +94,7 @@ its UID resolved as [graph-analysis.md](graph-analysis.md) describes, every matc
 schema field consumed, rejected or proven inert, and the specification written down.
 An unresolved semantic question blocks the affected path.
 
-## 3. Establish the oracle
+## 4. Establish the oracle
 
 Confirm a hipDNN reference can execute *this* graph before authoring anything —
 [harness.md](harness.md), and the decline list in
@@ -63,7 +110,7 @@ reference derived from the kernel under test are both disqualifying.
 
 **Gate:** a named, capable, independent oracle, or an explicit BLOCKED.
 
-## 4. Mine prior art and pin the device envelope
+## 5. Mine prior art and pin the device envelope
 
 Use [prior-art.md](prior-art.md) to find how the operation is actually implemented —
 in-tree first (`projects/composablekernel`, `projects/miopen`, `projects/hipblaslt`,
@@ -77,7 +124,7 @@ facts from that device, not from memory.
 **Gate:** a named algorithm with a source, and a recorded compile envelope and
 device-fact set for each target architecture.
 
-## 5. Decompose
+## 6. Decompose
 
 Decide, per [graph-analysis.md](graph-analysis.md): one kernel, a legal fusion, or an
 ordered sequence of launches. Fusion is preferred where the producer/consumer edge is
@@ -101,7 +148,7 @@ specialization.
 **Gate:** a written decomposition with per-launch contracts, scratch requirements and
 the generalization decision.
 
-## 6. Author the kernel
+## 7. Author the kernel
 
 Write HIP source inside the hipRTC envelope ([device-envelope.md](device-envelope.md)).
 Non-negotiables:
@@ -130,7 +177,7 @@ Non-negotiables:
 **Gate:** hipRTC compiles the source for every target architecture, with the compile
 log captured. A compile is not a correctness result and must not be reported as one.
 
-## 7. Prove it
+## 8. Prove it
 
 Build and run the harness of [harness.md](harness.md): identical seeded inputs to
 both sides, hipDNN reference on one, your kernel on the other, per-output comparison
@@ -153,7 +200,7 @@ non-tile-multiple size, and the smallest and largest shapes in the claimed envel
 with the three assertions above satisfied. A skipped reference, an unlaunched kernel
 or an all-zero comparison is a failed gate.
 
-## 8. Report and hand off
+## 9. Report and hand off
 
 Report: the operation specification, the decomposition, the kernel source and its
 entry-point signature, the compile options per architecture, the harness invocation,
@@ -171,4 +218,4 @@ for the integration skill, not something to paper over by changing the kernel's
 mathematics.
 
 **Gate:** the report is complete and every claim in it traces to an observation in
-stages 2-7.
+stages 2-8.
