@@ -45,8 +45,26 @@ symbol is a rebuild and a reinstall, and steps 5 and 6 run against the installed
 
 ## Environment
 
-These cost two failed jobs the first time and are not rediscoverable from an error
-message:
+None of this is rediscoverable from an error message. Read the half that applies to you.
+
+### Any host — these gate the build itself
+
+- **`HIPDNN_ENABLE_KERNEL_INGESTOR=ON` pulls in Python build-time dependencies.** The
+  `rocm_kpack` package must be importable, and it needs `msgpack` and `zstandard`. A
+  configure that cannot import them fails or silently drops the ingestor, depending on
+  where it trips.
+- **The generator needs `PyYAML` and `Jinja2`.** Where a `.venv` is absent — it is not
+  checked in, and no bootstrap step creates one for you — the interpreter you point `PY`
+  at must already have both. Targets guarded on "a Python that can import PyYAML and
+  Jinja2" **skip silently** when it cannot, leaving a `message(STATUS)` as the only
+  signal.
+- `PY="$GEN/.venv/bin/python"` and the generator README's setup block are **POSIX-only**.
+  On Windows use the interpreter directly (`.venv\Scripts\python.exe`, or any Python with
+  the two packages); there is no Windows variant of that block anywhere in the repo.
+
+### Scheduled / multi-node hosts only
+
+Skip this entire subsection on a local box — none of it applies.
 
 - **A worktree under `claude-workspace/worktrees/` may be a symlink into the login
   node's `/var/tmp`**, which is login-node-local storage no compute node can see —
@@ -126,8 +144,15 @@ process restart, because the cache is process-lifetime.
 
 ## 1. Read the kernel
 
-From the kernel, not from a sibling descriptor and not from the operation's popular
-name. Write down:
+From the kernel, and from its author's handoff where one exists — never from a sibling
+descriptor and never from the operation's popular name. An authored handoff is a statement
+about *this* kernel; a sibling descriptor and a popular name are guesses about a different
+one, and that prohibition stands whether or not a handoff arrived.
+[hipdnn-kernel-authoring](../hipdnn-kernel-authoring/SKILL.md) hands over four facts — the
+entry-point signature, the bundle's file set, the macros the source requires bound with
+their legal values, and the launch geometry and workspace the kernel assumes. Take each as
+an input and check it against the source; with no handoff, read all four out of the kernel
+yourself. Write down:
 
 - **Its ABI** — every parameter, its type and its position, and which are pointers to
   graph tensors versus scalars you must supply.
@@ -136,17 +161,26 @@ name. Write down:
   which side owes the guard.
 - **Its specialization axes** — which quantities must be compile-time `-D` values and
   which can be runtime arguments. Compile-time axes become metadata fields; runtime ones
-  become `launch()` arguments and cost nothing but registers.
+  become `launch()` arguments and cost nothing but registers. A macro the handoff names
+  without its legal values is an unfinished handoff, not a default.
+- **Its bundle file set**, if it ships one — every file you will place beside the source,
+  by name. The seam above owns the mechanism (one directory level, `.h`/`.hpp`/`.cuh`
+  only, and a name that collides with the provider's embedded list is a load error, not a
+  shadow); step 1's job is that the set is enumerated before a descriptor names it,
+  because a file nobody wrote down is a file nobody checked for a collision.
 - **What it admits** — dtypes, layouts as stride patterns, alignment, divisibility,
   minimum and maximum extents. This is the raw material of `graph_match`, and anything
-  you cannot state here will be claimed by accident.
-- **What scratch it needs**, if any. Zero is a legitimate answer and the common one.
+  you cannot state here will be claimed by accident. **The handoff does not supply this**:
+  the author states what was *proven*, so read their does-not-prove list as the part of
+  the envelope nobody validated, and derive the envelope itself from the source.
+- **What scratch it needs**, if any — the handoff's workspace fact. Zero is a legitimate
+  answer and the common one.
 
-**Artifact:** a written kernel contract with those five sections.
+**Artifact:** a written kernel contract with those six sections.
 
 **Gate:** every kernel parameter classified, every compile-time macro named with its
-legal values, and the admitted-shape envelope written down. An unstated precondition is
-a shape you will silently claim.
+legal values, every bundle file named, and the admitted-shape envelope written down. An
+unstated precondition is a shape you will silently claim.
 
 ## 2. Decide the symbols
 
@@ -165,7 +199,7 @@ Decide which of these this kernel needs, and name each one. **New by default.**
 existing pack exists" is not the reason; "this is another block size for the pack I
 shipped last month" is.
 
-**The two shipped packs are reference scaffolds and are never that reason.**
+**Two of the three shipped packs are reference scaffolds and are never that reason.**
 `PointwiseAdd` is one thread writing `c[0]` under
 `if(blockIdx.x == 0 && threadIdx.x == 0)` (`kernels/PointwiseAdd.cpp:11-12`) with grid
 1×1×1 (`PointwiseNative.cpp:436`); `ConvFwd` is a naive direct convolution admitting only
@@ -175,11 +209,32 @@ and to be read as worked examples. Attaching a real kernel to either inherits it
 matcher, its geometry and its ABI — all three chosen for a toy — and it is not what
 "extend an existing pack" means.
 
-Most requests have no pack at all: only `ConvNative.cpp` and `PointwiseNative.cpp` exist
-under `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`.
-Batchnorm, layernorm, RMSnorm and resample are `hip_mlops_engine` plan builders with no
-ingestor pack. For those the answer to "which existing pack" is **none**, and step 3 is
-where the work is.
+**The third, `hipkernel:BatchnormInference`, is the one pack for which "yes" is
+available — and it is available only to whoever shipped it.** Nothing about it is a
+toy: a full-tensor kernel with its own bounds guard
+(`kernels/BatchnormInference.cpp:64-94`), a grid computed from the element count
+(`BatchnormInferenceNative.cpp:642-647`), three io dtypes
+(`BatchnormInferenceNative.cpp:97-101`), nine shipped variants
+(`TestBatchnormInferencePacks.cpp:44-63`), and a matcher that refuses 15 parameterized
+cases and admits 9 (`TestBatchnormInferenceMatchers.cpp:165-314`,
+`TestBatchnormInferenceMatchers.cpp:65-129`). Extending it means another block size,
+another io dtype, another architecture or another variant *of batchnorm inference* —
+and its stated gaps are exactly the live axes: one proved architecture
+(`IngestorGenerator/configs/batchnorm_inference.yaml:49`), no device-level integration
+test wiring it, 10 of 82 `BatchnormInference/Default` bundle cases mirroring its own
+unit-test shapes, and a per-channel parameter dtype pinned to FLOAT
+(`BatchnormInferenceNative.cpp:103-107`). Hanging an unrelated kernel off it is not an
+extension, and if you did not ship it you are on the create path.
+
+Most requests have no pack at all: only `ConvNative.cpp`, `PointwiseNative.cpp` and
+`BatchnormInferenceNative.cpp` exist under
+`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`, and
+`IngestorPacks.cpp:16-26` registers exactly those three. Layernorm, RMSnorm and resample
+are `hip_mlops_engine` plan builders with no ingestor pack; batchnorm has both, the
+hand-written builder still serving the same single-node graph
+(`BatchnormPlanBuilder.cpp:371-374`, `BatchnormPlanBuilder.cpp:550-554`). For the three
+without a pack the answer to "which existing pack" is **none**, and step 3 is where the
+work is.
 
 **Artifact:** a written symbol decision — one row per hook, with its symbol name, new or
 reused, and the reason.
@@ -211,6 +266,39 @@ registration, and the row in `IngestorPacks.cpp`. `PointwiseNative.cpp:498-507` 
 worked example of the first, with its graph matcher, its three graph-scoped operation
 matchers, its kernel matcher, its score and its dispatch handler all added to one scope.
 Add the pack's source and test files to the engine's `target_sources` in the same pass.
+
+**Landing a pack obliges you to refresh the named pack examples.** The
+create-versus-extend decision is argued from which packs exist, which are scaffolds and
+which is genuinely extendable, so a new file under
+`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/` or a new
+row in `IngestorPacks.cpp:16-26` makes those examples stale in the commit that adds it.
+Four places carry them and must be updated in that same commit: step 2 above,
+SKILL.md §New symbols are the default, `hipdnn-ingestor-engine/RUNBOOK.md` §1 entry
+question 1, and `hipdnn-ingestor-engine/hiprtc-mining.md` §Scope — say in each which
+your pack is, and whether it routes `kernel_source.kind`.
+
+**The `IngestorPacks.cpp` row's cache fields follow your handler, not your dialect.** The
+row is `(label, registerSymbols, ownsModuleCache, resetModuleCache)`, and
+`TestIngestorPacksModuleCacheOwnership` asserts only that the last two agree — it passes
+for both shapes, so it cannot tell you which one you needed. The rule that holds in
+shipped code: **if your `prepare()` routes through `buildIngestorKernelCode`, your handler
+holds a `KpackKernelLoader` and owns a module cache, so the row is
+`true, &reset<Name>ModuleCache`** — define the reset outside the pack's anonymous
+namespace and declare it in `IngestorPacks.hpp`. `hipkernel:Pointwise` is exactly this
+case and ships `true, &resetPointwiseModuleCache` (`IngestorPacks.cpp:16`) despite its
+kernels being `embedded_source`. Only a handler that does **not** route —
+`hipkernel:ConvFwd`, `IngestorPacks.cpp:19` — takes `false, nullptr`. The generator's
+`ingestor_packs_cpp.j2` fragment keys this off the *packaged* dialect instead, which
+emits `false, nullptr` for a routed non-packaged engine; prefer this rule over the
+fragment's comment when they disagree.
+
+**The embedded header set is global and shared across the whole binary.** Adding a header
+to your pack's embedded list changes what every other pack sees. `TestHiprtcFileKernelSource`
+pins the virtual-header vector on the premise that the test binary embeds no headers of
+its own, so a new embedded header breaks
+`CollectsOnlyTopLevelHeadersByExtensionInNameOrder` — a real signal about a shared
+resource, not incidental breakage. Expect to update that expectation in the same commit,
+and say in the message that the set is shared.
 
 Use `buildIngestorKernelCode` in `prepare()` rather than calling the compiler directly:
 it is the one place source loading and path containment are handled for every
@@ -276,9 +364,12 @@ against the installed tree.
 The shared suite binary already takes `--test-engine` on the command line, so you can run
 your engine by hand before this step exists — but **registration is what makes anyone
 else run it.** Add an `add_external_integration_test_target` entry for your engine
-alongside the provider's existing ones
-(`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:213`,
-`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:277`), supplying:
+alongside the provider's existing ones. The two long-standing examples are
+`HIP_MLOPS_ENGINE` and `ASM_SDPA_ENGINE` (`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:408-413`,
+`:472-477`); the four `hipkernel:*` entries at `:313`, `:322`, `:339` and `:376` are closer
+models for a new ingestor engine, and `:376` is the one that also stages a descriptor tree.
+**Re-derive these line numbers before citing them** — this file gains entries regularly and
+the numbers drift; `grep -n add_external_integration_test_target` is the reliable form. Supply:
 
 - `ENGINE_NAME` — your UED engine name, passed through as `--test-engine`.
 - `TEST_CONFIG` — a TOML your engine owns under
@@ -312,6 +403,23 @@ case id:
     --bundle-dir "$REPO/dnn-providers/integration-tests/integration-test-bundles/"
 ```
 
+**Do this before the step 3/4 build, not after it.** The step numbering here is a
+dependency order for *authoring*, not a wall-clock order for *building*: bundles are
+`file(COPY)`-ed at CMake **configure** time, so a case imported after your last configure
+is absent from the build and install trees no matter how correct it is. The symptom is
+silent — "my case doesn't run" with no error — so import your graphs, then configure and
+build, then run. If you have already built, re-configure after importing.
+
+**`import_graph.py` is not turnkey when a skeleton hash is shared.** Sweeps are matched by
+topology skeleton, and several can collide on one hash — `BatchnormInference` shares its
+skeleton with `BatchnormFwdInference`. The tool then picks the alphabetically first within
+the tier, whose template may use different tensor names, and dies with
+`ERROR: round-trip verify failed after extraction`, naming neither the sweep it chose nor
+the mismatched field. Two fixes, usually both: **narrow `--bundle-dir`** to the exact
+target directory so no other sweep is a candidate, and **match your graph's tensor names to
+the target template's** (for `BatchnormInference`: `X`, `BatchnormInference_0::Y`, and so
+on). Read the template you are appending to before generating the graph.
+
 It reports `DUPLICATE` and skips an identical case, appends to an existing topology's
 `sweep.json`, or creates a new template+sweep directory, and prints the generated case id
 to stderr — that id is the gtest name you will cite.
@@ -336,18 +444,42 @@ when a bespoke harness says it served. A harness you wrote proves your kernel; t
 suite proves your *integration*, against the same reference executor and the same bundle
 corpus every other provider is held to.
 
+**First, check the reference executor can actually run your op.** This gate comes before
+the command, not after a failed run. The GPU reference executor implements a plan builder
+per op family, and today that is exactly six — `ConvolutionFwd`, `LayernormFwd`,
+`LayernormBwd`, `RMSNorm`, `Pointwise`, `SdpaFwd`
+(`dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/`, one
+`Gpu<Op>Plan.hpp` each). **If your op is not on that list, `--verification-mode gpu`
+produces the exact silent skip it is prescribed to prevent**: every case reports *"GPU
+reference cannot run this op"* and skips, the run exits 0 having passed zero, and the
+target goes green. Measured in a dry run: `BatchnormInference` with `gpu`, **0 of 731
+passed**, exit 0.
+
+Pick the mode from that check and name it explicitly:
+
+| Your op | Mode | Why |
+|---|---|---|
+| has a `Gpu<Op>Plan.hpp` | `gpu` | live GPU reference; strongest oracle |
+| does not | `cpu` | live CPU reference; still an independent oracle |
+| either | **never `auto`** | its golden → GPU → CPU → **skip** chain ends in a silent skip |
+
+`graph-contract.md`'s rule still governs: missing capable independent numerics blocks the
+feature. If neither reference executor can run your op, you do not have an oracle and that
+is a `STOP`, not a mode to work around.
+
 ```bash
 hipdnn_integration_tests --test-article <prefix>/lib/hipdnn_plugins/engines/<your>.so \
                          --test-engine "$ENGINE" \
-                         --verification-mode gpu \
+                         --verification-mode <gpu|cpu, per the check above> \
                          --gtest_filter='*<YourOp>*'
 ```
 
 - `--test-engine` pins the run to your engine, so an op your engine cannot serve **SKIPs**
   instead of falling through to another loaded engine. That is what makes the result
   attributable.
-- `--verification-mode gpu` demands a live GPU reference rather than `auto`'s fallback
-  chain, which can silently land on golden tensors that were never pulled.
+- An **explicit** mode is a demand for a specific oracle rather than `auto`'s fallback
+  chain, which can silently land on golden tensors that were never pulled — or on nothing
+  at all. Explicit does not mean `gpu`; it means the one you checked for above.
 - **Naming an absent engine is a hard failure**, not a skip:
   `Error: Engine '<name>' is not loaded. Check the plugin path.`, exit 1, zero tests run.
   Use it as the negative control — it proves the positive run's passes were conditional

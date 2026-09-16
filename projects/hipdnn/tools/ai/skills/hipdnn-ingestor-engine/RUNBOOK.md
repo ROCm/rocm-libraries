@@ -1,7 +1,7 @@
 # Runbook: production mining and lowering for an ingestor engine
 
 This is the **only ordered workflow for production mining and lowering** — corpus and
-baseline approval, packaging, tuning and final corpus proof. It is **not** the create
+scope, packaging, tuning and final corpus proof. It is **not** the create
 path: a plain HIP integration belongs to
 [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md), whose RUNBOOK owns
 the six-step sequence from a kernel to descriptors, native hooks, registration and
@@ -42,12 +42,155 @@ its selected compiler/wheel interpreter instead. Full artifact checking also nee
 `rocm_kpack` and its dependencies in `$PY` (including `zstandard` and `msgpack`).
 `--kpack-python-dir` supplies an import root, not missing Python dependencies.
 
-Verify source, build, install, corpus and output paths on the execution host. A
-workspace symlink backed by login-local **`/var/tmp` is invisible from compute
-nodes**, even when its link name is under shared storage. Use shared source or stage
-the exact checkout/artifacts to compute-local scratch through the active scheduler
-skill. Do not run GPU work on a login host. Retain command logs and source/artifact,
-machine, device and allocation identities under the workspace's evidence policy.
+**Resolve the interpreter by probing for the layout that exists.** `$PY` above is the
+POSIX layout. A Windows virtual environment puts the same interpreter at
+`.venv\Scripts\python.exe`, with or without the suffix, and a `.venv` may not be there
+at all — it is not checked in and no step here creates one. Any interpreter that can
+import the generator's dependencies serves; probe for the one present rather than
+assuming a path, and treat every path on this page as a POSIX example to translate,
+not a literal to copy. The same rule covers `$REPO`, `$BUILD`, `$INSTALL` and the
+corpus roots.
+
+**A tool that cannot run has not reported a negative.** A probe or inspection utility
+may be absent on a given host or packaging even when the condition it reports is
+satisfied, and an absent utility is silence, not a finding. Distinguish *tool
+unavailable* from *condition false* before treating either as a gate failure. When a
+prescribed utility is missing, observe the same facts by another means and record the
+substitution — what you ran instead, and what it did and did not show — rather than
+recording a failure or a pass. A gate discharged by substitution is discharged; a
+check you could not run and did not substitute for is **unobserved**, which blocks its
+gate without being evidence against the thing it was to observe. An unattended run
+that conflates the two strands on a healthy host.
+
+Verify source, build, install, corpus and output paths on the execution host.
+
+**Decide whether the target device is local or scheduled before running anything in
+this section.** When the device is in the host you are already on and directly
+reachable, the staging paragraph below does not apply at all — there is no login host,
+no staging hop and no allocation to acquire — and working through it anyway invents
+both the work and a failure mode that do not exist here. Skip it entirely.
+
+*Scheduled targets only.* A workspace symlink backed by login-local **`/var/tmp` is
+invisible from compute nodes**, even when its link name is under shared storage. Use
+shared source or stage the exact checkout/artifacts to compute-local scratch through
+the active scheduler skill. Do not run GPU work on a login host.
+
+Retain command logs and source/artifact, machine, device and allocation identities
+under the workspace's evidence policy.
+
+## Tools this skill assumes, and what to do without them
+
+Several rules on this page need a fact that **no command in this tree computes**. Each
+entry below names what is missing, what exists that is close to it, what to observe by
+hand instead, and what the outcome of that observation is.
+
+The outcome is never a pass. A fact derived by hand is a **recorded escalation**:
+record the substitution, the inputs you read, the conclusion you drew and the revision
+of the source you read it from, and carry it into the handoff as a finding the
+requester owes a decision on — not as a discharged gate. A rule whose inputs cannot be
+computed and were not substituted for is itself an escalation. Writing prose, evidence
+or a gate verdict as though one of these commands had run and agreed is the failure
+this section exists to prevent, and it is the same failure as reading a missing
+utility as a negative result.
+
+**1. Envelope declaration — absent.** Nothing declares, as data, the envelope the
+engine's matcher enforces. The generator config's engine-level graph-match block
+carries layout and discrimination documentation
+(`IngestorGenerator/codegen/models.py:324-336`), not admitted ranks, dtypes per
+operand role, shape relations, stride admissibility or aliasing rules, and nothing
+diffs any declaration against the matcher body. *Instead:* reconstruct the envelope by
+reading the `graph_match` and kernel-matcher bodies and write it into the run's
+evidence as data — node type and count, admitted ranks, admitted dtypes per operand
+role, required operand shape relations, stride admissibility, virtual and
+pass-by-value disposition, aliasing rules, and every node field the matcher gates on —
+with the source lines each item came from. *Outcome:* a recorded envelope, escalated
+as unvalidated. Nothing checks that the matcher still agrees with it, so it is correct
+only as of the revision you read.
+
+**2. Coverage computation — partial.** `mine_shapes.py` supplies per-source totals,
+the distinct count and the provenance split; it deliberately does not filter by what
+the engine can serve. For rocKE only, `dispatch_parity.py --report-gaps` prints every
+shape the dispatcher would not serve with its reason and the layer that refused —
+a genuine per-input exclusion reason, but from the reference library's dispatcher
+rather than from this engine's matcher, and it requires a profile. Nothing computes
+per-source servable/excluded counts against a declared envelope, and for a direct-load
+engine nothing computes them at all. *Instead:* take the totals from `mine_shapes.py`,
+then classify each input by hand against entry 1's reconstructed envelope, recording
+for every exclusion the specific axis that blocked it rather than a bare count.
+*Outcome:* a hand-built coverage table naming the envelope revision it was computed
+against, escalated as hand-derived. No command reproduces it and nothing recomputes it
+when the matcher changes.
+
+**3. Reference-capability lookup — partial.** The fact exists in the tree but not as a
+query: the GPU reference's capability is one `Gpu<Op>Plan.hpp` per op family under
+`dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/`, and the
+`admits(request) -> (bool, str)` contract is real. No command answers "which executors
+implement this operation". *Instead:* read the current family list and the
+gpu/cpu/never-`auto` decision table in
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/RUNBOOK.md), then confirm it
+against the headers actually present before choosing a mode. *Outcome:* the mode and
+the evidence you chose it from, recorded. Where no executor implements the operation
+this is not a mode to work around — it is [graph-contract.md](graph-contract.md)'s
+missing-capable-numerics block, escalated.
+
+**4. Workload fetch by digest — absent.** Content-addressed corpora are pulled with a
+data-versioning client. No script here fetches an object by digest without that
+client; `verify_golden_bundles.py` reports an unpulled pointer rather than resolving
+it. *Instead:* where the client is unavailable, read the digest and size out of the
+pointer file and fetch the object directly from the content-addressed remote, then
+verify the bytes against the digest. The layout is documented with the remote path
+shape in
+[the bundle README](../../../../../../dnn-providers/integration-tests/integration-test-bundles/README.md).
+A missing client is not evidence that the corpus is unavailable. *Outcome:* either the
+corpus, fetched and digest-verified with the method recorded, or the source recorded
+as unavailable naming what you attempted — escalated, never folded silently into a
+smaller denominator.
+
+**5. Corpus normalization — absent in the direction needed.** The migration scripts
+run the other way: `place_bundles.py` converts captured standalone cases *into*
+template+sweep form, and the template-instantiation primitive it round-trips through
+(`expand` in
+`dnn-providers/integration-tests/migration-scripts/bundle_utils.py:252`)
+is internal to those scripts. Nothing renders a parameterized in-tree case tree into
+the standalone per-graph form the measurement harness consumes. *Instead:* measure
+only corpora already in standalone per-graph form, or expand the specific cases in
+scope by hand and record which cases the expansion covered. *Outcome:* a corpus with
+its construction method recorded. A case corpus you could not render is a source
+excluded for tooling reasons and is reported as exactly that — never as unservable,
+which is a claim about the engine.
+
+**6. Runtime join — partial.** `sweep.py` builds and gates on an outcome ledger from
+its own measurement output, and `reconcile_applicability.py --declines` consumes a
+graph-name-to-reason JSON. Nothing assembles [workloads.md](workloads.md)'s complete
+per-input ledger from measurement output *plus* engine logs, which is the input stage 7
+requires. *Instead:* perform the join as the explicit evidence review stage 7 already
+describes, preserving its distinctions — reasons absent from runtime evidence stay
+absent, and offline policy is never substituted for them. *Outcome:* a hand-built
+ledger. Stage 7's gate therefore cannot close unattended today; record that as the
+stage-7 blocker in the handoff rather than as a limitation of the run.
+
+**7. Candidate enumeration — absent.** `knob_sweep.py` is the nearest tool and
+deliberately does not do this: its documented order is isolate, pair the survivors,
+ship what survived, and it records the cross-product as the arm that bought nothing
+(`IngestorGenerator/tools/knob_sweep.py:1-20`). It has no exhaustive mode for any
+dialect. *Instead:* enumerate the legal candidate space by hand from the authored
+source's specialization axes and entry 1's envelope, marking each cell with what
+adding it costs — a descriptor entry, a rebuild, or new authored source. *Outcome:* a
+recorded enumeration; where it exceeds the measurement window, record exactly which
+cells went unmeasured and never present a partial sweep as a complete one. Making
+exhaustive enumeration the default would contradict `knob_sweep.py`'s own documented
+stance, which is a question for that tool's owner and not a decision to take inside a
+run.
+
+**8. Per-candidate selection report — absent.** `sweep.py`'s ledger is per-graph,
+per-arm outcome and timing, and the
+[sweep reference](../../../IngestorGenerator/tools/README-sweeps.md) documents
+arm-versus-baseline aggregates. Neither answers, per candidate, which corpus subsets
+it wins, by what margin, and whether it is selected anywhere at all. *Instead:* derive
+that by hand from the ledger for the candidates actually under consideration.
+*Outcome:* recorded per-candidate findings. A candidate may be dropped only against a
+measurement that shows it selected nowhere; **not measured is not never selected**, and
+dropping on that basis is an escalation rather than a decision.
 
 ## 1. Entry and early feasibility
 
@@ -56,13 +199,37 @@ to [extend.md](extend.md).
 
 **Inventory the packs before you choose a dialect.** Ask, in this order:
 
-1. **Does an ingestor pack already exist for this operation, and is it yours?** Only
-   `ConvNative.cpp` and `PointwiseNative.cpp` exist under
-   `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`;
-   batchnorm, layernorm, RMSnorm and resample are `hip_mlops_engine` plan builders with
-   no ingestor pack. Those two are reference scaffolds — `PointwiseAdd` computes one
-   element (`kernels/PointwiseAdd.cpp:11-12`), `ConvFwd` serves 6 of 1218
-   `ConvolutionFwd` bundle cases — so neither is an extension target for a real kernel.
+1. **Does an ingestor pack already exist for this operation, and is it yours?** Three
+   packs exist — `ConvNative.cpp`, `PointwiseNative.cpp` and
+   `BatchnormInferenceNative.cpp` under
+   `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`,
+   registered at `IngestorPacks.cpp:16-26`. The answer turns on **ownership**, with one
+   independent disqualifier on top of it:
+   - **No pack for the operation** — layernorm, RMSnorm, resample and most requests.
+     Those three are `hip_mlops_engine` plan builders with no ingestor pack. Create
+     path.
+   - **The only candidate is `PointwiseAdd` or `ConvFwd`** — still no, on their own
+     merits: `PointwiseAdd` computes one element
+     (`kernels/PointwiseAdd.cpp:11-12`), `ConvFwd` serves 6 of 1218 `ConvolutionFwd`
+     bundle cases. Both are reference scaffolds, and a real kernel attached to either
+     inherits a matcher, a geometry and an ABI chosen for a toy.
+   - **The candidate is `BatchnormInference`** — the first legitimate yes, and it is
+     conditional on the pack being yours. It is no scaffold: a full-tensor kernel with
+     its own bounds guard (`kernels/BatchnormInference.cpp:64-94`), a computed grid
+     (`BatchnormInferenceNative.cpp:642-647`), three io dtypes
+     (`BatchnormInferenceNative.cpp:97-101`), nine shipped variants
+     (`TestBatchnormInferencePacks.cpp:44-63`) and a matcher refusing 15 parameterized
+     cases against 9 acceptances (`TestBatchnormInferenceMatchers.cpp:165-314`,
+     `TestBatchnormInferenceMatchers.cpp:65-129`). Extending it means another block
+     size, io dtype, architecture or variant *of batchnorm inference*, by whoever
+     shipped it — never an unrelated kernel hung off it. Its open axes are exactly its
+     limits: one proved architecture
+     (`IngestorGenerator/configs/batchnorm_inference.yaml:49`) and no device-level
+     integration test wiring it, with its 10 of 82 `BatchnormInference/Default` bundle
+     cases mirroring its own unit-test shapes rather than an independent corpus. Note
+     that batchnorm now has *both* an ingestor pack and the `hip_mlops_engine` builder
+     still claiming the same single-node graph (`BatchnormPlanBuilder.cpp:371-374`,
+     `BatchnormPlanBuilder.cpp:550-554`).
 2. **If no, this is the create path.** Go to
    [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) and return here for
    corpus, sweeps, tuning and packaging once the pack exists.
@@ -84,9 +251,24 @@ On the actual allocated execution host:
 
 Early mode requires the requested device and an existing writable root. It ignores
 inherited `INSTALL` and rejects `--install`; `$INSTALL` may name a future directory.
-Exit 0 proves feasibility only, exit 1 a device/path/write failure, and exit 2 an
-invalid invocation. For rocKE, confirm the actual builder/spec and `(spec, *, arch)`
-interface; an unknown architecture inventory needs source investigation.
+Exit 0 proves feasibility only, exit 2 an invalid invocation, and exit 1 **any** of the
+checks failing — device, path or write — without saying which. For rocKE, confirm the
+actual builder/spec and `(spec, *, arch)` interface; an unknown architecture inventory
+needs source investigation.
+
+**Exit 1 is not a statement that the device is absent.** The probe reads the device
+through `rocminfo` and catches that utility being missing and the architecture being
+missing in the same handler, appending both to one undifferentiated failure list
+(`IngestorGenerator/tools/device_probe.py:64-68`), which the exit path turns into a
+single `1` (`IngestorGenerator/tools/device_probe.py:83-86`). On a healthy host where
+`rocminfo` simply is not on `PATH` — a packaging difference, not a device one — this
+gate reports a device failure and an unattended run halts at the first thing it does.
+Apply the tool-unavailable rule above: read the printed `FAIL` line, establish whether
+`rocminfo` is on `PATH` at all, and where it is not, observe the device by another
+means — the driver's own device nodes, or the device enumeration any installed runtime
+exposes — then record what you ran, what it reported, and that the device half of this
+gate was discharged by substitution. The writable-root half still owes its own
+observation: one exit status covers both, so satisfying one does not answer the other.
 
 For `hiprtc_file`, feasibility is a symbol question before it is a device one. The
 target installation must already register every `match_symbol`, `graph_match`,
@@ -121,7 +303,17 @@ and the artifact you owe for it, and the gate does not pass until every one has 
 A missing dependency blocks its gate; host-only research may continue while a device
 allocation is pending, but cannot discharge device proof.
 
-## 2. Contracts, corpus and baseline approval
+## 2. Contracts, corpus and scope
+
+[graph-contract.md](graph-contract.md)'s dispositions, `mine_shapes.py`'s totals and the
+scope rules below are common to every dialect. What branches is where the kernel
+contracts come from, and which of them a tool can resolve:
+
+| Dialect | Contract evidence from | Servable/excluded split | Provisional baseline |
+|---|---|---|---|
+| `direct_load` / `embedded_source` | The authored HIP source; no profile is invented | No tool computes it: `mine_shapes.py`'s totals plus the hand classification of entries 1 and 2 | Not applicable — there is no dispatcher to resolve one from |
+| `direct_load` / `hiprtc_file` | The authored HIP source; no profile is invented | No tool computes it: the same hand classification | Not applicable, for the same reason |
+| `packaged` | [rocke-mining.md](rocke-mining.md)'s applicability, specialization, layout, geometry/workspace and ABI evidence | `dispatch_parity.py --report-gaps`, when a profile exists; otherwise the same hand classification | `dispatch_parity.py` then `reconcile_applicability.py`, when a profile exists |
 
 Record [graph-contract.md](graph-contract.md)'s topology/UID edges and field
 dispositions, then [rocke-mining.md](rocke-mining.md)'s applicability, specialization,
@@ -141,9 +333,19 @@ miner, using the sources in scope:
   --include-windowed --out "$SHAPES"
 ```
 
-Add `--rocke-bench <actual-benchmark-tree>` when applicable. Reconcile each source's
-total, parsed, servable, covered and excluded counts; do not discard window/sink or
-independent operand dimensions to fit the request schema.
+Add `--rocke-bench <actual-benchmark-tree>` when applicable. `mine_shapes.py` mines and
+deduplicates: it prints the rows found per source, the distinct count with duplicates
+merged, and the by-source breakdown of what it wrote, and every emitted shape carries
+its provenance. It deliberately **does not filter by what the engine can serve** —
+that is the dispatcher's answer, not the corpus's — so it supplies the *total*
+denominator and the provenance split, and no servable, covered or excluded figure.
+Those you reconcile yourself. For rocKE, `dispatch_parity.py --report-gaps` below
+prints every shape the dispatcher would not serve with its reason and the layer that
+refused, which is the servable/excluded split for that path; for every other dialect
+no tool computes it and the fallback in
+[Tools this skill assumes, and what to do without them](#tools-this-skill-assumes-and-what-to-do-without-them)
+applies. Do not discard window/sink or independent operand dimensions to fit the
+request schema.
 
 For rocKE, resolve the provisional baseline through its actual dispatcher:
 
@@ -158,22 +360,125 @@ The second command is **offline applicability**, not runtime coverage or numeric
 Scope reference candidates to the kernel family/algorithm and required opt-in
 selector. API failures are operational errors, never unsupported-shape evidence.
 
-Present the feature/shape boundary, per-source coverage and exclusions, architecture,
-engine identity, knobs and provisional baseline for approval. A legal cross-product
-is not a measured shipping set; a genuinely single-candidate engine needs no extra
-variants.
+### Deciding scope
 
-**Gate:** approved baseline and scope, with no unresolved semantic loss or reference
-assumption.
+Record the feature/shape boundary, per-source coverage and exclusions, architecture,
+engine identity, knobs and provisional baseline. Scope is then *derived* from the rules
+below and from the record of which rule fired on which inputs. There is no approval
+step: the record is the decision.
+
+For every axis that excludes in-scope inputs, classify it:
+
+| Class | Test | Disposition |
+|---|---|---|
+| A | Descriptor/matcher only — no kernel change, the authored source already compiles the value, and a capable independent reference covers it | **Widen** |
+| B | Requires a kernel or source change | Out of scope here; emit an upstream handoff naming the axis and the coverage it would unlock, then continue with what is admitted |
+| C | No capable independent numerical reference covers it | Out of scope, recorded as reference-blocked |
+
+**Prefer coverage — and pay for it in the same breath.** Widen every class-A axis that
+admits additional in-scope inputs; a widened axis is a **candidate** axis, not a served
+one, and every value it admits owes reference-verified numerics at §5 and measurement
+at §6 before it may ship. **Widening adds candidates, never claims.** These two are one
+rule and are not separable: widening without the debt it incurs ships unproven numerics
+under the engine's identity, which is the failure the second half exists to prevent.
+
+A legal cross-product is still not a measured shipping set, and pruning an axis that
+was never measured is the same error inverted. An axis with two or more candidates and
+no timing evidence sends **every** candidate into §6; prune only against measurements.
+An axis with exactly one candidate is genuinely single-candidate and owes no
+comparison.
+
+Include every corpus source with at least one servable input. Exclude the rest,
+recording for each exclusion both the reason and the specific axis that would admit it
+— that axis is itself a class A/B/C input above, so exclusions feed the widening
+decision rather than merely documenting a gap.
+
+**Coverage computation does not exist, so this is how the classification is made.** No
+command in this tree computes per-source servable/excluded counts, and nothing declares
+the envelope they would be computed against; entries 1 and 2 of
+[Tools this skill assumes, and what to do without them](#tools-this-skill-assumes-and-what-to-do-without-them)
+state the substitution and its standing, and are not restated here. Classify by reading
+the engine's `graph_match` and kernel-matcher bodies against `mine_shapes.py`'s
+per-source totals, distinct count and provenance split, recording for every judgement
+the source lines it rests on. What you produce is a hand-derived table carrying the
+engine revision it was computed against, and it carries that section's outcome: a
+recorded escalation, not a discharged fact. An axis you cannot classify at all is an
+escalation — never a silent widening, and never a silent exclusion.
+
+### Matcher-versus-reference parity
+
+Diff the declared envelope — or, until a declaration exists, the reconstruction
+[graph-contract.md](graph-contract.md)'s §Field dispositions and kernel mapping
+requires — against the predicates the chosen numerical reference enforces for the same
+operation. **Any predicate the reference enforces that the engine's matcher does not is
+a finding**: the engine admits inputs its own oracle refuses, so those inputs are
+validated by nothing, and the absence of an in-tree case exercising them is what hides
+the hole rather than evidence there is none. This check needs no tool — both sides are
+source you are already reading — and it is required, not advisory. Resolve every
+finding before the gate: either enforce the condition in the matcher, or record why it
+cannot arise.
+
+**Gate:** recorded scope derived from the rules above, complete per-source denominators
+with provenance, every excluded axis classified, every parity finding resolved, and no
+escalation condition met.
+
+### When to escalate
+
+Escalate to the requester **only** when:
+
+- no corpus source has a servable input and no class-A widening exists;
+- the included corpus leaves a declared-envelope axis with **no measurable input** — a
+  corpus that cannot exercise an axis cannot distinguish candidates along it. This
+  condition is envelope-relative on purpose and is deliberately not a key count:
+  sufficiency depends on the operation, the declared envelope and what the kernel
+  admits, so there is no global floor to compare against;
+- no capable independent numerical reference covers the admitted features;
+- two rules select conflicting scopes, or a rule's inputs cannot be computed and the
+  hand substitution above does not supply them either.
+
+Anything else: decide, record which rule fired and the inputs it consumed, and continue.
+A recorded rule application is the audit trail approval used to provide.
 
 ## 3. Generate, implement and splice
 
-Generate into an empty scratch directory, never over the live engine:
+### 3a. Create case: emit the descriptors and implement the hooks
+
+Generating into an empty scratch directory, never over the live engine, is the create
+path's own step, and the invocation is owned once by
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/RUNBOOK.md) §4 — including the
+`--force` rule, which is not optional after the first run because generating a second
+time into a non-empty output directory is refused. Run it there against `$CONFIG` and
+`$GENERATED` and come back; a second copy of that command here is how the `--force`
+rule goes missing. Production mining of the result stays on this page, at §3b below.
+
+Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
+Extensions remap scratch references and copy only additions per [extend.md](extend.md),
+including consumer IDs in shared KDP or per-UKD specialization declarations. Never
+edit packed evidence to match a changed descriptor; rebuild from authored inputs.
+
+Set `SCHEMA` to the actual operation `.fbs` and `NATIVE_SOURCE` to its implementation;
+pass all relevant source files and repeat for each schema in a fusion:
+
+```bash
+"$PY" "$GEN/tools/field_audit.py" "$SCHEMA" "$NATIVE_SOURCE"
+```
+
+Exit 0 covers lexical accessor references only. It is an inventory of where a schema
+field's accessor is *named* in the native source: a reference it counts may sit in
+dead code or fail to implement the field's semantics, so exit 0 proves neither
+consumption nor correctness. Review semantic dispositions separately. For an unspliced
+tree, check placeholders with:
 
 ```bash
 "$PY" "$GEN/generate.py" --config "$CONFIG" \
-  --output-dir "$GENERATED" --dry-run
-"$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
+  --output-dir "$GENERATED" --check-placeholders
+```
+
+### 3b. Production: verify the emitted inventory, splice it and stage it
+
+Verify the generated set structurally before anything consumes it:
+
+```bash
 "$PY" "$GEN/tools/verify_variant_sets.py" --mode structural \
   baseline "$GENERATED/descriptors"
 ```
@@ -183,11 +488,6 @@ tuple identity includes schema types/defaults and effective architecture overlap
 Structural mode reports compiled agreement as `NOT CHECKED` and can exit 0 with
 unrun checks. `--profile` optionally selects the bundle and supplies vocabulary;
 it cannot supply compiler evidence. Full artifact checking belongs after packing.
-
-Implement [native-pack.md](native-pack.md)'s referenced hooks and behavioral tests.
-Extensions remap scratch references and copy only additions per [extend.md](extend.md),
-including consumer IDs in shared KDP or per-UKD specialization declarations. Never
-edit packed evidence to match a changed descriptor; rebuild from authored inputs.
 
 Apply fragments to their actual consumers, preserving unrelated entries:
 
@@ -209,21 +509,6 @@ Stage packaged authored descriptors under the configured
 `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, preserving their generated relative
 subpath. Update that staging after every regeneration and compare content/identities,
 not only counts. A fragment file is not evidence that its splice was applied.
-
-Set `SCHEMA` to the actual operation `.fbs` and `NATIVE_SOURCE` to its implementation;
-pass all relevant source files and repeat for each schema in a fusion:
-
-```bash
-"$PY" "$GEN/tools/field_audit.py" "$SCHEMA" "$NATIVE_SOURCE"
-```
-
-Exit 0 covers lexical accessor references only; review semantic dispositions
-separately. For an unspliced tree, check placeholders with:
-
-```bash
-"$PY" "$GEN/generate.py" --config "$CONFIG" \
-  --output-dir "$GENERATED" --check-placeholders
-```
 
 For a packaged splice, set `DESCRIPTOR_STAGING_ROOT` to the production tree holding
 the generated descriptor subpath, then check all destinations below. For direct-load,
@@ -260,6 +545,16 @@ in SDK and provider. Packaged producers additionally need
 root, and the [packaging dependencies](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md).
 `HIPKERNELPROVIDER_ENABLE_ROCKE` does not replace the production producer switch.
 
+**Test inputs are copied into the build tree at configure time.** A bundle case
+imported after your last configure is absent from the build tree and from the
+installation, and the test that would consume it never registers — a silent absence,
+not an error. Import corpus inputs first, then configure and build; if you have already
+configured, reconfigure. The CMake mechanism and the import command it governs are
+stated once, in [hipdnn-kernel-integration](../hipdnn-kernel-integration/RUNBOOK.md)
+§6 — read it there rather than a second copy here. No gate in this stage detects an
+input that never arrived: a corpus that quietly lost a case narrows every denominator
+downstream while every check on this page still passes.
+
 Build the provider, validator and required test targets through the configured
 superbuild. For packaged engines, run `hkp_packaging_product` after the full build
 and after any reconfigure. Require the final staged descriptors, not merely an
@@ -274,6 +569,19 @@ kernels from the configured install prefix by default; building its executable o
 copying kernels into a build tree does not satisfy that path. Its explicit runtime
 override is a separate test setup, not evidence of the final installation. Keep the
 configured prefix aligned with `$INSTALL`, rather than relocating only this command.
+
+**The installed test binary takes a runtime override for its input-data root.** It is
+`--gd` / `--golden-data-dir`, or the `HIPDNN_TEST_GOLDEN_DATA_DIR` environment
+variable, defaulting to `<exe>/../lib/integration-test-bundles/`
+(`dnn-providers/integration-tests/src/main.cpp:132-135`). That lets the **installed**
+binary consume an arbitrary input tree with no reconfigure and no rebuild, which is the
+cheap way to exercise a candidate corpus against the real installation rather than
+waiting on the configure-time copy above. Resolve the flag from the binary's own
+argument parser rather than trusting this name to have survived — an unrecognised
+override is a silent default-root run, not an error you will notice. It does not
+replace shipping the inputs: **an override proves the corpus runs, not that it is
+installed.** Label every run that used one as override-derived, and do not let it
+discharge this stage's installed-boundary gate.
 
 Set `FINAL_DESCRIPTOR_ROOT` to the actual installed per-arch shard (or the
 arch-independent direct-load tree). Resolve `VALIDATOR` to the built
@@ -365,7 +673,7 @@ extension inventory and heuristic-disabled score absence per
 
 A `hiprtc_file` variant set of an **already-installed** pack skips this stage's build,
 packaging and `cmake --install` entirely: nothing native changes, so nothing is
-compiled here. Generate into an empty destination as in stage 3, then copy the
+compiled here. Generate into an empty destination as in §3a, then copy the
 generated `descriptors/<pack>/` directory **whole** — its descriptor JSONs plus the
 staged bundle directory — into a drop-in root, and point the installed process at it:
 
@@ -409,6 +717,18 @@ dispatch.
 
 ## 5. Baseline device proof from the installation
 
+**Derive the reference mode from capability; never assume one.** Before running
+anything in this stage, resolve which reference executors actually implement the
+operation under test, and select the mode from that capability. Which op families the
+GPU reference implements, the executor headers that are its source of truth, and the
+gpu/cpu/never-`auto` decision table are maintained as one copy in
+[hipdnn-kernel-integration](../hipdnn-kernel-integration/RUNBOOK.md): read them there
+rather than transcribing a list that changes whenever a family is added. A reference
+that does not implement the operation **declines every case and can still exit zero**,
+reporting a passing run in which nothing was verified. Zero selected, or every case
+declined, is a gate failure regardless of exit status — which is why the counts below
+are recorded separately rather than collapsed into one "passed" number.
+
 On the allocated target host:
 
 ```bash
@@ -416,7 +736,10 @@ On the allocated target host:
   --sweep-root "$SWEEP_ROOT" --install "$INSTALL"
 ```
 
-A missing/invisible installation fails even if early feasibility passed. Use
+A missing/invisible installation fails even if early feasibility passed, and this
+invocation carries stage 1's caveat unchanged: exit 1 still cannot distinguish a
+missing `rocminfo` from a missing device, so read the printed `FAIL` line before
+concluding anything about the host. Use
 `hipdnn-superbuild-test` discovery with component **`hip-kernel`**:
 
 ```bash
@@ -453,6 +776,12 @@ Use nontrivial inputs for quick feature breadth and bounded standard numerical
 depth. Exercise required declines separately; another winning engine must not hide
 them. NaN/unwritten output is a failure, not a tolerance adjustment.
 
+Where the corpus you must exercise is not the one installed beside the binary, point
+the installed binary at it with `--gd` / `--golden-data-dir` (env
+`HIPDNN_TEST_GOLDEN_DATA_DIR`) instead of reconfiguring for it. Record that the run
+used an override and which tree it read: that proves those inputs run against this
+installation, and nothing about whether the installation ships them.
+
 Extensions must select the addition explicitly. The disposable pointwise example
 adds HALF/block_size=256 to ADD, preserves MUL/SUB and changes ADD's expected census
 from three to four. Select HALF/256 on logical dims `{1,1,1,1}`, check the actual
@@ -465,7 +794,27 @@ accounting on `$ARCH`.
 
 ## 6. Tune the runnable baseline and rebuild the final selection
 
-For rocKE, propose bounded candidates with the actual profile:
+The `sweep.py` measurement below is common to every dialect, as are
+[workloads.md](workloads.md)'s session rules. What branches is where the candidates
+come from, what preparing an arm costs, and how the final config is resolved:
+
+| Dialect | Candidate proposal | Arm preparation | Final shipping config |
+|---|---|---|---|
+| `direct_load` / `embedded_source` | No tool proposes them: entry 7's hand enumeration from the authored source's specialization axes | Generate, implement/splice, build, install and check each arm into its own tree | Regenerate from the selected values; there is no dispatcher cross to resolve |
+| `direct_load` / `hiprtc_file` | No tool proposes them: the same hand enumeration | Generate each arm into its own empty destination and drop it in per stage 4's drop-in subsection, into its own drop-in root; nothing native is built, packed or installed | Re-drop the selected set; there is no dispatcher cross to resolve |
+| `packaged` | `knob_sweep.py --plan`, then `--isolate`, then `--pairwise` on the measured survivors — when a profile exists; otherwise the same hand enumeration | Generate, implement/splice, build, pack, install and check each arm into its own tree | `dispatch_parity.py --knobs`, when a profile exists |
+
+For rocKE, propose bounded candidates with the actual profile. `knob_sweep.py`
+implements one staged order — isolate each knob against the dispatcher's own value,
+pair only the knobs that moved, ship what survived — and it never measures. `--plan`
+resolves the corpus through the dispatcher and prints the partition: the knobs the
+dispatcher varies per shape, the surviving candidates with any declared hazard
+attached, and every excluded knob with its reason. Three exclusions are automatic
+(`IngestorGenerator/tools/knob_sweep.py:277-288`): a knob whose verdict is already
+settled in the kernel's own history, unless `--include-settled`; a knob the dispatcher
+varies per shape, which is a production axis rather than a sweep candidate; and a knob
+declaring fewer than two values. Read that output before generating arms — and note
+that a knob the profile never declares is not excluded, it is invisible.
 
 ```bash
 "$PY" "$GEN/tools/knob_sweep.py" --profile "$PROFILE" --shapes "$SHAPES" --plan
@@ -500,23 +849,33 @@ then generate, build and install the supported pairwise arms:
   --pairwise "$PAIRWISE_KNOBS" --out-dir "$PAIRWISE_CONFIG_ROOT"
 ```
 
-Obtain selection approval from coverage, correctness and per-corpus measurements.
-For the rocKE shipping cross, `APPROVED_KNOBS_JSON` contains the approved JSON object
-of knob value lists, **not a filename**:
+Derive the shipping selection from coverage, correctness and per-corpus measurements.
+As at §2, there is no approval step: the record of which measurement decided which
+value is the decision. For the rocKE shipping cross, `SELECTED_KNOBS_JSON` contains
+the selected JSON object of knob value lists, **not a filename**:
 
 ```bash
 "$PY" "$GEN/tools/dispatch_parity.py" --profile "$PROFILE" --shapes "$SHAPES" \
-  --knobs "$APPROVED_KNOBS_JSON" --out "$FINAL_CONFIG"
+  --knobs "$SELECTED_KNOBS_JSON" --out "$FINAL_CONFIG"
 ```
 
 Repeat **stages 3–5** with the final config and a new empty generation destination.
 Neither an isolation arm nor an old install certifies the regenerated shipping set.
-An explicitly untuned extension may retain its approved baseline selection, but
+An explicitly untuned extension may retain its recorded baseline selection, but
 still requires final installed artifact and corpus proof.
 
 **Gate:** justified selection and revalidated final installation.
 
 ## 7. Final corpus proof and runtime reconciliation
+
+The fresh-output sweep below is common to every dialect. What branches is the
+reconciliation, and what does not branch is the ledger:
+
+| Dialect | Runtime outcome ledger | Applicability reconciliation |
+|---|---|---|
+| `direct_load` / `embedded_source` | Required. No dialect branch: [workloads.md](workloads.md)'s complete per-input ledger, hand-built | Not applicable — no dispatcher oracle to reconcile against. Direct-load pointwise instead uses its explicit one-element corpus, installed engine results and independent arithmetic/reference correctness, with `exclude_tensors: none` |
+| `direct_load` / `hiprtc_file` | Required. No dialect branch: the same complete per-input ledger | Not applicable, for the same reason |
+| `packaged` | Required. No dialect branch: the same complete per-input ledger | `reconcile_applicability.py --declines`, when a profile exists; without the complete join, labelled **offline only** |
 
 Run the final installed artifact through a fresh-output YAML sweep with
 `correctness.enabled: true`. Require the exact phase key set and validated
@@ -535,6 +894,18 @@ missing outcomes, duplicate/ambiguous names and mismatched fingerprints. Runtime
 reasons unavailable in the evidence stay unavailable; do not reconstruct them from
 offline policy. This is an explicit evidence review, not a promised automatic
 matcher-reason extractor.
+
+**No tool emits that ledger, so this gate cannot close unattended.** The required output
+is [workloads.md](workloads.md)'s complete per-input ledger joined over final phase
+results *plus* engine logs. The procedure that produces it is the explicit evidence
+review the two paragraphs above already describe, with their distinctions intact:
+reasons absent from the runtime evidence stay absent, and offline policy is never
+substituted for them. Entry 6 of
+[Tools this skill assumes, and what to do without them](#tools-this-skill-assumes-and-what-to-do-without-them)
+states what exists, what is missing and the standing of the hand-built result; it is
+not restated here. Until that tool lands, the unattended close is a **recorded stage-7
+blocker in the handoff** — a gap in the tooling, not a limitation of this run — and it
+does not lower what the gate below requires.
 
 For rocKE, set `CORPUS_SHAPES` and `RUNTIME_DECLINES` to that corpus's requests and
 complete runtime-derived mapping, then reconcile:
@@ -556,8 +927,9 @@ time-weighted sum-baseline/sum-arm, round drift and byte-identical controls chos
 from artifact hashes.
 
 **Gate:** zero wrong answers, complete final-runtime accounting, and no missing,
-ambiguous, erroneous or unexplained in-scope outcomes. Changed installed artifacts
-invalidate old evidence and return to stages 3–5.
+ambiguous, erroneous or unexplained in-scope outcomes. That accounting is the ledger
+above, built by hand and attended; its absence blocks this gate rather than reducing
+it. Changed installed artifacts invalidate old evidence and return to stages 3–5.
 
 ## 8. Handoff
 

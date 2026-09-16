@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "7430c959-7e50-4bc8-9a23-06f20ccc1f93",
+  "name": "BatchnormInference selector",
+  "kind": "native",
+  "payload": "hipkernel.batchnorm_inference.score"
+}

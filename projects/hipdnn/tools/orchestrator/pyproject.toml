@@ -5,7 +5,11 @@ python_classes = "Test*"
 python_functions = "test_*"
 
 [tool.coverage.run]
-source = ["runner"]
+source = ["runner", "flowmcp"]
+# The only module that imports the MCP SDK, which the hermetic suite never
+# installs. It is a thin adapter with no validation of its own -- everything it
+# would be measured on lives in the modules beside it, which are covered.
+omit = ["flowmcp/server.py"]
 
 [tool.coverage.report]
 show_missing = true

@@ -17,6 +17,13 @@ const std::vector<IngestorPack>& ingestorPacks()
         // No kpack archive: its kernels are embedded_source, so there is no module to
         // drop and nothing for a reset to do.
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, false, nullptr},
+        // Owns a kpack module cache because its dispatch handler goes through
+        // buildIngestorKernelCode, which takes a loader for the kinds it also serves.
+        // Its own descriptors are all embedded_source, so today the cache stays empty.
+        {"hipkernel:BatchnormInference",
+         &registerBatchnormInferenceSymbols,
+         true,
+         &resetBatchnormInferenceModuleCache},
     };
     return s_packs;
 }

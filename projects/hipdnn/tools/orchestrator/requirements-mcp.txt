@@ -1,0 +1,15 @@
+# The MCP server only. Deliberately not in requirements.txt: `runner/` stays
+# PyYAML-only, and the hermetic test suite must pass without this installed --
+# `flowmcp/server.py` is the single module that imports the SDK.
+#
+# The floor is 1.10 rather than something older because the server declares an
+# `outputSchema` per tool and returns `structuredContent`, both of which arrived
+# with the 2025-06-18 protocol revision. An older SDK would drop them silently
+# and the advertised capability would be a lie.
+#
+# The ceiling is real, not caution: 2.x renames `McpError` to `MCPError` and
+# moves `InitializationOptions`, so an unbounded floor resolves to a release
+# this server cannot import. 1.30.0 is also the line the Electron client's
+# `@modelcontextprotocol/sdk` tracks, which keeps both ends on one protocol
+# revision. Moving to 2.x is its own change, not a version bump.
+mcp>=1.10,<2

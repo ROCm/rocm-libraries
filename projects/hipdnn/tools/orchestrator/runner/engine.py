@@ -74,6 +74,7 @@ class StepRecord:
     argv: list[str] = field(default_factory=list)
     cwd: str | None = None
     dir: str | None = None
+    tool: str | None = None
     outputs: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
@@ -156,6 +157,8 @@ class Engine:
         start_from: str | None = None,
         profile: str | None = None,
         log: Callable[[str], None] | None = None,
+        run_id: str | None = None,
+        on_step_process: Callable[[Step, subprocess.Popen], None] | None = None,
     ) -> None:
         self.flow = flow
         self.registry = registry
@@ -166,11 +169,15 @@ class Engine:
         self.start_from = start_from
         self.profile = profile
         self.log = log or (lambda message: print(message, file=sys.stderr, flush=True))
+        self.on_step_process = on_step_process
         if max_iterations is not None and max_iterations < 1:
             raise ConfigError(
                 f"--max-iterations must be at least 1, got {max_iterations}"
             )
-        self.run_id = _new_run_id()
+        #: Supplied by a caller that has already published an id -- a supervisor whose
+        #: clients address the run by it -- so the manifest, the directory leaf and that
+        #: id are one value rather than three that have to be reconciled.
+        self.run_id = run_id or _new_run_id()
         #: An explicitly named run directory may be created for us; a generated one may
         #: not already exist. Either way nothing in it is ever overwritten.
         self.explicit_run_dir = run_dir is not None
@@ -575,6 +582,7 @@ class Engine:
             group=group,
             iteration=iteration,
             dir=str(step_dir),
+            tool=step.tool,
         )
         self.records.append(record)
         resolver = self._resolver(step, loop=loop, previous=previous)
@@ -647,6 +655,7 @@ class Engine:
         self.log(f"  - {step.id}: {step.tool} ...")
         record.status = "running"
         self._checkpoint()
+        observer = self.on_step_process
         proc = launch(
             invocation.argv,
             cwd=invocation.cwd,
@@ -656,6 +665,9 @@ class Engine:
             stdin_text=invocation.stdin,
             timeout=invocation.timeout,
             tee=self.tee,
+            on_start=(
+                None if observer is None else lambda process: observer(step, process)
+            ),
         )
         record.exit_code = proc.exit_code
         record.timed_out = proc.timed_out
@@ -777,6 +789,9 @@ class Engine:
             "provenance": self.provenance,
             "inputs": self.inputs,
             "vars": self.vars,
+            #: The engine's own cross-iteration channel, published so a reader can
+            #: identify it by path rather than by guessing at its filename.
+            "feedback_path": str(self.feedback_path),
             "loops": [vars(loop) for loop in self.loops],
             "steps": [vars(record) for record in self.records],
         }
@@ -784,7 +799,34 @@ class Engine:
         temporary.write_text(
             json.dumps(payload, indent=2, default=str), encoding="utf-8"
         )
-        os.replace(temporary, self.run_dir / "run.json")
+        _replace_with_retry(temporary, self.run_dir / "run.json")
+
+
+def _replace_with_retry(
+    temporary: Path, destination: Path, attempts: int = 40, pause_s: float = 0.025
+) -> None:
+    """Replace `destination` with `temporary`, tolerating a concurrent reader.
+
+    `os.replace` is atomic, which is what lets anyone read `run.json` while a run
+    is still going. On Windows it is also refused outright while another process
+    holds the destination open: the manifest is rewritten after every step
+    transition, so a status reader polling it turns a checkpoint into
+    `PermissionError` and kills the run mid-flight -- with the half-written
+    `run.json.tmp` left behind as the only evidence.
+
+    Retrying closes that window. A reader opens, reads and closes in
+    microseconds, so the contention is real but brief, and one second of
+    retries is far longer than any honest reader holds the file. A replace
+    still failing after that is not contention and is raised.
+    """
+    for remaining in range(attempts - 1, -1, -1):
+        try:
+            os.replace(temporary, destination)
+            return
+        except PermissionError:
+            if not remaining:
+                raise
+            time.sleep(pause_s)
 
 
 def _recorded(values: dict[str, Any]) -> dict[str, Any]:

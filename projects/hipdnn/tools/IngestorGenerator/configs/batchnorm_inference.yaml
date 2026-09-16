@@ -1,0 +1,160 @@
+# The hipkernel:BatchnormInference ingestor engine: y = scale * ((x - mean) * inv_variance) + bias
+# over a single BatchnormInferenceAttributes node.
+#
+# Regenerate the installed descriptor set from this file; do not hand-edit the JSON under
+# dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/batchnorm_inference/.
+# The native half is packs/BatchnormInferenceNative.cpp and the kernel is
+# kernels/BatchnormInference.cpp + kernels/BatchnormInferenceTypes.h.
+
+engine:
+  name: hipkernel:BatchnormInference
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  knobs: [block_size]
+  heuristic: native
+  # One pack, and its graph_match both admits the node type and validates the operands --
+  # the ConvNative shape. There is nothing for a graph-scoped operation UMD to separate.
+  pack_discriminates: true
+
+kmd_fields:
+  # The kernel's three compile-time macros, one KMD field each. HIPDNN_BN_BLOCK is the
+  # int; HIPDNN_BN_IO_DTYPE and HIPDNN_BN_PARAM_DTYPE are the tag strings
+  # BatchnormInferenceTypes.h maps to device types.
+  - name: block_size
+    type: int
+    default_value: 64
+  # Two dtype fields, not one: BnIoElement (x, y) and BnParamElement (mean, inv_variance,
+  # scale, bias) are independent in the kernel, and batchnorm graphs routinely pair a
+  # 16-bit io dtype with float parameters.
+  - name: io_dtype
+    type: string
+  - name: param_dtype
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: embedded_source
+# Zero: one launch, no virtual tensors, no scratch. Every thread accumulates in registers
+# and writes its output element once.
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: batchnorm_inference
+    # Only gfx1151 was proved numerically (10/10 graphs, max abs diff 4.77e-07 against the
+    # CPU reference at atol=rtol=2e-4). Nothing about this kernel is arch-specific, but an
+    # unproved arch is not a claim this descriptor set gets to make.
+    arch: [gfx1151]
+    kernels:
+      # The full legal candidate cross-product for the admitted envelope: three io
+      # dtypes x three block sizes, param pinned to FLOAT. Enumerated exhaustively
+      # rather than pruned by a prior -- block size is measured, not modelled, and an
+      # io dtype ships because the CPU reference can prove it.
+      #
+      # param_dtype is NOT widened. The kernel's header accepts a 16-bit tag there and
+      # the pairing compiles, but every graph in every inventoried corpus carries float
+      # mean/inv_variance/scale/bias, so a 16-bit-parameter candidate could never be
+      # selected. Widening an axis that admits no additional input adds cost and no
+      # coverage.
+      - name: batchnorm_inference.f32_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 64
+          io_dtype: FLOAT
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.f32_block256
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 256
+          io_dtype: FLOAT
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.f32_block1024
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 1024
+          io_dtype: FLOAT
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.f16_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 64
+          io_dtype: HALF
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.f16_block256
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 256
+          io_dtype: HALF
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.f16_block1024
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 1024
+          io_dtype: HALF
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.bf16_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 64
+          io_dtype: BFLOAT16
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.bf16_block256
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 256
+          io_dtype: BFLOAT16
+          param_dtype: FLOAT
+        priority: 0
+      - name: batchnorm_inference.bf16_block1024
+        kernel_source:
+          kind: embedded_source
+          source_file: BatchnormInference.cpp
+          entry_point: BatchnormInference
+        metadata:
+          block_size: 1024
+          io_dtype: BFLOAT16
+          param_dtype: FLOAT
+        priority: 0
+
+# The direct-load dialect compiles from source_file/entry_point at plan-build time and
+# hydrates no builder object, so there is nothing for a binding to read back: every field
+# is matcher-only. Stated rather than left blank -- a bundle carrying no claim is
+# indistinguishable from one whose author never considered the question.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [block_size, io_dtype, param_dtype]
+  bindings: {}
+  vocabulary: {}

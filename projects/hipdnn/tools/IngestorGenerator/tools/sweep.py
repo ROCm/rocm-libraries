@@ -498,6 +498,20 @@ def descriptor_count(arm):
     return count
 
 
+def _from_plugin_dir(reported, plugin_dir):
+    """True when a result row's plugin_path attributes it to this arm's engines dir.
+
+    Benchmarks spell the same fact two ways: some report the individual plugin they
+    loaded, whose parent is the engines directory, and some echo back the directory
+    they were handed. Both mean "this row came from this arm"; neither means anything
+    looser, so only those two spellings are accepted and a path from any other tree
+    still fails attribution.
+    """
+    resolved = Path(reported).resolve()
+    target = Path(plugin_dir).resolve()
+    return resolved == target or resolved.parent == target
+
+
 def _positive(value):
     return type(value) in (int, float) and math.isfinite(value) and value > 0
 
@@ -589,11 +603,22 @@ def evaluate_phase(
         graph = rows.get(name, {})
         candidates = []
         references = []
+        wanted = config["correctness"]["reference"]
         for row in graph.get("results", []):
             if not isinstance(row, dict):
                 entry.update(outcome="ambiguous", reason="non-mapping result row")
                 continue
-            if row.get("role", "engine") == "reference":
+            # `role` is the explicit spelling. Benchmarks that do not emit it identify
+            # the reference the only other way available: the row's provider names the
+            # requested reference provider and is not the engine under test. Both are
+            # narrow -- a row from any other provider is still not reference evidence,
+            # and whether it actually ran is decided below, not here.
+            role = row.get("role")
+            if role == "reference" or (
+                role is None
+                and row.get("provider") == wanted
+                and row.get("engine_name") != config["engine_name"]
+            ):
                 references.append(row)
                 continue
             if row.get("engine_name") == config["engine_name"]:
@@ -601,7 +626,6 @@ def evaluate_phase(
         # A reference row is only evidence when it names the requested provider and
         # actually ran: a silently skipped reference leaves every engine row with
         # tolerance_match null, which the suite counts as a pass.
-        wanted = config["correctness"]["reference"]
         chosen = [
             r
             for r in references
@@ -631,9 +655,8 @@ def evaluate_phase(
                 or (observed_id & ((1 << 64) - 1)) != engine_id
             ):
                 entry.update(outcome="ambiguous", reason="engine name/ID disagreement")
-            elif (
-                row.get("plugin_path")
-                and Path(row["plugin_path"]).resolve().parent != plugin_dir
+            elif row.get("plugin_path") and not _from_plugin_dir(
+                row["plugin_path"], plugin_dir
             ):
                 entry.update(
                     outcome="ambiguous",

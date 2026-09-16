@@ -1,0 +1,46 @@
+# Integration test configuration for hipkernel:BatchnormInference
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# No entry of either kind, and that is a statement rather than an omission.
+#
+# This engine's pack serves a single BatchnormInferenceAttributes node at rank 4 with
+# FLOAT io and FLOAT parameters, arbitrary positive strides on x and y, and a y tensor
+# distinct from all five inputs. The suite's BatchnormInference sweeps also carry 3-D and
+# 5-D shapes and fp16/bf16 dtypes; those need no skip entry, because `--test-engine` pins
+# the run to this engine and a case its `graph_match` refuses SKIPs on its own rather than
+# falling through to another loaded engine. A filter here would duplicate the matcher and
+# rot against it.
+#
+# The arch restriction is likewise already expressed, in the descriptor's own `arch` list
+# (gfx1151, the only architecture the kernel's numerics were proved on): the loader filters
+# the kernels out elsewhere and every case skips, so an `archs` entry would restate it in a
+# second place.
+#
+# Tolerances: the served cases pass at the suite's defaults -- batchnorm::
+# getToleranceInference<float>(), atol = rtol = 2e-4 via ToleranceResolver -- against the
+# CPU reference executor, with a measured worst case of 4.77e-07 across the proved shape
+# envelope. The CPU one and not the GPU one because hipDNN's GPU reference has no
+# BatchnormInference plan: under `--verification-mode gpu` every case reports "GPU
+# reference is not applicable for this graph" and skips. An override belongs here only
+# with a measured failure behind it.

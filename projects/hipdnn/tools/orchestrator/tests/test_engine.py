@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
 
+import runner.engine as engine_module
 from runner.engine import Engine
 from runner.errors import ConfigError
 from runner.flow import Flow, bind_inputs, validate_refs
@@ -703,3 +706,180 @@ steps:
     report = build(tmp_path, registry_file, flow).run()
     assert report.status == "failed"
     assert "designated path" in (report.error or "")
+
+
+# -- supervised runs --------------------------------------------------------
+
+
+def engine_with(
+    tmp_path: Path, registry_file: Path, flow_text: str, **kwargs
+) -> Engine:
+    """`build()` with the run directory left to the caller."""
+    flow_path = tmp_path / "flow.yaml"
+    flow_path.write_text(flow_text, encoding="utf-8")
+    registry = ToolRegistry.load(registry_file)
+    flow = Flow.load(flow_path)
+    validate_refs(flow, registry.vars)
+    return Engine(
+        flow,
+        registry,
+        bind_inputs(flow, []),
+        log=lambda _message: None,
+        **kwargs,
+    )
+
+
+def test_a_supplied_run_id_is_the_runs_only_identity(
+    tmp_path, registry_file, agent_script
+):
+    """A caller that has already published an id -- a supervisor whose clients address
+    the run by it -- must not find a second one invented underneath it."""
+    supplied = "20260915T171233Z-a1b4"
+    flow = f"""
+version: 1
+name: identified
+vars:
+  tag: "${{run.id}}"
+steps:
+  - id: run
+    tool: agent
+    args: ["{agent_script.as_posix()}"]
+"""
+    engine = engine_with(
+        tmp_path, registry_file, flow, run_root=tmp_path / "runs", run_id=supplied
+    )
+    report = engine.run()
+
+    assert report.status == "ok"
+    assert engine.run_dir.name == supplied
+    manifest = json.loads((engine.run_dir / "run.json").read_text())
+    assert manifest["run_id"] == supplied
+    assert manifest["vars"]["tag"] == supplied
+
+
+def test_each_step_process_is_handed_over_while_it_is_still_alive(
+    tmp_path, registry_file, agent_script
+):
+    """Cancelling a run has to reach the agent, and `launch` returns only once the
+    child is already dead -- so a pid observed from its return value is unkillable.
+    The hand-over happens at construction, while the step is still running."""
+    flow = f"""
+version: 1
+name: observed
+steps:
+  - id: first
+    tool: agent
+    args: ["{agent_script.as_posix()}", "--sleep", "0.3"]
+  - id: second
+    tool: agent
+    args: ["{agent_script.as_posix()}", "--sleep", "0.3"]
+"""
+    seen = []
+
+    def observe(step, process):
+        record = engine.records[-1]
+        seen.append(
+            (step.id, process.pid, process.poll(), record.status, record.exit_code)
+        )
+
+    engine = engine_with(
+        tmp_path,
+        registry_file,
+        flow,
+        run_dir=tmp_path / "run",
+        on_step_process=observe,
+    )
+    report = engine.run()
+
+    assert report.status == "ok"
+    assert [entry[0] for entry in seen] == ["first", "second"]
+    # A process that has already exited reports its exit code here instead of None.
+    assert [entry[2] for entry in seen] == [None, None]
+    # And the step it belongs to has not finished either.
+    assert [(entry[3], entry[4]) for entry in seen] == [
+        ("running", None),
+        ("running", None),
+    ]
+    assert len({entry[1] for entry in seen}) == 2
+    assert [record.exit_code for record in report.steps] == [0, 0]
+
+
+def test_the_manifest_describes_the_run_without_the_flow_beside_it(
+    tmp_path, registry_file, agent_script
+):
+    """A consumer reading `run.json` must not need a second join against the flow
+    YAML to know what a step invoked or where the cross-iteration channel is. That
+    join is a second source of truth, and it drifts the moment the flow is edited
+    mid-run."""
+    flow = f"""
+version: 1
+name: described
+steps:
+  - id: first
+    tool: agent
+    args: ["{agent_script.as_posix()}"]
+"""
+    engine = engine_with(tmp_path, registry_file, flow, run_dir=tmp_path / "run")
+    engine.run()
+
+    manifest = json.loads((engine.run_dir / "run.json").read_text())
+    assert [record["tool"] for record in manifest["steps"]] == ["agent"]
+    assert Path(manifest["feedback_path"]).is_file()
+    assert Path(manifest["feedback_path"]) == engine.feedback_path
+
+
+def test_checkpoint_survives_a_reader_holding_the_manifest(tmp_path):
+    """A status reader must not be able to kill a run.
+
+    `run.json` is replaced after every step transition, and the manifest is
+    advertised as readable while a run is still going. On Windows `os.replace`
+    is refused outright while another handle holds the destination, so without
+    a retry the reader turns the next checkpoint into `PermissionError` and the
+    run dies mid-flight with `run.json.tmp` left behind.
+    """
+    destination = tmp_path / "run.json"
+    destination.write_text("old", encoding="utf-8")
+    temporary = tmp_path / "run.json.tmp"
+    temporary.write_text("new", encoding="utf-8")
+
+    released = threading.Event()
+    holding = threading.Event()
+
+    def hold() -> None:
+        with open(destination, "rb") as handle:
+            handle.read()
+            holding.set()
+            released.wait(timeout=5)
+
+    reader = threading.Thread(target=hold)
+    reader.start()
+    holding.wait(timeout=5)
+    releaser = threading.Timer(0.15, released.set)
+    releaser.start()
+    try:
+        engine_module._replace_with_retry(temporary, destination)
+    finally:
+        released.set()
+        releaser.cancel()
+        reader.join(timeout=5)
+
+    assert destination.read_text(encoding="utf-8") == "new"
+    assert not temporary.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="POSIX replaces over an open handle")
+def test_checkpoint_gives_up_on_a_reader_that_never_lets_go(tmp_path):
+    """Retrying is for contention, not for a wedged handle. A reader that never
+    closes is not a race to wait out, and swallowing it would hide the manifest
+    silently going stale."""
+    destination = tmp_path / "run.json"
+    destination.write_text("old", encoding="utf-8")
+    temporary = tmp_path / "run.json.tmp"
+    temporary.write_text("new", encoding="utf-8")
+
+    with open(destination, "rb") as handle:
+        handle.read()
+        with pytest.raises(PermissionError):
+            engine_module._replace_with_retry(
+                temporary, destination, attempts=3, pause_s=0.01
+            )

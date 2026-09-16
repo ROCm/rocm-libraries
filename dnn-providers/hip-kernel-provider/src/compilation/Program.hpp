@@ -18,15 +18,15 @@ public:
     /// @p kernelFileName, with the embedded include list as its virtual headers.
     Program(std::string kernelFileName, const std::vector<std::string>& options);
 
-    /// Compiles owned source text, for a kernel no embedded table holds -- a hiprtc_file
+    /// Compiles source text, for a kernel no embedded table holds -- a hiprtc_file
     /// kernel read out of a drop-in bundle at prepare().
     ///
     /// @param headers The complete virtual-header list as (name, text) pairs. Complete
     ///                rather than merged with the embedded list here, so the caller that
     ///                can name a colliding bundle header is the one that rejects it.
-    Program(std::string sourceText,
+    Program(const std::string& sourceText,
             std::string programName,
-            std::vector<std::pair<std::string, std::string>> headers,
+            const std::vector<std::pair<std::string, std::string>>& headers,
             const std::vector<std::string>& options);
 
     hipFunction_t getKernel(const std::string& kernelName) const;

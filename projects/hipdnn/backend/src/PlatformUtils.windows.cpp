@@ -96,8 +96,11 @@ std::string getSystemInfo()
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if(ntdll != nullptr)
     {
-        auto rtlGetVersion
-            = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
+        // GetProcAddress returns FARPROC; clang rejects a direct reinterpret_cast to an
+        // incompatible function type, so hop through void* -- the standard Win32 idiom.
+        auto rtlGetVersion = reinterpret_cast<RtlGetVersionPtr>(
+            // NOLINTNEXTLINE(bugprone-casting-through-void)
+            reinterpret_cast<void*>(GetProcAddress(ntdll, "RtlGetVersion")));
         if(rtlGetVersion != nullptr)
         {
             versionInfoValid = (rtlGetVersion(&versionInfo) == 0);

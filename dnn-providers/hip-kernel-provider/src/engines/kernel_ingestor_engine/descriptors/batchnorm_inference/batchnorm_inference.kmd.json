@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "20c56e06-9fa5-43a3-a537-35b2226eac46",
+  "name": "BatchnormInference variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "io_dtype",
+      "type": "string"
+    },
+    {
+      "name": "param_dtype",
+      "type": "string"
+    }
+  ]
+}

@@ -328,6 +328,23 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             REFERENCE_EXECUTOR gpu
             ENVIRONMENT    "HIPDNN_TEST_VERIFICATION_MODE=gpu"
         )
+        # Not gpu, unlike the two above: hipDNN's GPU reference executor has no
+        # BatchnormInference plan, so `--verification-mode gpu` reports
+        # "GPU reference is not applicable for this graph" and every case skips (0/731
+        # passed, measured). The capable independent reference for this operation is the
+        # CPU one -- CpuFpReferenceBatchnorm, which is what the kernel's numerics were
+        # proved against at batchnorm::getToleranceInference<float>()'s atol = rtol =
+        # 2e-4. Naming cpu explicitly rather than leaving `auto` to walk
+        # golden -> gpu -> cpu, whose next step after a miss is a silent skip.
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-hipkernel-batchnorm-inference-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    hipkernel:BatchnormInference
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_BatchnormInference.toml
+            REFERENCE_EXECUTOR cpu
+            ENVIRONMENT    "HIPDNN_TEST_VERIFICATION_MODE=cpu"
+        )
 
         # THIS TARGET IS A SMOKE GATE, NOT A COVERAGE GATE. Green here means the
         # `hiprtc_file` path loaded a descriptor set from HIPDNN_DESCRIPTOR_RUNTIME_DIR,

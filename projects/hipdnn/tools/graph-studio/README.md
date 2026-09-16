@@ -24,6 +24,10 @@ graph out without writing any code.
 - Import and export hipDNN's own JSON format, so graphs can be shared with
   other hipDNN tools.
 - Open benchmark reports to compare engines, inspect correctness, and view optional profiling traces.
+- Launch an agent flow against the graph you have open, from the **Implement**
+  tab, and watch it run — steps, loop iterations with the condition they are
+  measured against, and the files each one produced. See
+  [Running agent flows](#running-agent-flows).
 
 ## Requirements
 
@@ -42,6 +46,52 @@ Without the GPU pieces the app still runs: you can draw, save, and export
 graphs, and the Build and Execute buttons stay disabled.
 
 ## Quick start
+
+### Shared local installation
+
+From the outer `rocm-libraries` checkout, use Python 3.12+, Bun, Node.js 20+,
+and a native C++ build toolchain. On Windows, use a Visual Studio 2022 developer
+terminal. Initialize only the benchmarking submodule; do not recurse into its
+nested `rocm-libraries` submodule.
+
+```bash
+git submodule update --init -- projects/hipdnn/tools/dnn-benchmarking
+python3 projects/hipdnn/tools/dnn-benchmarking/setup_env.py --graph-studio --gpu-arch <gfx-target> --yes
+build/install/bin/start-graph-studio
+build/install/bin/dnn-benchmark --graph /path/to/graph.json -o /path/to/results.json
+```
+
+Use the target for the host GPU. An explicit target permits building when device
+detection is unavailable; it does not establish that the GPU can execute kernels.
+On Windows, use the generated `start-graph-studio.bat` and `dnn-benchmark.bat`.
+
+Setup preserves the outer checkout's `.venv`, provisions PyTorch and the ROCm
+wheel SDK, and builds hipDNN, its Python bindings, all three providers, and Studio
+in one superbuild. It installs fresh artifacts into `build/install`, not into
+the dependency SDK. The benchmarking package and matching frontend wheel install
+into `.venv`. The nested benchmarking checkout is not used.
+
+Use `--source-dir`, `--build-dir`, `--install-prefix`, and `--workspace` to select
+other locations. `--workspace` owns `.venv`; `--rocm-prefix` selects an existing
+dependency SDK, not the application destination. Rerun setup to rebuild and
+reinstall. Add `--reuse-artifacts` to reinstall an already-built superbuild
+without configuring or compiling it.
+
+The installed launchers work from any directory without Bun, Node.js, or source
+files at runtime. They use the bundled Electron executable, the exact configured
+Python interpreter, application libraries before SDK libraries, and the explicit
+application plugin directory. Benchmark startup selects the fresh backend before
+PyTorch probes can preload the SDK copy. Keep the configured `.venv` and ROCm
+dependencies at their recorded paths; this is a per-host install, not a standalone
+redistributable package.
+
+An import check or a zero benchmark exit code is not proof of GPU execution.
+Check report rows for actual executed engines. A host without a working ROCm
+device can render Studio and produce reports with every engine skipped.
+Studio's Build and Execute actions remain native; this setup does not replace
+them with the benchmarking backend.
+
+### Source development
 
 Windows, from the project folder:
 
@@ -156,6 +206,48 @@ found, or explains why it could not load.
 
 If the add-on is missing or fails to load, the app keeps working with Build and
 Execute switched off — rebuilding it is the only fix needed.
+
+## Running agent flows
+
+The **Implement** tab launches a hipDNN agent flow against the graph on the
+canvas and follows it to completion. Flows live in the orchestrator
+(`../orchestrator/configs/flows`) and describe what the agents do; Studio only
+launches them and renders what the run reports, so a new or rewritten flow shows
+up here with no change to the app.
+
+This needs the orchestrator's MCP extra, which is deliberately not part of its
+base requirements:
+
+```bash
+cd ../orchestrator
+.venv/Scripts/python.exe -m pip install -r requirements-mcp.txt   # Windows
+# .venv/bin/python -m pip install -r requirements-mcp.txt         # Linux
+```
+
+Studio finds the orchestrator by walking up from its own directory, so a normal
+checkout needs no configuration; `HIPDNN_ORCHESTRATOR_DIR` overrides it. **If the
+tab's controls are disabled it says why** — usually that the extra above is not
+installed, or that the tool registry names an executable this machine lacks.
+
+Pick a flow and its inputs are generated from what that flow declares. Any input
+the flow types as a path can be filled from the canvas instead of typed, which is
+how the graph you are editing reaches the run. **Iterations** lowers the flow's
+own loop budget; it cannot raise it.
+
+Start with `fast-converge`: it runs no agent, takes about two seconds, and
+exercises the whole path — live timeline, artifacts, cancellation — for free. The
+rest spend real agent sessions, and those sessions can edit this checkout, so
+`git status` after a run is worth a look.
+
+What a run reports is read from the run itself, never assumed. The terminal line
+is the run's status and the condition its loop was measured against, verbatim —
+there is no "passed". A run whose steps only invoked agents says so: nothing was
+compiled or executed, so it is review evidence and not a correctness claim. A
+flow that builds or tests stops saying it, on its own.
+
+Quitting ends every run and the agent sessions they are waiting on. Runs cannot
+outlive the app: the server is its child, so it goes when Studio goes. Everything
+already written stays in the run directory.
 
 ## Project layout
 

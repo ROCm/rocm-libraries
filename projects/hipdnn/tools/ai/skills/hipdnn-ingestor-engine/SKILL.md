@@ -46,13 +46,18 @@ source according to workspace policy.
 | Authored source | HIP, embedded at configure time | HIP, compiled at `prepare()` | `rocke` or `hip` |
 | Runtime descriptors | Authored direct-load tree | Authored tree, usually a drop-in root | Lowered per-arch tree, `kind: kpack` |
 | Source staging | Provider embedding/descriptor lists | Bundle directory beside the descriptors | Production packager's authored source root |
-| Adding a variant | Reconfigure, rebuild, reinstall | Copy files, restart the process | Repack, reinstall |
+| Adding a variant | Reconfigure, rebuild, reinstall | Copy files, restart the process — the cheapest exhaustive-sweep vehicle there is | Repack, reinstall |
 
 rocKE is always packaged. Direct-load engines need neither a fictitious rocKE
 profile nor a compiled-specialization claim their path cannot supply. `hiprtc_file`
 adds variants to an **already-installed** pack only, reusing its registered symbols
-and its handler's launch ABI. **A genuinely new native symbol is a rebuild, and it is
-create-path work** — take it to
+and its handler's launch ABI. Where it applies, that is what makes it the cheapest way
+to run an exhaustive sweep — a new variant costs a descriptor entry and a file rather
+than a rebuild, so the descriptor-cost tier of a tuning space can be enumerated against
+one installed provider — and its two constraints are the same sentence: it adds no
+native symbol, so the pack must already be installed and be one you shipped, and its
+handler must route `kernel_source.kind`. **A genuinely new native symbol is a rebuild,
+and it is create-path work** — take it to
 [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) rather than through
 the stages below, whichever dialect it ends up using.
 
@@ -78,6 +83,20 @@ Completion requires:
   Every final corpus input has an attributable runtime outcome and the complete join
   required by [workloads.md](workloads.md); missing/ambiguous/error outcomes block
   runtime acceptance. Without that join, reconciliation is offline only.
+
+**A zero exit status means a tool completed, not that it checked anything.** Commands
+that select no work, skip every case, or report their checks as not-run exit zero
+routinely, which is why every requirement above is stated as a count rather than as an
+outcome. Every reported result carries the count of what actually executed, and a
+result whose denominator is zero is absence of evidence — it blocks the gate it was
+offered for instead of passing it. The in-tree form of this discipline is
+`IngestorGenerator/tools/coverage_gate.py`: it runs the static and loader rungs, then
+prints the device rung as `NOT RUN`, stated rather than inferred from the two that
+passed (`IngestorGenerator/tools/coverage_gate.py:32-34`,
+`IngestorGenerator/tools/coverage_gate.py:236-239`), and its structural mode reports
+compiled agreement as `NOT CHECKED` rather than printing a stronger claim than it
+made. Report the same way. Summarising a `NOT RUN` or `NOT VERIFIED HERE` line into a
+pass is the failure this rule exists to prevent.
 
 State what each observation proves and does not prove, including device, reference,
 graph and architecture limits. Generation, enumeration, proposed commands and queued

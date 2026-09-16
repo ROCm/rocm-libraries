@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,7 @@ def launch(
     stdin_text: str | None = None,
     timeout: float | None = None,
     tee: bool = False,
+    on_start: Callable[[subprocess.Popen], None] | None = None,
 ) -> ProcResult:
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
@@ -74,6 +75,11 @@ def launch(
             stderr=stderr_target,
             **_new_group(),
         )
+        # Handed over while the child is still alive. `launch` returns only after
+        # `process.wait()`, so a caller that needs a killable pid -- a supervisor
+        # cancelling a run -- can only get one here.
+        if on_start is not None:
+            on_start(process)
 
         pumps: list[threading.Thread] = []
         if tee:

@@ -17,7 +17,11 @@ Each declared source needs total, parsed, servable, covered and excluded counts 
 reasons and original identities. Missing/unreadable input is not an empty population.
 Request JSON feeds mining/parity; actual graph JSON directories feed the sweep.
 `mine_shapes.py` accepts published CSV, graph directories and optional `--rocke-bench`
-input. Omit sources only when outside the approved scope.
+input, and reports the rows found per source, the distinct count after deduplication
+and the by-source split of what it wrote. It does not filter by servability: it
+supplies the total and the provenance, never the servable, covered or excluded
+figures. Those are reconciled separately — through the dispatcher for rocKE, and by
+hand for every other dialect. Omit sources only when outside the approved scope.
 
 Every semantic request field participates in identity, including unmasked/causal/window
 and sink semantics and independent Q/K/V dimensions. Provenance does not split the

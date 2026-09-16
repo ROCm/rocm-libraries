@@ -120,6 +120,74 @@ def _deep_set(obj, dotted_path, value):
     cur[parts[-1]] = value
 
 
+_ABSENT = "<absent>"
+
+
+def _first_mismatch(expected, actual, path=""):
+    """First differing field between two JSON trees.
+
+    Returns (dotted_path, expected_value, actual_value), or None when equal. Used
+    only to name what a failed round-trip lost, never to decide the comparison.
+    """
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        for key in sorted(set(expected) | set(actual)):
+            where = f"{path}.{key}" if path else key
+            if key not in expected:
+                return (where, _ABSENT, actual[key])
+            if key not in actual:
+                return (where, expected[key], _ABSENT)
+            found = _first_mismatch(expected[key], actual[key], where)
+            if found:
+                return found
+        return None
+    if isinstance(expected, list) and isinstance(actual, list):
+        for i in range(max(len(expected), len(actual))):
+            where = f"{path}[{i}]"
+            if i >= len(expected):
+                return (where, _ABSENT, actual[i])
+            if i >= len(actual):
+                return (where, expected[i], _ABSENT)
+            found = _first_mismatch(expected[i], actual[i], where)
+            if found:
+                return found
+        return None
+    if expected != actual:
+        return (path or "<root>", expected, actual)
+    return None
+
+
+def _brief(value, limit=200):
+    text = value if value is _ABSENT else json.dumps(value, sort_keys=True)
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _report_roundtrip_failure(where, expanded, graph):
+    """Name the field a failed round-trip lost, with expected vs actual."""
+    print(f"  ERROR: round-trip verify failed {where}", file=sys.stderr)
+    mismatch = _first_mismatch(graph, expanded)
+    if mismatch is None:
+        want, got = canon(graph), canon(expanded)
+        at = next(
+            (i for i, (a, b) in enumerate(zip(want, got)) if a != b),
+            min(len(want), len(got)),
+        )
+        print(
+            "    mismatch:  no field compares unequal, so this is a JSON rendering"
+            " difference, such as int 1 against float 1.0",
+            file=sys.stderr,
+        )
+        print(f"    at offset: {at}", file=sys.stderr)
+        print(f"    expected:  {want[at : at + 60]}  (input graph)", file=sys.stderr)
+        print(
+            f"    actual:    {got[at : at + 60]}  (template + values)", file=sys.stderr
+        )
+        return
+    field, expected, actual = mismatch
+    print(f"    field:     {field}", file=sys.stderr)
+    print(f"    expected:  {_brief(expected)}  (input graph)", file=sys.stderr)
+    print(f"    actual:    {_brief(actual)}  (template + values)", file=sys.stderr)
+
+
 def _extract_values(graph: dict, template: dict) -> dict:
     """Extract per-case values from a concrete graph given its template."""
     values = {}
@@ -265,7 +333,13 @@ def main() -> int:
 
         expanded = expand(template, values)
         if canon(expanded) != canon(graph):
-            print("  ERROR: round-trip verify failed after extraction", file=sys.stderr)
+            print(
+                f"  selected sweep: {sweep_path}"
+                f" (of {len(matches)} structural match(es),"
+                f" {len(tier_matches)} in tier '{args.tier}')",
+                file=sys.stderr,
+            )
+            _report_roundtrip_failure("after extraction", expanded, graph)
             return 1
 
         if not args.dry_run:
@@ -293,7 +367,7 @@ def main() -> int:
 
     expanded = expand(template, values)
     if canon(expanded) != canon(graph):
-        print("  ERROR: round-trip verify failed for new template", file=sys.stderr)
+        _report_roundtrip_failure("for new template", expanded, graph)
         return 1
 
     tmap = tensors_by_uid(graph)
