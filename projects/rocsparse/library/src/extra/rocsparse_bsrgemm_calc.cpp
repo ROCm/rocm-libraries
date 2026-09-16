@@ -93,12 +93,12 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the (sub)wavefront rows so a grid clamped to maxGridSize[0] covers all
-        for(J block_offset = static_cast<J>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE);
+        for(int64_t block_offset = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE);
             block_offset < mb;
-            block_offset += static_cast<J>(hipGridDim_x) * (BLOCKSIZE / WF_SIZE))
+            block_offset += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WF_SIZE))
         {
             rocsparse::bsrgemm_fill_wf_per_row_2x2_device<BLOCKSIZE, WF_SIZE, HASHSIZE, HASHVAL>(
-                block_offset,
+                static_cast<J>(block_offset),
                 dir,
                 mb,
                 nkb,
@@ -243,13 +243,13 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         // Grid-stride over the (sub)wavefront rows so a grid clamped to maxGridSize[0] covers all
-        for(J block_offset = static_cast<J>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE);
+        for(int64_t block_offset = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WF_SIZE);
             block_offset < mb;
-            block_offset += static_cast<J>(hipGridDim_x) * (BLOCKSIZE / WF_SIZE))
+            block_offset += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WF_SIZE))
         {
             rocsparse::
                 bsrgemm_fill_wf_per_row_device<BLOCKSIZE, WF_SIZE, HASHSIZE, HASHVAL, BLOCKDIM>(
-                    block_offset,
+                    static_cast<J>(block_offset),
                     dir,
                     mb,
                     nkb,
