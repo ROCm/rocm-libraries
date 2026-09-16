@@ -548,12 +548,14 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
 
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
     # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
-    # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline +
-    # ``default`` epilogue. The richer pipelines (compv3 / compv4 scheduler
-    # interleave, cshuffle LDS-staged C, and preshuffle) encode MFMA-shaped
-    # assumptions and are gated off until ported. gfx1250 additionally supports
-    # its native async direct-to-LDS instruction, including double-buffered
-    # prefetch. CDNA MFMA keeps the full matrix.
+    # gfx1250-class 16x16x32 atom, both through the simple ``mem`` pipeline.
+    # Both epilogues work: ``default`` scatters straight to global and
+    # ``cshuffle`` stages C through LDS (its accumulator scatter is driven by
+    # the op's ``c_layout()`` map, so no MFMA lane math leaks in). The richer
+    # pipelines (compv3 / compv4 scheduler interleave) and preshuffle still
+    # encode MFMA-shaped assumptions and are gated off until ported. gfx1250
+    # additionally supports its native async direct-to-LDS instruction,
+    # including double-buffered prefetch. CDNA MFMA keeps the full matrix.
     if family == "wmma":
         supported_atoms = {(16, 16, 16)}
         if arch == "gfx1250":
@@ -567,11 +569,6 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             return False, (
                 f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
-            )
-        if spec.trait.epilogue != "default":
-            return False, (
-                f"WMMA path supports only the 'default' epilogue "
-                f"(got {spec.trait.epilogue!r}) on {arch}"
             )
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
@@ -643,15 +640,19 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         )
 
     # LDS budget. The cap is the target's per-WG LDS capacity (160 KiB on
-    # gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3). Our current emitter does
-    # NOT alias AB and cshuffle staging (CK does; a separate optimisation
-    # we have not yet wired up), so the actual usage is additive:
+    # gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3).
     #   compv4 single AB:   tile_m*tile_k*2 + tile_n*tile_k*2
     #   compv4 double AB:   2 * single AB
     #   cshuffle staging:   tile_m*tile_n*2   (f16)
-    #   total:              double_buffer_AB + (cshuffle ? C : 0)
-    # When we land the AB/C aliasing in the cshuffle emitter, swap the
-    # `+` for a `max`.
+    # The cshuffle C staging tile is *aliased* onto the A/B pool: the smem-pool
+    # packer in :mod:`rocke.core.lower_llvm` sorts allocations by live-interval
+    # start, so A lands at pool offset 0 and the C tile -- whose live range
+    # begins after the last A/B read -- reuses that same offset. Peak usage is
+    # therefore ``max(AB, C)``, not ``AB + C``, and this gate has to model that
+    # or it spuriously rejects specs the emitter builds fine (a 256x256 C tile
+    # is 128 KiB, which double-counted on top of AB overflows every cap we
+    # have). ``cshuffle_no_alias`` opts out -- it marks the C tile exclusive so
+    # the packer gives it its own byte range -- and there usage is additive.
     # AB is double-buffered (2x LDS) only when the emitter actually
     # ping-pongs two halves: ``dtl_prefetch`` (DTLA ping-pong) or the
     # compv4 software-pipelined double buffer, which the emitter enables
@@ -664,7 +665,10 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     ab_single, _, _ab_dbl = _ab_lds_plan(spec, arch)
     ab_bytes = ab_single * (2 if _ab_dbl else 1)
     c_bytes = t.tile_m * t.tile_n * 2 if spec.trait.epilogue == "cshuffle" else 0
-    bytes_lds = ab_bytes + c_bytes
+    if c_bytes and not spec.trait.cshuffle_no_alias:
+        bytes_lds = max(ab_bytes, c_bytes)
+    else:
+        bytes_lds = ab_bytes + c_bytes
     if not target.fits_lds(bytes_lds):
         return False, (
             f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap "
@@ -2395,6 +2399,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _emit_epilogue_cshuffle(
                 b,
                 spec,
+                op,
                 A_smem,
                 _for_results,
                 warp_m_idx,
@@ -2636,8 +2641,9 @@ def _emit_epilogue_default(
     # The WMMA accumulator distributes the M x N tile across wave32 lanes
     # differently from MFMA, so we ask the op's accumulator layout map for the
     # (row, col) of every per-lane slot rather than hard-coding the lane math.
-    # One slot -> one f16 store. (The supported WMMA subset is the single
-    # 16x16x16 atom -> mfmas_m == mfmas_n == 1.)
+    # One slot -> one f16 store: a lane's slots share a column, so they cannot
+    # coalesce here. ``epilogue="cshuffle"`` is the way out -- it stages the
+    # tile through LDS and re-reads it row-major to recover a wide store.
     if op.family == "wmma":
         c_map = op.c_layout()
         block_warp_m_off = b.add(block_m_off, warp_m_off)
@@ -2790,6 +2796,7 @@ def _emit_epilogue_split_k(
 def _emit_epilogue_cshuffle(
     b: IRBuilder,
     spec: UniversalGemmSpec,
+    op,
     _smem_unused: Value,  # placeholder for future reuse
     accs: Sequence[Value],
     warp_m_idx: Value,
@@ -2828,6 +2835,18 @@ def _emit_epilogue_cshuffle(
     The MFMA->LDS index math matches what we used in the default
     epilogue (which keeps the implementation honest: same lane->output
     mapping, just an extra LDS pass).
+
+    Both ISAs are supported, and only step 1+2 (the accumulator -> LDS
+    scatter) is layout-dependent: MFMA routes through
+    :func:`_emit_mfma_acc_scatter`, WMMA asks the op's accumulator
+    ``c_layout()`` map for each slot's ``(row, col)`` exactly as the default
+    epilogue's WMMA branch does. Steps 3 and 4 (the barrier and the wide
+    global stores) read the staging tile in row-major order and are
+    ISA-agnostic, which is where the win on WMMA comes from: the wave32
+    accumulator holds each lane's ``c_per_lane`` slots in one *column*
+    (consecutive rows, ``N`` elements apart in C), so storing it directly
+    costs one scalar store per slot; routing it through LDS turns that into
+    contiguous ``store_vec``-wide stores.
     """
     t = spec.tile
     storage_dtype = _storage_dtype(spec)
@@ -2893,23 +2912,49 @@ def _emit_epilogue_cshuffle(
         h = b.vec_extract(acc_h, i)
         b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
 
-    # Same MFMA accumulator -> (row, col) layout as the default epilogue, but
-    # the base offsets are warp-relative (the block offset is applied at the
-    # wide global store in step 4) and each cell writes to the LDS staging
-    # tile instead of global. The shared scatter keeps the 16x16 / 32x32 row
-    # math + hoisting in one place.
-    _emit_mfma_acc_scatter(
-        b,
-        spec,
-        lane,
-        accs,
-        warp_m_off,
-        warp_n_off,
-        c_per_lane,
-        storage_dtype,
-        _smem_cell,
-        n_base_first=True,
-    )
+    # WMMA (RDNA) accumulator scatter: the wave32 accumulator distributes a
+    # warp tile across lanes differently from MFMA, so we ask the op's
+    # accumulator layout map for each slot's (row, col) instead of hard-coding
+    # the lane math -- the same contract the default epilogue's WMMA branch
+    # uses. Coordinates stay warp-relative (the block offset is applied at the
+    # wide global store in step 4), and the staging tile covers the whole block
+    # tile, so no bounds check is needed on the LDS write.
+    if op.family == "wmma":
+        c_map = op.c_layout()
+        flat = 0
+        for mi in range(mfmas_m):
+            atom_m = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m))
+            for ni in range(mfmas_n):
+                acc = accs[flat]
+                flat += 1
+                atom_n = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n))
+                acc_h = b.vec_cast_f32_to(acc, storage_dtype)
+                for i in range(c_per_lane):
+                    row_in_atom, col_in_atom = c_map.coord(b, lane, i)
+                    _smem_cell(
+                        b.add(atom_m, row_in_atom),
+                        b.add(atom_n, col_in_atom),
+                        acc_h,
+                        i,
+                    )
+    else:
+        # Same MFMA accumulator -> (row, col) layout as the default epilogue,
+        # but the base offsets are warp-relative (the block offset is applied
+        # at the wide global store in step 4) and each cell writes to the LDS
+        # staging tile instead of global. The shared scatter keeps the 16x16 /
+        # 32x32 row math + hoisting in one place.
+        _emit_mfma_acc_scatter(
+            b,
+            spec,
+            lane,
+            accs,
+            warp_m_off,
+            warp_n_off,
+            c_per_lane,
+            storage_dtype,
+            _smem_cell,
+            n_base_first=True,
+        )
 
     # ---- step 3: barrier. ----
     b.sync()

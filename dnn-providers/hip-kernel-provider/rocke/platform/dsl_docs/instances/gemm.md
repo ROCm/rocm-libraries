@@ -129,7 +129,7 @@ Shipped tile geometries cover `64..256 x 64..256 x 16..128` with warp grids `1x1
 
 `is_valid_spec(spec)` returns `(ok, reason)` and rejects unsupported combinations before IR build:
 
-- target architecture support (gfx942 / gfx950 CDNA wave64, gfx1151 / gfx1201 RDNA wave32; `is_valid_spec(spec, arch="gfx950")` defaults to gfx950 but is arch-aware — the WMMA RDNA path is limited to the 16x16x16 atom + `mem` pipeline + `default` epilogue);
+- target architecture support (gfx942 / gfx950 CDNA wave64, gfx1151 / gfx1201 RDNA wave32; `is_valid_spec(spec, arch="gfx950")` defaults to gfx950 but is arch-aware — the WMMA RDNA path is limited to the 16x16x16 atom (16x16x32 on gfx1250) and the `mem` pipeline, but supports **both** epilogues: `cshuffle`'s accumulator scatter is driven by the MMA op's `c_layout()` map, so it carries no MFMA lane math);
 - dtype combinations supported by IR lowering and the MFMA atom catalog;
 - supported layout string (`RCR` is the production family);
 - `tile_m`, `tile_n` divisible by `warp_* * warp_tile_*`;

@@ -12,7 +12,7 @@ matrix atom / unsupported path).
 | gfx1151 | RDNA3.5 | WMMA | 32 | 16x16x16 (`wmma_f32_16x16x16_{f16,bf16}`) |
 
 Matrix-core instances below were exercised with a portable f16 **16x16x16**
-atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`,
+atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, either epilogue,
 `wave_size=32`). Generated 2026-05-29; cross-compiled on a gfx1151 box.
 
 ---
@@ -46,12 +46,12 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
-| `universal_gemm` | ✅ | ✅ | ✅ | gfx1151: `mem`+`default` only |
+| `universal_gemm` | ✅ | ✅ | ✅ | gfx1151: `mem` pipeline only; both epilogues |
 | `batched_gemm` | ✅ | ✅ | ✅ | |
 | `grouped_gemm` | ✅ | ✅ | ✅ | |
 | `flatmm` | ✅ | ✅ | ✅ | |
-| `gemm_multi_d` | ✅ | ✅ | ❌ | needs `cshuffle` epilogue (not on WMMA) |
-| `gemm_multi_abd` | ✅ | ✅ | ❌ | needs `cshuffle` epilogue (not on WMMA) |
+| `gemm_multi_d` | ✅ | ✅ | ✅ | needs `cshuffle`, which the WMMA path now has |
+| `gemm_multi_abd` | ✅ | ✅ | ✅ | needs `cshuffle`, which the WMMA path now has |
 | `mfma_gemm` | ❌ | ✅ | ❌ | needs f16 16x16x32 kpack atom (CDNA4) |
 | `streamk_gemm` | ✅ | ✅ | ❌ | MFMA stream-K reduction path |
 | `block_scale_gemm` | ✅ | ✅ | ❌ | MFMA quantized GEMM |
@@ -115,10 +115,24 @@ as described in the notes.
 
 ## Notes
 
-- **gfx1151 (WMMA) only ships the `mem` pipeline + `default` epilogue** for the
-  GEMM family. The `compv3`/`compv4` pipelines and the `cshuffle` epilogue are
-  MFMA-only paths, so any instance that mandates them (e.g. `gemm_multi_d`,
-  `gemm_multi_abd`) is rejected on gfx1151.
+- **gfx1151 (WMMA) only ships the `mem` pipeline** for the GEMM family, but
+  **both epilogues** work. The `compv3`/`compv4` pipelines remain MFMA-only
+  (their scheduler interleave encodes MFMA-shaped assumptions). The `cshuffle`
+  epilogue is *not* MFMA-only: its accumulator scatter asks the MMA op's
+  `c_layout()` map for each fragment slot's `(row, col)`, so it follows the
+  wave32 accumulator the same way it follows MFMA's. That is what makes
+  `gemm_multi_d` / `gemm_multi_abd` — which mandate `cshuffle` for the fused-op
+  hook — reachable on RDNA.
+- **`cshuffle` on WMMA is LDS-free relative to the direct epilogue** whenever
+  the A/B staging is at least as large as the C tile: the smem-pool packer
+  aliases the C staging tile onto the A/B bytes (their live ranges do not
+  overlap), so the block's LDS peak is `max(A/B, C)` rather than the sum. Set
+  `cshuffle_no_alias` to opt out and the budget becomes additive.
+- **`pad_n` and `cshuffle` work against each other.** A partial output column
+  can split a store vector, and `N` is a runtime value, so the epilogue guards
+  each element separately rather than dropping the valid columns at the head of
+  the final vector. That is correct but gives up the wide store the epilogue
+  exists to buy, so a `pad_n` spec is better served by the `default` epilogue.
 - **Convolution on gfx1151:** `conv_implicit_gemm` runs on WMMA
   (16x16x16, `mem` pipeline, `default` epilogue, `wave_size=32`, `groups=1`).
   `conv_implicit_gemm_auto` is a separate MFMA-specialized autotuned path

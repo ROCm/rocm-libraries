@@ -673,6 +673,7 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
 
 void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        const rocke_gemm_universal_spec_t* spec,
+                                       const rocke_mmaop_t* op,
                                        rocke_value_t* smem_unused,
                                        rocke_value_t* const* accs,
                                        int num_accs,
@@ -756,20 +757,69 @@ void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
     warp_m_off = rocke_b_mul(b, warp_m_idx, rocke_b_const_i32(b, mfmas_m * t->warp_tile_m));
     warp_n_off = rocke_b_mul(b, warp_n_idx, rocke_b_const_i32(b, mfmas_n * t->warp_tile_n));
 
-    /* ---- step 1+2: warp accs -> LDS at the MFMA layout. ---- */
+    /* ---- step 1+2: warp accs -> LDS at the MMA output layout. ----
+     *
+     * WMMA (RDNA): the wave32 accumulator distributes a warp tile across lanes
+     * differently from MFMA, so we ask the op's accumulator layout map for each
+     * slot's (row, col) instead of hard-coding the lane math -- the same
+     * contract the default epilogue's WMMA branch uses. Coordinates stay
+     * warp-relative (the block offset is applied at the wide global store in
+     * step 4), and the staging tile covers the whole block tile, so no bounds
+     * check is needed on the LDS write. */
     smem_user.Cs = Cs;
-    rocke_gemm_emit_mfma_acc_scatter(b,
-                                     spec,
-                                     lane,
-                                     accs,
-                                     num_accs,
-                                     warp_m_off,
-                                     warp_n_off,
-                                     c_per_lane,
-                                     storage_dtype,
-                                     gemm_cshuffle_smem_cell,
-                                     &smem_user,
-                                     true);
+    if(op != NULL && op->family != NULL && strcmp(op->family, "wmma") == 0)
+    {
+        const rocke_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+        int flat = 0;
+        int mi, ni, i;
+
+        for(mi = 0; mi < mfmas_m; ++mi)
+        {
+            rocke_value_t* atom_m
+                = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
+            for(ni = 0; ni < mfmas_n; ++ni)
+            {
+                rocke_value_t* acc = accs[flat];
+                rocke_value_t* atom_n;
+                rocke_value_t* acc_h;
+                flat += 1;
+                atom_n = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
+                acc_h = rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
+                for(i = 0; i < c_per_lane; ++i)
+                {
+                    rocke_value_t* row_in_atom = NULL;
+                    rocke_value_t* col_in_atom = NULL;
+                    rocke_value_t* ld_m;
+                    rocke_value_t* ld_n;
+                    rocke_layout_map_coord(c_map, b, lane, i, &row_in_atom, &col_in_atom);
+                    /* Sequenced through locals: C leaves argument evaluation
+                     * order unspecified, and Python builds the row add before
+                     * the column add. Passing the two rocke_b_add calls
+                     * directly as arguments lets the compiler emit them in the
+                     * other order, which swaps their SSA numbering and breaks
+                     * byte-identity even though the pairing stays correct. */
+                    ld_m = rocke_b_add(b, atom_m, row_in_atom);
+                    ld_n = rocke_b_add(b, atom_n, col_in_atom);
+                    gemm_cshuffle_smem_cell(b, ld_m, ld_n, acc_h, i, &smem_user);
+                }
+            }
+        }
+    }
+    else
+    {
+        rocke_gemm_emit_mfma_acc_scatter(b,
+                                         spec,
+                                         lane,
+                                         accs,
+                                         num_accs,
+                                         warp_m_off,
+                                         warp_n_off,
+                                         c_per_lane,
+                                         storage_dtype,
+                                         gemm_cshuffle_smem_cell,
+                                         &smem_user,
+                                         true);
+    }
 
     /* ---- step 3: barrier. ---- */
     rocke_b_sync(b);
@@ -958,6 +1008,7 @@ void rocke_gemm_emit_epilogue(rocke_gemm_build_ctx_t* ctx)
     {
         rocke_gemm_emit_epilogue_cshuffle(b,
                                           spec,
+                                          ctx->op,
                                           ctx->A_smem,
                                           ctx->for_results,
                                           ctx->num_for_results,

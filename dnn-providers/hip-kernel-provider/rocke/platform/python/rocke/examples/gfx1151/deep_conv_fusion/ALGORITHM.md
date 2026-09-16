@@ -286,7 +286,7 @@ but the wave32/WMMA layout forces three structural differences:
 
 | axis | gfx950 (CDNA, MFMA, wave64) | gfx1151 (RDNA3.5, WMMA, wave32) |
 |---|---|---|
-| C-fragment store | cshuffle-store vectorizable | **cannot vectorize.** WMMA C is `<8 x float>`, slot `i → row = 2i + lane//16, col = lane%16`: a lane owns a fixed column and stride-2 rows, non-contiguous in the row-major LDS tile, so the gfx950 cshuffle vectorization lever does not exist |
+| C-fragment store | cshuffle-store vectorizable | **the scatter into LDS cannot vectorize.** WMMA C is `<8 x float>`, slot `i → row = 2i + lane//16, col = lane%16`: a lane owns a fixed column and stride-2 rows, non-contiguous in the row-major LDS tile, so the write side stays eight scalar `ds_write`s. The *read* side is unaffected — a lane re-reads a contiguous row run — which is why the universal-GEMM `cshuffle` epilogue still buys wide global stores on WMMA. What does not port here is fusing the scatter itself |
 | maxpool | intra-lane register fast path | **LDS-gather only.** The 2×2 window's four corners land in four different lanes under the WMMA acc layout, so the gfx950 register fast path cannot port |
 | occupancy | LDS/VGPR occupancy trade | **wave32, ~64 KB LDS/CU, one WG resident per CU** — warp count is a *free* latency-hiding lever, not an occupancy trade |
 | C→A handoff | (MFMA layout) | `permlanex16` + `v_perm_b32` (the gfx11 FMHA C→A transpose) for `fused_c0a1` |

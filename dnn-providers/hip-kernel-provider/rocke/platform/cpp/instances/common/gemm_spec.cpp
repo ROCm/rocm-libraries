@@ -601,13 +601,11 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
                 spec->trait.pipeline,
                 arch);
         }
-        if(strcmp(spec->trait.epilogue, "default") != 0)
-        {
-            CK_GEMM_REJECT("WMMA path supports only the 'default' epilogue (got '%s') on %s",
-                           spec->trait.epilogue,
-                           arch);
-        }
-        /* The Python loop walks (flag, label) in this fixed order and rejects on
+        /* Both epilogues work on the WMMA path: 'default' scatters straight to
+         * global and 'cshuffle' stages C through LDS (its accumulator scatter
+         * is driven by the op's c_layout() map, so no MFMA lane math leaks in).
+         *
+         * The Python loop walks (flag, label) in this fixed order and rejects on
          * the first set flag. */
         if(spec->trait.preshuffle_b)
         {
@@ -672,11 +670,26 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             "block_size %d != warp_m*warp_n*wave_size = %d", spec->block_size, expected_bs);
     }
 
-    /* LDS budget. */
+    /* LDS budget.
+     *
+     * The cshuffle C staging tile is *aliased* onto the A/B pool: the smem-pool
+     * packer sorts allocations by live-interval start, so A lands at pool
+     * offset 0 and the C tile -- whose live range begins after the last A/B
+     * read -- reuses that same offset. Peak usage is therefore max(AB, C), not
+     * AB + C, and this gate has to model that or it spuriously rejects specs
+     * the emitter builds fine. cshuffle_no_alias opts out (the C tile is marked
+     * exclusive so the packer gives it its own byte range) and is additive. */
     ck_gemm_ab_lds_plan(spec, target, &ab_single, NULL, &ab_dbl);
     ab_bytes = ab_single * (ab_dbl ? 2 : 1);
     c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
-    bytes_lds = ab_bytes + c_bytes;
+    if(c_bytes != 0 && !spec->trait.cshuffle_no_alias)
+    {
+        bytes_lds = ab_bytes > c_bytes ? ab_bytes : c_bytes;
+    }
+    else
+    {
+        bytes_lds = ab_bytes + c_bytes;
+    }
     if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))
     {
         CK_GEMM_REJECT("LDS budget %d > %d cap (AB=%d, C=%d) on %s",

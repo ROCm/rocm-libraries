@@ -106,6 +106,10 @@ class GemmCfg:
     warp_tile_k: int = 16
     pipeline: str = "compv3"
     epilogue: str = "default"
+    # 64 for CDNA/MFMA, 32 for RDNA/WMMA. A config whose wave_size does not
+    # match the running arch is reported REJECTED by the validate step below,
+    # so wave32 entries self-select onto RDNA devices and wave64 onto CDNA.
+    wave_size: int = 64
     block_size: int = 0  # 0 -> derived warp_m*warp_n*wave_size
     batch: int = 0  # 0 -> non-batched; >0 -> batched GEMM (block_id_z = batch)
     # Padding (partial-tile) trait flags. Must be set whenever the matching
@@ -268,6 +272,61 @@ GEMM_CONFIGS: List[GemmCfg] = [
         pad_m=True,
         pad_n=True,
     ),
+    # --- WMMA / RDNA wave32 (these are REJECTED on CDNA and vice versa) ---
+    # The cshuffle epilogue on the WMMA path: the accumulator -> LDS scatter is
+    # driven by the op's c_layout() map instead of MFMA lane math. Paired with
+    # a `default`-epilogue control on the same shape so a drift can be pinned
+    # to the epilogue rather than the WMMA body.
+    #
+    # gfx1250 (16x16x32 bf16 atom). The C staging tile aliases the A/B pool, so
+    # cshuffle costs no extra LDS over the default epilogue here.
+    GemmCfg(
+        "wmma1250_bf16_cshuffle",
+        512,
+        512,
+        256,
+        "bf16",
+        128,
+        128,
+        64,
+        2,
+        2,
+        warp_tile_k=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=32,
+    ),
+    GemmCfg(
+        "wmma1250_bf16_direct",
+        512,
+        512,
+        256,
+        "bf16",
+        128,
+        128,
+        64,
+        2,
+        2,
+        warp_tile_k=32,
+        pipeline="mem",
+        wave_size=32,
+    ),
+    # gfx1151 / gfx1201 (16x16x16 fp16 atom).
+    GemmCfg(
+        "wmma1151_fp16_cshuffle",
+        256,
+        256,
+        128,
+        "fp16",
+        64,
+        64,
+        32,
+        2,
+        2,
+        pipeline="mem",
+        epilogue="cshuffle",
+        wave_size=32,
+    ),
 ]
 
 
@@ -373,7 +432,7 @@ def _build_gemm_spec(cfg: GemmCfg):
             dtype_acc="fp32",
             layout="RCR",
         ),
-        wave_size=64,
+        wave_size=cfg.wave_size,
         block_size=cfg.block_size,
         batched=cfg.batch > 0,
     )

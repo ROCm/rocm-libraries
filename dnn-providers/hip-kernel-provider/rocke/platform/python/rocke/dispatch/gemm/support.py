@@ -207,11 +207,10 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
                 False,
                 f"WMMA path supports only the 'mem' pipeline, got {q.pipeline!r}",
             )
-        if q.epilogue != "default":
-            return (
-                False,
-                f"WMMA path supports only the 'default' epilogue, got {q.epilogue!r}",
-            )
+        # Both epilogues are available on the WMMA path: 'default' scatters
+        # straight to global and 'cshuffle' stages C through LDS (its
+        # accumulator scatter is driven by the op's c_layout() map, so it
+        # carries no MFMA lane math). See instances/common/gemm_universal.py.
         for flag, label in (
             (q.preshuffle_b, "preshuffle_b"),
             (q.direct_to_lds, "direct_to_lds"),

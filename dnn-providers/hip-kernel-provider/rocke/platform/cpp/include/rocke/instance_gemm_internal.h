@@ -451,9 +451,12 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
                                       rocke_value_t* Cf32,
                                       int c_per_lane);
 
-/* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. */
+/* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. `op` selects the
+ * accumulator -> LDS scatter: the MFMA acc scatter, or (family == "wmma") the
+ * op's c_layout() map. Steps 3/4 (barrier + wide global stores) are shared. */
 void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        const rocke_gemm_universal_spec_t* spec,
+                                       const rocke_mmaop_t* op,
                                        rocke_value_t* smem_unused,
                                        rocke_value_t* const* accs,
                                        int num_accs,

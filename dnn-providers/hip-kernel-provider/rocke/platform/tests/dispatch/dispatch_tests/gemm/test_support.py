@@ -54,15 +54,23 @@ class TestGemmSupportPredicates(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("LDS budget", why)
 
-    def test_rejects_wmma_pipeline_and_epilogue_restrictions(self):
+    def test_rejects_wmma_pipeline_restriction(self):
         rdna = dispatch_gemm_fp16(GemmRequest(M=64, N=32, K=16, arch="gfx1151"))
         q = support_query_from_universal_spec(rdna.spec, arch="gfx1151")
         ok, why = gemm_config_supported(replace(q, pipeline="compv4"))
         self.assertFalse(ok)
         self.assertIn("WMMA path supports only the 'mem' pipeline", why)
+
+    def test_accepts_cshuffle_epilogue_on_wmma(self):
+        """The WMMA path supports the LDS-staged cshuffle epilogue.
+
+        Its accumulator scatter is driven by the op's ``c_layout()`` map rather
+        than MFMA lane math, so there is nothing arch-specific left to gate.
+        """
+        rdna = dispatch_gemm_fp16(GemmRequest(M=64, N=32, K=16, arch="gfx1151"))
+        q = support_query_from_universal_spec(rdna.spec, arch="gfx1151")
         ok, why = gemm_config_supported(replace(q, epilogue="cshuffle"))
-        self.assertFalse(ok)
-        self.assertIn("WMMA path supports only the 'default' epilogue", why)
+        self.assertTrue(ok, why)
 
     def test_request_shape_support_respects_padding_flags(self):
         result = dispatch_gemm_fp16(GemmRequest(M=128, N=128, K=32, arch="gfx950"))

@@ -264,6 +264,61 @@ def _spec(idx: int) -> UniversalGemmSpec:
             block_size=1024,
             batched=False,
         )
+    if idx == 11:
+        # WMMA (RDNA3.5 / gfx1151, wave32) cshuffle epilogue. The wave32
+        # accumulator scatter is driven by the op's c_layout() map rather than
+        # the MFMA lane math, so this is the config that byte-validates the
+        # WMMA branch of _emit_epilogue_cshuffle. pad_m/pad_n stay off so the
+        # step-4 wide vector store (store_vec=8) is the path exercised.
+        return (
+            UniversalGemmSpec(
+                name="test_wmma_cshuffle_1151",
+                tile=TileSpec(
+                    tile_m=32,
+                    tile_n=32,
+                    tile_k=16,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=16,
+                ),
+                trait=TraitSpec(pipeline="mem", epilogue="cshuffle"),
+                data=DataSpec(dtype_a="fp16"),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1151",
+        )
+    if idx == 12:
+        # Same WMMA cshuffle config on gfx1201 (RDNA4). gfx1201 uses the
+        # column-distributed gfx12 accumulator map -- the same map gfx1250
+        # bf16 uses -- so this covers the layout the gfx1250 GEMM depends on
+        # with an arch the C++ engine can actually lower.
+        return (
+            UniversalGemmSpec(
+                name="test_wmma_cshuffle_1201",
+                tile=TileSpec(
+                    tile_m=32,
+                    tile_n=32,
+                    tile_k=16,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=16,
+                ),
+                trait=TraitSpec(pipeline="mem", epilogue="cshuffle"),
+                data=DataSpec(dtype_a="fp16"),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1201",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -271,7 +326,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..10>\n",
+        usage="usage: gemm_emit.py <config_index 0..12>\n",
     )
 
 

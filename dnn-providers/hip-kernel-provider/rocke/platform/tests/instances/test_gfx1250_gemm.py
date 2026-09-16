@@ -336,6 +336,136 @@ class TestGfx1250Gemm(unittest.TestCase):
             set(config["trait_config"]["lds_k_pad"]),
         )
 
+    @staticmethod
+    def _cshuffle_spec(
+        *, epilogue: str = "cshuffle", depth: int = 2, pad: bool = False
+    ):
+        """The m114688 case-study winner tile, epilogue/pad parameterised.
+
+        256x256x64 on a 8x4 warp grid (block 1024), WMMA 16x16x32 bf16, TDM
+        ping-pong, ``lds_k_pad=8``.
+        """
+        from rocke.instances.common.gemm_universal import (
+            DataSpec,
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+        )
+
+        return UniversalGemmSpec(
+            name="gfx1250_cshuffle_test",
+            tile=TileSpec(
+                tile_m=256,
+                tile_n=256,
+                tile_k=64,
+                warp_m=8,
+                warp_n=4,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            ),
+            trait=TraitSpec(
+                pipeline="mem",
+                scheduler="intrawave",
+                epilogue=epilogue,
+                tdm=True,
+                tdm_depth=depth,
+                lds_k_pad=8,
+                pad_m=pad,
+                pad_n=pad,
+                pad_k=pad,
+            ),
+            data=DataSpec(
+                dtype_a="bf16",
+                dtype_b="bf16",
+                dtype_c="bf16",
+                dtype_acc="fp32",
+                layout="RCR",
+            ),
+            wave_size=32,
+        )
+
+    def test_wmma_cshuffle_validation_contract(self):
+        """The WMMA path accepts both epilogues, and the LDS gate models the
+        A/B <-> C aliasing the emitter actually performs.
+
+        The winner tile's C staging tile is 128 KiB and its double-buffered
+        TDM A/B is 144 KiB. Counted additively that is 272 KiB against a 160
+        KiB cap, so an additive gate rejects every cshuffle spec at this tile;
+        the packer aliases C onto A/B, so the real peak is max(A/B, C).
+        """
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for epilogue in ("default", "cshuffle"):
+            for depth in (1, 2):
+                for pad in (False, True):
+                    with self.subTest(epilogue=epilogue, depth=depth, pad=pad):
+                        ok, why = is_valid_spec(
+                            self._cshuffle_spec(
+                                epilogue=epilogue, depth=depth, pad=pad
+                            ),
+                            arch="gfx1250",
+                        )
+                        self.assertTrue(ok, why)
+
+        # cshuffle_no_alias opts out of the aliasing, so the budget really is
+        # additive there and this tile no longer fits.
+        spec = self._cshuffle_spec()
+        no_alias = replace(
+            spec, trait=replace(spec.trait, cshuffle_no_alias=True)
+        )
+        ok, why = is_valid_spec(no_alias, arch="gfx1250")
+        self.assertFalse(ok)
+        self.assertIn("LDS budget", why)
+
+    def test_wmma_cshuffle_stages_c_through_lds_without_extra_lds(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        def _lower(**kw):
+            return lower_kernel_to_llvm(
+                build_universal_gemm(self._cshuffle_spec(**kw), arch="gfx1250"),
+                arch="gfx1250",
+            )
+
+        cshuffle = _lower()
+        default = _lower(epilogue="default")
+
+        # Two 256x(64+8) bf16 operand buffers, ping-ponged = 144 KiB. The C
+        # staging tile (128 KiB) aliases onto them, so the pool is unchanged
+        # from the direct epilogue -- cshuffle is LDS-free at this tile.
+        self.assertIn("[147456 x i8]", cshuffle)
+        self.assertIn("[147456 x i8]", default)
+
+        # The accumulator reaches C through LDS, and the global stores are
+        # 8-wide (16 B) instead of the direct epilogue's per-slot scalars.
+        self.assertIn("store <8 x bfloat>", cshuffle)
+        self.assertNotIn("store <8 x bfloat>", default)
+        self.assertIn("addrspace(3)", cshuffle)
+
+    def test_wmma_cshuffle_pad_n_forfeits_the_wide_store(self):
+        """``pad_n`` degrades the cshuffle epilogue to element-granular stores.
+
+        The staging tile is always fully in bounds, but a partial output column
+        can cut a vector in half, and ``N`` is a runtime value -- so the
+        emitter guards each element separately rather than dropping the valid
+        columns at the head of the final vector. That is correct but forfeits
+        the vectorisation the epilogue exists to buy, so a padded ``N`` wants
+        the direct epilogue instead.
+        """
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        padded = lower_kernel_to_llvm(
+            build_universal_gemm(
+                self._cshuffle_spec(pad=True), arch="gfx1250"
+            ),
+            arch="gfx1250",
+        )
+        self.assertNotIn("store <8 x bfloat>", padded)
+        self.assertIn("store bfloat", padded)
+
     def test_bf16_qwen_gemm_shapes_validate_and_lower(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (

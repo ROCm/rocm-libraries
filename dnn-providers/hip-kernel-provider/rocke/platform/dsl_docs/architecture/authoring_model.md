@@ -278,8 +278,17 @@ Async constraints:
 - swizzles belong in consumer read arithmetic, not in the destination pointer.
 
 The gfx1250 universal GEMM path currently uses synchronous WMMA staging. It
-accepts the `mem` or `wmma_v1` pipeline with the default epilogue and does not
-support `compv4`, `direct_to_lds`, or `dtl_prefetch`.
+accepts the `mem` or `wmma_v1` pipeline with either the `default` or the
+`cshuffle` epilogue, and does not support `compv4`, `direct_to_lds`, or
+`dtl_prefetch`.
+
+The `cshuffle` epilogue matters more on WMMA than on MFMA. A wave32 16x16 atom
+hands each lane eight accumulator values that sit in eight *different* rows of
+one column, so the direct epilogue has no choice but to store them one element
+at a time. Staging the tile through LDS re-lays it out in row-major order,
+which lets the store loop read back a contiguous run per lane and emit one wide
+vector store instead. On a bandwidth-bound output tile that is the difference
+between a scattered 16-bit store stream and a coalesced one.
 
 gfx1250 has a separate `global_load_async_to_lds_*` instruction family with a
 dedicated async counter. That path is currently used only for optional V
@@ -348,9 +357,10 @@ truth; do not transplant the gfx950 LDS recipe.
 For the current gfx942/gfx950 MFMA universal GEMM and convolution paths, use
 `DirectEpilogue` and `CShuffleEpilogue` from
 [`helpers/epilogues.py`](../../python/rocke/helpers/epilogues.py). The epilogue
-must agree with `MfmaAtom.lane_to_output`. WMMA universal paths instead use the
-selected target-specific `MmaOp` accumulator layout and the default direct
-epilogue admitted by the owning validator.
+must agree with `MfmaAtom.lane_to_output`. WMMA universal paths instead ask the
+selected target-specific `MmaOp` for its accumulator layout — `op.c_layout()`
+returns a map from `(lane, slot)` to `(row, col)` within the atom — and either
+epilogue admitted by the owning validator can consume it.
 
 Direct epilogue when:
 
@@ -360,9 +370,15 @@ Direct epilogue when:
 
 CShuffle epilogue when:
 
-- MFMA accumulator ownership is scattered across output coordinates;
+- accumulator ownership is scattered across output coordinates — true of MFMA,
+  and even more so of the WMMA 16x16 atom, where a lane's eight values occupy
+  eight rows of a single column;
 - direct stores would be scalar or poorly coalesced;
 - you want `buffer_store_dwordx{2, 4}` on the final stores.
+
+Do not reach for it when `pad_n` is set: the per-element bounds guard on a
+partial output column dissolves the store vector, so you pay the LDS round trip
+and keep the scalar stores.
 
 Never swap MFMA atom shape without revisiting `lane_to_output` and the epilogue vectorization width.
 
