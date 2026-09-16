@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { engine } from "../engine";
 import { FLOW_UNAVAILABLE, flowRunner } from "../flow";
 import { buildTimeline } from "../flow/timeline";
+import { canvasInputName } from "../flow/canvas";
 import { serializeGraph } from "../graph/serialize";
 import { platform } from "../platform";
 import { FlowTimeline } from "./FlowTimeline";
@@ -15,8 +16,9 @@ import type { Graph } from "../graph/model";
  * Everything the panel shows about a flow is read from the flow: the picker
  * lists whatever the host enumerates, the form is generated from the inputs
  * that flow declares, the iteration control appears because the flow declares a
- * loop, and the canvas-graph toggle is offered on inputs the flow declared as
- * paths. No flow, step, loop, input or output name appears in this file.
+ * loop, and the canvas-graph toggle appears on the one input the canvas can
+ * satisfy -- `flow/canvas.ts` decides which, and is the only place an input
+ * name is spelled. No flow, step, loop, input or output name appears here.
  *
  * A run lasts minutes to hours and outlives a tab switch, because the tab panel
  * stays mounted while hidden. `active` therefore guards exactly one thing — the
@@ -107,8 +109,16 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
     void refresh();
   }, [active, refresh]);
 
-  // A newly selected (or re-listed) flow brings its own form: declared
-  // defaults, and the canvas pointed at the first path the flow declares.
+  // One rule, read twice: it decides what the form binds on selection and which
+  // input is offered the toggle at all. Two rules would let the panel offer a
+  // binding it then refuses to make, or make one it never offered.
+  const canvasInput = useMemo(
+    () => (flow ? canvasInputName(flow.inputs) : null),
+    [flow],
+  );
+
+  // A newly selected (or re-listed) flow brings its own form: declared defaults,
+  // and the canvas bound to the one input that can take it, if the flow has one.
   useEffect(() => {
     if (!flow) {
       setValues({});
@@ -121,16 +131,7 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
       else next[input.name] = input.default === null || input.default === undefined ? "" : String(input.default);
     }
     setValues(next);
-    // The input that wants the canvas is the one called `graph`, not merely the first
-    // `path` the flow happens to declare. A pipeline's path inputs include corpus
-    // directories and prior run directories, and binding the canvas to one of those
-    // produces a value that is a real file and the wrong thing entirely -- a resume
-    // flow whose first path input is `prior_run` was handed a graph file and looked
-    // for its contract underneath it. Fall back to the first path only when no input
-    // is named `graph`, so single-input flows still work without ceremony.
-    const byName = flow.inputs.find((input) => input.type === "path" && input.name === "graph");
-    const target = byName ?? flow.inputs.find((input) => input.type === "path");
-    setGraphInputs(target ? [target.name] : []);
+    setGraphInputs(canvasInput ? [canvasInput] : []);
     // The flow's own budget, not 1. These loops exist to repair what their gates
     // catch, and a budget of 1 means the first gate that fails ends the run with the
     // feedback collected and nowhere to spend it -- the engine says so in as many
@@ -138,7 +139,7 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
     // Starting at the declared maximum makes the default behaviour the one the flow
     // was written for; the control still lets you wind it down to 1 for a dry pass.
     setBudget(flow.loops.reduce((most, loop) => Math.max(most, loop.maxIterations), 1));
-  }, [flow]);
+  }, [canvasInput, flow]);
 
   const applyStatus = useCallback(async (runId: string) => {
     const generation = generationRef.current;
@@ -415,6 +416,7 @@ export function ImplementPanel({ getGraph, active }: ImplementPanelProps) {
               input={input}
               value={values[input.name] ?? ""}
               usesGraph={graphInputs.includes(input.name)}
+              canUseGraph={input.name === canvasInput}
               disabled={controlsDisabled}
               onValue={(next) => setValues((previous) => ({ ...previous, [input.name]: next }))}
               onUseGraph={(use) =>
@@ -490,6 +492,8 @@ interface InputFieldProps {
   input: FlowInputSpec;
   value: InputValue;
   usesGraph: boolean;
+  /** True only for the one input the canvas can satisfy; the toggle is its alone. */
+  canUseGraph: boolean;
   disabled: boolean;
   onValue(next: InputValue): void;
   onUseGraph(use: boolean): void;
@@ -497,7 +501,7 @@ interface InputFieldProps {
 }
 
 /** One control, chosen from the type the flow declared for the input. */
-function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, onBrowse }: InputFieldProps) {
+function InputField({ input, value, usesGraph, canUseGraph, disabled, onValue, onUseGraph, onBrowse }: InputFieldProps) {
   const id = `implement-input-${input.name}`;
   const isPath = input.type === "path";
   const numeric = input.type === "int" || input.type === "float";
@@ -551,7 +555,7 @@ function InputField({ input, value, usesGraph, disabled, onValue, onUseGraph, on
           )}
         </div>
       )}
-      {isPath && (
+      {canUseGraph && (
         <label className="implement__usegraph">
           <input
             type="checkbox"
