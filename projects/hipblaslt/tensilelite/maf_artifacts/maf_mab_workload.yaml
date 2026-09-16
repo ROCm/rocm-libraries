@@ -1,0 +1,31 @@
+# MI450-MC MAF/MAB -- 10 GEMMs: 5 datatypes x {MAF, MAB}  [performance]
+# MAF 4096 x 3072 x 65536 (all dtypes)
+# MAB bf16/fp8: 16 x 65536 x K   |   MAB MX: 16 x 49152 x K
+#   bf16/fp8 use N=65536 -- their tuned kernels (MT16x128x64 / MT16x128x128) are
+#   there and beat the N=49152 pair by 8-12%. MX has no tuned N=65536 kernel yet.
+# K = 8 MiB / (256 * dtype_bytes), so A+B bytes match across dtypes at a given N.
+# scaleA/B: 0=none  3=B32E8 (MX, block 32)  6=B16E4M3 (NVFP4, block 16)
+# No epilogue: bias_vector unset (false), alpha=1 beta=0, activation none.
+#
+# TIMING tuned for the BEST OBSERVABLE number: short warmup + short window measures
+# near boost clock. MAF is power-limited here -- junction 44->69 C and sclk
+# 2362->1587 MHz within ~2 s of sustained load, so a long window reports the
+# THROTTLED steady state. Measured (MAF bf16): 20 ms -> 1.2300 PF, 200 ms -> 1.1915,
+# 1000 ms -> 1.1705, 2000 ms -> 1.1678. For SUSTAINED numbers instead:
+# measure_time: 1000 and drop adaptive_warmup_time. MAB moves <1% either way.
+
+
+# ---- MAF: 4096 x 4096 x 65536 ----
+- {function: matmul, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 0, scaleB: 0, transA: T, transB: N, M: 4096, N: 4096, K: 65536, batch_count: 1, lda: 65536, ldb: 65536, ldc: 4096, ldd: 4096, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAF BF16
+- {function: matmul, a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 0, scaleB: 0, transA: T, transB: N, M: 4096, N: 4096, K: 65536, batch_count: 1, lda: 65536, ldb: 65536, ldc: 4096, ldd: 4096, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAF FP8
+- {function: matmul, a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 3, scaleB: 3, transA: T, transB: N, M: 4096, N: 4096, K: 65536, batch_count: 1, lda: 65536, ldb: 65536, ldc: 4096, ldd: 4096, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAF MXFP8
+- {function: matmul, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 3, scaleB: 3, transA: T, transB: N, M: 4096, N: 4096, K: 65536, batch_count: 1, lda: 65536, ldb: 65536, ldc: 4096, ldd: 4096, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAF MXFP4
+- {function: matmul, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 6, scaleB: 6, transA: T, transB: N, M: 4096, N: 4096, K: 65536, batch_count: 1, lda: 65536, ldb: 65536, ldc: 4096, ldd: 4096, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAF NVFP4
+
+# ---- MAB: M=16 ----
+- {function: matmul, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 0, scaleB: 0, transA: T, transB: N, M: 16, N: 65536, K: 16384, batch_count: 1, lda: 16384, ldb: 16384, ldc: 16, ldd: 16, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAB BF16
+- {function: matmul, a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 0, scaleB: 0, transA: T, transB: N, M: 16, N: 65536, K: 32768, batch_count: 1, lda: 32768, ldb: 32768, ldc: 16, ldd: 16, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAB FP8
+- {function: matmul, a_type: f8_r, b_type: f8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 3, scaleB: 3, transA: T, transB: N, M: 16, N: 65536, K: 32768, batch_count: 1, lda: 32768, ldb: 32768, ldc: 16, ldd: 16, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAB MXFP8
+- {function: matmul, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 3, scaleB: 3, transA: T, transB: N, M: 16, N: 65536, K: 65536, batch_count: 1, lda: 65536, ldb: 65536, ldc: 16, ldd: 16, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAB MXFP4
+- {function: matmul, a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, bias_type: f32_r, scaleA: 6, scaleB: 6, transA: T, transB: N, M: 16, N: 65536, K: 65536, batch_count: 1, lda: 65536, ldb: 65536, ldc: 16, ldd: 16, initialization: trig_float, alpha: 1, beta: 0, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, use_gpu_timer: true, adaptive: true, adaptive_warmup_time: 20, measure_time: 20, print_kernel_info: 1}   # MAB NVFP4
+ 
