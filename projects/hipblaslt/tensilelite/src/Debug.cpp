@@ -205,6 +205,13 @@ namespace TensileLite
         m_excludedFromGetAll = excludedSet;
     }
 
+    Debug& Debug::Instance()
+    {
+        static Debug instance;
+
+        return instance;
+    }
+
     Debug::Debug()
         : m_value(DEBUG_SM)
         , m_value2(DEBUG_SM2)
@@ -230,7 +237,7 @@ namespace TensileLite
         const char* sk5Force = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
         if(sk5Force)
         {
-            char* end = nullptr;
+            char*      end = nullptr;
             const long val = strtol(sk5Force, &end, 0);
             if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
                 m_streamK5ForceMode = static_cast<int>(val);
@@ -296,8 +303,8 @@ namespace TensileLite
         const char* db2 = std::getenv("TENSILE_DB2");
         m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
 
-        const char* sk5Force    = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
-        m_streamK5ForceMode     = -1;
+        const char* sk5Force = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        m_streamK5ForceMode  = -1;
         if(sk5Force)
         {
             char*      end = nullptr;
