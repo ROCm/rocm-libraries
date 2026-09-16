@@ -946,7 +946,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     c_block_n = b.const_i32(block_n)
     c_block_k = b.const_i32(block_k)
 
-    tid = b.thread_id_x()
+    tid = b.debug_value("tid", b.thread_id_x())
     warp_id = b.div(tid, c_wave)
     warp_m_idx = b.div(warp_id, c_warps_n)
     warp_n_idx = b.mod(warp_id, c_warps_n)

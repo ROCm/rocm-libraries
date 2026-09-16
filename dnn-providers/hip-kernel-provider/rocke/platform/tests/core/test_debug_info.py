@@ -39,7 +39,7 @@ from unittest import mock
 from rocke.core import ir as ir_mod
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
-from rocke.core.lower_llvm import _escape_md_string, lower_kernel_to_llvm
+from rocke.core.lower_llvm import LLVM_FLAVORS, _escape_md_string, lower_kernel_to_llvm
 
 THIS_FILE = os.path.abspath(__file__)
 
@@ -67,6 +67,16 @@ def build_loop(capture_loc=None):
     with loop as (k, (acc,)):
         b.scf_yield(b.fadd(acc, b.global_load_f32(x, k)))
     b.global_store(x, c0, loop.results[0])
+    b.ret()
+    return b.kernel
+
+
+def build_selected(capture_loc=True):
+    """A kernel with one selected scalar logical value."""
+    b = IRBuilder("dbg_selected", capture_loc=capture_loc)
+    tid = b.debug_value("tid", b.thread_id_x())
+    out = b.param("out", PtrType(F32, "global"), noalias=True, align=16)
+    b.global_store(out, tid, b.const_f32(0.0))
     b.ret()
     return b.kernel
 
@@ -135,6 +145,12 @@ class TestDefaultOff(unittest.TestCase):
                 os.environ.pop(ir_mod.LOC_CAPTURE_ENV, None)
             else:
                 os.environ[ir_mod.LOC_CAPTURE_ENV] = prev
+
+    def test_selected_value_is_a_noop_without_location_capture(self):
+        b = IRBuilder("dbg_disabled", capture_loc=False)
+        tid = b.thread_id_x()
+        self.assertIs(b.debug_value("tid", tid), tid)
+        self.assertNotIn("debug_values", b.kernel.attrs)
 
 
 def frames(loc):
@@ -311,6 +327,93 @@ class TestEmittedDebugMetadata(unittest.TestCase):
         """The lowerer hardcodes !1/!2/!3; debug nodes must not reuse them."""
         ids = {int(m) for m in re.findall(r"^!(\d+) = ", self.ll, re.M)}
         self.assertFalse(ids & {1, 2, 3})
+
+
+class TestSelectedDebugValue(unittest.TestCase):
+    def setUp(self):
+        self.kernel = build_selected()
+        self.ll = lower_kernel_to_llvm(self.kernel, arch="gfx942")
+
+    def test_selection_is_kernel_metadata_not_an_executable_op(self):
+        self.assertEqual(
+            self.kernel.attrs["debug_values"][0]["name"],
+            "tid",
+        )
+        self.assertNotIn("debug.value", [op.name for op in self.kernel.body.ops])
+
+    def test_full_debug_variable_and_intrinsic_are_emitted(self):
+        self.assertIn("emissionKind: FullDebug", self.ll)
+        self.assertIn(
+            "declare void @llvm.dbg.value(metadata, metadata, metadata)", self.ll
+        )
+        self.assertRegex(
+            self.ll,
+            r"call void @llvm\.dbg\.value\(metadata i32 %tid\d+, "
+            r"metadata !\d+, metadata !DIExpression\(\)\), !dbg !\d+",
+        )
+        self.assertRegex(
+            self.ll,
+            r'!\d+ = !DILocalVariable\(name: "tid", .*type: !\d+\)',
+        )
+        self.assertIn(
+            '!DIBasicType(name: "i32", size: 32, encoding: DW_ATE_signed)',
+            self.ll,
+        )
+        self.assertNotIn("retainedNodes:", self.ll)
+
+    def test_cpp_engine_emits_identical_selected_value_metadata(self):
+        try:
+            import rocke_engine
+        except ImportError:
+            self.skipTest("rocke_engine extension not built")
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                python_ll = lower_kernel_to_llvm(
+                    self.kernel, arch="gfx942", llvm_flavor=flavor
+                )
+                cpp_ll = rocke_engine.lower_serialized_ir(
+                    serialize(self.kernel), arch="gfx942", flavor=flavor
+                )
+                self.assertEqual(cpp_ll, python_ll)
+
+    def test_variable_scope_matches_its_debug_value_location(self):
+        call = re.search(
+            r"@llvm\.dbg\.value\(metadata i32 %tid\d+, metadata !(\d+), "
+            r"metadata !DIExpression\(\)\), !dbg !(\d+)",
+            self.ll,
+        )
+        self.assertIsNotNone(call)
+        variable_id, location_id = call.groups()
+        variable = re.search(
+            rf"^!{variable_id} = !DILocalVariable\(.*scope: !(\d+),",
+            self.ll,
+            re.MULTILINE,
+        )
+        location = re.search(
+            rf"^!{location_id} = !DILocation\(.*scope: !(\d+)",
+            self.ll,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(variable)
+        self.assertIsNotNone(location)
+        self.assertEqual(variable.group(1), location.group(1))
+
+    def test_selection_round_trips_through_serialization(self):
+        rebuilt = parse(serialize(self.kernel))
+        self.assertEqual(
+            rebuilt.attrs["debug_values"], self.kernel.attrs["debug_values"]
+        )
+        self.assertEqual(
+            lower_kernel_to_llvm(rebuilt, arch="gfx942"),
+            self.ll,
+        )
+
+    def test_duplicate_name_is_rejected(self):
+        b = IRBuilder("dbg_duplicate", capture_loc=True)
+        b.debug_value("tid", b.thread_id_x())
+        with self.assertRaisesRegex(ValueError, "duplicate debug value"):
+            b.debug_value("tid", b.thread_id_x())
 
 
 class TestInliningChains(unittest.TestCase):

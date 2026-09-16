@@ -86,6 +86,7 @@ const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor)
 /* ---------------------------------------------------------------------- */
 
 const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
+    {"dbg.value", "declare void @llvm.dbg.value(metadata, metadata, metadata)"},
     {"workitem.x", "declare i32 @llvm.amdgcn.workitem.id.x()"},
     {"workitem.y", "declare i32 @llvm.amdgcn.workitem.id.y()"},
     {"workitem.z", "declare i32 @llvm.amdgcn.workitem.id.z()"},
