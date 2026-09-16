@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API,
           typename I,
@@ -446,14 +447,14 @@ void getrf_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         getrf_initData<NPVT, false, true, T>(
             handle, params, m, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_getrf(API,
                         NPVT,
                         handle,
@@ -471,9 +472,9 @@ void getrf_getPerfData(const hipsolverHandle_t   handle,
                         hlwork,
                         dInfo.data(),
                         bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API,
@@ -624,7 +625,7 @@ void testing_getrf(Arguments& argus)
         //                                  &max_error);
 
         // // collect performance data
-        // if(argus.timing)
+        // if(argus.timing && hot_calls > 0)
         //     getrf_getPerfData<API, NPVT, T>(handle,
         //                                     params,
         //                                     m,
@@ -697,7 +698,7 @@ void testing_getrf(Arguments& argus)
                                          &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrf_getPerfData<API, NPVT, T>(handle,
                                             params,
                                             m,

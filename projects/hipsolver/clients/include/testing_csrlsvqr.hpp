@@ -1,11 +1,12 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #pragma once
 
 #include "clientcommon.hpp"
 #include "hipsolverSp.hpp"
+#include "hipsolver_timer.hpp"
 
 template <bool HOST, typename T>
 void csrlsvqr_checkBadArgs(hipsolverSpHandle_t       handle,
@@ -342,7 +343,7 @@ void csrlsvqr_getPerfData(hipsolverSpHandle_t       handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
@@ -361,7 +362,7 @@ void csrlsvqr_getPerfData(hipsolverSpHandle_t       handle,
                                           hX,
                                           testcase);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_csrlsvqr(HOST,
                            handle,
                            n,
@@ -375,9 +376,9 @@ void csrlsvqr_getPerfData(hipsolverSpHandle_t       handle,
                            reorder,
                            dX.data(),
                            hSingularity.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool HOST, typename T>
@@ -387,13 +388,13 @@ void testing_csrlsvqr(Arguments& argus)
 
     // get arguments
     hipsolverSp_local_handle handle;
-    int                      n         = argus.get<int>("n");
-    int                      nnzA      = argus.get<int>("nnzA");
-    double                   tolerance = argus.get<double>("tolerance", 0);
-    int                      reorder   = argus.get<int>("reorder", 0);
-    int                      base1     = argus.get<int>("base1", 0);
-    int                      hot_calls = argus.iters;
-    int                      check_streams = argus.get<int>("stream", 0);
+    int                      n               = argus.get<int>("n");
+    int                      nnzA            = argus.get<int>("nnzA");
+    double                   tolerance       = argus.get<double>("tolerance", 0);
+    int                      reorder         = argus.get<int>("reorder", 0);
+    int                      base1           = argus.get<int>("base1", 0);
+    int                      hot_calls       = argus.iters;
+    int                      check_streams   = argus.get<int>("stream", 0);
     constexpr int            num_stream_reps = 25;
 
     // check non-supported values
@@ -543,7 +544,7 @@ void testing_csrlsvqr(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             csrlsvqr_getPerfData<HOST, T>(handle,
                                           n,
                                           nnzA,
@@ -614,7 +615,7 @@ void testing_csrlsvqr(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             csrlsvqr_getPerfData<HOST, T>(handle,
                                           n,
                                           nnzA,
