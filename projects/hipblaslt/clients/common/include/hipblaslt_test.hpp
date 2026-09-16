@@ -72,6 +72,16 @@
         }                                                \
     } while(0)
 
+#define CHECK_HOST_ALLOCATION(BUF, NUM_ELEMENTS)         \
+    do                                                   \
+    {                                                    \
+        if((NUM_ELEMENTS) > 0 && (BUF).buf() == nullptr) \
+        {                                                \
+            SUCCEED() << LIMITED_MEMORY_STRING;          \
+            return;                                      \
+        }                                                \
+    } while(0)
+
 // This wraps the hipBLASLt call with catch_signals_and_exceptions_as_failures().
 // By placing it at the hipBLASLt call site, memory resources are less likely to
 // be leaked in the event of a caught signal.
