@@ -4,10 +4,10 @@ Step 0 pre-sync investigation. This report catalogs everything that changed in
 the targeted CCCL release(s) so a future rocThrust code sync can be planned
 and scoped. It is descriptive intelligence — it does **not** merge any code.
 
-> **No downstream pipeline yet.** Unlike the RCCL/NCCL sync, there is currently
-> no `rocthrust-cccl-sync` / `-resolve` / `-finalize` / `-tickets` skill to hand
-> this report off to. This is a known gap; treat §5 and Handoff below as
-> forward-compatible scaffolding for when those skills exist.
+> **No downstream pipeline yet.** There is currently no `rocthrust-cccl-sync`
+> / `-resolve` / `-finalize` / `-tickets` skill to hand this report off to.
+> This is a known gap; treat §5 and Handoff below as forward-compatible
+> scaffolding for when those skills exist.
 
 ## Summary
 
@@ -45,10 +45,9 @@ and scoped. It is descriptive intelligence — it does **not** merge any code.
 - **Derived current tag guess**: `<CURRENT_TAG>` — **UNVERIFIED, confirm with a
   human.** When Current version signal D is present this is an exact decoded tag, not a
   major.minor guess — but it is still not infallible on its own. None of the
-  four signals is authoritative the way `version.mk` is for RCCL — Signals A
-  and B agreeing is not sufficient on its own; check Signals C and D
-  explicitly for corroborating or contradicting evidence before trusting this
-  guess.
+  four signals is authoritative on its own — Signals A and B agreeing is not
+  sufficient by itself; check Signals C and D explicitly for corroborating or
+  contradicting evidence before trusting this guess.
 
 > One-paragraph human summary of the headline changes and the expected
 > difficulty/risk of this sync.
@@ -72,9 +71,9 @@ Hyperlink the introducing PR when known:
 
 ## 2. New CMake options / feature macros
 
-Replaces "new env vars" from the RCCL/NCCL report — Thrust/CCCL surfaces new
-capabilities mostly via CMake `option()`s and `_CCCL_*` / `USE_LIB*CXX`-style
-preprocessor feature macros, not runtime env vars.
+Thrust/CCCL surfaces new capabilities mostly via CMake `option()`s and
+`_CCCL_*` / `USE_LIB*CXX`-style preprocessor feature macros, not runtime env
+vars.
 
 | Option / macro | Default | Introduced in | Defined/read in | Notes / rocThrust disposition |
 |----------------|---------|----------------|------------------|--------------------------------|
@@ -84,8 +83,8 @@ preprocessor feature macros, not runtime env vars.
 
 ## 3. Test / benchmark coverage gaps
 
-Replaces "rccl-tests flags needed" — checks whether rocThrust's own ported
-`testing/` and `benchmark/` directories already exercise new upstream APIs.
+Checks whether rocThrust's own ported `testing/` and `benchmark/`
+directories already exercise new upstream APIs.
 
 | Feature | How exercised upstream | rocThrust `testing/`/`benchmark/` coverage today | Action needed |
 |---------|--------------------------|----------------------------------------------------|----------------|

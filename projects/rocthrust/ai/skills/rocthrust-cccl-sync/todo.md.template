@@ -37,10 +37,9 @@ fix a bug the earlier commit itself introduced).
 - Ticked (`- [X]`) items below mean the commit's changes are **staged**
   (`git add`), not committed. Everything lands in a single commit at the end
   of `rocthrust-cccl-sync-finalize`.
-- Because this state can persist across sessions with nothing enforcing it
-  (unlike RCCL's open merge, which git itself blocks you from abandoning
-  silently), avoid `git reset --hard` on this branch, and consider a backup
-  branch if the sync spans many sessions.
+- Because this state can persist across sessions with nothing enforcing it,
+  avoid `git reset --hard` on this branch, and consider a backup branch if
+  the sync spans many sessions.
 
 ## Commits to port
 

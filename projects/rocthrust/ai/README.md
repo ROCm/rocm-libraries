@@ -13,7 +13,7 @@ them.
   themselves if it's missing).
 - Know the path to that clone. Every skill asks for it up front and stores
   it as `$ROCTHRUST_REPO` — have it ready, or be ready to answer when asked.
-  Nothing here guesses a path or reuses RCCL's equivalent config.
+  Nothing here guesses a path.
 
 ## The five skills, in pipeline order
 
@@ -58,10 +58,10 @@ this directory.
 
 ## Key conventions to know before you start
 
-- **No git merge, ever.** rocThrust has no subtree-merge mechanism the way
-  RCCL does. There is never a `MERGE_HEAD`, never conflict markers. Every
-  commit is hand-ported and staged; one single commit lands the whole sync
-  at the end (`rocthrust-cccl-sync-finalize`).
+- **No git merge, ever.** rocThrust has no subtree-merge mechanism. There
+  is never a `MERGE_HEAD`, never conflict markers. Every commit is
+  hand-ported and staged; one single commit lands the whole sync at the end
+  (`rocthrust-cccl-sync-finalize`).
 - **`todo.md` order is strict.** Only the first unticked item may be worked
   next — later commits may assume earlier ones already landed.
 - **Three upstream paths, not one.** Every skill scopes to upstream

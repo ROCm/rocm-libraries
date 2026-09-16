@@ -5,8 +5,8 @@
 # Thrust subtree, plus a table mapping each touched upstream path to its
 # translated rocThrust destination path, and two AMD-only counterpart
 # checks (CUDA -> HIP, and testing/ -> test/) for files that have no
-# upstream commit trail of their own. This is the two-way alternative to
-# RCCL's meld-based 3-way diff tool — rocThrust has no merge in progress, so
+# upstream commit trail of their own. This is the two-way alternative to a
+# meld-based 3-way diff tool — rocThrust has no merge in progress, so
 # there is no "ours"/"theirs"/"working" tree to snapshot (see
 # rocthrust-cccl-sync-resolve/SKILL.md's "No 3-way diff tool" section).
 #

@@ -6,9 +6,8 @@ description: Sets up a sync branch and enumerates the upstream CCCL/Thrust commi
 # CCCL → rocThrust Sync (driver)
 
 rocThrust lives at `projects/rocthrust/` inside the `ROCm/rocm-libraries` monorepo.
-Unlike RCCL — which tracks upstream NCCL via a registered git remote and a
-`git merge -s subtree` per release tag — **rocThrust has no subtree-merge
-mechanism**. The real historical sync,
+**rocThrust has no subtree-merge mechanism** for tracking upstream CCCL/Thrust.
+The real historical sync,
 [`1eb022d06b`](https://github.com/ROCm/rocm-libraries/commit/1eb022d06b)
 ("feat(rocthrust): CCCL 3.0.x changes (#3773)"), is a single-parent,
 normal squash-merged PR. Its own description says it plainly: *"Most of the
@@ -42,12 +41,11 @@ stages, each with their own skill:
 ## Conventions
 
 - One sync branch per confirmed `$CURRENT_TAG..$TO_TAG` range.
-- Commits are ported **strictly oldest-first, and are never reordered**.
-  This is the loudest divergence from RCCL's per-file `todo.md`, where items
-  can be worked in any order: a later upstream commit may assume an earlier
-  one has already landed (it may reference symbols the earlier commit
-  introduces, or fix a bug the earlier commit itself introduced). Only the
-  first unticked item in `todo.md` may ever be worked next.
+- Commits are ported **strictly oldest-first, and are never reordered**: a
+  later upstream commit may assume an earlier one has already landed (it may
+  reference symbols the earlier commit introduces, or fix a bug the earlier
+  commit itself introduced). Only the first unticked item in `todo.md` may
+  ever be worked next.
 - No `git merge` of any kind is run or in progress at any point in this
   pipeline. Do not look for `MERGE_HEAD` or conflict markers — they will
   never exist here.
@@ -67,10 +65,9 @@ working tree and store it in `$ROCTHRUST_REPO`.
    > "Where is your `rocm-libraries` working tree? Please provide the full
    > path."
 
-Do not guess or fall back to a hardcoded path, and do not reuse RCCL's
-`$RCCL_REPO`/config — that config is owned by, and named for, the RCCL skill
-family. Once `$ROCTHRUST_REPO` is established, pass it to every script
-invocation with `--repo "$ROCTHRUST_REPO"`.
+Do not guess or fall back to a hardcoded path. Once `$ROCTHRUST_REPO` is
+established, pass it to every script invocation with
+`--repo "$ROCTHRUST_REPO"`.
 
 ## Confirm the tag range
 
@@ -112,8 +109,8 @@ If the working tree is not clean, suggest creating a separate worktree.
 ## Sync branch name
 
 Use the git conventions to create a sync branch name, `$SYNC_BRANCH`. Ask
-for a JIRA ticket if one exists, but don't require one — unlike RCCL,
-rocThrust syncs have no fixed JIRA project (the historical CCCL 3.0 revert,
+for a JIRA ticket if one exists, but don't require one — rocThrust syncs
+have no fixed JIRA project (the historical CCCL 3.0 revert,
 [PR #10464](https://github.com/ROCm/rocm-libraries/pull/10464), cites both
 `ROCM-29174` and `EXSWSTRHPC-300` on the same PR). If the branch already
 exists, confirm with the human before reusing or recreating it.
@@ -135,11 +132,9 @@ The user must confirm that this looks ok before proceeding.
 git checkout -b "$SYNC_BRANCH" --no-track "$SYNC_BASE"
 ```
 
-This is the point where RCCL would run `git merge -s subtree`. rocThrust
-does not: there is no merge command here, and nothing to sanity-check
-against a "changes must be confined to `projects/rccl/`" rule. The branch
-simply starts as an exact copy of `$SYNC_BASE`; every subsequent change
-comes from hand-porting individual commits in `rocthrust-cccl-sync-resolve`.
+There is no merge command here: the branch simply starts as an exact copy
+of `$SYNC_BASE`; every subsequent change comes from hand-porting individual
+commits in `rocthrust-cccl-sync-resolve`.
 
 ## Determine the commit list
 
@@ -179,9 +174,9 @@ at a glance which commits are test/example-only (these usually need no
 CUDA/HIP source-level porting judgment at all; see
 `rocthrust-cccl-sync-resolve/SKILL.md`).
 
-There is no MERGED/NOT_MERGED classification step here (unlike
-`nccl-merge-status.sh`) — the range was already human-confirmed in the step
-above, so every commit the script returns needs to be ported.
+There is no MERGED/NOT_MERGED classification step here — the range was
+already human-confirmed in the step above, so every commit the script
+returns needs to be ported.
 
 ## Write `todo.md`
 

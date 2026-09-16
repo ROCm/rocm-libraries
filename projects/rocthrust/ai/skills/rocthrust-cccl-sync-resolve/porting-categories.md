@@ -1,10 +1,10 @@
 # rocThrust/CCCL porting categories (DRAFT)
 
-> **Status: DRAFT, unvalidated.** RCCL's 26-rule conflict-resolution catalog
-> (`rccl-nccl-sync-resolve/SKILL.md`) was built from years of real merge
-> incident history. Nothing like that exists yet for rocThrust — the one
-> real historical sync (`1eb022d06b`) predates this skill family, and PR
-> #10464 was reverted for a management/scheduling reason, not a documented
+> **Status: DRAFT, unvalidated.** A mature, incident-history-backed
+> conflict-resolution catalog takes years of real merge/port history to
+> build. Nothing like that exists yet for rocThrust — the one real
+> historical sync (`1eb022d06b`) predates this skill family, and PR #10464
+> was reverted for a management/scheduling reason, not a documented
 > technical failure, so it doesn't supply incident-driven rules either. What
 > follows is a small set of structural categories only, meant to be expanded
 > once several commits have actually been ported through
@@ -203,10 +203,9 @@ functionally, and still needed a textual follow-up.
 
 ## What's deliberately not here yet
 
-- Content-level CUDA-intrinsic-swap rules (RCCL's resolve skill has an
-  extensive GIN/device-intrinsic shim catalog). rocThrust has no equivalent
-  catalog yet — build one incrementally as real ported commits reveal
-  recurring patterns, rather than guessing upfront.
-- Any per-specific-file rule (RCCL's resolve skill has ~13 of these). None
-  exist for rocThrust because no sync has been completed through this
-  pipeline yet.
+- Content-level CUDA-intrinsic-swap rules (e.g. a device-intrinsic shim
+  catalog). rocThrust has no such catalog yet — build one incrementally as
+  real ported commits reveal recurring patterns, rather than guessing
+  upfront.
+- Any per-specific-file rules. None exist for rocThrust because no sync has
+  been completed through this pipeline yet.

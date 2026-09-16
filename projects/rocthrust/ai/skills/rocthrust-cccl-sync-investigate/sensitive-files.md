@@ -2,19 +2,16 @@
 
 > **Status: DRAFT, needs domain-expert review.** This is a first-pass,
 > directory/pattern-granularity list, not an exhaustive per-file audit. It
-> exists so `rccl-nccl-sync-investigate`'s Phase C.4 equivalent (cross-
-> referencing upstream commits against known AMD-customized areas) has
-> *something* to check against, the same way RCCL's 26 numbered resolver
-> rules do — but those rules were built from years of incident history, and
-> this list has none of that yet. Treat matches here as "look closer," not
-> "this will conflict."
+> exists so Phase C.4 (cross-referencing upstream commits against known
+> AMD-customized areas) has *something* to check against — but this list
+> was built without any institutional incident history yet. Treat matches
+> here as "look closer," not "this will conflict."
 >
-> `rocthrust-cccl-sync-resolve/porting-categories.md` is that per-rule
-> conflict-resolution guidance, the way `rccl-nccl-sync-resolve/SKILL.md`'s
-> 26 rules are for RCCL — but it starts from nothing, the same way this list
-> did. Expand both together as real ported commits produce real lessons;
-> keep the pattern list here and the resolution guidance there rather than
-> duplicating either direction.
+> `rocthrust-cccl-sync-resolve/porting-categories.md` is the per-rule
+> conflict-resolution guidance counterpart to this pattern list, and it
+> starts from nothing too. Expand both together as real ported commits
+> produce real lessons; keep the pattern list here and the resolution
+> guidance there rather than duplicating either direction.
 
 ## Provenance
 
@@ -62,9 +59,8 @@ conflict risk in that attempt, not a full file listing.
 - hipCUB's own sensitive-file set (this list is rocThrust-only; PR #10464
   also touched 185 hipCUB files and 5 rocPRIM files that would need separate
   triage if/when a hipCUB/CUB sync is prototyped).
-- Any incident-driven rules analogous to RCCL's numbered resolver rules (e.g.
-  a specific pointer-arithmetic or memory-drain gotcha) — none exist yet for
-  rocThrust because no completed sync has produced that institutional
-  knowledge. The reverted PR #10464 was deferred for management reasons, not
-  because of a documented technical failure, so it doesn't yet supply that
-  knowledge either.
+- Incident-driven numbered resolver rules (e.g. a specific pointer-arithmetic
+  or memory-drain gotcha) — none exist yet for rocThrust because no
+  completed sync has produced that institutional knowledge. The reverted
+  PR #10464 was deferred for management reasons, not because of a documented
+  technical failure, so it doesn't yet supply that knowledge either.

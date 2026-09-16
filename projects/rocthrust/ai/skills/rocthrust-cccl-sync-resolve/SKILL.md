@@ -14,10 +14,10 @@ commits into `projects/rocthrust/` one at a time, in the exact order listed.
 - `todo.md` exists at the repo root.
 - The current branch is the `$SYNC_BRANCH` named in `todo.md`'s "Sync
   parameters" section.
-- **No git merge is in progress.** Unlike RCCL's resolve skill, there is no
-  `MERGE_HEAD` to check for and no conflict markers to grep for — rocThrust
-  syncs never use `git merge`. If you find yourself looking for conflict
-  markers, you are following the wrong playbook.
+- **No git merge is in progress.** There is no `MERGE_HEAD` to check for and
+  no conflict markers to grep for — rocThrust syncs never use `git merge`.
+  If you find yourself looking for conflict markers, you are following the
+  wrong playbook.
 - Only the **first unticked** (`- [ ]`) item in `todo.md`'s commit list may
   be worked next. Do not jump ahead to a later commit even if it looks
   simpler — later commits may assume earlier ones are already applied.
@@ -122,8 +122,7 @@ If any of these don't hold, STOP and ask the human before proceeding.
    For adaptation cases, the change is hand-written to match the upstream
    commit's intent using HIP/rocThrust idiom, not a mechanical patch apply.
 
-7. **Tick the checkbox**, adding an indented rationale note (mirrors RCCL's
-   tick-note format):
+7. **Tick the checkbox**, adding an indented rationale note:
 
    ```
    - [X] <sha> <subject>
@@ -140,9 +139,8 @@ If any of these don't hold, STOP and ask the human before proceeding.
 8. **Do not commit.** Everything ported across every item in `todo.md`
    lands in a single commit, created by `rocthrust-cccl-sync-finalize` once
    every checkbox is ticked. This is a discipline this skill family imposes
-   on itself — unlike RCCL, where the open `git merge` makes "don't commit
-   yet" unavoidable, nothing here stops you from committing early by
-   mistake, so be deliberate about it. Because staged-but-uncommitted state
+   on itself — nothing here stops you from committing early by mistake, so
+   be deliberate about it. Because staged-but-uncommitted state
    can span many sessions, avoid `git reset --hard` on this branch, and
    consider a backup branch if the sync is long-running.
 
@@ -180,12 +178,11 @@ means the tick-note doesn't show the reasoning either way.
 
 ## No 3-way diff tool
 
-RCCL's resolve skill stages a meld-able 3-way view (`nccl-merge-3way-dirs.sh`)
-because an open subtree merge has "ours"/"theirs"/"working" trees to
-snapshot. rocThrust has no merge in progress, so there is nothing to
-snapshot that way — this is a known, permanent gap, not an oversight. Use
-`rocthrust-show-upstream-commit.sh` (step 2 above) as the two-way
-alternative: upstream commit vs. current local file.
+A meld-able 3-way view ("ours"/"theirs"/"working" trees) would require an
+open subtree merge to snapshot against. rocThrust has no merge in progress,
+so there is nothing to snapshot that way — this is a known, permanent gap,
+not an oversight. Use `rocthrust-show-upstream-commit.sh` (step 2 above) as
+the two-way alternative: upstream commit vs. current local file.
 
 ## Why the counterpart checks don't de-duplicate
 
@@ -230,15 +227,15 @@ that nothing in the old pipeline would ever have prompted a human to add.
 
 See the sibling `porting-categories.md` file for the (currently small,
 DRAFT) set of structural categories to check a commit against before
-porting. RCCL's equivalent 26-rule catalog took years of incident history
-to build; this one has none yet; treat it as a starting checklist, not an
-exhaustive rulebook.
+porting. Building a mature, incident-history-backed catalog takes years;
+this one has none yet; treat it as a starting checklist, not an exhaustive
+rulebook.
 
 ## When a build failure drives this skill
 
 If you were invoked because a build broke on a specific file, find which
 `todo.md` item introduced the change to that file, treat it as reopened
 (un-tick it, note the failure), and work it again from step 3 above. There
-is no `rccl-build`-equivalent skill yet for rocThrust — build/test
+is no dedicated build-verification skill yet for rocThrust — build/test
 verification itself is `rocthrust-cccl-sync-finalize`'s job (direct
 `rmake.py`/`ctest`/`rtest.py` invocation, documented there).

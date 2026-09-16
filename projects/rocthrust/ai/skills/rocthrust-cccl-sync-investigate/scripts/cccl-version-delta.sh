@@ -2,9 +2,9 @@
 # cccl-version-delta.sh
 #
 # Step 0 helper: work out the CCCL version delta that an upcoming rocThrust
-# sync must cover. Unlike RCCL/NCCL, rocThrust has no single authoritative
-# "last synced" file (no equivalent of version.mk). Instead this script
-# surfaces FOUR signals of varying strength and reports whether they agree:
+# sync must cover. rocThrust has no single authoritative "last synced" file.
+# Instead this script surfaces FOUR signals of varying strength and reports
+# whether they agree:
 #
 #   1. Signal A (corroboration/fallback) — _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR/MINOR
 #      in projects/rocthrust/thrust/detail/config/libcxx.h — the libcu++/
@@ -15,7 +15,7 @@
 #      unavailable.
 #   2. Signal B (corroboration) — CHANGELOG.md prose — e.g. "CCCL 2.8.x
 #      compatibility is deprecated... brought forward to CCCL 3.0.x". Known
-#      to drift stale (same caveat as the RCCL/NCCL CHANGELOG check).
+#      to drift stale — a CHANGELOG mention can easily lag the real version.
 #   3. Signal C (corroboration) — a curated fingerprint check
 #      (version-fingerprints.tsv, sibling of this script's directory). Greps
 #      rocThrust's local tree for specific code patterns known to have been
@@ -298,8 +298,8 @@ if [[ -z "$PENDING_TAGS" ]]; then
   echo "before proceeding)."
 else
   echo "Candidate pending CCCL releases (oldest-first — STOP and confirm with a"
-  echo "human before treating this as authoritative; unlike RCCL/NCCL there is"
-  echo "no exact version.mk-style ground truth here):"
+  echo "human before treating this as authoritative; there is no exact,"
+  echo "dedicated version-tracking file to check this against):"
   n=0; for t in $PENDING_TAGS; do n=$((n+1)); echo "  $n. $t"; done
 fi
 echo

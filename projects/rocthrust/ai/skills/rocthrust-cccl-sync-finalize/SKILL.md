@@ -135,13 +135,12 @@ it. This is a gate, like step 4 — a stale header on a touched example file
 is not an acceptable omission, the same way a missing CMake registration
 isn't.
 
-## Step 6 — No `net_ib`-equivalent step
+## Step 6 — No single hot-file reconciliation step
 
-RCCL's finalize skill has a dedicated step for hand-porting NCCL's
-`net_ib.cc` into RCCL's `net_ib_rocm.cc`. **rocThrust has no equivalent** —
-there is no single hot, hand-maintained file that every sync must specially
-reconcile. This is a deliberate, permanent gap in this skill, not an
-oversight — do not invent a replacement step.
+There is no single hot, hand-maintained file that every sync must specially
+reconcile (the counterpart sweeps in steps 2-4 already cover the AMD-only
+files that do need per-sync attention). This is a deliberate, permanent gap
+in this skill, not an oversight — do not invent a replacement step.
 
 ## Step 7 — CHANGELOG entry
 
@@ -178,9 +177,8 @@ CCCL generally.
 **Manually** bump `THRUST_VERSION` in
 `projects/rocthrust/thrust/version.h` to encode `$TO_TAG`, per the file's own
 documented formula (`major*100000 + minor*100 + patch`, e.g. `v3.1.0` →
-`300100`). Unlike RCCL's `version.mk`, which the merge commit updates
-automatically as part of the subtree merge, nothing here does this for
-you — **it is easy to forget, and every future
+`300100`). Nothing here does this for
+you automatically — **it is easy to forget, and every future
 `rocthrust-cccl-sync-investigate` run depends on it being correct** (it's
 Signal D, the primary version signal).
 
@@ -202,7 +200,7 @@ rocthrust-cccl-sync-investigate/scripts/cccl-version-delta.sh --repo "$ROCTHRUST
 
 ## Step 9 — Build and test verification
 
-There is no `rccl-build`-equivalent skill for rocThrust yet — this is a
+There is no dedicated build-verification skill for rocThrust yet — this is a
 documented gap, not an oversight. Invoke the build directly:
 
 ```bash
@@ -242,7 +240,7 @@ this pulls in the specific upstream commits listed in `todo.md`, plus fixes
 and workarounds attached to those commits.
 
 This produces exactly **one** commit with a single parent — no second
-parent, no subtree-merge lineage to preserve, unlike RCCL.
+parent, no subtree-merge lineage to preserve.
 
 Do not push or open a PR unless the human asks.
 

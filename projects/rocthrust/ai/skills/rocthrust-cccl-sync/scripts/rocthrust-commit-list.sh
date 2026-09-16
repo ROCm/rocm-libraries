@@ -6,9 +6,9 @@
 # flags (never reorders) commits that touch a path matching
 # sensitive-files.md.
 #
-# Unlike nccl-merge-status.sh, there is no MERGED/NOT_MERGED classification
-# here: rocThrust has no subtree-merge history to check commits against, and
-# the tag range is already human-confirmed by the time this script runs (see
+# There is no MERGED/NOT_MERGED classification here: rocThrust has no
+# subtree-merge history to check commits against, and the tag range is
+# already human-confirmed by the time this script runs (see
 # rocthrust-cccl-sync-investigate's Signal A-D version check). Every commit
 # this script prints needs to be ported.
 #

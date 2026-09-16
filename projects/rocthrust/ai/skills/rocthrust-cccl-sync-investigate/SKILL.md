@@ -11,12 +11,11 @@ synced into rocThrust, so a future code sync can be planned and scoped. It is
 purely **descriptive intelligence** — it does not merge, resolve, or build
 anything.
 
-> **Prototype status.** This is modeled directly on `rccl-nccl-sync-investigate`
-> (the analogous Step 0 for NCCL→RCCL), but unlike that skill, the downstream
-> pipeline it would feed — a `rocthrust-cccl-sync` driver, `-resolve`,
-> `-finalize` — **does not exist yet**. Running this skill produces a scoping
-> report and nothing more; there is no next skill to hand off to. That is a
-> known gap, not an oversight — see Handoff below.
+> **Prototype status.** The downstream pipeline this skill would feed — a
+> `rocthrust-cccl-sync` driver, `-resolve`, `-finalize` — **does not exist
+> yet**. Running this skill produces a scoping report and nothing more;
+> there is no next skill to hand off to. That is a known gap, not an
+> oversight — see Handoff below.
 
 ## What this skill mutates
 
@@ -32,18 +31,16 @@ Establish the path to the `rocm-libraries` working tree and store it in
 1. If the user gave a path, or `$ROCTHRUST_SKILLS_WORK_ROOT` is set, confirm it.
 2. Otherwise STOP and ask: *"Where is your `rocm-libraries` working tree?"*
 
-Do not guess. Pass `--repo "$ROCTHRUST_REPO"` to every script invocation. This
-skill does **not** reuse the `rccl-agent-skills` shared config (that config is
-owned by, and named for, the RCCL skill family) — it asks independently.
+Do not guess. Pass `--repo "$ROCTHRUST_REPO"` to every script invocation.
 
 The base branch is `origin/develop` unless the human names another. Store it
 as `$SYNC_BASE`.
 
 ## Phase A — Determine the version delta (one primary signal, three corroborating)
 
-Unlike RCCL, which has `makefiles/version.mk` as machine-truth ground truth,
-rocThrust has **no dedicated version-delta file** — but it does have one
-strong first-party signal (Current version signal D, below) plus three weaker corroborating
+rocThrust has **no dedicated version-delta file** as machine-truth ground
+truth — but it does have one strong first-party signal (Current version
+signal D, below) plus three weaker corroborating
 ones. None of the corroborating signals is authoritative on its own, and (per
 dogfooding below) even Signals A and B agreeing is not enough to trust the
 result on their own — which is exactly why Current version signal D now drives the derived
@@ -64,7 +61,7 @@ This prints:
   rocThrust tree that predates the `THRUST_VERSION` macro).
 - **Current version signal B (corroboration)**: a "CCCL X.Y" mention in the top of
   `CHANGELOG.md` (e.g. "CCCL 2.8.x compatibility is deprecated..."). Known to
-  drift stale — like RCCL's CHANGELOG check.
+  drift stale — a CHANGELOG mention can easily lag the real current version.
 - **Current version signal C (corroboration)**: a curated, **local-only** fingerprint check
   against `version-fingerprints.tsv` (sibling of this SKILL.md). Each row
   pairs a known upstream code pattern with the CCCL tag it was introduced in;
@@ -113,11 +110,11 @@ eval "$(scripts/cccl-version-delta.sh --repo "$ROCTHRUST_REPO" \
         | sed -n '/eval-able summary/,$p' | grep -E '^[A-Z_]+=')"
 ```
 
-### Confirm the version delta with the user (required gate — stronger than RCCL's)
+### Confirm the version delta with the user (required gate)
 
-**STOP here.** Even with Current version signal D as a strong first-party signal, there is
-still no file as reliable as `version.mk` on the RCCL side, so this
-confirmation gate matters more than it does for RCCL/NCCL — and Current version signal D
+**STOP here.** Even with Current version signal D as a strong first-party
+signal, there is no file as reliable as a dedicated version-tracking file
+would be, so this confirmation gate matters — and Current version signal D
 being present is **not** grounds to skip it either: it is the best evidence
 available, not infallible. Report what was found, be explicit about the
 uncertainty, and let the human decide — do not silently trust the derived
@@ -184,7 +181,7 @@ git remote get-url cccl >/dev/null 2>&1 || git remote add cccl https://github.co
 git fetch cccl --tags -q
 ```
 
-> **Path alignment gotcha (rocThrust-specific — no RCCL equivalent).** CCCL's
+> **Path alignment gotcha.** CCCL's
 > Thrust source lives at `thrust/thrust/*.h` inside the upstream repo (an
 > extra nested `thrust/` directory), while rocThrust's is the flatter
 > `projects/rocthrust/thrust/*.h`. A direct `git diff` between the two trees
@@ -201,10 +198,9 @@ git fetch cccl --tags -q
 > needed side-by-side, construct it by prefixing/stripping `thrust/` as
 > appropriate rather than assuming the paths line up.
 
-> If `rocm-libraries` is a partial/sparse clone, the same `blob:none`
-> gotcha documented in `rccl-nccl-sync-investigate` may apply — if `git diff`
-> fails with `could not fetch <oid> from promisor remote`, re-fetch with
-> `git fetch cccl --tags --refetch -q`.
+> If `rocm-libraries` is a partial/sparse clone, a `blob:none` gotcha may
+> apply — if `git diff` fails with `could not fetch <oid> from promisor
+> remote`, re-fetch with `git fetch cccl --tags --refetch -q`.
 
 ### Maintenance-branch drift check (confirmed gap, not hypothetical)
 
@@ -286,9 +282,9 @@ AMD). Caveat: the `^\+` filter is approximate — eyeball the results.
 
 ### 3. Test / benchmark coverage gaps
 
-Replaces "rccl-tests flags needed" — rocThrust ports its own `testing/` and
-`benchmark/` suites from upstream Thrust's. For each new feature from step 1,
-check whether rocThrust already has a ported test/benchmark:
+rocThrust ports its own `testing/` and `benchmark/` suites from upstream
+Thrust's. For each new feature from step 1, check whether rocThrust already
+has a ported test/benchmark:
 
 ```bash
 # What does upstream test/benchmark for this feature?
@@ -307,8 +303,8 @@ confirmation rather than guessing.
 Flag commits touching files listed in `sensitive-files.md` (sibling of this
 SKILL.md) — a **draft**, not-yet-battle-tested list seeded from
 [PR #10464](https://github.com/ROCm/rocm-libraries/pull/10464) (the last
-real, later-reverted CCCL sync attempt). Unlike RCCL's resolver rules, there
-is no institutional incident history backing this list yet.
+real, later-reverted CCCL sync attempt). There is no institutional incident
+history backing this list yet.
 
 ```bash
 SENSITIVE="thrust/system/hip thrust/detail/libcxx_wrapper thrust/detail/config/libcxx.h \
@@ -328,8 +324,8 @@ git diff "$CURRENT_TAG..$TO_TAG" -- thrust/thrust/system/cuda \
 
 For each flagged commit, note **why** it is risky. When a commit deletes a
 file rocThrust has an AMD-only equivalent for (or the reverse), state that
-explicitly — don't assume either side is authoritative (mirrors resolve rule
-#20's discipline in the RCCL skill). Also call out public API/ABI changes
+explicitly — don't assume either side is authoritative. Also call out public
+API/ABI changes
 (required libcu++/libhipcxx version bumps, new `thrust::` API surface).
 Hyperlink every commit SHA cited in this section — most are upstream CCCL
 commits, so default to
@@ -370,7 +366,7 @@ the same CCCL-vs-rocm-libraries disambiguation described in §4 above.
 ## Phase E — Make the report ticket-ready (forward-compatible scaffolding)
 
 There is no `rocthrust-cccl-sync-tickets` skill yet to consume this, but
-capture the same decisions the RCCL equivalent captures, so the report is
+capture the decisions a ticket-filing skill would need, so the report is
 ready whenever that skill exists:
 
 1. **Per-feature disposition (decided, not open).** For every §1 feature:

@@ -17,9 +17,8 @@ during, or not at all. Nothing downstream requires tickets to exist.
 
 ## Ask the human for project/component/epic up front
 
-**Never assume a fixed JIRA project or component.** Unlike RCCL, which
-hardcodes `AICOMRCCL`/`RCCL_PROD`, rocThrust has no single project it
-syncs are always filed under — the real historical CCCL 3.0 work
+**Never assume a fixed JIRA project or component.** rocThrust has no single
+project its syncs are always filed under — the real historical CCCL 3.0 work
 ([PR #10464](https://github.com/ROCm/rocm-libraries/pull/10464)) cites
 **both** `ROCM-29174` and `EXSWSTRHPC-300` in the same PR body, proving
 there is no one fixed answer. Ask, and store the answers as:
@@ -31,14 +30,13 @@ there is no one fixed answer. Ask, and store the answers as:
 - `$JIRA_EPIC` — an existing Epic to file under, or "create a new one."
 
 Also confirm the Jira base URL to use when reporting ticket links back
-(don't assume `amd-hub.atlassian.net` matches RCCL's default without
-checking).
+(don't assume `amd-hub.atlassian.net` without checking).
 
 ## Ticket structure
 
 - **Epic** — `CCCL <TO_TAG> Sync`. Top of the hierarchy for this sync.
-- **One "Code Port" Story** (note the rename from RCCL's "Code Merge" —
-  there is no merge here), tracked by the `rocthrust-cccl-sync` /
+- **One "Code Port" Story** (named for a port, not a merge — there is no
+  merge here), tracked by the `rocthrust-cccl-sync` /
   `rocthrust-cccl-sync-resolve` pipeline. Description = the report's §5
   headline scope roll-up + NVIDIA-only exclusions.
 - **One Task per line item** in the report's §5 "Per-feature disposition →
@@ -75,14 +73,14 @@ Use the human-provided values from above, never hardcoded IDs:
 | `type` | `Epic` / `Story` / `Task` per the structure above |
 | `parentIssueId` | the Epic's key, for Stories/Tasks |
 | `components` | `[{"name": "$JIRA_COMPONENT"}]`, if applicable |
-| `priority` | ask the human — do not assume RCCL's `P2: Medium` default |
+| `priority` | ask the human — do not assume a default |
 
 **Warning**: Jira custom-field IDs (Epic Link field, priority ID, component
 IDs) are project-schema-specific. `atlassian-jira-create-ticket` documents
 how to discover them for a project you haven't used before
 (`createmeta` API, or cloning a reference ticket in the target project) —
 do this the first time this skill is used against a new project. Do not
-assume they match RCCL/AICOMRCCL's values.
+assume default values without checking.
 
 ## Workflow
 
