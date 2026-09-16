@@ -196,7 +196,7 @@ def load_CMS_groups(
     make_param: Callable[..., ForkParameter],
     MT_DU: Optional[List] = None,
 ) -> GroupDimension:
-    """Load CMS groups from Tensile's kernel registry, returned as GroupDimension.
+    """Load CMS groups from tensilelite's kernel registry, returned as GroupDimension.
 
     *make_param* must be a bound ``_make_param`` from a ``BaseParamBuilder``
     subclass: it attaches default Tensile metadata comments for ordinary
