@@ -369,7 +369,7 @@ class TestIterateMode:
     def test_buffer_load_iterate_passes_group2_group3(self, tc):
         """In iterate mode, emitSingleBufferLoad passes non-None Group2 and Group3."""
         from unittest.mock import patch
-        from Tensile.Components.Subtile import SubtileGREmit
+        from tensilelite.Components.Subtile import SubtileGREmit
         kernel = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs_iterate(writer)
@@ -390,7 +390,7 @@ class TestIterateMode:
     def test_buffer_load_normal_omits_group2_group3(self, tc):
         """Non-iterate mode: emitSingleBufferLoad passes None for both Group2 and Group3."""
         from unittest.mock import patch
-        from Tensile.Components.Subtile import SubtileGREmit
+        from tensilelite.Components.Subtile import SubtileGREmit
         kernel = _create_gfx1250_kernel(64, 64, depth_u=NORMAL_DEPTH_U)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -408,7 +408,7 @@ class TestIterateMode:
 
     def test_iterate_mode_flag_on_states(self):
         """isSubtileIterateMode returns correct results for iterate vs normal kernel configs."""
-        from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+        from tensilelite.SolutionStructs.Utilities import isSubtileIterateMode
         kernel_iter = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
         assert isSubtileIterateMode(kernel_iter, "A") is True
         assert isSubtileIterateMode(kernel_iter, "B") is True
@@ -425,6 +425,6 @@ class TestIterateMode:
     ], ids=["at-limit", "just-over", "well-under", "double"])
     def test_iterate_mode_boundary_bf16(self, depth_u, expected):
         """Boundary check: iterate mode triggers at DepthU*bpe > 1024 for bf16."""
-        from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+        from tensilelite.SolutionStructs.Utilities import isSubtileIterateMode
         kernel = _create_gfx1250_kernel(64, 64, depth_u=depth_u)
         assert isSubtileIterateMode(kernel, "A") is expected

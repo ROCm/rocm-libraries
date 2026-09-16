@@ -6,7 +6,7 @@
 Characterisation test — branch_id c8562779274f6936fbe265f93ad5caa9f4aa44da
 
 Predicate : kernel["DirectToLds%s" % tc]
-Site      : Tensile/KernelWriterAssembly.py:10892  (function directToLdsM0Update)
+Site      : tensilelite/KernelWriterAssembly.py:10892  (function directToLdsM0Update)
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 
 Background

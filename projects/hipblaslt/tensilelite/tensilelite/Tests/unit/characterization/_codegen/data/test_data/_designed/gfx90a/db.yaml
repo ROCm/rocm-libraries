@@ -11,7 +11,7 @@
 # unreachable from it.
 #
 # Derived from the shipped gfx90a FP64 config
-# Tensile/Tests/common/gemm/f64_gfx90a.yaml (DataType=d, NT, [4,4,4,4] FP64
+# tensilelite/Tests/common/gemm/f64_gfx90a.yaml (DataType=d, NT, [4,4,4,4] FP64
 # MFMA), reduced to a single VALID fork permutation so the harness emits cleanly
 # regardless of permutation ordering. The parent config's wider ForkParameters
 # sweep (DepthU 8/16, VectorWidth 1/2, GSU 1/2, SourceSwap 0/1) rejects most
