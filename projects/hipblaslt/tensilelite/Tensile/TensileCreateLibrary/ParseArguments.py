@@ -115,10 +115,11 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     argParser.add_argument(
         "--library-format",
         dest="LibraryFormat",
-        choices=["yaml", "msgpack"],
+        choices=["yaml", "msgpack", "msgpack-indexed"],
         action="store",
         default="msgpack",
-        help="select which library format to use",
+        help="select which library format to use; msgpack-indexed defers "
+             "per-solution deserialization to query time",
     )
     argParser.add_argument(
         "--jobs",
