@@ -11,6 +11,7 @@ const path = require("node:path");
 const studioPaths = require("./paths.cjs");
 const flowBridge = require("./flow.cjs");
 const graphfile = require("./graphfile.cjs");
+const relativeRead = require("./relative-read.cjs");
 
 // Dev mode = a Vite dev server URL was provided (set by the electron:dev
 // script). electron:start builds first and loads the bundled files instead.
@@ -100,6 +101,25 @@ ipcMain.handle("platform:saveTextFile", async (_event, contents, options) => {
   }
   await fs.writeFile(filePath, contents, "utf8");
   return { path: filePath, name: path.basename(filePath) };
+});
+
+// Artifacts a report points at: traces and tensor manifests, read relative to
+// the report itself or to a folder the user granted. `relative-read.cjs` owns
+// containment; the renderer only says which kind of base it has.
+ipcMain.handle("platform:readRelated", async (_event, base, relativePath) =>
+  relativeRead.readRelated(base, relativePath),
+);
+
+ipcMain.handle("platform:openDirectory", async () => {
+  const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const dirPath = result.filePaths[0];
+  return { path: dirPath, name: path.basename(dirPath) };
+});
+
+ipcMain.handle("platform:listFiles", async (_event, dirPath) => {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
 });
 
 // ── Key/value store, persisted as JSON in userData ─────────────────────

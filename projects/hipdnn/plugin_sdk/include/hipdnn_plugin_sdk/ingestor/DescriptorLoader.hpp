@@ -1308,8 +1308,12 @@ inline bool validateKernelDefines(const KernelDescriptor& kernel,
         std::string templateError;
         if(!validateKernelDefineTemplate(templateText, schema, templateError))
         {
-            error = "kernel '" + kernel.name + "' cannot bind define '" + name
-                    + "': " + templateError;
+            error = "kernel '";
+            error += kernel.name;
+            error += "' cannot bind define '";
+            error += name;
+            error += "': ";
+            error += templateError;
             return false;
         }
     }

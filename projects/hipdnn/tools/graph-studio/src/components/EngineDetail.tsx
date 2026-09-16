@@ -13,6 +13,7 @@ import type {
   GraphResults,
   Oracle,
 } from "../benchmark/types";
+import type { ReadBase } from "../platform/types";
 import { PerfettoFrame } from "./PerfettoFrame";
 
 interface EngineDetailProps {
@@ -20,6 +21,8 @@ interface EngineDetailProps {
   graph: GraphResults;
   row: EngineResult;
   onClose: () => void;
+  base: ReadBase | null;
+  onGrantDirectory: () => Promise<void>;
 }
 
 const STAT_FIELDS: { key: keyof DurationStats; label: string }[] = [
@@ -246,10 +249,14 @@ function ProfilingSection({
   row,
   frameKey,
   engineLabel,
+  base,
+  onGrantDirectory,
 }: {
   row: EngineResult;
   frameKey: string;
   engineLabel: string;
+  base: ReadBase | null;
+  onGrantDirectory: () => Promise<void>;
 }) {
   const extra = row.extra_metrics ?? null;
   const trace = extra?.trace ?? null;
@@ -268,10 +275,13 @@ function ProfilingSection({
         </p>
       )}
       {trace && available && (
-        <>
-          <p className="report__note">Report-declared trace path (inert; not fetched): {trace.path}</p>
-          <PerfettoFrame key={frameKey} tracePath={trace.path ?? ""} engineLabel={engineLabel} />
-        </>
+        <PerfettoFrame
+          key={frameKey}
+          tracePath={trace.path ?? ""}
+          engineLabel={engineLabel}
+          base={base}
+          onGrantDirectory={onGrantDirectory}
+        />
       )}
       {trace && trace.warnings.length > 0 && (
         <ul className="report__warnings">
@@ -304,7 +314,7 @@ function ProfilingSection({
  * and (for suite reports) profiling. Reached from the results table's row
  * action; closed back to the summary/comparison/table view.
  */
-export function EngineDetail({ report, graph, row, onClose }: EngineDetailProps) {
+export function EngineDetail({ report, graph, row, onClose, base, onGrantDirectory }: EngineDetailProps) {
   const state = validationState(row.correctness);
   const hasOracle = Boolean(row.oracle || row.oracle_delta || row.oracle_error);
   const metrics: readonly (readonly [string, number, boolean?])[] = [
@@ -323,7 +333,7 @@ export function EngineDetail({ report, graph, row, onClose }: EngineDetailProps)
             <h2>{row.engine_name}</h2>
             <p>{graph.graph_name}</p>
           </div>
-          <button type="button" onClick={onClose}>
+          <button type="button" className="report__button" onClick={onClose}>
             Back to report
           </button>
         </div>
@@ -432,6 +442,8 @@ export function EngineDetail({ report, graph, row, onClose }: EngineDetailProps)
               row={row}
               frameKey={`${graph.graph_name}:${graph.graph_path}:${row.provider}:${row.engine_id ?? ""}`}
               engineLabel={row.engine_name}
+              base={base}
+              onGrantDirectory={onGrantDirectory}
             />
           </Disclosure>
         ) : (

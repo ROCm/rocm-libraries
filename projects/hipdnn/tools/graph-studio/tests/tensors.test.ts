@@ -1,5 +1,5 @@
 // Regression suite for the tensor artifact reader (src/benchmark/tensors.ts).
-// Fixtures under tests/fixtures/tensors are written by dnn-benchmarking's own
+// Fixtures under tests/fixtures/run/tensors are written by dnn-benchmarking's own
 // manifest writer, so a producer format change fails here. Bun's test runner.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import {
   type TensorSet,
 } from "../src/benchmark/tensors";
 
-const fixtureRoot = join(import.meta.dir, "fixtures/tensors");
+const fixtureRoot = join(import.meta.dir, "fixtures/run/tensors");
 
 /** Reads one artifact directory the way the file picker hands it over. */
 function readFixture(phase: string): { text: string; files: Map<string, Uint8Array> } {

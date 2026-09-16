@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld("hipdnn", {
   openTextFile: (accept) => ipcRenderer.invoke("platform:openTextFile", accept),
   saveTextFile: (contents, options) =>
     ipcRenderer.invoke("platform:saveTextFile", contents, options),
+  readRelated: (base, relativePath) =>
+    ipcRenderer.invoke("platform:readRelated", base, relativePath),
+  openDirectory: () => ipcRenderer.invoke("platform:openDirectory"),
+  listFiles: (dirPath) => ipcRenderer.invoke("platform:listFiles", dirPath),
   store: {
     get: (key) => ipcRenderer.invoke("store:get", key),
     set: (key, value) => ipcRenderer.invoke("store:set", key, value),

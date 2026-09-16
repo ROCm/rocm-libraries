@@ -121,8 +121,11 @@ normal download.
 
 ## Viewing benchmark results
 
-Open the **Verify** tab. Use **Open report…** to import a dnn-benchmarking suite
-`results.json` or a raw timing JSON. An import stays in memory: it survives tab
+Open the **Verify** tab. **Open results folder…** takes the folder that holds a
+`results.json` — one written by `dnn-benchmark --run-dir DIR` — finds the report
+inside it, and resolves every trace and tensor capture from that same folder. One
+pick, nothing else to choose. **Open report…** stays for a bare JSON, a raw timing
+export, or a folder holding several reports. An import stays in memory: it survives tab
 switches, a reload discards it, and it never enters graph autosave or command
 settings. Viewing a report needs no GPU, Python, native add-on, or backend service.
 
@@ -134,7 +137,7 @@ coverage is shown as a lower bound. Reported suite counters stay separate from t
 viewer's own row counts. Use a current browser to keep large integer engine IDs
 from rounding.
 
-**Inspect** in the Details column opens one engine: identity, timing statistics,
+**Details** on a row opens one engine: identity, timing statistics,
 resource metrics, correctness comparison, oracle tuning against the warm baseline,
 and profiling artifacts, each in its own section. **Back to report** returns.
 
@@ -144,22 +147,31 @@ comparison, and later canvas edits are not included. **Close execution** returns
 the opened report. Use **Export hipDNN JSON**, not ordinary Save, for the existing
 benchmarking handoff.
 
-For an available profiling trace, select the `.pftrace` file explicitly. A report
-path does not grant access to that file. Trace bytes go to a sandboxed
-`https://ui.perfetto.dev/` iframe, not an upload endpoint. Perfetto requires network
-access; report viewing does not. Confirm **Open trace?** inside the frame if asked.
-The parent reports byte handoff only; Perfetto owns parsing and trace diagnostics.
+Traces and captured tensors load themselves whenever the app can resolve the
+paths the report names, which is what **Open results folder…** establishes. The
+desktop build always can: it knows where the report came from and reads beside
+it, so **Open report…** is enough there. The browser cannot read by path at all,
+so a folder grant is the only bridge — **Use results folder…** appears after a report
+opened from a bare file. Manual pickers stay as an override, and a report can
+never reach outside its own directory: a path that escapes it is refused, and a
+failed read names the file and folder instead of quietly showing an empty picker.
+
+Trace bytes go to a sandboxed `https://ui.perfetto.dev/` iframe, not an upload
+endpoint. Perfetto requires network access; report viewing does not. Confirm
+**Open trace?** inside the frame if asked. The parent reports byte handoff only;
+Perfetto owns parsing and trace diagnostics.
 
 ### Checking the trace viewer without a GPU
 
-`tests/fixtures/report-with-trace.json` and `tests/fixtures/traces/sample.pftrace`
+`tests/fixtures/run/results.json` and `tests/fixtures/run/traces/sample.pftrace`
 exist for this. The trace is a real Perfetto protobuf trace with three slices on a
-`hipdnn` thread track; `bun run tests/fixtures/traces/make-trace.ts` regenerates it.
+`hipdnn` thread track; `bun run tests/fixtures/run/traces/make-trace.ts` regenerates it.
 
 1. `bun run dev`, then open the **Verify** tab.
-2. **Open report…** → `tests/fixtures/report-with-trace.json`.
-3. **Inspect** on the `MIOPEN_ENGINE` row, then expand **Profiling trace & artifacts**.
-4. Select `tests/fixtures/traces/sample.pftrace` in the picker, or drop it there.
+2. **Open results folder…** → `tests/fixtures/run`. The report opens and the trace
+   starts loading by itself; **Tensors** on the `MIOPEN_ENGINE` row shows both
+   captures already read, with the reference comparison filled in.
+3. **Details** on that row, then expand **Profiling trace & artifacts**.
 
 Perfetto then shows `conv_fwd`, `bias_add`, and `relu`. The second row in the same
 report records a skipped trace, so the suppressed state is visible beside it.
@@ -168,7 +180,7 @@ To confirm the file itself outside the browser:
 ```bash
 curl -LO https://get.perfetto.dev/trace_processor && chmod +x trace_processor
 echo 'select ts, dur, name from slice' > q.sql
-./trace_processor -q q.sql tests/fixtures/traces/sample.pftrace
+./trace_processor -q q.sql tests/fixtures/run/traces/sample.pftrace
 ```
 
 ## Turning on the GPU engine
