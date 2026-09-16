@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -14,21 +15,20 @@
 
 namespace roc::host_numerics::detail {
 inline float decodeFloat16(uint16_t bits) {
-    const uint32_t sign = static_cast<uint32_t>(bits >> 15);
+    const uint32_t sign = static_cast<uint32_t>(bits & 0x8000U) << 16;
     const uint32_t exponent = (bits >> 10) & 0x1fU;
     const uint32_t mantissa = bits & 0x3ffU;
 
-    float value;
     if (exponent == 0) {
-        value = mantissa == 0 ? 0.0f : std::ldexp(static_cast<float>(mantissa), -24);
-    } else if (exponent == 0x1fU) {
-        value = mantissa == 0 ? std::numeric_limits<float>::infinity()
-                              : std::numeric_limits<float>::quiet_NaN();
-    } else {
-        value = std::ldexp(1.0f + static_cast<float>(mantissa) / 1024.0f,
-                           static_cast<int>(exponent) - 15);
+        if (mantissa == 0) return std::bit_cast<float>(sign);
+        const uint32_t shift = std::countl_zero(mantissa) - 21U;
+        const uint32_t floatExponent = 113U - shift;
+        const uint32_t floatMantissa = (mantissa << (13U + shift)) & 0x7fffffU;
+        return std::bit_cast<float>(sign | (floatExponent << 23) | floatMantissa);
     }
-    return sign ? -value : value;
+    if (exponent == 0x1fU)
+        return std::bit_cast<float>(sign | (mantissa == 0 ? 0x7f800000U : 0x7fc00000U));
+    return std::bit_cast<float>(sign | ((exponent + 112U) << 23) | (mantissa << 13));
 }
 
 inline uint16_t encodeFloat16(float value) {
@@ -226,6 +226,18 @@ inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
     const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
     const float value = decodeFiniteBinaryFloatMagnitude(magnitude, format);
     return negative ? -value : value;
+}
+
+template <ScalarType Type>
+inline float decodeBinaryFloatKnown(uint32_t raw) {
+    constexpr BinaryFloatFormat format = binaryFloatFormatKnown<Type>();
+    static const auto values = [] {
+        std::array<float, size_t{1} << format.totalBits> result{};
+        for (uint32_t value = 0; value < result.size(); ++value)
+            result[value] = decodeBinaryFloat(Type, value);
+        return result;
+    }();
+    return values[raw & (values.size() - 1U)];
 }
 
 inline uint32_t nearestPositiveBinaryFloatRaw(ScalarType type, float value,

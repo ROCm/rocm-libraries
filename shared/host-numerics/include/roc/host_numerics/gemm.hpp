@@ -10,13 +10,12 @@
 #include <vector>
 
 namespace roc::host_numerics {
-// Selects the host implementation strategy. Blocked reuses operand blocks and
-// may accumulate unselected coordinates in every touched output block, but
-// writes only the selected D coordinates. Blas delegates to a supplied BLAS
-// implementation.
+// Selects the host implementation strategy. Blocked adapts between direct
+// selected-output work and operand-block reuse, but writes only the selected D
+// coordinates. Blas delegates to a supplied BLAS implementation.
 enum class GemmBackend {
     Automatic,  // Selects between available BLAS and built-in Blocked execution.
-    Blocked,    // Accumulates complete touched output blocks; writes selected D coordinates.
+    Blocked,    // Uses built-in density-aware blocked or selected-output execution.
     Blas,       // Uses the optional BLAS component's transforming implementation.
 };
 

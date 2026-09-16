@@ -19,9 +19,10 @@ namespace roc::host_numerics {
 namespace {
 using detail::GemmSupportInfo;
 
-constexpr size_t outputBlockRows = 32;
+constexpr size_t outputBlockRows = 64;
 constexpr size_t outputBlockColumns = 32;
-constexpr size_t reductionBlockElements = 8;
+constexpr size_t reductionBlockElements = 16;
+constexpr size_t selectedReductionBlockElements = 64;
 
 struct SelectedOutputLocation {
     size_t blockRow;
@@ -178,6 +179,95 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
                                         !problem.computeTypeB &&
                                         problem.mathMode == MathMode::Default;
 
+    const auto loadA = [&](size_t row, size_t reduction) {
+        Accumulator value = conjugateIfNeeded(a(row, reduction), problem.conjugateA);
+        for (const auto& scale : preScalesA) {
+            if constexpr (needsExplicitArithmetic)
+                value = multiply(value, scale(row, reduction));
+            else
+                value *= scale(row, reduction);
+        }
+        return operandMath(quantizeA(value));
+    };
+    const auto loadB = [&](size_t reduction, size_t column) {
+        Accumulator value = conjugateIfNeeded(b(reduction, column), problem.conjugateB);
+        for (const auto& scale : preScalesB) {
+            if constexpr (needsExplicitArithmetic)
+                value = multiply(value, scale(reduction, column));
+            else
+                value *= scale(reduction, column);
+        }
+        return operandMath(quantizeB(value));
+    };
+
+    const auto executeSelectedOutput = [&](const SelectedOutputLocation& selected) {
+        const size_t row =
+            selected.blockRow * outputBlockRows + selected.localIndex / outputBlockColumns;
+        const size_t column =
+            selected.blockColumn * outputBlockColumns + selected.localIndex % outputBlockColumns;
+        Accumulator accumulator = Accumulator(0);
+        std::array<Accumulator, selectedReductionBlockElements> aValues;
+        std::array<Accumulator, selectedReductionBlockElements> bValues;
+
+        const auto accumulateRange = [&](Accumulator& destination, size_t reductionBegin,
+                                         size_t reductionEnd) {
+            for (size_t reductionBase = reductionBegin; reductionBase < reductionEnd;
+                 reductionBase += selectedReductionBlockElements) {
+                const size_t reductions =
+                    std::min(selectedReductionBlockElements, reductionEnd - reductionBase);
+                const std::span<Accumulator> aBlock(aValues.data(), reductions);
+                const std::span<Accumulator> bBlock(bValues.data(), reductions);
+                if (loadAWithoutTransforms)
+                    aBlockReader.load(row, reductionBase, 1, reductions, aBlock);
+                else
+                    for (size_t reduction = 0; reduction < reductions; ++reduction)
+                        aBlock[reduction] = loadA(row, reductionBase + reduction);
+                if (loadBWithoutTransforms)
+                    bBlockReader.load(reductionBase, column, reductions, 1, bBlock);
+                else
+                    for (size_t reduction = 0; reduction < reductions; ++reduction)
+                        bBlock[reduction] = loadB(reductionBase + reduction, column);
+
+                for (size_t reduction = 0; reduction < reductions; ++reduction) {
+                    const Accumulator product = multiply(aBlock[reduction], bBlock[reduction]);
+                    destination = add(destination, product);
+                }
+            }
+        };
+
+        if (!hasBlockScale) {
+            accumulateRange(accumulator, 0, k);
+        } else {
+            for (size_t reductionBase = 0; reductionBase < k;) {
+                const size_t remainingA =
+                    blockScaleA ? problem.blockSizeA - reductionBase % problem.blockSizeA
+                                : k - reductionBase;
+                const size_t remainingB =
+                    blockScaleB ? problem.blockSizeB - reductionBase % problem.blockSizeB
+                                : k - reductionBase;
+                const size_t reductionEnd =
+                    reductionBase + std::min({k - reductionBase, remainingA, remainingB});
+                Accumulator partial = Accumulator(0);
+                accumulateRange(partial, reductionBase, reductionEnd);
+
+                Accumulator scale = Accumulator(1);
+                if (blockScaleA)
+                    scale = multiply(scale,
+                                     (*blockScaleA)(row, (reductionEnd - 1) / problem.blockSizeA));
+                if (blockScaleB)
+                    scale = multiply(
+                        scale, (*blockScaleB)(column, (reductionEnd - 1) / problem.blockSizeB));
+                accumulator = add(accumulator, multiply(partial, scale));
+                reductionBase = reductionEnd;
+            }
+        }
+
+        if (selectedOutputWriter)
+            selectedOutputWriter->store(0, selected.selectedIndex, accumulator);
+        else
+            output.store(row, column, accumulator);
+    };
+
     const auto executeBlock = [&](size_t rowBase, size_t columnBase, bool storeAllOutputs,
                                   std::span<const SelectedOutputLocation> selectedOutputs) {
         const size_t rows = std::min(outputBlockRows, m - rowBase);
@@ -187,12 +277,15 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
         const size_t aBlockElements = rows * maximumReductions;
         const size_t bBlockElements = maximumReductions * columns;
         const size_t partialElements = hasBlockScale ? accumulatorElements : 0;
-        std::vector<Accumulator> scratch(accumulatorElements + aBlockElements + bBlockElements +
-                                         partialElements);
+        // Reuse one buffer per worker so a matrix with many output tiles does not allocate for
+        // every tile. OpenMP nested execution is disabled by forEachParallelIndex.
+        thread_local std::vector<Accumulator> scratch;
+        scratch.resize(accumulatorElements + aBlockElements + bBlockElements + partialElements);
         std::span<Accumulator> accumulator(scratch.data(), accumulatorElements);
         std::span<Accumulator> aBlock(scratch.data() + accumulatorElements, aBlockElements);
         std::span<Accumulator> bBlock(aBlock.data() + aBlockElements, bBlockElements);
         std::span<Accumulator> partial(bBlock.data() + bBlockElements, partialElements);
+        std::fill(accumulator.begin(), accumulator.end(), Accumulator(0));
 
         const auto accumulateTile = [&](std::span<Accumulator> destination, size_t reductionBase,
                                         size_t reductions) {
@@ -200,36 +293,18 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
                 aBlockReader.load(rowBase, reductionBase, rows, reductions, aBlock);
             } else {
                 for (size_t row = 0; row < rows; ++row) {
-                    for (size_t reduction = 0; reduction < reductions; ++reduction) {
-                        Accumulator value = conjugateIfNeeded(
-                            a(rowBase + row, reductionBase + reduction), problem.conjugateA);
-                        for (const auto& scale : preScalesA) {
-                            if constexpr (needsExplicitArithmetic)
-                                value = multiply(value,
-                                                 scale(rowBase + row, reductionBase + reduction));
-                            else
-                                value *= scale(rowBase + row, reductionBase + reduction);
-                        }
-                        aBlock[row * reductions + reduction] = operandMath(quantizeA(value));
-                    }
+                    for (size_t reduction = 0; reduction < reductions; ++reduction)
+                        aBlock[row * reductions + reduction] =
+                            loadA(rowBase + row, reductionBase + reduction);
                 }
             }
             if (loadBWithoutTransforms) {
                 bBlockReader.load(reductionBase, columnBase, reductions, columns, bBlock);
             } else {
                 for (size_t reduction = 0; reduction < reductions; ++reduction) {
-                    for (size_t column = 0; column < columns; ++column) {
-                        Accumulator value = conjugateIfNeeded(
-                            b(reductionBase + reduction, columnBase + column), problem.conjugateB);
-                        for (const auto& scale : preScalesB) {
-                            if constexpr (needsExplicitArithmetic)
-                                value = multiply(
-                                    value, scale(reductionBase + reduction, columnBase + column));
-                            else
-                                value *= scale(reductionBase + reduction, columnBase + column);
-                        }
-                        bBlock[reduction * columns + column] = operandMath(quantizeB(value));
-                    }
+                    for (size_t column = 0; column < columns; ++column)
+                        bBlock[reduction * columns + column] =
+                            loadB(reductionBase + reduction, columnBase + column);
                 }
             }
 
@@ -344,15 +419,37 @@ GemmExecutionInfo runBlocked(const GemmInvocation& problem, Tensor* selectedOutp
             });
     } else {
         const std::span<const SelectedOutputLocation> selectedOutputs(selectedPlan->locations);
-        detail::forEachParallelIndex(
-            selectedPlan->blocks.size(),
-            detail::saturatedProduct(outputElementsCovered, reductionWork), parallelOutput,
-            1'000'000, [&](size_t index) {
-                const PlannedOutputBlock& block = selectedPlan->blocks[index];
-                (void)executeBlock(
-                    block.rowBase, block.columnBase, false,
-                    selectedOutputs.subspan(block.firstSelectedOutput, block.selectedOutputCount));
-            });
+        const size_t selectedWork = detail::saturatedProduct(selectedOutputs.size(), reductionWork);
+        const size_t blockedWork = detail::saturatedProduct(outputElementsCovered, reductionWork);
+        constexpr size_t minimumSelectedWorkPerThread = 16'384;
+        const size_t selectedThreads = static_cast<size_t>(
+            detail::operationThreadCount(selectedWork, minimumSelectedWorkPerThread));
+        const size_t blockedThreads =
+            std::min(selectedPlan->blocks.size(),
+                     static_cast<size_t>(detail::operationThreadCount(blockedWork, 1'000'000)));
+        constexpr long double blockedThroughputAdvantage = 20.0L;
+        const long double selectedCost =
+            static_cast<long double>(selectedWork) / static_cast<long double>(selectedThreads);
+        const long double blockedCost =
+            static_cast<long double>(blockedWork) /
+            static_cast<long double>(std::max<size_t>(1, blockedThreads)) /
+            blockedThroughputAdvantage;
+
+        if (selectedCost < blockedCost) {
+            outputElementsCovered = selectedOutputs.size();
+            detail::forEachParallelIndex(
+                selectedOutputs.size(), selectedWork, parallelOutput, minimumSelectedWorkPerThread,
+                [&](size_t index) { executeSelectedOutput(selectedOutputs[index]); });
+        } else {
+            detail::forEachParallelIndex(
+                selectedPlan->blocks.size(), blockedWork, parallelOutput, 1'000'000,
+                [&](size_t index) {
+                    const PlannedOutputBlock& block = selectedPlan->blocks[index];
+                    (void)executeBlock(block.rowBase, block.columnBase, false,
+                                       selectedOutputs.subspan(block.firstSelectedOutput,
+                                                               block.selectedOutputCount));
+                });
+        }
     }
 
     return {

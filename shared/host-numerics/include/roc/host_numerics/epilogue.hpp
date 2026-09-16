@@ -6,6 +6,7 @@
 #include <optional>
 #include <roc/host_numerics/operation_types.hpp>
 #include <roc/host_numerics/tensor.hpp>
+#include <vector>
 
 namespace roc::host_numerics {
 enum class ActivationApplication {
@@ -21,7 +22,10 @@ struct EpilogueOptions {
           auxiliaryScale(Tensor::scalar(compute, 1)) {}
 
     ScalarType computeType;
-    std::optional<Tensor> inputScale;   // Optional rank-zero factor applied to input.
+    // Ordered broadcast factors are combined first, then applied to the input.
+    // inputScale is an additional rank-zero factor applied afterward.
+    std::vector<Tensor> inputScaleFactors;
+    std::optional<Tensor> inputScale;
     std::optional<Tensor> addend;       // Optional matrix added before bias and activation.
     std::optional<Tensor> addendScale;  // Optional rank-zero factor applied to addend.
     std::optional<Tensor> auxiliaryInput;

@@ -62,7 +62,7 @@ void testExplicitSelectionBlockPlan() {
     blockedProblem.outputSelection = selection;
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Explicit blocked selection result mismatch.");
-    require(run.outputElementsWritten == 4 && run.outputElementsCovered == 1518,
+    require(run.outputElementsWritten == 4 && run.outputElementsCovered == 4,
             "Explicit blocked selection reported the wrong output counts.");
     requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
@@ -82,7 +82,7 @@ void testStridedSelectionBlockPlan() {
     blockedProblem.outputSelection = selection;
     const GemmTestRunInfo run =
         runAndCheck(blockedProblem, blockedOutput, "Strided blocked selection result mismatch.");
-    require(run.outputElementsWritten == 6 && run.outputElementsCovered == 2272,
+    require(run.outputElementsWritten == 6 && run.outputElementsCovered == 6,
             "Strided blocked selection reported the wrong output counts.");
     requireOnlySelectedOutputsStored(blockedOutput, selection);
 }
@@ -128,7 +128,7 @@ void testBlockScaledSelectionBlockPlan() {
 
     const GemmTestRunInfo run = runAndCheck(blockedProblem, blockedOutput,
                                             "Block-scaled blocked selection result mismatch.");
-    require(run.outputElementsWritten == 3 && run.outputElementsCovered == 1027,
+    require(run.outputElementsWritten == 3 && run.outputElementsCovered == 3,
             "Block-scaled blocked selection reported the wrong output counts.");
     requireOnlySelectedOutputsStored(blockedOutput, selection);
 }

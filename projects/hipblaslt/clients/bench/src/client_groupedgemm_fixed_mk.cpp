@@ -974,15 +974,19 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                {1, ldc[i]},
                                i3 * stride_c[i]));
                     const Tensor product = matmul(a, b, ScalarType::Float32);
-                    const Tensor combined
-                        = product * static_cast<float>(alpha[i])
-                          + c.copyConvertedTo(ScalarType::Float32) * static_cast<float>(beta[i]);
-
                     EpilogueOptions options;
+                    options.inputScale
+                        = Tensor::scalar(ScalarType::Float32, static_cast<float>(alpha[i]));
+                    if(beta[i] != 0)
+                    {
+                        options.addend = c;
+                        options.addendScale
+                            = Tensor::scalar(ScalarType::Float32, static_cast<float>(beta[i]));
+                    }
                     options.activation = toHostNumericsActivation(actType[i]);
                     if(enable_bias[i])
                         options.bias = h_bias[i].expandDims(1);
-                    referenceEpilogueInto(combined, {.output = referenceOutput}, options);
+                    referenceEpilogueInto(product, {.output = referenceOutput}, options);
 
                     // Use the greatest representable double below 0.001 so a
                     // difference that rounds to exactly 0.001 is rejected.

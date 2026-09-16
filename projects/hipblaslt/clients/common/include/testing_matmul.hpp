@@ -2857,7 +2857,6 @@ void testing_matmul_with_bias(const Arguments&                                  
                 using roc::host_numerics::Shape;
                 using roc::host_numerics::SiluActivation;
                 using roc::host_numerics::Tensor;
-                using roc::host_numerics::add;
                 using roc::host_numerics::matmulWithBlasBackend;
                 using roc::host_numerics::multiply;
                 using roc::host_numerics::referenceEpilogueInto;
@@ -2923,33 +2922,27 @@ void testing_matmul_with_bias(const Arguments&                                  
                           ? hipblaslt::host_numerics::scalarValue(scaleDValue, Talpha)
                           : Tensor::scalar(accumulatorType, 1);
 
-                std::optional<Tensor> referenceAccumulator;
+                Tensor referenceAccumulator(
+                    accumulatorType, Shape{referenceA.shape()[0], referenceB.shape()[1]});
+                EpilogueOptions conversion(accumulatorType);
                 if(alpha.item<std::complex<double>>() != std::complex<double>(0.0, 0.0)
                    && referenceA.shape()[1] != 0)
                 {
-                    const Tensor product = matmulWithBlasBackend(
+                    referenceAccumulator = matmulWithBlasBackend(
                         referenceA, referenceB, accumulatorType, matmulOptions);
-                    referenceAccumulator
-                        = multiply(product, alpha, accumulatorType, accumulatorType);
+                    conversion.inputScale = alpha;
                 }
                 if(beta.item<std::complex<double>>() != std::complex<double>(0.0, 0.0))
                 {
-                    const Tensor cScale = multiply(beta, scaleC, accumulatorType, accumulatorType);
-                    Tensor addend = multiply(referenceC, cScale, accumulatorType, accumulatorType);
-                    referenceAccumulator
-                        = referenceAccumulator
-                              ? add(*referenceAccumulator, addend, accumulatorType, accumulatorType)
-                              : std::move(addend);
+                    conversion.addend = referenceC;
+                    conversion.addendScale
+                        = multiply(beta, scaleC, accumulatorType, accumulatorType);
                 }
-                if(!referenceAccumulator)
-                    referenceAccumulator.emplace(
-                        accumulatorType, Shape{referenceA.shape()[0], referenceB.shape()[1]});
 
-                EpilogueOptions conversion(accumulatorType);
                 conversion.outputScale = outputScale;
                 if(referenceD.type() == ScalarType::Int8)
                     conversion.outputConversion = OutputConversion::SaturatingInt8;
-                referenceEpilogueInto(*referenceAccumulator, {.output = referenceD}, conversion);
+                referenceEpilogueInto(referenceAccumulator, {.output = referenceD}, conversion);
 
                 if(preparedProblem.epilogueEnabled)
                 {

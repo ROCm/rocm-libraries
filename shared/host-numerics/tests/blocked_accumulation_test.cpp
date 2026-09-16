@@ -60,7 +60,7 @@ void testSelectedBlockAccumulatorFamilies() {
             expected = roundThrough(accumulatorType, expected + product);
         }
         const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
-        require(run.outputElementsWritten == 1 && run.outputElementsCovered == rows * columns &&
+        require(run.outputElementsWritten == 1 && run.outputElementsCovered == 1 &&
                     output.loadAs<float>({0, 0}) == expected &&
                     output.loadAs<float>({0, 1}) == untouchedValue,
                 "Selected blocked GEMM mishandled reduced-precision accumulation.");
@@ -78,7 +78,7 @@ void testSelectedBlockAccumulatorFamilies() {
     const int32_t wrappedProduct =
         std::bit_cast<int32_t>(static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) * 2U);
     const int32_t wrappedSum = std::bit_cast<int32_t>(static_cast<uint32_t>(wrappedProduct) * 2U);
-    require(integerRun.outputElementsCovered == rows * columns &&
+    require(integerRun.outputElementsCovered == 1 &&
                 integerOutput.loadAs<int32_t>({0, 0}) == wrappedSum &&
                 integerOutput.loadAs<int32_t>({0, 1}) == -99,
             "Selected blocked GEMM mishandled Int32 wrapping accumulation.");
@@ -93,7 +93,7 @@ void testSelectedBlockAccumulatorFamilies() {
                                 complexOutput, ScalarType::ComplexFloat32);
     complexProblem.outputSelection = selection;
     const GemmTestRunInfo complexRun = referenceGemm(complexProblem, GemmBackend::Blocked);
-    require(complexRun.outputElementsCovered == rows * columns &&
+    require(complexRun.outputElementsCovered == 1 &&
                 complexOutput.loadAs<Complex>({0, 0}) == Complex(-10.0f, 20.0f) &&
                 complexOutput.loadAs<Complex>({0, 1}) == Complex(-99.0f, -99.0f),
             "Selected blocked GEMM mishandled complex accumulation.");
