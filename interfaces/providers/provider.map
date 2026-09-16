@@ -1,0 +1,6 @@
+ROCM_INTERFACES_PROVIDER_1 {
+  global:
+    rocm_interfaces_provider_query_v1;
+  local:
+    *;
+};
