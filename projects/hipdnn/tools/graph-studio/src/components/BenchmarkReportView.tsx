@@ -7,7 +7,7 @@ import {
   summarize,
   validationState,
 } from "../benchmark/metrics";
-import type { BenchmarkReport } from "../benchmark/types";
+import type { BenchmarkReport, EngineResult, GraphResults } from "../benchmark/types";
 
 /**
  * Benchmark report view: suite totals, a per-graph engine comparison chart for
@@ -23,9 +23,16 @@ interface BenchmarkReportViewProps {
   sourceLabel: string;
   /** Marks the view as showing bundled sample data rather than a real run. */
   sample?: boolean;
+  /** Opens the tensor inspector for one row. Omitted hides the row action. */
+  onOpenTensors?: (graph: GraphResults, row: EngineResult) => void;
 }
 
-export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkReportViewProps) {
+export function BenchmarkReportView({
+  report,
+  sourceLabel,
+  sample,
+  onOpenTensors,
+}: BenchmarkReportViewProps) {
   const { metadata, graphs } = report;
   const [graphName, setGraphName] = useState(graphs[0]?.graph_name ?? "");
   const [metricId, setMetricId] = useState(METRICS[0].id);
@@ -214,6 +221,7 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
                 <th className="num">Build (ms)</th>
                 <th className="num">Workspace</th>
                 <th>Validation</th>
+                {onOpenTensors && <th>Tensors</th>}
               </tr>
             </thead>
             <tbody>
@@ -248,6 +256,21 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
                         {VALIDATION_LABEL[state]}
                       </span>
                     </td>
+                    {onOpenTensors && (
+                      <td>
+                        {r.tensor_manifest || graph?.input_tensor_manifest ? (
+                          <button
+                            type="button"
+                            className="report__rowaction"
+                            onClick={() => graph && onOpenTensors(graph, r)}
+                          >
+                            Inspect
+                          </button>
+                        ) : (
+                          <span className="report__engine-ver">not captured</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}

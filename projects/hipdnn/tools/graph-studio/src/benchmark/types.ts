@@ -51,12 +51,21 @@ export interface EngineResult {
   readonly cpu_user_time_per_iter_us: number;
   readonly cpu_kernel_time_per_iter_us: number;
   readonly correctness: Correctness;
+  /**
+   * `reference` marks a timed validation-provider row, which is shown for
+   * comparison but is not counted as an engine pass or failure.
+   */
+  readonly role?: "engine" | "reference";
+  /** Manifest of the tensors this row produced, when capture was requested. */
+  readonly tensor_manifest?: string;
 }
 
 export interface GraphResults {
   readonly graph_name: string;
   readonly graph_path: string;
   readonly results: readonly EngineResult[];
+  /** Manifest of the inputs every row in this graph executed against. */
+  readonly input_tensor_manifest?: string;
 }
 
 export interface ReportMetadata {
