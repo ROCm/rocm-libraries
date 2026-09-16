@@ -4,7 +4,7 @@
 ################################################################################
 """R4 — LocalRead.py CheckValue1 debug path + MFMA lrvwTile>1 characterization.
 
-Target missing ranges in Tensile/Components/LocalRead.py:
+Target missing ranges in tensilelite/Components/LocalRead.py:
   - 117-151 : CheckValue1A/B debug instrumentation inside LocalReadVALU.__call__
                (dbgVgpr extraction, SWaitCnt, data-type dispatch for Half/BF16/
                Int8/Single). Gated on writer.db["CheckValue1A"/"CheckValue1B"].
@@ -77,8 +77,8 @@ _ARCH_950 = "gfx950"
 @contextlib.contextmanager
 def _isolated_globals_with_isa(isaInfoMap):
     """Isolate process-global state while populating ISA entries."""
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
-    from Tensile.Common.ValidParameters import validParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.ValidParameters import validParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -94,9 +94,9 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 def _toolchain_for(arch):
     """Return (assembler, isaInfoMap) for a single arch. Not cached — test isolation."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Validators import validateToolchain
 
     isa = gfxToIsa(arch)
     cxx = validateToolchain("amdclang++")
@@ -112,16 +112,16 @@ def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
     Returns [(basename, src, err), ...] sorted by basename.
     """
     import rocisa  # noqa: F401
-    from Tensile import LibraryIO
-    from Tensile.BenchmarkProblems import _generateForkedSolutions
-    from Tensile.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
-    from Tensile.Common.Types import makeDebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite import LibraryIO
+    from tensilelite.BenchmarkProblems import _generateForkedSolutions
+    from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
+    from tensilelite.Common.Types import makeDebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
     import codegen_harness as _ch
 
     assembler, iim = _toolchain_for(arch)
@@ -196,7 +196,7 @@ def test_r4_localread_checkvalue1_debug_hhs():
     Expected: >=1 kernel emits with err==0; source contains debug wait markers
     from the CheckValue1 arm (SWaitCnt for lgkmcnt + isHalf assert).
     """
-    from Tensile.Common.Types import DebugConfig
+    from tensilelite.Common.Types import DebugConfig
 
     debug_cfg = DebugConfig(
         enableDebugA=True,
