@@ -50,6 +50,12 @@ import sys
 from dataclasses import dataclass
 from typing import List
 
+# hipDeviceAttributeMaxGridDimZ. Grouped wgrad puts groups*split_k on z, which
+# is the only launch in this driver that can reach the limit. Mirrors
+# dispatch.grouped_convolution._MAX_GRID_DIM_Z -- this file is a standalone
+# sweep driver that deliberately does not import the dispatcher.
+_MAX_GRID_DIM_Z = 65535
+
 # Suppress the "fell back to Python lowerer" warning — expected in environments
 # where the C++ engine extension is not built.
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
@@ -1400,6 +1406,13 @@ def _build_wgrad_one(args_tuple):
     else:
         # split_k=0 (runtime) or split_k=1 (no-split): pass through as-is.
         resolved_split_k = split_k
+    if resolved_split_k > 1:
+        # See the note in _build_wgrad_two_stage_one: groups*split_k must fit
+        # gridDim.z, and the clamp belongs with the spec so the baked degree and
+        # the launch geometry cannot disagree.
+        resolved_split_k = max(
+            1, min(resolved_split_k, _MAX_GRID_DIM_Z // max(1, problem.groups))
+        )
 
     spec = WgradConvSpec(
         problem=problem,
@@ -1439,6 +1452,10 @@ def _build_wgrad_two_stage_one(args_tuple):
     Must live at module level for pickle.
     """
     combo, problem, dtype, arch = args_tuple
+    # Must unpack the same 10-field combo as _build_wgrad_one. This branch is
+    # only reachable when C/groups is odd, which nothing in CI exercises, so it
+    # silently kept a stale 9-field unpack after async_dma was added and raised
+    # "too many values to unpack" the moment a depthwise shape reached it.
     (
         tile_m,
         tile_n,
@@ -1448,6 +1465,7 @@ def _build_wgrad_two_stage_one(args_tuple):
         warp_tile_mn,
         pipeline,
         epilogue,
+        async_dma,
         split_k,
     ) = combo
 
@@ -1496,6 +1514,15 @@ def _build_wgrad_two_stage_one(args_tuple):
     else:
         resolved_split_k = split_k
 
+    # The group and the K-slice share gridDim.z (z = groups*split_k), and the
+    # CK formula sizes split_k from the per-group GEMM without seeing the groups
+    # factor. On a grouped problem it therefore asks for a degree that overflows
+    # the z limit and the launch fails with hipErrorInvalidValue. Clamp with the
+    # spec, not at the grid, so the baked degree and the launch geometry agree.
+    resolved_split_k = max(
+        1, min(resolved_split_k, _MAX_GRID_DIM_Z // max(1, problem.groups))
+    )
+
     # Two-stage only makes sense for split_k > 1.
     if resolved_split_k <= 1:
         return None
@@ -1519,6 +1546,10 @@ def _build_wgrad_two_stage_one(args_tuple):
         epilogue=epilogue,
         split_k=resolved_split_k,
         two_stage=True,
+        # Carried for the same comparability reason as lds_k_outer below: the
+        # two legs must differ only in the epilogue, or the side-by-side
+        # timings are measuring two different kernels.
+        async_dma=async_dma,
         # Same per-combo K-outer gate the single-stage leg uses
         # (_build_wgrad_one). Without it the two-stage leg builds M-outer
         # kernels while the atomic leg builds K-outer ones, so the two sets of
@@ -2582,6 +2613,8 @@ def _run_wgrad_sweep(
         ws_nbytes_cur = 0
 
         for combo, spec, resolved_split_k, s1_kernel, s2_kernel in pending_2s:
+            # 10-field combo, same as the single-stage leg. The second of the
+            # two stale 9-field unpacks on this odd-cpg-only path.
             (
                 tile_m,
                 tile_n,
@@ -2591,6 +2624,7 @@ def _run_wgrad_sweep(
                 warp_tile_mn,
                 pipeline,
                 epilogue,
+                _async_dma,
                 _,
             ) = combo
             warp_tile_k = spec.warp_tile_k

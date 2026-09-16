@@ -371,24 +371,42 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
 
         /* For fp16/bf16 output the packed atomic writes pairs of elements via
-         * global_atomic_add_pk_f16/bf16.  Each pair spans two adjacent C
-         * positions within one (y,x) filter position.  An odd C means the last
-         * element of a row has no partner and the pair straddles a filter-position
-         * boundary, producing a wrong-geometry atomic.
-         * Matches Python is_valid_wgrad_spec: "requires even C". */
+         * global_atomic_add_pk_f16/bf16.  The pair is addressed as a flat
+         * `m * wg_N + n` element index with n rounded down to even, so it is
+         * dword-aligned iff the dW row length wg_N = Z*Y*X*(C/groups) is even.
+         *
+         * Two corrections to the previous form of this gate, both mirrored from
+         * Python is_valid_wgrad_spec / WgradConvSpec.validate():
+         *   - it tested the dense problem.C, but the dW row is per-group, so on
+         *     any grouped conv it disagreed with Python (which tests cpg);
+         *   - it did not exempt the two-stage path, which stores f32 to a
+         *     workspace and emits no atomic at all.
+         * The local per-group computation is deliberate: the shared
+         * rocke_wgrad_conv_spec_wg_N() helper still returns the dense Z*Y*X*C
+         * and is used for workspace sizing, so it is not interchangeable here. */
+        const bool effective_two_stage_gate = (s->two_stage || s->force_deterministic) && sk > 1;
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
-        if(strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0)
+        if(!effective_two_stage_gate && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
         {
-            if(s->problem.C % 2 != 0)
+            const int groups_v = s->problem.groups > 0 ? s->problem.groups : 1;
+            const int cpg_v = s->problem.C / groups_v;
+            const int z_v = s->problem.is_3d ? s->problem.Z : 1;
+            const int wg_N_v = z_v * s->problem.Y * s->problem.X * cpg_v;
+            if(wg_N_v % 2 != 0)
             {
                 if(reason && reason_cap)
                     snprintf(reason,
                              reason_cap,
-                             "split_k atomic with dtype_d=%s requires even C "
-                             "(packed <2 x dtype> atomic pairs must stay within one filter "
-                             "position); got C=%d",
+                             "split_k atomic with dtype_d=%s requires an even dW row length "
+                             "wg_N=Y*X*(C/groups) (packed <2 x dtype> atomic pairs are "
+                             "dword-aligned only on an even row); got wg_N=%d (Y=%d, X=%d, "
+                             "cpg=%d). Use two_stage=true (or force_deterministic=true) to "
+                             "reach split-K via the f32 workspace path, which emits no atomics.",
                              dt,
-                             s->problem.C);
+                             wg_N_v,
+                             s->problem.Y,
+                             s->problem.X,
+                             cpg_v);
                 return false;
             }
         }
@@ -406,7 +424,11 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
     if(sk > 1 || sk == 0)
     {
-        bool effective_two_stage_v = s->two_stage || (s->force_deterministic && sk > 1);
+        /* The `sk > 1` term applies to two_stage as well, not just to
+         * force_deterministic: the builder computes
+         * is_two_stage = split_k > 1 && two_stage, so at sk == 0 a two_stage
+         * spec still lands on the atomic epilogue and must stay gated. */
+        bool effective_two_stage_v = (s->two_stage || s->force_deterministic) && sk > 1;
         if(!effective_two_stage_v)
         {
             const char* dt = s->dtype_d ? s->dtype_d : "fp16";
