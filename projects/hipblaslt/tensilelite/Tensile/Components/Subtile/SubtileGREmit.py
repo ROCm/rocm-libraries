@@ -119,19 +119,27 @@ def _emitGRPtrUpdate(tag, tile, ti, writer, kernel):
 _stub = lambda *args, **kwargs: None
 
 
-def emitSrdAdvance(module, tc, inc, writer, holdOnLastIter=False):
+def emitSrdAdvance(module, tc, inc, writer, kernel=None, holdOnLastIter=False):
   """Advance Srd{tc}'s base pointer by inc bytes.
 
-  holdOnLastIter suppresses the advance when LoopCounterL <= 1. It is set only
-  for the PGR=2 pre-loop advance that sits between the two prefetch clusters.
-  With a single unroll iteration the pre-loop branches straight to the NLL, which
-  reads only cluster 1's LDS buffer, so cluster 2 prefetches a K-block that does
-  not exist. Its loads still have to issue -- the pre-loop's vmcnt(N) counts on
-  them -- so instead of skipping them we leave the SRD in place and let them
-  re-read cluster 1's K-block. Srd+2 is a fixed tile-boundary limit rather than a
-  distance to the end of the tensor, so nothing else would clip them and they run
-  off the end of the allocation (hipErrorIllegalAddress on the MX scale tensors,
-  whose allocations are small enough to end on a mapping boundary).
+  holdOnLastIter suppresses the advance when the K-block that the PGR=2 pre-loop's
+  second prefetch cluster would read does not exist at all. It is set only for the
+  pre-loop advance that sits between the two clusters. When the whole summation
+  fits in one DepthU the pre-loop branches straight to the NLL, which reads only
+  cluster 1's LDS buffer, so cluster 2 prefetches a K-block past the end of the
+  tensor. Its loads still have to issue -- the pre-loop's vmcnt(N) counts on them
+  -- so instead of skipping them we leave the SRD in place and let them re-read
+  cluster 1's K-block. Srd+2 is a fixed tile-boundary limit rather than a distance
+  to the end of the tensor, so nothing else would clip them and they run off the
+  end of the allocation (hipErrorIllegalAddress on the MX scale tensors, whose
+  allocations are small enough to end on a mapping boundary).
+
+  The hold must not fire when a K-tail follows a single unrolled iteration. There
+  cluster 2's K-block is the tail's own block: it exists (partially), and the tail
+  loop reads it through this same SRD, so holding makes the tail re-MAC K-block 0.
+  The condition is therefore "hold iff sizeL <= DepthU", expressed as
+  LoopCounterL <= (0 if the tail runs else 1). The tail test mirrors
+  calculateLoopNumIter's own SizesSum % DepthU.
   """
   if not holdOnLastIter:
     module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
@@ -140,9 +148,17 @@ def emitSrdAdvance(module, tc, inc, writer, holdOnLastIter=False):
                         comment=f"{tc}: carry"))
     return
 
+  depthU = kernel["DepthU"]
+  assert (depthU & (depthU - 1)) == 0, "PGR=2 pre-loop SRD hold assumes DepthU is a power of two"
   tmp = writer.sgprPool.checkOut(1, tag=f"emitSrdAdvance_{tc}", preventOverflow=False)
-  module.add(SCmpLeU32(src0=sgpr("LoopCounterL"), src1=1,
-                       comment="single unroll iteration? (cluster 2 is a dead prefetch)"))
+  module.add(SAndB32(dst=sgpr(tmp), src0=sgpr("SizesSum+%u" % writer.states.unrollIdx),
+                     src1=depthU - 1,
+                     comment="tail = SizesSum %% DepthU (0 => NLL is terminal)"))
+  module.add(SCmpEQU32(src0=sgpr(tmp), src1=0, comment="no tail loop?"))
+  module.add(SCSelectB32(dst=sgpr(tmp), src0=1, src1=0,
+                         comment="hold threshold: 1 without a tail, 0 with one"))
+  module.add(SCmpLeU32(src0=sgpr("LoopCounterL"), src1=sgpr(tmp),
+                       comment="sizeL <= DepthU? (cluster 2 has no K-block to read)"))
   module.add(SCSelectB32(dst=sgpr(tmp), src0=0, src1=inc,
                          comment=f"{tc}: hold SRD rather than read past the tensor"))
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(tmp),
@@ -606,7 +622,7 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel, holdOnLastIter=False):
   # tile, so advancing one DepthU consumes 16 contiguous row fragments.
   rowMultiplier = ti.mmaTileShape[0] if ti.isPreShuffled else 1
   inc = int(ti.depthUBytes * rowMultiplier)
-  emitSrdAdvance(module, tc, inc, writer, holdOnLastIter)
+  emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
   return module
 
 

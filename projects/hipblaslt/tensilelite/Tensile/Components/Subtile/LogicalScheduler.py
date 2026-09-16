@@ -610,7 +610,7 @@ class GRIncOp(BaseOp):
     tensor: str = ""
     unrollId: int = 0
     # Set on the PGR=2 pre-loop advance between the two prefetch clusters, where
-    # the SRD must stay put when LoopCounterL <= 1. See emitSrdAdvance.
+    # the SRD must stay put when the summation fits in one DepthU. See emitSrdAdvance.
     holdOnLastIter: bool = False
 
     def __post_init__(self):
@@ -4793,17 +4793,19 @@ class LogicalScheduler:
                                              before=None,
                                              source=None))
 
-        # ── Preloop split: initC on both paths, LRA on fast path and NoTailLoop only ──
+        # ── Preloop split: initC, LRA and the PLSIN guard fold on both paths ──
         #
         # Fast path (K >= DepthU, skipGRForTail=True):
         #   [GRs] -> [initC] -> [lraDeferred] -> SBranch PreloopEnd
         #                                      -> [WaitGR, Sync, LR, SkipOps]
         #
         # Slow path (K < DepthU):
-        #   Label SkipPreloop -> [initC] -> SCmpEQ/tailJump -> Label PreloopEnd
-        #                                                    -> [WaitGR, Sync, LR, SkipOps]
-        #   lraDeferred is omitted: the tail loop uses an independent flat-tile layout
-        #   and does not consume the LR address registers.
+        #   Label SkipPreloop -> [initC] -> [lraDeferred] -> Label PreloopEnd
+        #                     -> [guard fold] -> SCmpEQ/tailJump
+        #                                     -> [WaitGR, Sync, LR, SkipOps]
+        #   The tail-only route leaves from here, so it gets its own copy of the LR
+        #   address setup, and the paths converge before the guard fold so both reach
+        #   the single copy of it.
         #
         # NoTailLoop path (skipGRForTail=False, no split):
         #   [GRs] -> [initC] -> [lraDeferred] -> [WaitGR, Sync, LR, SkipOps]
@@ -4874,26 +4876,41 @@ class LogicalScheduler:
                 #   [MT0 GRs] → [initC] → [LRA] → [MT1 GRs] → SBranch PreloopEnd
                 #                                             → [WaitGR, Sync, LR, ...]
                 # Revised slow path:
-                #   Label SkipPreloop → [initC copy] → tailJump → Label PreloopEnd
-                #                                               → [WaitGR, Sync, LR, ...]
+                #   Label SkipPreloop → [initC copy] → [LRA copy] → Label PreloopEnd
+                #                       → [guard fold] → tailJump
+                #                                      → [WaitGR, Sync, LR, ...]
                 wait_idx = next((i for i, em in enumerate(em_list)
                                  if em.opType == 'wait_gr'), len(em_list))
 
-                # Insert SBranch PreloopEnd right before wait_gr (end of fast path).
-                em_list.insert(wait_idx, EmittedModule(
+                # The tail-only route leaves from the slow path, so the state it reads
+                # has to be built before it branches: the LR address VGPRs the tail's
+                # LDS reads go through, and the PostLoopFusedStore flag the post-loop
+                # dedup guard tests. The LR setup is copied onto the slow path below.
+                # The fold carries labels and cannot be copied, so instead the split
+                # closes ahead of it: PreloopEnd sits before the fold and the tail test
+                # after it, letting the fast path branch in and the slow path fall
+                # through. The fold stays in the global-read shadow either way, since
+                # it is still ahead of wait_gr.
+                fold_idx = next((i for i, em in enumerate(em_list)
+                                 if em.instructions
+                                 and getattr(em.instructions[0], 'name', None)
+                                     == 'computePostLoopFusedStore'), None)
+                split_idx = wait_idx if fold_idx is None else fold_idx
+
+                # Insert SBranch PreloopEnd at the split (end of the fast path).
+                em_list.insert(split_idx, EmittedModule(
                     moduleId=next_id,
                     instructions=[SBranch(labelName=preloopEndLabel.getLabelName(),
                                           comment="K >= DepthU: MT1 GRs issued, skip slow-path initC")]))
                 next_id += 1
-                wait_idx += 1  # shift due to insertion
+                slow_idx = split_idx + 1
 
-                # Slow-path: SkipPreloop label + initC copy + tail-jump + PreloopEnd.
-                # lraDeferred is NOT duplicated here: the tail loop has its own
-                # flat-tile addressing and does not consume the LR address registers.
-                em_list.insert(wait_idx, EmittedModule(
+                # Slow-path: SkipPreloop label + initC copy + LRA copy, then PreloopEnd.
+                em_list.insert(slow_idx, EmittedModule(
                     moduleId=next_id,
                     instructions=[skipGRLabel]))
                 next_id += 1
+                slow_idx += 1
 
                 # Copy the canonical initC for the slow path. When the interleave
                 # pass ran it emptied the fast-path initC module (its content was
@@ -4902,18 +4919,40 @@ class LogicalScheduler:
                     if filler_pass_ran else None
                 if slow_initc is None:
                     slow_initc = list(em_list[init_idx].instructions)
-                em_list.insert(wait_idx + 1, EmittedModule(
+                em_list.insert(slow_idx, EmittedModule(
                     moduleId=next_id,
                     instructions=list(slow_initc)))
                 next_id += 1
+                slow_idx += 1
 
-                em_list.insert(wait_idx + 2, EmittedModule(
+                # LRA is spliced next to the fast-path initC (or distributed into the
+                # clusters by the filler pass), so the slow path needs its own copy.
+                # Deep-copied because the fast-path modules are already placed.
+                if _lraDeferred:
+                    em_list.insert(slow_idx, EmittedModule(
+                        moduleId=next_id,
+                        instructions=copy.deepcopy(list(_lraDeferred)),
+                        before=None,
+                        source=None))
+                    next_id += 1
+                    slow_idx += 1
+
+                # Paths converge here, ahead of the fold.
+                em_list.insert(slow_idx, EmittedModule(
+                    moduleId=next_id,
+                    instructions=[preloopEndLabel]))
+                next_id += 1
+
+                # Tail-only test, after the fold and immediately before wait_gr. The
+                # fast path reaches it too and falls through (LoopCounterL > 0).
+                jump_idx = next((i for i, em in enumerate(em_list)
+                                 if em.opType == 'wait_gr'), len(em_list))
+                em_list.insert(jump_idx, EmittedModule(
                     moduleId=next_id,
                     instructions=[
                         SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                  comment="K < DepthU? slow-path initC done, run tail only"),
+                                  comment="K < DepthU? setup done, run tail only"),
                         tailJump,
-                        preloopEndLabel,
                     ]))
             else:
                 # skipGRForTail=False (PGR=0): no split needed.

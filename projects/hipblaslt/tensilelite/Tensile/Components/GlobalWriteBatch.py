@@ -663,8 +663,10 @@ class GlobalWriteBatchWriter:
         waitLocalLoadCntStrList.append("%d (scaleAVec)"%self.scaleAVecLoadIssued[elementIdx])
         waitLocalLoadCnt += self.scaleBVecLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (scaleBVec)"%self.scaleBVecLoadIssued[elementIdx])
-      # Skip scaleAlphaVec only when the cross-wave barrier drains it (multi-DU)
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel and not needsCrossWaveBarrier:
+      # Skip scaleAlphaVec when the cross-wave barrier drains it (multi-DU) or the
+      # fused PLSIN store never loads it
+      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel and not needsCrossWaveBarrier \
+          and not self.parentWriter._plsinFusedSkipEpilogueMul():
         waitLocalLoadCnt += self.scaleAlphaVecLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (scaleAlphaVec)"%self.scaleAlphaVecLoadIssued[elementIdx])
       # Get vlcnt and dscnt
@@ -727,7 +729,8 @@ class GlobalWriteBatchWriter:
       if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
         dscnt = 0
         commentList.append("ScaleABVec")
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel \
+          and not self.parentWriter._plsinFusedSkipEpilogueMul():
         dscnt = 0
         commentList.append("ScaleAlphaVec")
       if (vlcnt != -1) or (dscnt != -1):
@@ -838,7 +841,8 @@ class GlobalWriteBatchWriter:
     if not preamble:
       self.biasLoadIssued.append(len(self.loadedDataBias) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
 
-    if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+    if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel \
+        and not self.parentWriter._plsinFusedSkipEpilogueMul():
       modGwvwScaleAlpha = Module("GwvwScaleAlpha")
       # For multi-DU, the subtile ScaleAlphaVec epilogue load passes None as the
       # LDS reference vgpr; non-multi-DU uses localReferenceVgpr.
@@ -2121,7 +2125,8 @@ class GlobalWriteBatchWriter:
       module.add(scaleBVecModule)
 
       scaleAlphaVecModule = Module("scaleAlphaVecModule")
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel \
+          and not self.parentWriter._plsinFusedSkipEpilogueMul():
         applyScaleVec(scaleAlphaVecModule, "ScaleAlphaVec", dataScaleAlphaVec, self.factorDim, isGlobal=False)
       module.add(scaleAlphaVecModule)
 
