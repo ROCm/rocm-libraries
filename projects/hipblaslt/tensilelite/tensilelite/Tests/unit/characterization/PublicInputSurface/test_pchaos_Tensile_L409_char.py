@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurface characterization: the ``if runningTuning:`` predicate
-in ``Tensile/tensilelite.py`` at line 409, inside ``restore_prob_sol_map``.
+in ``tensilelite/Tensile.py`` at line 409, inside ``restore_prob_sol_map``.
 
 Branch aa18a787b08bf05166d8f981c6cefe39f0e5a016. The predicate is a bare
 boolean local ``runningTuning`` (initialized False at line 388; set to True

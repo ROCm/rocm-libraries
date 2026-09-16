@@ -6,7 +6,7 @@ import types
 import pytest
 import yaml
 
-from tensilelite import tensilelite as TensileModule
+from tensilelite import Tensile as TensileModule
 
 pytestmark = pytest.mark.unit
 
