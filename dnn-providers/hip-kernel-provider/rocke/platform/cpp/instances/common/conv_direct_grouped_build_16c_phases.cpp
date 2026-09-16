@@ -66,7 +66,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     ctx->BLOCK_GROUPS = spec->block_groups;
     ctx->WAVE = spec->wave_size;
     ctx->THREADS = rocke_direct_conv_16c_threads_per_block(spec);
-    ctx->LDS_W = ctx->BLOCK_Q + ctx->p.KW - 1;
+    ctx->LDS_W = (ctx->BLOCK_Q - 1) * ctx->p.stride + ctx->p.KW;
     ctx->LDS_ROW_FP16 = ctx->LDS_W * ctx->BLOCK_GROUPS * ctx->p.cpg;
     ctx->LOAD_VEC = 4;
     ctx->NUM_VEC4 = ctx->LDS_ROW_FP16 / ctx->LOAD_VEC;
@@ -406,11 +406,13 @@ void rocke_dconv16c_build_descriptors(rocke_dconv_16c_ctx_t* ctx)
             xforms[0]
                 = rocke_embed_bounded(b, h_upper, 1, "h", h_strides, -ctx->p.PAD, 0, ctx->p.H);
         }
-        /* embed(upper=("q_pos","W_lds_pos"), into="w", strides=(1,1),
+        /* embed(upper=("q_pos","W_lds_pos"), into="w", strides=(stride,1),
          *       offset=-PAD, lo=0, hi=W) */
         {
             static const char* const w_upper[2] = {"q_pos", "W_lds_pos"};
-            int w_strides[2] = {1, 1};
+            int w_strides[2];
+            w_strides[0] = ctx->p.stride;
+            w_strides[1] = 1;
             xforms[1]
                 = rocke_embed_bounded(b, w_upper, 2, "w", w_strides, -ctx->p.PAD, 0, ctx->p.W);
         }
