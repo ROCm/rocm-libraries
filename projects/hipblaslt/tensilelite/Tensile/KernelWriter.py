@@ -945,7 +945,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if scheduleIterAlg == 0:
       # simple schedule, just add the modules in-order
       if kernel["HalfPLR"]:
-        assert len(packCode.flatitems()) == 0, "Pack code should be empty for half PLR case"
+        # A/B packing is still illegal for HalfPLR. MXBlock=MI_K splat is
+        # different: v_perm lives in packMXSA/B even with UnrollMajor LDS.
+        if len(packCode.flatitems()) != 0:
+          for it in packCode.items():
+            name = getattr(it, "name", "") or ""
+            if name.startswith("packMXSA") or name.startswith("packMXSB"):
+              continue
+            leftover = it.flatitems() if isinstance(it, Module) else [it]
+            assert len(leftover) == 0, "A/B pack code should be empty for half PLR case"
         if kernel["PrefetchGlobalRead"] < 2:
           iterCode.add(globalReadCode)
         iterCode.add(waitLWCode)
@@ -953,6 +961,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         iterCode.add(localReadCode)
         iterCode.add(localWriteCode)
         iterCode.add(waitCode)
+        iterCode.add(packPreCode)
+        iterCode.add(packCode)
         macCnt = countMFMA(macIterCode)
         assert macCnt % 2 == 0, "HalfPLR does not support odd number of matrix instructions"
         macToSchedule = macCnt // 2
@@ -1304,9 +1314,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
         instPerRegPackMX = 1
       instPerPackMXSA = 0
       instPerPackMXSB = 0
-      if kernel["ProblemType"]["MXBlockA"] and (not kernel["UnrollMajorLDSMXSA"]):
+      mxUnitA = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockA"] if kernel["ProblemType"]["MXBlockA"] else 0
+      mxUnitB = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"] if kernel["ProblemType"]["MXBlockB"] else 0
+      # MXBlock=MI_K: one v_perm per loaded WaveTile (splat e8 -> SSSS), even with UnrollMajor LDS.
+      # TileSpan halves ds_loads (partner WaveTile via matrix_*_scale:1), so splat count halves too.
+      lrMX = Component.LocalRead.find(self)
+      if kernel["ProblemType"]["MXBlockA"] and mxUnitA == 1:
+        instPerPackMXSA = kernel["MIWaveTileA"]
+        if lrMX.getMxsTileSpanInfo(kernel, "MXSA", 0, self.states.asmCaps) is not None:
+          instPerPackMXSA //= 2
+      elif kernel["ProblemType"]["MXBlockA"] and (not kernel["UnrollMajorLDSMXSA"]):
         instPerPackMXSA = int(kernel["MIInputPerThreadMXSA"] * kernel["ProblemType"]["DataTypeMXSA"].numRegisters() * instPerRegPackMX)
-      if kernel["ProblemType"]["MXBlockB"] and (not kernel["UnrollMajorLDSMXSB"]):
+      if kernel["ProblemType"]["MXBlockB"] and mxUnitB == 1:
+        instPerPackMXSB = kernel["MIWaveTileB"]
+        if lrMX.getMxsTileSpanInfo(kernel, "MXSB", 1, self.states.asmCaps) is not None:
+          instPerPackMXSB //= 2
+      elif kernel["ProblemType"]["MXBlockB"] and (not kernel["UnrollMajorLDSMXSB"]):
         instPerPackMXSB = int(kernel["MIInputPerThreadMXSB"] * kernel["ProblemType"]["DataTypeMXSB"].numRegisters() * instPerRegPackMX)
 
       instPerPackA    = 0 if kernel["UnrollMajorLDSA"] else int(kernel["MIInputPerThreadA"] * kernel["ProblemType"]["MacDataTypeA"].numRegisters() * instPerRegPackA)
@@ -2131,8 +2154,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
             packAIdx = packAIdx if tPA["bpe"] < 4 and (not kernel["UnrollMajorLDSA"] or kernel["ConvertAfterDS"]) else 0
             packBIdx = packBIdx if tPB["bpe"] < 4 and (not kernel["UnrollMajorLDSB"] or kernel["ConvertAfterDS"]) else 0
-            packMXSAIdx = packMXSAIdx if ("MX" in tPA) and (not kernel["UnrollMajorLDSMXSA"]) else 0
-            packMXSBIdx = packMXSBIdx if ("MX" in tPB) and (not kernel["UnrollMajorLDSMXSB"]) else 0
+            packMXSAIdx = packMXSAIdx if ("MX" in tPA) and (not kernel["UnrollMajorLDSMXSA"] or mxUnitA == 1) else 0
+            packMXSBIdx = packMXSBIdx if ("MX" in tPB) and (not kernel["UnrollMajorLDSMXSB"] or mxUnitB == 1) else 0
           else:
             packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 else 0
             packBIdx = packBIdx if tPB["localReadInstruction"].blockWidth == 0.25 else 0
@@ -7959,7 +7982,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           return info is not None
 
         if kernel["ProblemType"]["MXBlockA"]:
-          self.states.mxsa.numVgprValuPerBlock = kernel["MIWaveTileMXSA"] * kernel["MIInputPerThreadMXSA"] // self.states.bpr
+          # One dword per WaveTile; ceil so MXBlock==MI_K (1 e8/thread) still gets a VGPR.
+          self.states.mxsa.numVgprValuPerBlock = kernel["MIWaveTileMXSA"] * ceil(kernel["MIInputPerThreadMXSA"] / self.states.bpr)
           # workaround for gfx950
           # need to allocate same amount of MIWaveTile
           if isgfx950:
@@ -7978,7 +8002,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.states.mxsa.numVgprValu = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"]
 
         if kernel["ProblemType"]["MXBlockB"]:
-          self.states.mxsb.numVgprValuPerBlock = kernel["MIWaveTileMXSB"] * kernel["MIInputPerThreadMXSB"] // self.states.bpr
+          self.states.mxsb.numVgprValuPerBlock = kernel["MIWaveTileMXSB"] * ceil(kernel["MIInputPerThreadMXSB"] / self.states.bpr)
           # workaround for gfx950
           # need to allocate same amount of MIWaveTile
           if isgfx950:
