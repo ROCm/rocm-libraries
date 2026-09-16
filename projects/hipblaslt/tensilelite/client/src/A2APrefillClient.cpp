@@ -42,6 +42,7 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -619,6 +620,7 @@ namespace TensileLite
                 const int skewXUs    = std::max(0, args["a2a-multigpu-skew-x-us"].as<int>());
                 const int skewGemmUs = std::max(0, args["a2a-multigpu-skew-gemm-us"].as<int>());
                 const bool warBarrier = args["a2a-multigpu-war-barrier"].as<int>() != 0;
+                const bool timing     = args["a2a-multigpu-time"].as<int>() != 0;
 
                 int deviceCount = 0;
                 HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
@@ -626,6 +628,12 @@ namespace TensileLite
                 {
                     std::cerr << "[a2a-multigpu] ERROR: W=" << W << " needs " << W
                               << " devices, found " << deviceCount << std::endl;
+                    return 1;
+                }
+                if(timing && batch != 1)
+                {
+                    std::cerr << "[a2a-multigpu] ERROR: timing needs batch 1, got " << batch
+                              << std::endl;
                     return 1;
                 }
 
@@ -641,7 +649,7 @@ namespace TensileLite
                 std::cout << "[a2a-multigpu] W=" << W << " M=" << M << " N=" << N << " K=" << K
                           << " k_local=" << kLoc << " launches=" << launches << " batch=" << batch
                           << " skew-x-us=" << skewXUs << " skew-gemm-us=" << skewGemmUs
-                          << " war-barrier=" << warBarrier << std::endl;
+                          << " war-barrier=" << warBarrier << " time=" << timing << std::endl;
 
                 ContractionProblemGemm problem = base;
                 problem.resetTensor(ContractionProblemGemm::TENSOR::B,
@@ -865,6 +873,81 @@ namespace TensileLite
                         wantSeg[d][j] = hostX.data() + (size_t)((d + j) % W) * xElems
                                         + (size_t)d * segElems;
 
+                auto enqueueStage = [&](int r, size_t vOff, int d) {
+                    char* const gathered = (char*)devB[d].ptr + (size_t)r * xBytes;
+
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    HIP_CHECK_EXC(hipMemsetAsync(
+                        (char*)devD[d].ptr + (size_t)r * cdBytes, 0, cdBytes, streams[d]));
+
+                    // WAR barrier: gates the x rewrite below.
+                    if(warBarrier)
+                    {
+                        hipLaunchKernelGGL(
+                            a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
+                        HIP_CHECK_EXC(hipGetLastError());
+                    }
+
+                    if(skewXUs != 0 && d == W - 1)
+                    {
+                        hipLaunchKernelGGL(
+                            a2aSkewKernel, 1, 1, 0, streams[d], (uint64_t)skewXUs * wallTicksPerUs);
+                        HIP_CHECK_EXC(hipGetLastError());
+                    }
+
+                    HIP_CHECK_EXC(hipMemcpyAsync(devX[d].ptr,
+                                                 (char*)devXSrc[d].ptr + vOff,
+                                                 xBytes,
+                                                 hipMemcpyDeviceToDevice,
+                                                 streams[d]));
+                    HIP_CHECK_EXC(hipMemcpyAsync(gathered,
+                                                 (char*)devX[d].ptr + (size_t)d * segBytes,
+                                                 segBytes,
+                                                 hipMemcpyDeviceToDevice,
+                                                 streams[d]));
+                    HIP_CHECK_EXC(hipMemsetAsync(
+                        gathered + segBytes, A2A_LOOPBACK_POISON, xBytes - segBytes, streams[d]));
+                };
+
+                auto enqueueCompute = [&](int r, int d) {
+                    HIP_CHECK_EXC(hipSetDevice(d));
+                    HIP_CHECK_EXC(
+                        hipMemsetAsync((char*)devCounter[d].ptr + FUSED_A2A_MODE1_FLAG_OFFSET,
+                                       0,
+                                       layout.flagBytes,
+                                       streams[d]));
+
+                    // RAW barrier: gates the GEMM below.
+                    hipLaunchKernelGGL(
+                        a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
+                    HIP_CHECK_EXC(hipGetLastError());
+
+                    if(skewGemmUs != 0 && d == W - 1)
+                    {
+                        hipLaunchKernelGGL(a2aSkewKernel,
+                                           1,
+                                           1,
+                                           0,
+                                           streams[d],
+                                           (uint64_t)skewGemmUs * wallTicksPerUs);
+                        HIP_CHECK_EXC(hipGetLastError());
+                    }
+
+                    HIP_CHECK_EXC(adapters[d]->launchKernels(
+                        perDeviceKernels[d][r], streams[d], nullptr, nullptr));
+                };
+
+                auto syncAll = [&]() {
+                    for(int d = 0; d < W; d++)
+                    {
+                        HIP_CHECK_EXC(hipSetDevice(d));
+                        HIP_CHECK_EXC(hipStreamSynchronize(streams[d]));
+                    }
+                };
+
+                std::vector<double> makespanUs;
+                std::vector<double> enqueueUs;
+
                 int rc = 0;
                 for(int it0 = 0; it0 < launches; it0 += batch)
                 {
@@ -873,81 +956,35 @@ namespace TensileLite
                     for(int r = 0; r < n; r++)
                     {
                         const size_t vOff = (size_t)((it0 + r) % A2A_X_VARIANTS) * xBytes;
-                        for(int d = 0; d < W; d++)
+                        if(timing)
                         {
-                            char* const gathered = (char*)devB[d].ptr + (size_t)r * xBytes;
+                            for(int d = 0; d < W; d++)
+                                enqueueStage(r, vOff, d);
+                            syncAll();
 
-                            HIP_CHECK_EXC(hipSetDevice(d));
-                            HIP_CHECK_EXC(hipMemsetAsync((char*)devD[d].ptr + (size_t)r * cdBytes,
-                                                         0,
-                                                         cdBytes,
-                                                         streams[d]));
-
-                            // WAR barrier: gates the x rewrite below.
-                            if(warBarrier)
+                            const auto t0 = std::chrono::steady_clock::now();
+                            for(int d = 0; d < W; d++)
+                                enqueueCompute(r, d);
+                            const auto tEnqueued = std::chrono::steady_clock::now();
+                            syncAll();
+                            makespanUs.push_back(
+                                std::chrono::duration<double, std::micro>(
+                                    std::chrono::steady_clock::now() - t0)
+                                    .count());
+                            enqueueUs.push_back(
+                                std::chrono::duration<double, std::micro>(tEnqueued - t0).count());
+                        }
+                        else
+                        {
+                            for(int d = 0; d < W; d++)
                             {
-                                hipLaunchKernelGGL(
-                                    a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
-                                HIP_CHECK_EXC(hipGetLastError());
+                                enqueueStage(r, vOff, d);
+                                enqueueCompute(r, d);
                             }
-
-                            if(skewXUs != 0 && d == W - 1)
-                            {
-                                hipLaunchKernelGGL(a2aSkewKernel,
-                                                   1,
-                                                   1,
-                                                   0,
-                                                   streams[d],
-                                                   (uint64_t)skewXUs * wallTicksPerUs);
-                                HIP_CHECK_EXC(hipGetLastError());
-                            }
-
-                            HIP_CHECK_EXC(hipMemcpyAsync(devX[d].ptr,
-                                                         (char*)devXSrc[d].ptr + vOff,
-                                                         xBytes,
-                                                         hipMemcpyDeviceToDevice,
-                                                         streams[d]));
-                            HIP_CHECK_EXC(hipMemcpyAsync(gathered,
-                                                         (char*)devX[d].ptr + (size_t)d * segBytes,
-                                                         segBytes,
-                                                         hipMemcpyDeviceToDevice,
-                                                         streams[d]));
-                            HIP_CHECK_EXC(hipMemsetAsync(gathered + segBytes,
-                                                         A2A_LOOPBACK_POISON,
-                                                         xBytes - segBytes,
-                                                         streams[d]));
-                            HIP_CHECK_EXC(hipMemsetAsync((char*)devCounter[d].ptr
-                                                             + FUSED_A2A_MODE1_FLAG_OFFSET,
-                                                         0,
-                                                         layout.flagBytes,
-                                                         streams[d]));
-
-                            // RAW barrier: gates the GEMM below.
-                            hipLaunchKernelGGL(
-                                a2aBoundaryBarrierKernel, 1, 1, 0, streams[d], arrivals, d, W);
-                            HIP_CHECK_EXC(hipGetLastError());
-
-                            if(skewGemmUs != 0 && d == W - 1)
-                            {
-                                hipLaunchKernelGGL(a2aSkewKernel,
-                                                   1,
-                                                   1,
-                                                   0,
-                                                   streams[d],
-                                                   (uint64_t)skewGemmUs * wallTicksPerUs);
-                                HIP_CHECK_EXC(hipGetLastError());
-                            }
-
-                            HIP_CHECK_EXC(adapters[d]->launchKernels(
-                                perDeviceKernels[d][r], streams[d], nullptr, nullptr));
                         }
                     }
 
-                    for(int d = 0; d < W; d++)
-                    {
-                        HIP_CHECK_EXC(hipSetDevice(d));
-                        HIP_CHECK_EXC(hipStreamSynchronize(streams[d]));
-                    }
+                    syncAll();
 
                     for(int r = 0; r < n; r++)
                     {
@@ -1014,6 +1051,18 @@ namespace TensileLite
                                 rc = 1;
                         }
                     }
+                }
+
+                if(!makespanUs.empty())
+                {
+                    const double mn = *std::min_element(makespanUs.begin(), makespanUs.end());
+                    const double mx = *std::max_element(makespanUs.begin(), makespanUs.end());
+                    const double enqMn = *std::min_element(enqueueUs.begin(), enqueueUs.end());
+                    const double enqMx = *std::max_element(enqueueUs.begin(), enqueueUs.end());
+                    std::cout << "[a2a-multigpu] W=" << W << " makespan-min-us=" << mn
+                              << " makespan-max-us=" << mx << " spread-us=" << (mx - mn)
+                              << " enqueue-min-us=" << enqMn << " enqueue-max-us=" << enqMx
+                              << " samples=" << makespanUs.size() << std::endl;
                 }
 
                 for(int d = 0; d < W; d++)
