@@ -68,6 +68,16 @@ TEST(TestGpuMatmulRefValidation, AcceptsValidBroadcast5D)
     EXPECT_NO_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c));
 }
 
+TEST(TestGpuMatmulRefValidation, AcceptsValidBroadcastStrangeLayouts5D)
+{
+    SKIP_IF_NO_DEVICES();
+    Tensor<float> a({1, 2, 3, 3, 2}, {256, 1, 16, 3, 64});
+    Tensor<float> b({7, 6, 6, 2, 3}, {1, 42, 512, 21, 7});
+    Tensor<float> c({7, 6, 6, 3, 3}, {1, 7, 42, 252, 756});
+
+    EXPECT_NO_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c));
+}
+
 // --- validateConsistentDimensions() throw paths ---
 
 TEST(TestGpuMatmulRefValidation, ThrowsOnInputRankTooSmall)
@@ -166,38 +176,6 @@ TEST(TestGpuMatmulRefValidation, ThrowsOnCNMismatch)
     Tensor<float> a({2, 3, 2});
     Tensor<float> b({2, 2, 3});
     Tensor<float> c({2, 3, 5});
-
-    EXPECT_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c), std::invalid_argument);
-}
-
-// --- validateConsistentLayouts() throw paths ---
-
-TEST(TestGpuMatmulRefValidation, ThrowsOnInputStrideOrderMismatch)
-{
-    SKIP_IF_NO_DEVICES();
-    Tensor<float> a({2, 3, 2}, generateStrides({2, 3, 2}, {2, 0, 1}));
-    Tensor<float> b({2, 2, 3}, generateStrides({2, 2, 3}, {2, 1, 0}));
-    Tensor<float> c({2, 3, 3}, generateStrides({2, 3, 3}, {2, 1, 0}));
-
-    EXPECT_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c), std::invalid_argument);
-}
-
-TEST(TestGpuMatmulRefValidation, ThrowsOnOutputStrideOrderMismatch)
-{
-    SKIP_IF_NO_DEVICES();
-    Tensor<float> a({2, 3, 2}, generateStrides({2, 3, 2}, {2, 1, 0}));
-    Tensor<float> b({2, 2, 3}, generateStrides({2, 2, 3}, {2, 1, 0}));
-    Tensor<float> c({2, 3, 3}, generateStrides({2, 3, 3}, {2, 0, 1}));
-
-    EXPECT_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c), std::invalid_argument);
-}
-
-TEST(TestGpuMatmulRefValidation, ThrowsOnNonContiguous)
-{
-    SKIP_IF_NO_DEVICES();
-    Tensor<float> a({2, 3, 2}, generateStrides({2, 3, 2}, {2, 0, 1}));
-    Tensor<float> b({2, 2, 3}, generateStrides({2, 2, 3}, {2, 0, 1}));
-    Tensor<float> c({2, 3, 3}, generateStrides({2, 3, 3}, {2, 0, 1}));
 
     EXPECT_THROW(GpuFpReferenceMatmul::matmul<float>(a, b, c), std::invalid_argument);
 }
@@ -347,64 +325,39 @@ TEST(TestGpuMatmulRefValidation, BFloat16AHalfBBfloatC)
 
 // --- Test suite instantiations ---
 
-using TestGpuMatmulRef2DFp32 = MatmulShapeSuite<float, float, float>;
-using TestGpuMatmulRef2DFp16 = MatmulShapeSuite<half, half, half>;
-using TestGpuMatmulRef2DBfp16 = MatmulShapeSuite<bfloat16, bfloat16, bfloat16>;
-using TestGpuMatmulRef3DFp32 = MatmulShapeSuite<float, float, float>;
-using TestGpuMatmulRef3DFp16 = MatmulShapeSuite<half, half, half>;
-using TestGpuMatmulRef3DBfp16 = MatmulShapeSuite<bfloat16, bfloat16, bfloat16>;
-using TestGpuMatmulRef4DFp32 = MatmulShapeSuite<float, float, float>;
-using TestGpuMatmulRef4DFp16 = MatmulShapeSuite<half, half, half>;
-using TestGpuMatmulRef4DBfp16 = MatmulShapeSuite<bfloat16, bfloat16, bfloat16>;
-using TestGpuMatmulRef5DFp32 = MatmulShapeSuite<float, float, float>;
-using TestGpuMatmulRef5DFp16 = MatmulShapeSuite<half, half, half>;
-using TestGpuMatmulRef5DBfp16 = MatmulShapeSuite<bfloat16, bfloat16, bfloat16>;
+using TestGpuMatmulRefPureFp32 = MatmulPureShapeSuite<float>;
+using TestGpuMatmulRefPureFp16 = MatmulPureShapeSuite<half>;
+using TestGpuMatmulRefPureBfp16 = MatmulPureShapeSuite<bfloat16>;
+using TestGpuMatmulRefMixedFp16 = MatmulMixedShapeSuite<half>;
+using TestGpuMatmulRefMixedBfp16 = MatmulMixedShapeSuite<bfloat16>;
+using TestGpuMatmulRefUpcastFp16 = MatmulUpcastShapeSuite<half>;
+using TestGpuMatmulRefUpcastBfp16 = MatmulUpcastShapeSuite<bfloat16>;
 
-TEST_P(TestGpuMatmulRef2DFp32, MatchesCpuRef)
+TEST_P(TestGpuMatmulRefPureFp32, MatchesCpuRef)
 {
     this->runMatmulTest();
 }
-TEST_P(TestGpuMatmulRef2DFp16, MatchesCpuRef)
+TEST_P(TestGpuMatmulRefPureFp16, MatchesCpuRef)
 {
     this->runMatmulTest();
 }
-TEST_P(TestGpuMatmulRef2DBfp16, MatchesCpuRef)
+TEST_P(TestGpuMatmulRefPureBfp16, MatchesCpuRef)
 {
     this->runMatmulTest();
 }
-TEST_P(TestGpuMatmulRef3DFp32, MatchesCpuRef)
+TEST_P(TestGpuMatmulRefMixedFp16, MatchesCpuRef)
 {
     this->runMatmulTest();
 }
-TEST_P(TestGpuMatmulRef3DFp16, MatchesCpuRef)
+TEST_P(TestGpuMatmulRefMixedBfp16, MatchesCpuRef)
 {
     this->runMatmulTest();
 }
-TEST_P(TestGpuMatmulRef3DBfp16, MatchesCpuRef)
+TEST_P(TestGpuMatmulRefUpcastFp16, MatchesCpuRef)
 {
     this->runMatmulTest();
 }
-TEST_P(TestGpuMatmulRef4DFp32, MatchesCpuRef)
-{
-    this->runMatmulTest();
-}
-TEST_P(TestGpuMatmulRef4DFp16, MatchesCpuRef)
-{
-    this->runMatmulTest();
-}
-TEST_P(TestGpuMatmulRef4DBfp16, MatchesCpuRef)
-{
-    this->runMatmulTest();
-}
-TEST_P(TestGpuMatmulRef5DFp32, MatchesCpuRef)
-{
-    this->runMatmulTest();
-}
-TEST_P(TestGpuMatmulRef5DFp16, MatchesCpuRef)
-{
-    this->runMatmulTest();
-}
-TEST_P(TestGpuMatmulRef5DBfp16, MatchesCpuRef)
+TEST_P(TestGpuMatmulRefUpcastBfp16, MatchesCpuRef)
 {
     this->runMatmulTest();
 }
@@ -414,232 +367,123 @@ TEST_P(TestGpuMatmulRef5DBfp16, MatchesCpuRef)
 // ========
 
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef2DFp32,
-                         ::testing::ValuesIn(getMatmulSmall2DTestCases()));
+                         TestGpuMatmulRefPureFp32,
+                         ::testing::ValuesIn(getMatmulSmallTestCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef2DFp16,
-                         ::testing::ValuesIn(getMatmulSmall2DTestCases()));
+                         TestGpuMatmulRefPureFp16,
+                         ::testing::ValuesIn(getMatmulSmallTestCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef2DBfp16,
-                         ::testing::ValuesIn(getMatmulSmall2DTestCases()));
+                         TestGpuMatmulRefPureBfp16,
+                         ::testing::ValuesIn(getMatmulSmallTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuMatmulRefMixedFp16,
+                         ::testing::ValuesIn(getMatmulSmallTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuMatmulRefMixedBfp16,
+                         ::testing::ValuesIn(getMatmulSmallTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuMatmulRefUpcastFp16,
+                         ::testing::ValuesIn(getMatmulSmallTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuMatmulRefUpcastBfp16,
+                         ::testing::ValuesIn(getMatmulSmallTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef2DFp32,
-                         ::testing::ValuesIn(getMatmulMedium2DTestCases()));
+                         TestGpuMatmulRefPureFp32,
+                         ::testing::ValuesIn(getMatmulMediumTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef2DFp16,
-                         ::testing::ValuesIn(getMatmulMedium2DTestCases()));
+                         TestGpuMatmulRefPureFp16,
+                         ::testing::ValuesIn(getMatmulMediumTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef2DBfp16,
-                         ::testing::ValuesIn(getMatmulMedium2DTestCases()));
+                         TestGpuMatmulRefPureBfp16,
+                         ::testing::ValuesIn(getMatmulMediumTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuMatmulRefMixedFp16,
+                         ::testing::ValuesIn(getMatmulMediumTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuMatmulRefMixedBfp16,
+                         ::testing::ValuesIn(getMatmulMediumTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuMatmulRefUpcastFp16,
+                         ::testing::ValuesIn(getMatmulMediumTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuMatmulRefUpcastBfp16,
+                         ::testing::ValuesIn(getMatmulMediumTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef2DFp32,
-                         ::testing::ValuesIn(getMatmulLarge2DTestCases()));
+                         TestGpuMatmulRefPureFp32,
+                         ::testing::ValuesIn(getMatmulLargeTestCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef2DFp16,
-                         ::testing::ValuesIn(getMatmulLarge2DTestCases()));
+                         TestGpuMatmulRefPureFp16,
+                         ::testing::ValuesIn(getMatmulLargeTestCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef2DBfp16,
-                         ::testing::ValuesIn(getMatmulLarge2DTestCases()));
+                         TestGpuMatmulRefPureBfp16,
+                         ::testing::ValuesIn(getMatmulLargeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuMatmulRefMixedFp16,
+                         ::testing::ValuesIn(getMatmulLargeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuMatmulRefMixedBfp16,
+                         ::testing::ValuesIn(getMatmulLargeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuMatmulRefUpcastFp16,
+                         ::testing::ValuesIn(getMatmulLargeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuMatmulRefUpcastBfp16,
+                         ::testing::ValuesIn(getMatmulLargeTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef2DFp32, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall2DTestCases();
-                             auto m = getMatmulMedium2DTestCases();
-                             auto l = getMatmulLarge2DTestCases();
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefPureFp32, ::testing::ValuesIn([]() {
+                             auto v = getMatmulSmallTestCases();
+                             auto m = getMatmulMediumTestCases();
+                             auto l = getMatmulLargeTestCases();
                              v.insert(v.end(), m.begin(), m.end());
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef2DFp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall2DTestCases();
-                             auto m = getMatmulMedium2DTestCases();
-                             auto l = getMatmulLarge2DTestCases();
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefPureFp16, ::testing::ValuesIn([]() {
+                             auto v = getMatmulSmallTestCases();
+                             auto m = getMatmulMediumTestCases();
+                             auto l = getMatmulLargeTestCases();
                              v.insert(v.end(), m.begin(), m.end());
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef2DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall2DTestCases();
-                             auto m = getMatmulMedium2DTestCases();
-                             auto l = getMatmulLarge2DTestCases();
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefPureBfp16, ::testing::ValuesIn([]() {
+                             auto v = getMatmulSmallTestCases();
+                             auto m = getMatmulMediumTestCases();
+                             auto l = getMatmulLargeTestCases();
                              v.insert(v.end(), m.begin(), m.end());
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-
-// ========
-// 3D tests
-// ========
-
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef3DFp32,
-                         ::testing::ValuesIn(getMatmulSmall3DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef3DFp16,
-                         ::testing::ValuesIn(getMatmulSmall3DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef3DBfp16,
-                         ::testing::ValuesIn(getMatmulSmall3DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef3DFp32,
-                         ::testing::ValuesIn(getMatmulMedium3DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef3DFp16,
-                         ::testing::ValuesIn(getMatmulMedium3DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef3DBfp16,
-                         ::testing::ValuesIn(getMatmulMedium3DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef3DFp32,
-                         ::testing::ValuesIn(getMatmulLarge3DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef3DFp16,
-                         ::testing::ValuesIn(getMatmulLarge3DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef3DBfp16,
-                         ::testing::ValuesIn(getMatmulLarge3DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef3DFp32, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall3DTestCases();
-                             auto m = getMatmulMedium3DTestCases();
-                             auto l = getMatmulLarge3DTestCases();
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefMixedFp16, ::testing::ValuesIn([]() {
+                             auto v = getMatmulSmallTestCases();
+                             auto m = getMatmulMediumTestCases();
+                             auto l = getMatmulLargeTestCases();
                              v.insert(v.end(), m.begin(), m.end());
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef3DFp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall3DTestCases();
-                             auto m = getMatmulMedium3DTestCases();
-                             auto l = getMatmulLarge3DTestCases();
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefMixedBfp16, ::testing::ValuesIn([]() {
+                             auto v = getMatmulSmallTestCases();
+                             auto m = getMatmulMediumTestCases();
+                             auto l = getMatmulLargeTestCases();
                              v.insert(v.end(), m.begin(), m.end());
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef3DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall3DTestCases();
-                             auto m = getMatmulMedium3DTestCases();
-                             auto l = getMatmulLarge3DTestCases();
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefUpcastFp16, ::testing::ValuesIn([]() {
+                             auto v = getMatmulSmallTestCases();
+                             auto m = getMatmulMediumTestCases();
+                             auto l = getMatmulLargeTestCases();
                              v.insert(v.end(), m.begin(), m.end());
                              v.insert(v.end(), l.begin(), l.end());
                              return v;
                          }()));
-
-// ========
-// 4D tests
-// ========
-
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef4DFp32,
-                         ::testing::ValuesIn(getMatmulSmall4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef4DFp16,
-                         ::testing::ValuesIn(getMatmulSmall4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef4DBfp16,
-                         ::testing::ValuesIn(getMatmulSmall4DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef4DFp32,
-                         ::testing::ValuesIn(getMatmulMedium4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef4DFp16,
-                         ::testing::ValuesIn(getMatmulMedium4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef4DBfp16,
-                         ::testing::ValuesIn(getMatmulMedium4DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef4DFp32,
-                         ::testing::ValuesIn(getMatmulLarge4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef4DFp16,
-                         ::testing::ValuesIn(getMatmulLarge4DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef4DBfp16,
-                         ::testing::ValuesIn(getMatmulLarge4DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef4DFp32, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall4DTestCases();
-                             auto m = getMatmulMedium4DTestCases();
-                             auto l = getMatmulLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef4DFp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall4DTestCases();
-                             auto m = getMatmulMedium4DTestCases();
-                             auto l = getMatmulLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef4DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall4DTestCases();
-                             auto m = getMatmulMedium4DTestCases();
-                             auto l = getMatmulLarge4DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-
-// ========
-// 5D tests
-// ========
-
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef5DFp32,
-                         ::testing::ValuesIn(getMatmulSmall5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef5DFp16,
-                         ::testing::ValuesIn(getMatmulSmall5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuMatmulRef5DBfp16,
-                         ::testing::ValuesIn(getMatmulSmall5DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef5DFp32,
-                         ::testing::ValuesIn(getMatmulMedium5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef5DFp16,
-                         ::testing::ValuesIn(getMatmulMedium5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuMatmulRef5DBfp16,
-                         ::testing::ValuesIn(getMatmulMedium5DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef5DFp32,
-                         ::testing::ValuesIn(getMatmulLarge5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef5DFp16,
-                         ::testing::ValuesIn(getMatmulLarge5DTestCases()));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuMatmulRef5DBfp16,
-                         ::testing::ValuesIn(getMatmulLarge5DTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef5DFp32, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall5DTestCases();
-                             auto m = getMatmulMedium5DTestCases();
-                             auto l = getMatmulLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef5DFp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall5DTestCases();
-                             auto m = getMatmulMedium5DTestCases();
-                             auto l = getMatmulLarge5DTestCases();
-                             v.insert(v.end(), m.begin(), m.end());
-                             v.insert(v.end(), l.begin(), l.end());
-                             return v;
-                         }()));
-INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRef5DBfp16, ::testing::ValuesIn([]() {
-                             auto v = getMatmulSmall5DTestCases();
-                             auto m = getMatmulMedium5DTestCases();
-                             auto l = getMatmulLarge5DTestCases();
+INSTANTIATE_TEST_SUITE_P(Full, TestGpuMatmulRefUpcastBfp16, ::testing::ValuesIn([]() {
+                             auto v = getMatmulSmallTestCases();
+                             auto m = getMatmulMediumTestCases();
+                             auto l = getMatmulLargeTestCases();
                              v.insert(v.end(), m.begin(), m.end());
                              v.insert(v.end(), l.begin(), l.end());
                              return v;

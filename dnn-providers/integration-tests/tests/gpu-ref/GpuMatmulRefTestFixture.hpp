@@ -30,25 +30,30 @@ template <typename ADataType,
 void runGpuVsCpuMatmul(const std::vector<int64_t>& aDims,
                        const std::vector<int64_t>& bDims,
                        const std::vector<int64_t>& cDims,
+                       const std::vector<int64_t>& aStrides,
+                       const std::vector<int64_t>& bStrides,
+                       const std::vector<int64_t>& cStrides,
                        const float tolerance,
                        const float fillRange = 1.0f)
 {
     const unsigned int seed = getGlobalTestSeed();
 
-    auto aTensor = Tensor<ADataType>(aDims);
+    auto aTensor = Tensor<ADataType>(aDims, aStrides);
     aTensor.fillWithRandomValues(
         static_cast<ADataType>(-fillRange), static_cast<ADataType>(fillRange), seed);
-    auto bTensor = Tensor<BDataType>(bDims);
+    auto bTensor = Tensor<BDataType>(bDims, bStrides);
     bTensor.fillWithRandomValues(
         static_cast<BDataType>(-fillRange), static_cast<BDataType>(fillRange), seed + 1);
-    auto cGpu = Tensor<CDataType>(cDims);
-    auto cCpu = Tensor<CDataType>(cDims);
+    auto cGpu = Tensor<CDataType>(cDims, cStrides);
+    auto cCpu = Tensor<CDataType>(cDims, cStrides);
 
     GpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
         aTensor, bTensor, cGpu);
+    cGpu.markDeviceModified();
 
     CpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
         aTensor, bTensor, cCpu);
+    cCpu.markHostModified();
 
     assertAllClose(cCpu, cGpu, tolerance, "C");
 }
@@ -68,7 +73,10 @@ protected:
         runGpuVsCpuMatmul<ADataType, BDataType, CDataType>(
             testCase.aDims,
             testCase.bDims,
-            testCase.calculateCDims(),
+            testCase.cDims,
+            testCase.aStrides,
+            testCase.bStrides,
+            testCase.cStrides,
             hipdnn_test_sdk::utilities::matmul::getTolerance<CDataType>());
     }
 };
