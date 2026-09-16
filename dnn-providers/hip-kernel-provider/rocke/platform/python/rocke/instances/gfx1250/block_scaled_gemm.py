@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
+from ...core.arch.wmma_scale import gfx1250_scaled_wmma
 from ...core.ir import (
     BF16,
     F16,
@@ -29,7 +30,7 @@ from ...core.ir import (
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
-_LOWBIT_DTYPES = {"fp8", "fp8e4m3", "bf8", "bf8e5m2"}
+_LOWBIT_DTYPES = {"fp8", "fp8e4m3", "bf8", "bf8e5m2", "fp4", "fp4e2m1"}
 _OUTPUT_DTYPES = {"fp16", "f16", "bf16"}
 _SCALE_DTYPES = {"fp16", "f16", "fp32", "f32"}
 _SUPPORTED_MATRIX_PATHS = {
@@ -60,7 +61,9 @@ def _canon_lowbit(dtype: str) -> str:
         return "fp8"
     if dtype in ("bf8", "bf8e5m2"):
         return "bf8"
-    raise ValueError(f"expected fp8/bf8 low-bit dtype, got {dtype!r}")
+    if dtype in ("fp4", "fp4e2m1"):
+        return "fp4"
+    raise ValueError(f"expected fp8/bf8/fp4 low-bit dtype, got {dtype!r}")
 
 
 def _wire_scale_dtype(dtype: str) -> str:
@@ -144,16 +147,17 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         return False, f"M/N/K must be positive (got M={spec.M}, N={spec.N}, K={spec.K})"
     if spec.dtype_a not in _LOWBIT_DTYPES or spec.dtype_b not in _LOWBIT_DTYPES:
         return False, (
-            f"A/B must be fp8 or bf8 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
+            f"A/B must be fp8, bf8, or fp4 (got A={spec.dtype_a!r}, B={spec.dtype_b!r})"
         )
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
     family = matrix_path if native_scale else "wmma"
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
     if native_scale and (
-        _canon_lowbit(spec.dtype_a) != "fp8" or _canon_lowbit(spec.dtype_b) != "fp8"
-    ):
-        return False, "native gfx1250 SCALE/SCALE16 currently supports fp8 x fp8 only"
+        _canon_lowbit(spec.dtype_a),
+        _canon_lowbit(spec.dtype_b),
+    ) not in (("fp8", "fp8"), ("fp4", "fp4")):
+        return False, "native gfx1250 SCALE/SCALE16 supports fp8 x fp8 or fp4 x fp4"
     if not target.mma.has_shape(
         family=family,
         a_dtype=_canon_lowbit(spec.dtype_a),
@@ -179,7 +183,11 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
                 "native gfx1250 SCALE/SCALE16 requires packed E8M0 scale bytes "
                 f"(got {spec.scale_dtype!r})"
             )
-        required_block_k = 16 if matrix_path == "wmma_scale16" else 32
+        scale_op = gfx1250_scaled_wmma(
+            f"{matrix_path}_f32_16x16x128_{_canon_lowbit(spec.dtype_a)}_{_canon_lowbit(spec.dtype_b)}"
+        )
+        assert scale_op is not None
+        required_block_k = scale_op.scales.block_k
         if spec.block_k != required_block_k:
             return False, (
                 f"{matrix_path} requires block_k={required_block_k} E8M0 groups "
@@ -202,7 +210,10 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
         return False, "M and N must be multiples of 16"
 
     if native_scale:
-        return True, f"ok: gfx1250 K=128 native {matrix_path} FP8 GEMM"
+        return (
+            True,
+            f"ok: gfx1250 K=128 native {matrix_path} {_canon_lowbit(spec.dtype_a)} GEMM",
+        )
     return True, "ok: gfx1250 K=64 FP8/BF8 WMMA block-scaled GEMM"
 
 
@@ -215,8 +226,22 @@ def block_scaled_gemm_signature(spec: BlockScaledGemmSpec) -> List[dict]:
     )
     return (
         SignatureBuilder()
-        .ptr("A", _canon_lowbit(spec.dtype_a))
-        .ptr("B", _canon_lowbit(spec.dtype_b))
+        .ptr(
+            "A",
+            (
+                "i8"
+                if _canon_lowbit(spec.dtype_a) == "fp4"
+                else _canon_lowbit(spec.dtype_a)
+            ),
+        )
+        .ptr(
+            "B",
+            (
+                "i8"
+                if _canon_lowbit(spec.dtype_b) == "fp4"
+                else _canon_lowbit(spec.dtype_b)
+            ),
+        )
         .ptr("A_scale", scale)
         .ptr("B_scale", scale)
         .ptr("C", spec.dtype_c)
@@ -232,6 +257,8 @@ def block_scaled_gemm_grid(spec: BlockScaledGemmSpec) -> Tuple[int, int, int]:
 
 
 def _storage_type(dtype: str) -> Type:
+    if dtype in ("fp4", "fp4e2m1"):
+        return I8
     if dtype in ("fp16", "f16"):
         return F16
     if dtype == "bf16":
@@ -250,20 +277,23 @@ def _as_f32(b: IRBuilder, v):
 def build_block_scaled_gemm(
     spec: BlockScaledGemmSpec, arch: str = "gfx1250"
 ) -> KernelDef:
-    """Build a gfx1250 FP8/BF8 block-scaled GEMM (RCR, ``C = A @ B^T``).
+    """Build a gfx1250 FP8/BF8/FP4 block-scaled GEMM (RCR, ``C = A @ B^T``).
 
     One wave (32 lanes) computes one 16x16 output tile without LDS. The legacy
     ``wmma`` path uses K=64 FP8/BF8 atoms, accumulates each ``block_k`` group,
     and applies FP16/FP32 A/B scales in software. The native ``wmma_scale`` and
-    ``wmma_scale16`` paths use K=128 FP8 atoms and pass packed E8M0 scale bytes
+    ``wmma_scale16`` paths use K=128 FP8/FP4 atoms and pass packed E8M0 scale bytes
     directly to the instruction, with K=32 and K=16 scale groups respectively.
 
     Lane ``l`` owns output column ``l % 16`` and rows
     ``(l // 16) * 8 : (l // 16 + 1) * 8``. Legacy matrix fragments carry 32
-    low-bit bytes per lane as ``<8 x i32>``. Native fragments carry 64 bytes as
+    low-bit bytes per lane as ``<8 x i32>``. Native FP8 fragments carry 64 bytes as
     ``<16 x i32>`` as four 16-byte K chunks, alternating chunks between lane
     halves. Both paths use the gfx12 column-distributed ``<8 x f32>``
-    accumulator layout.
+    accumulator layout. FP4 uses prepacked E2M1 bytes: A is [M, K/2], B
+    is [N, K/2], low nibble first along K. Each lane loads two K=32
+    chunks and pads eight packed i32 words to the sixteen-word builtin ABI.
+    Scale arrays remain A_scale[M, K/block_k] and B_scale[K/block_k, N].
     """
     ok, reason = is_valid_spec(spec, arch=arch)
     if not ok:
@@ -274,12 +304,14 @@ def build_block_scaled_gemm(
     c_ty = _storage_type(spec.dtype_c)
     matrix_path = spec.resolved_matrix_path()
     native_scale = matrix_path in ("wmma_scale", "wmma_scale16")
+    packed_fp4 = _canon_lowbit(spec.dtype_a) == "fp4"
     scale_ty = I8 if native_scale else _scale_type(spec.scale_dtype)
     op_id = (
-        f"{matrix_path}_f32_16x16x128_fp8_fp8"
+        f"{matrix_path}_f32_16x16x128_{_canon_lowbit(spec.dtype_a)}_{_canon_lowbit(spec.dtype_b)}"
         if native_scale
         else _wmma_op_id(spec.dtype_a, spec.dtype_b)
     )
+    scale_op = gfx1250_scaled_wmma(op_id)
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
     frag_words = 16 if native_scale else _ACC
     a_frag_ty = VectorType(I32, frag_words)
@@ -318,8 +350,9 @@ def build_block_scaled_gemm(
     n0 = ir.mul(ir.block_id_x(), c16)
     a_row = ir.add(m0, frag)  # this lane's A row
     b_row = ir.add(n0, frag)  # this lane's B row (= output col n)
-    a_base = ir.mul(a_row, cK)
-    b_base = ir.mul(b_row, cK)
+    storage_k = ir.div(cK, ir.const_i32(2)) if packed_fp4 else cK
+    a_base = ir.mul(a_row, storage_k)
+    b_base = ir.mul(b_row, storage_k)
 
     def _load_frag(ptr, base, storage_ty, k0):
         if not native_scale:
@@ -328,6 +361,25 @@ def build_block_scaled_gemm(
             lo = ir.global_load_vN(ptr, off0, storage_ty, 16, align=16)
             hi = ir.global_load_vN(ptr, off1, storage_ty, 16, align=16)
             return ir.bitcast(ir.vec_concat(lo, hi), a_frag_ty)
+
+        if packed_fp4:
+            # Each lane owns two K=32 chunks (16 packed bytes each):
+            # half 0 gets K[0:32] and K[64:96], half 1 the intervening chunks.
+            # Byte low/high nibbles hold even/odd logical K, respectively.
+            lane_bytes = ir.mul(half, ir.const_i32(16))
+            step_base = ir.add(base, ir.const_i32(k0 // 2))
+            lo = ir.global_load_vN(ptr, ir.add(step_base, lane_bytes), I8, 16, align=16)
+            hi = ir.global_load_vN(
+                ptr,
+                ir.add(ir.add(step_base, ir.const_i32(32)), lane_bytes),
+                I8,
+                16,
+                align=16,
+            )
+            words = ir.bitcast(ir.vec_concat(lo, hi), VectorType(I32, 8))
+            # Match CK's padded builtin ABI: eight meaningful words, then zeros.
+            padding = ir.vector_splat(ir.const_i32(0), 8)
+            return ir.vec_concat(words, padding)
 
         # CK's gfx1250 SCALE and SCALE16 wrappers use the same four 16-byte
         # matrix chunks. The instruction variants differ in scale grouping,
@@ -354,9 +406,12 @@ def build_block_scaled_gemm(
         return ir.bitcast(packed, a_frag_ty)
 
     def _pack_strided_scales(ptr, row_or_col, call_idx, *, for_b):
-        count = 8 if matrix_path == "wmma_scale16" else 4
-        word_ty = I64 if count == 8 else I32
-        packed = ir.const_i64(0) if count == 8 else ir.const_i32(0)
+        assert scale_op is not None
+        packing = scale_op.scales
+        count = packing.count
+        word_ty = I64 if packing.word_bits == 64 else I32
+        word_const = ir.const_i64 if packing.word_bits == 64 else ir.const_i32
+        packed = word_const(0)
         scale_groups = spec.K // spec.block_k
         for j in range(count):
             scale_group = call_idx * count + j
@@ -369,7 +424,7 @@ def build_block_scaled_gemm(
                 )
             byte = ir.global_load(ptr, idx, I8, align=1)
             widened = ir.zext(byte, word_ty)
-            shift = ir.const_i64(j * 8) if count == 8 else ir.const_i32(j * 8)
+            shift = word_const(j * packing.element_bits)
             shifted = ir.shl(widened, shift)
             packed = ir.lor(packed, shifted)
         return packed

@@ -59,6 +59,8 @@ static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
     {"fp8e4m3", "fp8e4m3"},
     {"bf8", "bf8e5m2"},
     {"bf8e5m2", "bf8e5m2"},
+    {"fp4", "fp4"},
+    {"fp4e2m1", "fp4"},
     {"iu8", "iu8"},
     {"iu4", "iu4"},
     {"i8", "i8"},
@@ -1018,7 +1020,9 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
     {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
     {"wmma_scale_f32_16x16x128_fp8_fp8", 8},
+    {"wmma_scale_f32_16x16x128_fp4_fp4", 8},
     {"wmma_scale16_f32_16x16x128_fp8_fp8", 8},
+    {"wmma_scale16_f32_16x16x128_fp4_fp4", 8},
 };
 
 int rocke_arch_mma_c_frag_len(const char* op_id)
@@ -1052,8 +1056,7 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
- * NOTE: fp4/fp6 dtypes are not in _DTYPE_ALIASES, so normalize_dtype passes them
- * through as the lowercased spelling "fp4"/"fp6" (Python identity fallthrough).
+ * FP4 E2M1 spellings normalize to "fp4"; "fp6" passes through unchanged.
  */
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
@@ -1816,6 +1819,21 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      NULL,
      NULL,
      &lm_wmma_gfx12_c},
+    {"wmma_scale",
+     "fp4",
+     "fp4",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_scale_f32_16x16x128_fp4_fp4",
+     16,
+     16,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
     {"wmma_scale16",
      "fp8",
      "fp8",
@@ -1824,6 +1842,21 @@ static const rocke_mma_op_t k_mma_gfx1250[] = {
      16,
      128,
      "wmma_scale16_f32_16x16x128_fp8_fp8",
+     16,
+     16,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma_scale16",
+     "fp4",
+     "fp4",
+     "fp32",
+     16,
+     16,
+     128,
+     "wmma_scale16_f32_16x16x128_fp4_fp4",
      16,
      16,
      8,
