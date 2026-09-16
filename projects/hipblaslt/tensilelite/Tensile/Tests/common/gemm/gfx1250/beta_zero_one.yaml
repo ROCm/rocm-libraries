@@ -1,0 +1,92 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# A0-compatible test: Beta = 0 vs Beta = 1 edge cases
+# Validates UseBeta behavior
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0  # Beta = 0
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # Beta = 0 (ignore C)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: False  # Beta = 0
+      Batched: True  # Use True with batch=1 to avoid non-batched bug
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [32, 32, 1, 32]     # Small square
+          - Exact: [64, 64, 1, 64]     # Medium square
+          - Exact: [128, 128, 1, 128]  # Larger
+          - Exact: [17, 19, 1, 23]     # All prime/odd
+          - Exact: [63, 65, 1, 67]     # Near power-of-2
+          - Exact: [256, 64, 1, 128]   # Non-square
+          # === RANGE SIZES ===
+          - Range: [ [32, 32, 128], [32, 32, 128], [1], [64] ]
+
+  # Beta = 1 (use C)
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True  # Beta != 0
+      Batched: True  # Use True with batch=1 to avoid non-batched bug
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [3]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [32, 32, 1, 32]     # Small square
+          - Exact: [64, 64, 1, 64]     # Medium square
+          - Exact: [128, 128, 1, 128]  # Larger
+          - Exact: [17, 19, 1, 23]     # All prime/odd
+          - Exact: [97, 101, 1, 103]   # Larger primes
+          - Exact: [64, 256, 1, 128]   # Non-square
+          # === RANGE SIZES ===
+          - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
