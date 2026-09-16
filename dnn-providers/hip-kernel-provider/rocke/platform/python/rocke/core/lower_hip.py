@@ -15,7 +15,10 @@ IR's `KernelDef.params`. Body locals are named after IR SSA values
 
 from __future__ import annotations
 
+
 from typing import List, Optional
+
+from .scaled_wmma import SCALED_WMMA_OPS
 
 from .ir import (
     KernelDef,
@@ -531,6 +534,9 @@ class _Lowerer:
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
         op_id = op.attrs["op_id"]
+        if op_id in SCALED_WMMA_OPS:
+            self._emit_wmma_gfx1250_scaled(op, op_id=op_id)
+            return
         legacy = Op(
             name=f"tile.{op_id}",
             operands=list(op.operands),
@@ -675,14 +681,15 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
         )
 
-    def _emit_wmma_gfx1250_scaled(self, op: Op, *, scale16: bool, fmt: int = 0) -> None:
-        op_id = (
-            "wmma_scale16_f32_16x16x128_fp8_fp8"
-            if scale16
-            else "wmma_scale_f32_16x16x128_fp8_fp8"
-        )
-        if fmt == 4:
-            op_id = op_id.replace("fp8_fp8", "fp4_fp4")
+    def _emit_wmma_gfx1250_scaled(
+        self, op: Op, *, scale16: bool = False, fmt: int = 0, op_id: str | None = None
+    ) -> None:
+        if op_id is None:
+            mode = "wmma_scale16" if scale16 else "wmma_scale"
+            dtype = "fp4" if fmt == 4 else "fp8"
+            op_id = f"{mode}_f32_16x16x128_{dtype}_{dtype}"
+        scale16, fmt_a, fmt_b = SCALED_WMMA_OPS[op_id]
+
         self._require_wmma_arch(op_id)
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
@@ -692,7 +699,7 @@ class _Lowerer:
         )
         self._emit(
             f"f32x8 {_name(op.result)} = {builtin}("
-            f"{fmt}, {_name(a)}, {fmt}, {_name(b)}, (int16_t)0, {_name(c)}, "
+            f"{fmt_a}, {_name(a)}, {fmt_b}, {_name(b)}, (int16_t)0, {_name(c)}, "
             f"0, 0, {_name(a_scale)}, 0, 0, {_name(b_scale)}, false, false);"
         )
 

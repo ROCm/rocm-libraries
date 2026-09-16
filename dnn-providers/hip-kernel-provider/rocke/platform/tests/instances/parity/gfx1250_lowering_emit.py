@@ -256,6 +256,20 @@ CONFIGS = [
 ]
 
 
+# Matrix pairs with E8M0 scales; retain the original config indices above.
+_SCALED_PAIRS = [
+    (a, b)
+    for a in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    for b in ("fp8", "bf8", "fp6", "bf6", "fp4")
+    if (a, b) not in (("fp8", "fp8"), ("fp4", "fp4"))
+]
+CONFIGS.extend(
+    (_wmma_scaled(a, b, mode), "gfx1250")
+    for mode in ("scale", "scale16")
+    for a, b in _SCALED_PAIRS
+)
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

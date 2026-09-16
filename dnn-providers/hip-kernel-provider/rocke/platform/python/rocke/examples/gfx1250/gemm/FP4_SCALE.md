@@ -33,8 +33,9 @@ are two 16-byte loads, yielding eight i32 words padded with eight zero words
 for the builtin's sixteen-word argument. Both scale modes use this input map.
 Output slot `i` maps to row `8*h+i`, column `l % 16` within the output tile.
 
-M/N must be multiples of 16 and K a multiple of 128. Mixed operand formats,
-partial tiles, a logical FP4 IR type, and quantization conversions are outside
+M/N must be multiples of 16 and K a multiple of 128. Mixed operand formats
+are supported as described in [FP6 and mixed matrix formats](FP6.md).
+Partial tiles, a logical FP4 IR type, and quantization conversions are outside
 this path. The K loop is statically unrolled, as in the existing FP8 builder.
 
 ## Verification

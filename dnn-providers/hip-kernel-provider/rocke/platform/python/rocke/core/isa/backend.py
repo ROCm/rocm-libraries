@@ -28,9 +28,12 @@ import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 
 from __future__ import annotations
 
+
 from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
+
+from ..scaled_wmma import SCALED_WMMA_OPS
 
 
 class ISABackend:
@@ -332,36 +335,21 @@ _GFX1250_WMMA_FP8 = {
 }
 
 
-# gfx1250 native MX FP8/FP4 WMMA, available with the LLVM 23 toolchain used by
+# gfx1250 native scaled FP8/FP6/FP4 WMMA, available with the LLVM 23 toolchain used by
 # ROCm 7.13+. Both operations consume <16 x i32> matrix fragments; SCALE packs
-# four E8M0 scale bytes in i32 while SCALE16 packs eight in i64.
+# four scale bytes in i32 while SCALE16 packs eight in i64.
 # Reuse the historical declaration keys across dtypes: the intrinsic ABI is
 # identical, and a kernel using both formats must not declare it twice.
 _GFX1250_WMMA_SCALE = {
-    "tile.wmma_scale_f32_16x16x128_fp8_fp8": (
-        "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8",
-        "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-        "i32",
-        0,
-    ),
-    "tile.wmma_scale16_f32_16x16x128_fp8_fp8": (
-        "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8",
-        "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-        "i64",
-        0,
-    ),
-    "tile.wmma_scale_f32_16x16x128_fp4_fp4": (
-        "wmma.scale.gfx1250.f32.16x16x128.fp8.fp8",
-        "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-        "i32",
-        4,
-    ),
-    "tile.wmma_scale16_f32_16x16x128_fp4_fp4": (
-        "wmma.scale16.gfx1250.f32.16x16x128.fp8.fp8",
-        "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-        "i64",
-        4,
-    ),
+    f"tile.{op_id}": (
+        f"wmma.{mode}.gfx1250.f32.16x16x128.fp8.fp8",
+        f"llvm.amdgcn.wmma.{mode}.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+        "i64" if scale16 else "i32",
+        fa,
+        fb,
+    )
+    for op_id, (scale16, fa, fb) in SCALED_WMMA_OPS.items()
+    for mode in ["scale16" if scale16 else "scale"]
 }
 
 
@@ -639,14 +627,15 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         )
 
     def _emit_wmma_scale(self, lowerer, op, spec) -> None:
-        """Emit the ROCm 7.13+ gfx1250 SCALE/SCALE16 FP8/FP4 call."""
+        """Emit the ROCm 7.13+ gfx1250 SCALE/SCALE16 FP8/FP6/FP4 call."""
         if lowerer._flavor != "llvm23":
             raise NotImplementedError(
                 f"{op.name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
             )
         if len(op.operands) != 5:
             raise ValueError(f"{op.name} expects 5 operands, got {len(op.operands)}")
-        decl_key, intrinsic, scale_ty, fmt = spec
+        decl_key, intrinsic, scale_ty, fmt_a, fmt_b = spec
+
         a, b, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(
@@ -656,8 +645,8 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"i32 {fmt}, <16 x i32> {lowerer._operand(a)}, "
-            f"i32 {fmt}, <16 x i32> {lowerer._operand(b)}, "
+            f"i32 {fmt_a}, <16 x i32> {lowerer._operand(a)}, "
+            f"i32 {fmt_b}, <16 x i32> {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i32 0, i32 0, {scale_ty} {lowerer._operand(a_scale)}, "
             f"i32 0, i32 0, {scale_ty} {lowerer._operand(b_scale)}, "

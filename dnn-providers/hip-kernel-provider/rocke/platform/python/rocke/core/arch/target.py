@@ -23,6 +23,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..scaled_wmma import SCALED_WMMA_OPS
+
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
 # Canonical dtype spellings used as catalog keys. Instance/spec dtype strings
@@ -38,6 +40,8 @@ _DTYPE_ALIASES = {
     "fp32": "fp32",
     "fp8": "fp8e4m3",
     "fp8e4m3": "fp8e4m3",
+    "fp6e2m3": "fp6",
+    "fp6e3m2": "bf6",
     "bf8": "bf8e5m2",
     "bf8e5m2": "bf8e5m2",
     # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
@@ -799,6 +803,16 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         _wmma_gfx12_acc_16x16,
     ),
 }
+
+
+# All native matrix pairs share the padded ABI and accumulator layout.
+
+_MMA_FRAGMENT_INFO.update(
+    {
+        op_id: _MMA_FRAGMENT_INFO["wmma_scale_f32_16x16x128_fp8_fp8"]
+        for op_id in SCALED_WMMA_OPS
+    }
+)
 
 
 def _frag_info(op_id: str) -> _FragInfo:
