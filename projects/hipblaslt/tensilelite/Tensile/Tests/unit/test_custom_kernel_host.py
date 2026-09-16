@@ -15,7 +15,7 @@ from Tensile.BenchmarkProblems import _hashableProblemTypeKV
 from Tensile.Common.DataType import DataType
 from Tensile.Common.Utilities import deriveWaveParams
 from Tensile.SolutionStructs.Naming import _getName, getKernelFileBase
-from Tensile.SolutionStructs.Solution import Solution
+from Tensile.SolutionStructs.Solution import Solution, _supportStreamKPerTileExtraIters
 from Tensile.Toolchain.Component import Assembler
 
 pytestmark = pytest.mark.unit
@@ -137,6 +137,40 @@ def test_assign_custom_kernel_params_bias_gradient_workspace():
     state["CustomKernel"]["workspaceSizePerElemBias"] = 4
     Solution._assignCustomKernelParameters(state)
     assert state["_WorkspaceSizePerElemBias"] == 4
+
+
+# --------------------------------------------------------------------------- #
+# Stream-K USO capability vs handwritten custom kernels
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        # GFA ordinary SK3/SK5: CustomKernelName is absent, not empty.
+        ({"StreamK": 3}, True),
+        ({"StreamK": 5}, True),
+        ({"StreamK": 4}, False),
+        ({"StreamK": 0}, False),
+        ({"StreamK": 3, "CustomKernelName": ""}, True),
+        ({"StreamK": 3, "CustomKernelName": "handwritten"}, False),
+        ({"StreamK": 3, "CustomKernel": {"name": "handwritten"}}, False),
+        ({"StreamK": 3, "CustomKernel": {"name": "gen", "generated": True}}, True),
+        ({"StreamK": 3, "CustomKernel": -1}, True),
+    ],
+)
+def test_uso_capability_does_not_require_custom_kernel_name(state, expected):
+    assert _supportStreamKPerTileExtraIters(state) is expected
+
+
+def test_uso_capability_assignment_survives_missing_custom_kernel_name():
+    # The merge-time KeyError was state["CustomKernelName"] inside
+    # assignDerivedParameters. Drive the same assignment the derivation uses.
+    state = {"StreamK": 3, "InternalSupportParams": {}}
+    state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = (
+        _supportStreamKPerTileExtraIters(state)
+    )
+    assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
 
 
 # --------------------------------------------------------------------------- #

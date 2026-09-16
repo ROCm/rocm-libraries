@@ -42,7 +42,7 @@ from Tensile.Common.DataType import DataType
 from Tensile.Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.CustomKernels import supportsUserSgprKernargPreload
+from Tensile.CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
@@ -232,6 +232,18 @@ def _validateSubtileGRKPartition(state, printRejectionReason):
              % (tc, loadRatioGR, localSubtileGrid, localSubtileGrid[0]))
       return False
   return True
+
+
+def _supportStreamKPerTileExtraIters(state):
+  """Whether this solution's asm claims the Stream-K per-tile extra-iters capability.
+
+  Newly generated SK3 / SK5 kernels emit both K-split mappings and honor bit 29
+  of MagicShiftItersPerTile as the runtime USO selector. SK4, SK0, and
+  handwritten custom kernels do not. Detection goes through
+  ``isCustomKernelConfig`` because GFA dropped the flat ``CustomKernelName``
+  key from defaultSolution; indexing it here KeyErrors on ordinary GFA states.
+  """
+  return state["StreamK"] in (3, 5) and not isCustomKernelConfig(state)
 
 
 def _validateStreamKForceDPOnly(state, printRejectionReason):
@@ -1935,12 +1947,8 @@ class Solution(collections.abc.Mapping):
     # K-split mappings and honors bit 29 of MagicShiftItersPerTile as the
     # runtime selector". It is fully derived here, overriding whatever the
     # solution YAML said, because only the generator knows what it just emitted.
-    # Newly generated SK3 / SK5 kernels emit both mappings plus the bit-29 gate.
-    # SK4 (dynamic) and SK0 do not, and custom kernels are hand-written asm that
-    # this generator did not produce, so none of them may claim the capability.
-    isCustomKernel = bool(state["CustomKernelName"])
     state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
-        (state["StreamK"] in (3, 5)) and not isCustomKernel
+        _supportStreamKPerTileExtraIters(state)
 
     if state["StreamK"] != 0:
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
@@ -5195,11 +5203,7 @@ class Solution(collections.abc.Mapping):
           else:
             reject(state, printRejectionReason, "%s's padded address is inconsistent"%tc)
 
-    ck = state.get("CustomKernel")
-    isActualCustomKernel = bool(state.get("CustomKernelName", "")) or \
-        (isinstance(ck, dict) and bool(ck.get("name"))
-         and not ck.get("generated", False))
-    if(not isActualCustomKernel):
+    if not isCustomKernelConfig(state):
       checkLdsBlockSizePerPad("A")
       checkLdsBlockSizePerPad("B")
 
