@@ -620,24 +620,16 @@ def scalarStaticDivideAndRemainder(qReg, rReg, dReg, divisor,
 
         shift = 33
         magic = ((1 << shift) // divisor) + 1
-        magicHi = magic >> 16
-        magicLo = magic & 0xFFFF
 
-        module.add(SMovB32(dst=tmpSgpr1, src=0,
-                           comment=f"STATIC_DIV: divisor={divisor}"))
-        module.add(SMulI32(dst=tmpSgpr, src0=magicHi, src1=dRegSgpr,
-                           comment="tmp1 = dividend * magic hi"))
-        module.add(SLShiftLeftB64(dst=tmp2Sgpr, shiftHex=16, src=tmp2Sgpr,
-                                  comment="left shift 16 bits"))
-        module.add(SMulI32(dst=qRegSgpr, src0=dRegSgpr, src1=magicLo,
-                           comment="tmp0 = dividend * magic lo"))
-        module.add(SAddU32(dst=tmpSgpr, src0=qRegSgpr, src1=tmpSgpr,
-                           comment="add lo"))
-        module.add(SAddCU32(dst=tmpSgpr1, src0=tmpSgpr1, src1=0,
-                            comment="add hi"))
+        # Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+        # product wraps once dividend * magic reaches 2^32.
+        module.add(SMulHIU32(dst=tmpSgpr1, src0=dRegSgpr, src1=magic,
+                             comment=f"STATIC_DIV: divisor={divisor}"))
+        module.add(SMulI32(dst=tmpSgpr, src0=dRegSgpr, src1=magic,
+                           comment="tmp = dividend * magic"))
         module.add(SLShiftRightB64(
             dst=tmp2Sgpr, shiftHex=shift, src=tmp2Sgpr,
-            comment="tmp1 = (dividend * magic) << shift"))
+            comment="tmp = (dividend * magic) >> shift"))
         module.add(SMovB32(dst=qRegSgpr, src=tmpSgpr, comment="quotient"))
 
         if doRemainder:
@@ -678,21 +670,13 @@ def scalarStaticCeilDivide(qReg, dReg, divisor, tmpSgprRes=None):
 
         shift = 33
         magic = ((1 << shift) // divisor) + 1
-        magicHi = magic >> 16
-        magicLo = magic & 0xFFFF
 
-        module.add(SMovB32(dst=tmpSgpr1, src=0,
-                           comment=f"STATIC_DIV: divisor={divisor}"))
-        module.add(SMulI32(dst=tmpSgpr, src0=magicHi, src1=dRegSgpr,
-                           comment="tmp1 = dividend * magic hi"))
-        module.add(SLShiftLeftB64(dst=tmp2Sgpr, shiftHex=16, src=tmp2Sgpr,
-                                  comment="left shift 16 bits"))
-        module.add(SMulI32(dst=qRegSgpr, src0=dRegSgpr, src1=magicLo,
-                           comment="tmp0 = dividend * magic lo"))
-        module.add(SAddU32(dst=tmpSgpr, src0=qRegSgpr, src1=tmpSgpr,
-                           comment="add lo"))
-        module.add(SAddCU32(dst=tmpSgpr1, src0=tmpSgpr1, src1=0,
-                            comment="add hi"))
+        # Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+        # product wraps once dividend * magic reaches 2^32.
+        module.add(SMulHIU32(dst=tmpSgpr1, src0=dRegSgpr, src1=magic,
+                             comment=f"STATIC_DIV: divisor={divisor}"))
+        module.add(SMulI32(dst=tmpSgpr, src0=dRegSgpr, src1=magic,
+                           comment="tmp = dividend * magic"))
         module.add(SLShiftRightB64(dst=tmp2Sgpr, shiftHex=shift,
                                    src=tmp2Sgpr, comment="tmp0 = quotient"))
         module.add(SMulI32(dst=tmpSgpr1, src0=tmpSgpr, src1=divisor,
