@@ -143,6 +143,15 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_exclusive_scan(
+        T input, T& output, int valid_items, T init, storage_type& storage, BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, storage, scan_op);
+        to_exclusive(output, valid_items, init, storage, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(T input, T& output, storage_type& storage, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, storage, scan_op);
@@ -151,12 +160,35 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_exclusive_scan(
+        T input, T& output, int valid_items, storage_type& storage, BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, storage, scan_op);
+        to_exclusive(output, valid_items, storage);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(
         T input, T& output, storage_type& storage, T& reduction, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, storage, scan_op);
-        reduction = storage.get().threads[VirtualWaveSize - 1];
+        compute_reduction(reduction, storage);
         to_exclusive(output, storage);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_exclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                storage_type&  storage,
+                                T&             reduction,
+                                BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, storage, scan_op);
+        compute_reduction(valid_items, reduction, storage);
+        to_exclusive(output, valid_items, storage);
     }
 
     template<class BinaryFunction>
@@ -164,10 +196,24 @@ public:
     void exclusive_scan(
         T input, T& output, T init, T& reduction, storage_type& storage, BinaryFunction scan_op)
     {
-        storage_type_& storage_ = storage.get();
         inclusive_scan(input, output, storage, scan_op);
-        reduction = storage_.threads[VirtualWaveSize - 1];
+        compute_reduction(reduction, storage);
         to_exclusive(output, init, storage, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void partial_exclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T              init,
+                                T&             reduction,
+                                storage_type&  storage,
+                                BinaryFunction scan_op)
+    {
+        partial_inclusive_scan(input, output, valid_items, storage, scan_op);
+        compute_reduction(valid_items, reduction, storage);
+        to_exclusive(output, valid_items, init, storage, scan_op);
     }
 
     template<class BinaryFunction>
@@ -273,6 +319,35 @@ private:
         }
     }
 
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void to_exclusive(
+        T& exclusive_output, int valid_items, T init, storage_type& storage, BinaryFunction scan_op)
+    {
+        const unsigned int lid      = detail::logical_lane_id<VirtualWaveSize>();
+        storage_type_&     storage_ = storage.get();
+        if((lid != 0) && (static_cast<int>(lid) < valid_items))
+        {
+            exclusive_output = scan_op(init, storage_.threads[lid - 1]);
+        }
+        if((lid == 0) && (valid_items > 0))
+        {
+            exclusive_output = init;
+        }
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void to_exclusive(T& exclusive_output, int valid_items, storage_type& storage)
+    {
+        const unsigned int lid      = detail::logical_lane_id<VirtualWaveSize>();
+        storage_type_&     storage_ = storage.get();
+        if((lid != 0u) && (static_cast<int>(lid) < valid_items))
+        {
+            exclusive_output = storage_.threads[lid - 1];
+        }
+    }
+
+    // Common inclusive scan code
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     T common_inclusive_scan(BinaryFunction scan_op,
