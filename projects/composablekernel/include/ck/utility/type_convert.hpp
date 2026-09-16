@@ -1293,7 +1293,7 @@ inline __host__ __device__ bhalf2_t type_convert<bhalf2_t, bf8x2_ocp_t>(bf8x2_oc
 {
 #if defined(__gfx950__)
     return __builtin_amdgcn_cvt_scalef32_pk_bf16_bf8(bit_cast<uint16_t>(x), /*scale*/ 1.f, 0);
-#elif defined(__gfx125__)
+#elif defined(__gfx1250__)
     union
     {
         fp8_impl::uint32x2_t ival;
