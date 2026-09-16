@@ -60,8 +60,13 @@ Description
   spatially generated patterns under a ROI (non_linear_blend centres its
   gaussian on the region, not on the absolute image frame).
 
+  The translation is applied in GRID space, after the rotation -- the pattern
+  is rotated about the region origin and the whole rotated grid is then slid
+  by translateVector. Sliding first and rotating the result (R(p - t)) is a
+  different operator whenever both are non-zero, and is not what the op does.
+
 Expression
-  (gx, gy) = R(gridAngle) * (p - translateVector)
+  (gx, gy) = R(gridAngle) * p - translateVector
   masked   = (gx mod d) < l  &&  (gy mod d) < l
   dst      = masked ? black : src
 
@@ -78,9 +83,10 @@ Per-type form
 
 Notes
   The API doc states neither the rotation handedness nor the rotate/translate
-  order. The gridAngle == 0 parameter sets are independent of both, and the
-  rotated set uses translateVector == {0,0} so that the order cannot matter
-  there either.
+  order. Both are pinned by the "rotshift" parameter set, which is the only
+  one with gridAngle and translateVector both non-zero and so the only one
+  that can tell R(p) - t from R(p - t); the other sets are independent of the
+  order by construction.
 */
 
 // True iff the ROI-relative pixel (x, y) falls inside a black square of the grid.
@@ -92,10 +98,10 @@ inline bool gridmask_masked(int x, int y, Rpp32u tileWidth, double gridRatio, do
     if (l <= 0.0) return false;
 
     const double c = std::cos(gridAngle), s = std::sin(gridAngle);
-    const double px = static_cast<double>(x) - static_cast<double>(translateX);
-    const double py = static_cast<double>(y) - static_cast<double>(translateY);
-    double gx = px * c - py * s;
-    double gy = px * s + py * c;
+    const double px = static_cast<double>(x), py = static_cast<double>(y);
+    // Rotate first, then translate in grid space: R(p) - t, not R(p - t).
+    double gx = px * c - py * s - static_cast<double>(translateX);
+    double gy = px * s + py * c - static_cast<double>(translateY);
 
     gx = std::fmod(gx, d);
     if (gx < 0.0) gx += d;

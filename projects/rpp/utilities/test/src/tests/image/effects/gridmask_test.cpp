@@ -111,14 +111,17 @@ TEST_P(GridmaskTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_gridmask<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Four param sets. gridRatio is chosen so the black-square edge l = gridRatio * tileWidth lands
+// Five param sets. gridRatio is chosen so the black-square edge l = gridRatio * tileWidth lands
 // strictly between pixel centres (4.0 and 5.5); a ratio putting l exactly on an integer boundary
 // (e.g. 0.6f * 10, which is 6.0000002 in float) makes the edge column a coin flip, not a test.
-//   "axis"  -- no rotation, no translation: the grid aligned to the region origin.
-//   "shift" -- translation only, so the translate direction is exercised without rotation.
-//   "wide"  -- a different tileWidth/gridRatio, still axis-aligned.
-//   "rot"   -- rotation only (translateVector {0,0}), so the rotate/translate order -- which the
-//              API doc does not specify -- cannot affect the result.
+//   "axis"    -- no rotation, no translation: the grid aligned to the region origin.
+//   "shift"   -- translation only, so the translate direction is exercised without rotation.
+//   "wide"    -- a different tileWidth/gridRatio, still axis-aligned.
+//   "rot"     -- rotation only (translateVector {0,0}).
+//   "rotshift"-- rotation AND translation. The other four are all invariant to the rotate/
+//                translate order, which the API doc does not specify; this one is not, so it is
+//                the only set that holds the reference to the op's R(p) - t and would catch a
+//                regression back to R(p - t). 32% of pixels differ between the two orders here.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, GridmaskTest,
     ::testing::ValuesIn(with_params<GridmaskParams>(
@@ -131,5 +134,6 @@ INSTANTIATE_TEST_SUITE_P(
         }),
         {GridmaskParams{8, 0.5f, 0.0f, 0, 0, "axis"}, GridmaskParams{8, 0.5f, 0.0f, 3, 2, "shift"},
          GridmaskParams{10, 0.55f, 0.0f, 0, 0, "wide"},
-         GridmaskParams{10, 0.55f, 0.5f, 0, 0, "rot"}})),
+         GridmaskParams{10, 0.55f, 0.5f, 0, 0, "rot"},
+         GridmaskParams{10, 0.55f, 0.5f, 3, 2, "rotshift"}})),
     op_config_name<GridmaskParams>);
