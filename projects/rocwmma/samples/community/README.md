@@ -228,6 +228,12 @@ For questions about contributing community samples:
 - **Limitations**: M must be a multiple of MACRO_TILE_X (64), N must be a multiple of MACRO_TILE_Y (64), K must be a multiple of ROCWMMA_K (16); LoRA rank R is fixed at 16; row_major only; source may contain gfx9/gfx11/gfx12 parameter-selection paths, but only gfx1201 is documented as validated and other architectures should be considered experimental/untested; not production-optimized
 - **Author**: Odin.Yang
 
+### Flash Attention v2 Forward
+- **File**: `simple_flash_attn_v2.cpp`
+- **Description**: Fused Flash Attention v2 forward sample implementing `O = softmax(Q * K^T * scale) * V` in a single kernel using rocWMMA. The sample uses Q-tile outer-loop scheduling, online softmax, dual-GEMM fusion, cooperative global reads, K/V LDS double buffering, causal masking support, and register-resident fp32 output accumulation.
+- **Requirements**: ROCm 6.0+; gfx9 / gfx11 / gfx12 supported path, tested on RDNA4 gfx1201 (RX 9070); float16 I/O, float32 compute; contiguous `[B, H, N, D]` row-major layout
+- **Limitations**: Head dimension D is fixed to 64; sequence length N must be a multiple of Br (64) and Bc (32); no backward pass, dropout, ALiBi, or sliding-window mask; softmax reductions and output rescaling are LDS-mediated; not production-optimized
+- **Author**: Odin.Yang
 
 <!-- Template for documenting samples:
 ### Sample Name
