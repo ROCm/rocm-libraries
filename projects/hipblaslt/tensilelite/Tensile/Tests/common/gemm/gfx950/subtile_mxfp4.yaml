@@ -2225,3 +2225,56 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 2304]   # three
           - Exact: [224, 224, 1, 768]   # M and N edge
           - Exact: [256, 256, 2, 1536]   # batch, two iterations
+  ########################################
+  # StreamK partial tiles, all four layouts
+  ########################################
+  -
+    - &prob12 # K deep enough to split a tile.  Everything else here runs K <= 2304,
+      # where StreamKLocalStart stays 0 and a wrong partial-tile K stride is
+      # multiplied away before it can be seen.  Do not shrink K.
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - &bench12
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]   # MT128x128 wg2x2
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 4096]   # 4 tiles, 16 iters each
+  -
+    - <<: *prob12
+      TransposeA: False
+      TransposeB: False
+    - *bench12
+  -
+    - <<: *prob12
+      TransposeA: True
+      TransposeB: True
+    - *bench12
+  -
+    - <<: *prob12
+      TransposeA: True
+      TransposeB: False
+    - *bench12
