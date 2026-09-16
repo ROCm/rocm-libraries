@@ -79,13 +79,38 @@ def test_get_version_no_match_raises(monkeypatch):
         C._getVersion("amdclang++", "--version", r"version\s+([\d.]+)")
 
 
-def test_get_rocm_version_uses_hipconfig(monkeypatch):
+@pytest.mark.parametrize(
+    "version, expected",
+    [
+        ("6.4.43482", SemanticVersion(6, 4, 43482)),
+        ("7.1.25424-4179531dcd", SemanticVersion(7, 1, 25424)),
+        ("10.1.0a20260813", SemanticVersion(10, 1, 0)),
+    ],
+)
+def test_get_rocm_version_uses_environment(monkeypatch, version, expected):
+    monkeypatch.setenv("ROCM_VERSION", version)
+    monkeypatch.setattr(
+        C,
+        "_getVersion",
+        lambda *args, **kwargs: pytest.fail("hipconfig fallback must not run"),
+    )
+    assert C.get_rocm_version() == expected
+
+
+def test_get_rocm_version_rejects_invalid_environment(monkeypatch):
+    monkeypatch.setenv("ROCM_VERSION", "not-a-version")
+    with pytest.raises(RuntimeError, match="Invalid ROCM_VERSION"):
+        C.get_rocm_version()
+
+
+def test_get_rocm_version_falls_back_to_hipconfig(monkeypatch):
     seen = {}
 
     def _fake(exe, flag, regex):
         seen["exe"], seen["flag"] = exe, flag
         return SemanticVersion(6, 4, 0)
 
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
     monkeypatch.setattr(C, "_getVersion", _fake)
     assert C.get_rocm_version() == SemanticVersion(6, 4, 0)
     assert seen["flag"] == "--version"
@@ -110,6 +135,7 @@ def test_get_rocm_version_uses_hipconfig(monkeypatch):
 def test_get_rocm_version_parses_hipconfig_build_suffix(
     monkeypatch, hipconfig_output, expected_version
 ):
+    monkeypatch.delenv("ROCM_VERSION", raising=False)
     monkeypatch.setattr(C, "validateToolchain", lambda x: x)
 
     class _R:

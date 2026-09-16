@@ -650,11 +650,12 @@ class TestRunCLIEntryPoint:
             base_args.update(extra_args)
 
         _, info_map = _make_isa_info_map("gfx942")
+        validate_toolchain = MagicMock(return_value=(
+            "/fake/hipcc", None, "/fake/bundler", None))
 
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
-             patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+             patch.object(M, "validateToolchain", validate_toolchain), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
@@ -671,6 +672,13 @@ class TestRunCLIEntryPoint:
              patch.object(M.LibraryIO, "write"), \
              patch.object(M.shutil, "rmtree"):
             M.run()
+
+        validate_toolchain.assert_called_once_with(
+            base_args["CxxCompiler"],
+            base_args["CCompiler"],
+            base_args["OffloadBundler"],
+            base_args["Assembler"],
+        )
 
     def test_run_completes_without_exception(self, logic_dir, output_dir):
         """Lines 881-1086: run() must complete without raising."""
@@ -694,7 +702,7 @@ class TestRunCLIEntryPoint:
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
              patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
@@ -733,7 +741,7 @@ class TestRunCLIEntryPoint:
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
              patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
@@ -773,7 +781,7 @@ class TestRunCLIEntryPoint:
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
              patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
@@ -802,7 +810,7 @@ class TestRunCLIEntryPoint:
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
              patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
@@ -819,7 +827,7 @@ class TestRunCLIEntryPoint:
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
              patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
@@ -851,7 +859,7 @@ class TestRunCLIEntryPoint:
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
              patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \
@@ -909,7 +917,7 @@ class TestRunCLIEntryPoint:
         with patch.object(M, "parseArguments", return_value=base_args), \
              patch.object(M, "setVerbosity"), \
              patch.object(M, "validateToolchain", return_value=(
-                 "/fake/hipcc", None, "/fake/bundler", None, None)), \
+                 "/fake/hipcc", None, "/fake/bundler", None)), \
              patch.object(M, "makeIsaInfoMap", return_value=info_map), \
              patch.object(M, "assignGlobalParameters"), \
              patch.object(M, "makeAssemblyToolchain", return_value=MagicMock()), \

@@ -81,10 +81,7 @@ from Tensile.SolutionStructs.Solution import (
 from Tensile.verify_stinky_comment_vs_elf_text import verify_stinky_paths
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, buildSourceCodeObjectFiles
-from Tensile.Toolchain.Validators import (
-    ToolchainDefaults,
-    validateToolchain,
-)
+from Tensile.Toolchain.Validators import validateToolchain
 from Tensile.Toolchain.Component import Assembler
 from Tensile.Utilities.Decorators.Profile import profile
 from Tensile.Utilities.Decorators.Timing import timing
@@ -1086,12 +1083,11 @@ def run():
     arguments = parseArguments()
     setVerbosity(arguments["PrintLevel"])
     outputPath = Path(ensurePath(os.path.abspath(arguments["OutputPath"])))
-    cxxCompiler, _, offloadBundler, _, _ = validateToolchain(
+    cxxCompiler, _, offloadBundler, _ = validateToolchain(
         arguments["CxxCompiler"],
         arguments["CCompiler"],
         arguments["OffloadBundler"],
         arguments["Assembler"],
-        ToolchainDefaults.HIP_CONFIG,
     )
 
     if ";" in arguments["Architecture"]:
