@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+################################################################################
+# MXBlockFree TDM constants: free-dim share is independent of MXBlock (K).
+# MXBlockFree=1 is the 1xK layout (one scale per M/N row). 128 is 128x128.
+################################################################################
+
+import pytest
+
+from Tensile.Common.MxScaleLayout import (
+    MXS_LDS_ALIGN_2D,
+    mxFreeTile,
+    mxLdsAlign,
+    mxLdsKStride,
+    mxLdsLsuStride,
+    mxLdsNumBytes,
+    mxLraFreeShift,
+    mxLraScaleRow,
+    mxTdmMSplitStride,
+    mxTdmTile0,
+    mxTdmTileM,
+    mxTileSpanPartnerDelta,
+)
+
+
+def _kernel(mxBlockFreeA=1, mxBlockFreeB=1, mxBlockA=128, mxBlockB=128):
+    return {
+        "ProblemType": {
+            "MXBlockA": mxBlockA,
+            "MXBlockB": mxBlockB,
+            "MXBlockFreeA": mxBlockFreeA,
+            "MXBlockFreeB": mxBlockFreeB,
+        }
+    }
+
+
+def test_mx_free_tile_defaults_to_1d():
+    k = _kernel()
+    assert mxFreeTile(k, "MXSA") == 1
+    assert mxFreeTile(k, "MXSB") == 1
+    assert mxFreeTile(k, "A") == 1
+    assert mxFreeTile({"ProblemType": {"MXBlockA": 128}}, "MXSA") == 1
+
+
+def test_mx_free_tile_128():
+    k = _kernel(mxBlockFreeA=128, mxBlockFreeB=128)
+    assert mxFreeTile(k, "MXSA") == 128
+    assert mxFreeTile(k, "MXSB") == 128
+
+
+def test_mx_free_tile_a_and_b_independent():
+    k = _kernel(mxBlockFreeA=128, mxBlockFreeB=1)
+    assert mxFreeTile(k, "MXSA") == 128
+    assert mxFreeTile(k, "MXSB") == 1
+
+
+def test_mx_tdm_tile0_1d_matches_current_mt_times_mxunit():
+    # MT=256, mxUnit=1, 4 waves -> numComp=2, K-split
+    assert mxTdmTile0(256, mxUnit=1, mxTile=1, numComp=2, kSplit=True) == 256
+    assert mxTdmTile0(256, mxUnit=1, mxTile=1, numComp=2, kSplit=False) == 128
+
+
+def test_mx_tdm_tile0_2d_divides_m_by_128():
+    assert mxTdmTile0(256, mxUnit=1, mxTile=128, numComp=2, kSplit=True) == 2
+    assert mxTdmTile0(256, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 1
+    assert mxTdmTile0(224, mxUnit=1, mxTile=128, numComp=2, kSplit=True) == 2
+    assert mxTdmTile0(512, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 2
+
+
+def test_mx_tdm_tile0_2d_does_not_floor_to_zero():
+    # DU=128 M-split: 1 scale-row vs 2 (or 8) comps used to yield tile0=0.
+    assert mxTdmTile0(32, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 1
+    assert mxTdmTile0(64, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 1
+    assert mxTdmTile0(128, mxUnit=1, mxTile=128, numComp=2, kSplit=False) == 1
+    assert mxTdmTile0(32, mxUnit=1, mxTile=128, numComp=8, kSplit=False) == 1
+    assert mxTdmMSplitStride(32, 128, 2) == 0
+    assert mxTdmMSplitStride(64, 128, 2) == 0
+    assert mxTdmMSplitStride(128, 128, 2) == 0
+    assert mxTdmMSplitStride(256, 128, 2) == 1
+    assert mxTdmMSplitStride(256, 1, 2) == 128
+
+
+def test_mx_tdm_tile_m_ceils_unaligned_macro_tile():
+    assert mxTdmTileM(256, 128) == 2
+    assert mxTdmTileM(224, 128) == 2
+    assert mxTdmTileM(192, 128) == 2
+    assert mxTdmTileM(128, 128) == 1
+    assert mxTdmTileM(129, 128) == 2
+
+
+def test_mx_lds_num_bytes_1d_is_mt_times_mxdu():
+    # DepthU=256, MXBlock=128 → mxDU=2
+    assert mxLdsNumBytes(128, 256, 128, mxTile=1) == 256
+    assert mxLdsNumBytes(256, 256, 128, mxTile=1) == 512
+    assert mxLdsNumBytes(256, 256, 32, mxTile=1) == 2048
+
+
+def test_mx_lds_num_bytes_2d_divides_free_dim():
+    assert mxLdsNumBytes(128, 256, 128, mxTile=128) == 2
+    assert mxLdsNumBytes(256, 256, 128, mxTile=128) == 4
+    assert mxLdsNumBytes(224, 256, 128, mxTile=128) == 4
+    assert mxLdsNumBytes(256, 256, 32, mxTile=128) == 16
+    assert MXS_LDS_ALIGN_2D == 64
+
+
+def test_mx_lds_num_bytes_pad_interval_matches_1d_solution():
+    # calcLdsNumBytesAB: raw / padInterval * (padInterval + ldsPad)
+    # MXBlock=32, DepthU=256 → mxDU=8; MT=128 → raw=1024; VW=8 pad table.
+    assert mxLdsNumBytes(128, 256, 32, mxTile=1, ldsPad=16, padInterval=256) == 1088
+    # 2D buffer smaller than one pad block must not floor to 0.
+    assert mxLdsNumBytes(128, 256, 128, mxTile=128, ldsPad=16, padInterval=256) == 2
+
+
+def test_mx_lds_align_2d_does_not_restore_1d_size():
+    assert mxLdsAlign(1, 256) == 256
+    assert mxLdsAlign(128, 256) == MXS_LDS_ALIGN_2D
+    assert mxLdsAlign(1, 64) == 64
+
+
+def test_mx_lds_k_stride_1d_matches_local_read_inc():
+    # MT=128, mxUnit=1: swizzle K-step is one e8 per M-row.
+    assert mxLdsKStride(128, 1, 1, swizzled=True) == 128
+    assert mxLdsKStride(128, 1, 1, swizzled=False, unrollMajor=True) == 1
+    assert mxLdsKStride(128, 1, 1, swizzled=False, unrollMajor=False) == 128
+
+
+def test_mx_lds_k_stride_2d_matches_tdm_k_split():
+    # MT=128, MXBlockFree=128: one scale-row, kg1 is the next byte.
+    assert mxLdsKStride(128, 128, 1, swizzled=True) == 1
+    assert mxLdsKStride(256, 128, 1, swizzled=True) == 2
+    assert mxLdsKStride(224, 128, 1, swizzled=True) == 2
+    assert mxLdsKStride(128, 128, 1, swizzled=False, unrollMajor=True) == 1
+    assert mxLdsKStride(128, 128, 1, swizzled=False, unrollMajor=False) == 1
+
+
+def test_mx_lds_lsu_stride_2d_uses_scale_rows_not_mt():
+    # MT128x64, DU=256, LSU=2: 1D would step 64 bytes off a 2-byte buffer.
+    assert mxLdsLsuStride(64, 128, mxDU=2, lsu=2) == 1
+    assert mxLdsLsuStride(128, 128, mxDU=2, lsu=2) == 1
+    assert mxLdsLsuStride(64, 1, mxDU=2, lsu=2) == 64
+    assert mxLdsLsuStride(128, 128, mxDU=2, lsu=1) == 2
+
+
+def test_mx_lra_free_shift():
+    assert mxLraFreeShift(1) == 0
+    assert mxLraFreeShift(0) == 0
+    assert mxLraFreeShift(128) == 7
+    with pytest.raises(ValueError):
+        mxLraFreeShift(192)
+
+
+def test_mx_lra_scale_row_adapts_to_mt():
+    # VW=4, strideWave=64: both waves of MT=128 (and the first 128 of MT=256) → row 0
+    assert mxLraScaleRow(0, 64, 128) == 0
+    assert mxLraScaleRow(1, 64, 128) == 0
+    # A later wave at M=128 (e.g. 3rd wave, or VW=8 stride 128)
+    assert mxLraScaleRow(2, 64, 128) == 1
+    assert mxLraScaleRow(1, 128, 128) == 1
+
+
+def _partner_delta_kernel(vw, wave_group, bm=1, bn=1):
+    return {
+        "VectorWidthMXSA": vw,
+        "VectorWidthMXSB": vw,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstBM": bm,
+        "MatrixInstBN": bn,
+        "MIWaveGroup": list(wave_group),
+    }
+
+
+def test_mx_tile_span_partner_delta_wave_split():
+    # MIWG=2: 16 * BM * 2 * VW
+    assert mxTileSpanPartnerDelta(_partner_delta_kernel(1, (2, 2)), "MXSA", 0) == 32
+    assert mxTileSpanPartnerDelta(_partner_delta_kernel(2, (2, 2)), "MXSA", 0) == 64
+    assert mxTileSpanPartnerDelta(_partner_delta_kernel(4, (2, 2)), "MXSA", 0) == 128
+    assert mxTileSpanPartnerDelta(_partner_delta_kernel(8, (2, 2)), "MXSA", 0) == 256
+    assert mxTileSpanPartnerDelta(_partner_delta_kernel(4, (2, 2)), "MXSB", 1) == 128
+
+
+def test_mx_tile_span_partner_delta_non_split():
+    # MIWG=1: 16 * VW
+    assert mxTileSpanPartnerDelta(_partner_delta_kernel(4, (1, 1)), "MXSA", 0) == 64
+    assert mxTileSpanPartnerDelta(_partner_delta_kernel(8, (1, 1)), "MXSA", 0) == 128
