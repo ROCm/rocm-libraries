@@ -1,0 +1,58 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# A loop-carried RAW at distance 1, and the reason tlcnt = 0 is not by itself
+# evidence of a bug.
+#
+# waitcnt_insertion_loop_carried_raw_distance2 pins the relaxed case: at d = 2
+# the fill from one trip back names a different buffer, so it stays in flight
+# and the wait is tlcnt = 1. At d = 1 there is nothing to keep in flight -- the
+# reader consumes the immediately preceding fill -- so a full drain is the
+# correct and tightest answer, not a conservative fallback.
+#
+# Two readers on one ring, the shape of waitcnt_insertion_loop_carried_war_
+# single_wave read from the RAW side. Ring 3, one step per trip:
+#
+#                           iter 0   iter 1   iter 2   iter 3
+#   ds_load A   (Read,  [0])  LDS0     LDS1     LDS2     LDS0
+#   ds_load B   (Read,  [1])  LDS1     LDS2     LDS0     LDS1
+#   tensor_load (Write, [2])  LDS2     LDS0     LDS1     LDS2
+#
+# Read(k) = Write(k-d): A reads blk(k) so d = 2, B reads blk(k+1) so d = 1.
+# Both name the fill's tag [2]; only the distance differs.
+#
+# B binds. computeRequiredWaits takes the min over every dependency, and B's
+# d = 1 selects the newest fill in the queue, giving tlcnt = 0. A's d = 2 then
+# finds nothing at tripsBack >= 2, which is correct rather than a miss: CK_Tensor
+# is InOrder, so retiring fill(k-1) has already retired fill(k-2). This is the
+# tensor-side twin of the "name only the nearest partner" rule the WAR tests
+# rely on.
+#
+# The wait lands at B, after the two A reads, because that is the first
+# instruction whose annotation binds. A needs no wait of its own.
+#
+# CHECK-LABEL: @waitcnt_insertion_loop_carried_raw_distance1
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# The d = 1 drain. A full drain here is exact, not a fallback.
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 0
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [1]
+# CHECK: tensor_load_to_lds{{.*}}tokens = [2]
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK-NOT: s_barrier
+
+st.func @waitcnt_insertion_loop_carried_raw_distance1() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] }, mod.loopcarriedraw = { tokens = [2], distance = 2 } }
+  v[40:41] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] }, mod.loopcarriedraw = { tokens = [2], distance = 2 } }
+  v[60:61] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] }, mod.loopcarriedraw = { tokens = [2], distance = 1 } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] }, mod.loopcarriedwar = { tokens = [0], distance = 1 } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
