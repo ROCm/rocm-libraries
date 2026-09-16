@@ -153,6 +153,8 @@ jobs:
     # component-test (pytest_runner) path uses.
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      # GPU access: --group-add 993/992/110 are the render/video/kfd device group
+      # GIDs on the ROCm runners (mirrors TheRock's _GPU_CONTAINER_OPTIONS).
       options: >-
         --ipc host
         --ulimit memlock=-1:-1
@@ -222,27 +224,18 @@ jobs:
           RC=${PIPESTATUS[0]}
           set -e
           if [ "$RC" -ne 0 ]; then
-            # Fail-closed graceful skip: gfx125X-dcgpu is in the presubmit matrix
-            # so it builds on every PR, BUT when a PR's build reuses a baseline the
-            # artifact lives under the baseline run-id, not this run-id — so fetching
-            # by workflow_run.id finds nothing. Skip cleanly in that case.
-            # ANY other failure (S3/auth/network) is a real error and must fail.
-            # NOTE: refine this pattern against the actual "missing artifact" message
-            # once the first validation run confirms it. Option C to close the reuse
-            # tail: resolve the baseline run-id and fetch from it instead of skipping.
-            if grep -qiE "no.*artifact|not found|does not exist|no matching|NoSuchKey|404" fetch.log; then
-              echo "::warning::No gfx1250 artifact for run ${BUILD_RUN_ID} (reused/baseline build?); tests did NOT run."
-              {
-                echo "### :warning: gfx1250 tests SKIPPED — NOT tested"
-                echo ""
-                echo "No gfx1250 artifact was found for build run \`${BUILD_RUN_ID}\`, so the"
-                echo "hipBLASLt / TensileLite tests **did not run**. A green check here does **not**"
-                echo "indicate gfx1250 coverage."
-              } >> "$GITHUB_STEP_SUMMARY"
-              echo "artifact_ready=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "::error::Artifact fetch failed and does not look like a missing artifact (S3/auth/network?). See fetch.log."
+            # Fail closed: any fetch error is red, never a silent green. A narrow
+            # skip for the reuse-baseline "missing artifact" case can be added once a
+            # validation run reveals its exact signal.
+            echo "::error::gfx1250 artifact fetch failed (RC=$RC). See fetch.log."
+            {
+              echo "### :x: gfx1250 artifact fetch FAILED — NOT tested"
+              echo ""
+              echo "Fetch for build run \`${BUILD_RUN_ID}\` failed (RC=$RC). If this was a"
+              echo "reused-baseline build with no artifact under this run-id, that case gets an"
+              echo "explicit narrow skip once its exact signal is confirmed — until then it is a"
+              echo "red failure, never a silent green."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit "$RC"
           fi
           echo "$ROCM/bin" >> "$GITHUB_PATH"
@@ -260,6 +253,7 @@ jobs:
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
         run: |
+          set -o pipefail  # a failing test must propagate through `| tee`, not be masked
           mkdir -p test_results
           HIPBLASLT_TEST="$(find "$ROCM" -type f -name hipblaslt-test | head -1)"
           if [ -z "$HIPBLASLT_TEST" ]; then
@@ -281,6 +275,7 @@ jobs:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
           TL_WORKERS: ${{ inputs.pytest_workers || '1' }}
         run: |
+          set -o pipefail  # a failing test must propagate through `| tee`, not be masked
           mkdir -p tensilelite_test_results
           export PYTHONPATH="$ROCM/share/hipblaslt/tensilelite:${PYTHONPATH:-}"
           cd "$ROCM/share/hipblaslt/tensilelite"
