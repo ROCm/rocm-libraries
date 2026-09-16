@@ -252,6 +252,7 @@ TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
     solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
 
     auto problem = dummyProblem();
     auto device  = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
@@ -271,6 +272,7 @@ TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
     solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
 
     auto problem       = dummyProblem();
     auto device        = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
@@ -292,6 +294,7 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
     solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
     solution.sizeMapping.workspaceSizePerElemC = 4;
 
     auto problem = dummyProblem();
@@ -364,6 +367,7 @@ namespace
         solution.sizeMapping.streamK           = 5;
         solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU            = 64;
+        solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
         solution.sizeMapping.CUOccupancy       = 1;
     }
@@ -445,6 +449,7 @@ namespace
         solution.sizeMapping.streamK            = streamK;
         solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
         solution.sizeMapping.depthU             = 16;
+        solution.sizeMapping.workGroupSize      = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.matrixInstruction  = {16, 16, 4, 1};
         solution.sizeMapping.workGroupMapping   = 1;
         solution.sizeMapping.CUOccupancy        = -1;
