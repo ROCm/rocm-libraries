@@ -40,13 +40,16 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
+// TARGET: {'gen': 'rdna2', 'arch': 'gfx1030', 'gpu': 'rx6900', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -55,7 +58,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -64,7 +67,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -73,7 +76,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -81,7 +84,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -90,7 +93,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -99,7 +102,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -108,7 +111,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -117,7 +120,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -125,7 +128,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -134,7 +137,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -142,7 +145,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 64, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -150,7 +153,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 64, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -158,7 +161,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -166,7 +169,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -174,7 +177,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -183,7 +186,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -192,7 +195,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -201,7 +204,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -209,7 +212,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -218,7 +221,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -227,7 +230,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -236,7 +239,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -245,7 +248,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -253,7 +256,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -262,7 +265,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -271,7 +274,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -280,7 +283,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -289,7 +292,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -297,7 +300,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = short, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -306,7 +309,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -314,7 +317,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -322,7 +325,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -330,7 +333,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -338,7 +341,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -346,7 +349,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -355,7 +358,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -364,7 +367,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = short
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -373,7 +376,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
     {
@@ -381,7 +384,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -394,13 +397,16 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'rdna3', 'arch': 'gfx1100', 'gpu': 'rx7900', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -409,7 +415,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -418,7 +424,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -427,7 +433,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -435,7 +441,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = double, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -444,7 +450,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -453,7 +459,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -462,7 +468,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -471,7 +477,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -479,7 +485,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -488,7 +494,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -496,7 +502,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 128, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -504,7 +510,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 128, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -512,7 +518,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -520,7 +526,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -528,7 +534,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -537,7 +543,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -546,7 +552,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -555,7 +561,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -563,7 +569,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -572,7 +578,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 16}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -581,7 +587,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -590,7 +596,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -599,7 +605,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -607,7 +613,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -616,7 +622,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -625,7 +631,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 64, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -634,7 +640,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 64, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -643,7 +649,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -651,7 +657,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = short, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -660,7 +666,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 8}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -668,7 +674,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 8}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -676,7 +682,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -684,7 +690,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 8}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -692,7 +698,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -700,7 +706,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 8}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -709,7 +715,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -718,7 +724,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = short
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -727,7 +733,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
     {
@@ -735,7 +741,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -748,13 +754,16 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'rdna4', 'arch': 'gfx1200', 'gpu': 'rx9060', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna4, target_arch::gfx1200, gpu::rx9060, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -763,7 +772,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -772,7 +781,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -781,7 +790,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -789,7 +798,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -798,7 +807,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -807,7 +816,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -816,7 +825,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -824,7 +833,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -832,7 +841,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -840,7 +849,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 64, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -848,7 +857,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -856,7 +865,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -865,7 +874,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -874,7 +883,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -883,7 +892,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -891,7 +900,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -900,7 +909,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -909,7 +918,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -918,7 +927,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -926,7 +935,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -935,7 +944,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -944,7 +953,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -953,7 +962,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -961,7 +970,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -969,7 +978,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -977,7 +986,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -985,7 +994,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 2}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -997,13 +1006,16 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'rdna4', 'arch': 'gfx1201', 'gpu': 'rx9070', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna4, target_arch::gfx1201, gpu::rx9070, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1012,7 +1024,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1021,7 +1033,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1030,7 +1042,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -1038,7 +1050,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1047,7 +1059,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1056,7 +1068,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1065,7 +1077,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -1073,7 +1085,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -1081,7 +1093,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -1089,7 +1101,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 64, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -1097,7 +1109,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -1105,7 +1117,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1114,7 +1126,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1123,7 +1135,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1132,7 +1144,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -1140,7 +1152,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1149,7 +1161,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1158,7 +1170,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1167,7 +1179,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -1175,7 +1187,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 2}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1184,7 +1196,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1193,7 +1205,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1202,7 +1214,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -1210,7 +1222,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -1218,7 +1230,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -1226,7 +1238,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 128, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -1234,7 +1246,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 2}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -1242,7 +1254,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1251,7 +1263,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1260,7 +1272,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -1268,7 +1280,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1277,7 +1289,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1286,7 +1298,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1295,7 +1307,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = short
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1304,7 +1316,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
     {
@@ -1312,7 +1324,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1321,7 +1333,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1330,7 +1342,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = short, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1339,7 +1351,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -1351,13 +1363,15 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'gcn5', 'arch': 'gfx906', 'gpu': 'mi50', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1366,7 +1380,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1375,7 +1389,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1384,7 +1398,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -1392,7 +1406,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = double, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1401,7 +1415,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1410,7 +1424,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1419,7 +1433,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1428,7 +1442,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -1436,7 +1450,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1445,7 +1459,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -1453,7 +1467,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 64, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -1461,7 +1475,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -1469,7 +1483,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -1477,7 +1491,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -1485,7 +1499,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1494,7 +1508,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1503,7 +1517,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1512,7 +1526,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -1520,7 +1534,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1529,7 +1543,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1538,7 +1552,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1547,7 +1561,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1556,7 +1570,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -1564,7 +1578,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1573,7 +1587,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1582,7 +1596,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1591,7 +1605,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1600,7 +1614,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -1608,7 +1622,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1617,7 +1631,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 16}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -1625,7 +1639,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -1633,7 +1647,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -1641,7 +1655,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -1649,7 +1663,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -1657,7 +1671,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1666,7 +1680,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1675,7 +1689,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 8}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = short
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1684,7 +1698,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
     {
@@ -1692,7 +1706,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1705,13 +1719,15 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'cdna1', 'arch': 'gfx908', 'gpu': 'mi100', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1720,7 +1736,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 128, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1729,7 +1745,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 2}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 256, 'ipt': 16}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1738,7 +1754,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -1746,7 +1762,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = double, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1755,7 +1771,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1764,7 +1780,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1773,7 +1789,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1782,7 +1798,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -1790,7 +1806,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1799,7 +1815,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -1807,7 +1823,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 64, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -1815,7 +1831,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 64, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -1823,7 +1839,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -1831,7 +1847,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -1839,7 +1855,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1848,7 +1864,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1857,7 +1873,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1866,7 +1882,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 16}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -1874,7 +1890,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1883,7 +1899,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1892,7 +1908,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 64, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1901,7 +1917,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1910,7 +1926,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -1918,7 +1934,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = int, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1927,7 +1943,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -1936,7 +1952,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -1945,7 +1961,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -1954,7 +1970,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -1962,7 +1978,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = short, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -1971,7 +1987,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -1979,7 +1995,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -1987,7 +2003,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -1995,7 +2011,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -2003,7 +2019,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -2011,7 +2027,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 4}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2020,7 +2036,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2029,7 +2045,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = short
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 16}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2038,7 +2054,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 16}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
     {
@@ -2046,7 +2062,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 8}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2059,13 +2075,15 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'cdna2', 'arch': 'gfx90a', 'gpu': 'mi210', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2074,7 +2092,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2083,7 +2101,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2092,7 +2110,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -2100,7 +2118,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2109,7 +2127,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2118,7 +2136,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2127,7 +2145,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2136,7 +2154,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -2144,7 +2162,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2153,7 +2171,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -2161,7 +2179,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 64, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -2169,7 +2187,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 64, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -2177,7 +2195,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -2185,7 +2203,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -2193,7 +2211,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 2}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2202,7 +2220,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2211,7 +2229,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2220,7 +2238,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -2228,7 +2246,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2237,7 +2255,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2246,7 +2264,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2255,7 +2273,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2264,7 +2282,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -2272,7 +2290,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2281,7 +2299,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2290,7 +2308,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2299,7 +2317,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2308,7 +2326,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -2316,7 +2334,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2325,7 +2343,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -2333,7 +2351,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 2}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 256, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -2341,7 +2359,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 256, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -2349,7 +2367,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -2357,7 +2375,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 2}
         };
     }
-    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -2365,7 +2383,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2374,7 +2392,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2383,7 +2401,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = short
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2392,7 +2410,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
     {
@@ -2400,7 +2418,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 2}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2413,13 +2431,15 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'cdna3', 'arch': 'gfx942', 'gpu': 'mi300x', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+        transform_config_params>
 {
-    // Based on value_type = double, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2428,7 +2448,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = int64_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2437,7 +2457,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = int
+    // CONFIG: {'value_type': 'double', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2446,7 +2466,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = short
+    // CONFIG: {'value_type': 'double', 'output_type': 'short', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2455,7 +2475,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = double, output_type = int8_t
+    // CONFIG: {'value_type': 'double', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -2463,7 +2483,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = float, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2472,7 +2492,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int64_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2481,7 +2501,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int
+    // CONFIG: {'value_type': 'float', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2490,7 +2510,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = short
+    // CONFIG: {'value_type': 'float', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2499,7 +2519,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = float, output_type = int8_t
+    // CONFIG: {'value_type': 'float', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -2507,7 +2527,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = rocprim::half, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -2515,7 +2535,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 8}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -2523,7 +2543,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 8}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int', 'block_size_x': 256, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -2531,7 +2551,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = short
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'short', 'block_size_x': 256, 'ipt': 2}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -2539,7 +2559,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 2}
         };
     }
-    // Based on value_type = rocprim::half, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::half', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(output_type) <= 1)))
     {
@@ -2547,7 +2567,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2556,7 +2576,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int64_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2565,7 +2585,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2574,7 +2594,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = short
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2583,7 +2603,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = rocprim::int128_t, output_type = int8_t
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 16)
                   && (sizeof(value_type) > 8) && (sizeof(output_type) <= 1)))
     {
@@ -2591,7 +2611,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2600,7 +2620,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int64_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2609,7 +2629,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2618,7 +2638,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = short
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2627,7 +2647,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int64_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int64_t', 'output_type': 'int8_t', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 8)
                   && (sizeof(value_type) > 4) && (sizeof(output_type) <= 1)))
     {
@@ -2635,7 +2655,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'rocprim::int128_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2644,7 +2664,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = int, output_type = int64_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2653,7 +2673,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int
+    // CONFIG: {'value_type': 'int', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2662,7 +2682,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = short
+    // CONFIG: {'value_type': 'int', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2671,7 +2691,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int, output_type = int8_t
+    // CONFIG: {'value_type': 'int', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4)
                   && (sizeof(value_type) > 2) && (sizeof(output_type) <= 1)))
     {
@@ -2679,7 +2699,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 1}
         };
     }
-    // Based on value_type = short, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 16)
                   && (sizeof(output_type) > 8)))
@@ -2688,7 +2708,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int64_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 8)
                   && (sizeof(output_type) > 4)))
@@ -2697,7 +2717,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int
+    // CONFIG: {'value_type': 'short', 'output_type': 'int', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 4)
                   && (sizeof(output_type) > 2)))
@@ -2706,7 +2726,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = short
+    // CONFIG: {'value_type': 'short', 'output_type': 'short', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 2)
                   && (sizeof(output_type) > 1)))
@@ -2715,7 +2735,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = short, output_type = int8_t
+    // CONFIG: {'value_type': 'short', 'output_type': 'int8_t', 'block_size_x': 256, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2)
                   && (sizeof(value_type) > 1) && (sizeof(output_type) <= 1)))
     {
@@ -2723,7 +2743,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = rocprim::int128_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 16) && (sizeof(output_type) > 8)))
     {
@@ -2731,7 +2751,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {256, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int64_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int64_t', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 8) && (sizeof(output_type) > 4)))
     {
@@ -2739,7 +2759,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {128, 4}
         };
     }
-    // Based on value_type = int8_t, output_type = int
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int', 'block_size_x': 64, 'ipt': 1}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 4) && (sizeof(output_type) > 2)))
     {
@@ -2747,7 +2767,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 1}
         };
     }
-    // Based on value_type = int8_t, output_type = short
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'short', 'block_size_x': 64, 'ipt': 8}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 2) && (sizeof(output_type) > 1)))
     {
@@ -2755,7 +2775,7 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
             {64, 8}
         };
     }
-    // Based on value_type = int8_t, output_type = int8_t
+    // CONFIG: {'value_type': 'int8_t', 'output_type': 'int8_t', 'block_size_x': 128, 'ipt': 4}
     if constexpr((!bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1)
                   && (sizeof(output_type) <= 1)))
     {
@@ -2767,11 +2787,14 @@ constexpr auto lower_bound_config_picker() -> std::enable_if_t<
     return binary_search_config_params_base<value_type, output_type>();
 }
 
+// TARGET: {'gen': 'unknown', 'arch': 'unknown', 'gpu': 'generic', 'rep': 'amdgcn'}
 template<class Target, class value_type, class output_type>
-constexpr auto lower_bound_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
-    transform_config_params>
+constexpr auto lower_bound_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+        transform_config_params>
 {
     return lower_bound_config_picker<
         comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,

@@ -20,4 +20,23 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from .utils import TypeInfo, TYPE_CONFIGS, Parser, BASE_DIR
+import sys
+import os
+
+sys.path.append(f"{os.path.dirname(__file__)}/../")
+sys.path.append(f"{os.path.dirname(__file__)}")
+
+from tuner.base_tuner import TunerArgs
+from tuning_device_binary_search import Tuner
+
+class UpperBoundTuner(Tuner):
+    @classmethod
+    def _get_default_args(cls) -> TunerArgs:
+        return TunerArgs(algo_full_name='device_upper_bound')
+
+    def __init__(self, args: TunerArgs) -> None:
+        super().__init__(args)
+
+if __name__ == "__main__":
+    UpperBoundTuner.cli()
+    
