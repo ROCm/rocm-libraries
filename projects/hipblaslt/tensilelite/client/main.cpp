@@ -311,6 +311,7 @@ namespace TensileLite
                 ("a2a-multigpu-skew-x-us",   po::value<int>()->default_value(0), "Microseconds of busy-wait the a2a-multigpu arm enqueues on the last rank's stream between the first boundary barrier and the x rewrite.")
                 ("a2a-multigpu-skew-gemm-us",po::value<int>()->default_value(0), "Microseconds of busy-wait the a2a-multigpu arm enqueues on the last rank's stream between the second boundary barrier and the GEMM.")
                 ("a2a-multigpu-war-barrier", po::value<int>()->default_value(1), "Enqueue the a2a-multigpu arm's boundary barrier ahead of the x rewrite (1=on). At 0 the arm keeps only the barrier ahead of the GEMM, which leaves a rewrite racing a peer's in-flight read of x untested.")
+                ("a2a-multigpu-time",        po::value<int>()->default_value(0), "Report the a2a-multigpu arm's makespan (1=on). The arm synchronizes after staging x and the gathered buffer, then times the flag reset, the boundary barrier and the GEMM across all ranks. Requires --a2a-multigpu-batch 1.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
