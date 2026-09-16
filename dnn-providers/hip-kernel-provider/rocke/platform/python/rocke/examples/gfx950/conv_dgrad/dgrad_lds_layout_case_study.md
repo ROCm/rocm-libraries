@@ -93,13 +93,14 @@ the same wrong lane map is exactly the failure the gfx1250 study documents.
 
 ## Replay
 
-From `platform/`, with `PYTHONPATH=$(pwd)/python`.
+From `platform/`, with `PYTHONPATH=$(pwd)/python:$(pwd)/../library` (conv kernels,
+tests and the sweep driver moved to `library/` in #11978).
 
 Correctness — the bitwise A/B, and the full suite:
 
 ```bash
-python3 -m pytest tests/instances/test_conv_dgrad_correctness.py -q -rs -k LdsKOuter
-python3 -m pytest tests/instances/test_conv_dgrad_correctness.py -q
+python3 -m pytest ../library/tests/test_conv_dgrad_correctness.py -q -rs -k LdsKOuter
+python3 -m pytest ../library/tests/test_conv_dgrad_correctness.py -q
 ```
 
 All six `TestConvDgradLdsKOuter` cases must **run** on gfx950 — wave64,
@@ -126,7 +127,7 @@ Step 0 lever sweep. Shapes come from `--miopen-cmd` / `--miopen-file`; `-F 2`
 selects the backward-data direction in the MIOpen driver grammar:
 
 ```bash
-python3 python/rocke/benchmark/benchmark_implicit_gemm_conv.py \
+python3 ../library/benchmarks/common/benchmark_implicit_gemm_conv.py \
     --direction dgrad --arch gfx950 --dtype bf16 \
     --miopen-cmd "./MIOpenDriver convbfp16 -n 8 -c 128 -H 32 -W 32 -k 128 \
         -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -g 1 -F 2 -in_layout=NHWC" \

@@ -1640,7 +1640,7 @@ def _build_dgrad_one(args_tuple):
         # Deduced per combo, not a run-level flag: warp_tile_mn is itself a
         # sweep axis, and the predicate keys on it. Mirrors the wgrad caller.
         # The M-outer path keeps coverage through the in-process A/B tests in
-        # tests/instances/test_conv_dgrad_correctness.py, which construct both
+        # library/tests/test_conv_dgrad_correctness.py, which construct both
         # layouts directly rather than going through this driver.
         lds_k_outer=DgradConvSpec.default_lds_k_outer(
             arch=arch,

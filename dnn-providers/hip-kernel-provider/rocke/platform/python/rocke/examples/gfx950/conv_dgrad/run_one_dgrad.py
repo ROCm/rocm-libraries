@@ -4,7 +4,7 @@
 """Build, launch and time ONE dgrad implicit-GEMM config.
 
 The dgrad LDS-layout case study's capture command runs this driver. The sweep
-driver (``rocke.benchmark.benchmark_implicit_gemm_conv``) is the wrong tool for a
+driver (``benchmarks.common.benchmark_implicit_gemm_conv``) is the wrong tool for a
 trace: it compiles thousands of kernels and rocprofv3 would have to decode every
 dispatch. Here exactly one kernel runs, so ``--kernel-regex`` matches one thing.
 Dgrad only -- it builds ``DgradConvSpec`` and nothing else, so it does not serve
@@ -13,7 +13,7 @@ the wgrad case study.
 Deliberately does NO numeric verification. torch's HIP runtime and rocke's fight
 over the process HIP context, and timings come out multiples wrong when a verify
 and a timing loop share a process -- verify in a separate run (the sweep driver's
-``--verify``, or tests/instances/test_conv_dgrad_correctness.py).
+``--verify``, or library/tests/test_conv_dgrad_correctness.py).
 
 ``--print-name-only`` builds and compiles but never touches the GPU queue, which
 is how you get the ``--kernel-regex`` for a capture without perturbing it.
@@ -86,7 +86,7 @@ def _parse_args(argv=None):
         "and the sweep driver call, so a plain run traces the kernel that would "
         "actually ship for this shape. on/off set the field directly on the "
         "spec this driver builds -- what "
-        "tests/instances/test_conv_dgrad_correctness.py does to A/B the two "
+        "library/tests/test_conv_dgrad_correctness.py does to A/B the two "
         "layouts in-process -- which is how you get an M-outer baseline to "
         "trace against. Neither dispatch nor the sweep driver takes an "
         "override.",
@@ -120,17 +120,17 @@ def main(argv=None) -> int:
         return 2
 
     import torch
-    from rocke import compile_kernel
-    from rocke.benchmark.benchmark_implicit_gemm_conv import parse_miopen_cmd
-    from rocke.core.arch import ArchTarget
-    from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-    from rocke.instances.common.conv_implicit_gemm_dgrad import (
+    from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+    from kernels.common.conv_implicit_gemm import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_dgrad import (
         DgradConvSpec,
         build_implicit_gemm_conv_dgrad,
         is_valid_dgrad_spec,
         pack_sub_gemm_buffer,
     )
+    from rocke import compile_kernel
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.manifest import conv_args_signature
     from rocke.runtime import synchronize_and_release, time_launches
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
