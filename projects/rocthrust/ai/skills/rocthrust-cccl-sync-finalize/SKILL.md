@@ -16,6 +16,23 @@ skill's job is to turn that staged state into a single, real landing commit.
 - Confirm there is **no** git merge in progress (`git status` should not
   mention `MERGE_HEAD`) — there never should have been one at any point in
   this pipeline.
+- Run the counterpart-disposition linter, and confirm it reports zero
+  violations:
+
+  ```bash
+  rocthrust-cccl-sync-resolve/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo.md
+  ```
+
+  This is a **hard gate**, unlike step 3's end-of-sync counterpart sweep
+  below. It exists because the informal version of this check has already
+  failed silently once in a completed sync: PR 12112's `todo.md` used the
+  CUDA -> HIP / `testing/` -> `test/` counterpart checks correctly for its
+  first several commits, then recorded no disposition at all for the
+  remaining ~80 — including the exact commits a later diff against the
+  human-authored PR 11296 proved had left `test/test_*.cpp` files behind.
+  If this reports any violations, treat each flagged item as reopened (back
+  to `rocthrust-cccl-sync-resolve` step 2/3 to record the missing
+  disposition) rather than proceeding to Step 2.
 
 If any of these don't hold, STOP — hand back to `rocthrust-cccl-sync-resolve`
 rather than proceeding.

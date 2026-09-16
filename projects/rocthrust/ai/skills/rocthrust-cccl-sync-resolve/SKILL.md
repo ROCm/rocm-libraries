@@ -146,6 +146,38 @@ If any of these don't hold, STOP and ask the human before proceeding.
    can span many sessions, avoid `git reset --hard` on this branch, and
    consider a backup branch if the sync is long-running.
 
+## Periodic self-check: `rocthrust-todo-lint.sh`
+
+Every 5-10 commits (and always before handing off to
+`rocthrust-cccl-sync-finalize`), re-run:
+
+```bash
+$SKILL_DIR/scripts/rocthrust-todo-lint.sh --repo "$ROCTHRUST_REPO" --todo todo.md
+```
+
+This re-derives, from each already-ticked commit's own upstream diff,
+whether it touched `thrust/system/cuda/` or a top-level `thrust/testing/*.cu`
+file, and flags any ticked item whose tick-note recorded no HIP or `test/`
+counterpart disposition at all — a mechanical version of step 3's "must
+record that disposition explicitly" requirement, not a new check.
+
+This exists because that requirement has already failed silently once, in
+practice: the real `todo.md` behind PR 12112 used the counterpart checks
+correctly for its first several commits, then stopped recording dispositions
+for the remaining ~80 — including the exact commits a later side-by-side
+diff against the human-authored PR 11296 proved had left `test/test_*.cpp`
+files behind. The counterpart-check mechanism existed and was demonstrably
+used at the start of that sync; the gap was a mid-session discipline lapse
+nothing caught until the sync was already done. Treat any violation this
+script reports as reopening that `todo.md` item — go back to step 2/3 for it
+and record the missing disposition — not as something to wave through
+because the sync has already moved on.
+
+This is a presence check only: it does not judge whether a recorded
+disposition was the *right* call, only that one was written down. A
+violation here does not necessarily mean a file was left un-ported — it
+means the tick-note doesn't show the reasoning either way.
+
 ## No 3-way diff tool
 
 RCCL's resolve skill stages a meld-able 3-way view (`nccl-merge-3way-dirs.sh`)
