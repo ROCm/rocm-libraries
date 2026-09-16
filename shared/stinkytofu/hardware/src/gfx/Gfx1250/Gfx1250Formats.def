@@ -33,6 +33,7 @@ DEF_ARCH(Gfx1250,
     .totalVgprPerSimd = 1024,  // physical VGPR file per SIMD (wave32)
     .vgprAllocGranule = 16,    // VGPR allocation granule (wave32, static allocation).
     .maxWavesPerSimd = 10,     // wave slots per SIMD, the limit once registers stop binding
+    .packedWorkitemId = 1,     // X, Y and Z share v0, so one VGPR arrives filled
     .defaultCycle = 1, .defaultLatency = 1,
     .d16Writes32BitVgpr = 1)
 

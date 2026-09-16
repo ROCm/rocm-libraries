@@ -93,6 +93,9 @@ struct ArchDef {
     int totalVgprPerSimd = 0;
     int vgprAllocGranule = 0;
     int maxWavesPerSimd = 0;
+    // Work-item ID packing at kernel launch: 1 when X, Y and Z share v0, so
+    // exactly one VGPR arrives filled however many dimensions are enabled.
+    int packedWorkitemId = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
     // ECC presence: D16 VMEM zero-fills the non-data half and True16 VALU does
@@ -503,6 +506,7 @@ class DefTParser {
                     parseFieldInt(block, ".totalVgprPerSimd", arch_.totalVgprPerSimd);
                     parseFieldInt(block, ".vgprAllocGranule", arch_.vgprAllocGranule);
                     parseFieldInt(block, ".maxWavesPerSimd", arch_.maxWavesPerSimd);
+                    parseFieldInt(block, ".packedWorkitemId", arch_.packedWorkitemId);
                     parseFieldInt(block, ".defaultCycle", arch_.defaultCycle);
                     parseFieldInt(block, ".defaultLatency", arch_.defaultLatency);
                     parseFieldInt(block, ".d16Writes32BitVgpr", arch_.d16Writes32BitVgpr);
@@ -1981,7 +1985,8 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << ", " << arch.totalVgprPerSimd << " /* totalVgprPerSimd */" << ", "
         << arch.vgprAllocGranule << " /* vgprAllocGranule */" << ", " << arch.maxWavesPerSimd
         << " /* maxWavesPerSimd */" << ", " << arch.maxVGPR << " /* maxVGPR */" << ", "
-        << arch.maxSGPR << " /* maxSGPR */" << ", " << arch.maxAGPR << " /* maxAGPR */)\n"
+        << arch.maxSGPR << " /* maxSGPR */" << ", " << arch.maxAGPR << " /* maxAGPR */" << ", "
+        << arch.packedWorkitemId << " /* packedWorkitemId */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"

@@ -1515,37 +1515,43 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         /// throws rather than being clamped, since no descriptor expresses it.
         void refreshVgprCount() const {
             const stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            // How many registers the enabled workitem-id dimensions occupy is
+            // the target's convention, not the field's. False on a target this
+            // build does not know, which over-declares rather than under.
+            const auto* info = archInfo();
+            const bool packedWorkitemId = info != nullptr && info->packedWorkitemId != 0;
             uint32_t required = 0;
             for (const auto* function : module_->getFunctions()) {
                 if (function == nullptr) continue;
-                required =
-                    std::max(required, stinkytofu::requiredVgprCount(*function, kd.vgprWorkItem));
+                required = std::max(required, stinkytofu::requiredVgprCount(
+                                                  *function, kd.vgprWorkItem, packedWorkitemId));
             }
             if (required == 0) return;
 
-            const uint32_t addressable = addressableVgprs();
-            if (addressable != 0 && required > addressable) {
+            // An architecture this build does not know has no limit to check
+            // against, rather than a limit of zero.
+            if (info != nullptr && required > info->maxVGPR) {
                 throw std::runtime_error(
                     "kernel needs " + std::to_string(required) +
                     " VGPRs after register allocation but the architecture addresses only " +
-                    std::to_string(addressable));
+                    std::to_string(info->maxVGPR));
             }
             signature_->setDeclaredVgprs(static_cast<int>(required));
         }
 
-        /// Addressable VGPRs for the architecture this module was lifted for, or
-        /// 0 when it is not one this build knows. Looked up by triple so an
-        /// unknown target returns null instead of asserting.
-        uint32_t addressableVgprs() const {
+        /// The architecture this module was lifted for, or null when it is not
+        /// one this build knows. Looked up by triple, which returns null on an
+        /// unknown target instead of asserting the way GfxArchID resolution does.
+        const stinkytofu::ArchHelper::ArchInfo* archInfo() const {
             for (const auto* function : module_->getFunctions()) {
                 if (function == nullptr) continue;
                 const std::array<int, 3>& isa = function->getGemmTileConfig().arch;
                 const auto* info = stinkytofu::ArchHelper::getInstance().getArchInfo(
                     static_cast<uint32_t>(isa[0]), static_cast<uint32_t>(isa[1]),
                     static_cast<uint32_t>(isa[2]));
-                if (info != nullptr) return info->maxVGPR;
+                if (info != nullptr) return info;
             }
-            return 0;
+            return nullptr;
         }
 
         /// SGPRs the descriptor declares, as `.amdhsa_next_free_sgpr`.
