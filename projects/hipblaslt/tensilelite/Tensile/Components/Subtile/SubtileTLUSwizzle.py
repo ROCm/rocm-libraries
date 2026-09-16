@@ -35,11 +35,25 @@ class TLUColScatter:
 
     A single-bit XOR cannot reach 1-way once stackM >= 8: the two ds_read phases
     are stackM loads apart and the pad-induced bank-pair shift wraps.  Instead,
-    K-column k goes to load ``k % N`` and its ``col_group = k // N`` is
-    bit-interleaved to land the distinguishing group bit at thread bit 3 (the
-    bank-pair bit), so with 8B inter-load padding the phases cover complementary
-    halves of the even bank pairs.  Verified against the bank model for
-    stackM in {8,16}; all fields derive from N = stackM.
+    deal the K-columns across the loads and place each column's group at the
+    thread position that lands its distinguishing bit on the bank-pair bit::
+
+        K-column k  ->  load  k % N,   col_group = k // N      (N = stackM)
+
+            load 0  <-  k = 0,  8, 16, 24, ...
+            load 1  <-  k = 1,  9, 17, 25, ...        N = 8 shown
+              ...
+            load 7  <-  k = 7, 15, 23, 31, ...
+
+        thread bit    5      4      3      2      1      0
+                    cg[3]  cg[1]  cg[2]  cg[0]  mc[1]  mc[0]
+                                  =====
+                     bit 3 is the bank-pair bit, so it always
+                     carries col_group[gdBit]
+
+    With 8B inter-load padding the phases then cover complementary halves of the
+    even bank pairs.  Verified against the bank model for stackM in {8,16}; all
+    fields derive from N = stackM.
     """
     N: int                    # loads per strip (= stackM)
     cpc: int                  # chunks per K-column (= N/2 for fp4 b128)
