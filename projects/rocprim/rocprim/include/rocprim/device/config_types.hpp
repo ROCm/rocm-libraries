@@ -260,8 +260,7 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1153: return gen::rdna3;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
-        case target_arch::gfx1250:
-        case target_arch::gfx1250_strict: return gen::cdna5;
+        case target_arch::gfx1250: return gen::cdna5; // this also covers gfx1250-strict as it also maps to gfx1250
         case target_arch::unknown:
         case target_arch::invalid: return gen::unknown;
     }
