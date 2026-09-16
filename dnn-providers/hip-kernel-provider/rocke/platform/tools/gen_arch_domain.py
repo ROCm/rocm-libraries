@@ -652,13 +652,19 @@ def main() -> int:
             if args.verbose and status != STATUS_OK:
                 print(f"     {key:44s} {arch:14s} {status}")
 
-    # Second pass, serial: anything that failed in a way we could not classify
-    # gets one more chance with no contention. A real result is stable under
-    # retry; a resource failure is not. Cells that survive this stay
-    # probe_error, which is the honest answer -- we still do not know.
-    retry = [(k, a) for k, a in work if results[k][a]["status"] == STATUS_PROBE_ERROR]
+    # Second pass, serial: anything that failed in a way we could not classify,
+    # and anything that took the toolchain down with it, gets one more chance
+    # with no contention. A real result is stable under retry; a resource
+    # failure is not, and under -j the probes fork enough linkers to hit the
+    # process limit occasionally -- llvm.fabs.f32 on gfx11-generic aborted that
+    # way once in three runs and would otherwise have been recorded as a
+    # permanent compiler crash. A genuine crash (permlane64 on the wave64
+    # targets) reproduces serially, so the retry separates the two. Cells that
+    # survive stay as they were, which is the honest answer.
+    unstable = (STATUS_PROBE_ERROR, STATUS_TOOLCHAIN_CRASH)
+    retry = [(k, a) for k, a in work if results[k][a]["status"] in unstable]
     if retry:
-        print(f"   retrying {len(retry)} unclassified probe(s) serially...")
+        print(f"   retrying {len(retry)} unclassified/crashed probe(s) serially...")
         for key, arch in retry:
             _k, _a, status, evidence = run((key, arch))
             record(key, arch, status, evidence)
