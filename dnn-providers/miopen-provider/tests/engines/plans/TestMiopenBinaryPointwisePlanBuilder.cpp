@@ -103,6 +103,18 @@ TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes, GetCustomKnobsReturnsEmpty)
     EXPECT_TRUE(knobs.empty());
 }
 
+TEST_P(TestGpuMiopenBinaryPointwisePlanBuilderModes, BuildPlanSetsPlanForValidGraph)
+{
+    auto builder = validGraph();
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    HipdnnMiopenContext ctx;
+
+    EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
+    ASSERT_TRUE(ctx.hasValidPlan());
+    EXPECT_EQ(ctx.plan().getWorkspaceSize(*_dummyHandle), 0u);
+}
+
 INSTANTIATE_TEST_SUITE_P(AllCases,
                          TestGpuMiopenBinaryPointwisePlanBuilderModes,
                          ::testing::ValuesIn(getBinaryModeCases()),
