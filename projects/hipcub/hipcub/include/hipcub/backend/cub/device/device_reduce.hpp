@@ -231,7 +231,7 @@ public:
                              InputIteratorT       d_in,
                              ExtremumOutIteratorT d_max_out,
                              IndexOutIteratorT    d_index_out,
-                             ::std::int64_t       num_items,
+                             NumItemsT            num_items,
                              hipStream_t          stream = 0)
     {
         using value_type = ::hipcub::detail::it_value_t<InputIteratorT>;
