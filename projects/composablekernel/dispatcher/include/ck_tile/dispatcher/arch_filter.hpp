@@ -354,8 +354,15 @@ class ArchFilter
         float elem_a = element_size(sig.dtype_a);
         float elem_b = element_size(sig.dtype_b);
 
+        // When the B cast policy runs before the LDS write, B is staged as
+        // ADataType rather than BDataType (GetSmemSizeB in
+        // gemm_universal_pipeline_ag_bg_cr_policy.hpp). Charging B at the wider
+        // of the two keeps a mixed-precision pair from being under-counted; for
+        // equal dtypes it is the same number.
+        float elem_b_staged = std::max(elem_a, elem_b);
+
         std::size_t matrix_a_size = alg.tile_shape.m * alg.tile_shape.k * elem_a;
-        std::size_t matrix_b_size = alg.tile_shape.n * alg.tile_shape.k * elem_b;
+        std::size_t matrix_b_size = alg.tile_shape.n * alg.tile_shape.k * elem_b_staged;
         std::size_t total_lds     = matrix_a_size + matrix_b_size;
 
         // The budget depends on the target, not just the pipeline. Must stay in

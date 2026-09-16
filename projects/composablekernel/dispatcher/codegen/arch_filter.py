@@ -755,8 +755,15 @@ class ArchFilter:
         elem_size_a = ELEMENT_SIZE_MAP.get(config.datatype_a, 2)
         elem_size_b = ELEMENT_SIZE_MAP.get(config.datatype_b, 2)
 
+        # When the B cast policy runs before the LDS write, B is staged as
+        # ADataType rather than BDataType (GetSmemSizeB in
+        # gemm_universal_pipeline_ag_bg_cr_policy.hpp). Charging B at the wider
+        # of the two keeps a mixed-precision pair from being under-counted; for
+        # equal dtypes it is the same number.
+        elem_size_b_staged = max(elem_size_a, elem_size_b)
+
         matrix_a_size = config.tile_m * config.tile_k * elem_size_a
-        matrix_b_size = config.tile_n * config.tile_k * elem_size_b
+        matrix_b_size = config.tile_n * config.tile_k * elem_size_b_staged
         total_lds = matrix_a_size + matrix_b_size
 
         # The budget depends on the target, not just the pipeline: a tile that
