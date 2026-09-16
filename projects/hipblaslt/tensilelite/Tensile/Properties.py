@@ -68,8 +68,8 @@ class Property:
 _MATCHING_ORDER = {
     'EqualityMatching': 0,
     'RangeMatching': 1,
-    'PredictionMatching': 2,
-    'GridBasedMatching': 3,
+    'PredictionMatching': 3,
+    'GridBasedMatching': 2,
     'FreeSizeMatching': 4,
     'TruePred': 5,
 }
