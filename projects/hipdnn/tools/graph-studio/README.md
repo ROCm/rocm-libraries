@@ -24,6 +24,10 @@ graph out without writing any code.
 - Import and export hipDNN's own JSON format, so graphs can be shared with
   other hipDNN tools.
 - Open benchmark reports to compare engines, inspect correctness, and view optional profiling traces.
+- Launch an agent flow against the graph you have open, from the **Implement**
+  tab, and watch it run — steps, loop iterations with the condition they are
+  measured against, and the files each one produced. See
+  [Running agent flows](#running-agent-flows).
 
 ## Requirements
 
@@ -202,6 +206,48 @@ found, or explains why it could not load.
 
 If the add-on is missing or fails to load, the app keeps working with Build and
 Execute switched off — rebuilding it is the only fix needed.
+
+## Running agent flows
+
+The **Implement** tab launches a hipDNN agent flow against the graph on the
+canvas and follows it to completion. Flows live in the orchestrator
+(`../orchestrator/configs/flows`) and describe what the agents do; Studio only
+launches them and renders what the run reports, so a new or rewritten flow shows
+up here with no change to the app.
+
+This needs the orchestrator's MCP extra, which is deliberately not part of its
+base requirements:
+
+```bash
+cd ../orchestrator
+.venv/Scripts/python.exe -m pip install -r requirements-mcp.txt   # Windows
+# .venv/bin/python -m pip install -r requirements-mcp.txt         # Linux
+```
+
+Studio finds the orchestrator by walking up from its own directory, so a normal
+checkout needs no configuration; `HIPDNN_ORCHESTRATOR_DIR` overrides it. **If the
+tab's controls are disabled it says why** — usually that the extra above is not
+installed, or that the tool registry names an executable this machine lacks.
+
+Pick a flow and its inputs are generated from what that flow declares. Any input
+the flow types as a path can be filled from the canvas instead of typed, which is
+how the graph you are editing reaches the run. **Iterations** lowers the flow's
+own loop budget; it cannot raise it.
+
+Start with `fast-converge`: it runs no agent, takes about two seconds, and
+exercises the whole path — live timeline, artifacts, cancellation — for free. The
+rest spend real agent sessions, and those sessions can edit this checkout, so
+`git status` after a run is worth a look.
+
+What a run reports is read from the run itself, never assumed. The terminal line
+is the run's status and the condition its loop was measured against, verbatim —
+there is no "passed". A run whose steps only invoked agents says so: nothing was
+compiled or executed, so it is review evidence and not a correctness claim. A
+flow that builds or tests stops saying it, on its own.
+
+Quitting ends every run and the agent sessions they are waiting on. Runs cannot
+outlive the app: the server is its child, so it goes when Studio goes. Everything
+already written stays in the run directory.
 
 ## Project layout
 
