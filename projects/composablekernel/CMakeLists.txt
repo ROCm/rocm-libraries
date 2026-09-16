@@ -882,6 +882,7 @@ option(BUILD_CK_DEVICE_INSTANCES "Build device operation instances in library/" 
 option(BUILD_CK_PROFILER "Build the CK profiler in profiler/" ON)
 option(BUILD_CK_TILE_ENGINE_TESTS "Build tile engine tests" ON)
 option(BUILD_CK_TILE_FMHA_TESTS "Build FMHA tests" ON)
+option(BUILD_CK_TILE_SPARSE_ATTN_TESTS "Build sparse attention tests" ON)
 option(BUILD_CK_TILE_CSHUFFLE_LDS_BENCHMARKS "Build CShuffleLds microbenchmarks (requires BUILD_CK_EXAMPLES=ON)" OFF)
 
 if(BUILD_CK_DEVICE_INSTANCES)
