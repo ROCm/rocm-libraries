@@ -33,6 +33,7 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, 
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
+from ..Common.MxScaleLayout import mxFreeTile
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 from ..AsmAddressCalculation import AddrCalculation
@@ -244,17 +245,22 @@ class GSUOff(GSU):
             # MX scale unroll-step SRD increment, gated by MXScaleFormat:
             #   - Swizzled (HostPreSwizzle/InMemorySwizzle): each K-block of
             #     scales (DepthU/MXBlock K-scales per M) is laid out as a
-            #     contiguous (M, K_inner) block, so a K-step of DepthU advances
-            #     the SRD by Size{tile} * (DepthU/MXBlock * bpe).
+            #     contiguous (M/MXBlockFree, K_inner) block, so a K-step of DepthU
+            #     advances the SRD by (Size{tile}/MXBlockFree)*(DepthU/MXBlock*bpe).
             #   - NoSwizzle: canonical row/column layout with K-axis stride 1;
             #     the K-step of DepthU is just DepthU/MXBlock * bpe and goes
             #     through the standard graIncrementsCommon path.
             mxFmt = kernel.get("MXScaleFormat", "NoSwizzle")
             isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
             if isMxSwizzledScale and writer.isConstUnitStride(stride):
+                mxTile = mxFreeTile(kernel, tc)
                 module.add(SMulI32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), \
                     src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=m, \
                     comment="incr%s = Size%s*DepthU*Bpe (unrollIdx, swizzled MX scale layout)"%(tc, INDEX_CHARS[tIdx])))
+                if mxTile > 1:
+                    module.add(SLShiftRightB32(dst=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), \
+                        shiftHex=hex(log2(mxTile)), src=sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx)), \
+                        comment="MXS 2D: incr /= MXBlockFree(%u)"%mxTile))
             else:
                 module.add(self.graIncrementsCommon(writer, loopIdx, tc, stride, m))
 
@@ -508,6 +514,9 @@ class GSUOn(GSU):
                 isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
                 if isMxSwizzledScale:
                     module.add(SMulI32(dst=incSgpr, src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d) (swizzled MX scale layout)"%(mi_dim)))
+                    mxTile = mxFreeTile(kernel, tc)
+                    if mxTile > 1:
+                        module.add(SLShiftRightB32(dst=incSgpr, shiftHex=hex(log2(mxTile)), src=incSgpr, comment="MXS 2D: Size / MXBlockFree(%u)"%mxTile))
                 elif kernel["enableTDMMetadata"] and tP["isM"] and kernel["ProblemType"]["MetadataLayout"]:
                     ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]
                     metadataStrideSgpr = f"Stride{tc}{writer.states.indexChars[ia[1]]}"

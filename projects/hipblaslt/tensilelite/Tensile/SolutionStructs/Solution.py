@@ -50,6 +50,7 @@ from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_con
                                                MXS_LDS_BLOCK_BYTES, MXS_LDS_PAD_BYTES
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
+from Tensile.Common.MxScaleLayout import mxFreeTile, mxLdsAlign, mxLdsNumBytes
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
                                             _expectedParamTypes, \
@@ -3781,13 +3782,25 @@ class Solution(collections.abc.Mapping):
         ldsAlign = int(64 / state["ProblemType"]["MacDataType%s"%tc].numRegisters())
         ldsAlign = 64 if state["ProblemType"]["MacDataType%s"%tc].is6bitFloat() else ldsAlign
 
-        if state["UnrollMajorLDS%s"%mxTc]:
+        if "MXS" in mxTc:
+          mxTile = mxFreeTile(state, mxTc)
+          ldsAlign = mxLdsAlign(mxTile, ldsAlign)
+          ldsNumBytes = mxLdsNumBytes(
+            state["MacroTile%s"%mxTc],
+            state["DepthU"],
+            state["ProblemType"]["MXBlock%s"%tc],
+            mxTile=mxTile,
+            ldsPad=ldsPad,
+            unrollMajor=state["UnrollMajorLDS%s"%mxTc],
+            padInterval=LdsBlockSizePerPad,
+          )
+        elif state["UnrollMajorLDS%s"%mxTc]:
           ldsNumBytes = int((state["_DepthU%s"%mxTc] + ldsPad) * state["MacroTile%s"%mxTc] * bpe)
         else:
           ldsNumBytes = int(state["_DepthU%s"%mxTc] * (state["MacroTile%s"%mxTc] + ldsPad) * bpe)
         padInterval = LdsBlockSizePerPad
 
-        if padInterval != 0:
+        if "MXS" not in mxTc and padInterval != 0:
           ldsNumBytes = int((state["_DepthU%s"%mxTc] * state["MacroTile%s"%mxTc] * bpe) / padInterval * (padInterval + ldsPad * bpe))
         ldsNumBytesAligned = roundUpToNearestMultiple(ldsNumBytes, ldsAlign)
 

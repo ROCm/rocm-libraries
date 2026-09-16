@@ -60,6 +60,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   swizzleGeometry
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
+from .Common.MxScaleLayout import mxFreeTile
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getKernelNameMin
@@ -1321,12 +1322,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       lrMX = Component.LocalRead.find(self)
       if kernel["ProblemType"]["MXBlockA"] and mxUnitA == 1:
         instPerPackMXSA = kernel["MIWaveTileA"]
+        if mxFreeTile(kernel, "MXSA") > 1:
+          instPerPackMXSA = kernel["MIWaveTileA"] // max(1, int(kernel["VectorWidthMXSA"]))
         if lrMX.getMxsTileSpanInfo(kernel, "MXSA", 0, self.states.asmCaps) is not None:
           instPerPackMXSA //= 2
       elif kernel["ProblemType"]["MXBlockA"] and (not kernel["UnrollMajorLDSMXSA"]):
         instPerPackMXSA = int(kernel["MIInputPerThreadMXSA"] * kernel["ProblemType"]["DataTypeMXSA"].numRegisters() * instPerRegPackMX)
       if kernel["ProblemType"]["MXBlockB"] and mxUnitB == 1:
         instPerPackMXSB = kernel["MIWaveTileB"]
+        if mxFreeTile(kernel, "MXSB") > 1:
+          instPerPackMXSB = kernel["MIWaveTileB"] // max(1, int(kernel["VectorWidthMXSB"]))
         if lrMX.getMxsTileSpanInfo(kernel, "MXSB", 1, self.states.asmCaps) is not None:
           instPerPackMXSB //= 2
       elif kernel["ProblemType"]["MXBlockB"] and (not kernel["UnrollMajorLDSMXSB"]):
@@ -7988,6 +7993,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # need to allocate same amount of MIWaveTile
           if isgfx950:
             self.states.mxsa.numVgprValuPerBlock = kernel["MIWaveTileMXSA"]
+          elif mxFreeTile(kernel, "MXSA") > 1:
+            # 2D: VW WaveTiles in one MXBlockFree-row group share one SSSS.
+            vw = max(1, int(kernel["VectorWidthMXSA"]))
+            nVec = kernel["MIWaveTileMXSA"] // vw
+            self.states.mxsa.numVgprValuPerBlock = max(1, nVec) * ceil(kernel["MIInputPerThreadMXSA"] / self.states.bpr)
           if kernel["DirectToVgprMXSA"] and not (self.states.packDTVA or self.states.convDTVA):
             self.states.mxsa.numVgprValuPerBlock = 0
           # MX scale registers are consumed by local-read and wmma paths; avoid
@@ -8007,6 +8017,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # need to allocate same amount of MIWaveTile
           if isgfx950:
             self.states.mxsb.numVgprValuPerBlock = kernel["MIWaveTileMXSB"]
+          elif mxFreeTile(kernel, "MXSB") > 1:
+            vw = max(1, int(kernel["VectorWidthMXSB"]))
+            nVec = kernel["MIWaveTileMXSB"] // vw
+            self.states.mxsb.numVgprValuPerBlock = max(1, nVec) * ceil(kernel["MIInputPerThreadMXSB"] / self.states.bpr)
           if kernel["DirectToVgprMXSB"] and not (self.states.packDTVB or self.states.convDTVB):
             self.states.mxsb.numVgprValuPerBlock = 0
           # MX scale registers are consumed by local-read and wmma paths; avoid
@@ -9460,8 +9474,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # - TLUA false for A, TLUB false for B
       # - numSgprGlobalReadIncs is 1
       # - the MX scale layout is not swizzled: a swizzled (HostPreSwizzle /
-      #   InMemorySwizzle) scale block advances by Size{tile}*DepthU/MXBlock*bpe
-      #   per unroll step (see GSU.graIncrements), which is only known at runtime,
+      #   InMemorySwizzle) scale block advances by Size{tile}/MXBlockFree *
+      #   DepthU/MXBlock*bpe per unroll step (MXBlockFree=1 is 1D; see
+      #   GSU.graIncrements), which is only known at runtime,
       #   so those increments must stay in SGPRs. Subtile is exempt: it builds its
       #   own descriptors and never reads GlobalReadIncs, so holding the SGPR there
       #   only costs registers that MX kernels, which Solution forces onto subtile

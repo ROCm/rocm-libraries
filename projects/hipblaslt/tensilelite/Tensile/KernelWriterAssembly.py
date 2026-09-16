@@ -73,6 +73,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
+from .Common.MxScaleLayout import mxFreeTile, mxLdsKStride, mxTdmTile0, mxTdmTileM
 from .Components.GL2Prefetch import GL2PrefetchLoad
 from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGate
@@ -5989,7 +5990,13 @@ class KernelWriterAssembly(KernelWriter):
       tc             = tP["tensorChar"]
       tile01         = tP["tile01Idx"]
       LdsPad         = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
-      mtAddPad       = kernel["MacroTile%u" % tile01] + LdsPad
+      # 2D MXS LDS is indexed by scale-row, not 1D M/N. MacroTileMXS is still
+      # the 1D tile; use ceil(MT/MXBlockFree) so LSU>1 does not step past the
+      # 2-byte 2D buffer (e.g. MT128x64 WG z=2).
+      mtForLsu       = kernel["MacroTile%u" % tile01]
+      if "MXS" in tc:
+        mtForLsu = mxTdmTileM(kernel["MacroTile%s" % tc], mxFreeTile(kernel, tc))
+      mtAddPad       = mtForLsu + LdsPad
       umlds          = kernel["UnrollMajorLDS%s" % tc]
       lsu            = kernel["LocalSplitU"]
       du             = kernel["_DepthU%s"%tc]
@@ -6004,8 +6011,9 @@ class KernelWriterAssembly(KernelWriter):
       with self.allocTmpSgpr(1, tag="lraFinalOffset_tmpSgprInfo") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
         if umlds == False or isMxSwizzled:
+          mtLabel = tc if "MXS" in tc else str(tile01)
           module.add(SMovB32(dst=sgpr(tmpSgpr), src=mtAddPad*lsuStride, \
-            comment="LSU offset: stride = lsuStride(%u)*(MT%u(%u) + PAD%u(%u))" % (lsuStride,tile01, kernel["MacroTile%u" % tile01], tile01, LdsPad)))
+            comment="LSU offset: stride = lsuStride(%u)*(MT%s(%u) + PAD%s(%u))" % (lsuStride, mtLabel, mtForLsu, mtLabel, LdsPad)))
         else:
           module.add(SMovB32(dst=sgpr(tmpSgpr), src=lsuStride, \
             comment="LSU offset: stride = lsuStride(%u) when umlds==True" % (lsuStride)))
@@ -8806,13 +8814,22 @@ class KernelWriterAssembly(KernelWriter):
       return idxAB, 0
     component = Component.LocalRead.find(self)
     info = component.getMxsTileSpanInfo(kernel, tc, tP["tile01Idx"], self.states.asmCaps)
+    mx2d = mxFreeTile(kernel, tc) > 1
+    vectorWidth = kernel.get("VectorWidth%s"%tc, 1)
     if info is None:
+      # 2D without TileSpan: VW WaveTiles share one SSSS VGPR.
+      if mx2d and vectorWidth > 1:
+        return idxAB // vectorWidth, 0
       return idxAB, 0
     vectorWidth = info["vectorWidth"]
     groupSize   = 2 * vectorWidth
     group       = idxAB // groupSize
     within      = idxAB %  groupSize
     scaleSel    = within // vectorWidth          # 0 = lower half-wave, 1 = partner half-wave
+    if mx2d:
+      # VW dests in a half-wave share the group's single SSSS; scaleSel still
+      # picks the partner scale row from the other half-wave of that VGPR.
+      return group, scaleSel
     regInHalf   = within %  vectorWidth
     # Only the lower half-wave of each group is loaded (LocalRead packs the loaded groups
     # contiguously and drops the partner-half vgprs), so map the logical block to the
@@ -13210,15 +13227,19 @@ class KernelWriterAssembly(KernelWriter):
         inc = int(self.states.lrvwUnrollA * kernel["NumWaveSplitK"] * tP["bpeDS"])
         comment = "(LocalReadVectorWidth*NumWaveSplitK*bpeDS)"
       else:
-        inc = int((kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad) * tP["bpeDS"])
+        mtForInc = kernel["MacroTile%s" % tP["tensorChar"]]
+        if tc in ("MXSA", "MXSB"):
+          mtForInc = mxTdmTileM(mtForInc, mxFreeTile(kernel, tc))
+        inc = int((mtForInc + LdsPad) * tP["bpeDS"])
         comment = " ((MT+PAD)*bpeDS)"
       if kernel["EnableMatrixInstruction"]:
         if kernel["UnrollMajorLDS%s" % tc]:
           if tc in ("MXSA", "MXSB"):
             # Tail-loop K-step between MFMA-K sub-iterations for MX scales,
             # gated by MXScaleFormat:
-            #   - Swizzled (HostPreSwizzle/InMemorySwizzle): MT * mxUnit * bpeDS,
-            #     scaled by matrixInstK (M-blocks interleaved on K).
+            #   - Swizzled (HostPreSwizzle/InMemorySwizzle): scaleRows * mxUnit
+            #     * bpeDS, scaled by matrixInstK (M-blocks interleaved on K).
+            #     1D scaleRows=MT; 2D scaleRows=MT/MXBlockFree (TDM k-split).
             #   - NoSwizzle (canonical): mxUnit * bpeDS; mxUnit already encodes
             #     the per-K-scale stride and is not multiplied by matrixInstK.
             subTc = tc[3]
@@ -13226,7 +13247,8 @@ class KernelWriterAssembly(KernelWriter):
             mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
             isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
             if isMxSwizzled:
-              inc = kernel["MacroTile%s"%tP["tensorChar"]] * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
+              scaleRows = mxTdmTileM(kernel["MacroTile%s"%tP["tensorChar"]], mxFreeTile(kernel, tc))
+              inc = scaleRows * tP["bpeDS"] * max(self.states.numReadsIterCoalescedMXSA,self.states.numReadsIterCoalescedMXSB)
               comment = " (bpeDS)"
               inc *= matrixInstK
             else:
@@ -13287,20 +13309,17 @@ class KernelWriterAssembly(KernelWriter):
           if "MXS" in tc:
             subTc = tc[3]
             mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
-            # K-step between MFMA-K sub-iterations for MX scales:
-            #   - Swizzled (HostPreSwizzle/InMemorySwizzle):
-            #       MT * mxUnit (M-blocks interleaved on K)
-            #   - NoSwizzle (canonical), LDS layout follows UnrollMajorLDS<tc>:
-            #       UMLDS=1 (K-major LDS):  mxUnit (K-scales contiguous per M)
-            #       UMLDS=0 (M-major LDS):  (MT + LdsPad) * mxUnit (step over M-row, mxUnit K-scales)
+            # K-step between MFMA-K sub-iterations for MX scales.
+            # 1D (MXBlockFree=1): swizzled MT*mxUnit; K-major mxUnit;
+            # M-major (MT+pad)*mxUnit. 2D replaces MT with scale-rows
+            # (MT/MXBlockFree) so kg1 lands on the TDM-packed next byte.
             mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
             isMxSwizzled  = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
-            if isMxSwizzled:
-              offsetInc = kernel["MacroTile%s"%tP["tensorChar"]] * mxUnit
-            elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
-              offsetInc = mxUnit
-            else:
-              offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * mxUnit
+            offsetInc = mxLdsKStride(
+                kernel["MacroTile%s"%tP["tensorChar"]], mxFreeTile(kernel, tc), mxUnit,
+                swizzled=isMxSwizzled,
+                unrollMajor=kernel["UnrollMajorLDS%s" % tP["tensorChar"]],
+                ldsPad=LdsPad)
           elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             if tc in ("MXSA", "MXSB"):
               offsetInc = matrixInstK * max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
@@ -19809,6 +19828,14 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      if ("MXS" in tc):
+        mxTileLds = mxFreeTile(kernel, tc)
+        if mxTileLds > 1:
+          # K-split LDS dest is (MT/MXBlockFree) * (mxDU/numComp). Do not do
+          # (MT/MXBlockFree)//numComp first: MT/128 can be 1, which floors to 0
+          # and both components write the same LDS byte. 0 is still correct
+          # when scaleRows*mxDU < numComp: extra comps share LDS+0 (dim0 idle).
+          dataBytes = mxTdmTileM(mt, mxTileLds) * du // numComp * int(bpe * 4) // (4 * dim1Divisor)
       _segOffAB = kernel["LDSSegInterleaveOffsets"] if kernel.get("LDSSegmentInterleave") == 1 else {}
       # Active tensor only gets the component wave jump; the baseline tensor (aBaseline/bBaseline) is untouched.
       _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and (
@@ -19862,17 +19889,27 @@ class KernelWriterAssembly(KernelWriter):
       if ("MXS" in tc):
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
+        mxTile = mxFreeTile(kernel, tc)
         dim0 = tmpSgprIdx
         dim1 = sizeRefName(3)
         with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgpr2") as tmpSgpr:
           tmpSgprWaveOffset = tmpSgpr.idx
           if numMxKGroups < numComp:
-            # M/N-splitting: offset within same k_group along tile dimension
-            mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
-            mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
-            mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
-            mod.add(SSubU32(sgpr(dim0), sgpr(dim0), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
-            mod.add(SCMovB32(sgpr(dim0), 0, "set to 0 for waves that no enough data to load"))
+            tileM = mxTdmTileM(mt, mxTile)
+            if tileM >= numComp:
+              # M/N-splitting: offset within same k_group along tile dimension
+              mod.add(VReadfirstlaneB32(sgpr(tmpSgprWaveOffset), vgpr("Serial"), "first tId"))
+              mod.add(SLShiftRightB32(sgpr(tmpSgprWaveOffset), ceil(log2(wavelen)) + 1, sgpr(tmpSgprWaveOffset), "wId=fTid // wavelen // 2"))
+              mod.add(SMulI32(sgpr(tmpSgprWaveOffset), sgpr(tmpSgprWaveOffset), round(mt // numComp), "woffset = wId * (mt // numComp)"))
+              mod.add(SSubU32(sgpr(dim0), sgpr(dim0), sgpr(tmpSgprWaveOffset), "consider multiple waves"))
+              mod.add(SCMovB32(sgpr(dim0), 0, "set to 0 for waves that no enough data to load"))
+            # tileM < numComp: do not M-split and do not zero extra comps.
+            # A 0-wide TDM to the same LDS dest can clobber Comp0's scale byte.
+            # All comps issue the same small tile (tile0 keeps the full footprint).
+          if mxTile > 1:
+            # remain M/N in scale-row units: ceil(remain / MXBlockFree)
+            mod.add(SAddU32(sgpr(dim0), sgpr(dim0), mxTile - 1, f"ceil(remain / MXBlockFree({mxTile}))"))
+            mod.add(SLShiftRightB32(sgpr(dim0), hex(int(log2(mxTile))), sgpr(dim0), f"remain scale rows = remain M / MXBlockFree({mxTile})"))
           mod.add(comp.setTensorDim0(descSgprName(1), dim0, self, ceil(log2(mxUnit)), True))
           mod.add(comp.setTensorDim1(descSgprName(1), dim1, self, ceil(log2(duScale*mxUnit)), True))
 #        mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, ceil(log2(mxUnit)), True))
@@ -19917,15 +19954,23 @@ class KernelWriterAssembly(KernelWriter):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
       sizeShifter = 1 if dtype.isFloat4() else 0
       numMxKGroups = sizeTile0 // mxUnit
-      if numMxKGroups >= numComp:
+      mxTile = mxFreeTile(kernel, tc)
+      kSplit = numMxKGroups >= numComp
+      tile0 = mxTdmTile0(sizeTile1, mxUnit, mxTile, numComp, kSplit)
+      if kSplit:
         # K-splitting: enough k_groups to divide among wave components
-        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit, self, sizeShifter))
+        mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // numComp // dim1Divisor, self))
       else:
         # M/N-splitting: not enough k_groups, split tile dimension instead
-        mod.add(comp.setTensorTile0(descSgprName(1), sizeTile1 * mxUnit // numComp, self, sizeShifter))
+        mod.add(comp.setTensorTile0(descSgprName(1), tile0, self, sizeShifter))
         mod.add(comp.setTensorTile1(descSgprName(1), numMxKGroups // dim1Divisor, self))
-      mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
+      if mxTile > 1:
+        with self.allocTmpSgpr(1, tag="initTDMDescriptorWaveSeparatedImpl_mxTileStride") as tmpStride:
+          mod.add(SLShiftRightB32(sgpr(tmpStride.idx), hex(int(log2(mxTile))), sgpr(sizeRefName(ti)), f"stride0 = Size / MXBlockFree({mxTile})"))
+          mod.add(comp.setTensorStride0(descSgprName(1), tmpStride.idx, ceil(log2(mxUnit)), True))
+      else:
+        mod.add(comp.setTensorStride0(descSgprName(1), sizeRefName(ti), ceil(log2(mxUnit)), True))
     else:
       is6bit = dtype.is6bitFloat()
       if is6bit:

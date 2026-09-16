@@ -9,7 +9,9 @@ from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
+from ..Common.MxScaleLayout import mxFreeTile, mxTdmMSplitStride, mxTdmTileM
 # from ..KernelWriterAssembly import KernelWriterAssembly
+
 
 class TensorDataMoverLoad(TensorDataMover):
     kernel = {"TDMInst": 3}
@@ -129,6 +131,9 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
+                    mxTile = mxFreeTile(kernel, tc)
+                    if mxTile > 1:
+                        mod.add(SLShiftRightB32(sgpr(gsuOffsetSgprIdx), hex(int(log2(mxTile))), sgpr(gsuOffsetSgprIdx), f"MXS 2D: Size / MXBlockFree({mxTile})"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))
@@ -198,7 +203,15 @@ class TensorDataMoverLoad(TensorDataMover):
             waveOffsetSgprIdx = tmpSgprRes.idx + 2
             mod.add(SMovB64(sgpr(tmpSgprIdx, 2), 0))
             if ("MXS" in tc):
-                mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mt * bpe), f"wgId * mxUnit({mxUnit}) * MT({mt}) * bpe({bpe})"))
+                mxTile = mxFreeTile(kernel, tc)
+                if mxTile > 1:
+                    # (wg*MT)/MXBlockFree, not wg*ceil(MT/free): a 224-row tile
+                    # starts at N=224 → scale row 1, not row 2.
+                    mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mt * mxUnit * bpe), f"wgId * MT({mt}) * mxUnit({mxUnit}) * bpe({bpe})"))
+                    mod.add(SLShiftRightB32(sgpr(tmpSgprIdx), hex(int(log2(mxTile))), sgpr(tmpSgprIdx), f"MXS 2D: (wg*MT)/MXBlockFree({mxTile})"))
+                else:
+                    mtScale = mxTdmTileM(mt, mxTile)
+                    mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mtScale * bpe), f"wgId * mxUnit({mxUnit}) * (MT({mt})/MXBlockFree({mxTile})) * bpe({bpe})"))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
                 mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
@@ -207,14 +220,20 @@ class TensorDataMoverLoad(TensorDataMover):
             if ("MXS" in tc):
                 mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit
+                mxTile = mxFreeTile(kernel, tc)
                 if numMxKGroups >= numComp:
                     # K-splitting: offset by stride to next k_group
                     scale = numMxKGroups // numComp
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), (mxUnit * numMxKGroups // numComp), f"woffset = wCompId * mxUnit({mxUnit}) * numMxKGroups({numMxKGroups}) // numComp({numComp})"))
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"woffset *= Size{INDEX_CHARS[tIdx]}"))
+                    if mxTile > 1:
+                        mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), hex(int(log2(mxTile))), sgpr(waveOffsetSgprIdx), f"MXS 2D: Size / MXBlockFree({mxTile})"))
                 else:
-                    # M/N-splitting: offset within same k_group along tile dimension
-                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * mxUnit * bpe), f"woffset = wCompId * mt//numComp({mt // numComp}) * mxUnit({mxUnit}) * bpe({bpe})"))
+                    # M/N-splitting: offset within same k_group along tile dimension.
+                    # 0 when scale-rows < numComp: all comps share the WG start
+                    # (extra comps are 0-wide via dim0).
+                    mSplit = mxTdmMSplitStride(mt, mxTile, numComp)
+                    mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mSplit * mxUnit * bpe), f"woffset = wCompId * mSplit({mSplit}) * mxUnit({mxUnit}) * bpe({bpe})"))
             else:
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
@@ -227,6 +246,9 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), gsuOffsetBytes, f"gsuOffset = gsuIterOffset * DepthU({depthU}) * bpe({bpe})"))
                 if "MXS" in tc:
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), sgpr(f"Size{INDEX_CHARS[tIdx]}"), f"MXS: scale GSU offset by tile size Size{INDEX_CHARS[tIdx]}"))
+                    mxTile = mxFreeTile(kernel, tc)
+                    if mxTile > 1:
+                        mod.add(SLShiftRightB32(sgpr(gsuOffsetSgprIdx), hex(int(log2(mxTile))), sgpr(gsuOffsetSgprIdx), f"MXS 2D: Size / MXBlockFree({mxTile})"))
                 elif tlu:
                     unrollStride = writer.strideRef(tc, unrollSummation[-1])
                     mod.add(SMulI32(sgpr(gsuOffsetSgprIdx), sgpr(gsuOffsetSgprIdx), unrollStride, "tlu=1, scale GSU offset by unroll stride"))

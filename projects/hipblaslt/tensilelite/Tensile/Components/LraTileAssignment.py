@@ -32,6 +32,7 @@ from rocisa.functions import vectorStaticRemainder, \
 from ..Component import LraTileAssignment, LraTileProperties, LocalRead
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
+from ..Common.MxScaleLayout import mxFreeTile, mxLraFreeShift
 from dataclasses import dataclass
 
 @dataclass
@@ -918,7 +919,51 @@ class LraTileAssignmentMFMA(LraTileAssignment):
            writer.vgprPool.checkIn(reMap0)
            writer.vgprPool.checkIn(reMap1)
 
-        with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
+        mxTile = mxFreeTile(kernel, tc)
+        mxShift = mxLraFreeShift(mxTile)
+
+        if mxShift:
+            # 2D: scale row = floor(M_off / MXBlockFree). Extra WaveTiles are
+            # localReadMX vIdx * MIWGShape / MXBlockFree. TileSpan uses the same
+            # 1D geometry gate: wave-split adds hiOffset (M-elements * strideTile)
+            # before the shift; after / MXBlockFree a small partnerΔ maps both
+            # half-waves onto the same scale row. Non-split uses nIdx=wtid so
+            # lanes MI..2MI-1 do the same.
+            if tileSpan and not tileSpanWaveSplit:
+                with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
+                    module.add(vectorStaticRemainder(dummy, tReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo,
+                        "MXS 2D TileSpan non-split: nIdx = wtid"))
+                    module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo,
+                        "MXS 2D TileSpan non-split: nOffset = nIdx * nStride(%u)" % strideTile))
+                    module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo,
+                        "MXS 2D TileSpan non-split: nOffset *= vw(%u)" % vectorWidth))
+                    module.add(VLShiftRightB32(dst=vgpr(tReg), shiftHex=hex(mxShift), src=vgpr(tReg),
+                        comment="MXS 2D: scale row = nOffset / MXBlockFree(%u)" % mxTile))
+            elif num1DWaves > 1:
+                with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
+                    module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes,
+                        "MXS 2D: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
+                    module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo,
+                        "MXS 2D: wtid0 = wtid %% num1DWaves(%u)" % num1DWaves))
+                    module.add(vectorStaticMultiply(vgpr(tReg), vgpr(dummy), strideWave, tmpSgprInfo,
+                        "MXS 2D: wave M offset = wtid0 * W0Stride(%u)" % strideWave))
+                    if tileSpanWaveSplit:
+                        hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
+                        tileDim = "M" if tile01 == 0 else "N"
+                        module.add(vectorStaticDivide(dummy, dividendReg, matrixInstTO, tmpVgprRes,
+                            "MXS 2D TileSpan wave-split: hiSel = tid / MI_dim(%u)" % matrixInstTO))
+                        module.add(VAndB32(dst=vgpr(dummy), src0=1, src1=vgpr(dummy),
+                            comment="MXS 2D TileSpan wave-split: hi = (tid / MI_dim) & 1"))
+                        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), hiOffset, vgpr(tReg), tmpSgprInfo,
+                            "MXS 2D TileSpan wave-split: + hi * hiOffset(%u) (%s); then / MXBlockFree" % (hiOffset, tileDim)))
+                    module.add(VLShiftRightB32(dst=vgpr(tReg), shiftHex=hex(mxShift), src=vgpr(tReg),
+                        comment="MXS 2D: scale row = wave offset / MXBlockFree(%u)" % mxTile))
+            else:
+                module.add(VMovB32(dst=vgpr(tReg), src=0,
+                    comment="MXS 2D: one wave along free dim, scale row 0"))
+
+        if not mxShift:
+          with writer.allocTmpSgpr(1, tag="LraTileAssignmentMFMA_tmpSgprInfo") as tmpSgprInfo:
 
             if perpBlockSize > 0:
                rotVgpr = writer.vgprPool.checkOut(1, tag="perpPerm_rotVgpr") # remainder
