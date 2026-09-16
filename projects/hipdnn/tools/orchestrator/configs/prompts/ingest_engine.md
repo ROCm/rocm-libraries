@@ -33,6 +33,27 @@ gated on `tune` below.
   its log directory. Open that directory. The corpus join report, with the specific
   unaccounted graph names, is in it.
 
+## You are probably not starting from nothing
+
+This is attempt ${loop.attempt}, and nothing a previous attempt did has been undone: the
+checkout still holds its edits, and the build and install trees still hold whatever it
+built. Before you rebuild or regenerate anything:
+
+```
+git -C ${vars.repo_root} status --short     # what previous attempts changed
+ls ${vars.ingestor_build_dir}               # an existing build tree -- reuse it
+ls ${vars.ingestor_install_dir}             # an existing install
+```
+
+A previous round that failed late may have left a **correct, current install** and failed
+only on the corpus join. Rebuilding that from scratch costs this attempt's budget for no
+gain. Check whether the install is current first -- the rule below still holds, so if you
+changed nothing that affects it, it is still valid evidence.
+
+If `${vars.ingestor_file}` already exists, read it: it is a previous attempt's claim
+about this same installation, and the corpus outcomes in it tell you which graphs were
+already accounted for and which were not. Say in `summary` what you reused.
+
 # The corpus is the job, and the denominator is the directory
 
 `${inputs.corpus_dir}` is the corpus. **Every file under it must end this round with

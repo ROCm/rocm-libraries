@@ -741,7 +741,13 @@ def _coerce(spec: InputSpec, value: Any) -> Any:
     resolved = Path(str(value)).expanduser().resolve()
     if spec.exists and not resolved.exists():
         raise ConfigError(f"input '{spec.name}': {resolved} does not exist")
-    return str(resolved)
+    # as_posix, not str: a rendered path is routinely pasted into a prompt, and on
+    # Windows a native separator lands inside a JSON string literal as an escape --
+    # `D:\test-graphs` carries a TAB, `\d` and `\r` are invalid escapes, and the agent
+    # reads a corrupted path or fails to parse at all. Forward slashes are accepted by
+    # the Win32 APIs, CMake and every tool this orchestrator launches, and they make
+    # ${inputs.*} agree with ${vars.*}, which are spelled with / in the registry.
+    return resolved.as_posix()
 
 
 def _require(mapping: Mapping[str, Any], key: str, path: Path, where: str) -> Any:

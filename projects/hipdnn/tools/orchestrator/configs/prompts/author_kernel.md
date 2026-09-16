@@ -21,6 +21,34 @@ directory its logs are in. Open `stdout.log` in that directory: the hipRTC compi
 diagnostic, the list of unresolved entry points, or the failing contract checks are
 there. The one-line note is not the evidence.
 
+## You are probably not starting from nothing
+
+This is attempt ${loop.attempt}. Every attempt in this run shares one directory, and a
+previous attempt's work is still on disk -- it is not cleaned between rounds. **Before
+you design anything, look:**
+
+```
+ls ${vars.kernel_dir}          # kernel sources a previous attempt wrote
+ls ${run.dir}                  # its harness, build tree, logs, reports
+```
+
+If a kernel is already there, **your job is to finish or repair it, not to replace it.**
+Read it, read any `*-report.json` and `logs/` beside it, and find out how far it got. A
+previous round that ran out of time may have left a kernel that already compiles and
+already passes its own numerics -- in which case the missing piece is the contract file
+below, and rewriting the kernel from scratch throws away work that was already correct
+and spends this attempt's budget re-deriving it.
+
+Start over only when the evidence says the existing kernel is wrong, and say in
+`summary` what you found and why you kept, repaired or replaced it.
+
+## Budget
+
+Your wall-clock budget is finite and a round that overruns it is killed with no partial
+credit. **Write the contract file as soon as the kernel and its harness results exist**,
+then improve things and rewrite it if you learn more. A complete result that is later
+refined beats a perfect result that never got written down.
+
 # Where things go
 
 Everything you write goes under `${run.dir}`:

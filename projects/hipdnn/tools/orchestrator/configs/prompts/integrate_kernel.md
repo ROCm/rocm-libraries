@@ -39,8 +39,35 @@ contract, so read it rather than re-deriving anything from the tree.
 **`${loop.feedback_path}`** accumulates one section per failed round, naming the step
 that failed and the directory its logs are in. Open that directory's `stdout.log`. The
 failing check names and the compiler diagnostics are there; the one-line note is not the
-evidence. If a previous round left partly-working code in the tree, you are fixing it,
-not starting over.
+evidence.
+
+## You are probably not starting from nothing
+
+This is attempt ${loop.attempt}, and nothing a previous attempt wrote has been reverted.
+Unlike the authoring stage, your output lands in the **checkout**, so a previous round's
+work is sitting in the product tree right now. Before you generate or write anything:
+
+```
+git -C ${vars.repo_root} status --short        # everything a previous attempt changed
+ls ${vars.ingestor_dir}                        # the pack, its symbols, its descriptors
+ls ${vars.provider_tests_dir}                  # the bundle cases
+```
+
+If `${vars.integration_file}` already exists, a previous attempt got as far as writing a
+contract; read it and treat it as a claim to verify, not as truth.
+
+**Repair what is there rather than regenerating over it.** Re-running the generator on a
+tree that already holds a half-finished pack can quietly reintroduce placeholders that a
+previous round had already filled in -- run
+`generate.py --check-placeholders` first and let its output tell you what is genuinely
+missing. Say in `summary` what you found and whether you kept, repaired or regenerated
+it.
+
+## Budget
+
+A round that overruns its budget is killed with no partial credit, and the work above is
+what the next attempt inherits. Land a coherent tree and write the contract as soon as
+the pieces exist; refine afterwards.
 
 # This is the create path. There is no pack to attach to.
 

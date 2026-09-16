@@ -209,7 +209,10 @@ def _stringify(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, Path):
-        return str(value)
+        # Same reason as flow._coerce: ${run.dir} and every `type: path` output are
+        # interpolated into prompts, and a Windows separator inside a JSON string
+        # literal is an escape sequence, not a path.
+        return value.as_posix()
     if value is None:
         return ""
     return str(value)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,24 @@ from runner import Engine, Flow, ToolRegistry, bind_inputs, validate_refs
 from runner.errors import ConfigError, OrchestratorError
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_TOOLS = HERE / "configs" / "tools.yaml"
+
+#: The registry is machine-local, and the copy in this repository is deliberately a
+#: template: it names paths that exist on nobody's machine. Editing it in place puts a
+#: home directory into every later diff of a tracked file, so there are two ways to
+#: point at a real one, in precedence order:
+#:
+#:   1. --tools, or $HIPDNN_ORCHESTRATOR_TOOLS;
+#:   2. configs/tools.local.yaml, which .gitignore already excludes.
+#:
+#: (2) is the same file Graph Studio's flow bridge prefers (electron/flowpaths.cjs),
+#: so dropping a registry there configures the CLI and the desktop app together and
+#: neither needs a flag. With none of them present the template is used, which is what
+#: produces "tool `claude`: ... does not exist" on a fresh checkout.
+_LOCAL_TOOLS = HERE / "configs" / "tools.local.yaml"
+DEFAULT_TOOLS = Path(
+    os.environ.get("HIPDNN_ORCHESTRATOR_TOOLS")
+    or (_LOCAL_TOOLS if _LOCAL_TOOLS.is_file() else HERE / "configs" / "tools.yaml")
+)
 
 
 def main(argv: list[str] | None = None) -> int:

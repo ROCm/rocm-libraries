@@ -48,6 +48,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -72,6 +74,43 @@ BANNED_STEMS = frozenset(
         "cat",
     }
 )
+
+
+def _group_kwargs() -> dict:
+    """Popen kwargs that make the harness killable as a tree.
+
+    Mirrors runner/process.py: a new process group on Windows, a new session on
+    POSIX, so the children of a hung harness can be reached.
+    """
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kill_tree(process: subprocess.Popen) -> None:
+    """Kill the harness and everything it spawned. Best effort, never raises."""
+    if process.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                capture_output=True,
+                check=False,
+            )
+        else:
+            group = os.getpgid(process.pid)
+            os.killpg(group, signal.SIGTERM)
+            for _ in range(20):
+                if process.poll() is not None:
+                    return
+                time.sleep(0.1)
+            os.killpg(group, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            process.kill()
+        except OSError:
+            pass
 
 
 def _hash_file(path: Path) -> str:
@@ -209,6 +248,13 @@ def main() -> int:
     parser.add_argument(
         "--cwd", help="working directory for the harness (default: current directory)"
     )
+    parser.add_argument(
+        "--path-prepend",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="directory to prepend to the harness's PATH; repeatable, first wins",
+    )
     args = parser.parse_args()
 
     out_path = Path(args.out)
@@ -290,14 +336,35 @@ def main() -> int:
     process_started = False
     timed_out = 0
     exit_code = -1
+
+    # The harness is a native binary linked against the installed hipDNN, so it loads
+    # amdhip64_7.dll and friends. On Windows a missing ROCm bin on PATH does not raise
+    # -- the OS terminates the process before main with 0xC0000135, which arrives here
+    # as a plain nonzero exit and an absent report, i.e. indistinguishable from a
+    # harness that ran and produced nothing. Prepend for the child only, the same way
+    # scripts/exec_at.py does for every other native launch in a flow.
+    env = os.environ.copy()
+    if args.path_prepend:
+        env["PATH"] = (
+            os.pathsep.join(args.path_prepend) + os.pathsep + env.get("PATH", "")
+        )
+
     started_at = time.time()
     try:
-        proc = subprocess.run(argv, cwd=cwd, timeout=args.timeout)
-        process_started = True
-        exit_code = proc.returncode
-    except subprocess.TimeoutExpired:
-        timed_out = 1
-        notes.append(f"harness timed out after {args.timeout:g}s and was killed.")
+        # Popen + kill_tree rather than subprocess.run(timeout=): run() kills only the
+        # direct child, and a GPU-hung harness that spawned anything leaves those
+        # children holding the device for every later attempt in the loop.
+        proc = subprocess.Popen(argv, cwd=cwd, env=env, **_group_kwargs())
+        try:
+            exit_code = proc.wait(timeout=args.timeout)
+            process_started = True
+        except subprocess.TimeoutExpired:
+            timed_out = 1
+            _kill_tree(proc)
+            proc.wait()
+            notes.append(
+                f"harness timed out after {args.timeout:g}s; it and its children were killed."
+            )
     except OSError as error:
         notes.append(f"harness could not be started: {error}.")
     duration_s = time.time() - started_at

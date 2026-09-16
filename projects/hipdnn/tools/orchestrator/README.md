@@ -173,7 +173,7 @@ result from the installed tree with a complete corpus accounting. Three agents, 
 running one skill from `projects/hipdnn/tools/ai/skills`, in order:
 
 ```
-preflight   profile, identity, configure, cache_check, build, comgr, venv, install, hash
+preflight   device_arch, profile, identity, configure, cache_check, build, comgr, venv, install, hash
 loop author_cycle      (max 4, until mismatched_outputs == 0)
   author         hipdnn-kernel-authoring    -> authoring.json
   author_scope   nothing in the product tree changed
@@ -193,8 +193,20 @@ loop ingestor_cycle    (max 3, until corpus.meets_target == 1)
 $P orchestrate.py run configs/flows/ingestor-engine-kernel.yaml \
     --input graph=test-graphs/conv_fwd_pointwise_fp32_nchw.json \
     --input engine_name=hipkernel:ConvPointwiseRtc \
-    --input corpus_dir=test-graphs --tee
+    --input corpus_dir=test-graphs \
+    --input arch=gfx1151 --tee
 ```
+
+`arch` is required and has no default. It reaches `-DGPU_TARGETS`, the pack and every
+device gate, and nothing between the start of the run and the first kernel launch can
+tell a wrong value from a right one -- hipRTC returns `HIPRTC_SUCCESS` compiling for an
+architecture the box does not have, so `rtc_compile` stays green and the mistake only
+lands in `numerics`, after a superbuild and up to four agent rounds. The `device_arch`
+preflight now compares it against `hipInfo`'s `gcnArchName` and fails in under a second
+if they disagree.
+
+`build_parallel` defaults to 16 (AGENTS.md's cap) for both superbuilds; raise it on a
+bigger machine.
 
 It configures its own build tree (`build-ingestor`) and install prefix
 (`install-ingestor`) with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` and

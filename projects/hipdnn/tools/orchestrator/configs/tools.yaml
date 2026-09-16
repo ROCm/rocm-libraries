@@ -49,6 +49,21 @@ vars:
   # in this repository; the superbuild skill installs it. CMAKE_PROGRAM_PATH points the
   # preset at it on Windows.
   clang_bin: D:/develop/dist/clang/bin
+  # The directory holding ninja. Every flow that configures with `-G Ninja` needs it
+  # findable by cmake, and "it is on PATH" is not true everywhere: a winget or scoop
+  # shim directory is per-user, and the desktop app inherits whatever environment the
+  # window manager started it with rather than a login shell's. CMake does not fall
+  # back -- it stops with "unable to find a build program corresponding to Ninja.
+  # CMAKE_MAKE_PROGRAM is not set", which reads like a broken preset rather than a
+  # missing directory. Prepended to the cmake tool's PATH below.
+  ninja_bin: C:/Users/dev/AppData/Local/Microsoft/WinGet/Links
+  # The interpreter CMake should build and pack against. Not decorative: descriptor
+  # packaging imports rocm_kpack, which needs zstandard and msgpack, and CMake's own
+  # FindPython picks the first interpreter it finds -- typically a bare system Python
+  # with neither. The ROCm wheel venv has both and is what the hipdnn-python component
+  # builds its extension for, so pinning it keeps the packer and the extension on one
+  # interpreter.
+  python_exe: D:/develop/latest_wheels/Scripts/python.exe
 
 # A profile is an overlay on the `vars` and `tools` above, selected with
 # `--profile NAME`. It exists because this registry is the one machine-local file and
@@ -70,6 +85,12 @@ profiles:
       # this never gets consulted. Pointed at the real directory anyway, because a
       # variable naming a path that does not exist is a trap for the next reader.
       clang_bin: /opt/rocm/lib/llvm/bin
+      # Distro ninja. Harmless to prepend a directory that is already on PATH, and it
+      # keeps the cmake tool's spelling identical on both platforms.
+      ninja_bin: /usr/bin
+      # A venv with zstandard and msgpack, not the distro interpreter, for the kpack
+      # reason above.
+      python_exe: /path/to/venv/bin/python
       # Two differences from the Windows spellings above, and both are load-bearing.
       # HIPDNN_PLUGIN_ROOTDIR is CMAKE_INSTALL_BINDIR only under WIN32 and
       # CMAKE_INSTALL_LIBDIR otherwise, so plugins land in lib/ rather than bin/; and
@@ -89,10 +110,16 @@ tools:
       windows: C:/Users/dev/.local/bin/claude.exe
       linux: claude
 
+  # path_prepend, not an -DCMAKE_MAKE_PROGRAM in the flow: where ninja lives is a
+  # property of the machine, and a flow that spelled the path would be this machine's
+  # flow. `cmake --build` re-invokes ninja too, so both the configure and the build
+  # steps need it.
   cmake:
     exe:
       windows: C:/Program Files/CMake/bin/cmake.exe
       linux: cmake
+    path_prepend:
+      - "${vars.ninja_bin}"
 
   ctest:
     exe:

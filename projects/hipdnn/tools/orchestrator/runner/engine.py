@@ -207,8 +207,8 @@ class Engine:
                     run={
                         "id": self.run_id,
                         "name": self.flow.name,
-                        "dir": str(self.run_dir),
-                        "feedback_path": str(self.feedback_path),
+                        "dir": self.run_dir.as_posix(),
+                        "feedback_path": self.feedback_path.as_posix(),
                     },
                 )
                 try:
@@ -277,10 +277,10 @@ class Engine:
                         {
                             "iteration": 0,
                             "attempt": 1,
-                            "attempt_dir": str(
+                            "attempt_dir": (
                                 self.run_dir / (group or "") / "iter-00"
-                            ),
-                            "feedback_path": str(self.feedback_path),
+                            ).as_posix(),
+                            "feedback_path": self.feedback_path.as_posix(),
                             "max_iterations": budget,
                         }
                         if isinstance(node, LoopGroup)
@@ -423,8 +423,11 @@ class Engine:
             run={
                 "id": self.run_id,
                 "name": self.flow.name,
-                "dir": str(self.run_dir),
-                "feedback_path": str(self.feedback_path),
+                # as_posix for the same reason flow._coerce uses it: these land in
+                # prompt text, and a Windows separator inside a JSON string literal is
+                # an escape sequence rather than a path.
+                "dir": self.run_dir.as_posix(),
+                "feedback_path": self.feedback_path.as_posix(),
             },
             step={"result_file": result_file or ""},
             loop=loop,
@@ -444,8 +447,10 @@ class Engine:
             loop_ctx = {
                 "iteration": iteration,
                 "attempt": iteration + 1,
-                "attempt_dir": str(attempt_dir),
-                "feedback_path": str(self.feedback_path),
+                # as_posix: these are interpolated into prompts, where a Windows
+                # separator inside a JSON string literal is an escape, not a path.
+                "attempt_dir": attempt_dir.as_posix(),
+                "feedback_path": self.feedback_path.as_posix(),
                 "max_iterations": budget,
             }
             self.log(f"[{group.id}] iteration {iteration + 1}/{budget}")
@@ -494,9 +499,22 @@ class Engine:
                 )
                 self._append_feedback(group, iteration, resolver)
             else:
+                # An aborted round leaves no step outputs, so `${loop.previous...}` is
+                # empty for the next attempt and this note is the only handover it gets.
+                # Name the two directories that survive: the abandoned attempt's own
+                # evidence, and the run directory, whose artifacts are NOT cleaned
+                # between iterations. Without that, a fresh session rebuilds from
+                # scratch beside work that was already correct.
                 self._write_feedback(
                     iteration,
                     f"The previous attempt did not complete: {aborted}\n\n"
+                    f"Its evidence is in {attempt_dir.as_posix()} -- the failing step's "
+                    f"stdout.log and stderr.log are there, and they say more than this "
+                    f"note does.\n\n"
+                    f"Anything that attempt wrote under {self.run_dir.as_posix()} is "
+                    f"still on disk; nothing is reverted between attempts. Look before "
+                    f"you rebuild: a round that ran out of time can leave work that is "
+                    f"already correct and only needs finishing.\n\n"
                     f"Treat this as a failed round. Produce a complete result this time, "
                     f"including every file the instructions require.",
                 )

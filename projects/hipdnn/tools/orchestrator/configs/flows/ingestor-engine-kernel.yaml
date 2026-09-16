@@ -92,8 +92,16 @@ inputs:
     type: path
     required: true
   arch:
-    description: Target GPU architecture. Compiles, packs and device proof are all scoped to it.
-    default: gfx90a
+    description: >-
+      Target GPU architecture. Compiles, packs and device proof are all scoped to it.
+      Required on purpose: it used to default to gfx90a, and a default is the worst
+      possible answer here because nothing cheap catches a wrong one. hipRTC compiles
+      happily for an architecture the box does not have (verified: gfx90a and gfx1151
+      both return HIPRTC_SUCCESS on a gfx1151 machine), so rtc_compile stays green and
+      the mistake only surfaces at the first device launch, four authoring rounds of an
+      opus agent later. The device_arch step below checks this against the GPU actually
+      present before anything expensive runs.
+    required: true
   kernel_source_kind:
     description: >-
       embedded_source or hiprtc_file. embedded_source is the create-path default: the
@@ -122,6 +130,13 @@ inputs:
   notes:
     description: Extra constraints for the agents (use =@file.md for a long brief)
     default: ""
+  build_parallel:
+    description: >-
+      Compile jobs for the two full superbuilds. 16 rather than the hardware thread
+      count: AGENTS.md caps it there, and oversubscribing a 16C/32T box with 48 links
+      costs wall time rather than saving it. Raise it on a bigger machine.
+    type: int
+    default: 16
 
 vars:
   provider_dir: "${vars.repo_root}/dnn-providers/hip-kernel-provider"
@@ -157,6 +172,35 @@ vars:
 steps:
 
   # ---------------------------------------------------------------- preflight
+
+  # First step on purpose, and cheap. `arch` reaches -DGPU_TARGETS, the pack, and every
+  # device gate, but nothing between here and the first kernel launch can tell a wrong
+  # value from a right one: hipRTC compiles for an absent architecture and returns
+  # HIPRTC_SUCCESS, so rtc_compile goes green and the run only breaks in numerics --
+  # after a superbuild and up to four opus authoring rounds. One hipInfo call up front
+  # turns that into a sentence before anything is spent.
+  #
+  # exec_at.py rather than a registered tool: hipInfo lives beside the ROCm runtime it
+  # loads, so it needs the same PATH prepend as every other native launch here.
+  - id: device_arch
+    tool: python
+    args:
+      - "${vars.scripts_dir}/exec_at.py"
+      - "--exe"
+      - "${vars.rocm_bin}/hipInfo${platform.exe_suffix}"
+      - "--produced-by"
+      - "the ROCm installation named by rocm_path in configs/tools.yaml"
+      - "--path-prepend"
+      - "${vars.rocm_bin}"
+    cwd: "${vars.rocm_bin}"
+    timeout: 300
+    outputs:
+      # hipInfo prints one block per device; this takes the last, which is the same
+      # device index 0 the runtime defaults to on a single-GPU box.
+      detected: { regex: 'gcnArchName:\s*(\S+)' }
+    assert:
+      - that: "${steps.device_arch.outputs.detected} == ${inputs.arch}"
+        message: "--input arch does not match the GPU in this machine; every compile, the pack and every device gate would target an architecture that is not here, and hipRTC will not complain - re-run with the architecture this step detected"
 
   # Which integration cases exercise this graph, derived from its node types so the
   # operation-wide gate moves with the input instead of being pinned to one operation.
@@ -239,6 +283,9 @@ steps:
       - "-B"
       - "${vars.ingestor_build_dir}"
       - "-DROCM_PATH=${vars.rocm_path}"
+      # Steers find_program() only. It does NOT choose the compiler: rocm-clang.cmake
+      # derives CMAKE_C/CXX_COMPILER strictly from ${ROCM_PATH}/lib/llvm/bin, so a
+      # clang_bin pointing at a different LLVM changes nothing about what compiles.
       - "-DCMAKE_PROGRAM_PATH=${vars.clang_bin}"
       - "-DGPU_TARGETS=${inputs.arch}"
       - "-DCMAKE_INSTALL_PREFIX=${vars.ingestor_install_dir}"
@@ -254,6 +301,32 @@ steps:
       # by this flow. Turning tidy off buys a run, and costs tidy coverage on the code the
       # agents write into kernel_ingestor_engine/. Drop this flag once the branch is clean.
       - "-DENABLE_CLANG_TIDY=OFF"
+      # ENABLE_CLANG_FORMAT is a hard error, not a warning: CheckToolVersion.cmake:134
+      # stops the configure outright when clang-format is not on PATH or in the CMake
+      # program/prefix paths. The ROCm wheel's LLVM is a trimmed one and does not ship
+      # it, so a machine whose only clang is the wheel cannot configure at all. The
+      # canonical Windows build script (WIP/.../run-build.bat) passes this flag for the
+      # same reason. Formatting is enforced by pre-commit, which is where it belongs --
+      # nothing this flow does depends on the build system also checking it.
+      - "-DENABLE_CLANG_FORMAT=OFF"
+      # Descriptor packaging needs rocm_kpack, and it is only reachable three ways:
+      # /opt/rocm-kpack/python (which only the hipDNN dev container has), an explicit
+      # HIPKERNELPROVIDER_KPACK_PYTHON_DIR pointing at a rocm-systems checkout, or this
+      # flag, which fetches the commit the provider pins. HkpPackaging.cmake:58 is a
+      # hard error -- "rocm_kpack is required to pack descriptors; there is no skip
+      # path" -- so a machine outside the container cannot configure this flow at all
+      # without one of them, and the ingestor options are what pull packaging in, which
+      # is why an ordinary superbuild of the same provider never meets this.
+      # Point KPACK_PYTHON_DIR at a local rocm-systems instead if you have one; a
+      # pinned fetch is deterministic but it is still a fetch.
+      - "-DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON"
+      # Both spellings, because the tree asks for Python two ways: FindPython (Python_)
+      # and FindPython3 (Python3_) each cache separately, and descriptor packaging reads
+      # the Python3_ one. Left unpinned, CMake picks whatever interpreter it finds first
+      # -- here a bare system Python with neither zstandard nor msgpack, which fails the
+      # kpack import above rather than anything recognisable as a Python problem.
+      - "-DPython_EXECUTABLE=${vars.python_exe}"
+      - "-DPython3_EXECUTABLE=${vars.python_exe}"
     cwd: "${vars.repo_root}"
     timeout: 3600
 
@@ -301,7 +374,7 @@ steps:
       - "--build"
       - "${vars.ingestor_build_dir}"
       - "--parallel"
-      - "48"
+      - "${inputs.build_parallel}"
     cwd: "${vars.repo_root}"
     timeout: 14400
 
@@ -565,6 +638,13 @@ steps:
 
       # The harness is the agent's; running it and reading its report is not. See
       # run_report.py for what this does and does not establish.
+      #
+      # --path-prepend for the same reason every exec_at.py launch in this flow carries
+      # it: the harness is a native binary linked against the installed hipDNN, and on
+      # Windows a missing ROCm bin kills it before main with 0xC0000135. That arrives as
+      # a nonzero exit with no report, which reads exactly like a harness that ran and
+      # measured nothing -- all six asserts below fire and the loop retries a defect that
+      # is not in the kernel.
       - id: numerics
         tool: python
         args:
@@ -573,6 +653,10 @@ steps:
           - "${vars.authoring_file}"
           - "--out"
           - "${loop.attempt_dir}/numerics.json"
+          - "--path-prepend"
+          - "${vars.install_bin}"
+          - "--path-prepend"
+          - "${vars.rocm_bin}"
           - "--timeout"
           - "1800"
         cwd: "${run.dir}"
@@ -799,7 +883,7 @@ steps:
           - "--build"
           - "${vars.ingestor_build_dir}"
           - "--parallel"
-          - "48"
+          - "${inputs.build_parallel}"
         cwd: "${vars.repo_root}"
         timeout: 14400
 
