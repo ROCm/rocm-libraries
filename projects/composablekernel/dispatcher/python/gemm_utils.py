@@ -26,6 +26,7 @@ how it is compiled into a ``.so``.
 """
 
 from __future__ import annotations
+from dispatcher_common import unified_framework_flags
 
 import ctypes
 import functools
@@ -1891,6 +1892,7 @@ def _build_compile_jobs(
         "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
+        *unified_framework_flags(config.gfx_arch),
         # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
         # _tile_engine_codegen_flags). Without them the kernel is compiled with
         # different inlining/register allocation, which changes occupancy;

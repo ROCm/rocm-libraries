@@ -16,6 +16,7 @@ Usage:
     result = runner.run(Q, K, V, problem)
 """
 
+from dispatcher_common import unified_framework_flags
 import ctypes
 import json
 import os
@@ -1447,6 +1448,7 @@ def setup_fmha_dispatcher(
         f"-I{output_dir / 'dispatcher_wrappers'}",
         f"-include{dispatch_header}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
+        *unified_framework_flags(config.gfx_arch),
         str(ctypes_src),
         "-o",
         str(ctypes_obj),
@@ -1654,6 +1656,7 @@ def setup_multiple_fmha_dispatchers(
                         f"-I{out / 'dispatcher_wrappers'}",
                         f"-include{dispatch}",
                         f'-DGFX_ARCH="{arch}"',
+                        *unified_framework_flags(arch),
                         str(ctypes_src),
                         "-o",
                         str(ctypes_obj),
