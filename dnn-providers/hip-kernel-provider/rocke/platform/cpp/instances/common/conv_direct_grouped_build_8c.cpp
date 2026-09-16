@@ -59,7 +59,7 @@ bool rocke_dconv8c_prologue(rocke_dconv_8c_ctx_t* ctx)
     ctx->BLOCK_GROUPS = spec->block_groups;
     ctx->WAVE = spec->wave_size;
     ctx->THREADS = rocke_direct_conv_8c_threads_per_block(spec);
-    ctx->LDS_W = ctx->BLOCK_Q + ctx->p.KW - 1;
+    ctx->LDS_W = (ctx->BLOCK_Q - 1) * ctx->p.stride + ctx->p.KW;
     ctx->LDS_ROW_FP16 = ctx->LDS_W * ctx->BLOCK_GROUPS * ctx->p.cpg;
     ctx->LOAD_VEC = 4;
     ctx->NUM_VEC4 = ctx->LDS_ROW_FP16 / ctx->LOAD_VEC;
@@ -357,7 +357,9 @@ void rocke_dconv8c_build_descriptors(rocke_dconv_8c_ctx_t* ctx)
         }
         {
             static const char* const w_upper[2] = {"q_pos", "W_lds_pos"};
-            int w_strides[2] = {1, 1};
+            int w_strides[2];
+            w_strides[0] = ctx->p.stride;
+            w_strides[1] = 1;
             xforms[1]
                 = rocke_embed_bounded(b, w_upper, 2, "w", w_strides, -ctx->p.PAD, 0, ctx->p.W);
         }
@@ -476,10 +478,15 @@ static rocke_value_t*
     rocke_value_t* lds_idx;
     rocke_value_t* indices[2];
 
-    /* W_lds_idx = b.add(b.add(q_in_lane, b.const_i32(q_subtile*16)), s_lane)
-     * Force Python left-to-right SSA. */
-    W_lds_idx = rocke_b_add(
-        b, rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16)), ctx->s_lane);
+    /* W_lds_idx = b.add(
+     *     b.mul(b.add(q_in_lane, b.const_i32(q_subtile*16)), b.const_i32(c_stride_8c)),
+     *     s_lane)
+     * Force Python left-to-right SSA order: inner add first, then mul, then outer add. */
+    {
+        rocke_value_t* base = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16));
+        W_lds_idx = rocke_b_add(
+            b, rocke_b_mul(b, base, rocke_b_const_i32(b, ctx->p.stride)), ctx->s_lane);
+    }
 
     /* lds_idx = W_lds_idx*BG_cpg + wave_id*cpg + (ch_lane/4)*4
      * Python order: ch_block_idx first, then mul_wlds/mul_wave/inner/mul_ch. */
@@ -507,8 +514,17 @@ static rocke_value_t*
     rocke_value_t* vec;
     rocke_value_t* indices[2];
 
-    /* W_lds_idx = q_in_lane + q_subtile*16 + 2 */
-    W_lds_idx = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16 + 2));
+    /* W_lds_idx = b.add(
+     *     b.mul(b.add(q_in_lane, b.const_i32(q_subtile*16)), b.const_i32(c_stride_8c)),
+     *     b.const_i32(2))
+     * Force Python left-to-right SSA order: inner add first, then mul, then outer add. */
+    {
+        rocke_value_t* base = rocke_b_add(b, ctx->q_in_lane, rocke_b_const_i32(b, q_subtile * 16));
+        rocke_value_t* c_s = rocke_b_const_i32(b, ctx->p.stride);
+        rocke_value_t* mul_v = rocke_b_mul(b, base, c_s);
+        rocke_value_t* c_2 = rocke_b_const_i32(b, 2);
+        W_lds_idx = rocke_b_add(b, mul_v, c_2);
+    }
 
     {
         rocke_value_t* ch_block_idx = rocke_b_div(b, ctx->ch_lane, rocke_b_const_i32(b, 4));
@@ -649,9 +665,12 @@ rocke_kernel_def_t* rocke_dconv8c_stream_h_loop(rocke_dconv_8c_ctx_t* ctx)
         p_flush_val = y - (KH - 1);
         P_FLUSH = ((p_flush_val % KH) + KH) % KH;
 
-        /* Flush slot to D (Python lines 1512-1535). */
-        if(0 <= p_flush_val && p_flush_val < p->H)
+        /* Flush slot to D (Python lines 1512-1535).
+         * if 0 <= p_flush_val < p.H and p_flush_val % c_stride_8c == 0:
+         *     ho_row = p_flush_val // c_stride_8c */
+        if(0 <= p_flush_val && p_flush_val < p->H && p_flush_val % p->stride == 0)
         {
+            int ho_row = p_flush_val / p->stride;
             for(qt = 0; qt < q_subtiles; ++qt)
             {
                 rocke_value_t* acc_to_flush = ctx->acc_tiles[qt][P_FLUSH];
@@ -688,7 +707,7 @@ rocke_kernel_def_t* rocke_dconv8c_stream_h_loop(rocke_dconv_8c_ctx_t* ctx)
                 off_names[0] = "n";
                 off_vals[0] = ctx->n;
                 off_names[1] = "h";
-                off_vals[1] = rocke_b_const_i32(b, p_flush_val);
+                off_vals[1] = rocke_b_const_i32(b, ho_row);
                 off_names[2] = "w";
                 off_vals[2] = out_q;
                 off_names[3] = "k";
