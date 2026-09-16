@@ -862,12 +862,24 @@ function(hkp_require_ingestor_toolchain out_arches)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_resolve_production_root(<out_var>)
+# _hkp_resolve_production_root(<out_var> <out_is_default>)
 #   Declares the overridable production source root and resolves it to a path or
 #   to empty. Empty is the dormant case and not an error; a value that is set but
 #   is not a directory is fatal, because that is a typo rather than a choice.
+#
+#   <out_is_default> reports whether the resolved root is still the built-in
+#   default rather than one this build asked for. The two are not interchangeable:
+#   a named root carries an instruction to ship what is under it, while the default
+#   is inherited by every build that never mentioned descriptors at all, including
+#   builds targeting an architecture the shipped descriptors do not declare. Callers
+#   that turn "nothing to ship" into an error owe the default the gentler reading.
+#
+#   Equality against the default path is the only evidence available: a cache entry
+#   keeps no record of who wrote it. Passing exactly the default path is therefore
+#   read as the default, which is harmless -- it asks for precisely what the default
+#   already supplies.
 # ---------------------------------------------------------------------------
-function(_hkp_resolve_production_root out_var)
+function(_hkp_resolve_production_root out_var out_is_default)
     set(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
         "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}" CACHE PATH
         "The authored source root the production pack step compiles from, \
@@ -877,6 +889,13 @@ descriptor's authored subpath is preserved into the staged and installed trees. 
 holding no descriptor, like an empty value, leaves production packaging dormant.")
 
     set(${out_var} "" PARENT_SCOPE)
+    if("${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" STREQUAL
+       "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
+        set(${out_is_default} TRUE PARENT_SCOPE)
+    else()
+        set(${out_is_default} FALSE PARENT_SCOPE)
+    endif()
+
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
         if(NOT IS_DIRECTORY "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}")
             message(FATAL_ERROR
@@ -885,6 +904,25 @@ holding no descriptor, like an empty value, leaves production packaging dormant.
         endif()
         set(${out_var} "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}" PARENT_SCOPE)
     endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_path_is_hidden(<out_var> <root> <path>)
+#   TRUE when any segment of <path> below <root> is dot-prefixed, which is how
+#   load_flat_input() decides a file is not authored content. Factored out so the
+#   two functions below cannot drift into two different notions of hidden: they
+#   walk the same roots and must agree on which files they are walking.
+# ---------------------------------------------------------------------------
+function(_hkp_path_is_hidden out_var root path)
+    set(${out_var} FALSE PARENT_SCOPE)
+    file(RELATIVE_PATH _rel "${root}" "${path}")
+    string(REPLACE "/" ";" _segments "${_rel}")
+    foreach(_segment IN LISTS _segments)
+        if(_segment MATCHES "^\\.")
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -905,19 +943,74 @@ function(_hkp_root_has_kdp out_var root)
 
     file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
     foreach(_kdp IN LISTS _kdps)
-        file(RELATIVE_PATH _kdp_rel "${root}" "${_kdp}")
-        string(REPLACE "/" ";" _kdp_segments "${_kdp_rel}")
-        set(_kdp_hidden FALSE)
-        foreach(_kdp_segment IN LISTS _kdp_segments)
-            if(_kdp_segment MATCHES "^\\.")
-                set(_kdp_hidden TRUE)
-                break()
-            endif()
-        endforeach()
+        _hkp_path_is_hidden(_kdp_hidden "${root}" "${_kdp}")
         if(NOT _kdp_hidden)
             set(${out_var} TRUE PARENT_SCOPE)
             return()
         endif()
+    endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_root_covers_any_arch(<out_var> <root> <arches>)
+#   TRUE when at least one non-hidden *.kdp.json under <root> would survive
+#   arch_matches() for at least one arch in <arches>. Mirrors that predicate
+#   exactly: an absent `arch` key and an empty `arch` array are both wildcards,
+#   and anything else is exact string membership in the wired arch list.
+#
+#   FALSE is the only answer this function is asked to be sure of. kdp_survives()
+#   tests arch_matches() first, so a root no arch matches is a root nothing
+#   survives in -- provable emptiness. TRUE claims nothing beyond "not provably
+#   empty": a matching KDP can still prune on its UKD entries, which is the
+#   packer's report to make and not this function's.
+#
+#   That asymmetry decides every ambiguous case toward TRUE. A KDP whose JSON
+#   does not parse, or whose `arch` is not an array, is counted as covering, so
+#   the root stays wired and the packer reads the file and says what is wrong
+#   with it. Answering FALSE here would turn a malformed descriptor into a
+#   silently dormant build, which is the one outcome nobody could diagnose.
+#
+#   CONFIGURE_DEPENDS for the same reason as _hkp_root_has_kdp: authoring a KDP
+#   for a newly targeted arch must re-run configure and wire the target.
+# ---------------------------------------------------------------------------
+function(_hkp_root_covers_any_arch out_var root arches)
+    set(${out_var} FALSE PARENT_SCOPE)
+    if(NOT root)
+        return()
+    endif()
+
+    file(GLOB_RECURSE _kdps CONFIGURE_DEPENDS "${root}/*.kdp.json")
+    foreach(_kdp IN LISTS _kdps)
+        _hkp_path_is_hidden(_kdp_hidden "${root}" "${_kdp}")
+        if(_kdp_hidden)
+            continue()
+        endif()
+
+        file(READ "${_kdp}" _kdp_json)
+
+        # One error variable covers two ambiguous cases that both resolve to TRUE:
+        # "member not found", which is the absent-key wildcard, and "not valid JSON",
+        # which is the unparseable file the packer must be the one to report.
+        string(JSON _arch_type ERROR_VARIABLE _arch_err TYPE "${_kdp_json}" arch)
+        if(_arch_err OR NOT _arch_type STREQUAL "ARRAY")
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+
+        string(JSON _arch_len ERROR_VARIABLE _len_err LENGTH "${_kdp_json}" arch)
+        if(_len_err OR _arch_len EQUAL 0)
+            set(${out_var} TRUE PARENT_SCOPE)
+            return()
+        endif()
+
+        math(EXPR _arch_last "${_arch_len} - 1")
+        foreach(_i RANGE ${_arch_last})
+            string(JSON _arch ERROR_VARIABLE _get_err GET "${_kdp_json}" arch ${_i})
+            if(_get_err OR _arch IN_LIST arches)
+                set(${out_var} TRUE PARENT_SCOPE)
+                return()
+            endif()
+        endforeach()
     endforeach()
 endfunction()
 
@@ -941,7 +1034,10 @@ endfunction()
 #
 #   The root defaults to the provider's in-tree shipped descriptors and is
 #   overridable. Root empty, or holding no descriptor = production packaging
-#   dormant. Root set but not a directory = fatal. The tests are wired regardless.
+#   dormant. The default root additionally goes dormant when no descriptor under it
+#   declares an architecture this build packs for, because that root is inherited
+#   rather than requested; a named root in the same state is the packer's hard
+#   failure. Root set but not a directory = fatal. The tests are wired regardless.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -949,7 +1045,7 @@ function(hkp_add_packaging)
     hkp_resolve_kpack(_rocm_kpack_dir "${Python3_EXECUTABLE}")
     hkp_require_ingestor_toolchain(_arches)
 
-    _hkp_resolve_production_root(_source_root)
+    _hkp_resolve_production_root(_source_root _source_root_is_default)
 
     set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
         "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
@@ -996,6 +1092,31 @@ loaded is the one named here.")
     # present but pruned on every arch stays a hard failure: this distinguishes
     # "nothing to ship" from "something to ship that did not".
     _hkp_root_has_kdp(_product_has_content "${_source_root}")
+    if(NOT _source_root)
+        set(_product_dormant_reason "empty-root")
+    else()
+        set(_product_dormant_reason "no-kdp")
+    endif()
+
+    # The hard failure above rests on a premise the packer states itself: a root wired
+    # to a pack was wired to ship descriptors. That premise belongs to a root this
+    # build NAMED. The default root is inherited by every build that never mentioned
+    # descriptors, including builds targeting an architecture the shipped descriptors
+    # do not declare, and those builds asked for nothing and so cannot have failed to
+    # get it. Arch coverage is therefore consulted for the default root alone; a named
+    # root reaches the packer and fails there exactly as it always has.
+    #
+    # Safe in one direction only, which is the direction needed. arch_matches() runs
+    # first inside kdp_survives(), so "no KDP declares an arch this build packs for"
+    # proves no KDP survives. A root this misses stays wired and the packer reports it,
+    # so the check only ever adds dormancy where emptiness is already provable.
+    if(_product_has_content AND _source_root_is_default)
+        _hkp_root_covers_any_arch(_product_covers_arch "${_source_root}" "${_arches}")
+        if(NOT _product_covers_arch)
+            set(_product_has_content FALSE)
+            set(_product_dormant_reason "no-arch")
+        endif()
+    endif()
 
     # Production descriptors.
     if(_source_root AND _product_has_content)
@@ -1016,10 +1137,26 @@ loaded is the one named here.")
         if(HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR)
             file(REMOVE_RECURSE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
         endif()
-        message(STATUS
-            "hkp: no *.kdp.json under "
-            "'${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}'; production packaging "
-            "dormant (tests still run against the fixtures).")
+        # One message per reason. The three dormant cases are diagnosed differently --
+        # one is a deliberate opt-out, one is an authoring gap, one is an arch this
+        # build does not target -- and a single line covering all three sends whoever
+        # reads it looking for the wrong thing. The arch line names the arch list
+        # because that is the value to change to make packing happen.
+        if(_product_dormant_reason STREQUAL "empty-root")
+            message(STATUS
+                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is empty; production "
+                "packaging dormant (tests still run against the fixtures).")
+        elseif(_product_dormant_reason STREQUAL "no-arch")
+            message(STATUS
+                "hkp: the default production root '${_source_root}' declares no "
+                "descriptor for any architecture this build packs for (${_arches}), "
+                "so every descriptor under it would prune; production packaging "
+                "dormant (tests still run against the fixtures).")
+        else()
+            message(STATUS
+                "hkp: no *.kdp.json under '${_source_root}'; production packaging "
+                "dormant (tests still run against the fixtures).")
+        endif()
     endif()
 
     # Test descriptors, one pack per authored set. The shared root is packed into both

@@ -176,12 +176,6 @@ jobs:
 
       - name: Configure superbuild
         run: |
-          # Production packaging is left dormant on this lane. Every shipped production
-          # descriptor declares gfx942 and this lane builds gfx1151, and a wired root
-          # whose KDPs all prune is a hard packer error ("produced nothing"), not a clean
-          # skip. The root must therefore be empty here rather than merely unmatched.
-          # Passed explicitly because the default root is the provider's in-tree
-          # descriptors, which are gfx942. The Linux lane builds gfx942 and packs them.
           cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
@@ -192,7 +186,6 @@ jobs:
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
-            -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="" \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
@@ -208,9 +201,10 @@ jobs:
       # producer is asserted here: its arch list is hardcoded in its own
       # CMakeLists, so it packs on every lane.
       #
-      # Nothing is lost: the production root is empty on this lane (see Configure),
-      # so production packaging is dormant and emits no archive either way. The
-      # Linux job asserts the product tree, because there the arch matches and
+      # Nothing is lost: every shipped production descriptor declares gfx942 and this
+      # lane builds gfx1151, so no descriptor under the default production root can
+      # survive arch pruning, packaging is dormant and emits no archive either way.
+      # The Linux job asserts the product tree, because there the arch matches and
       # an empty tree really is a defect.
       - name: Verify kpack archives were produced
         shell: bash
