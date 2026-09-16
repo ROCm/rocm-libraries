@@ -2399,7 +2399,7 @@ void common_inst(nb::module_ m_common)
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
                       const InstructionInput&,
-                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src0"),
