@@ -117,17 +117,17 @@ namespace rocsparse
                 break;
             }
 
-            rocsparse_int idx = ELL_IND(ai, p++, m, ell_width);
-            ell_col_ind[idx]  = csr_col_ind[aj] - csr_idx_base + ell_idx_base;
-            ell_val[idx]      = csr_val[aj];
+            int64_t idx      = ELL_IND(ai, p++, static_cast<int64_t>(m), ell_width);
+            ell_col_ind[idx] = csr_col_ind[aj] - csr_idx_base + ell_idx_base;
+            ell_val[idx]     = csr_val[aj];
         }
 
         // Pad remaining ELL structure
         for(J aj = row_end - row_begin; aj < ell_width; ++aj)
         {
-            const I idx      = ELL_IND(ai, aj, m, ell_width);
-            ell_col_ind[idx] = -1;
-            ell_val[idx]     = static_cast<T>(0);
+            const int64_t idx = ELL_IND(ai, aj, static_cast<int64_t>(m), ell_width);
+            ell_col_ind[idx]  = -1;
+            ell_val[idx]      = static_cast<T>(0);
         }
     }
 
