@@ -87,14 +87,17 @@ if(_CMA_HAS_GFX9 AND _CMA_HAS_GFX12)
         "file carries only one. Requested: ${CONTRACTION_MULTI_ABD_GPU_TARGETS}. "
         "Configure separate builds, or pass "
         "-DCONTRACTION_MULTI_ABD_CONFIG_FILE=<file> to choose deliberately.")
-elseif(_CMA_HAS_GFX12)
-    set(_CMA_DEFAULT_CONFIG "default_config_gfx1250.json")
-else()
-    set(_CMA_DEFAULT_CONFIG "default_config.json")
 endif()
 
+# One config file serves every target: default_config.json carries an
+# arch_tile_config block the codegen selects on --gfx-arch. The arch is derived
+# from the first configured target, matching how the ctypes bindings derive
+# GFX_ARCH, and is passed to BOTH codegen invocations so the listed and the
+# generated kernel sets cannot diverge.
+list(GET CONTRACTION_MULTI_ABD_GPU_TARGETS 0 CONTRACTION_MULTI_ABD_CODEGEN_ARCH)
+
 message(STATUS "contraction_multi_abd: building for GPU targets: ${CONTRACTION_MULTI_ABD_GPU_TARGETS}")
-message(STATUS "contraction_multi_abd: default config for these targets: ${_CMA_DEFAULT_CONFIG}")
+message(STATUS "contraction_multi_abd: codegen arch: ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}")
 
 # ---------------------------------------------------------------------------
 # Compiler cache
@@ -180,7 +183,7 @@ foreach(datatype IN LISTS CONTRACTION_MULTI_ABD_DATATYPE)
         elseif(NOT "${CONTRACTION_MULTI_ABD_CONFIG_FILE}" STREQUAL "")
             set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${CONTRACTION_MULTI_ABD_CONFIG_FILE}")
         else()
-            set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${_CMA_DEFAULT_CONFIG}")
+            set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
         endif()
 
         if(NOT EXISTS ${json_blob})
@@ -236,6 +239,7 @@ open('${_cma_config_file}','w').write(json.dumps(base))"
             COMMAND ${Python3_EXECUTABLE} ${_CMA_CODEGEN_SCRIPT}
                     --output-dir ${working_path}
                     --config ${_cma_config_file}
+                    --gfx-arch ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}
                     --list-name
             WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
             RESULT_VARIABLE _cma_ret
@@ -253,6 +257,7 @@ open('${_cma_config_file}','w').write(json.dumps(base))"
             COMMAND ${Python3_EXECUTABLE} ${_CMA_CODEGEN_SCRIPT}
                     --output-dir ${working_path}
                     --config ${_cma_config_file}
+                    --gfx-arch ${CONTRACTION_MULTI_ABD_CODEGEN_ARCH}
             WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
             RESULT_VARIABLE _cma_ret2
             OUTPUT_VARIABLE _cma_out2
