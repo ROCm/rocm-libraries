@@ -214,7 +214,8 @@ def findAvailableArchs(gpu_targets=None):
         List of architecture strings (e.g. ["gfx942"]).
     """
     if gpu_targets:
-        return [t.strip() for t in gpu_targets.split(";") if t.strip()]
+        # Strip a trailing version suffix so architecture marks match the base gfx target.
+        return [re.sub(r"v\d+$", "", t.strip()) for t in gpu_targets.split(";") if t.strip()]
 
     from Tensile.Tests.gpu_detection import get_available_archs
     return get_available_archs()

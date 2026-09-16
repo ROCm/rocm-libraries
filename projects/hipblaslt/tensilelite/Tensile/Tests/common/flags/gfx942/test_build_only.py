@@ -91,9 +91,14 @@ def _write_config(path: str) -> None:
         f.write(_CONFIG)
 
 
+@pytest.mark.skipif(
+    not _HAS_GFX942,
+    reason="gfx942-only: --build-only targets the runner's arch, so on other archs "
+    "it compiles the wrong ISA (e.g. unhandled WMMA on gfx1250) and fails",
+)
 def test_compile(tensile_args: list[str], tmp_path: Path) -> None:
     """
-    Compile the kernel. This can run on any machine.
+    Compile the kernel for gfx942.
     """
     config_path = str(tmp_path / "config.yaml")
     _write_config(config_path)
