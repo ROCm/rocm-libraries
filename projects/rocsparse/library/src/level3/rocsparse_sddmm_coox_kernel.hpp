@@ -185,29 +185,4 @@ namespace rocsparse
                 coo_base);
         }
     }
-
-    template <rocsparse_int BLOCKSIZE, bool AOS, typename T, typename I, typename J, typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void sddmm_coox_sample_kernel(J M,
-                                  J N,
-                                  I nnz,
-                                  const C* __restrict__ dense_C,
-                                  J lda,
-                                  C* __restrict__ coo_val,
-                                  const I* __restrict__ coo_row,
-                                  const I* __restrict__ coo_col,
-                                  rocsparse_index_base coo_base)
-    {
-        const auto NUM_THREADS = hipGridDim_x * BLOCKSIZE;
-
-        const auto gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        for(auto idx = gid; idx < nnz; idx += NUM_THREADS)
-        {
-            const I row = coo_row[idx * ((AOS) ? 2 : 1)] - coo_base;
-            const I col = coo_col[idx * ((AOS) ? 2 : 1)] - coo_base;
-
-            coo_val[idx] = dense_C[col * lda + row];
-        }
-    }
 }

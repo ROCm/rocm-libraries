@@ -21,7 +21,6 @@
  *
  * ************************************************************************ */
 
-#include "../conversion/rocsparse_coo2dense_aos.hpp"
 #include "rocsparse_sddmm_coox_kernel.hpp"
 
 template <typename T, typename I, typename J, typename A, typename B, typename C>
@@ -55,16 +54,6 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
-        {
-            if(nnz == 0)
-            {
-                *buffer_size = 0;
-                return rocsparse_status_success;
-            }
-
-            *buffer_size = ((sizeof(C) * m * n - 1) / 256 + 1) * 256;
-            return rocsparse_status_success;
-        }
         case rocsparse_sddmm_alg_default:
         {
             buffer_size[0] = 0;
@@ -147,100 +136,6 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo_aos, T, I, J, A, B, C>
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
-        {
-            if(nnz == 0)
-            {
-                return rocsparse_status_success;
-            }
-
-            if(buffer == nullptr)
-            {
-                return rocsparse_status_invalid_pointer;
-            }
-
-            // Batched computation is not supported for the dense algorithm.
-            if(batch_count > 1)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-
-            char* ptr   = reinterpret_cast<char*>(buffer);
-            C*    dense = reinterpret_cast<C*>(ptr);
-
-            // Convert to Dense
-            RETURN_IF_ROCSPARSE_ERROR((rocsparse::coo2dense_aos_template(handle,
-                                                                         m,
-                                                                         n,
-                                                                         nnz,
-                                                                         C_descr,
-                                                                         C_val_data,
-                                                                         C_row_data,
-                                                                         dense,
-                                                                         m,
-                                                                         rocsparse_order_column)));
-
-            const bool A_col_major = (order_A == rocsparse_order_column);
-            const bool B_col_major = (order_B == rocsparse_order_column);
-
-            const rocsparse_operation trans_A_adjusted
-                = (A_col_major != (trans_A == rocsparse_operation_none))
-                      ? rocsparse_operation_transpose
-                      : rocsparse_operation_none;
-            const rocsparse_operation trans_B_adjusted
-                = (B_col_major != (trans_B == rocsparse_operation_none))
-                      ? rocsparse_operation_transpose
-                      : rocsparse_operation_none;
-
-            // Compute
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::blas_gemm_ex(handle->blas_handle,
-                                                              trans_A_adjusted,
-                                                              trans_B_adjusted,
-                                                              m,
-                                                              n,
-                                                              k,
-                                                              alpha,
-                                                              A_val,
-                                                              rocsparse::get_datatype<A>(),
-                                                              A_ld,
-                                                              B_val,
-                                                              rocsparse::get_datatype<B>(),
-                                                              B_ld,
-                                                              beta,
-                                                              dense,
-                                                              rocsparse::get_datatype<C>(),
-                                                              m,
-                                                              dense,
-                                                              rocsparse::get_datatype<C>(),
-                                                              m,
-                                                              rocsparse::get_datatype<T>(),
-                                                              rocsparse::blas_gemm_alg_standard,
-                                                              0,
-                                                              0));
-
-            // Sample dense C
-            static constexpr int NB = 512;
-
-            const int64_t num_blocks_x = rocsparse::min(
-                ((nnz - 1) / NB + 1), static_cast<I>(handle->properties.maxGridSize[0]));
-            const dim3 blocks(num_blocks_x);
-            const dim3 threads(NB);
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_sample_kernel<NB, true, T>),
-                                               blocks,
-                                               threads,
-                                               0,
-                                               handle->stream,
-                                               m,
-                                               n,
-                                               nnz,
-                                               dense,
-                                               m,
-                                               C_val_data,
-                                               C_row_data,
-                                               C_col_data,
-                                               C_base);
-            return rocsparse_status_success;
-        }
         case rocsparse_sddmm_alg_default:
         {
             static constexpr int NB = 512;

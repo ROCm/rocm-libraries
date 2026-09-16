@@ -49,8 +49,6 @@ set(rocsparse_source
   src/common/rocsparse_datatype_utils.cpp
   src/common/rocsparse_one.cpp
   src/common/rocsparse_assign_async.cpp
-  src/common/rocsparse_blas.cpp
-  src/common/rocsparse_blas_rocblas.cpp
   src/common/rocsparse_envariables.cpp
   src/common/rocsparse_memstat.cpp
   src/common/rocsparse_debug.cpp

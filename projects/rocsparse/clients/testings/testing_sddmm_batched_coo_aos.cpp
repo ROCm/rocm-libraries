@@ -133,29 +133,6 @@ void testing_sddmm_batched_coo_aos_bad_arg(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_preprocess(PARAMS), rocsparse_status_invalid_value);
     EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm(PARAMS), rocsparse_status_invalid_value);
 
-    // Batched computation with rocsparse_sddmm_alg_dense is not yet supported.
-    batch_count_A  = 5;
-    batch_count_B  = 5;
-    batch_count_C  = 5;
-    batch_stride_A = m * k;
-    batch_stride_B = k * n;
-    batch_stride_C = nnz;
-    alg            = rocsparse_sddmm_alg_dense;
-
-    EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_A, batch_count_A, batch_stride_A),
-                            rocsparse_status_success);
-    EXPECT_ROCSPARSE_STATUS(rocsparse_dnmat_set_strided_batch(mat_B, batch_count_B, batch_stride_B),
-                            rocsparse_status_success);
-    EXPECT_ROCSPARSE_STATUS(rocsparse_coo_set_strided_batch(mat_C, batch_count_C, batch_stride_C),
-                            rocsparse_status_success);
-
-    EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_buffer_size(PARAMS_BUFFER_SIZE),
-                            rocsparse_status_not_implemented);
-    EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm_preprocess(PARAMS), rocsparse_status_not_implemented);
-    EXPECT_ROCSPARSE_STATUS(rocsparse_sddmm(PARAMS), rocsparse_status_not_implemented);
-
-    alg = rocsparse_sddmm_alg_default;
-
 #undef PARAMS
 #undef PARAMS_BUFFER_SIZE
 }

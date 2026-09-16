@@ -27,7 +27,6 @@
 #include "rocsparse-auxiliary.h"
 
 #include "rocsparse_adaptive_info.hpp"
-#include "rocsparse_blas.hpp"
 #include "rocsparse_bsrmv_info.hpp"
 #include "rocsparse_color_info.hpp"
 #include "rocsparse_csrgemm_info.hpp"
@@ -103,9 +102,6 @@ struct _rocsparse_handle
     // device one
     void* sone{};
     void* done{};
-
-    // blas handle
-    rocsparse::blas_handle blas_handle{};
 
     // Temporary storage for spmv descriptor during csrmv calls
     // This allows template functions to access pre-extracted arrays

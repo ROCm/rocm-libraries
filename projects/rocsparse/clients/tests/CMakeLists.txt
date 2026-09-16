@@ -609,7 +609,6 @@ if (WIN32)
     $ENV{HIP_DIR}/bin/*.dll
     $ENV{HIP_DIR}/bin/hipinfo.exe
     ${CMAKE_SOURCE_DIR}/rtest.*
-    $ENV{rocblas_DIR}/bin/*.dll
     C:/Windows/System32/libomp140*.dll
   )
   foreach( file_i ${third_party_dlls})

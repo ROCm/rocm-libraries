@@ -500,16 +500,14 @@ try
                        rocsparse_status_invalid_value);
 
 #ifdef ROCSPARSE_WITH_SDDMM_BATCHED
-    // Batched computation is only supported for CSR, CSC, COO, COO AoS, and ELL formats with the
-    // default algorithm.
+    // Batched computation is only supported for CSR, CSC, COO, COO AoS, and ELL formats.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
         (mat_C->batch_count > 1
-         && ((mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_csc
-              && mat_C->format != rocsparse_format_coo && mat_C->format != rocsparse_format_coo_aos
-              && mat_C->format != rocsparse_format_ell)
-             || alg != rocsparse_sddmm_alg_default)),
+         && (mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_csc
+             && mat_C->format != rocsparse_format_coo && mat_C->format != rocsparse_format_coo_aos
+             && mat_C->format != rocsparse_format_ell)),
         rocsparse_status_not_implemented);
 #else
     // Batched SDDMM is gated behind the ROCSPARSE_WITH_SDDMM_BATCHED build-time feature flag. When
@@ -976,16 +974,14 @@ try
                        rocsparse_status_invalid_value);
 
 #ifdef ROCSPARSE_WITH_SDDMM_BATCHED
-    // Batched computation is only supported for CSR, CSC, COO, COO AoS, and ELL formats with the
-    // default algorithm.
+    // Batched computation is only supported for CSR, CSC, COO, COO AoS, and ELL formats.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
         (mat_C->batch_count > 1
-         && ((mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_csc
-              && mat_C->format != rocsparse_format_coo && mat_C->format != rocsparse_format_coo_aos
-              && mat_C->format != rocsparse_format_ell)
-             || alg != rocsparse_sddmm_alg_default)),
+         && (mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_csc
+             && mat_C->format != rocsparse_format_coo && mat_C->format != rocsparse_format_coo_aos
+             && mat_C->format != rocsparse_format_ell)),
         rocsparse_status_not_implemented);
 #else
     // Batched SDDMM is gated behind the ROCSPARSE_WITH_SDDMM_BATCHED build-time feature flag. When
@@ -1456,16 +1452,14 @@ try
                        rocsparse_status_invalid_value);
 
 #ifdef ROCSPARSE_WITH_SDDMM_BATCHED
-    // Batched computation is only supported for CSR, CSC, COO, COO AoS, and ELL formats with the
-    // default algorithm.
+    // Batched computation is only supported for CSR, CSC, COO, COO AoS, and ELL formats.
     ROCSPARSE_CHECKARG(
         7,
         mat_C,
         (mat_C->batch_count > 1
-         && ((mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_csc
-              && mat_C->format != rocsparse_format_coo && mat_C->format != rocsparse_format_coo_aos
-              && mat_C->format != rocsparse_format_ell)
-             || alg != rocsparse_sddmm_alg_default)),
+         && (mat_C->format != rocsparse_format_csr && mat_C->format != rocsparse_format_csc
+             && mat_C->format != rocsparse_format_coo && mat_C->format != rocsparse_format_coo_aos
+             && mat_C->format != rocsparse_format_ell)),
         rocsparse_status_not_implemented);
 #else
     // Batched SDDMM is gated behind the ROCSPARSE_WITH_SDDMM_BATCHED build-time feature flag. When

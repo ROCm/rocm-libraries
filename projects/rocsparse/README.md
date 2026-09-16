@@ -52,7 +52,7 @@ Optional:
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
     cd rocm-libraries
     git sparse-checkout init --cone
-    git sparse-checkout set projects/rocsparse # add projects/rocprim and projects/rocblas to include dependencies
+    git sparse-checkout set projects/rocsparse # add projects/rocprim to include dependencies
     git checkout develop # or use the branch you want to work with
     ```
 
