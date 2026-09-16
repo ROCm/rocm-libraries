@@ -29,6 +29,7 @@ target_include_directories(hip_kernel_provider_tests PRIVATE
 # test suite, which resolves paths relative to the installed plugin.
 target_compile_definitions(hip_kernel_provider_tests PRIVATE
     ASM_KPACK_TEST_DIR="${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/arch_content/asm_sdpa"
+    ASM_KPACK_INSTALL_DIR="${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/asm_sdpa"
 )
 
 # Ensure codegen runs before compiling the tests

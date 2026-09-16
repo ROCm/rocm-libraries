@@ -104,7 +104,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # descriptors with no ctest in the loop -- see the note there.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
-        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}"
+        HIPDNN_INSTALL_PLUGIN_ENGINE_DIR="${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}")
 
     # The kpack adapter's tests. Gated with the sources they exercise, and kept together
     # here -- including the dispatch one, which sits under engines/ -- so all three sit
