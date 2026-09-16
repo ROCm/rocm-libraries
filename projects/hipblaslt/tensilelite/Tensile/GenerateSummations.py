@@ -54,7 +54,7 @@ def createLibraryForBenchmark(logicPath, libraryPath, currentPath):
     pythonExePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bin", "TensileCreateLibrary")
     args = [pythonExePath, \
         "--new-client-only", "--no-short-file-names", \
-        "--architecture=all", "--code-object-version=default", "--library-format=yaml", \
+        "--architecture=all", "--code-object-version=default", "--library-format=msgpack", \
         logicPath, libraryPath, "HIP"]
 
     try:

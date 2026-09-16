@@ -243,7 +243,7 @@ def addCommonArguments(argParser):
     argParser.add_argument("--logic-format", dest="LogicFormat", choices=["yaml", "json"], \
         action="store", default="yaml", help="select which logic format to use")
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
-        action="store", default="yaml", help="select which library format to use")
+        action="store", default="msgpack", help="select which library format to use")
     argParser.add_argument("--client-lock", default=None)
     argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH), \
         type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")

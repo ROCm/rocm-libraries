@@ -444,6 +444,8 @@ class Library:
                 common["compute_type"] = "i32_r"
             else:
                 common["compute_type"] = common["a_type"]
+            # scale_type required by hipblaslt 1.5.0 --yaml mode
+            common["scale_type"] = common["compute_type"].lstrip("c_").lstrip("x")
 
         if "F32XdlMathOp" in self.problem and self.problem["F32XdlMathOp"] == 9:  # TF32
             common["math_mode"] = 1
