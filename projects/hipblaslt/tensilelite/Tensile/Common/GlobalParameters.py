@@ -557,6 +557,7 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporal": [-1]},
     {"TemporalHint": [-1]},
     {"TemporalHintE": [0]},
+    {"TemporalHintGate": [0]},
     {"TemporalHintD": [0]},
     {"TemporalHintC": [0]},
     {"TemporalHintA": [0]},
@@ -567,6 +568,7 @@ defaultBenchmarkCommonParameters = [
     {"TemporalHintMetadata": [0]},
     {"NonVolatile": [-1]},
     {"NonVolatileE": [0]},
+    {"NonVolatileGate": [0]},
     {"NonVolatileD": [0]},
     {"NonVolatileC": [0]},
     {"NonVolatileA": [0]},
@@ -838,6 +840,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
