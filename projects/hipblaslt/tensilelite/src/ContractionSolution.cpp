@@ -4335,15 +4335,15 @@ namespace TensileLite
         if(mt0 == 0 || mt1 == 0)
             return 0;
 
-        // PartialRMS uses free0/D.M as the feature dimension and free1/D.N as the row dimension.
-        // K1 writes partialBuf[row, tile] with one fp32 per (row, free0 macro-tile): rows are
+        // PartialRMS uses free0/D.M as the feature dimension and free1/D.N as the token dimension.
+        // K1 writes partialBuf[token, tile] with one fp32 per (token, free0 macro-tile): tokens are
         // padded by MT1 and columns are nD tiles along the feature dimension by MT0.
         const size_t nHidden = problem.d().sizes()[0]; // free0 = feature dimension
-        const size_t tokens  = problem.d().sizes()[1]; // free1 = row dimension
+        const size_t tokens  = problem.d().sizes()[1]; // free1 = token dimension
         const size_t batch   = problem.d().sizes()[2];
 
         const size_t nD       = (nHidden + mt0 - 1) / mt0; // partial tiles along features
-        const size_t mPadded  = ((tokens + mt1 - 1) / mt1) * mt1; // K1 writes padded token rows
+        const size_t mPadded  = ((tokens + mt1 - 1) / mt1) * mt1; // K1 writes padded tokens
         return mPadded * nD * batch * sizeof(float);
     }
 

@@ -1108,7 +1108,7 @@ try
                 }
             }
             // Decomposed flow: validate the caller-owned FP32 [D.N*batch] handoff buffer on both
-            // sides. The producer's row_rstd reduction writes one float per D.N row, and the
+            // sides. The producer's row_rstd reduction writes one float per D.N index, and the
             // consumer reads it through a free1 ScaleAlphaVec bounded to the same D.N count. The
             // two stages are mutually exclusive within a chain.
             if(partialStats || scaleApply)

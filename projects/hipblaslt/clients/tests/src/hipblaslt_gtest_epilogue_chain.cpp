@@ -928,8 +928,8 @@ static void expectBf16Near(const std::vector<uint16_t>& actual,
 // ---- End-to-end numeric test: decomposed RMSNorm consumer (Kernel 3 RstdScale) ----
 //
 // Exercises the decomposed flow's consumer stage in isolation: a GEMM2 with the
-// HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY epilogue multiplies each output row by a
-// pre-computed per-row rstd carried in the handoff descriptor. This test puts a host-computed
+// HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY epilogue multiplies each token's output by a
+// pre-computed per-token rstd carried in the handoff descriptor. This test puts a host-computed
 // rstd in the caller-owned handoff buffer so the consumer can be exercised independently of the
 // producer. Verifies out[m,n] = (mat1 @ W)[m,n] * rstd[m]; the consumer performs no
 // reduction. gfx950-only.
@@ -967,7 +967,7 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
     fillRandomBf16(hMat1, rng, dist);
     fillRandomBf16(hW, rng, dist);
     for(auto& r : hRstd)
-        r = rdist(rng); // arbitrary per-row scale standing in for the producer's rstd
+        r = rdist(rng); // arbitrary per-token scale standing in for the producer's rstd
 
     void *       dMat1 = nullptr, *dW = nullptr, *dD = nullptr, *dRstd = nullptr, *dWs = nullptr;
     const size_t wsSize = size_t(64) * 1024 * 1024;
@@ -995,7 +995,7 @@ TEST(FusedEpilogueE2E, decomposedScaleApplyMatchesReference)
                   stats, dRstd, hRstd.size() * sizeof(float)),
               HIPBLAS_STATUS_SUCCESS);
 
-    // Consumer chain: RMSNorm scale-apply reads the deferred per-row scale from the handoff.
+    // Consumer chain: RMSNorm scale-apply reads the deferred per-token scale from the handoff.
     hipblasLtFusedEpilogueDescriptor_t cons = nullptr;
     ASSERT_NO_FATAL_FAILURE(createScaleApplyDescriptor(stats, &cons));
 
@@ -1221,7 +1221,7 @@ TEST(FusedEpilogueE2E, decomposedProducerConsumerMatchesReference)
 
 // ---- Validation: the decomposed flow requires a caller-owned handoff buffer ----
 //
-// The library does not allocate the per-row rstd storage, so both decomposed stages reject a
+// The library does not allocate the per-token rstd storage, so both decomposed stages reject a
 // handoff descriptor with no buffer or with fewer than D.N scales for either stage. This covers
 // the matmul-level enforcement; the argument checks on
 // hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer itself are in
@@ -1298,7 +1298,7 @@ TEST(FusedEpilogueE2E, decomposedHandoffBufferIsValidated)
             HIPBLAS_STATUS_INVALID_VALUE);
         ASSERT_GT(algoCount, 0) << "no PartialRMS (K1) producer solution selected";
 
-        // One row short of D.N * batchCount * sizeof(float).
+        // One scale short of D.N * batchCount * sizeof(float).
         ASSERT_EQ(hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer(
                       stats, dRstd, requiredBytes - sizeof(float)),
                   HIPBLAS_STATUS_SUCCESS);
@@ -2039,7 +2039,7 @@ static void runConsumerAndValidate(hipblasLtHandle_t                         han
 // Exercises the pure-bf16 PartialRMSStoreBf16D path through the decomposed producer chain
 // RESIDUAL_ADD -> PARTIAL_RMSNORM_STATS with a separate residual-out buffer set via
 // HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER. The K1 kernel writes the gamma-scaled bf16 D
-// and stashes the per-row rstd in the handoff, AND additionally stores the pre-normalization value
+// and stashes the per-token rstd in the handoff, AND additionally stores the pre-normalization value
 // H+residual as bf16 in the residual-out buffer. Verifies residualOut against the CPU reference
 // mat1 @ mat2 + residual (no gamma, no invRms). gfx950-only.
 
@@ -2403,7 +2403,7 @@ TEST(FusedEpilogueE2E, partialRmsMxfp8InputMxfp8QuantMatchesReference)
 //
 // GEMM1 is F8F8S with MXAE8B32/MXBE8B32 input scales (uniform-127, i.e. scale=1).
 // The epilogue chain is RESIDUAL_ADD -> PARTIAL_RMSNORM_STATS -> REQUANT(MX) with a bf16
-// residualOut dual-store.  GEMM2 (consumer) applies the per-row rstd, producing bf16 D2.
+// residualOut dual-store.  GEMM2 (consumer) applies the per-token rstd, producing bf16 D2.
 // This exercises the partialrms_residual_mxfp8quant_residualout_scaled_mxfp8_k1 kernel.
 TEST(FusedEpilogueE2E, chainedMxfp8ScaledResidualOutProducerConsumerMatchesReference)
 {

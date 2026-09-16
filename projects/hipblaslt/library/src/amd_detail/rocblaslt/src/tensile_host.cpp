@@ -415,7 +415,7 @@ namespace
     //   }
     //
     // The consumer (RMSNORM_SCALE_APPLY / GEMM2) reads fused->rmsnorm_stats->per_row_scale and
-    // applies it along D.N, which must match the producer's row count.
+    // applies it along D.N, which must match the producer's token count.
     inline TensileLite::ActivationType getTensileActivationType(rocblaslt_epilogue epilogue)
     {
         switch(epilogue)
@@ -2185,7 +2185,7 @@ namespace
             tensileProblem.setRMSEpilogue(partialRMS);
             // Decomposed consumer (Kernel 3 RstdScale): apply the per-token rstd to GEMM2's
             // output through the N-direction ScaleAlphaVec.
-            // Use UseScaleAlphaVec=2 with the column-vector length d.sizes()[1] (= rows = rstd
+            // Use UseScaleAlphaVec=2 with the column-vector length d.sizes()[1] (= tokens = rstd
             // length). Re-issue setScaleAlphaVec after enabling the flag because the earlier
             // setScaleAlphaVec call ran while useScaleAlphaVec was still false.
             if(fusedInfo.hasRMSNormScaleApply)
@@ -3688,12 +3688,12 @@ namespace
     }
 
     // Launch row_div (Kernel 2) on `stream` after K1 has completed (same stream => ordered).
-    // D is column-major [D.M features, D.N rows], whose bytes are also a row-major
-    // [rows, features] tensor. partialBuf contains one fp32 sum-of-squares partial per
-    // (row, feature tile). row_div reduces partialBuf across the feature tiles and divides D by
+    // D is column-major [D.M features, D.N tokens], whose bytes are also a row-major
+    // [tokens, features] tensor. partialBuf contains one fp32 sum-of-squares partial per
+    // (token, feature tile). row_div reduces partialBuf across the feature tiles and divides D by
     // sqrt(inv_d * Sigma + eps). Kernarg layout matches buildRowDivArgs:
     //   0 D, 8 partialBuf, 16 pad(i32=0), 20 n(=features), 24 n_c(=RD_BLOCK), 28 n_d(=nD),
-    //   32 inv_d(=1/features), 36 eps. grid=(rows, features/RD_BLOCK, 1), block=(64,1,1).
+    //   32 inv_d(=1/features), 36 eps. grid=(tokens, features/RD_BLOCK, 1), block=(64,1,1).
     hipError_t launchRowDiv(void*       D,
                             void*       partialBuf,
                             uint32_t    tokensM,
@@ -4022,7 +4022,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 if(pbBytes && prob.workspace && total >= pbBytes)
                     partialRmsBuf = static_cast<uint8_t*>(prob.workspace) + (total - pbBytes);
 
-                // partialBuf has nD = ceil(D.M / MT0) feature tiles per D.N row.
+                // partialBuf has nD = ceil(D.M / MT0) feature tiles per D.N token.
                 const size_t mt0  = solution->sizeMapping.macroTile.x;
                 partialRmsNTilesN = mt0 ? static_cast<uint32_t>((prob.m + mt0 - 1) / mt0) : 0;
 
@@ -4145,7 +4145,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     }
                     status = hip2RocStatus(launchRowRstd(partialRmsRstdOut,
                                                          partialRmsBuf,
-                                                         static_cast<uint32_t>(prob.n), // rows
+                                                         static_cast<uint32_t>(prob.n), // tokens
                                                          static_cast<uint32_t>(prob.m), // features
                                                          partialRmsNTilesN, // nD
                                                          partialRmsEps,
@@ -4161,7 +4161,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                               reinterpret_cast<void*>(prob.D),
                                               partialRmsQuantBf16,
                                               partialRmsQuantScale,
-                                              static_cast<uint32_t>(prob.n), // rows
+                                              static_cast<uint32_t>(prob.n), // tokens
                                               static_cast<uint32_t>(prob.m), // features
                                               partialRmsNTilesN, // nD
                                               partialRmsEps,
@@ -4172,7 +4172,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                         status
                             = hip2RocStatus(launchRowDiv(reinterpret_cast<void*>(prob.D),
                                                          partialRmsBuf,
-                                                         static_cast<uint32_t>(prob.n), // rows
+                                                         static_cast<uint32_t>(prob.n), // tokens
                                                          static_cast<uint32_t>(prob.m), // features
                                                          partialRmsNTilesN, // nD
                                                          partialRmsEps,
