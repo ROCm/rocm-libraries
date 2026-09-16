@@ -213,21 +213,13 @@ rocsparse_status
     {
         static constexpr int BLOCKSIZE = 256;
 
-        const int64_t nblocks = (nnz_A - 1) / BLOCKSIZE + 1;
+        const int64_t num_blocks_x = rocsparse::min(
+            (nnz_A - 1) / BLOCKSIZE + 1, static_cast<int64_t>(handle->properties.maxGridSize[0]));
+        dim3 blocks(num_blocks_x);
+        dim3 threads(BLOCKSIZE);
 
-        const uint32_t grid_x = std::min(nblocks, static_cast<int64_t>(2147483647));
-        const uint32_t grid_y = std::min((nblocks - 1) / grid_x + 1, static_cast<int64_t>(65535));
-
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((abs_kernel<BLOCKSIZE, T>),
-                                           dim3(grid_x, grid_y, 1),
-                                           dim3(BLOCKSIZE, 1, 1),
-                                           0,
-                                           stream,
-                                           m,
-                                           n,
-                                           A,
-                                           lda,
-                                           output);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (abs_kernel<BLOCKSIZE, T>), blocks, threads, 0, stream, m, n, A, lda, output);
     }
 
     // Determine amount of temporary storage needed for rocprim sort and inclusive scan and allocate if necessary
