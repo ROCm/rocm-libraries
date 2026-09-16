@@ -44,7 +44,7 @@ import sys
 
 import pytest
 
-import Tensile.LibraryIO as L
+import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
 

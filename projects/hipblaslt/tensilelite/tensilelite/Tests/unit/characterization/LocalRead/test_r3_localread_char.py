@@ -5,7 +5,7 @@
 """P4 characterization: LocalReadMFMA helper methods + CheckValue1 path.
 
 Directly exercises the pure-Python helper methods on LocalReadMFMA that live
-on the missing-coverage ranges in Tensile/Components/LocalRead.py:
+on the missing-coverage ranges in tensilelite/Components/LocalRead.py:
 
   117-151  LocalReadVALU CheckValue1 debug path (lines 117-118 reachable;
            119-151 are dead code due to RegisterContainer.split() bug)
@@ -24,9 +24,9 @@ Pattern: A (codegen-component method calls, pure Python).
 import pytest
 from types import SimpleNamespace
 
-import rocisa  # noqa: F401 — must import before Tensile.Component to avoid SIGABRT
-import Tensile.Component  # noqa: F401 — ensures Component.py is loaded before LocalRead.py
-from Tensile.Components.LocalRead import LocalReadMFMA
+import rocisa  # noqa: F401 — must import before tensilelite.Component to avoid SIGABRT
+import tensilelite.Component  # noqa: F401 — ensures Component.py is loaded before LocalRead.py
+from tensilelite.Components.LocalRead import LocalReadMFMA
 
 pytestmark = pytest.mark.unit
 
@@ -356,9 +356,9 @@ class TestLocalReadVALUCheckValue1:
         ))
         from config_harness import _toolchain_for, _isolated_globals_with_isa, _solutions_from_config_unguarded
         from codegen_harness import _init_rocisa_for, _prepare_kernel
-        from Tensile.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions, processKernelSource
-        from Tensile.KernelWriterAssembly import KernelWriterAssembly
-        from Tensile.Common.Types import DebugConfig
+        from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions, processKernelSource
+        from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+        from tensilelite.Common.Types import DebugConfig
 
         arch = "gfx942"
         assembler, iim = _toolchain_for(arch)

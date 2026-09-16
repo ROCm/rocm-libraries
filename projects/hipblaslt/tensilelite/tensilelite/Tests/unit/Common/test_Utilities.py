@@ -28,9 +28,9 @@ import pytest
 from unittest.mock import mock_open, patch
 from pathlib import Path
 
-from Tensile import __version__
-from Tensile.Common import Utilities as UtilitiesModule
-from Tensile.Common.Utilities import (
+from tensilelite import __version__
+from tensilelite.Common import Utilities as UtilitiesModule
+from tensilelite.Common.Utilities import (
     ClientExecutionLock,
     ProgressBar,
     ceilDivide,
@@ -59,7 +59,7 @@ from Tensile.Common.Utilities import (
     versionIsCompatible,
     wmmaV3InputVgprLayout,
 )
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 @pytest.fixture
 def mock_openFile():
