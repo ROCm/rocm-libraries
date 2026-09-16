@@ -1,0 +1,114 @@
+{
+  "compute_data_type": "${case.compute_data_type}",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "min_required_engine_api_version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "name": "Conv Bias",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "w_tensor_uid": 3,
+        "x_tensor_uid": 4
+      },
+      "name": "ConvolutionFprop_0",
+      "outputs": {
+        "y_tensor_uid": 0
+      },
+      "parameters": {
+        "conv_mode": "CROSS_CORRELATION",
+        "dilation": [
+          1
+        ],
+        "post_padding": [
+          0
+        ],
+        "pre_padding": [
+          0
+        ],
+        "stride": [
+          1
+        ]
+      },
+      "type": "ConvolutionFwdAttributes"
+    },
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "axis_tensor_uid": null,
+        "elu_alpha": null,
+        "in_0_tensor_uid": 0,
+        "in_1_tensor_uid": 2,
+        "in_2_tensor_uid": null,
+        "operation": "add",
+        "relu_lower_clip": null,
+        "relu_lower_clip_slope": null,
+        "relu_upper_clip": null,
+        "softplus_beta": null,
+        "swish_beta": null
+      },
+      "name": "Pointwise_1",
+      "outputs": {
+        "out_0_tensor_uid": 1
+      },
+      "type": "PointwiseAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "ConvolutionFprop_0::Y",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": true
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Pointwise_1::OUT_0",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "w",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    }
+  ]
+}

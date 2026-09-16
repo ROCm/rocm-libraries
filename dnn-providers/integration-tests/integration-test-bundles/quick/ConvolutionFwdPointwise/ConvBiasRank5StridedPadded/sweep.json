@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "case",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              16,
+              8,
+              4,
+              2,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              16,
+              8,
+              4,
+              2,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              2,
+              2,
+              2
+            ],
+            "strides": [
+              16,
+              8,
+              4,
+              2,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              2,
+              3,
+              3,
+              3
+            ],
+            "strides": [
+              54,
+              27,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              5,
+              5,
+              5
+            ],
+            "strides": [
+              250,
+              125,
+              25,
+              5,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "Hackweek:ConvBias, rank generalization round 20260916T225820Z-032a"
+      }
+    }
+  ]
+}

@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "case",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              6,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              8
+            ],
+            "strides": [
+              16,
+              8,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "Hackweek:ConvBias, rank generalization round 20260916T225820Z-032a"
+      }
+    },
+    {
+      "id": "1_2_6_nwc",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              1,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              1,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              1,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              6,
+              1,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              8
+            ],
+            "strides": [
+              16,
+              1,
+              2
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "Hackweek:ConvBias, rank generalization round 20260916T225820Z-032a"
+      }
+    },
+    {
+      "id": "1_2_6_broadcast_bias",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              6
+            ],
+            "strides": [
+              12,
+              6,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              6,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              8
+            ],
+            "strides": [
+              16,
+              8,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "Hackweek:ConvBias, rank generalization round 20260916T225820Z-032a"
+      }
+    }
+  ]
+}

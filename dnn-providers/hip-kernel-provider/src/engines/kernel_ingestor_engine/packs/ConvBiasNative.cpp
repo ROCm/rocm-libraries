@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright Â© Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -50,13 +50,25 @@
  * consume the conv's own y and that y must be virtual.
  *
  * The kernel (kernels/ConvBiasFusedFwd.cpp) is layout-agnostic and shape-agnostic: it
- * takes all sixteen tensor strides and every extent, group count, padding, stride and
+ * takes all twenty tensor strides and every extent, group count, padding, stride and
  * dilation as runtime arguments. Layout is not a field in the hipDNN schema -- it exists
  * only as the stride vector -- so an NCHW and an NHWC graph of the same dims differ here
- * and nowhere else. What the kernel is NOT agnostic about is rank (it unravels exactly
- * four coordinates) and element type (HKP_CONV_BIAS_TYPE changes the declared types of
- * four of its parameters), so the matcher refuses anything else rather than letting it in
- * and miscomputing.
+ * and nowhere else.
+ *
+ * RANK is served the same way, by canonicalisation rather than by branching. The kernel is
+ * written once in a five-axis (N, C, D, H, W) form with three spatial axes, and this
+ * matcher expresses every admitted rank in it: a graph's rank - 2 spatial axes are
+ * RIGHT-aligned into the canonical three and the leading slots left over are made
+ * degenerate -- extent 1, filter 1, pad 0, stride 1, dilation 1, tensor stride 0. That is
+ * an identity, not an approximation: the only coordinate such a slot can take is 0, its
+ * loop runs once, and every address it contributes is a multiple of zero. So ranks 3, 4
+ * and 5 reach one kernel body through one set of checks, and there is no per-rank code
+ * path in either file to get out of step with the other.
+ *
+ * What the kernel is still NOT agnostic about is element type -- HKP_CONV_BIAS_TYPE
+ * changes the declared types of four of its parameters -- and rank beyond five, which
+ * would need a fourth spatial loop it does not have. The matcher refuses both rather than
+ * letting them in and miscomputing.
  *
  * Two conventions below are taken from the hipDNN CPU reference rather than from the
  * operation's popular name, because both are places where libraries disagree, and getting
@@ -93,11 +105,21 @@ constexpr std::string_view W_TOKEN = "conv_bias.w.uid";
 constexpr std::string_view BIAS_TOKEN = "conv_bias.bias.uid";
 constexpr std::string_view OUT_TOKEN = "conv_bias.out.uid";
 
-/// The kernel unravels a flat index into exactly four coordinates and names each tensor's
-/// four strides as separate parameters, so rank 4 is not a simplification here.
-constexpr uint32_t SUPPORTED_RANK = 4;
-/// Two spatial axes, so pre_padding, post_padding, stride and dilation are each length 2.
-constexpr size_t SUPPORTED_SPATIAL_RANK = 2;
+/// The kernel is written in one canonical five-axis form, (N, C, D, H, W), and every
+/// admitted rank is expressed in it. Nothing below is a rank-specific code path: a rank-3
+/// or rank-4 graph is the same kernel with its unused leading spatial slots made
+/// degenerate, which canonicalSpatial() below constructs.
+constexpr uint32_t CANONICAL_RANK = 5;
+/// Three canonical spatial axes, so the kernel's padding, stride and dilation arguments
+/// are each a triple regardless of what the graph carried.
+constexpr size_t CANONICAL_SPATIAL_RANK = 3;
+
+/// The graph ranks this engine admits, inclusive. Two batch-and-channel axes plus one to
+/// three spatial ones. Rank 2 is a graph with no spatial axis at all -- a convolution
+/// whose window has nowhere to slide -- and the reference does not produce one; rank 6 and
+/// above needs a fourth spatial loop this kernel does not have.
+constexpr uint32_t MIN_SUPPORTED_RANK = 3;
+constexpr uint32_t MAX_SUPPORTED_RANK = CANONICAL_RANK;
 
 /// This engine's graph is exactly two nodes, in this topological order.
 constexpr uint32_t SUPPORTED_NODE_COUNT = 2;
@@ -144,32 +166,44 @@ struct ConvBiasBinding
     }
 };
 
-/// The 33 scalars the kernel takes after its four pointers, in its own declared order.
+/// One value per canonical spatial axis, in (D, H, W) order.
+using CanonicalSpatial = std::array<int64_t, CANONICAL_SPATIAL_RANK>;
+/// One value per canonical tensor axis, in (N, C, D, H, W) order.
+using CanonicalAxes = std::array<int64_t, CANONICAL_RANK>;
+
+/// The 43 scalars the kernel takes after its four pointers, in its own declared order.
+///
+/// Everything here is already canonical: a rank-3 or rank-4 graph has had its degenerate
+/// leading spatial slots filled in, so nothing downstream of describeConvBias() needs to
+/// know what rank the graph was.
 struct ConvBiasGeometry
 {
     int32_t outN = 0;
     int32_t outC = 0;
-    int32_t outP = 0;
-    int32_t outQ = 0;
+    /// (outD, outP, outQ) -- the output's canonical spatial extents.
+    std::array<int32_t, CANONICAL_SPATIAL_RANK> outSpatial = {1, 1, 1};
     int32_t convK = 0;
     int32_t xC = 0;
     int32_t wC = 0;
-    int32_t xH = 0;
-    int32_t xW = 0;
-    int32_t filtR = 0;
-    int32_t filtS = 0;
-    int32_t padH = 0;
-    int32_t padW = 0;
-    int32_t strideH = 0;
-    int32_t strideW = 0;
-    int32_t dilationH = 0;
-    int32_t dilationW = 0;
-    std::array<int64_t, SUPPORTED_RANK> xStrides = {0, 0, 0, 0};
-    std::array<int64_t, SUPPORTED_RANK> wStrides = {0, 0, 0, 0};
+    /// (xD, xH, xW).
+    std::array<int32_t, CANONICAL_SPATIAL_RANK> xSpatial = {1, 1, 1};
+    /// (filtT, filtR, filtS).
+    std::array<int32_t, CANONICAL_SPATIAL_RANK> filter = {1, 1, 1};
+    /// pre_padding, stride and dilation, each canonicalised. A degenerate slot carries the
+    /// identity -- pad 0, stride 1, dilation 1 -- which is what makes its only coordinate,
+    /// 0, map to input coordinate 0.
+    std::array<int32_t, CANONICAL_SPATIAL_RANK> padding = {0, 0, 0};
+    std::array<int32_t, CANONICAL_SPATIAL_RANK> stride = {1, 1, 1};
+    std::array<int32_t, CANONICAL_SPATIAL_RANK> dilation = {1, 1, 1};
+    /// Canonical strides. A degenerate spatial slot carries 0, so its always-zero
+    /// coordinate contributes nothing to any address.
+    CanonicalAxes xStrides = {0, 0, 0, 0, 0};
+    CanonicalAxes wStrides = {0, 0, 0, 0, 0};
     /// Already zeroed on every axis the bias broadcasts along -- see zeroedBiasStrides().
-    std::array<int64_t, SUPPORTED_RANK> biasStrides = {0, 0, 0, 0};
-    std::array<int64_t, SUPPORTED_RANK> outStrides = {0, 0, 0, 0};
-    /// outN * outC * outP * outQ, in int64_t. The iteration space, and the grid divisor.
+    CanonicalAxes biasStrides = {0, 0, 0, 0, 0};
+    CanonicalAxes outStrides = {0, 0, 0, 0, 0};
+    /// outN * outC * outD * outP * outQ, in int64_t. The iteration space, and the grid
+    /// divisor.
     int64_t total = 0;
 };
 
@@ -197,40 +231,105 @@ bool fitsInt32(int64_t value)
            && value <= std::numeric_limits<int32_t>::max();
 }
 
-/// One spatial attribute vector -- pre_padding, post_padding, stride or dilation -- read
-/// as its two values.
+/// The canonical slot a graph's spatial axis occupies.
 ///
-/// An absent vector reads as @p fallback, which is the frontend attribute default (0 for
-/// the paddings, 1 for stride and dilation) and not a guess. A vector that is *present*
-/// must be exactly length 2 and every element at least @p minimum; anything else is a
-/// refusal rather than a clamp, because a 3-D convolution's length-3 vector is a graph
-/// this kernel cannot serve, not one to truncate.
-std::optional<std::array<int64_t, SUPPORTED_SPATIAL_RANK>>
-    spatialParameter(const flatbuffers::Vector<int64_t>* values, int64_t fallback, int64_t minimum)
+/// The graph's @p spatialRank real spatial axes are RIGHT-aligned into the canonical three:
+/// a rank-4 graph's (H, W) become canonical (H, W) and leave D degenerate, and a rank-3
+/// graph's single axis becomes canonical W. Right-aligning rather than left-aligning is
+/// what keeps the kernel's fastest-varying iteration axis the same axis at every rank, so
+/// there is one unravel order there rather than three.
+size_t canonicalSpatialSlot(size_t spatialRank, size_t spatialAxis)
 {
+    return CANONICAL_SPATIAL_RANK - spatialRank + spatialAxis;
+}
+
+/// One spatial attribute vector -- pre_padding, post_padding, stride or dilation -- read
+/// into canonical (D, H, W) slots.
+///
+/// An absent vector reads as @p fallback throughout, which is the frontend attribute
+/// default (0 for the paddings, 1 for stride and dilation) and not a guess. A vector that
+/// is *present* must be exactly @p spatialRank long -- the graph's own rank minus its two
+/// batch/channel axes -- and every element at least @p minimum. A length that disagrees
+/// with the tensors' rank is a refusal rather than a truncation or a pad: a length-2
+/// stride on a rank-5 graph is a graph whose author meant something, and guessing which
+/// two of the three axes they meant is not this matcher's job.
+///
+/// Slots the graph does not occupy receive @p identity, which is the value that makes the
+/// kernel's degenerate loop a no-op: 0 for padding, 1 for stride and dilation. Note this
+/// is the same number as @p fallback for all four callers, but it is a different fact --
+/// one is "the frontend omitted this", the other is "this axis does not exist" -- so it is
+/// spelled separately rather than reused.
+std::optional<CanonicalSpatial> spatialParameter(const flatbuffers::Vector<int64_t>* values,
+                                                 size_t spatialRank,
+                                                 int64_t fallback,
+                                                 int64_t minimum,
+                                                 int64_t identity)
+{
+    CanonicalSpatial result = {identity, identity, identity};
+
     if(values == nullptr)
     {
-        return std::array<int64_t, SUPPORTED_SPATIAL_RANK>{fallback, fallback};
+        for(size_t axis = 0; axis < spatialRank; ++axis)
+        {
+            result[canonicalSpatialSlot(spatialRank, axis)] = fallback;
+        }
+        return result;
     }
-    if(values->size() != SUPPORTED_SPATIAL_RANK)
+    if(values->size() != spatialRank)
     {
         return std::nullopt;
     }
 
-    std::array<int64_t, SUPPORTED_SPATIAL_RANK> result = {0, 0};
-    for(flatbuffers::uoffset_t axis = 0; axis < SUPPORTED_SPATIAL_RANK; ++axis)
+    for(size_t axis = 0; axis < spatialRank; ++axis)
     {
-        const auto value = values->Get(axis);
+        const auto value = values->Get(static_cast<flatbuffers::uoffset_t>(axis));
         if(value < minimum || !fitsInt32(value))
         {
             return std::nullopt;
         }
-        result[axis] = value;
+        result[canonicalSpatialSlot(spatialRank, axis)] = value;
     }
     return result;
 }
 
-/// True when @p tensor is rank 4 with a usable stride per dim, every extent int32-sized.
+/// A tensor's dims in canonical (N, C, D, H, W) slots, degenerate spatial slots reading 1.
+///
+/// Extent 1 rather than 0 on an absent axis: it is an axis of exactly one coordinate, so
+/// the kernel's loop over it runs once and its bounds test passes, which is what makes the
+/// degenerate slot an identity rather than an empty iteration space.
+CanonicalAxes canonicalDims(const data_objects::TensorAttributes& tensor, size_t rank)
+{
+    const size_t spatialRank = rank - 2;
+    CanonicalAxes dims = {1, 1, 1, 1, 1};
+    dims[0] = tensor.dims()->Get(0);
+    dims[1] = tensor.dims()->Get(1);
+    for(size_t axis = 0; axis < spatialRank; ++axis)
+    {
+        dims[2 + canonicalSpatialSlot(spatialRank, axis)]
+            = tensor.dims()->Get(static_cast<flatbuffers::uoffset_t>(2 + axis));
+    }
+    return dims;
+}
+
+/// A tensor's strides in canonical (N, C, D, H, W) slots, degenerate spatial slots
+/// reading 0 -- which is what makes their always-zero coordinate contribute nothing to the
+/// address the kernel computes.
+CanonicalAxes canonicalStrides(const data_objects::TensorAttributes& tensor, size_t rank)
+{
+    const size_t spatialRank = rank - 2;
+    CanonicalAxes strides = {0, 0, 0, 0, 0};
+    strides[0] = tensor.strides()->Get(0);
+    strides[1] = tensor.strides()->Get(1);
+    for(size_t axis = 0; axis < spatialRank; ++axis)
+    {
+        strides[2 + canonicalSpatialSlot(spatialRank, axis)]
+            = tensor.strides()->Get(static_cast<flatbuffers::uoffset_t>(2 + axis));
+    }
+    return strides;
+}
+
+/// True when @p tensor is rank @p rank with a usable stride per dim, every extent
+/// int32-sized.
 ///
 /// Strides are otherwise unconstrained -- that is the point of this kernel. The one
 /// refusal is a stride below 1 on an axis of extent > 1. For the output that is the
@@ -239,12 +338,12 @@ std::optional<std::array<int64_t, SUPPORTED_SPATIAL_RANK>>
 /// element, which the kernel would survive -- but no such graph was ever run, so it is
 /// declined rather than claimed. An extent-1 axis may carry any stride, because its
 /// coordinate is always 0 and the term drops out.
-bool hasSupportedShape(const data_objects::TensorAttributes& tensor)
+bool hasSupportedShape(const data_objects::TensorAttributes& tensor, size_t rank)
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
     if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
-       || dims->size() != SUPPORTED_RANK)
+       || dims->size() != rank)
     {
         return false;
     }
@@ -267,9 +366,9 @@ bool hasSupportedShape(const data_objects::TensorAttributes& tensor)
 /// True when @p tensor is real device data this kernel can address: a supported shape, the
 /// one supported element type, not virtual, not a pass-by-value scalar, carrying no inline
 /// constant and no ragged offset, and aligned at least to its element.
-bool isSupportedOperand(const data_objects::TensorAttributes& tensor)
+bool isSupportedOperand(const data_objects::TensorAttributes& tensor, size_t rank)
 {
-    if(!hasSupportedShape(tensor))
+    if(!hasSupportedShape(tensor, rank))
     {
         return false;
     }
@@ -285,7 +384,7 @@ bool isSupportedOperand(const data_objects::TensorAttributes& tensor)
         return false;
     }
 
-    // A rank-4 tensor is also the shape a pass-by-value scalar can take; that variant-pack
+    // An admitted rank is also a shape a pass-by-value scalar can take; that variant-pack
     // slot holds a host pointer, not a device one.
     if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor))
     {
@@ -313,9 +412,9 @@ bool isSupportedOperand(const data_objects::TensorAttributes& tensor)
 /// be virtual, which is the fact that makes this fusion an elision rather than a dropped
 /// output. A non-virtual y is a graph whose conv result someone else can observe, and
 /// eliding it would silently leave that buffer unwritten.
-bool isSupportedVirtualIntermediate(const data_objects::TensorAttributes& tensor)
+bool isSupportedVirtualIntermediate(const data_objects::TensorAttributes& tensor, size_t rank)
 {
-    return hasSupportedShape(tensor) && tensor.data_type() == SUPPORTED_DATA_TYPE
+    return hasSupportedShape(tensor, rank) && tensor.data_type() == SUPPORTED_DATA_TYPE
            && tensor.virtual_() && tensor.value_type() == data_objects::TensorValue::NONE
            && !tensor.ragged_offset_tensor_uid().has_value()
            && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
@@ -369,27 +468,34 @@ bool pointwiseExtrasAbsent(const data_objects::PointwiseAttributes& pointwise)
            && !pointwise.elu_alpha().has_value() && !pointwise.softplus_beta().has_value();
 }
 
-/// The bias operand's strides with every broadcast axis zeroed.
+/// The bias operand's canonical strides with every broadcast axis zeroed.
 ///
 /// The kernel indexes bias at the OUTPUT's coordinates and holds no bias extents and no
-/// broadcast test of its own -- kernels/ConvBiasFusedFwd.cpp:76-77 states that as its
-/// contract with the caller. So an axis where the bias has extent 1 against an output
+/// broadcast test of its own -- see the contract stated in kernels/ConvBiasFusedFwd.cpp's
+/// entry-point doc comment. So an axis where the bias has extent 1 against an output
 /// extent greater than 1 must arrive as stride 0, or every thread on that axis reads past
 /// the operand. Zeroing on extent 1 unconditionally is correct in both sub-cases: where
 /// the output extent is also 1 the coordinate is always 0, so the product is 0 either way.
 ///
+/// It is also what makes a degenerate spatial slot free here rather than a special case:
+/// canonicalDims() reports extent 1 for a slot the graph does not have, so this zeroes it
+/// by the same rule that zeroes a genuine broadcast, and canonicalStrides() would have
+/// given 0 anyway.
+///
 /// This is the computed, conditional kind of value the seam assigns to the handler rather
 /// than to a descriptor: the descriptor's substituter does literal replacement and could
 /// not derive it.
-std::array<int64_t, SUPPORTED_RANK>
-    zeroedBiasStrides(const data_objects::TensorAttributes& bias)
+CanonicalAxes zeroedBiasStrides(const data_objects::TensorAttributes& bias, size_t rank)
 {
-    std::array<int64_t, SUPPORTED_RANK> strides = {0, 0, 0, 0};
-    for(flatbuffers::uoffset_t axis = 0; axis < SUPPORTED_RANK; ++axis)
+    const auto dims = canonicalDims(bias, rank);
+    const auto strides = canonicalStrides(bias, rank);
+
+    CanonicalAxes zeroed = {0, 0, 0, 0, 0};
+    for(size_t axis = 0; axis < CANONICAL_RANK; ++axis)
     {
-        strides[axis] = bias.dims()->Get(axis) == 1 ? int64_t{0} : bias.strides()->Get(axis);
+        zeroed[axis] = dims[axis] == 1 ? int64_t{0} : strides[axis];
     }
-    return strides;
+    return zeroed;
 }
 
 /**
@@ -520,33 +626,60 @@ std::optional<ConvBiasPlan> describeConvBias(const MatchContext& context)
         return std::nullopt;
     }
 
-    if(!isSupportedOperand(*x) || !isSupportedOperand(*w) || !isSupportedOperand(*bias)
-       || !isSupportedOperand(*out) || !isSupportedVirtualIntermediate(*y))
+    // The graph's rank, taken from the sole graph output and then REQUIRED of the other
+    // four by the isSupportedOperand calls below, which each compare against it. Reading it
+    // off one tensor and enforcing it on the rest is the point: a graph mixing a rank-4 x
+    // with a rank-5 w has no canonical form at all, and admitting it would canonicalise
+    // each tensor against a different axis alignment and address one of them wrongly.
+    const auto* outDimsVector = out->dims();
+    if(outDimsVector == nullptr || outDimsVector->size() < MIN_SUPPORTED_RANK
+       || outDimsVector->size() > MAX_SUPPORTED_RANK)
+    {
+        return std::nullopt;
+    }
+    const size_t rank = outDimsVector->size();
+    const size_t spatialRank = rank - 2;
+
+    if(!isSupportedOperand(*x, rank) || !isSupportedOperand(*w, rank)
+       || !isSupportedOperand(*bias, rank) || !isSupportedOperand(*out, rank)
+       || !isSupportedVirtualIntermediate(*y, rank))
     {
         return std::nullopt;
     }
 
-    const auto spatialPrePadding
-        = spatialParameter(conv.pre_padding(), /*fallback=*/0, /*minimum=*/0);
-    const auto spatialPostPadding
-        = spatialParameter(conv.post_padding(), /*fallback=*/0, /*minimum=*/0);
-    const auto spatialStride = spatialParameter(conv.stride(), /*fallback=*/1, /*minimum=*/1);
-    const auto spatialDilation = spatialParameter(conv.dilation(), /*fallback=*/1, /*minimum=*/1);
+    // Canonicalised straight out of the accessor: each is length 3 in (D, H, W) order with
+    // the graph's own axes right-aligned into it, and the slots this rank does not have
+    // carrying the identity. A vector whose length disagrees with `spatialRank` is refused
+    // here rather than padded -- that is the check that keeps a rank-5 graph carrying a
+    // length-2 stride out, instead of silently convolving it with an invented third value.
+    const auto spatialPrePadding = spatialParameter(
+        conv.pre_padding(), spatialRank, /*fallback=*/0, /*minimum=*/0, /*identity=*/0);
+    const auto spatialPostPadding = spatialParameter(
+        conv.post_padding(), spatialRank, /*fallback=*/0, /*minimum=*/0, /*identity=*/0);
+    const auto spatialStride = spatialParameter(
+        conv.stride(), spatialRank, /*fallback=*/1, /*minimum=*/1, /*identity=*/1);
+    const auto spatialDilation = spatialParameter(
+        conv.dilation(), spatialRank, /*fallback=*/1, /*minimum=*/1, /*identity=*/1);
     if(!spatialPrePadding.has_value() || !spatialPostPadding.has_value()
        || !spatialStride.has_value() || !spatialDilation.has_value())
     {
         return std::nullopt;
     }
 
-    const auto* xDims = x->dims();
-    const auto* wDims = w->dims();
-    const auto* yDims = y->dims();
-    const auto* biasDims = bias->dims();
-    const auto* outDims = out->dims();
+    // From here down everything is canonical five-axis, so none of the checks below is
+    // written once per rank. A degenerate spatial slot reads extent 1 on every tensor, and
+    // the output-extent identity it has to satisfy is (1 + 0 + 0 - ((1-1)*1+1))/1 + 1 == 1,
+    // which holds -- so the loop over the three canonical spatial axes proves the real ones
+    // and passes trivially over the rest.
+    const auto xDims = canonicalDims(*x, rank);
+    const auto wDims = canonicalDims(*w, rank);
+    const auto yDims = canonicalDims(*y, rank);
+    const auto biasDims = canonicalDims(*bias, rank);
+    const auto outDims = canonicalDims(*out, rank);
 
-    const auto xC = xDims->Get(1);
-    const auto convK = wDims->Get(0);
-    const auto wC = wDims->Get(1);
+    const auto xC = xDims[1];
+    const auto convK = wDims[0];
+    const auto wC = wDims[1];
 
     // Groups are carried by no schema field: this quotient IS the group count, and w's
     // first dimension is indexed by the global output channel with x's channel offset by
@@ -563,7 +696,7 @@ std::optional<ConvBiasPlan> describeConvBias(const MatchContext& context)
     }
 
     // The conv's own output shape, checked against the graph's stated y.
-    if(yDims->Get(0) != xDims->Get(0) || yDims->Get(1) != convK)
+    if(yDims[0] != xDims[0] || yDims[1] != convK)
     {
         return std::nullopt;
     }
@@ -571,24 +704,23 @@ std::optional<ConvBiasPlan> describeConvBias(const MatchContext& context)
     // The output extent identity. This is where post_padding is actually consumed: it does
     // not enter the input-coordinate mapping, but the extent it implies must be the one
     // the graph states, so an inconsistent post_padding is refused rather than ignored.
-    for(flatbuffers::uoffset_t spatial = 0; spatial < SUPPORTED_SPATIAL_RANK; ++spatial)
+    for(size_t spatial = 0; spatial < CANONICAL_SPATIAL_RANK; ++spatial)
     {
-        const auto axis = static_cast<flatbuffers::uoffset_t>(2 + spatial);
-        const auto window
-            = (wDims->Get(axis) - 1) * (*spatialDilation)[spatial] + 1;
-        const auto numerator = xDims->Get(axis) + (*spatialPrePadding)[spatial]
-                               + (*spatialPostPadding)[spatial] - window;
+        const size_t axis = 2 + spatial;
+        const auto window = (wDims[axis] - 1) * (*spatialDilation)[spatial] + 1;
+        const auto numerator
+            = xDims[axis] + (*spatialPrePadding)[spatial] + (*spatialPostPadding)[spatial] - window;
         if(numerator < 0)
         {
             return std::nullopt;
         }
-        if(yDims->Get(axis) != numerator / (*spatialStride)[spatial] + 1)
+        if(yDims[axis] != numerator / (*spatialStride)[spatial] + 1)
         {
             return std::nullopt;
         }
         // The conv's spatial extents are the added tensor's, so the fusion is elementwise
         // over one iteration space.
-        if(yDims->Get(axis) != outDims->Get(axis))
+        if(yDims[axis] != outDims[axis])
         {
             return std::nullopt;
         }
@@ -597,58 +729,55 @@ std::optional<ConvBiasPlan> describeConvBias(const MatchContext& context)
     // Either the convolution's channels align with the added tensor's, or there is exactly
     // one filter broadcast across them -- the convK == 1 case the kernel implements with
     // kOut = 0. No other relationship is admitted, because no other one is computed.
-    if(yDims->Get(1) != outDims->Get(1) && yDims->Get(1) != 1)
+    if(yDims[1] != outDims[1] && yDims[1] != 1)
     {
         return std::nullopt;
     }
-    if(yDims->Get(0) != outDims->Get(0))
+    if(yDims[0] != outDims[0])
     {
         return std::nullopt;
     }
 
     // The bias is per-axis broadcast compatible with the output, numpy-style: each of its
-    // four dims equals the output's or is 1. Anything else would be read out of bounds,
-    // since the kernel addresses it at the output's coordinates.
-    for(flatbuffers::uoffset_t axis = 0; axis < SUPPORTED_RANK; ++axis)
+    // dims equals the output's or is 1. Anything else would be read out of bounds, since
+    // the kernel addresses it at the output's coordinates. A degenerate spatial slot is
+    // extent 1 on both sides, so it satisfies this by either arm.
+    for(size_t axis = 0; axis < CANONICAL_RANK; ++axis)
     {
-        if(biasDims->Get(axis) != outDims->Get(axis) && biasDims->Get(axis) != 1)
+        if(biasDims[axis] != outDims[axis] && biasDims[axis] != 1)
         {
             return std::nullopt;
         }
     }
 
     ConvBiasGeometry geometry;
-    geometry.outN = static_cast<int32_t>(outDims->Get(0));
-    geometry.outC = static_cast<int32_t>(outDims->Get(1));
-    geometry.outP = static_cast<int32_t>(outDims->Get(2));
-    geometry.outQ = static_cast<int32_t>(outDims->Get(3));
+    geometry.outN = static_cast<int32_t>(outDims[0]);
+    geometry.outC = static_cast<int32_t>(outDims[1]);
     geometry.convK = static_cast<int32_t>(convK);
     geometry.xC = static_cast<int32_t>(xC);
     geometry.wC = static_cast<int32_t>(wC);
-    geometry.xH = static_cast<int32_t>(xDims->Get(2));
-    geometry.xW = static_cast<int32_t>(xDims->Get(3));
-    geometry.filtR = static_cast<int32_t>(wDims->Get(2));
-    geometry.filtS = static_cast<int32_t>(wDims->Get(3));
-    geometry.padH = static_cast<int32_t>((*spatialPrePadding)[0]);
-    geometry.padW = static_cast<int32_t>((*spatialPrePadding)[1]);
-    geometry.strideH = static_cast<int32_t>((*spatialStride)[0]);
-    geometry.strideW = static_cast<int32_t>((*spatialStride)[1]);
-    geometry.dilationH = static_cast<int32_t>((*spatialDilation)[0]);
-    geometry.dilationW = static_cast<int32_t>((*spatialDilation)[1]);
-
-    for(flatbuffers::uoffset_t axis = 0; axis < SUPPORTED_RANK; ++axis)
+    for(size_t spatial = 0; spatial < CANONICAL_SPATIAL_RANK; ++spatial)
     {
-        geometry.xStrides[axis] = x->strides()->Get(axis);
-        geometry.wStrides[axis] = w->strides()->Get(axis);
-        geometry.outStrides[axis] = out->strides()->Get(axis);
+        const size_t axis = 2 + spatial;
+        geometry.outSpatial[spatial] = static_cast<int32_t>(outDims[axis]);
+        geometry.xSpatial[spatial] = static_cast<int32_t>(xDims[axis]);
+        geometry.filter[spatial] = static_cast<int32_t>(wDims[axis]);
+        geometry.padding[spatial] = static_cast<int32_t>((*spatialPrePadding)[spatial]);
+        geometry.stride[spatial] = static_cast<int32_t>((*spatialStride)[spatial]);
+        geometry.dilation[spatial] = static_cast<int32_t>((*spatialDilation)[spatial]);
     }
-    geometry.biasStrides = zeroedBiasStrides(*bias);
+
+    geometry.xStrides = canonicalStrides(*x, rank);
+    geometry.wStrides = canonicalStrides(*w, rank);
+    geometry.outStrides = canonicalStrides(*out, rank);
+    geometry.biasStrides = zeroedBiasStrides(*bias, rank);
 
     // int64_t: the matcher admits shapes whose element count exceeds 2^31, and a 32-bit
     // product here would wrap both the grid size and the comparison the kernel's own
     // bounds guard makes against it.
     geometry.total = static_cast<int64_t>(geometry.outN) * geometry.outC
-                     * static_cast<int64_t>(geometry.outP) * geometry.outQ;
+                     * static_cast<int64_t>(geometry.outSpatial[0]) * geometry.outSpatial[1]
+                     * static_cast<int64_t>(geometry.outSpatial[2]);
 
     return ConvBiasPlan{ConvBiasBinding{xUid, wUid, biasUid, outUid}, geometry};
 }
@@ -956,8 +1085,8 @@ public:
         const auto out
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.out, deviceBuffers, numDeviceBuffers);
 
-        // 37 arguments, in the order kernels/ConvBiasFusedFwd.cpp declares them: four
-        // pointers, then 17 int32_t extents and conv parameters, then 16 int64_t strides.
+        // 47 arguments, in the order kernels/ConvBiasFusedFwd.cpp declares them: four
+        // pointers, then 23 int32_t extents and conv parameters, then 20 int64_t strides.
         //
         // Neither arity nor order is diagnosed anywhere downstream -- hipRTC compiles the
         // kernel, getKernel() resolves it, and hipModuleLaunchKernel reads one pointer per
@@ -966,6 +1095,11 @@ public:
         // below are int32_t/int64_t in the geometry struct for the same reason: the
         // variadic pushes exactly what it is given, so a plain `int` where the kernel
         // declares int64_t would misalign every argument after it.
+        //
+        // Every one of these is canonical five-axis already. The rank of the graph that
+        // produced them is not passed and is not needed: describeConvBias() resolved it
+        // into degenerate slot values, so a rank-3 launch differs from a rank-5 one only in
+        // the numbers below.
         preparedConvBias.kernel().launch(handle.getStream(),
                                          x.ptr,
                                          w.ptr,
@@ -973,37 +1107,47 @@ public:
                                          out.ptr,
                                          geometry.outN,
                                          geometry.outC,
-                                         geometry.outP,
-                                         geometry.outQ,
+                                         geometry.outSpatial[0],
+                                         geometry.outSpatial[1],
+                                         geometry.outSpatial[2],
                                          geometry.convK,
                                          geometry.xC,
                                          geometry.wC,
-                                         geometry.xH,
-                                         geometry.xW,
-                                         geometry.filtR,
-                                         geometry.filtS,
-                                         geometry.padH,
-                                         geometry.padW,
-                                         geometry.strideH,
-                                         geometry.strideW,
-                                         geometry.dilationH,
-                                         geometry.dilationW,
+                                         geometry.xSpatial[0],
+                                         geometry.xSpatial[1],
+                                         geometry.xSpatial[2],
+                                         geometry.filter[0],
+                                         geometry.filter[1],
+                                         geometry.filter[2],
+                                         geometry.padding[0],
+                                         geometry.padding[1],
+                                         geometry.padding[2],
+                                         geometry.stride[0],
+                                         geometry.stride[1],
+                                         geometry.stride[2],
+                                         geometry.dilation[0],
+                                         geometry.dilation[1],
+                                         geometry.dilation[2],
                                          geometry.xStrides[0],
                                          geometry.xStrides[1],
                                          geometry.xStrides[2],
                                          geometry.xStrides[3],
+                                         geometry.xStrides[4],
                                          geometry.wStrides[0],
                                          geometry.wStrides[1],
                                          geometry.wStrides[2],
                                          geometry.wStrides[3],
+                                         geometry.wStrides[4],
                                          geometry.biasStrides[0],
                                          geometry.biasStrides[1],
                                          geometry.biasStrides[2],
                                          geometry.biasStrides[3],
+                                         geometry.biasStrides[4],
                                          geometry.outStrides[0],
                                          geometry.outStrides[1],
                                          geometry.outStrides[2],
-                                         geometry.outStrides[3]);
+                                         geometry.outStrides[3],
+                                         geometry.outStrides[4]);
     }
 
 private:

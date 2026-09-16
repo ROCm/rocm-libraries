@@ -13,14 +13,31 @@
 // the hipDNN schema, it exists only as the stride pattern, so an NCHW and an NHWC graph
 // of the same dims differ here and nowhere else.
 //
+// RANK. This kernel is written in a canonical five-axis form (N, C, D, H, W) with three
+// spatial axes, and serves graphs of rank 3, 4 and 5 through it. A graph with S = rank - 2
+// spatial axes occupies the LAST S of the three canonical spatial slots; the leading
+// 3 - S slots are made degenerate by the caller and cost one trip-count-1 loop each:
+//
+//     slot extent 1, filter extent 1, pad 0, stride 1, dilation 1, and every tensor's
+//     stride on that slot 0.
+//
+// That is exactly identity, not an approximation. The only coordinate a degenerate slot
+// can take is 0: the loop runs once at r == 0, the mapped input coordinate is
+// 0*1 + 0*1 - 0 == 0 which is inside [0, 1), and every offset it contributes is a
+// multiple of a zero stride. So rank 4 differs from rank 5 here in the caller's argument
+// values and nowhere in this source, and there is no rank-specific branch to get wrong.
+// Right-aligning rather than left-aligning the real axes is what makes this work: W stays
+// the fastest-varying iteration axis at every rank, so the unravel order below is one
+// order rather than three.
+//
 // Two conventions are taken from the hipDNN CPU reference rather than from the operation's
 // popular name, because both are places where libraries disagree:
 //
 //   * The input coordinate is `y*stride + r*dilation - prePadding`, and a coordinate
 //     outside [0, extent) contributes nothing at all rather than contributing a zero
 //     product. post_padding never enters the mapping; it only ever widened the output
-//     extent, and the output extent arrives here as outP/outQ read off the graph's own
-//     y tensor. (CpuFpReferenceConvolution.hpp, fprop's spatial-index loop.)
+//     extent, and the output extent arrives here as outD/outP/outQ read off the graph's
+//     own y tensor. (CpuFpReferenceConvolution.hpp, fprop's spatial-index loop.)
 //   * Groups are not a schema field. They are implied by the channel relationship
 //     groups = x.dims[1] / w.dims[1], with w's first dimension indexed by the *global*
 //     output channel and x's channel offset by the group. (Same file, `nGroups` /
@@ -63,18 +80,23 @@ using HkpConvBiasElement = HKP_CB_CAT(HKP_CONV_BIAS_TYPE);
 // and a second paren group in it is an invitation to transcribe the wrong thing.
 #define HKP_CONV_BIAS_LAUNCH_BOUNDS __launch_bounds__(HKP_CONV_BIAS_BLOCK_SIZE)
 
-/// Fused ConvolutionFwd(CROSS_CORRELATION) + Pointwise(ADD).
+/// Fused ConvolutionFwd(CROSS_CORRELATION) + Pointwise(ADD), canonical rank 5.
 ///
-/// out[n, c, p, q] = element(  sum over (cl, r, s) of
-///                               x[n, g*wC + cl, p*strideH + r*dilationH - padH,
-///                                              q*strideW + s*dilationW - padW]
-///                             * w[k, cl, r, s]  )
-///                   + bias[n, c, p, q]
+/// out[n, c, o, p, q] = element(  sum over (cl, t, r, s) of
+///                                  x[n, g*wC + cl, o*strideD + t*dilationD - padD,
+///                                                  p*strideH + r*dilationH - padH,
+///                                                  q*strideW + s*dilationW - padW]
+///                                * w[k, cl, t, r, s]  )
+///                      + bias[n, c, o, p, q]
 ///
 /// with k = (convK == 1 ? 0 : c), g = k / (convK / (xC / wC)), terms whose input
 /// coordinate falls outside the x extents omitted, and every tensor addressed through its
 /// own strides. `bias` is addressed with strides the caller has already zeroed on any axis
 /// the bias broadcasts along, so this kernel needs no bias extents and no broadcast test.
+///
+/// A rank-3 or rank-4 graph reaches this same body with its unused leading spatial slots
+/// made degenerate by the caller -- see the RANK note at the top of this file. The caller
+/// is what decides which slots those are; this kernel has no notion of the graph's rank.
 ///
 /// The grid is sized from the shape by the caller, so the last block is partially
 /// populated and this kernel owns its own bounds check.
@@ -83,9 +105,11 @@ extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
     const HkpConvBiasElement* __restrict__ w,
     const HkpConvBiasElement* __restrict__ bias,
     HkpConvBiasElement* __restrict__ out,
-    // Extents of the pointwise output, which is the iteration space.
+    // Extents of the pointwise output, which is the iteration space. outD is 1 for a
+    // rank-4 graph, and outD and outP are both 1 for a rank-3 one.
     int32_t outN,
     int32_t outC,
+    int32_t outD,
     int32_t outP,
     int32_t outQ,
     // Channel counts: w.dims[0], x.dims[1], w.dims[1]. groups and channels-per-group are
@@ -93,41 +117,53 @@ extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
     int32_t convK,
     int32_t xC,
     int32_t wC,
-    // x spatial extents, and the filter window.
+    // x spatial extents, and the filter window. Degenerate slots carry 1 in both.
+    int32_t xD,
     int32_t xH,
     int32_t xW,
+    int32_t filtT,
     int32_t filtR,
     int32_t filtS,
-    // pre_padding, stride, dilation -- one value per spatial axis.
+    // pre_padding, stride, dilation -- one value per canonical spatial axis. Degenerate
+    // slots carry the identity: pad 0, stride 1, dilation 1.
+    int32_t padD,
     int32_t padH,
     int32_t padW,
+    int32_t strideD,
     int32_t strideH,
     int32_t strideW,
+    int32_t dilationD,
     int32_t dilationH,
     int32_t dilationW,
-    // Strides in elements, in the graph's own [N, C, H, W] / [K, C, R, S] axis order.
+    // Strides in elements, in canonical [N, C, D, H, W] / [K, C, T, R, S] axis order.
+    // A degenerate spatial slot carries 0, which is what makes its always-zero coordinate
+    // contribute nothing to the address.
     int64_t xStrideN,
     int64_t xStrideC,
+    int64_t xStrideD,
     int64_t xStrideH,
     int64_t xStrideW,
     int64_t wStrideK,
     int64_t wStrideC,
+    int64_t wStrideT,
     int64_t wStrideR,
     int64_t wStrideS,
     int64_t biasStrideN,
     int64_t biasStrideC,
+    int64_t biasStrideD,
     int64_t biasStrideH,
     int64_t biasStrideW,
     int64_t outStrideN,
     int64_t outStrideC,
+    int64_t outStrideD,
     int64_t outStrideH,
     int64_t outStrideW)
 {
-    // int64_t throughout: outN*outC*outP*outQ exceeds 2^31 well inside the shapes this
+    // int64_t throughout: outN*outC*outD*outP*outQ exceeds 2^31 well inside the shapes this
     // admits, and a 32-bit total would wrap and silently defeat the guard below rather
     // than merely mis-sizing it.
-    const int64_t total
-        = static_cast<int64_t>(outN) * outC * static_cast<int64_t>(outP) * outQ;
+    const int64_t total = static_cast<int64_t>(outN) * outC * static_cast<int64_t>(outD)
+                          * outP * static_cast<int64_t>(outQ);
 
     const int64_t index = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(index >= total)
@@ -135,13 +171,17 @@ extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
         return;
     }
 
-    // Unravel over (n, c, p, q) with q fastest. This is an iteration-space order, not a
+    // Unravel over (n, c, o, p, q) with q fastest. This is an iteration-space order, not a
     // memory order: the store below goes through outStride*, so the two need not agree.
+    // At rank 3 and 4 the degenerate slots have extent 1, so their coordinate is 0 and the
+    // division by 1 is a no-op -- the same unravel serves every admitted rank.
     int64_t remaining = index;
     const int64_t qOut = remaining % outQ;
     remaining /= outQ;
     const int64_t pOut = remaining % outP;
     remaining /= outP;
+    const int64_t oOut = remaining % outD;
+    remaining /= outD;
     const int64_t cOut = remaining % outC;
     remaining /= outC;
     const int64_t nOut = remaining;
@@ -164,27 +204,39 @@ extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
         const int64_t xChannelOffset = (baseInputChannel + cl) * xStrideC;
         const int64_t wChannelOffset = wBase + cl * wStrideC;
 
-        for(int64_t r = 0; r < filtR; ++r)
+        for(int64_t t = 0; t < filtT; ++t)
         {
-            const int64_t hIn = pOut * strideH + r * dilationH - padH;
-            if(hIn < 0 || hIn >= xH)
+            const int64_t dIn = oOut * strideD + t * dilationD - padD;
+            if(dIn < 0 || dIn >= xD)
             {
                 continue;
             }
-            const int64_t xRowOffset = xChannelOffset + hIn * xStrideH;
-            const int64_t wRowOffset = wChannelOffset + r * wStrideR;
+            const int64_t xDepthOffset = xChannelOffset + dIn * xStrideD;
+            const int64_t wDepthOffset = wChannelOffset + t * wStrideT;
 
-            for(int64_t s = 0; s < filtS; ++s)
+            for(int64_t r = 0; r < filtR; ++r)
             {
-                const int64_t wIn = qOut * strideW + s * dilationW - padW;
-                if(wIn < 0 || wIn >= xW)
+                const int64_t hIn = pOut * strideH + r * dilationH - padH;
+                if(hIn < 0 || hIn >= xH)
                 {
                     continue;
                 }
+                const int64_t xRowOffset = xDepthOffset + hIn * xStrideH;
+                const int64_t wRowOffset = wDepthOffset + r * wStrideR;
 
-                const int64_t xIndex = nOut * xStrideN + xRowOffset + wIn * xStrideW;
-                const int64_t wIndex = wRowOffset + s * wStrideS;
-                accumulator += static_cast<float>(x[xIndex]) * static_cast<float>(w[wIndex]);
+                for(int64_t s = 0; s < filtS; ++s)
+                {
+                    const int64_t wIn = qOut * strideW + s * dilationW - padW;
+                    if(wIn < 0 || wIn >= xW)
+                    {
+                        continue;
+                    }
+
+                    const int64_t xIndex = nOut * xStrideN + xRowOffset + wIn * xStrideW;
+                    const int64_t wIndex = wRowOffset + s * wStrideS;
+                    accumulator
+                        += static_cast<float>(x[xIndex]) * static_cast<float>(w[wIndex]);
+                }
             }
         }
     }
@@ -193,10 +245,10 @@ extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
     // tensor of this type between the two nodes, so this is the value the add sees.
     const float convolved = static_cast<float>(static_cast<HkpConvBiasElement>(accumulator));
 
-    const int64_t biasIndex = nOut * biasStrideN + cOut * biasStrideC + pOut * biasStrideH
-                              + qOut * biasStrideW;
-    const int64_t outIndex
-        = nOut * outStrideN + cOut * outStrideC + pOut * outStrideH + qOut * outStrideW;
+    const int64_t biasIndex = nOut * biasStrideN + cOut * biasStrideC + oOut * biasStrideD
+                              + pOut * biasStrideH + qOut * biasStrideW;
+    const int64_t outIndex = nOut * outStrideN + cOut * outStrideC + oOut * outStrideD
+                             + pOut * outStrideH + qOut * outStrideW;
 
     out[outIndex]
         = static_cast<HkpConvBiasElement>(convolved + static_cast<float>(bias[biasIndex]));

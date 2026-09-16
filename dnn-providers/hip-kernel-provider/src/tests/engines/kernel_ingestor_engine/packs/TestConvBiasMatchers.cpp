@@ -1,4 +1,4 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright Â© Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -25,6 +25,14 @@
  * refusals are every precondition the kernel has that the frontend does not enforce. Both
  * directions are load-bearing: an accept-only suite passes for a matcher stuck on true, a
  * refusal-only suite for one stuck on false.
+ *
+ * RANK is the axis with the most cases on both sides, because it is the axis where the
+ * matcher and the kernel most easily come apart. The kernel is one canonical five-axis
+ * body and the matcher expresses ranks 3, 4 and 5 in it, so the accepts prove each rank
+ * carries its OWN conv parameters, layout and broadcast -- not merely that a rank is let
+ * through -- and the refusals pin the two boundaries (rank 2 below, rank 6 above) plus the
+ * two ways a graph can be internally inconsistent about its rank: operands that disagree
+ * with each other, and a spatial attribute vector that disagrees with the operands.
  *
  * This engine is the only two-node one in the provider, so several refusals here have no
  * counterpart in the sibling suites: a graph whose pointwise does not consume the
@@ -135,11 +143,31 @@ int64_t convolvedExtent(const ConvBiasGraphSpec& spec, size_t spatial)
 /// Builds the two-node fused graph: ConvolutionFwd -> Pointwise(ADD) over a virtual y.
 flatbuffers::FlatBufferBuilder buildConvBiasGraph(const ConvBiasGraphSpec& spec = {})
 {
-    const auto yDims = spec.yDims.has_value() ? *spec.yDims
-                                              : std::vector<int64_t>{spec.xDims.at(0),
-                                                                     spec.wDims.at(0),
-                                                                     convolvedExtent(spec, 0),
-                                                                     convolvedExtent(spec, 1)};
+    // Derived at whatever rank xDims carries, so a rank-3 or rank-5 case states only its
+    // tensors and its conv parameters and gets the y the reference's mapping produces --
+    // the same way a rank-4 case does. A case that means to state a y the parameters do
+    // NOT produce (the extent-identity refusal) overrides yDims instead.
+    //
+    // Derived only when it is actually needed, NOT through value_or: several refusal cases
+    // are deliberately self-inconsistent -- a rank-5 x against a rank-4 w, or a length-2
+    // stride against three spatial axes -- and deriving a y from them would index past the
+    // end of a vector the case shortened on purpose. Those cases all state yDims
+    // themselves, so the derivation must not run for them. Eagerly computing it turns a
+    // matcher refusal into a std::out_of_range from the builder, which passes for a
+    // failure while proving nothing about the matcher.
+    std::vector<int64_t> yDims;
+    if(spec.yDims.has_value())
+    {
+        yDims = *spec.yDims;
+    }
+    else
+    {
+        yDims = {spec.xDims.at(0), spec.wDims.at(0)};
+        for(size_t spatial = 0; spatial + 2 < spec.xDims.size(); ++spatial)
+        {
+            yDims.push_back(convolvedExtent(spec, spatial));
+        }
+    }
     // The added tensor's channels default to the convolution's, which is the aligned case;
     // a caller overriding outDims exercises the convK == 1 broadcast instead.
     const auto outDims = spec.outDims.value_or(yDims);
@@ -344,6 +372,93 @@ INSTANTIATE_TEST_SUITE_P(
          // ADD is commutative and the frontend may emit either order, so the conv's y is
          // bound by identity rather than by position.
          ConvBiasGraphSpec{.swapPointwiseOperands = true}},
+
+        // --- Rank. The kernel is one canonical five-axis body; these are the ranks the
+        // matcher canonicalises into it. Each has a bundle case behind it.
+        {"Rank3",
+         // One spatial axis, so every conv vector is length 1. Canonically it occupies the
+         // W slot and leaves D and H degenerate -- extent 1, filter 1, stride 0 -- which is
+         // why the same kernel serves it.
+         ConvBiasGraphSpec{.xDims = {1, 2, 8},
+                           .wDims = {2, 2, 3},
+                           .stride = {1},
+                           .dilation = {1},
+                           .prePadding = {0},
+                           .postPadding = {0}}},
+        {"Rank3StridedDilatedAndPadded",
+         // The conv parameters at the new rank, not just the trivial ones: refusing to
+         // prove these separately is how a rank widening quietly serves only stride 1.
+         // (8 + 2 - ((3-1)*2+1)) / 2 + 1 = 4.
+         ConvBiasGraphSpec{.xDims = {1, 2, 9},
+                           .wDims = {2, 2, 3},
+                           .stride = {2},
+                           .dilation = {2},
+                           .prePadding = {2},
+                           .postPadding = {0}}},
+        {"Rank3ChannelLastStrides",
+         // NWC: layout is the stride vector at rank 3 exactly as it is at rank 4.
+         ConvBiasGraphSpec{.xDims = {1, 2, 8},
+                           .wDims = {2, 2, 1},
+                           .stride = {1},
+                           .dilation = {1},
+                           .prePadding = {0},
+                           .postPadding = {0},
+                           .xStrides = std::vector<int64_t>{16, 1, 2},
+                           .outStrides = std::vector<int64_t>{16, 1, 2}}},
+        {"Rank3BroadcastBias",
+         // A [1, C, 1] bias: the broadcast-axis zeroing has to happen in canonical space,
+         // or the zeroed axis and the addressed axis are different axes.
+         ConvBiasGraphSpec{.xDims = {1, 2, 8},
+                           .wDims = {2, 2, 1},
+                           .biasDims = std::vector<int64_t>{1, 2, 1},
+                           .stride = {1},
+                           .dilation = {1},
+                           .prePadding = {0},
+                           .postPadding = {0}}},
+        {"Rank5",
+         // Three spatial axes, which is the canonical form itself: no slot is degenerate
+         // and all three of the kernel's spatial loops carry a real extent.
+         ConvBiasGraphSpec{.xDims = {1, 2, 4, 4, 4},
+                           .wDims = {2, 2, 2, 2, 2},
+                           .stride = {1, 1, 1},
+                           .dilation = {1, 1, 1},
+                           .prePadding = {0, 0, 0},
+                           .postPadding = {0, 0, 0}}},
+        {"Rank5StridedAndPadded",
+         // (5 + 1 - 3) / 2 + 1 = 2 on each of the three axes.
+         ConvBiasGraphSpec{.xDims = {1, 2, 5, 5, 5},
+                           .wDims = {2, 2, 3, 3, 3},
+                           .stride = {2, 2, 2},
+                           .dilation = {1, 1, 1},
+                           .prePadding = {1, 1, 1},
+                           .postPadding = {0, 0, 0}}},
+        {"Rank5ChannelLastStrides",
+         // NDHWC.
+         ConvBiasGraphSpec{.xDims = {1, 2, 4, 4, 4},
+                           .wDims = {2, 2, 1, 1, 1},
+                           .stride = {1, 1, 1},
+                           .dilation = {1, 1, 1},
+                           .prePadding = {0, 0, 0},
+                           .postPadding = {0, 0, 0},
+                           .xStrides = std::vector<int64_t>{128, 1, 32, 8, 2},
+                           .outStrides = std::vector<int64_t>{128, 1, 32, 8, 2}}},
+        {"Rank5GroupedConvolution",
+         // groups = 4 / 2 at the rank where the canonical channel slot is furthest from
+         // the axis the graph wrote it on.
+         ConvBiasGraphSpec{.xDims = {1, 4, 3, 3, 3},
+                           .wDims = {4, 2, 1, 1, 1},
+                           .stride = {1, 1, 1},
+                           .dilation = {1, 1, 1},
+                           .prePadding = {0, 0, 0},
+                           .postPadding = {0, 0, 0}}},
+        {"Rank5BroadcastBias",
+         ConvBiasGraphSpec{.xDims = {1, 2, 3, 3, 3},
+                           .wDims = {2, 2, 1, 1, 1},
+                           .biasDims = std::vector<int64_t>{1, 2, 1, 1, 1},
+                           .stride = {1, 1, 1},
+                           .dilation = {1, 1, 1},
+                           .prePadding = {0, 0, 0},
+                           .postPadding = {0, 0, 0}}},
     }),
     [](const ::testing::TestParamInfo<GraphCase>& info) { return info.param.name; });
 
@@ -440,12 +555,43 @@ INSTANTIATE_TEST_SUITE_P(
          // One HKP_CONV_BIAS_TYPE covers all five tensors, so a graph storing the bias at a
          // different width has no candidate that can serve it.
          ConvBiasGraphSpec{.biasDataType = data_objects::DataType::HALF}},
-        {"Rank3Tensors",
-         // The kernel unravels exactly four coordinates and names four strides per tensor.
-         ConvBiasGraphSpec{.xDims = {1, 3, 8},
-                           .wDims = {1, 3, 1},
-                           .outDims = std::vector<int64_t>{1, 1, 8},
-                           .yDims = std::vector<int64_t>{1, 1, 8}}},
+        {"Rank2Tensors",
+         // Two axes is N and C with no spatial axis at all -- a convolution whose window
+         // has nowhere to slide. Below the canonical form's floor, and the reference does
+         // not produce one.
+         ConvBiasGraphSpec{.xDims = {1, 3},
+                           .wDims = {1, 3},
+                           .stride = {},
+                           .dilation = {},
+                           .prePadding = {},
+                           .postPadding = {}}},
+        {"Rank6Tensors",
+         // Four spatial axes. The kernel has three spatial loops, so this is the first rank
+         // the canonical form cannot express -- refused rather than silently folded.
+         ConvBiasGraphSpec{.xDims = {1, 2, 3, 3, 3, 3},
+                           .wDims = {2, 2, 1, 1, 1, 1},
+                           .stride = {1, 1, 1, 1},
+                           .dilation = {1, 1, 1, 1},
+                           .prePadding = {0, 0, 0, 0},
+                           .postPadding = {0, 0, 0, 0}}},
+        {"MixedRankOperands",
+         // A rank-5 x against a rank-4 everything-else. There is no single canonical
+         // alignment for this graph, and canonicalising each tensor against its own rank
+         // would address x on axes the other four do not have.
+         ConvBiasGraphSpec{.xDims = {1, 2, 1, 4, 4},
+                           .wDims = {2, 2, 1, 1},
+                           .outDims = std::vector<int64_t>{1, 2, 4, 4},
+                           .yDims = std::vector<int64_t>{1, 2, 4, 4}}},
+        {"SpatialVectorShorterThanTheTensorRank",
+         // A rank-5 graph carrying a length-2 stride. Padding it to three would be
+         // inventing the value for an axis its author did say something about.
+         ConvBiasGraphSpec{.xDims = {1, 2, 4, 4, 4},
+                           .wDims = {2, 2, 1, 1, 1},
+                           .yDims = std::vector<int64_t>{1, 2, 4, 4, 4},
+                           .stride = {1, 1},
+                           .dilation = {1, 1, 1},
+                           .prePadding = {0, 0, 0},
+                           .postPadding = {0, 0, 0}}},
         {"ChannelsNotDivisibleByFilterChannels",
          // xC / wC is the group count, and an inexact quotient is not one.
          ConvBiasGraphSpec{.xDims = {1, 5, 4, 4}, .wDims = {2, 2, 1, 1}}},
@@ -476,9 +622,10 @@ INSTANTIATE_TEST_SUITE_P(
          ConvBiasGraphSpec{.xDims = {1, 3, 4, 4},
                            .wDims = {3, 3, 1, 1},
                            .outStrides = std::vector<int64_t>{48, 0, 4, 1}}},
-        {"ThreeSpatialAxes",
-         // stride/dilation/padding are length 2 here; a 3-D convolution is a different
-         // kernel, not a vector to truncate.
+        {"SpatialVectorLongerThanTheTensorRank",
+         // A length-3 stride on a rank-4 graph. The tensors say two spatial axes and the
+         // attribute says three; truncating would pick two of the author's three values
+         // and convolve with those.
          ConvBiasGraphSpec{.stride = {1, 1, 1}}},
         {"ZeroStride",
          // yDims are stated as a stride of 1 would produce them, so the stated-extent
