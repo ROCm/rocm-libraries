@@ -1312,7 +1312,7 @@ struct intrin_wmma_scale_f32_16x16x128_f8f6f4<16,
             "v_wmma_scale_f32_16x16x128_f8f6f4");
 
         // keep int32_t for backward compatibility
-#if defined(__gfx125__)
+#if defined(__gfx1250__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
                 wmma_impl::MxTypeSelector<TypeA>::value, // OPSEL
@@ -1371,7 +1371,7 @@ struct intrin_wmma_scale16_f32_16x16x128_f8f6f4<16,
             "unsupported matrix/scale format combination for "
             "v_wmma_scale16_f32_16x16x128_f8f6f4");
 
-#if defined(__gfx125__)
+#if defined(__gfx1250__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
                 wmma_impl::MxTypeSelector<TypeA>::value, // OPSEL
@@ -1426,7 +1426,7 @@ struct intrin_wmma_scale_f32_32x16x128_f4<32, 16, ScaleOpselB, ScaleTypeA, Scale
                           is_same_v<ScaleTypeB, e5m3x4_scale_t> ||
                           is_same_v<ScaleTypeB, e4m3x4_scale_t>,
                       "ScaleTypeB must be e8m0x4_bexp_t, e5m3x4_scale_t, or e4m3x4_scale_t");
-#if defined(__gfx125__)
+#if defined(__gfx1250__)
         int32x16_t arg_a = bit_cast<int32x16_t>(reg_a);
         int32x8_t arg_b  = bit_cast<int32x8_t>(reg_b);
         reg_c.template AsType<float16_t>()(Number<0>{}) =
@@ -1480,7 +1480,7 @@ struct intrin_wmma_scale16_f32_32x16x128_f4<32, 16, ScaleOpselB, ScaleTypeA, Sca
                           is_same_v<ScaleTypeB, e5m3x8_scale_t> ||
                           is_same_v<ScaleTypeB, e4m3x8_scale_t>,
                       "ScaleTypeB must be e8m0x8_bexp_t, e5m3x8_scale_t, or e4m3x8_scale_t");
-#if defined(__gfx125__)
+#if defined(__gfx1250__)
         int32x16_t arg_a = bit_cast<int32x16_t>(reg_a);
         int32x8_t arg_b  = bit_cast<int32x8_t>(reg_b);
         reg_c.template AsType<float16_t>()(Number<0>{}) =

@@ -811,6 +811,7 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
 };
 
 // 32x16x128 f4 specialization - GFX125
+#if defined(__gfx1250__)
 template <>
 struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
     : WmmaTraitsBase<gfx12_t, pk_fp4_t, pk_fp4_t, float, 128, false, 32, 16>
@@ -832,6 +833,7 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
 #endif
     }
 };
+#endif
 
 template <bool IsScale16>
 struct WmmaTraitsGfx125PkFp4F32_32x32x128
@@ -847,7 +849,7 @@ struct WmmaTraitsGfx125PkFp4F32_32x32x128
                                                   const ScaleType& b_scale,
                                                   const CVecType& c_vec)
     {
-#ifdef __gfx125__
+#ifdef __gfx1250__
         using ASliceType = ext_vector_t<pk_fp4_t, sizeof(AVecType) / sizeof(pk_fp4_t)>;
         using BSliceType = ext_vector_t<pk_fp4_t, sizeof(BVecType) / sizeof(pk_fp4_t) / kCNBlock>;
         using CSliceType = fp32x16_t;
