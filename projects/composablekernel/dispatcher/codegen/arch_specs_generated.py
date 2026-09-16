@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-16T02:35:18.750329
+Generated at: 2026-09-16T14:42:54.848163
 
 To update this file:
 1. Edit arch_specs.json
@@ -28,7 +28,7 @@ ARCH_FAMILY_MAP: Dict[str, str] = {
     "gfx1100": "rdna3",
     "gfx1200": "rdna4",
     "gfx1201": "rdna4",
-    "gfx1250": "rdna4",
+    "gfx1250": "cdna5",
 }
 
 # Element size in bytes for each data type

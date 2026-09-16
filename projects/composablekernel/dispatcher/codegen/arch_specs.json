@@ -175,10 +175,16 @@
     },
 
     "gfx1250": {
-      "family": "rdna4",
+      "family": "cdna5",
       "target_family": "gfx125",
       "architecture": "rdna",
-      "description": "AMD gfx1250 (wave32, RDNA-style WMMA)",
+      "_architecture_note": [
+        "architecture is the ISA lineage, not the product generation. arch.hpp",
+        "states that gfx1250 shares the RDNA architecture with the GFX12 family",
+        "while being its own standalone target family, because its MMA builtins",
+        "and data-type ABI differ. family records the product generation."
+      ],
+      "description": "AMD gfx1250 (wave32, WMMA rather than MFMA)",
       "warp_size": 32,
       "_lds_capacity_kb_source": "get_lds_size(gfx125_t) in include/ck_tile/core/arch/arch.hpp",
       "lds_capacity_kb": 320,
