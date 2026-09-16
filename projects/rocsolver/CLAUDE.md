@@ -23,7 +23,7 @@ Build mode flags for `install.sh`:
 |---|---|
 | *(none)* | Release build -> `build/release/` |
 | `-g` | Debug build -> `build/debug/` |
-| `-k` | Release-debug build -> `build/release_debug/` |
+| `-k` | Release-debug build (RelWithDebInfo) -> `build/release-debug/` |
 | `-c` | Include clients (tests + benchmarks) |
 | `-n` | Skip specialized small-matrix kernels |
 | `-a gfx1100` | Target GPU architecture |
@@ -38,7 +38,7 @@ Example -- release-debug with clients (targeting several architectures):
 **Important:** The test/bench binaries link against the system `/opt/rocm/lib/librocsolver.so.0` by default, not the local build. Always prepend `LD_LIBRARY_PATH` to use the locally built library:
 
 ```bash
-# From build/release (or build/release_debug):
+# From build/release (or build/release-debug):
 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH ./clients/staging/rocsolver-test <args>
 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH ./clients/staging/rocsolver-bench <args>
 ```
@@ -167,10 +167,11 @@ The same pattern applies to auxiliary functions under `library/src/auxiliary/`.
 - `LATRD_MULTI_KERNEL=1` -- multi-kernel path (separate kernel launches per step)
 - `COOP_LAUNCH=1` -- force cooperative kernel launch (single persistent kernel)
 - `LATRD_SW_GRID_SYNC=1` -- fused kernel with software grid sync (full L2 fences)
-- `LATRD_SW_RAW_SYNC=1` -- fused kernel with software barrier (sc1 raw stores, no L2 fences)
-- `LATRD_COOP_GRID_X=N` -- override thread block count for the fused kernel
+- `LATRD_SW_RAW_SYNC=1` -- fused kernel with software barrier (sc1 raw stores, no L2 fences). The raw-buffer descriptor uses `word3 = 0x00027000`, a CDNA3/CDNA4 (gfx942/gfx950) value; the sc1 coherence-scope semantics are not validated on CDNA2 (gfx90a), so this path is unreliable there (see `docs/latrd_sync_paths_cache_and_sc1_analysis.md`).
+- `LATRD_COOP_GRID_X=N` -- hard override of the fused kernel's thread block count (grid_x)
+- `LATRD_COOP_GRID_X_MAX=N` -- soft cap on grid_x: uses `min(N, n/2)` so the grid shrinks naturally with problem size
 - `LATRD_COOP_SWITCH_SIZE=N` -- use fused kernel only when n < N (default 8192)
-- `PRINT_DEBUG=1` -- verbose HIP call tracing via `HIP_TRACE` macro
+- `PRINT_DEBUG=1` -- verbose HIP call tracing via `HIP_TRACE`; also prints the `[latrd_fused]` line (grid_x, max_blocks_per_sm, max_total, active path)
 
 ### Memory Model
 
