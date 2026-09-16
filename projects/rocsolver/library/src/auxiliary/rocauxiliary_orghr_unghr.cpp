@@ -124,7 +124,7 @@ extern "C" {
 
     The Householder matrices \f$H(i)\f$ are never stored. They are computed from the
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{tau}[i]\f$, as
-    returned by GEHRD in its arguments ``A`` and ``tau``.
+    returned by \ref rocsolver_sgehrd "GEHRD" in its arguments ``A`` and ``tau``.
 
     @param[in]
     handle      rocblas_handle.
@@ -132,22 +132,21 @@ extern "C" {
     n           rocblas_int. n >= 0.
                 The order of the matrix Q.
     @param[in]
-    ilo         rocblas_int. 1 <= ilo <= ihi <= n, or ilo = 1 and ihi = 0 when n = 0.
-                The lower bound (1-based) of the active submatrix, as returned by GEHRD.
+    ilo         rocblas_int. 1 <= ilo <= ihi.
+                The lower bound (1-based) of the active submatrix.
     @param[in]
-    ihi         rocblas_int. 1 <= ilo <= ihi <= n, or ilo = 1 and ihi = 0 when n = 0.
-                The upper bound (1-based) of the active submatrix, as returned by GEHRD.
+    ihi         rocblas_int. ilo <= ihi <= n.
+                The upper bound (1-based) of the active submatrix.
     @param[inout]
     A           pointer to type. Array on the GPU of dimension lda*n.
-                On entry, the Householder vectors as returned by GEHRD in the lower
-                triangle of the submatrix A(ilo:ihi-1, ilo:ihi-1) (1-indexed).
+                On entry, the Householder vectors as returned by \ref rocsolver_sgehrd "GEHRD".
                 On exit, the computed matrix Q.
     @param[in]
     lda         rocblas_int. lda >= n.
                 The leading dimension of A.
     @param[in]
     tau        pointer to type. Array on the GPU of at least ihi - ilo scalars.
-                The Householder scalars as returned by GEHRD for reflectors
+                The Householder scalars as returned by \ref rocsolver_sgehrd "GEHRD" for reflectors
                 H(ilo) through H(ihi-1).
     ********************************************************************/
 ROCSOLVER_EXPORT rocblas_status rocsolver_sorghr(rocblas_handle handle,
@@ -193,7 +192,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorghr(rocblas_handle handle,
 
     The Householder matrices \f$H(i)\f$ are never stored. They are computed from the
     corresponding Householder vectors \f$v_i\f$ and scalars \f$\text{tau}[i]\f$, as
-    returned by GEHRD in its arguments ``A`` and ``tau``.
+    returned by \ref rocsolver_sgehrd "GEHRD" in its arguments ``A`` and ``tau``.
 
     @param[in]
     handle      rocblas_handle.
@@ -201,22 +200,21 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dorghr(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 The order of the matrix Q.
     @param[in]
-    ilo         rocblas_int. 1 <= ilo <= ihi <= n, or ilo = 1 and ihi = 0 when n = 0.
-                The lower bound (1-based) of the active submatrix, as returned by GEHRD.
+    ilo         rocblas_int. 1 <= ilo <= ihi.
+                The lower bound (1-based) of the active submatrix.
     @param[in]
-    ihi         rocblas_int. 1 <= ilo <= ihi <= n, or ilo = 1 and ihi = 0 when n = 0.
-                The upper bound (1-based) of the active submatrix, as returned by GEHRD.
+    ihi         rocblas_int. ilo <= ihi <= n.
+                The upper bound (1-based) of the active submatrix.
     @param[inout]
     A           pointer to type. Array on the GPU of dimension lda*n.
-                On entry, the Householder vectors as returned by GEHRD in the lower
-                triangle of the submatrix A(ilo:ihi-1, ilo:ihi-1) (1-indexed).
+                On entry, the Householder vectors as returned by \ref rocsolver_sgehrd "GEHRD".
                 On exit, the computed matrix Q.
     @param[in]
     lda         rocblas_int. lda >= n.
                 The leading dimension of A.
     @param[in]
     tau        pointer to type. Array on the GPU of at least ihi - ilo scalars.
-                The Householder scalars as returned by GEHRD for reflectors
+                The Householder scalars as returned by \ref rocsolver_sgehrd "GEHRD" for reflectors
                 H(ilo) through H(ihi-1).
     ********************************************************************/
 ROCSOLVER_EXPORT rocblas_status rocsolver_cunghr(rocblas_handle handle,
