@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,8 @@ class sort_keys_benchmark : public primbench::benchmark_interface
                                          size_t&,
                                          const Key*,
                                          Key*,
-                                         int,
-                                         int,
+                                         int64_t,
+                                         int64_t,
                                          offset_type*,
                                          offset_type*,
                                          hipStream_t);
@@ -166,8 +166,8 @@ class sort_pairs_benchmark : public primbench::benchmark_interface
                                          Key*,
                                          const Value*,
                                          Value*,
-                                         int,
-                                         int,
+                                         int64_t,
+                                         int64_t,
                                          offset_type*,
                                          offset_type*,
                                          hipStream_t);

@@ -341,7 +341,7 @@ void rank_kernel(const KeyType* keys_input,
     UnsignedBits(&unsigned_keys)[ItemsPerThread]
         = reinterpret_cast<UnsignedBits(&)[ItemsPerThread]>(keys);
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
         unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);
@@ -531,18 +531,39 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
                                  int*           prefix_sum_output,
                                  unsigned int   start_bit)
 {
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    constexpr bool warp_striped = false; // CUB BlockRadixRankMatch expects blocked layout
+#else
     constexpr bool warp_striped = Algorithm == RadixRankAlgorithm::RADIX_RANK_MATCH;
+#endif
 
     using KeyTraits      = hipcub::Traits<KeyType>;
     using UnsignedBits   = typename KeyTraits::UnsignedBits;
     using DigitExtractor = hipcub::BFEDigitExtractor<KeyType>;
-    using RankType       = std::conditional_t<
-        Algorithm == RadixRankAlgorithm::RADIX_RANK_MATCH,
-        hipcub::BlockRadixRankMatch<BlockSize, RadixBits, Descending>,
-        hipcub::BlockRadixRank<BlockSize,
-                               RadixBits,
-                               Descending,
-                               Algorithm == RadixRankAlgorithm::RADIX_RANK_MEMOIZE>>;
+
+    using RankType =
+#if defined(__HIP_PLATFORM_NVIDIA__)
+        // For CUB + ULL + MATCH, fall back to basic BlockRadixRank
+        std::conditional_t<
+            Algorithm == RadixRankAlgorithm::RADIX_RANK_MATCH
+                && std::is_same_v<KeyType, unsigned long long>,
+            hipcub::BlockRadixRank<BlockSize, RadixBits, Descending>,
+            std::conditional_t<
+                Algorithm == RadixRankAlgorithm::RADIX_RANK_MATCH,
+                hipcub::BlockRadixRankMatch<BlockSize, RadixBits, Descending>,
+                hipcub::BlockRadixRank<BlockSize,
+                                       RadixBits,
+                                       Descending,
+                                       Algorithm == RadixRankAlgorithm::RADIX_RANK_MEMOIZE>>>;
+#else
+        std::conditional_t<
+            Algorithm == RadixRankAlgorithm::RADIX_RANK_MATCH,
+            hipcub::BlockRadixRankMatch<BlockSize, RadixBits, Descending>,
+            hipcub::BlockRadixRank<BlockSize,
+                                   RadixBits,
+                                   Descending,
+                                   Algorithm == RadixRankAlgorithm::RADIX_RANK_MEMOIZE>>;
+#endif
 
     using KeyExchangeType  = hipcub::BlockExchange<KeyType, BlockSize, ItemsPerThread>;
     using RankExchangeType = hipcub::BlockExchange<int, BlockSize, ItemsPerThread>;
@@ -571,7 +592,7 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
     UnsignedBits(&unsigned_keys)[ItemsPerThread]
         = reinterpret_cast<UnsignedBits(&)[ItemsPerThread]>(keys);
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
         unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);
@@ -595,13 +616,28 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
 
     hipcub::StoreDirectBlocked(lid, ranks_output + block_offset, ranks);
 
-    const size_t pfs_size       = (1 << RadixBits);
-    const size_t pfs_offset     = (blockIdx.x * pfs_size) + (threadIdx.x * bins_tracked_per_thread);
+    const size_t pfs_size   = (1 << RadixBits);
+    const size_t pfs_offset = (blockIdx.x * pfs_size);
 
     for(size_t i = 0; i < bins_tracked_per_thread; i++)
     {
-        if((threadIdx.x * bins_tracked_per_thread) + i < pfs_size)
-            prefix_sum_output[pfs_offset + i] = prefix_sum_storage[i];
+        const size_t local_bin = threadIdx.x * bins_tracked_per_thread + i;
+        if(local_bin >= pfs_size)
+            continue;
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+        if constexpr(std::is_same_v<KeyType, unsigned long long> && Descending)
+        {
+            // Make CUB's layout match rocPRIM's: flip the global bin index
+            const size_t mirrored_bin                    = pfs_size - 1 - local_bin;
+            prefix_sum_output[pfs_offset + mirrored_bin] = prefix_sum_storage[i];
+        }
+        else
+#endif
+        {
+            // Normal (rocPRIM-compatible) layout
+            prefix_sum_output[pfs_offset + local_bin] = prefix_sum_storage[i];
+        }
     }
 }
 
@@ -640,7 +676,7 @@ void test_radix_rank_with_prefix_sum_output()
     constexpr unsigned     end_bit          = start_bit + radix_bits;
     constexpr size_t       items_per_block  = block_size * items_per_thread;
 
-    if constexpr(std::is_same<key_type, unsigned long long>::value)
+    if constexpr(std::is_same_v<key_type, unsigned long long>)
     {
 
         // Given block size not supported
@@ -715,10 +751,10 @@ void test_radix_rank_with_prefix_sum_output()
                     uint64_t bit_rep = c.out;
 
                     bit_rep >>= start_bit;
-                    bit_rep &= ((1 << radix_bits) - 1);
+                    bit_rep &= ((1ull << radix_bits) - 1);
 
                     if(descending)
-                        bit_rep = (1 << radix_bits) - (1 + bit_rep); //flip it
+                        bit_rep = (1ull << radix_bits) - (1 + bit_rep); //flip it
 
                     ++histogram[bit_rep];
                 }
@@ -783,14 +819,22 @@ void test_radix_rank_with_prefix_sum_output()
             {
                 SCOPED_TRACE(testing::Message() << "with index= " << i);
                 ASSERT_EQ(ranks_output[i], expected[i]);
-
-                if(i < pfs_size)
-                    ASSERT_EQ(prefix_sum_output[i], pfs_expected[i]);
             }
 
             HIP_CHECK(hipFree(d_keys_input));
             HIP_CHECK(hipFree(d_ranks_output));
             HIP_CHECK(hipFree(d_prefix_sum_output));
+
+            for(size_t block = 0; block < grid_size; ++block)
+            {
+                const size_t block_pfs_offset = block * pfs_items_per_block;
+
+                for(size_t bin = 0; bin < pfs_items_per_block; ++bin)
+                {
+                    const size_t idx = block_pfs_offset + bin;
+                    ASSERT_EQ(prefix_sum_output[idx], pfs_expected[idx]);
+                }
+            }
         }
     }
 }

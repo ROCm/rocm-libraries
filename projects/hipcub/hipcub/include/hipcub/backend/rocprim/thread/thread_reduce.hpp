@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -45,7 +45,7 @@ AccumType
 {
     AccumType     retval = static_cast<AccumType>(prefix);
     constexpr int length = ::hipcub::detail::static_size_v<InputType>();
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < length; ++i)
     {
         retval = reduction_op(retval, input[i]);
@@ -60,7 +60,7 @@ AccumType ThreadReduceSequential(const InputType& input, ReductionOp reduction_o
 {
     AccumType     retval = input[0];
     constexpr int length = ::hipcub::detail::static_size_v<InputType>();
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 1; i < length; ++i)
     {
         retval = reduction_op(retval, input[i]);
@@ -76,10 +76,10 @@ __device__ __forceinline__
 AccumType ThreadReduceBinaryTree(const InputType& input, ReductionOp reduction_op)
 {
     constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 1; i < length; i *= 2)
     {
-#pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(int j = 0; j + i < length; j += i * 2)
         {
             input[j] = reduction_op(input[j], input[j + i]);
@@ -95,10 +95,10 @@ __device__ __forceinline__
 AccumType ThreadReduceTernaryTree(const InputType& input, ReductionOp reduction_op)
 {
     constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 1; i < length; i *= 3)
     {
-#pragma unroll
+        _CCCL_PRAGMA_UNROLL_FULL()
         for(int j = 0; j + i < length; j += i * 3)
         {
             auto value = reduction_op(input[j], input[j + i]);
