@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ extern "C" {
 *  and \p blockDim == 1 is not supported.
 *
 *  \deprecated
-*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
 *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
@@ -143,6 +143,99 @@ hipsparseStatus_t hipsparseSbsrxmv(hipsparseHandle_t         handle,
                                    const float*              x,
                                    const float*              beta,
                                    float*                    y);
+/*! \ingroup level2_module
+*  \brief Sparse matrix vector multiplication with mask operation using the BSR storage format.
+*
+*  \details
+*  \p hipsparseXbsrxmv multiplies the scalar \f$\alpha\f$ with a sparse
+*  \f$(mb \times \text{blockDim}) \times (nb \times \text{blockDim})\f$
+*  modified matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
+*  such that
+*  \f[
+*    y := \left( \alpha \cdot op(A) \cdot x + \beta \cdot y \right)\left( \text{mask} \right),
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if trans == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  The \f$\text{mask}\f$ is defined as an array of block row indices.
+*  The input sparse matrix is defined with a modified BSR storage format where the beginning and the end of each row
+*  is defined with two arrays, \p bsrRowPtr and \p bsr_end_ptr (both of size \p mb), rather the usual \p bsrRowPtr of size \p mb+1.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  Currently, only \p trans == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported,
+*  and \p blockDim == 1 is not supported.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dir         matrix storage of BSR blocks.
+*  @param[in]
+*  trans       matrix operation type.
+*  @param[in]
+*  sizeOfMask  number of updated block rows of the array \p y. Must be non-negative and
+*              not greater than \p mb.
+*  @param[in]
+*  mb          number of block rows of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nb          number of block columns of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nnzb        number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  alpha       scalar \f$\alpha\f$.
+*  @param[in]
+*  descr       descriptor of the sparse BSR matrix. Currently, only
+*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  bsrVal      array of \p nnzb blocks of the sparse BSR matrix.
+*  @param[in]
+*  bsrMaskPtr  array of \p sizeOfMask elements that give the indices of the updated block rows.
+*  @param[in]
+*  bsrRowPtr   array of \p mb elements that point to the start of every block row of
+*              the sparse BSR matrix.
+*  @param[in]
+*  bsrEndPtr   array of \p mb elements that point to the end of every block row of
+*              the sparse BSR matrix.
+*  @param[in]
+*  bsrColInd   array of \p nnzb elements containing the block column indices of the sparse
+*              BSR matrix.
+*  @param[in]
+*  blockDim    block dimension of the sparse BSR matrix. Must be greater than 1.
+*  @param[in]
+*  x           array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
+*              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*  @param[in]
+*  beta        scalar \f$\beta\f$.
+*  @param[inout]
+*  y           array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
+*              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
+*          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDbsrxmv(hipsparseHandle_t         handle,
@@ -163,6 +256,99 @@ hipsparseStatus_t hipsparseDbsrxmv(hipsparseHandle_t         handle,
                                    const double*             x,
                                    const double*             beta,
                                    double*                   y);
+/*! \ingroup level2_module
+*  \brief Sparse matrix vector multiplication with mask operation using the BSR storage format.
+*
+*  \details
+*  \p hipsparseXbsrxmv multiplies the scalar \f$\alpha\f$ with a sparse
+*  \f$(mb \times \text{blockDim}) \times (nb \times \text{blockDim})\f$
+*  modified matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
+*  such that
+*  \f[
+*    y := \left( \alpha \cdot op(A) \cdot x + \beta \cdot y \right)\left( \text{mask} \right),
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if trans == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  The \f$\text{mask}\f$ is defined as an array of block row indices.
+*  The input sparse matrix is defined with a modified BSR storage format where the beginning and the end of each row
+*  is defined with two arrays, \p bsrRowPtr and \p bsr_end_ptr (both of size \p mb), rather the usual \p bsrRowPtr of size \p mb+1.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  Currently, only \p trans == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported,
+*  and \p blockDim == 1 is not supported.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dir         matrix storage of BSR blocks.
+*  @param[in]
+*  trans       matrix operation type.
+*  @param[in]
+*  sizeOfMask  number of updated block rows of the array \p y. Must be non-negative and
+*              not greater than \p mb.
+*  @param[in]
+*  mb          number of block rows of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nb          number of block columns of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nnzb        number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  alpha       scalar \f$\alpha\f$.
+*  @param[in]
+*  descr       descriptor of the sparse BSR matrix. Currently, only
+*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  bsrVal      array of \p nnzb blocks of the sparse BSR matrix.
+*  @param[in]
+*  bsrMaskPtr  array of \p sizeOfMask elements that give the indices of the updated block rows.
+*  @param[in]
+*  bsrRowPtr   array of \p mb elements that point to the start of every block row of
+*              the sparse BSR matrix.
+*  @param[in]
+*  bsrEndPtr   array of \p mb elements that point to the end of every block row of
+*              the sparse BSR matrix.
+*  @param[in]
+*  bsrColInd   array of \p nnzb elements containing the block column indices of the sparse
+*              BSR matrix.
+*  @param[in]
+*  blockDim    block dimension of the sparse BSR matrix. Must be greater than 1.
+*  @param[in]
+*  x           array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
+*              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*  @param[in]
+*  beta        scalar \f$\beta\f$.
+*  @param[inout]
+*  y           array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
+*              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
+*          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCbsrxmv(hipsparseHandle_t         handle,
@@ -183,6 +369,99 @@ hipsparseStatus_t hipsparseCbsrxmv(hipsparseHandle_t         handle,
                                    const hipComplex*         x,
                                    const hipComplex*         beta,
                                    hipComplex*               y);
+/*! \ingroup level2_module
+*  \brief Sparse matrix vector multiplication with mask operation using the BSR storage format.
+*
+*  \details
+*  \p hipsparseXbsrxmv multiplies the scalar \f$\alpha\f$ with a sparse
+*  \f$(mb \times \text{blockDim}) \times (nb \times \text{blockDim})\f$
+*  modified matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
+*  such that
+*  \f[
+*    y := \left( \alpha \cdot op(A) \cdot x + \beta \cdot y \right)\left( \text{mask} \right),
+*  \f]
+*  with
+*  \f[
+*    op(A) = \left\{
+*    \begin{array}{ll}
+*        A,   & \text{if trans == HIPSPARSE_OPERATION_NON_TRANSPOSE} \\
+*        A^T, & \text{if trans == HIPSPARSE_OPERATION_TRANSPOSE} \\
+*        A^H, & \text{if trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE}
+*    \end{array}
+*    \right.
+*  \f]
+*
+*  The \f$\text{mask}\f$ is defined as an array of block row indices.
+*  The input sparse matrix is defined with a modified BSR storage format where the beginning and the end of each row
+*  is defined with two arrays, \p bsrRowPtr and \p bsr_end_ptr (both of size \p mb), rather the usual \p bsrRowPtr of size \p mb+1.
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  Currently, only \p trans == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported,
+*  and \p blockDim == 1 is not supported.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dir         matrix storage of BSR blocks.
+*  @param[in]
+*  trans       matrix operation type.
+*  @param[in]
+*  sizeOfMask  number of updated block rows of the array \p y. Must be non-negative and
+*              not greater than \p mb.
+*  @param[in]
+*  mb          number of block rows of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nb          number of block columns of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  nnzb        number of non-zero blocks of the sparse BSR matrix. Must be non-negative.
+*  @param[in]
+*  alpha       scalar \f$\alpha\f$.
+*  @param[in]
+*  descr       descriptor of the sparse BSR matrix. Currently, only
+*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  bsrVal      array of \p nnzb blocks of the sparse BSR matrix.
+*  @param[in]
+*  bsrMaskPtr  array of \p sizeOfMask elements that give the indices of the updated block rows.
+*  @param[in]
+*  bsrRowPtr   array of \p mb elements that point to the start of every block row of
+*              the sparse BSR matrix.
+*  @param[in]
+*  bsrEndPtr   array of \p mb elements that point to the end of every block row of
+*              the sparse BSR matrix.
+*  @param[in]
+*  bsrColInd   array of \p nnzb elements containing the block column indices of the sparse
+*              BSR matrix.
+*  @param[in]
+*  blockDim    block dimension of the sparse BSR matrix. Must be greater than 1.
+*  @param[in]
+*  x           array of \p nb*blockDim elements (\f$op(A) = A\f$) or \p mb*blockDim
+*              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*  @param[in]
+*  beta        scalar \f$\beta\f$.
+*  @param[inout]
+*  y           array of \p mb*blockDim elements (\f$op(A) = A\f$) or \p nb*blockDim
+*              elements (\f$op(A) = A^T\f$ or \f$op(A) = A^H\f$).
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, \p nnzb, or \p sizeOfMask is negative, \p sizeOfMask is greater than \p mb,
+*          \p blockDim is less than or equal to 1, or \p bsrVal, \p bsrMaskPtr, \p bsrRowPtr,
+*          \p bsrEndPtr, \p bsrColInd, \p x, or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p trans is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZbsrxmv(hipsparseHandle_t         handle,

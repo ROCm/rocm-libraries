@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ extern "C" {
 *  then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
 *
 *  \deprecated
-*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
 *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
@@ -95,6 +95,56 @@ hipsparseStatus_t hipsparseScsrcolor(hipsparseHandle_t         handle,
                                      int*                      reordering,
                                      hipsparseColorInfo_t      info);
 
+/*! \ingroup reordering_module
+*  \brief Coloring of the adjacency graph of the matrix \f$A\f$ stored in the CSR format.
+*
+*  \details
+*  \p hipsparseXcsrcolor performs the coloring of the undirected graph represented by the (symmetric) sparsity
+*  pattern of the matrix \f$A\f$ stored in CSR format. Graph coloring is a way of coloring the nodes of a graph
+*  such that no two adjacent nodes are of the same color. The \p fractionToColor is a parameter to only color
+*  a given percentage of the graph nodes. The remaining uncolored nodes receive distinct new colors. The optional
+*  \p reordering array is a permutation array that groups unknowns of the same color. The matrix \f$A\f$
+*  must be stored as a general matrix with a symmetric sparsity pattern, and if the matrix \f$A\f$ is non-symmetric,
+*  then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of sparse matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  nnz             number of non-zero entries of sparse matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  descrA          sparse matrix descriptor.
+*  @param[in]
+*  csrValA         array of \p nnz elements of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix.
+*  @param[in]
+*  csrColIndA      array of \p nnz elements containing the column indices of the sparse
+*                  CSR matrix.
+*  @param[in]
+*  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$. For example, \f$0.8\f$ implies that
+*                  \f$80\f$ percent of nodes will be colored.
+*  @param[out]
+*  ncolors         resulting number of distinct colors.
+*  @param[out]
+*  coloring        resulting mapping of colors.
+*  @param[out]
+*  reordering      optional resulting reordering permutation if \p reordering is a non-null pointer.
+*  @param[inout]
+*  info            structure that holds the information collected during the coloring algorithm.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p fractionToColor,
+*          \p ncolors, \p coloring, or \p info is nullptr, \p m or \p nnz is negative, or
+*          \p csrValA, \p csrRowPtrA, or \p csrColIndA is nullptr when \p nnz is greater than zero.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsrcolor(hipsparseHandle_t         handle,
@@ -110,6 +160,56 @@ hipsparseStatus_t hipsparseDcsrcolor(hipsparseHandle_t         handle,
                                      int*                      reordering,
                                      hipsparseColorInfo_t      info);
 
+/*! \ingroup reordering_module
+*  \brief Coloring of the adjacency graph of the matrix \f$A\f$ stored in the CSR format.
+*
+*  \details
+*  \p hipsparseXcsrcolor performs the coloring of the undirected graph represented by the (symmetric) sparsity
+*  pattern of the matrix \f$A\f$ stored in CSR format. Graph coloring is a way of coloring the nodes of a graph
+*  such that no two adjacent nodes are of the same color. The \p fractionToColor is a parameter to only color
+*  a given percentage of the graph nodes. The remaining uncolored nodes receive distinct new colors. The optional
+*  \p reordering array is a permutation array that groups unknowns of the same color. The matrix \f$A\f$
+*  must be stored as a general matrix with a symmetric sparsity pattern, and if the matrix \f$A\f$ is non-symmetric,
+*  then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of sparse matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  nnz             number of non-zero entries of sparse matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  descrA          sparse matrix descriptor.
+*  @param[in]
+*  csrValA         array of \p nnz elements of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix.
+*  @param[in]
+*  csrColIndA      array of \p nnz elements containing the column indices of the sparse
+*                  CSR matrix.
+*  @param[in]
+*  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$. For example, \f$0.8\f$ implies that
+*                  \f$80\f$ percent of nodes will be colored.
+*  @param[out]
+*  ncolors         resulting number of distinct colors.
+*  @param[out]
+*  coloring        resulting mapping of colors.
+*  @param[out]
+*  reordering      optional resulting reordering permutation if \p reordering is a non-null pointer.
+*  @param[inout]
+*  info            structure that holds the information collected during the coloring algorithm.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p fractionToColor,
+*          \p ncolors, \p coloring, or \p info is nullptr, \p m or \p nnz is negative, or
+*          \p csrValA, \p csrRowPtrA, or \p csrColIndA is nullptr when \p nnz is greater than zero.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsrcolor(hipsparseHandle_t         handle,
@@ -125,6 +225,56 @@ hipsparseStatus_t hipsparseCcsrcolor(hipsparseHandle_t         handle,
                                      int*                      reordering,
                                      hipsparseColorInfo_t      info);
 
+/*! \ingroup reordering_module
+*  \brief Coloring of the adjacency graph of the matrix \f$A\f$ stored in the CSR format.
+*
+*  \details
+*  \p hipsparseXcsrcolor performs the coloring of the undirected graph represented by the (symmetric) sparsity
+*  pattern of the matrix \f$A\f$ stored in CSR format. Graph coloring is a way of coloring the nodes of a graph
+*  such that no two adjacent nodes are of the same color. The \p fractionToColor is a parameter to only color
+*  a given percentage of the graph nodes. The remaining uncolored nodes receive distinct new colors. The optional
+*  \p reordering array is a permutation array that groups unknowns of the same color. The matrix \f$A\f$
+*  must be stored as a general matrix with a symmetric sparsity pattern, and if the matrix \f$A\f$ is non-symmetric,
+*  then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of sparse matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  nnz             number of non-zero entries of sparse matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  descrA          sparse matrix descriptor.
+*  @param[in]
+*  csrValA         array of \p nnz elements of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix.
+*  @param[in]
+*  csrColIndA      array of \p nnz elements containing the column indices of the sparse
+*                  CSR matrix.
+*  @param[in]
+*  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$. For example, \f$0.8\f$ implies that
+*                  \f$80\f$ percent of nodes will be colored.
+*  @param[out]
+*  ncolors         resulting number of distinct colors.
+*  @param[out]
+*  coloring        resulting mapping of colors.
+*  @param[out]
+*  reordering      optional resulting reordering permutation if \p reordering is a non-null pointer.
+*  @param[inout]
+*  info            structure that holds the information collected during the coloring algorithm.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p fractionToColor,
+*          \p ncolors, \p coloring, or \p info is nullptr, \p m or \p nnz is negative, or
+*          \p csrValA, \p csrRowPtrA, or \p csrColIndA is nullptr when \p nnz is greater than zero.
+*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsrcolor(hipsparseHandle_t         handle,
