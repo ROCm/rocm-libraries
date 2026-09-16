@@ -13,13 +13,17 @@ The property under test here is therefore not "does the gate pass on good input"
 and still prints a reassuring last line. A rung that cannot run must report NOT RUN
 loudly and fail, never be skipped into a pass.
 
-The validator is a build artifact, so rung-2 tests skip when it is absent -- and the
-absence itself is asserted to be a FAILURE of the gate, not a skip.
+The validator is a build artifact and the profile is an author's own input, so the
+end-to-end class needs both pointed at from the environment and skips otherwise. The
+rung-separation tests need neither, and it is they that assert a missing validator is
+a FAILURE of the gate rather than a skip -- the property this module exists for is
+therefore checked on every machine, opt-in or not.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,15 +31,53 @@ from pathlib import Path
 import pytest
 
 _GATE = Path(__file__).resolve().parents[1] / "tools" / "coverage_gate.py"
-_PROFILE = (
-    Path(__file__).resolve().parents[1]
-    / "configs"
-    / "gfx942_attention_dense.profile.yaml"
-)
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
+#: The env vars naming the authoring profile handed to `--profile`, in precedence
+#: order: the unsuffixed name wins, then gfx942, then gfx950. Nothing here asserts a
+#: profile's CONTENT -- only that the gate runs clean on a profile and the build it
+#: describes -- so any of the three serves, and accepting all three is what stops a
+#: reader who set `test_launch_surface.py`'s per-arch pair from being silently
+#: skipped by this module. gfx942 precedes gfx950 because `_EXPECT_ENGINE`'s default
+#: names the gfx942 bundle this branch ships; with both set, that is the one more
+#: likely to match the build under test. The chosen profile and `_EXPECT_ENGINE` must
+#: name the same pack.
+_PROFILE_VARS = (
+    "HIPDNN_INGESTOR_PROFILE",
+    "HIPDNN_INGESTOR_PROFILE_GFX942",
+    "HIPDNN_INGESTOR_PROFILE_GFX950",
+)
 
-_EXPECT_ENGINE = "hipkernel:Gfx942AttentionDense"
+#: The engine name the packed tree under test must expose. Overridable for the same
+#: reason the profile is: it identifies a specific pack, not a property of the tool.
+#: The default is the engine the provider's shipped production bundle declares
+#: (`src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx942_attention_dense/`),
+#: because `_find_build_artifacts` below probes a PACKED tree and that bundle is what
+#: a build of this branch packs into one. A generator config under `configs/` is an
+#: author's input that no build wires, so naming an engine only a config mentions
+#: would reject every build dir and turn this class into a skip no machine can
+#: satisfy.
+_EXPECT_ENGINE = os.environ.get(
+    "HIPDNN_INGESTOR_ENGINE", "hipkernel:Gfx942AttentionDense"
+)
+
+
+def _profile_from_env() -> Path | None:
+    """The first of `_PROFILE_VARS` naming an existing file, or None.
+
+    Deliberately NO fixture default, unlike `test_launch_surface.py`: the class below
+    drives the whole gate against a packed tree an author really built, and the
+    committed fixture profiles describe no real pack, so defaulting to one would
+    manufacture a failure on the first machine that has a build rather than skip.
+    """
+    for var in _PROFILE_VARS:
+        raw = os.environ.get(var)
+        if raw and Path(raw).is_file():
+            return Path(raw)
+    return None
+
+
+_PROFILE = _profile_from_env()
 
 
 def _find_build_artifacts() -> tuple[Path | None, Path | None]:
@@ -47,9 +89,23 @@ def _find_build_artifacts() -> tuple[Path | None, Path | None]:
     covers "no build for this engine"; it must never cover "the gate is broken".
     """
     for candidate in sorted(_REPO_ROOT.glob("build*")):
-        validator = candidate / "bin" / "hipdnn_validate_descriptors"
+        # Both spellings, because the executable suffix is the platform's and the
+        # skip below cannot tell "no build" apart from "a build this probe walked
+        # past": a bare name matches nothing on Windows, where every build writes
+        # the .exe, so the tests would report no build on a tree that has one.
+        validator = next(
+            (
+                path
+                for path in (
+                    candidate / "bin" / "hipdnn_validate_descriptors",
+                    candidate / "bin" / "hipdnn_validate_descriptors.exe",
+                )
+                if path.is_file()
+            ),
+            None,
+        )
         packed = candidate / "lib/hipdnn_plugins/engines/arch_content"
-        if not (validator.is_file() and packed.is_dir()):
+        if not (validator and packed.is_dir()):
             continue
         try:
             probe = subprocess.run(
@@ -71,10 +127,13 @@ def _find_build_artifacts() -> tuple[Path | None, Path | None]:
 _VALIDATOR, _PACKED = _find_build_artifacts()
 
 _needs_build = pytest.mark.skipif(
-    _VALIDATOR is None or not _PROFILE.is_file(),
-    reason=f"needs a build*/ whose packed tree contains {_EXPECT_ENGINE} "
-    f"AND {_PROFILE.name} (configure with HIPDNN_ENABLE_KERNEL_INGESTOR=ON on a "
-    "branch that ships both)",
+    _VALIDATOR is None or _PROFILE is None,
+    reason=f"needs BOTH a build*/ whose packed tree contains {_EXPECT_ENGINE} "
+    "(configure with HIPDNN_ENABLE_KERNEL_INGESTOR=ON; HIPDNN_INGESTOR_ENGINE "
+    f"overrides the name) AND one of {', '.join(_PROFILE_VARS)} (first wins) set to "
+    "the existing authoring profile that build was packed from -- a profile is an "
+    "author's input this repo does not ship, so this class is opt-in and its "
+    "absence is not a broken checkout",
 )
 
 
@@ -201,6 +260,15 @@ class TestRungsStaySeparable:
 
 @_needs_build
 class TestAgainstTheRealBuild:
+    """The whole gate driven end to end against a packed tree an author actually
+    built and the profile they authored it from.
+
+    Opt-in, on both a build and one of `_PROFILE_VARS`: the classes above pin the
+    rung-separation property everywhere, and this class adds only the claim that the
+    assembled gate agrees with them on real inputs. Skipping it therefore leaves the
+    module's stated property checked; it does not make it conditional.
+    """
+
     def test_packed_tree_passes_both_runnable_rungs(self):
         result = _run(
             "--tree",

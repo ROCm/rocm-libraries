@@ -933,6 +933,97 @@ class TestFullModeReportsAKernelWithNothingToBind:
         failures, _ = _run_full(root)
         assert failures
 
+    @staticmethod
+    def verdict(root):
+        """`(failures, unverified)` from one full-mode run over `root`.
+
+        The waiver and the failure are separate output lists, so the three origin
+        cases below have to read both: a kernel that lands in neither, or in both,
+        is a different verdict from the one each asserts.
+        """
+        _b, _d, failures, _unchecked, unverified, _k = gate_module.check(
+            "set", str(root), gate_module.Profile.empty(), "full", _ARCH, _Payloads()
+        )
+        return failures, unverified
+
+    def with_origin(self, tmp_path, tag, origin_kind):
+        """The recordless, claimless bundle above, stamped with an origin.
+
+        `tree` writes no `provenance.origin_kind` at all and publishes no
+        `effective_spec`, so the stamp is the only thing separating the origin cases
+        and each verdict below is attributable to the origin alone.
+        """
+        root = self.tree(tmp_path, [], tag)
+        path = root / "test_engine.kdp.json"
+        doc = json.loads(path.read_text())
+        provenance = doc["kernelDescriptors"][0]["provenance"]
+        assert "effective_spec" not in provenance
+        provenance["origin_kind"] = origin_kind
+        path.write_text(json.dumps(doc))
+        return root
+
+    def test_a_rocke_origin_cannot_waive_its_own_evidence(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The waiver keyed on the claim alone is a self-service exemption.
+
+        The packer publishes `effective_spec` onto every rocKE UKD it ships, so a
+        descriptor whose own origin is rocKE contradicts the absence of the record.
+        Left waivable, deleting the record and relabelling the specialized fields as
+        matcher-only carries a shipped rocKE shard to a clean exit with the archive
+        bytes never read. Asserted on the exit code as well, because the waiver is
+        reported at status 0 and only the code separates the two outcomes.
+        """
+        root = self.with_origin(tmp_path, "rocke_origin", "rocke")
+        failures, unverified = self.verdict(root)
+        assert unverified == []
+        assert len(failures) == 1, failures
+        # The report has to name which kernel; an integrator reading `GATE FAILED`
+        # off a multi-kernel bundle has nothing else to go on.
+        assert failures[0].startswith("k_packed: "), failures[0]
+        assert (
+            "A rocKE-produced kernel is required to carry its compiler evidence"
+            in failures[0]
+        )
+
+        monkeypatch.setattr(gate_module, "Payloads", lambda *_a, **_k: _Payloads())
+        profile = tmp_path / "rocke-profile.yaml"
+        profile.write_text(_PROFILE)
+        code = gate_module.main(
+            ["set", str(root), "--mode", "full", "--profile", str(profile)]
+        )
+        out = capsys.readouterr().out
+        assert code == 1, out
+        assert "GATE FAILED" in out
+        assert "k_packed" in out
+
+    def test_a_non_rocke_origin_in_the_same_state_still_waives(self, tmp_path):
+        """The control, differing from the case above only in the origin it names.
+
+        An AOT hip pack has no builder object to bind, so there is no record for it
+        to have lost and the waiver is the legitimate verdict. Without this pair the
+        rocKE case passes just as well against a check that fails every recordless
+        kernel whatever produced it.
+        """
+        root = self.with_origin(tmp_path, "hip_origin", "hip")
+        failures, unverified = self.verdict(root)
+        assert failures == []
+        assert len(unverified) == 1
+
+    def test_an_absent_origin_kind_is_not_read_as_rocke(self, tmp_path):
+        """Silence is not a claim of rocKE origin, so it keeps the waiver.
+
+        Descriptors packed before `origin_kind` existed, and hand-authored trees,
+        carry no origin at all. Reading rocKE out of the absence would fail every one
+        of them over evidence they were never asked to produce.
+        """
+        root = self.tree(tmp_path, [], "absent_origin")
+        doc = json.loads((root / "test_engine.kdp.json").read_text())
+        assert "origin_kind" not in doc["kernelDescriptors"][0]["provenance"]
+        failures, unverified = self.verdict(root)
+        assert failures == []
+        assert len(unverified) == 1
+
 
 class TestFullModeCannotPassOnANarrowedRun:
     """A full run claims every property, so a check it could not RUN is a gap.

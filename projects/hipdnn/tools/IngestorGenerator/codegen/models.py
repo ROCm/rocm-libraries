@@ -78,6 +78,12 @@ BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
 
 ENGINE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 
+#: ``native.cpp.j2`` builds ``<NAME>_FIELD`` from each kmd field name and both
+#: ``<NAME>_MATCHER_SYMBOL`` and ``<name>OperationMatches`` from each pack
+#: discriminator. A name outside this shape is a syntax error in a file nobody
+#: wrote.
+CXX_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 #: ``DescriptorLoader.hpp``'s ``isPlausibleArchBaseId``: ``gfx`` + lowercase
 #: alnum/``-``/``_``, no feature suffix. A well-formed-but-unrecognized id
 #: (``gfx94``) passes this shape check and only trips pre-mint check #5.

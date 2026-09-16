@@ -574,10 +574,37 @@ def check(
                 # whatever its declaration claims -- otherwise relabelling the
                 # specialized field as matcher-only would waive a stale or forged
                 # record into a pass.
+                #
+                # The waiver is keyed on origin too. `provenance.origin_kind ==
+                # "rocke"` means the packer published the evidence when it shipped
+                # this kernel, so dropping `effective_spec` and moving the
+                # specialized fields to matcher-only would otherwise retire the
+                # check and leave the archive bytes unread. An ABSENT `origin_kind`
+                # is NOT rocKE: descriptors packed before the field existed and
+                # hand-authored inputs have none.
+                #
+                # This reaches evidence lost by accident, not evidence removed on
+                # purpose. `origin_kind` is bound only by the digest inside the
+                # record being dropped, so one edit can remove the record and set
+                # the origin to `"hip"` together, presenting as a source that never
+                # owed evidence.
+                provenance = entry.ukd.get("provenance") or {}
                 claimed = any(r["declaration"]["metadata_fields"] for r in bound)
-                if not claimed and "effective_spec" not in (
-                    entry.ukd.get("provenance") or {}
-                ):
+                if not claimed and "effective_spec" not in provenance:
+                    if provenance.get("origin_kind") == "rocke":
+                        failures.append(
+                            f"{name}: provenance.origin_kind is 'rocke', so the "
+                            f"packer published this kernel's compiler-owned "
+                            f"provenance.effective_spec when it shipped it. The "
+                            f"descriptor in hand declares no specialized "
+                            f"metadata_fields AND carries no effective_spec, so "
+                            f"there is no record left to bind and the archive bytes "
+                            f"were never read. A rocKE-produced kernel is required "
+                            f"to carry its compiler evidence; relabelling its "
+                            f"specialized fields as matcher-only does not make it an "
+                            f"unspecialized source."
+                        )
+                        continue
                     unverified.append(
                         f"{name}: declares no specialized metadata_fields, so there "
                         f"is no producing-build record to bind and nothing here was "

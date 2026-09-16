@@ -102,6 +102,19 @@ def test_validate_skill_flags_slash_command_reference(validate_mod, tmp_path):
     assert any("slash-command reference" in error for error in errors)
 
 
+def test_validate_skill_allows_relative_link_to_a_sibling_skill(validate_mod, tmp_path):
+    """A markdown link into a sibling skill directory is a path, not a command.
+
+    The two read alike after the leading slash, so the check keys on what precedes
+    it. Paired with the test above, which shares the '/hipdnn' text and must still
+    be rejected, so this passing cannot mean the check stopped firing.
+    """
+    skill = tmp_path / "demo-skill"
+    _write_skill(skill, body="See [the runbook](../hipdnn-demo/RUNBOOK.md) for steps.\n")
+    errors = validate_mod.validate_skill(skill)
+    assert not any("slash-command reference" in error for error in errors)
+
+
 def test_validate_skill_requires_claude_frontmatter_fields(validate_mod, tmp_path):
     """A skill named in the claude_commands set needs argument-hint + allowed-tools."""
     skill = tmp_path / "hipdnn-pr-quality"

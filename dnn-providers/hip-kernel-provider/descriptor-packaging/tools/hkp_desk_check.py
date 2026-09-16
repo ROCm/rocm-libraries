@@ -22,14 +22,22 @@ there is no producing-build record for a declaration to bind and the mode has
 nothing to check; a non-kpack kernel is a failure here, the same refusal
 `verify_variant_sets` makes, so the two readers agree about one artifact.
 
-A packed kernel whose declaration lists no specialized metadata field is reported
-as NOT VERIFIED HERE and never folded into the agreement line. Only rocKE-origin
-kernels currently carry compiled-specialization evidence: a hip kernel AOT-built
-with specializing preprocessor defines is a real compiled specialization that this
-check does not yet verify, so the absence of a claim is a limit of this tool
-rather than a property of the kernel. Reading it as compiled agreement would be a
-success this tool never earned, which is the substitution the two modes exist to
+A packed NON-rocKE kernel whose declaration lists no specialized metadata field is
+reported as NOT VERIFIED HERE and never folded into the agreement line. Only
+rocKE-origin kernels currently carry compiled-specialization evidence: a hip kernel
+AOT-built with specializing preprocessor defines is a real compiled specialization
+that this check does not yet verify, so the absence of a claim is a limit of this
+tool rather than a property of the kernel. Reading it as compiled agreement would be
+a success this tool never earned, which is the substitution the two modes exist to
 prevent.
+
+A kernel whose `provenance.origin_kind` is `rocke` cannot reach that report: the
+packer published its `effective_spec` when it shipped it, so declaring no
+specialized metadata field AND carrying no record is a FAILURE. Without that,
+moving the specialized fields into `matcher_only_fields` and deleting the record
+would waive a rocKE kernel's evidence into a clean exit with the archive unread. An
+ABSENT `origin_kind` is not treated as rocKE -- descriptors packed before the field
+existed have none.
 
 A KDP's `kernelDescriptors` may hold standalone-UKD id references as bare strings
 after packing; they are resolved against the shard, the same hop

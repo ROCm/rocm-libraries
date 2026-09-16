@@ -384,6 +384,343 @@ class TestPackDiscriminatorsCheck:
             _check_pack_discriminators(config)
 
 
+class TestEmittedIdentifierShape:
+    """Names this config splices into generated C++ IDENTIFIERS.
+
+    `native.cpp.j2` builds `<NAME>_FIELD` from every kmd field name, and
+    `<NAME>_MATCHER_SYMBOL` plus `<name>OperationMatches` from every pack
+    discriminator. A name outside the identifier shape is a syntax error in a file
+    the author never edited, reached from a config that loads cleanly and passes
+    every other pre-mint check.
+    """
+
+    def test_a_valid_config_is_accepted(self):
+        """The control: an underscored field name and discriminator are ordinary."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[
+                make_kmd_field(name="head_dim"),
+                make_kmd_field(name="block_size"),
+            ],
+            packs=[
+                make_pack(name="a", discriminator="add_fast"),
+                make_pack(name="b", discriminator="_scale2"),
+            ],
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_a_hyphenated_field_name_is_rejected(self):
+        """`head-dim` emits `constexpr std::string_view HEAD-DIM_FIELD`."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(kmd_fields=[make_kmd_field(name="head-dim")])
+        with pytest.raises(ConfigError, match="head-dim"):
+            _check_emitted_identifiers(config)
+
+    def test_two_field_names_differing_only_in_case_are_rejected_naming_both(self):
+        """`dtype` and `dType` both uppercase to `DTYPE_FIELD` -- a redefinition.
+
+        Each name is a perfectly good identifier on its own, so a shape check alone
+        does not catch it. The diagnostic has to carry both original spellings:
+        `DTYPE` names neither field in the config.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[
+                make_kmd_field(name="dtype", type="string", default_value="FLOAT"),
+                make_kmd_field(name="dType", type="string", default_value="FLOAT"),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "'dtype'" in message and "'dType'" in message, message
+
+    def test_two_fields_spelled_identically_are_rejected(self):
+        """The same name twice emits `BLOCK_SIZE_FIELD` twice, as two spellings do.
+
+        Distinct from the case-variant above, and the harder of the two to catch: a
+        check that compares how the two entries describe themselves sees one
+        description and lets the second claim a constant already taken. What the
+        compiler rejects is the identifier appearing twice, which it does either way.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[
+                make_kmd_field(name="block_size", type="int", default_value=64),
+                make_kmd_field(name="block_size", type="int", default_value=128),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "BLOCK_SIZE_FIELD" in str(excinfo.value), str(excinfo.value)
+
+    def test_two_discriminators_spelled_identically_are_rejected(self):
+        """The same collision on the matcher-symbol side, which folds the same way."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="left", discriminator="add", kernels=[make_kernel()]),
+                make_pack(name="right", discriminator="add", kernels=[make_kernel()]),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        assert "ADD_MATCHER_SYMBOL" in str(excinfo.value), str(excinfo.value)
+
+    def test_a_hyphenated_discriminator_is_rejected(self):
+        """`add-fast` emits both `ADD-FAST_MATCHER_SYMBOL` and the function
+        `add-fastOperationMatches`."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="a", discriminator="add-fast"),
+                make_pack(name="b", discriminator="mul"),
+            ]
+        )
+        with pytest.raises(ConfigError, match="add-fast"):
+            _check_emitted_identifiers(config)
+
+    def test_two_discriminators_differing_only_in_case_are_rejected_naming_both(self):
+        """`add` and `Add` both uppercase to `ADD_MATCHER_SYMBOL`.
+
+        `_check_pack_discriminators` dedups by EXACT match, so both survive it;
+        each is a good identifier on its own, so the shape check passes too. The
+        diagnostic has to carry both original spellings: `ADD` names neither pack.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            packs=[
+                make_pack(name="a", discriminator="add"),
+                make_pack(name="b", discriminator="Add"),
+            ]
+        )
+        with pytest.raises(ConfigError) as excinfo:
+            _check_emitted_identifiers(config)
+        message = str(excinfo.value)
+        assert "'add'" in message and "'Add'" in message, message
+
+    def test_a_discriminator_on_a_reserved_stem_is_rejected(self):
+        """`graph` and `kernel` are already taken by the template's own fixed
+        constants, which it emits for every engine outside the per-pack loop.
+
+        Nothing else in the config mentions those two constants, so the collision
+        is invisible in the YAML and surfaces as a redefinition in generated C++.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        for reserved in ("graph", "Kernel"):
+            config = make_minimal_config(
+                packs=[
+                    make_pack(name="a", discriminator=reserved),
+                    make_pack(name="b", discriminator="mul"),
+                ]
+            )
+            with pytest.raises(ConfigError) as excinfo:
+                _check_emitted_identifiers(config)
+            assert f"'{reserved}'" in str(excinfo.value), reserved
+
+    def test_a_field_and_a_discriminator_may_share_a_name(self):
+        """The control for the two collision checks above: `<NAME>_FIELD` and
+        `<NAME>_MATCHER_SYMBOL` are different identifiers.
+
+        Folding both into one map would reject `add` as a metadata field beside an
+        `add` pack -- a pairing the config's own vocabulary encourages.
+        """
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(
+            kmd_fields=[make_kmd_field(name="add"), make_kmd_field(name="mul")],
+            packs=[
+                make_pack(name="a", discriminator="add"),
+                make_pack(name="b", discriminator="mul"),
+            ],
+        )
+        _check_emitted_identifiers(config)  # does not raise
+
+    def test_the_reserved_stems_are_the_ones_the_template_actually_emits(
+        self, template_dir
+    ):
+        """The reserved list is checked against its source rather than trusted.
+
+        A fixed `<STEM>_MATCHER_SYMBOL` added to the template and not to the tuple
+        reopens the hole silently: the config still loads, and the collision is a
+        C++ redefinition in a file nobody wrote.
+        """
+        import re
+
+        from codegen.config_loader import RESERVED_MATCHER_SYMBOL_STEMS
+
+        source = (template_dir / "native.cpp.j2").read_text()
+        # Only the LITERAL stems: the per-pack constant interpolates
+        # `{{ pack.discriminator.upper() }}` and so cannot match.
+        emitted = re.findall(
+            r"^constexpr std::string_view ([A-Z0-9_]+)_MATCHER_SYMBOL",
+            source,
+            re.MULTILINE,
+        )
+        assert sorted(emitted) == sorted(RESERVED_MATCHER_SYMBOL_STEMS), emitted
+
+    def test_load_config_runs_the_check(self, tmp_path):
+        """Wired into the pre-mint phase, not merely available to it."""
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "head-dim", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"head-dim": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        with pytest.raises(ConfigError, match="head-dim"):
+            load_config(path)
+
+
+class TestArchListsAreNormalisedAtLoad:
+    """A repeated arch entry is collapsed as the config is read.
+
+    Normalising at load settles it for every consumer at once, which is why it is
+    not a ConfigError: there is nothing the author could do about it that the loader
+    cannot. See ``config_loader._unique_arch`` for where a repeat bites.
+    """
+
+    def _load(self, tmp_path, pack_arch, kernel_arch):
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": pack_arch,
+                    "kernels": [
+                        {
+                            "name": "k",
+                            "arch": kernel_arch,
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_a_repeated_arch_entry_is_collapsed(self, tmp_path):
+        config = self._load(
+            tmp_path, ["gfx942", "gfx950", "gfx942"], ["gfx950", "gfx950"]
+        )
+        assert config.packs[0].arch == ["gfx942", "gfx950"]
+        assert config.packs[0].kernels[0].arch == ["gfx950"]
+
+    def test_distinct_entries_are_all_kept_in_authored_order(self, tmp_path):
+        """The control: the normalisation is not a sort, and not a truncation.
+
+        Arch order reaches the descriptor bytes, so a normalisation that reordered
+        the list would rewrite what ships while every membership test kept passing.
+        """
+        config = self._load(tmp_path, ["gfx950", "gfx942"], ["gfx942"])
+        assert config.packs[0].arch == ["gfx950", "gfx942"]
+        assert config.packs[0].kernels[0].arch == ["gfx942"]
+
+
+class TestKernelNameUniquenessIsEngineScoped:
+    """Descriptor identity is engine-scoped, so the uniqueness check is too.
+
+    The loader collects an engine's packs into ONE `DescriptorSet` by engine id,
+    so two same-named kernels in two packs are as indistinguishable to the runtime
+    as two in one pack -- and nothing downstream catches either, because the
+    de-duplication pass keys on resolved metadata rather than on the name.
+    """
+
+    def _raw(self, left_names, right_names):
+        def kernel(name, block_size):
+            return {
+                "name": name,
+                "kernel_source": {
+                    "kind": "embedded_source",
+                    "source_file": "k.hip",
+                    "entry_point": "k",
+                },
+                "metadata": {"block_size": block_size},
+            }
+
+        return {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test", "knobs": ["block_size"]},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "packs": [
+                {
+                    "name": "left",
+                    "discriminator": "left",
+                    # Distinct metadata per kernel, so nothing here depends on the
+                    # de-duplication pass.
+                    "kernels": [
+                        kernel(name, 64 + i) for i, name in enumerate(left_names)
+                    ],
+                },
+                {
+                    "name": "right",
+                    "discriminator": "right",
+                    "kernels": [
+                        kernel(name, 128 + i) for i, name in enumerate(right_names)
+                    ],
+                },
+            ],
+        }
+
+    def _load(self, tmp_path, raw):
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_distinct_names_across_two_packs_still_load(self, tmp_path):
+        """The control: the check widened to the engine must not reject an
+        ordinary multi-pack engine."""
+        config = self._load(tmp_path, self._raw(["a"], ["b"]))
+        assert [k.name for pack in config.packs for k in pack.kernels] == ["a", "b"]
+
+    def test_one_name_in_two_packs_is_rejected_naming_both_packs(self, tmp_path):
+        with pytest.raises(ConfigError, match="duplicated kernel name") as excinfo:
+            self._load(tmp_path, self._raw(["same"], ["same"]))
+        message = str(excinfo.value)
+        assert "'same'" in message, message
+        assert "'left'" in message and "'right'" in message, message
+
+    def test_one_name_twice_in_one_pack_is_still_rejected(self, tmp_path):
+        """The narrower invariant survives the widening: an engine-wide check that
+        lost the within-pack case would trade one silent collision for another."""
+        with pytest.raises(ConfigError, match="duplicated kernel name") as excinfo:
+            self._load(tmp_path, self._raw(["dup", "dup"], ["b"]))
+        assert "'left'" in str(excinfo.value)
+
+
 class TestDeprecatedKeys:
     def _base_raw(self):
         return {

@@ -964,6 +964,112 @@ class TestEmittedInventory:
         assert left | right == {"on_942", "on_950"}
         assert inventory["total_descriptor_count"] == 2
 
+    def _two_packs_on_one_arch(self, left_names, right_names):
+        """A two-pack engine whose packs ship for the same architecture, so every
+        descriptor lands in one bucket and the per-arch count is comparable with
+        the engine-wide one.
+
+        Every kernel gets its own ``block_size``, so the engine-wide
+        de-duplication keeps them all whatever they are named.
+        """
+        block_size = iter(range(64, 512))
+
+        def pack(name, kernel_names):
+            return make_pack(
+                name=name,
+                discriminator=name,
+                arch=["gfx942"],
+                kernels=[
+                    make_kernel(
+                        name=kernel_name,
+                        metadata={"block_size": next(block_size), "dtype": "FLOAT"},
+                    )
+                    for kernel_name in kernel_names
+                ],
+            )
+
+        return make_minimal_config(
+            packs=[pack("a", left_names), pack("b", right_names)]
+        )
+
+    def test_three_distinct_descriptors_over_two_packs_count_as_three(self):
+        """The control: a count derived from the name set or the pack count reads
+        2 here and 2 in the collision above."""
+        config = self._two_packs_on_one_arch(["on_a"], ["on_b", "on_c"])
+        ids = mint_ids(config)
+        inventory = emitted_inventory(config, build_kdp_documents(config, ids))
+        entry = inventory["arches"]["gfx942"]
+        assert entry["descriptor_count"] == 3
+        assert inventory["total_descriptor_count"] == 3
+        assert entry["descriptor_names"] == ["on_a", "on_b", "on_c"]
+
+    def _inventory_for_pack_arch(self, tmp_path, pack_arch):
+        """The inventory of a one-kernel engine whose pack names ``pack_arch``,
+        read through ``load_config`` because the arch normalisation is the
+        LOADER's -- a config hand-built from ``make_pack`` never passes through it.
+        """
+        import yaml
+
+        from codegen.config_loader import load_config
+
+        raw = {
+            "authored_subpath": "unit",
+            "engine": {"name": "hipkernel:Test"},
+            "kmd_fields": [{"name": "block_size", "type": "int", "default_value": 64}],
+            "specialization": {
+                "metadata_fields": [],
+                "matcher_only_fields": ["block_size"],
+                "bindings": {},
+                "vocabulary": {},
+            },
+            "packs": [
+                {
+                    "name": "p",
+                    "arch": pack_arch,
+                    "kernels": [
+                        {
+                            "name": "only",
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "k.hip",
+                                "entry_point": "k",
+                            },
+                            "metadata": {"block_size": 64},
+                        }
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        config = load_config(path)
+        ids = mint_ids(config)
+        return emitted_inventory(config, build_kdp_documents(config, ids))
+
+    def test_a_repeated_arch_counts_its_one_descriptor_once(self, tmp_path):
+        """One descriptor filed under one arch is one descriptor.
+
+        The inventory appends per arch ENTRY, so an arch list repeating a value
+        reports a per-arch count above the number of descriptors that ship -- and
+        above ``total_descriptor_count``, which is the one number a reader would
+        check it against.
+        """
+        inventory = self._inventory_for_pack_arch(tmp_path, ["gfx942", "gfx942"])
+        assert inventory["arches"]["gfx942"]["descriptor_count"] == 1
+        assert inventory["total_descriptor_count"] == 1
+
+    def test_two_distinct_arches_each_count_the_descriptor_once(self, tmp_path):
+        """The control: a descriptor really is filed under every arch it names.
+
+        Collapsing the arch list to its first entry, or filing the descriptor
+        once overall, reads 1 for gfx942 here exactly as the repeat above does.
+        """
+        inventory = self._inventory_for_pack_arch(tmp_path, ["gfx942", "gfx950"])
+        assert set(inventory["arches"]) == {"gfx942", "gfx950"}
+        assert inventory["arches"]["gfx942"]["descriptor_count"] == 1
+        assert inventory["arches"]["gfx950"]["descriptor_count"] == 1
+        assert inventory["total_descriptor_count"] == 1
+
     def test_the_packaged_dialect_reports_the_kind_that_actually_ships(self):
         """hkp_pack lowers ``rocke``/``hip`` to ``kpack`` before the loader reads
         it, so a census expecting the AUTHORED kind expects one that never

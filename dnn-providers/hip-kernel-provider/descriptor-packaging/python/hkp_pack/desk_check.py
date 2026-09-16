@@ -219,6 +219,21 @@ def compiled_agreement(
     `metadata_fields` is the legitimate shape for a non-compiled source and binds no
     record, so it counts as unclaimed rather than as a pass nothing was read for.
     Only rocKE-origin kernels carry that evidence today.
+
+    The waiver is keyed on origin. A kernel whose `provenance.origin_kind` is
+    `"rocke"` was published with its evidence by construction, so the same shape is
+    a failure there: otherwise a descriptor could retire its own evidence by
+    dropping `effective_spec` and moving its `metadata_fields` into
+    `matcher_only_fields`, leaving the archive bytes unread. An ABSENT
+    `origin_kind` is not rocKE -- descriptors packed before the field existed and
+    hand-authored fixtures have none.
+
+    That reaches evidence lost by accident, not evidence removed on purpose.
+    Nothing outside the record binds `origin_kind`: `descriptor_binding()` digests
+    it, and that digest is inside the record being dropped, so an edit that removes
+    the record can set `origin_kind` to `"hip"` in the same pass and present as a
+    source that never owed evidence. Detecting that needs provenance bound
+    somewhere the shipped tree cannot rewrite.
     """
     kdp_path = Path(kdp_path).resolve()
     index = descriptor_context.Index(str(kdp_path.parent))
@@ -256,8 +271,23 @@ def compiled_agreement(
                 kernel, engine, kmd, schemas, doc if entry.inline else None
             )
             records = all_records[kernel["id"]]
+            provenance = kernel.get("provenance") or {}
             claimed = any(r["declaration"]["metadata_fields"] for r in records)
-            if not claimed and "effective_spec" not in (kernel.get("provenance") or {}):
+            if not claimed and "effective_spec" not in provenance:
+                # The packer publishes `effective_spec` onto every rocKE UKD it
+                # ships, so only a non-rocKE origin may waive.
+                if provenance.get("origin_kind") == "rocke":
+                    raise HkpPackError(
+                        "provenance.origin_kind is 'rocke', so the packer published "
+                        "this kernel's compiler-owned provenance.effective_spec when "
+                        "it shipped it. The descriptor in hand declares no "
+                        "specialized metadata_fields AND carries no effective_spec, "
+                        "so there is no record left to bind and the archive bytes "
+                        "were never read. A rocKE-produced kernel is required to "
+                        "carry its compiler evidence; relabelling its specialized "
+                        "fields as matcher-only does not make it an unspecialized "
+                        "source."
+                    )
                 unclaimed.append(
                     f"{name}: declares no specialized metadata_fields, so there is "
                     f"no producing-build record to bind and nothing here was "

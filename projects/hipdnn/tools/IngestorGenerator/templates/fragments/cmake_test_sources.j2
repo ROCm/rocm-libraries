@@ -37,7 +37,14 @@ hkp_register_census_tests(TARGET hip_kernel_provider_tests
 {% endfor %}
                           )
 ##
-## `PACK_NAME product` resolves because the shipped root is non-empty.
+## `PACK_NAME product` resolves only where the `product` pack target is wired, which
+## needs the shipped root to hold a descriptor AND at least one of them to declare an
+## architecture this build packs for. A build whose GPU_TARGETS your bundle does not
+## declare leaves production packaging dormant, and this call is then a configure
+## error naming a pack nothing wired -- which reads as a splice mistake rather than as
+## the arch mismatch it is. Guard the call with the same condition your bundle's arch
+## list expresses if you configure for other architectures.
+##
 ## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing
 ## this call, or the registered census will run against a shard that does not contain
 ## your descriptors.

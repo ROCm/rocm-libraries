@@ -840,6 +840,43 @@ class _ReaderArtifact:
         archive.finalize_archive()
         archive.write(self.archive_path)
 
+    def retire_evidence(self, origin_kind):
+        """Drop the producer's record AND the claim that would demand it back.
+
+        Together they are the shape a tree presents once its evidence is lost --
+        a partial copy, a hand-edit, a regenerated descriptor. Not the shape a
+        deliberate strip presents: that edit would move `origin_kind` too, which
+        is why the parameter exists rather than being fixed at `"rocke"`.
+        `origin_kind` is the only other thing that moves -- `None` removes it
+        outright -- so whatever verdict a caller then asserts is attributable to
+        the origin alone.
+        """
+        provenance = self.ukd["provenance"]
+        # The frozen control is rocKE-produced, which is what makes "hip" and
+        # "absent" below real mutations.
+        assert provenance["origin_kind"] == "rocke"
+        provenance.pop("effective_spec")
+        if origin_kind is None:
+            provenance.pop("origin_kind")
+        else:
+            provenance["origin_kind"] = origin_kind
+        declaration = provenance["specialization_contract"]["consumers"][0]
+        declaration["matcher_only_fields"] += declaration["metadata_fields"]
+        declaration["metadata_fields"] = []
+        declaration["bindings"] = {}
+        declaration["vocabulary"] = {}
+        self.save()
+
+    def assert_qualified_waiver(self):
+        """Both readers pass, and both say out loud that they bound nothing."""
+        failures, unclaimed, verified = compiled_agreement(
+            self.kdp_path, self.python_dir
+        )
+        assert failures == [] and len(unclaimed) == 1 and verified == 0
+        for result in self.run_clis():
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "NOT VERIFIED HERE" in result.stdout
+
     def run_clis(self):
         package = Path(__file__).resolve().parents[1]
         repo = Path(__file__).resolve().parents[4]
@@ -973,25 +1010,53 @@ class TestRealArchiveReaders:
                 assert result.returncode == 1, result.stdout + result.stderr
                 assert str(artifact.archive_path) in result.stdout + result.stderr
 
-    def test_recordless_packed_no_claim_remains_qualified(self, reader_artifact):
+    def test_recordless_packed_no_claim_from_a_hip_origin_remains_qualified(
+        self, reader_artifact
+    ):
+        """A hip-origin kernel with no claim and no record is the legitimate shape.
+
+        The same mutation `test_a_rocke_origin_cannot_waive_its_own_evidence`
+        performs, differing only in the origin it leaves behind. The pair is what
+        proves the check discriminates on origin rather than having been switched
+        off.
+        """
         artifact = reader_artifact()
         artifact.assert_agreement()
-        provenance = artifact.ukd["provenance"]
-        provenance.pop("effective_spec")
-        provenance["origin_kind"] = "hip"
-        declaration = provenance["specialization_contract"]["consumers"][0]
-        declaration["matcher_only_fields"] += declaration["metadata_fields"]
-        declaration["metadata_fields"] = []
-        declaration["bindings"] = {}
-        declaration["vocabulary"] = {}
-        artifact.save()
-        failures, unclaimed, verified = compiled_agreement(
-            artifact.kdp_path, artifact.python_dir
+        artifact.retire_evidence("hip")
+        artifact.assert_qualified_waiver()
+
+    def test_a_rocke_origin_cannot_waive_its_own_evidence(self, reader_artifact):
+        """The waiver keyed on the claim alone is a self-service exemption.
+
+        The packer publishes `effective_spec` onto every rocKE UKD it ships, so this
+        descriptor's own `origin_kind` contradicts the absence of the record. Left
+        waivable, deleting the record and relabelling the specialized fields as
+        matcher-only takes a shipped rocKE shard to a clean exit with the archive
+        bytes never read.
+        """
+        artifact = reader_artifact()
+        artifact.assert_agreement()
+        artifact.retire_evidence("rocke")
+        artifact.assert_failure(
+            "A rocKE-produced kernel is required to carry its compiler evidence"
         )
-        assert failures == [] and len(unclaimed) == 1 and verified == 0
         for result in artifact.run_clis():
-            assert result.returncode == 0, result.stdout + result.stderr
-            assert "NOT VERIFIED HERE" in result.stdout
+            # The report must name which kernel.
+            assert artifact.ukd["name"] in result.stdout + result.stderr
+            assert "NOT VERIFIED HERE" not in result.stdout
+
+    def test_an_absent_origin_kind_is_not_read_as_rocke(self, reader_artifact):
+        """Silence is not a claim of rocKE origin, so it keeps the waiver.
+
+        Descriptors packed before `origin_kind` existed, and hand-authored trees,
+        carry no origin at all. Inferring rocKE from the absence would fail every
+        one of them over evidence they were never asked to produce.
+        """
+        artifact = reader_artifact()
+        artifact.assert_agreement()
+        artifact.retire_evidence(None)
+        assert "origin_kind" not in artifact.ukd["provenance"]
+        artifact.assert_qualified_waiver()
 
     def test_kdp_effective_spec_is_never_inherited(self, reader_artifact):
         artifact = reader_artifact(inherited=True)

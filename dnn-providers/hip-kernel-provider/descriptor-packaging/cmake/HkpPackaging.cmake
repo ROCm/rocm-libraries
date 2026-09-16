@@ -986,6 +986,15 @@ function(_hkp_root_covers_any_arch out_var root arches)
             continue()
         endif()
 
+        # CONFIGURE_DEPENDS re-runs the glob when the SET of files changes, and this
+        # answer turns on their CONTENTS. Editing a KDP's `arch` moves no path, so
+        # without a content dependency the previous verdict survives the edit: a root
+        # that starts declaring this build's architecture stays dormant and ships
+        # nothing, with no configure to say otherwise.
+        set_property(
+            DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_kdp}")
+
         file(READ "${_kdp}" _kdp_json)
 
         # One error variable covers two ambiguous cases that both resolve to TRUE:

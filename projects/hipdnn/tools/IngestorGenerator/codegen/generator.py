@@ -632,11 +632,14 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
 
     ``kdp_documents`` is `build_kdp_documents`' ``[(pack, document), ...]``; the
     pack carries the stem the file is named for, which the document does not.
+
+    A descriptor is filed under every arch it names, and each arch reports its
+    distinct names, so an engine contributes one entry per arch it covers.
     """
-    arches: dict[str, dict[str, set]] = {}
+    arches: dict[str, dict] = {}
 
     def bucket(arch: str) -> dict:
-        return arches.setdefault(arch, {"descriptor_names": set(), "pack_names": set()})
+        return arches.setdefault(arch, {"descriptors": [], "pack_names": set()})
 
     total = 0
     for pack, document in kdp_documents:
@@ -647,7 +650,7 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
         for descriptor in document["kernelDescriptors"]:
             total += 1
             for arch in list(descriptor.get("arch") or []) or pack_arch:
-                bucket(arch)["descriptor_names"].add(descriptor["name"])
+                bucket(arch)["descriptors"].append(descriptor["name"])
 
     return {
         "sdk_version": config.engine.sdk_version,
@@ -656,10 +659,14 @@ def emitted_inventory(config: IngestorConfig, kdp_documents: list) -> dict:
             if config.is_packaged
             else config.kernel_source_kind
         ),
+        # Both the list and the count come from the distinct names, matching the
+        # std::set the generated census loads them into. Two descriptors of one
+        # engine cannot share a name -- the loader rejects that engine-wide -- so
+        # the set collapses nothing a bundle can actually ship.
         "arches": {
             arch: {
-                "descriptor_names": sorted(entry["descriptor_names"]),
-                "descriptor_count": len(entry["descriptor_names"]),
+                "descriptor_names": sorted(set(entry["descriptors"])),
+                "descriptor_count": len(set(entry["descriptors"])),
                 "pack_names": sorted(entry["pack_names"]),
                 "pack_count": len(entry["pack_names"]),
             }

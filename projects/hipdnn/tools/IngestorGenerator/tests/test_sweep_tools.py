@@ -170,7 +170,27 @@ raise SystemExit(scenario.get("rc", 0))
 """
 
 
+#: Marks a case that drives a sweep far enough to execute a staged fixture.
+#:
+#: The tool targets an allocated device host and carries no platform handling, so
+#: this is a limit of what can be driven here rather than a gap in a supported
+#: configuration.
+#:
+#: Deliberately narrower than the file: staging a fixture and refusing a config both
+#: work anywhere, so the refusal cases and the device-probe and field-audit cases
+#: stay live on every platform.
+_needs_posix_exec = pytest.mark.skipif(
+    os.name != "posix",
+    reason=(
+        "driving a sweep to a result needs POSIX execution semantics: sweep.py "
+        "selects the benchmark interpreter from its shebang and runs the benchmark "
+        "directly. sweep.py targets an allocated device host."
+    ),
+)
+
+
 def _script(path: Path, body: str) -> Path:
+    """Stage an executable the driver can run by name, the way a real one arrives."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!" + sys.executable + "\n" + body)
     path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
@@ -308,12 +328,14 @@ def sweep(tmp_path):
 class TestTheCLIsRunAsPrograms:
     """From an unrelated cwd, with no inherited environment doing the work."""
 
+    @_needs_posix_exec
     def test_a_clean_timing_sweep_completes(self, sweep):
         result = sweep.run()
         assert result.returncode == 0, result.stdout + result.stderr
         assert "SWEEP_TIMING_ONLY" in result.stdout
         assert all(sweep.gates(result).values())
 
+    @_needs_posix_exec
     def test_a_correctness_sweep_reports_a_validated_run(self, tmp_path):
         staged = Sweep(tmp_path, correctness=True)
         result = staged.run()
@@ -441,6 +463,7 @@ class TestTheCLIsRunAsPrograms:
         assert "exactly one .fbs schema" in result.stderr
 
 
+@_needs_posix_exec
 class TestGatesFailIndependently:
     """Each gate must be able to be the ONLY thing that failed.
 
@@ -520,6 +543,7 @@ class TestGatesFailIndependently:
         assert self._only_failing(sweep.gates(result)) == {"metadata"}
 
 
+@_needs_posix_exec
 class TestCorrectnessEvidenceIsRequiredNotOptional:
     def test_a_tolerance_mismatch_fails_the_correctness_phase(self, tmp_path):
         staged = Sweep(tmp_path, correctness=True)
@@ -555,6 +579,7 @@ class TestCorrectnessEvidenceIsRequiredNotOptional:
         assert summary["timing_only_complete"] is True
 
 
+@_needs_posix_exec
 class TestResume:
     """A completed phase is reusable only when it is bound to the CURRENT inputs and
     passed EVERY gate. Each of the three ways that binding is broken is tested."""
@@ -632,6 +657,7 @@ class TestResume:
 
 
 class TestTheDriverRefusesAnUnsafeConfig:
+    @_needs_posix_exec
     def test_a_shell_launcher_is_not_a_benchmark_executable(self, sweep):
         config = json.loads(sweep.config_path.read_text())
         config["benchmark"]["argv"] = ["/bin/sh"]
@@ -680,6 +706,7 @@ class TestTheDriverRefusesAnUnsafeConfig:
         assert result.returncode == 2
         assert "expected 3" in result.stderr
 
+    @_needs_posix_exec
     def test_a_missing_device_declines_the_sweep_at_the_device_gate(self, sweep):
         """Wrong-arch host: the sweep may not silently measure whatever is present.
         A gate that declined is an ordinary incomplete outcome, exit 1 -- distinct

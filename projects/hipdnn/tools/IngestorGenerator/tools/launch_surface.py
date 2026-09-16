@@ -60,7 +60,7 @@ def _load_profile(path: str) -> dict:
     an object -- a bare list, say -- would otherwise crash later with an
     AttributeError naming neither the file nor the problem.
     """
-    text = Path(path).read_text()
+    text = Path(path).read_text(encoding="utf-8")
     try:
         import json
 
@@ -358,11 +358,15 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
     py_text_cache: dict[str, str | None] = {}
 
     def read_cached(cache: dict[str, str | None], resolved: Path) -> str | None:
+        # UTF-8 explicitly: this repo's sources are UTF-8 and read_text() would
+        # otherwise decode with the platform's locale encoding, so a source file
+        # carrying one non-ASCII character in a comment aborts the whole audit on a
+        # cp1252 Windows shell and checks clean everywhere else.
         key = str(resolved)
         if key not in cache:
             try:
-                cache[key] = resolved.read_text()
-            except OSError:
+                cache[key] = resolved.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
                 cache[key] = None
         return cache[key]
 
@@ -410,9 +414,16 @@ def check(profile: dict, root: Path) -> tuple[list[str], list[str]]:
         cpp_path = _path_part(surface["cpp_mirror"])
         cpp_text = read_cached(cpp_text_cache, root / cpp_path) if cpp_path else None
         if cpp_path and cpp_text is None:
-            failures.append(
-                f"surface '{name}' cpp_mirror path does not exist: {cpp_path}"
+            # read_cached answers None for a file that is absent and for one that is
+            # present but undecodable, and the two want different repairs: author the
+            # file, or re-save it as UTF-8. Reporting both as a missing path sends the
+            # second reader looking for a file they are staring at.
+            reason = (
+                "path does not exist"
+                if not (root / cpp_path).is_file()
+                else "is not valid UTF-8"
             )
+            failures.append(f"surface '{name}' cpp_mirror {reason}: {cpp_path}")
 
         # (1c) cpp_mirror's leading symbol, if it names one, must be real.
         if cpp_text is not None:

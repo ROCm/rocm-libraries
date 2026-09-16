@@ -20,6 +20,7 @@ import yaml
 from .models import (
     ARCH_BASE_ID_PATTERN,
     AUTHORED_TEST_SETS,
+    CXX_IDENTIFIER_PATTERN,
     DIALECT_DIRECT_LOAD,
     DIALECT_PACKAGED,
     DIALECTS,
@@ -50,6 +51,22 @@ class ConfigError(Exception):
     """Raised when a YAML config is invalid."""
 
     pass
+
+
+def _unique_arch(raw_arch) -> list[str]:
+    """An arch list with repeats collapsed, authored order preserved.
+
+    A repeated entry is inert everywhere the value is READ: ``archCovers`` and the
+    subset check are membership tests, and the emitted KDP's ``arch`` is a
+    membership list. It is not inert where the value is COUNTED -- the emitted
+    inventory files a descriptor under every arch the descriptor names, so a repeat
+    files it twice and reports a per-arch descriptor count larger than the number
+    of descriptors that ship. Normalising here settles it once for every consumer
+    rather than at each counting site.
+
+    Order is preserved because arch order reaches the descriptor bytes.
+    """
+    return list(dict.fromkeys(raw_arch))
 
 
 def load_config(path: Path) -> IngestorConfig:
@@ -176,18 +193,21 @@ def load_config(path: Path) -> IngestorConfig:
                     ),
                     metadata=dict(kernel_raw.get("metadata", {})),
                     priority=kernel_raw.get("priority", 0),
-                    arch=list(kernel_raw.get("arch", [])),
+                    arch=_unique_arch(kernel_raw.get("arch", [])),
                 )
             )
-        _check_kernel_names_unique(kernels, pack_raw["name"])
         packs.append(
             PackSpec(
                 name=pack_raw["name"],
                 kernels=kernels,
-                arch=list(pack_raw.get("arch", [])),
+                arch=_unique_arch(pack_raw.get("arch", [])),
                 discriminator=pack_raw.get("discriminator", ""),
             )
         )
+
+    # Once, over the whole engine, rather than per pack inside the loop above: the
+    # scope of the check is the scope of the identity it protects.
+    _check_kernel_names_unique(packs)
 
     gm_raw = raw.get("graph_match", {})
     graph_match = GraphMatchSpec(
@@ -213,8 +233,13 @@ def load_config(path: Path) -> IngestorConfig:
     return config
 
 
-def _check_kernel_names_unique(kernels: list, pack_name: str) -> None:
-    """Every kernel in a pack has its own name -- hand-authored or expanded.
+def _check_kernel_names_unique(packs: list) -> None:
+    """Every kernel of one ENGINE has its own name -- hand-authored or expanded.
+
+    Scoped to the engine rather than to a pack because that is the scope of the
+    identity it protects: the loader collects an engine's packs into one
+    ``DescriptorSet`` by engine id, so two kernels sharing a name in two packs are
+    exactly as indistinguishable to the runtime as two sharing one pack.
 
     NOTHING downstream catches a collision: the de-duplication pass in
     ``generator.py`` keys on resolved METADATA rather than the name, so two entries
@@ -222,26 +247,31 @@ def _check_kernel_names_unique(kernels: list, pack_name: str) -> None:
     runtime cannot tell apart, and two sharing a name AND metadata are reduced to
     whichever came first, silently.
     """
-    seen: dict = {}
-    collisions: dict = {}
-    for kernel in kernels:
-        if kernel.name in seen:
-            collisions.setdefault(kernel.name, 1)
-            collisions[kernel.name] += 1
-        seen[kernel.name] = kernel
+    packs_by_name: dict = {}
+    for pack in packs:
+        for kernel in pack.kernels:
+            packs_by_name.setdefault(kernel.name, []).append(pack.name)
+    collisions = {
+        name: where for name, where in packs_by_name.items() if len(where) > 1
+    }
     if not collisions:
         return
+    # The pack list is de-duplicated for display while the count is not: a name
+    # twice in one pack reads 'x2 in pack(s) 'p'', which still says both halves.
     shown = ", ".join(
-        f"{name!r} x{count}" for name, count in sorted(collisions.items())[:3]
+        f"{name!r} x{len(where)} in pack(s) "
+        + ", ".join(repr(p) for p in dict.fromkeys(where))
+        for name, where in sorted(collisions.items())[:3]
     )
     more = f" (+{len(collisions) - 3} more)" if len(collisions) > 3 else ""
     raise ConfigError(
-        f"pack '{pack_name}' declares {len(collisions)} duplicated kernel name(s): "
-        f"{shown}{more}. Kernel names must be unique within a pack: nothing "
-        f"downstream catches a collision, so the entries ship as descriptors that "
-        f"cannot be told apart in a log or a failure message. If these came from a "
-        f"'variants' group, its name template omits a field the shapes differ in -- "
-        f"add that field to the template, or a per-arm 'tag' that distinguishes them."
+        f"this engine declares {len(collisions)} duplicated kernel name(s): "
+        f"{shown}{more}. Kernel names must be unique across every pack of one "
+        f"engine: nothing downstream catches a collision, so the entries ship as "
+        f"descriptors that cannot be told apart in a log or a failure message. If "
+        f"these came from a 'variants' group, its name template omits a field the "
+        f"shapes differ in -- add that field to the template, or a per-arm 'tag' "
+        f"that distinguishes them."
     )
 
 
@@ -1387,6 +1417,96 @@ def _check_pack_discriminators(config: IngestorConfig) -> None:
             raise ConfigError(f"pack '{pack.name}' declares no kernels.")
 
 
+#: The ``<STEM>_MATCHER_SYMBOL`` constants ``native.cpp.j2`` emits with a literal
+#: stem, outside its per-pack loop, for every engine it renders.
+#:
+#: They share the matcher-symbol namespace with the per-pack constants built from
+#: the discriminators, so a discriminator folding onto one of these stems redefines
+#: it. ``tests/test_config_loader.py`` reads the literal stems back out of the
+#: template and compares them with this tuple, so adding a fixed constant there
+#: without adding it here fails rather than silently reopening the hole.
+RESERVED_MATCHER_SYMBOL_STEMS = ("GRAPH", "KERNEL")
+
+
+def _check_emitted_identifiers(config: IngestorConfig) -> None:
+    """Every name spliced into a generated C++ identifier is shaped like one, and
+    no two of them land on the same identifier.
+
+    ``native.cpp.j2`` interpolates each kmd field name uppercased into
+    ``<NAME>_FIELD`` and each pack discriminator into ``<NAME>_MATCHER_SYMBOL``
+    and ``<name>OperationMatches``. A hyphen -- the separator an author reaches
+    for when the same word appears in a JSON key -- is legal everywhere else in
+    this config and is a syntax error there, reported by the C++ compiler against
+    a file the author never edited. The uppercasing also folds names the rest of
+    the config keeps apart, so two fields, or two discriminators, differing only in
+    case emit one constant twice; a discriminator also has the template's own fixed
+    stems to avoid.
+
+    The two suffixes are two INDEPENDENT namespaces: a field and a discriminator
+    sharing a name emit ``<NAME>_FIELD`` and ``<NAME>_MATCHER_SYMBOL``. Each suffix
+    therefore gets its own claim map, and every collision -- field/field,
+    discriminator/discriminator, discriminator/reserved -- is the same claim failing.
+    """
+    for kmd_field in config.kmd_fields:
+        if not CXX_IDENTIFIER_PATTERN.match(kmd_field.name):
+            raise ConfigError(
+                f"kmd_fields entry '{kmd_field.name}' must be a C++ identifier, "
+                f"matching ^[A-Za-z_][A-Za-z0-9_]*$. The name is emitted uppercased "
+                f"as the constant '<NAME>_FIELD' in the generated native pack, so "
+                f"any other character does not decline at match time -- it fails "
+                f"to compile, in a file nobody wrote."
+            )
+    for pack in config.packs:
+        if pack.discriminator and not CXX_IDENTIFIER_PATTERN.match(pack.discriminator):
+            raise ConfigError(
+                f"pack '{pack.name}' discriminator '{pack.discriminator}' must be "
+                f"a C++ identifier, matching ^[A-Za-z_][A-Za-z0-9_]*$. It names "
+                f"both the constant '<NAME>_MATCHER_SYMBOL' and the function "
+                f"'{pack.discriminator}OperationMatches' in the generated native "
+                f"pack, so any other character fails to compile there."
+            )
+
+    def claim(claims: dict, name: str, suffix: str, claimant: str) -> None:
+        # Presence, not inequality: two entries spelled identically describe
+        # themselves identically, so comparing descriptions lets an exact duplicate
+        # claim a constant already taken. The identifier is emitted once per entry
+        # either way, which is what the compiler rejects.
+        constant = f"{name.upper()}{suffix}"
+        if constant in claims:
+            raise ConfigError(
+                f"{claimant} and {claims[constant]} both emit the constant "
+                f"'{constant}' in the generated native pack -- a redefinition the "
+                f"compiler rejects. Two entries that differ only in case, or not at "
+                f"all, land on one identifier. Rename or remove whichever of the two "
+                f"this config owns."
+            )
+        claims[constant] = claimant
+
+    field_claims: dict = {}
+    for kmd_field in config.kmd_fields:
+        claim(
+            field_claims,
+            kmd_field.name,
+            "_FIELD",
+            f"kmd_fields entry '{kmd_field.name}'",
+        )
+
+    matcher_claims: dict = {
+        f"{stem}_MATCHER_SYMBOL": (
+            f"the fixed {stem}_MATCHER_SYMBOL every generated native pack declares"
+        )
+        for stem in RESERVED_MATCHER_SYMBOL_STEMS
+    }
+    for pack in config.packs:
+        if pack.discriminator:
+            claim(
+                matcher_claims,
+                pack.discriminator,
+                "_MATCHER_SYMBOL",
+                f"pack '{pack.name}' discriminator '{pack.discriminator}'",
+            )
+
+
 def _validate_config(config: IngestorConfig) -> list[str]:
     """Run every pre-mint check, in order.
 
@@ -1412,6 +1532,10 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     _check_specialization_declaration(config)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
+    # After the discriminator check, which is what decides whether a pack carries
+    # one at all: a single-pack engine emits no matcher symbol, so there is no
+    # identifier to shape.
+    _check_emitted_identifiers(config)
     # Last, because it is about WHERE the bundle is written rather than what is in
     # it: a config with a content defect should hear about the content first.
     _check_authored_subpath(config)

@@ -37,6 +37,13 @@ using namespace hipdnn_plugin_sdk::ingestor;
 namespace
 {
 
+{#
+   GRAPH and KERNEL are the literal stems of this namespace, listed as reserved in
+   config_loader.RESERVED_MATCHER_SYMBOL_STEMS because the per-pack constants below
+   are built from pack discriminators and land in the same namespace. A fixed
+   <STEM>_MATCHER_SYMBOL added here belongs in that tuple too, and a test in
+   tests/test_config_loader.py compares the two.
+#}
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "{{ config.graph_match_symbol }}";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "{{ config.kernel_match_symbol }}";
