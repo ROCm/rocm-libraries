@@ -25,6 +25,7 @@
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRules.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -265,18 +266,47 @@ uint32_t dispatchFilledSgprsOf(const Function& function) {
     return static_cast<uint32_t>(filled);
 }
 
+/// Where the dispatch stops writing vectors, or "everywhere" when \p arch does
+/// not settle it.
+///
+/// No metadata to read: the only VGPRs the dispatch fills hold the workitem id,
+/// and on a target that packs the dimensions into v0 that is one register
+/// whatever the descriptor enabled. An unpacked target needs a field the
+/// allocator cannot reach, so it lands on "everywhere" and keeps every vector
+/// live-in pinned -- the same direction of caution as a missing
+/// kSigDispatchFilledSgprsMetaKey.
+uint32_t dispatchFilledVgprsOf(GfxArchID arch) {
+    constexpr uint32_t kEverything = std::numeric_limits<uint32_t>::max();
+    return settledDispatchFilledVgprCount(arch).value_or(kEverything);
+}
+
 /// Whether a live-in bound to \p hint arrived holding something.
 ///
+/// One line per class, because the dispatch fills the two for unrelated
+/// reasons: scalars from preloaded kernargs and workgroup ids, vectors from the
+/// workitem id alone. Either line is absent when this build cannot say where it
+/// falls, and an absent line pins the whole class -- understating a line unpins
+/// a register the dispatch wrote, which is wrong code rather than a missed
+/// optimisation.
+///
 /// Per DWORD, each unit of a tuple carrying its own hint, so a tuple straddling
-/// the line keeps the pin on its lower units and tupleRuns() holds the rest in
+/// a line keeps the pin on its lower units and tupleRuns() holds the rest in
 /// place behind them.
 ///
-/// Scalars only: the vector side is filled with workitem ids whose packing this
-/// does not model. A missing hint counts as filled too, there being no index to
-/// compare and no reading of "no register recorded" that means "any will do".
-bool dispatchFillsLiveIn(const std::optional<RegKey>& hint, uint32_t dispatchFilledSgprs) {
-    if (!hint.has_value() || hint->type != RegType::S) return true;
-    return hint->idx < dispatchFilledSgprs;
+/// A missing hint counts as filled, there being no index to compare and no
+/// reading of "no register recorded" that means "any will do". So does a class
+/// with neither line, which is every class beyond S and V.
+bool dispatchFillsLiveIn(const std::optional<RegKey>& hint, uint32_t dispatchFilledSgprs,
+                         uint32_t dispatchFilledVgprs) {
+    if (!hint.has_value()) return true;
+    switch (hint->type) {
+        case RegType::S:
+            return hint->idx < dispatchFilledSgprs;
+        case RegType::V:
+            return hint->idx < dispatchFilledVgprs;
+        default:
+            return true;
+    }
 }
 
 std::string joinIds(const std::vector<SSAValueID>& ids) {
@@ -308,6 +338,7 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
 
     const RegClassSet& liftedClasses = function.ssaArena().liftedClasses();
     const uint32_t dispatchFilledSgprs = dispatchFilledSgprsOf(function);
+    const uint32_t dispatchFilledVgprs = dispatchFilledVgprsOf(target.arch());
 
     const uint32_t wavefrontSize = wavefrontSizeOf(function);
 
@@ -347,11 +378,15 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
             // then arrives holding something that moving it would lose. Above
             // that line nobody wrote it, so a pin would fix a block in place to
             // preserve contents that do not exist -- and at s[100:107] on a
-            // 106-register file could not be honoured at all.
+            // 106-register file could not be honoured at all. Vectors reach
+            // that state in bulk: a kernel lifted mid-stream can name hundreds
+            // of VGPRs it never defines, and pinning them leaves the file too
+            // fragmented for an aligned tuple to fit anywhere.
             if (arg.incoming.empty()) {
                 const SSAValueID id = arg.value->valueId();
                 if (id == kInvalidSSAValueID || id >= constraints.pinnedByValue_.size()) continue;
-                if (dispatchFillsLiveIn(constraints.hintByValue_[id], dispatchFilledSgprs)) {
+                if (dispatchFillsLiveIn(constraints.hintByValue_[id], dispatchFilledSgprs,
+                                        dispatchFilledVgprs)) {
                     constraints.pinnedByValue_[id] = true;
                 } else {
                     constraints.undefinedLiveIns_.push_back(id);
