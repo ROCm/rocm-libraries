@@ -64,9 +64,17 @@ class CheckParam:
         """
 
     def check_valid(self, key, value, bs, ipt, rb, algo) -> bool:
-        param = (TYPE_CONFIGS[key].size, TYPE_CONFIGS[value].size, bs, ipt, rb, algo)
-        if param in self.cache:
-            return self.cache[param]
+        param = (TYPE_CONFIGS[key].size, TYPE_CONFIGS[value].size, bs, rb, algo)
+
+        """
+        self.cache[(k_size, val_size, bs, rb, algo)] -> [max_ipt]
+        """
+
+        if param not in self.cache:
+            self.cache[param] = -1
+        
+        if ipt <= self.cache[param]:
+            return True
 
         src = f'{BASE_DIR}/tuner/probe.cpp'
         with open(src, 'w') as f:
@@ -86,8 +94,8 @@ class CheckParam:
         valid = compiled.returncode == 0
         if not valid and "exceeds LDS" not in compiled.stderr:
             print(f"[probe] unexpected failure for {param}:\n{compiled.stderr[:500]}")
-        self.cache[param] = valid
 
+        self.cache[param] = ipt
         return valid
 
 class Tuner(BaseTuner):
@@ -115,10 +123,10 @@ class Tuner(BaseTuner):
     ) -> Callable[[dict], bool]:
         def validate(params):
             bs, ipt, rb, algo = params['block_size_x'], params['ipt'], params['radix_bits'], params['algo']
-            print(f'Checking: key: {key_type}, val: {val_type}, bs: {bs}, ipt: {ipt}, rb: {rb}, algo: {algo}')
             if bs != params['sort_block_size_x'] or  ipt != params['sort_ipt']:
                 return False
 
+            print(f'Checking: key: {key_type}, val: {val_type}, bs: {bs}, ipt: {ipt}, rb: {rb}, algo: {algo}')
             return self.param_checker.check_valid(key_type, val_type, bs, ipt, rb, algo)
 
         return validate
@@ -135,4 +143,3 @@ class Tuner(BaseTuner):
 
 if __name__ == "__main__":
     Tuner.cli()
-    
