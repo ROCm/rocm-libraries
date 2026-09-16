@@ -48,7 +48,8 @@ namespace rocsparse
     // (csr_diag_ind[i] < 0) corresponds to a zero pivot and is reported as 0.
     template <uint32_t BLOCKSIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrildlt0_copy_diag_kernel(J m,
+    void csrildlt0_copy_diag_kernel(J       m,
+                                    int64_t batch_count,
                                     const T* __restrict__ csr_val,
                                     int64_t csr_val_stride,
                                     const I* __restrict__ csr_diag_ind,
@@ -61,12 +62,16 @@ namespace rocsparse
             return;
         }
 
-        const auto batch_index = hipBlockIdx_y;
-        const I    diag_pos    = csr_diag_ind[row];
+        const I diag_pos = csr_diag_ind[row];
 
-        diag[batch_index * diag_stride + row]
-            = (diag_pos >= 0) ? rocsparse::real(csr_val[batch_index * csr_val_stride + diag_pos])
-                              : static_cast<floating_data_t<T>>(0);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            diag[batch_index * diag_stride + row]
+                = (diag_pos >= 0)
+                      ? rocsparse::real(csr_val[batch_index * csr_val_stride + diag_pos])
+                      : static_cast<floating_data_t<T>>(0);
+        }
     }
 
     // Copy the real diagonal D into the optional user-provided vector once the factorization
@@ -86,7 +91,8 @@ namespace rocsparse
         auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         static constexpr uint32_t BLOCKSIZE = 256;
-        const dim3                blocks((A->rows - 1) / BLOCKSIZE + 1, A->batch_count);
+        const dim3                blocks((A->rows - 1) / BLOCKSIZE + 1,
+                          rocsparse::get_batch_grid_size(A->batch_count));
         const dim3                threads(BLOCKSIZE);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -96,6 +102,7 @@ namespace rocsparse
             0,
             handle->stream,
             static_cast<J>(A->rows),
+            A->batch_count,
             reinterpret_cast<const T*>(A->val_data),
             A->batch_stride,
             reinterpret_cast<const I*>(trm_info->get_diag_ind()),

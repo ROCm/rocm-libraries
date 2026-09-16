@@ -250,7 +250,8 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csric0_kernel_hash(J m,
+    void csric0_kernel_hash(J       m,
+                            int64_t batch_count,
                             const I* __restrict__ csr_row_ptr,
                             const J* __restrict__ csr_col_ind,
                             T*      csr_val,
@@ -274,19 +275,22 @@ namespace rocsparse
         const double tolerance
             = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
 
-        const auto batch_index = hipBlockIdx_y;
-        rocsparse::csric0_device_hash<BLOCKSIZE, WFSIZE, HASH>(
-            m,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + batch_index * csr_val_stride,
-            csr_diag_ind,
-            done + batch_index * done_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            singular_pivot + batch_index * singular_pivot_stride,
-            tolerance,
-            idx_base);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csric0_device_hash<BLOCKSIZE, WFSIZE, HASH>(
+                m,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val + batch_index * csr_val_stride,
+                csr_diag_ind,
+                done + batch_index * done_stride,
+                map,
+                zero_pivot + batch_index * zero_pivot_stride,
+                singular_pivot + batch_index * singular_pivot_stride,
+                tolerance,
+                idx_base);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -307,7 +311,7 @@ namespace rocsparse
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
         const dim3    csric0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                 A->batch_count);
+                                 rocsparse::get_batch_grid_size(A->batch_count));
         const dim3    csric0_threads(BLOCKSIZE);
 
         auto                         numeric_exact = csric0_info->get_singularity_numeric_exact();
@@ -327,6 +331,7 @@ namespace rocsparse
             0,
             handle->stream,
             static_cast<J>(A->rows),
+            A->batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

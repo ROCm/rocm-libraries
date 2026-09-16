@@ -125,6 +125,54 @@ Tests:
   indextype: *i32
   batch_count: [8]
 
+# AISPARSE-690 regression: every incomplete factorization launch put
+# A->batch_count directly on grid.y, so a batch count above the grid.y cap
+# failed with hipErrorInvalidConfiguration. The launches now clamp grid.y
+# through rocsparse::get_batch_grid_size and the kernels grid-stride over the
+# batch, so batch instance 65535 is reached ONLY by that loop and its values are
+# checked against the host reference like every other instance. The matrices are
+# small enough that the whole batch costs a few hundred megabytes and runs on any
+# GPU. spic0 covers both csric0 and bsric0.
+#
+# batch_count is 65536 rather than something larger because the shared
+# singularity-position helper (rocsparse::assign_async, reached from every
+# spic0/spilu0/spildlt0 descriptor) puts the batch count on grid.y too and still
+# fails above it; see AISPARSE-697. Raise this once that fix lands, which is
+# what also makes the clamp itself (rather than only the grid-stride loop)
+# observable from the public API.
+#
+# The BSR entry asserts launch success only: the clients zero every batch of the
+# value comparison when analysis reports a pivot, and the random BSR generator
+# always reports a symbolic pivot at row 0, so BSR values are never compared.
+- name: spic0_large_batch_count
+  category: quick
+  function: spic0
+  precision: *single_precision
+  M_N:
+    - { M: 64, N: 64 }
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [65536]
+
+- name: spic0_large_batch_count
+  category: quick
+  function: spic0
+  precision: *single_precision
+  M_N:
+    - { M: 16, N: 16 }
+  block_dim: [4]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  formatA: [rocsparse_format_bsr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [65536]
+
 - name: spic0_bad_arg
   category: pre_checkin
   function: spic0_bad_arg
