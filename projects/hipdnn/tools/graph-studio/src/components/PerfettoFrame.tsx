@@ -30,13 +30,24 @@ export type RelatedRead =
  * ask for a one-time folder grant when it cannot, or fall back to a manual
  * pick carrying the read's own failure reason when the host can resolve
  * paths in general but this particular one was missing or escaped the base.
+ *
+ * A browser without the File System Access API can never grant a folder, so
+ * offering the grant there would be a button that does nothing.
  */
 export async function resolveRelated(
-  bridge: Pick<PlatformBridge, "canReadRelated" | "readRelated">,
+  bridge: Pick<PlatformBridge, "canReadRelated" | "readRelated" | "canGrantDirectory">,
   base: ReadBase | null | undefined,
   relativePath: string,
 ): Promise<RelatedRead> {
-  if (!base || !bridge.canReadRelated(base)) return { kind: "grant" };
+  if (!base || !bridge.canReadRelated(base)) {
+    return bridge.canGrantDirectory()
+      ? { kind: "grant" }
+      : {
+          kind: "manual",
+          reason:
+            "this browser cannot read a folder — pick the file, or use the desktop build",
+        };
+  }
   try {
     const bytes = await bridge.readRelated(base, relativePath);
     if (bytes === null) return { kind: "grant" };

@@ -95,6 +95,8 @@ export function detectElectronPlatform(): PlatformBridge | null {
       if (!ipcBase) return null;
       return api.readRelated(ipcBase, relativePath);
     },
+    canGrantDirectory: () => true,
+
     async openDirectory(): Promise<DirectoryRef | null> {
       const result = await api.openDirectory();
       if (!result) return null;

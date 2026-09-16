@@ -72,6 +72,12 @@ export interface PlatformBridge {
    * Resolves null when cancelled or when the host has no such capability.
    */
   openDirectory(): Promise<DirectoryRef | null>;
+
+  /**
+   * Whether `openDirectory` can do anything here. False in a browser without
+   * the File System Access API, where no folder grant is possible at all.
+   */
+  canGrantDirectory(): boolean;
 }
 
 export interface KeyValueStore {

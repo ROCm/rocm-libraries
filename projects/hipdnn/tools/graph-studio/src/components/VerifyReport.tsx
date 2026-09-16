@@ -95,7 +95,7 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
             Inspect tensors…
           </button>
         )}
-        {!shown.sample && !platform.canReadRelated(base) && (
+        {!shown.sample && !platform.canReadRelated(base) && platform.canGrantDirectory() && (
           <button type="button" onClick={() => void requestDirectory()}>
             Use run folder…
           </button>

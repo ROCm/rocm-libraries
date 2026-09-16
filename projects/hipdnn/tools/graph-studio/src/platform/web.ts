@@ -210,6 +210,10 @@ export const webPlatform: PlatformBridge = {
     if (!isDirectoryHandle(base.token)) return null;
     return readRelatedFromDirectory(base.token, relativePath);
   },
+  canGrantDirectory(): boolean {
+    return typeof fsWindow.showDirectoryPicker === "function";
+  },
+
   async openDirectory(): Promise<DirectoryRef | null> {
     if (typeof fsWindow.showDirectoryPicker !== "function") return null;
     try {

@@ -15,8 +15,9 @@ const BASE: FileHandleRef = { name: "results.json", token: "/runs/2026/results.j
 function bridge(
   canRead: boolean,
   read: (base: unknown, path: string) => Promise<Uint8Array | null>,
-): Pick<PlatformBridge, "canReadRelated" | "readRelated"> {
-  return { canReadRelated: () => canRead, readRelated: read };
+  canGrant = true,
+): Pick<PlatformBridge, "canReadRelated" | "readRelated" | "canGrantDirectory"> {
+  return { canReadRelated: () => canRead, readRelated: read, canGrantDirectory: () => canGrant };
 }
 
 test("autoloads when the host can resolve the base and the read succeeds", async () => {
@@ -57,4 +58,15 @@ test("falls back to manual reporting a path that escaped the base", async () => 
 test("offers the folder grant when the host reports it cannot read by path after all", async () => {
   const plan = await resolveRelated(bridge(true, async () => null), BASE, "traces/sample.pftrace");
   expect(plan).toEqual({ kind: "grant" });
+});
+
+test("asks for no grant in a browser that cannot grant one, and says why", async () => {
+  const read = async () => {
+    throw new Error("must not be called when canReadRelated is false");
+  };
+  const plan = await resolveRelated(bridge(false, read, false), BASE, "traces/sample.pftrace");
+  expect(plan).toEqual({
+    kind: "manual",
+    reason: "this browser cannot read a folder — pick the file, or use the desktop build",
+  });
 });
