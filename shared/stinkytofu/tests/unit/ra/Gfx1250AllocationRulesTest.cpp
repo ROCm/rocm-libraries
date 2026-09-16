@@ -565,10 +565,14 @@ TEST_F(Gfx1250AllocationRulesTest, TheAccumulatorPairingNamesEveryDwordOfTheTupl
 }
 
 TEST_F(Gfx1250AllocationRulesTest, TheDestinationReusesTheAccumulatorOnlyWithTheRuleOn) {
-    // The accumulator is a live-in pinned at v340 and dies at the WMMA, so its
-    // registers are free for the destination afterwards. Packing from the
-    // bottom has no reason to take them and puts the destination at v0; the
-    // pairing is what sends it to v340 instead.
+    // The accumulator is a live-in that stays at v340 and dies at the WMMA, so
+    // its registers are free for the destination afterwards. The destination
+    // has no reason to take them: with v[100:107] withheld, first-fit gives it
+    // v0. The pairing is what sends it to v340 instead.
+    //
+    // Withholding its own registers is what leaves anything to observe. A block
+    // sits on its hint when the registers are free and no preference outranks
+    // that, so a destination still able to reach v[100:107] would never move.
     BasicBlock* entry = block("entry");
     StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
     AsmIRBuilder builder(*entry, kRaTestArch);
@@ -580,16 +584,18 @@ TEST_F(Gfx1250AllocationRulesTest, TheDestinationReusesTheAccumulatorOnlyWithThe
 
     const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
     ASSERT_NE(dest, nullptr);
-    CompactingGreedyAllocator allocator;
+    GreedyAllocator allocator;
 
     AllocationSetup off(*func, RegClassSet::only(RegType::V), {},
                         gfx1250RulesWithAccumulatorReuse(/*on=*/false));
+    off.target().reserve(RegType::V, 100, 8);
     Expected<AllocationResult> without = allocator.allocate(off.context());
     ASSERT_TRUE(without.hasValue()) << without.getError();
     EXPECT_EQ(without->assignmentOf(dest->valueId()).idx, 0u);
 
     AllocationSetup on(*func, RegClassSet::only(RegType::V), {},
                        gfx1250RulesWithAccumulatorReuse());
+    on.target().reserve(RegType::V, 100, 8);
     Expected<AllocationResult> with = allocator.allocate(on.context());
     ASSERT_TRUE(with.hasValue()) << with.getError();
     EXPECT_TRUE(verifyAllocation(*func, *with, on.context()).ok());

@@ -521,6 +521,7 @@ When a `clobbersEarly` rule is Active, the allocator and the verifier see the wi
 | `.totalVgprPerSimd` | physical register file → `totalPerSimd(class)` |
 | `.vgprAllocGranule` | step occupancy is measured in → `allocationGranule(class)` |
 | `.maxWavesPerSimd` | wave slots per SIMD, the cap `getWavesPerSimd` applies once registers stop binding |
+| `.packedWorkitemId` | whether the dispatch packs the work-item ID dimensions into `v0` → `hasPackedWorkitemId`, which fixes how many VGPRs arrive filled and so which vector live-ins may be pinned |
 
 Nothing is keyed on an architecture, so supporting a target means editing that target's `.def`.
 
@@ -550,7 +551,7 @@ flowchart LR
     Ops["srcRegs / destRegs<br/>via liftedSSAUnits()"] --> Tuple["tupleRuns()"]
     Args["block ssaArguments()"] -->|has incoming| Aff["affinitySets()"]
     Args -->|"no incoming, dispatch-filled"| Pin["isPinned()"]
-    Args -->|"no incoming, above that line"| Undef["undefinedLiveIns()"]
+    Args -->|"no incoming, above its class's line"| Undef["undefinedLiveIns()"]
     RMW["read-write dest/src pair"] --> Aff
     Rules["AllocationRules::addRelations"] --> Tuple
     Rules --> Aff
@@ -585,7 +586,11 @@ Three things deliberately yield no constraint, which is as useful to know:
 
 **But only up to where the dispatch stops writing.** "No incoming edge" says nothing defines the value; the pin claims something *else* does, and that holds only inside the ABI prefix — `settledDispatchFilledSgprCount()`: preloaded kernargs plus two for the kernarg segment pointer, then one per enabled workgroup id, so 32 for a kernel with `.amdhsa_user_sgpr_count 29`. A scalar live-in above that line was written by nobody, so any register serves it equally and a pin there preserves contents that do not exist — at `s[100:107]` on a 106-register chip it cannot be honoured at all, which is why an SGPR-heavy kernel came back uncoloured. Those values stay movable and are listed in `undefinedLiveIns()`, which the shadow report names: "nothing defines it" and "it is undefined" differ by whether lifting saw every definition, so a run that moves one should be able to say which.
 
-Every unknown pins. The line arrives as `kSigDispatchFilledSgprsMetaKey` on the Function, the descriptor not being reachable from a pass, and absent or zero reads as the whole file — so a `.stir` file or a test keeps the old behaviour. A kernel with no preloaded kernargs never publishes it at all, the descriptor leaving it unsettled whether the kernarg segment pointer sits in `s[0:1]` ahead of the workgroup ids; understating the line is the one direction that produces wrong code. Vector live-ins stay pinned regardless, the workitem ids being packed in a layout this does not model.
+Every unknown pins. The line arrives as `kSigDispatchFilledSgprsMetaKey` on the Function, the descriptor not being reachable from a pass, and absent or zero reads as the whole file — so a `.stir` file or a test keeps the old behaviour. A kernel with no preloaded kernargs never publishes it at all, the descriptor leaving it unsettled whether the kernarg segment pointer sits in `s[0:1]` ahead of the workgroup ids; understating the line is the one direction that produces wrong code.
+
+**Vectors have a line of their own, and it is `v0`.** The only VGPRs a dispatch fills hold the workitem id, and `.amdhsa_system_vgpr_workitem_id` counts enabled *dimensions*, not registers. Which of the two conventions a target uses is `.packedWorkitemId` in its `DEF_ARCH`, read through `hasPackedWorkitemId()` — packed means x, y and z share `v0`'s bits 0:9, 10:19 and 20:29, so one register arrives filled whatever the field says, and `settledDispatchFilledVgprCount()` answers 1 without consulting the descriptor at all. An unpacked target needs the field, which the allocator cannot reach, so the answer is nothing and every vector live-in stays pinned as before. No metadata key either way: `AllocationConstraints::build` has `target.arch()`, which is the whole question.
+
+This matters more than the scalar line does. A kernel lifted mid-stream can name hundreds of VGPRs nothing in the function defines — an F8 GEMM came back with 506, of which only `v0` had arrived holding anything. Pinning the other 505 left no aligned 16-wide window free anywhere in the file and the kernel would not colour, which is why the shadow report prints a count and a sample rather than the list.
 
 **Alignment is a placement rule, not a constraint.** Neither `AllocationConstraints` nor `destroyAttachedSSA` checks it — both check consecutiveness alone. A row such as `ScalarTupleAlignment` forbids a bad base through `forbidsBase`, and the verifier rechecks it, so a policy that ignores the table is refused rather than assembled. A chip with an empty table still does not enforce alignment. Do not route an arch preference through `hintFor()`: that is the register the producer used, so it would vanish for any value with no hint.
 

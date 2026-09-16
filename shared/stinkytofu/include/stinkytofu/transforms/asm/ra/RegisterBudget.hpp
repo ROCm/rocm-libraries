@@ -19,6 +19,7 @@
 #include <optional>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
 
 namespace stinkytofu {
@@ -79,15 +80,38 @@ STINKYTOFU_EXPORT std::optional<uint32_t> settledDispatchFilledSgprCount(
 STINKYTOFU_EXPORT uint32_t requiredSgprCount(const Function& function, int numSgprPreload,
                                              const std::array<int, 3>& workgroupIds);
 
-/// VGPRs the dispatch writes before the first instruction: the workitem id,
-/// which is one register per enabled dimension. \p vgprWorkItem is the
-/// descriptor's .amdhsa_system_vgpr_workitem_id, so 0 means x alone.
-STINKYTOFU_EXPORT uint32_t dispatchFilledVgprCount(int vgprWorkItem);
+/// VGPRs the dispatch writes before the first instruction, which is the
+/// workitem id and nothing else.
+///
+/// \p vgprWorkItem is the descriptor's .amdhsa_system_vgpr_workitem_id, which
+/// counts *extra* dimensions, so 0 means x alone. How many registers those
+/// dimensions occupy is the architecture's business, not the field's:
+/// \p packedWorkitemId targets deliver x, y and z inside v0 and so fill one
+/// register whatever the field says, while unpacked targets take one register
+/// per enabled dimension from v0 upward.
+///
+/// Takes the packing as a bool rather than an architecture because its caller
+/// is the descriptor refresher, which tolerates a target this build does not
+/// know. False there means the unpacked count, which over-declares by a
+/// register or two instead of under-declaring.
+STINKYTOFU_EXPORT uint32_t dispatchFilledVgprCount(int vgprWorkItem, bool packedWorkitemId);
+
+/// The VGPRs the dispatch fills where the architecture settles it, and nothing
+/// where it does not -- the vector counterpart of
+/// settledDispatchFilledSgprCount, and read for the same purpose.
+///
+/// A packed target fills v0 alone, which is settled by \p arch with no help
+/// from the descriptor. On an unpacked target the count needs
+/// .amdhsa_system_vgpr_workitem_id, which the allocator cannot reach, so the
+/// answer is nothing and every vector live-in stays pinned. Understating the
+/// line unpins a register the dispatch wrote, which is wrong code.
+STINKYTOFU_EXPORT std::optional<uint32_t> settledDispatchFilledVgprCount(GfxArchID arch);
 
 /// VGPR count \p function must declare: the larger of what it uses and what
 /// the dispatch fills. A kernel that never reads its workitem id names it in
 /// no operand, so a count taken from usage alone can declare fewer registers
 /// than the dispatch writes.
-STINKYTOFU_EXPORT uint32_t requiredVgprCount(const Function& function, int vgprWorkItem);
+STINKYTOFU_EXPORT uint32_t requiredVgprCount(const Function& function, int vgprWorkItem,
+                                             bool packedWorkitemId);
 
 }  // namespace stinkytofu

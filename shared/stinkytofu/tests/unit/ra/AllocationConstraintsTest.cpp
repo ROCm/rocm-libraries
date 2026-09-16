@@ -9,6 +9,7 @@
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 
@@ -35,6 +36,19 @@ class AllocationConstraintsTest : public ::testing::Test {
         StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::s_mov_b32, kRaTestArch));
         mov->addDestReg(StinkyRegister("s", 40, 1));
         mov->addSrcReg(StinkyRegister("s", source, 1));
+        if (!liftForAllocation(*func)) return kInvalidSSAValueID;
+        const StinkySSAValue* value = ssaSourceValue(*mov, 0);
+        return value == nullptr ? kInvalidSSAValueID : value->valueId();
+    }
+
+    /// The same for vectors: v40 = v_mov_b32(v\p source). No metadata to set --
+    /// the vector line comes from the architecture's work-item ID packing, which
+    /// kRaTestArch declares.
+    SSAValueID vectorLiveIn(BasicBlock& entry, uint32_t source) {
+        AsmIRBuilder builder(entry, kRaTestArch);
+        StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+        mov->addDestReg(StinkyRegister("v", 40, 1));
+        mov->addSrcReg(StinkyRegister("v", source, 1));
         if (!liftForAllocation(*func)) return kInvalidSSAValueID;
         const StinkySSAValue* value = ssaSourceValue(*mov, 0);
         return value == nullptr ? kInvalidSSAValueID : value->valueId();
@@ -155,4 +169,50 @@ TEST_F(AllocationConstraintsTest, WithoutTheBoundaryEveryLiveInStaysPinned) {
     AllocationSetup setup(*func, RegClassSet::all());
     EXPECT_TRUE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
     EXPECT_TRUE(setup.constraints().undefinedLiveIns().empty());
+}
+
+TEST_F(AllocationConstraintsTest, VectorLiveInTheDispatchFilledIsPinned) {
+    // v0 is the whole vector line on a target that packs the work-item ID
+    // dimensions into it, which is what the workitem id arrives in.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSAValueID liveIn = vectorLiveIn(*block("entry"), /*source=*/0);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_FALSE(isUndefinedLiveIn(setup.constraints(), liveIn));
+}
+
+TEST_F(AllocationConstraintsTest, VectorLiveInAboveV0IsUndefinedAndKeepsItsHint) {
+    // Nothing wrote v300: the dispatch fills v0 alone whatever
+    // .amdhsa_system_vgpr_workitem_id enabled, so pinning it would hold a block
+    // in place to preserve contents that do not exist. It stays hinted, which
+    // is the right strength for a value whose contents do not matter.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSAValueID liveIn = vectorLiveIn(*block("entry"), /*source=*/300);
+    ASSERT_NE(liveIn, kInvalidSSAValueID);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_FALSE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
+    EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), liveIn)) << setup.constraints().toString();
+    EXPECT_EQ(setup.constraints().hintFor(liveIn), (RegKey{RegType::V, 300, RegHalf::NONE}));
+}
+
+TEST_F(AllocationConstraintsTest, AScalarLiveInIsUnaffectedByTheVectorLine) {
+    // The two lines are separate: a vector live-in being free above v0 says
+    // nothing about s100, which stays pinned for want of a scalar boundary.
+    func->setMetaData(kSigDispatchFilledSgprsMetaKey, kDispatchFills);
+    BasicBlock* entry = block("entry");
+    AsmIRBuilder builder(*entry, kRaTestArch);
+    StinkyInstruction* mov = builder.create(getMCIDByUOp(GFX::v_mov_b32, kRaTestArch));
+    mov->addDestReg(StinkyRegister("v", 40, 1));
+    mov->addSrcReg(StinkyRegister("v", 300, 1));
+    const SSAValueID scalar = scalarLiveIn(*entry, /*source=*/8);
+    ASSERT_NE(scalar, kInvalidSSAValueID);
+    const StinkySSAValue* vector = ssaSourceValue(*mov, 0);
+    ASSERT_NE(vector, nullptr);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    EXPECT_TRUE(setup.constraints().isPinned(scalar)) << setup.constraints().toString();
+    EXPECT_FALSE(setup.constraints().isPinned(vector->valueId())) << setup.constraints().toString();
 }

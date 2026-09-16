@@ -8,6 +8,7 @@
 
 #include "AllocationTestUtils.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
@@ -132,4 +133,29 @@ TEST(SettledDispatchFilledSgprCountTest, TheLineIsThePreloadedFloorOrNothingAtAl
     // requiredSgprCount can absorb and a pin boundary cannot: reading 3 when the
     // pointer does take s[0:1] would free s3 and s4, which the dispatch wrote.
     EXPECT_EQ(settledDispatchFilledSgprCount(/*numSgprPreload=*/0, {1, 1, 1}), std::nullopt);
+}
+
+TEST(DispatchFilledVgprCountTest, PackingDecidesTheCountRatherThanTheField) {
+    // The field counts enabled dimensions. On a packed target they share v0, so
+    // every value of it means one register.
+    for (int workItem = -1; workItem <= 2; ++workItem) {
+        EXPECT_EQ(dispatchFilledVgprCount(workItem, /*packedWorkitemId=*/true), 1u)
+            << "workItem=" << workItem;
+    }
+
+    // Unpacked, one register per dimension from v0 up, the field counting the
+    // extras -- so x alone is 0 and reaches v0.
+    EXPECT_EQ(dispatchFilledVgprCount(/*vgprWorkItem=*/-1, /*packedWorkitemId=*/false), 1u);
+    EXPECT_EQ(dispatchFilledVgprCount(/*vgprWorkItem=*/0, /*packedWorkitemId=*/false), 1u);
+    EXPECT_EQ(dispatchFilledVgprCount(/*vgprWorkItem=*/2, /*packedWorkitemId=*/false), 3u);
+}
+
+TEST(SettledDispatchFilledVgprCountTest, APackedTargetFillsV0AloneAndAnUnknownOneNothing) {
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    EXPECT_EQ(settledDispatchFilledVgprCount(kRaTestArch), 1u);
+
+    // An id past the end of what this build registered. Nothing is known about
+    // its packing, so the line is unsettled and every vector live-in stays
+    // pinned -- the same direction of caution as a missing scalar boundary.
+    EXPECT_EQ(settledDispatchFilledVgprCount(static_cast<GfxArchID>(1u << 20)), std::nullopt);
 }

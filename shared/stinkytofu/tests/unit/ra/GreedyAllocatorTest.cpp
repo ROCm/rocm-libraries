@@ -299,17 +299,24 @@ TEST_F(GreedyAllocatorTest, AnAffinitySetRelocatesAsAUnit) {
 }
 
 TEST_F(GreedyAllocatorTest, FunctionLiveInsKeepTheirRegisters) {
-    // A live-in arrives in a register the dispatch filled, so nothing in the
-    // function defines it and moving it changes what the kernel reads. It is
-    // pinned regardless of policy, which is why greedy-compact cannot trade it
-    // away for a lower high-water mark.
+    // A live-in in a register the dispatch filled arrives holding something,
+    // and moving it changes what the kernel reads. It is pinned regardless of
+    // policy, which is why greedy-compact cannot trade it away for a lower
+    // high-water mark.
+    //
+    // v0 is that register and the only one: this target packs the workitem id
+    // dimensions into it. v20 is a live-in as well, but above the line nothing
+    // wrote it, so there are no contents to preserve and compacting may move
+    // it like anything else.
     BasicBlock* entry = block("entry");
-    StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, /*dest=*/40, 20, 21);
+    StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, /*dest=*/40, 0, 20);
     ASSERT_TRUE(liftForAllocation(*func));
 
-    const SSAValueID liveIn = idOf(ssaSourceValue(*add, 0));
+    const SSAValueID filled = idOf(ssaSourceValue(*add, 0));
+    const SSAValueID undefined = idOf(ssaSourceValue(*add, 1));
     const SSAValueID defined = idOf(ssaDefinedValue(*add));
-    ASSERT_TRUE(AllocationSetup(*func).constraints().isPinned(liveIn));
+    ASSERT_TRUE(AllocationSetup(*func).constraints().isPinned(filled));
+    ASSERT_FALSE(AllocationSetup(*func).constraints().isPinned(undefined));
     ASSERT_FALSE(AllocationSetup(*func).constraints().isPinned(defined));
 
     // Compacting would pack everything from v0 up if it could.
@@ -318,9 +325,10 @@ TEST_F(GreedyAllocatorTest, FunctionLiveInsKeepTheirRegisters) {
     Expected<AllocationResult> result = compact.allocate(setup.context());
     ASSERT_TRUE(result.hasValue()) << (result.hasValue() ? "" : result.getError());
 
-    EXPECT_EQ(result->assignmentOf(liveIn), (RegKey{RegType::V, 20, RegHalf::NONE}))
+    EXPECT_EQ(result->assignmentOf(filled), (RegKey{RegType::V, 0, RegHalf::NONE}))
         << result->toString();
-    // The value the function defines is free to move down.
+    // The undefined live-in and the value the function defines both move down.
+    EXPECT_LT(result->assignmentOf(undefined).idx, 20u) << result->toString();
     EXPECT_LT(result->assignmentOf(defined).idx, 40u) << result->toString();
 }
 
@@ -890,13 +898,14 @@ TEST_F(GreedyAllocatorTest, AFoldThatCannotBePlacedGivesWayRatherThanRefusing) {
     // with folding off, and the two ends go back to separate registers -- four
     // wide and two wide, which the rule above does not constrain.
     BasicBlock* entry = block("entry");
-    createVAddInBlock(entry, kRaTestArch, /*dest=*/60, /*src0=*/4, /*src1=*/4);
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/60, /*src0=*/0, /*src1=*/0);
     dsLoad(entry, /*dest=*/10, /*width=*/2, /*addr=*/50);
     StinkyInstruction* wide = dsLoad(entry, /*dest=*/12, /*width=*/4, /*addr=*/11);
     createVAddInBlock(entry, kRaTestArch, /*dest=*/61, /*src0=*/12, /*src1=*/13);
-    // Read again, so v4 is live across everything and base 0 stays unusable for
-    // any block reaching as far as index 4.
-    createVAddInBlock(entry, kRaTestArch, /*dest=*/62, /*src0=*/4, /*src1=*/4);
+    // Read again, so v0 is live across everything. It is the register the
+    // dispatch filled, hence pinned, so base 0 stays unusable for any block at
+    // all -- and base 0 is the only base the folded width may start at.
+    createVAddInBlock(entry, kRaTestArch, /*dest=*/62, /*src0=*/0, /*src1=*/0);
     ASSERT_TRUE(liftForAllocation(*func));
 
     const StinkySSAValue* dest = ssaDefinedValue(*wide, 0);
@@ -918,11 +927,16 @@ TEST_F(GreedyAllocatorTest, AFoldThatCannotBePlacedGivesWayRatherThanRefusing) {
 }
 
 TEST_F(GreedyAllocatorTest, APairingPullsABlockOffTheRegisterFirstFitWouldTake) {
-    // v300 is a live-in, so it is pinned up there and dies at the add. The
-    // destination could take its register, but packing from the bottom has no
-    // reason to: first-fit gives it v0. The pairing is what changes that, and
-    // the contrast against the same function with no rule is what makes this
-    // a test of the pairing rather than of the function being small.
+    // v300 is a live-in that stays at its register and dies at the add, so that
+    // register is free for the destination afterwards. The destination has no
+    // reason to go there: v40 is withheld, so first-fit gives it v0. The
+    // pairing is what changes that, and the contrast against the same function
+    // with no rule is what makes this a test of the pairing rather than of the
+    // function being small.
+    //
+    // Withholding v40 is what leaves anything to observe. A block sits on its
+    // own hint when the register is free, and no preference outranks that, so a
+    // destination still able to reach v40 would never move for a pairing.
     BasicBlock* entry = block("entry");
     StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/300,
                                                /*src1=*/300);
@@ -930,12 +944,14 @@ TEST_F(GreedyAllocatorTest, APairingPullsABlockOffTheRegisterFirstFitWouldTake) 
     const StinkySSAValue* dest = ssaDefinedValue(*add);
     ASSERT_NE(dest, nullptr);
 
-    CompactingGreedyAllocator allocator;
+    GreedyAllocator allocator;
 
     AllocationSetup unpaired(*func, RegClassSet::only(RegType::V));
+    unpaired.target().reserve(RegType::V, 40, 1);
     EXPECT_EQ(colourWith(allocator, unpaired).assignmentOf(dest->valueId()).idx, 0u);
 
     AllocationSetup paired(*func, RegClassSet::only(RegType::V), {}, destPrefersFirstSource());
+    paired.target().reserve(RegType::V, 40, 1);
     EXPECT_EQ(colourWith(allocator, paired).assignmentOf(dest->valueId()).idx, 300u);
 }
 
