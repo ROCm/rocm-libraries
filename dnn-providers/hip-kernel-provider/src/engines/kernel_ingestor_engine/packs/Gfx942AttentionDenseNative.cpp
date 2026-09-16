@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -550,33 +551,50 @@ std::optional<int64_t>
     return total;
 }
 
+/// `Sum_{i=1}^{n} i == n * (n + 1) / 2`, halving before the multiply. `n * (n + 1)` can
+/// overflow for an `n` whose triangular number does not, and exactly one of `n`, `n + 1` is
+/// even, so dividing that one first is exact.
+std::optional<int64_t> triangular(int64_t n)
+{
+    if(n <= 0)
+    {
+        return int64_t{0};
+    }
+    return n % 2 == 0 ? checkedMultiply(n / 2, n + 1) : checkedMultiply(n, (n + 1) / 2);
+}
+
 /**
  * @brief The FLOPs this op performs, under the project's settled counting convention.
  *
- * CAUSAL-EFFECTIVE, NOT DENSE. RFC 0019 §13.6 settles the convention as whatever
- * `attention_flops` in rocKE's
- * `optimization/utilities/tools/stage1_benchmark/_ua_shape_utils.py:363` computes, which is
- * also aiter's and Triton's. For a square causal problem that is about HALF the dense
- * `4 * B * Hq * Sq * Skv * D`. The choice is load-bearing rather than cosmetic: this field
- * is the numerator of the arithmetic intensity a UHD ranks on and the denominator of every
- * TFLOPS number derived from it, so counting densely here while the training corpus counts
- * effectively in Python is train/serve skew inside a feature, not a rounding difference.
+ * CAUSAL-EFFECTIVE, NOT DENSE. RFC 0019 §13.6 settles the convention as the effective
+ * count -- the work the mask leaves -- rather than the dense `4 * B * Hq * Sq * Skv * D`.
+ * The choice is load-bearing rather than cosmetic: this field is the numerator of the
+ * arithmetic intensity a UHD ranks on and the denominator of every TFLOPS number derived
+ * from it, so a count that does not describe the work the kernel did is train/serve skew
+ * inside a feature, not a rounding difference.
  *
- * The two branches:
- *  - `causal == 0`: the effective KV length is the full `seqLenKv`, and the expression
- *    reduces exactly to the dense `4 * B * Sq * Skv * Hq * D`.
- *  - `causal != 0`: with a contiguous query suffix the average effective KV length per
- *    query is `Skv - Sq + (Sq + 1) / 2`, so the MACs per sequence are
- *    `Sq * Skv - Sq * (Sq - 1) / 2` -- the dense rectangle less the triangle the mask
- *    discards. Written as that subtraction rather than as the reference's average because
- *    `Sq * (Sq - 1) / 2` is exact in integers while the average is a half-integer; the two
- *    agree term for term, and the half-integer form would need a float round-trip to
- *    reproduce the reference's per-sequence `int()` truncation.
+ * TOP-LEFT ALIGNED, because that is what the kernel does. Its causal clamp derives the
+ * KV-loop bound from the query-block index with no `Skv - Sq` offset (see the
+ * BOTTOM_RIGHT_CAUSAL arm of the mask switch below, and `GpuRefSdpaFwd.cpp:129`, which
+ * keeps `skv <= sq` at `windowOffset == 0`). Query `i` therefore attends `min(i + 1, Skv)`
+ * keys and the MACs per sequence are that sum over the `Sq` queries:
  *
- * The `Sq > 2 * Skv + 1` arm reproduces the reference's `avg_eff < 0` fallback
- * (`avg_eff = kv_len / 2`) rather than improving on it, degenerate though that value is:
- * agreeing with the corpus generator is the point of adopting its convention, and a count
- * that diverges only in a corner is the harder disagreement to ever notice.
+ *  - `causal == 0`: every query attends every key; the expression is the dense
+ *    `4 * B * Sq * Skv * Hq * D`.
+ *  - `causal != 0`, `Sq <= Skv`: no query saturates, so the sum is the triangle
+ *    `Sq * (Sq + 1) / 2`.
+ *  - `causal != 0`, `Sq > Skv`: the first `Skv` queries ramp and the remaining
+ *    `Sq - Skv` are clamped at `Skv`, giving `Skv * (Skv + 1) / 2 + (Sq - Skv) * Skv`.
+ *
+ * The previous form counted BOTTOM-RIGHT (`Sq * Skv - Sq * (Sq - 1) / 2`, every query
+ * attending a contiguous suffix ending at its own row). The two coincide at `Sq == Skv` --
+ * which is why this went unnoticed, every shipped causal bundle being square -- and
+ * diverge without bound as `Sq / Skv` falls: at `Sq = 1, Skv = 131072` bottom-right counts
+ * the whole row and top-left counts one element. Measured throughput was the tell, 148
+ * corpus rows reporting up to 34x the machine's peak because the count, not the kernel, was
+ * doing the impossible. Note this also disposes of the old `Sq > 2 * Skv + 1` fallback:
+ * that arm existed to paper over a negative average effective KV length, which the
+ * saturating form cannot produce.
  *
  * nullopt on overflow -- §13.6's "absent beats silently wrong", because a wrapped negative
  * would not be caught downstream; it would become a model feature.
@@ -592,18 +610,26 @@ std::optional<int64_t> attentionFlopsFor(const AttentionDenseProblem& problem, i
     int64_t macsPerSequence = *dense;
     if(causal != 0)
     {
-        // Guarded on `> 1` because Sq == 1 masks nothing out and checkedMultiply refuses
-        // the zero factor that Sq - 1 would then be.
-        int64_t maskedOut = 0;
-        if(problem.seqLenQ > 1)
+        // The ramp, over however many queries attend fewer than all `Skv` keys.
+        const auto ramp = triangular(std::min(problem.seqLenQ, problem.seqLenKv));
+        if(!ramp.has_value())
         {
-            if(problem.seqLenQ > std::numeric_limits<int64_t>::max() / (problem.seqLenQ - 1))
+            return std::nullopt;
+        }
+        macsPerSequence = *ramp;
+
+        if(problem.seqLenQ > problem.seqLenKv)
+        {
+            // Every query past the `Skv`-th is clamped at the full KV length.
+            const auto clamped
+                = checkedMultiply(problem.seqLenQ - problem.seqLenKv, problem.seqLenKv);
+            if(!clamped.has_value()
+               || macsPerSequence > std::numeric_limits<int64_t>::max() - *clamped)
             {
                 return std::nullopt;
             }
-            maskedOut = problem.seqLenQ * (problem.seqLenQ - 1) / 2;
+            macsPerSequence += *clamped;
         }
-        macsPerSequence = *dense >= maskedOut ? *dense - maskedOut : *dense / 2;
     }
 
     // 4 = two flops per multiply-accumulate, over the two GEMMs (QK^T and PV). Every

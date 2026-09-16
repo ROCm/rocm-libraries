@@ -888,13 +888,15 @@ TEST(TestGfx942AttentionDenseBinding, BindsCausalEffectiveFlopsNotTheDenseCount)
     const auto bound = matchGraph(asymmetricSpec());
     ASSERT_TRUE(bound.has_value());
 
-    // Hand-computed for B=3, Hq=8, Sq=64, Skv=128, D=32, causal:
-    //   average effective KV per query = Skv - Sq + (Sq + 1) / 2 = 128 - 64 + 32.5 = 96.5
-    //   MACs per sequence              = 64 * 96.5 = 6176
-    //                                    (= Sq*Skv - Sq*(Sq-1)/2 = 8192 - 2016, the same
-    //                                     number in exact integers)
-    //   flops = 4 * B * macs * Hq * D  = 4 * 3 * 6176 * 8 * 32 = 18,972,672
-    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 18972672);
+    // Hand-computed for B=3, Hq=8, Sq=64, Skv=128, D=32, causal. The clamp is TOP-LEFT, so
+    // query i attends keys 0..i and no query saturates the 128 available:
+    //   MACs per sequence              = sum_{i=1}^{64} i = 64 * 65 / 2 = 2080
+    //   flops = 4 * B * macs * Hq * D  = 4 * 3 * 2080 * 8 * 32 = 6,389,760
+    //
+    // Bottom-right -- every query attending a 96.5-key suffix ending at its own row, for
+    // 6176 MACs -- is the count this pack used to bind, and the count the kernel does not
+    // perform. The two agree only at Sq == Skv, so an asymmetric shape is the whole test.
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 6389760);
 }
 
 TEST(TestGfx942AttentionDenseBinding, BindsTheDenseCountWithNoMaskAndCausalIsStrictlySmaller)
@@ -913,8 +915,8 @@ TEST(TestGfx942AttentionDenseBinding, BindsTheDenseCountWithNoMaskAndCausalIsStr
     EXPECT_EQ(tryGetBoundInt(*unmasked, "attention_dense.causal"), 0);
     EXPECT_EQ(tryGetBoundInt(*unmasked, "attention_dense.flops"), 25165824);
 
-    // The whole point of the effective convention: the mask discards 2016 of every
-    // sequence's 8192 MACs, so causal must cost strictly LESS on an identical shape.
+    // The whole point of the effective convention: the mask leaves 2080 of every sequence's
+    // 8192 MACs, so causal must cost strictly LESS on an identical shape.
     // Counting densely on both branches -- the easy mistake -- makes these two equal.
     EXPECT_LT(*tryGetBoundInt(*causal, "attention_dense.flops"),
               *tryGetBoundInt(*unmasked, "attention_dense.flops"));
@@ -927,28 +929,31 @@ TEST(TestGfx942AttentionDenseBinding, BindsFlopsForASingleQueryDecodeShape)
     const auto bound = matchGraph(spec);
     ASSERT_TRUE(bound.has_value());
 
-    // Sq == 1 masks nothing out -- the one query is the last row and attends all 128 keys:
-    //   macs = 1 * 128, flops = 4 * 3 * 128 * 8 * 32 = 393,216.
-    // The shape that catches a `Sq * (Sq - 1)` routed through the positive-factors-only
-    // checkedMultiply: the zero factor would make flops ABSENT on every decode graph,
-    // which is the half of the corpus that matters most for a latency-ranked heuristic.
-    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 393216);
+    // Under the kernel's TOP-LEFT clamp the single query is row 0 and attends exactly ONE
+    // key, however long the KV run is:
+    //   macs = 1, flops = 4 * 3 * 1 * 8 * 32 = 3,072.
+    //
+    // Counterintuitive for a shape that looks like KV-cache decode, where the new query
+    // ought to see all 128 cached keys -- but that is BOTTOM-RIGHT, and this pack declines
+    // BOTTOM_RIGHT_CAUSAL at Sq != Skv precisely so it never serves it wrongly. What the
+    // kernel runs is what gets counted; a decode-shaped graph that wants the suffix does
+    // not reach here. This is also the shape that caught the old count reading 128x high.
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 3072);
 }
 
-TEST(TestGfx942AttentionDenseBinding, ReproducesTheReferenceFallbackWhenQueriesOutrunKeys)
+TEST(TestGfx942AttentionDenseBinding, SaturatesAtTheKvLengthWhenQueriesOutrunKeys)
 {
     auto spec = asymmetricSpec();
     spec.seqLenKv = 8;
     const auto bound = matchGraph(spec);
     ASSERT_TRUE(bound.has_value());
 
-    // Sq > 2 * Skv + 1 (64 > 17), where the suffix formula gives a NEGATIVE effective KV
-    // length. `attention_flops` substitutes kv_len / 2 there, and this pack reproduces
-    // that substitution rather than improving on it: the field is worth something only
-    // while it equals what the corpus generator computed for the same shape, and a count
-    // that diverges only in a corner is the disagreement nobody ever notices.
-    //   macs = floor(64 * 8 / 2) = 256, flops = 4 * 3 * 256 * 8 * 32 = 786,432.
-    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 786432);
+    // Sq = 64 > Skv = 8: the first 8 queries ramp 1..8 and the remaining 56 are each
+    // clamped at the full 8 keys -- nothing here can go negative, which is why the old
+    // `Sq > 2 * Skv + 1` fallback to `Skv / 2` has no counterpart under top-left.
+    //   macs  = 8 * 9 / 2 + (64 - 8) * 8 = 36 + 448 = 484
+    //   flops = 4 * 3 * 484 * 8 * 32 = 1,486,848
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_dense.flops"), 1486848);
 }
 
 TEST(TestGfx942AttentionDenseBinding, BindsBytesAsThePerOperandSumOfElementsTimesItsDtypeWidth)
@@ -984,7 +989,7 @@ TEST(TestGfx942AttentionDenseBinding, ByteCountFollowsTheKvOperandsAndFlopsDoesN
     // the corpus.
     EXPECT_EQ(tryGetBoundInt(*multi, "attention_dense.flops"),
               tryGetBoundInt(*grouped, "attention_dense.flops"));
-    EXPECT_EQ(tryGetBoundInt(*multi, "attention_dense.flops"), 18972672);
+    EXPECT_EQ(tryGetBoundInt(*multi, "attention_dense.flops"), 6389760);
 
     // The dtype-width version of this test cannot exist for this pack: the matcher
     // declines every dtype but bf16 and fp16 (supportedDataTypeName), and both are two
