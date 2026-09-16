@@ -188,8 +188,21 @@ namespace rocisa
                     throw std::runtime_error("Invalid tmpSgprRes, must be at least 1");
                 }
                 auto tmpSgpr = sgpr(tmpSgprRes->idx);
-                module->addT<SMovB32>(tmpSgpr, multiplier, dComment);
-                module->addT<VMulLOU32>(product, tmpSgpr, operand, dComment);
+
+                // Check if operand is a scalar register to avoid constant bus restriction
+                if(operand->regType == "s")
+                {
+                    // If operand is SGPR, move it to product (VGPR) first, then multiply
+                    module->addT<VMovB32>(product, operand, std::nullopt, dComment + " (move SGPR to VGPR)");
+                    module->addT<SMovB32>(tmpSgpr, multiplier, dComment);
+                    module->addT<VMulLOU32>(product, tmpSgpr, product, dComment);
+                }
+                else
+                {
+                    // Operand is already VGPR, use original logic
+                    module->addT<SMovB32>(tmpSgpr, multiplier, dComment);
+                    module->addT<VMulLOU32>(product, tmpSgpr, operand, dComment);
+                }
             }
         }
         return module;
