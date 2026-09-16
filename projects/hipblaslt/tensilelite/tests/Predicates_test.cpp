@@ -249,3 +249,47 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_JustUnderCeiling_Accepted)
     auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(64);
     EXPECT_TRUE((*pred)(problem));
 }
+
+TEST(Predicates, BufferStoreOffsetLimitCheck_BetweenSentinelAndTwoPow32_Rejected)
+{
+    using namespace TensileLite;
+    // Isolates the threshold change (0xfffff000 vs. the old 2^32 constant)
+    // from the min()-cap fix: macroTile1 == n here, so the old formula's
+    // min(macroTile1, n) always equals n and computes the same full extent
+    // the fixed formula does. A shape whose extent falls strictly between
+    // the two constants is therefore only rejected by the corrected
+    // threshold, not by the extent-formula fix on its own.
+    constexpr size_t macroTile1 = 256;
+    constexpr size_t n          = 256;
+    constexpr size_t m          = 8388601;
+    static_assert(m * n * 2 > 0xfffff000ull,
+                  "extent must exceed the real hardware sentinel");
+    static_assert(m * n * 2 < 4294967296ull,
+                  "extent must stay under the old, looser 2^32 constant, or this "
+                  "test would not isolate the threshold change");
+
+    auto problem = ContractionProblemGemm::GEMM_Strides(false,
+                                                         false,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         rocisa::DataType::BFloat16,
+                                                         m,
+                                                         n,
+                                                         /*k=*/48,
+                                                         /*batchSize=*/1,
+                                                         /*lda=*/m,
+                                                         /*aStride=*/-1,
+                                                         /*ldb=*/48,
+                                                         /*bStride=*/-1,
+                                                         /*ldc=*/m,
+                                                         /*cStride=*/-1,
+                                                         /*ldd=*/m,
+                                                         /*dStride=*/-1,
+                                                         /*beta=*/0.0);
+    auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n << " bf16: true D extent falls between the "
+           "0xfffff000 sentinel and 2^32, so the corrected threshold (not just "
+           "the extent-formula fix) must reject this shape.";
+}

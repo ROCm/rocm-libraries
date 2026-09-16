@@ -6,12 +6,13 @@
 // crosses the buffer-store SRD's fixed num_records ceiling on gfx950/gfx942.
 //
 // Root cause: allocPostLoopSrd() (Tensile/KernelWriterAssembly.py) programs the
-// post-loop store SRD for C/D with a base address that is never re-based per
-// workgroup and num_records fixed to the BufferOOB sentinel (0xfffff000, ~4 GiB
-// - 4 KiB). Any BufferStore=True kernel can therefore only address BufferOOB
-// bytes past the tensor's start; stores beyond that are silently dropped by the
-// hardware buffer-store instruction rather than faulting, so the caller gets a
-// partially-written D with no error.
+// post-loop store SRD for C/D with num_records fixed to the BufferOOB sentinel
+// (0xfffff000, ~4 GiB - 4 KiB). That field is a 32-bit cap on every store a
+// BufferStore=True kernel issues, independent of how far the SRD base itself
+// is re-based per workgroup; once D's true byte extent reaches the sentinel,
+// stores at or past it are silently dropped by the hardware buffer-store
+// instruction rather than faulting, so the caller gets a partially-written D
+// with no error.
 //
 // Fix (this PR): repair the existing BufferStoreOffsetLimitCheck problem
 // predicate (ContractionProblemPredicates.hpp) so it checks the D tensor's
@@ -64,7 +65,9 @@
 
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -119,9 +122,27 @@ namespace
         hipblasStatus_t    heuristicStatus = HIPBLAS_STATUS_INTERNAL_ERROR;
         int                foundAlgoCount  = 0;
         bool               ran             = false;
+        // True only if the post-run verification scan itself completed
+        // cleanly (kernel launch + both hipMemcpy's succeeded). Callers must
+        // check this before trusting unwrittenCount/wrongCount == 0 -- a
+        // verification-side failure must not be misread as "nothing wrong".
+        bool               verified        = false;
         unsigned long long unwrittenCount  = 0;
         unsigned long long wrongCount      = 0;
         size_t             totalElements   = 0;
+    };
+
+    // Runs `cleanups` in reverse (LIFO) order when it goes out of scope, so
+    // every early return below still frees exactly the resources that were
+    // successfully allocated up to that point -- no leaks on any path.
+    struct ScopeGuard
+    {
+        std::vector<std::function<void()>>& cleanups;
+        ~ScopeGuard()
+        {
+            for(auto it = cleanups.rbegin(); it != cleanups.rend(); ++it)
+                (*it)();
+        }
     };
 
     // bf16 NN matmul, A and B filled with 1.0 everywhere, alpha=1, beta=0, so
@@ -135,13 +156,23 @@ namespace
         MatmulOutcome outcome;
         outcome.totalElements = (size_t)M * (size_t)N;
 
-        __hip_bfloat16 *A = nullptr, *B = nullptr, *D = nullptr;
+        std::vector<std::function<void()>> cleanups;
+        ScopeGuard                         guard{cleanups};
+
+        __hip_bfloat16* A = nullptr;
         if(hipMalloc(&A, (size_t)M * K * sizeof(*A)) != hipSuccess)
             return outcome;
+        cleanups.push_back([A] { static_cast<void>(hipFree(A)); });
+
+        __hip_bfloat16* B = nullptr;
         if(hipMalloc(&B, (size_t)K * N * sizeof(*B)) != hipSuccess)
             return outcome;
+        cleanups.push_back([B] { static_cast<void>(hipFree(B)); });
+
+        __hip_bfloat16* D = nullptr;
         if(hipMalloc(&D, (size_t)M * N * sizeof(*D)) != hipSuccess)
             return outcome;
+        cleanups.push_back([D] { static_cast<void>(hipFree(D)); });
 
         fillConstant<<<2048, 256>>>(A, (size_t)M * K, 1.0f);
         fillConstant<<<2048, 256>>>(B, (size_t)K * N, 1.0f);
@@ -152,32 +183,52 @@ namespace
         hipblasLtHandle_t handle;
         if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
             return outcome;
+        cleanups.push_back([handle] { static_cast<void>(hipblasLtDestroy(handle)); });
 
-        hipblasLtMatrixLayout_t la, lb, ld;
+        hipblasLtMatrixLayout_t la;
         if(hipblasLtMatrixLayoutCreate(&la, HIP_R_16BF, M, K, M) != HIPBLAS_STATUS_SUCCESS)
             return outcome;
+        cleanups.push_back([la] { static_cast<void>(hipblasLtMatrixLayoutDestroy(la)); });
+
+        hipblasLtMatrixLayout_t lb;
         if(hipblasLtMatrixLayoutCreate(&lb, HIP_R_16BF, K, N, K) != HIPBLAS_STATUS_SUCCESS)
             return outcome;
+        cleanups.push_back([lb] { static_cast<void>(hipblasLtMatrixLayoutDestroy(lb)); });
+
+        hipblasLtMatrixLayout_t ld;
         if(hipblasLtMatrixLayoutCreate(&ld, HIP_R_16BF, M, N, M) != HIPBLAS_STATUS_SUCCESS)
             return outcome;
+        cleanups.push_back([ld] { static_cast<void>(hipblasLtMatrixLayoutDestroy(ld)); });
 
         hipblasLtMatmulDesc_t desc;
         if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
            != HIPBLAS_STATUS_SUCCESS)
             return outcome;
+        cleanups.push_back([desc] { static_cast<void>(hipblasLtMatmulDescDestroy(desc)); });
+
         hipblasOperation_t opN = HIPBLAS_OP_N;
-        hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
-        hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
+        if(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN))
+           != HIPBLAS_STATUS_SUCCESS)
+            return outcome;
+        if(hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN))
+           != HIPBLAS_STATUS_SUCCESS)
+            return outcome;
 
         void*  workspace = nullptr;
         size_t wsize      = 128ull << 20;
         if(hipMalloc(&workspace, wsize) != hipSuccess)
             return outcome;
+        cleanups.push_back([workspace] { static_cast<void>(hipFree(workspace)); });
 
         hipblasLtMatmulPreference_t pref;
-        hipblasLtMatmulPreferenceCreate(&pref);
-        hipblasLtMatmulPreferenceSetAttribute(
-            pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsize, sizeof(wsize));
+        if(hipblasLtMatmulPreferenceCreate(&pref) != HIPBLAS_STATUS_SUCCESS)
+            return outcome;
+        cleanups.push_back(
+            [pref] { static_cast<void>(hipblasLtMatmulPreferenceDestroy(pref)); });
+        if(hipblasLtMatmulPreferenceSetAttribute(
+               pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsize, sizeof(wsize))
+           != HIPBLAS_STATUS_SUCCESS)
+            return outcome;
 
         hipblasLtMatmulHeuristicResult_t heuristic[1];
         int                              found = 0;
@@ -197,27 +248,31 @@ namespace
 
         if(outcome.ran)
         {
-            unsigned long long *unwrittenCount, *wrongCount;
-            static_cast<void>(hipMalloc(&unwrittenCount, sizeof(*unwrittenCount)));
-            static_cast<void>(hipMalloc(&wrongCount, sizeof(*wrongCount)));
-            static_cast<void>(hipMemset(unwrittenCount, 0, sizeof(*unwrittenCount)));
-            static_cast<void>(hipMemset(wrongCount, 0, sizeof(*wrongCount)));
-
-            scanAgainstExpected<<<4096, 256>>>(
-                D, (size_t)M * N, (float)K, unwrittenCount, wrongCount);
-
-            static_cast<void>(hipMemcpy(&outcome.unwrittenCount, unwrittenCount,
-                                         sizeof(outcome.unwrittenCount), hipMemcpyDeviceToHost));
-            static_cast<void>(hipMemcpy(&outcome.wrongCount, wrongCount,
-                                         sizeof(outcome.wrongCount), hipMemcpyDeviceToHost));
-            static_cast<void>(hipFree(unwrittenCount));
-            static_cast<void>(hipFree(wrongCount));
+            unsigned long long *unwrittenCount = nullptr, *wrongCount = nullptr;
+            bool                verifyOk       = hipMalloc(&unwrittenCount, sizeof(*unwrittenCount))
+                                    == hipSuccess
+                             && hipMalloc(&wrongCount, sizeof(*wrongCount)) == hipSuccess;
+            if(verifyOk)
+                verifyOk = hipMemset(unwrittenCount, 0, sizeof(*unwrittenCount)) == hipSuccess
+                           && hipMemset(wrongCount, 0, sizeof(*wrongCount)) == hipSuccess;
+            if(verifyOk)
+            {
+                scanAgainstExpected<<<4096, 256>>>(
+                    D, (size_t)M * N, (float)K, unwrittenCount, wrongCount);
+                verifyOk = hipMemcpy(&outcome.unwrittenCount, unwrittenCount,
+                                      sizeof(outcome.unwrittenCount), hipMemcpyDeviceToHost)
+                               == hipSuccess
+                           && hipMemcpy(&outcome.wrongCount, wrongCount,
+                                        sizeof(outcome.wrongCount), hipMemcpyDeviceToHost)
+                                  == hipSuccess;
+            }
+            outcome.verified = verifyOk;
+            if(unwrittenCount)
+                static_cast<void>(hipFree(unwrittenCount));
+            if(wrongCount)
+                static_cast<void>(hipFree(wrongCount));
         }
 
-        static_cast<void>(hipFree(A));
-        static_cast<void>(hipFree(B));
-        static_cast<void>(hipFree(D));
-        static_cast<void>(hipFree(workspace));
         return outcome;
     }
 
@@ -246,6 +301,7 @@ TEST(BufferStoreOffsetGuard_pre_checkin, SafeOutputDispatchesAndIsExact)
     ASSERT_GT(outcome.foundAlgoCount, 0) << "no algorithm found for an ordinary, "
                                             "well within-range problem";
     ASSERT_TRUE(outcome.ran);
+    ASSERT_TRUE(outcome.verified) << "post-run verification scan itself failed";
     EXPECT_EQ(outcome.unwrittenCount, 0u);
     EXPECT_EQ(outcome.wrongCount, 0u);
 }
@@ -282,6 +338,7 @@ TEST(BufferStoreOffsetGuard_pre_checkin, OversizedOutputGuardedAgainstSilentCorr
     // fully and correctly written -- this is the only alternative to (a) that
     // is not the ROCM-31016 corruption bug itself.
     ASSERT_TRUE(outcome.ran) << "an algorithm was found but failed to run";
+    ASSERT_TRUE(outcome.verified) << "post-run verification scan itself failed";
     EXPECT_EQ(outcome.unwrittenCount, 0u)
         << outcome.unwrittenCount << " of " << outcome.totalElements
         << " D elements were never written -- this IS the ROCM-31016 silent "
