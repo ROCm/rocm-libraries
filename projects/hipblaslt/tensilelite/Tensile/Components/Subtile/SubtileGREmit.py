@@ -1105,6 +1105,21 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
   return module
 
 
+def _b128ChunkTiling(tileInfo, mStripBytes):
+  """How one lane's b128 divides a strip: (chunks per K row, elements per chunk).
+
+  A b128 covers 16/bpe contiguous free-dim elements at one K row.  The baseline
+  2x1 fp4 stack fits exactly one chunk per K row, so the per-lane offset is a
+  pure K ramp.  Taller fp4 stacks make a b128 cover only part of a row, so the
+  physical chunk P = i*wavesize + laneId splits into K row P // chunksPerK and an
+  intra-row M block P % chunksPerK.  Only fp4 subdivides; the other TLU dtypes
+  (bf16 AB_B16_TLU1) keep one chunk per K row.  emitSingleDsRead in
+  SubtileLREmit has the matching LDS image.
+  """
+  chunksPerK = max(1, mStripBytes // 16) if float(tileInfo.bpe) == 0.5 else 1
+  return chunksPerK, int(16 / tileInfo.bpe)
+
+
 def _graTileAssignment_tlu(writer, kernel, tileInfo):
   """GR per-lane offset for TLU=1 (NT / free-dim contiguous) subtile tiles.
 
@@ -1147,15 +1162,9 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   tmpVgpr = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_tmpVgpr")
   swzTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_swzTmp") if swz else None
 
-  # M-tiling across b128 loads (fp4 taller stacks).  When a b128 covers only part
-  # of a K row (chunksPerK > 1), physical chunk P = i*wavesize + laneId splits
-  # into K row (P // chunksPerK) plus an intra-row M block (P % chunksPerK) of
-  # elemsPerChunk elements.  Scoped to fp4; other TLU dtypes keep the pure ramp.
   instM = int(tileInfo.mmaTileShape[0])
   mStripBytes = int(tileInfo.subtileShape[0] * instM * tileInfo.bpe)
-  isFp4 = float(tileInfo.bpe) == 0.5
-  chunksPerK = max(1, mStripBytes // 16) if isFp4 else 1
-  elemsPerChunk = int(16 / tileInfo.bpe)
+  chunksPerK, elemsPerChunk = _b128ChunkTiling(tileInfo, mStripBytes)
   mTileTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_mTileTmp") if chunksPerK > 1 else None
 
   # Multi-wave: waves split the free dim (M for A via MIWaveGroup[0], N for B

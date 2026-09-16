@@ -402,6 +402,29 @@ def selectDGeometry(kernel: dict) -> CDTileGeometry:
 # TileInfo — runtime tile state
 ################################################################################
 
+def _wholeStripsAlongFreeDim(gr_cfg, macroTile, depthU):
+  """Subtile grid whose free-dim strip count is rounded up to whole strips.
+
+  A macro tile that is not a multiple of the stack (96 free-dim elements over an
+  8-tile stack) still occupies a whole strip, and the surplus M tiles are fetched
+  into LDS and never read back.  LDS sizing, the GR m0 walk and the LR K-window
+  stride all key off this, so the round-up happens once, here.
+  """
+  grid = list(gr_cfg.globalSubtileGrid(macroTile, depthU))
+  grid[0] = math.ceil(grid[0])
+  return grid
+
+
+def _wavesSharingOneStrip(stackM, perWaveMTiles):
+  """Waves that split one GR strip's K rows between them.
+
+  Normally 1, since a strip is one wave's M extent.  A tall stack makes the
+  strip span several waves' extents, leaving fewer tiles per wave than the stack
+  itself, where the plain ratio would floor to 0.
+  """
+  return max(1, stackM // perWaveMTiles) if perWaveMTiles else 1
+
+
 class TileInfo:
   """Runtime tile state combining frozen geometry with kernel/writer config.
 
@@ -483,33 +506,16 @@ class TileInfo:
       self.subtileShape        = list(gr_cfg.subtileShape)
       self.subtileCount        = gr_cfg.subtileCount
       self.subtileStride       = gr_cfg.subtileStride
-      # Strip count along the free dim.  Rounded UP: a macro tile that is not a
-      # multiple of the stack (96 free-dim elements over an 8-tile stack) is
-      # covered by a whole strip whose surplus M tiles are fetched into LDS and
-      # never read back.  Exact for every power-of-two tile, so this is a no-op
-      # there.  Every consumer -- LDS sizing, the GR m0 walk, the LR K-window
-      # stride -- keys off this, so the round-up has to happen once, here.
-      self.globalSubtileGrid = list(gr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
-      self.globalSubtileGrid[0] = math.ceil(self.globalSubtileGrid[0])
-      # Waves per GR strip along the free dim.  Normally 1: the GR strip is one
-      # wave's M extent, so each wave owns whole strips.  With a tall stack the
-      # GR strip spans several waves' extents, so localMMATileGrid[0] (per wave)
-      # is smaller than subtileShape[0] and the plain ratio would floor to 0.
-      # Those waves cooperate on one strip instead, splitting its K rows.
       grStackM      = int(self.subtileShape[0])
       perWaveMTiles = int(self.localMMATileGrid[0])
-      self.grWavesPerStrip = max(1, grStackM // perWaveMTiles) if perWaveMTiles else 1
+      self.globalSubtileGrid = _wholeStripsAlongFreeDim(gr_cfg, self.macroTile, self.depthU)
+      self.grWavesPerStrip   = _wavesSharingOneStrip(grStackM, perWaveMTiles)
       self.localSubtileGrid  = [max(1, int(perWaveMTiles / grStackM)),
                                  int(self.localMMATileGrid[1] / self.subtileShape[1])]
       self.subtileSize       = gr_cfg.subtileSizeBytes()
 
-      # Cooperative GR load counts (scheduler: vmcnt, loop trip count).
-      # loadRatioGR uses the global GR tile size (subtileShape * subtileCount),
-      # which is the full hardware granularity for one cooperative load round.
-      # Waves that COOPERATE ON THE FETCH -- distinct from grWavesPerStrip, which
-      # counts waves sharing a strip on read-back and picks the swizzle.  See
-      # planGRCoopSpread for how the group is chosen; TLU=0 fetches with every
-      # wave and does not slice.
+      # The fetch group, which is not grWavesPerStrip: that counts waves sharing
+      # a strip on read-back.  TLU=0 fetches with every wave and does not slice.
       isTLU1 = isinstance(getattr(gr_cfg, "tag", None), GRTag_TLU1)
       otherWaves = max(1, self.numWaves // self.waveGroupSize)
       numWin = int(self.localSubtileGrid[1])
