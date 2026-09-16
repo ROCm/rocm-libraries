@@ -548,19 +548,40 @@ inline bool is_trait_unsupported(Pipeline pipeline, [[maybe_unused]] Epilogue ep
     print(f"Generated: {output_path}")
 
 
+def _find_clang_format_config() -> Path:
+    """Locate the repository's .clang-format by walking up from this script."""
+    for parent in [SCRIPT_DIR, *SCRIPT_DIR.parents]:
+        candidate = parent / ".clang-format"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _clang_format_in_place(path: Path):
     """Format generated C++ so it satisfies the repository's clang-format hook.
 
-    Best effort: if clang-format is unavailable the file is still valid C++,
-    it just needs formatting before it can be committed.
+    The style file is resolved from this script's location, not from the output
+    path. Plain '-style=file' searches upward from the file being formatted, so
+    writing the header outside the repository (via --cpp-output-dir) would
+    silently fall back to the built-in style and emit a differently formatted,
+    non-conforming file. Pinning the config keeps the output byte-identical
+    wherever it is written.
+
+    Best effort: if clang-format is unavailable the file is still valid C++, it
+    just needs formatting before it can be committed.
     """
+    config = _find_clang_format_config()
+    style = f"file:{config}" if config else "file"
+
     for tool in ("clang-format-18", "clang-format"):
         exe = shutil.which(tool)
         if exe is None:
             continue
         try:
             subprocess.run(
-                [exe, "-i", "-style=file", str(path)], check=True, capture_output=True
+                [exe, "-i", f"-style={style}", str(path)],
+                check=True,
+                capture_output=True,
             )
             return
         except subprocess.CalledProcessError as exc:
