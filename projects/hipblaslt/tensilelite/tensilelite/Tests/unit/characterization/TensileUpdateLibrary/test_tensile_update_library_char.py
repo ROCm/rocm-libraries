@@ -86,7 +86,7 @@ class TestTensileUpdateLibraryMain:
 
     def test_tensile_update_library_with_argv_and_minimal_yaml(self, temp_logic_dir, tmp_path):
         """TensileUpdateLibrary() processes minimal LibraryLogic YAML."""
-        from Tensile import TensileUpdateLibrary
+        from tensilelite import TensileUpdateLibrary
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -119,7 +119,7 @@ class TestTensileUpdateLibraryMain:
 
     def test_tensile_update_library_main_entry_point_with_argv(self, temp_logic_dir, tmp_path):
         """TensileUpdateLibrary.main() entry point processes sys.argv."""
-        from Tensile import TensileUpdateLibrary
+        from tensilelite import TensileUpdateLibrary
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
@@ -154,7 +154,7 @@ class TestTensileUpdateLibraryMain:
 
     def test_update_logic_function_processes_yaml_structure(self, temp_logic_dir, tmp_path):
         """UpdateLogic function processes YAML and converts data types."""
-        from Tensile import TensileUpdateLibrary
+        from tensilelite import TensileUpdateLibrary
 
         logic_file = list(temp_logic_dir.glob("*.yaml"))[0]
         output_dir = tmp_path / "output"

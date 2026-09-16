@@ -50,7 +50,7 @@ _CONFIG = os.path.join(
 # WaveGroup=[1,1] (prod == 1) is the single-wave negative control.
 _SINGLE_WAVE_MI = [16, 16, 128, 1, 1, 1, 1, 1, 1]
 
-_SolMod = importlib.import_module("Tensile.SolutionStructs.Solution")
+_SolMod = importlib.import_module("tensilelite.SolutionStructs.Solution")
 
 
 def _valid_solutions_from_dict(config):
@@ -61,9 +61,9 @@ def _valid_solutions_from_dict(config):
     ``_build_and_validate_solution`` directly (no ParallelMap), so a monkeypatched
     ``reject`` in this process observes the rejection reasons.
     """
-    from Tensile.BenchmarkProblems import _build_and_validate_solution
-    from Tensile.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
-    from Tensile.Common.Types import makeDebugConfig
+    from tensilelite.BenchmarkProblems import _build_and_validate_solution
+    from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
+    from tensilelite.Common.Types import makeDebugConfig
 
     assembler, iim = _ch._toolchain_for(_ARCH)
     isa = next(iter(iim.keys()))

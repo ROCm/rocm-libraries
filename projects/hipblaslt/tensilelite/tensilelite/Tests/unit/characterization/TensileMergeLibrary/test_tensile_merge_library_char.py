@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.TensileMergeLibrary — pure helper layer.
+# Characterization tests for tensilelite.TensileMergeLibrary — pure helper layer.
 #
 # ADD-ONLY. The mergeLogic / avoidRegressions / main CLI driver (and the
 # ProblemType-deriving compareProblemType / reNameSolutions) are resistance; this
@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.TensileMergeLibrary")
+M = importlib.import_module("tensilelite.TensileMergeLibrary")
 
 
 @pytest.fixture(autouse=True)

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Common.RegisterPool``: the
+"""Characterization tests for ``tensilelite.Common.RegisterPool``: the
 ``allocTmpGpr`` / ``allocTmpGprList`` context-manager allocators over a real
 rocisa ``RegisterPool``."""
 
@@ -12,7 +12,7 @@ import pytest
 from rocisa.register import RegisterPool as RocisaPool
 from rocisa.enum import RegisterType
 
-from Tensile.Common.RegisterPool import allocTmpGpr, allocTmpGprList
+from tensilelite.Common.RegisterPool import allocTmpGpr, allocTmpGprList
 
 pytestmark = pytest.mark.unit
 
