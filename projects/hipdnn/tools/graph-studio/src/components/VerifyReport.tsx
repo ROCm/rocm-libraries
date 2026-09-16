@@ -95,6 +95,12 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
             Inspect tensors…
           </button>
         )}
+        {!shown.sample && !platform.canReadRelated(base) && (
+          <button type="button" onClick={() => void requestDirectory()}>
+            Use run folder…
+          </button>
+        )}
+        {granted && <span className="verify__note">reading artifacts from {granted.name}</span>}
         {shown.sample && <span className="verify__note">showing bundled sample data</span>}
         {error && (
           <span className="verify__note" data-tone="error">

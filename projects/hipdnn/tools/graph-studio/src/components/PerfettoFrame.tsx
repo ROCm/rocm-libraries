@@ -212,7 +212,11 @@ export function PerfettoFrame(props: {
           Use run folder…
         </button>
       )}
-      <p>Choose the .pftrace file to load this profiling result.</p>
+      <p>
+        {session?.source === "auto"
+          ? "Loaded from the run folder. Pick a file only to override it."
+          : "Choose the .pftrace file to load this profiling result."}
+      </p>
       <div
         className="perfetto-frame__drop"
         onDragOver={(event) => {
@@ -226,7 +230,7 @@ export function PerfettoFrame(props: {
         }}
       >
         <button type="button" onClick={() => inputRef.current?.click()}>
-          Select .pftrace file
+          {session?.source === "auto" ? "Use a different file" : "Select .pftrace file"}
         </button>
         {" or drop it here"}
         <input

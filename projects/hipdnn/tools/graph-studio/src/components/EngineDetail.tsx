@@ -275,16 +275,13 @@ function ProfilingSection({
         </p>
       )}
       {trace && available && (
-        <>
-          <p className="report__note">Report-declared trace path (inert; not fetched): {trace.path}</p>
-          <PerfettoFrame
-            key={frameKey}
-            tracePath={trace.path ?? ""}
-            engineLabel={engineLabel}
-            base={base}
-            onGrantDirectory={onGrantDirectory}
-          />
-        </>
+        <PerfettoFrame
+          key={frameKey}
+          tracePath={trace.path ?? ""}
+          engineLabel={engineLabel}
+          base={base}
+          onGrantDirectory={onGrantDirectory}
+        />
       )}
       {trace && trace.warnings.length > 0 && (
         <ul className="report__warnings">
