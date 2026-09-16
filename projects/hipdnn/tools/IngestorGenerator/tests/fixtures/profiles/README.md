@@ -2,8 +2,8 @@
 
 Two synthetic `.profile.yaml` files, shaped like the per-arch profiles an integration
 author writes by hand, committed so the profile-driven tests in
-`tests/test_launch_surface.py` and `tests/test_variant_reachability.py` run on a bare
-checkout with nothing set in the environment.
+`tests/test_launch_surface.py` run on a bare checkout with nothing set in the
+environment.
 
 They are **controlled inputs to the tools**, not descriptions of any shipped engine's
 real launch surface. A test asserting `set(unguarded) == {"spec_resolution"}` against
@@ -11,10 +11,12 @@ real launch surface. A test asserting `set(unguarded) == {"spec_resolution"}` ag
 it; it says nothing about which surfaces the real gfx950 attention-dense pack leaves
 unguarded. Read every literal expectation in those modules that way.
 
-This directory is shared rather than named after one tool because `gfx950.profile.yaml`
-serves both of them: `launch_surface.py` reads its `launch_surface:` block and
-`variant_reachability.py` reads its `score:` block, and one file keeping both honest is
-what a real authoring profile does too.
+This directory is named for the artifact rather than for the tool that reads it. An
+authoring profile is one file per architecture that several tools take blocks out of —
+`launch_surface.py` reads `launch_surface:`, other audits read blocks of their own — so
+a fixture filed under one tool's name would have to move the first time a second tool
+grew a case against it. Only the launch-surface audits read these today, and each
+carries the blocks that audit needs and nothing further.
 
 ## Overriding
 
@@ -54,9 +56,6 @@ accessor, and `kernargs` cites that same mirror while declaring nothing. Deletin
 `applicability` is therefore caught by the metadata-field scan and deleting `kernargs`
 is not — the two branches of the documented residual gap `TestUndeclaredSurfaceLimit`
 exercises.
-
-Also carries a `score:` block naming `block_n` with `max` preferred, which
-`variant_reachability.py` needs to rank variants at all.
 
 ## Why the mirrors are real files
 

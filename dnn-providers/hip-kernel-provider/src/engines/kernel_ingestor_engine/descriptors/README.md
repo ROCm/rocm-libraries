@@ -72,8 +72,11 @@ Production pack wiring is gated on this root holding at least one non-hidden `*.
 A KDP is what architecture pruning consumes, so standalone UKDs, kernel sources and this
 README do not by themselves make a pack. With none, production packaging stays dormant and
 any stale product tree from an earlier configure is removed — that is not an error. A KDP
-that *is* present but is pruned on every architecture remains a hard failure: the gate
-distinguishes "nothing to ship" from "something to ship that did not".
+that *is* present but is pruned on every architecture remains a hard failure for a root
+the build NAMED, since naming it asserts it ships here: the gate distinguishes "nothing to
+ship" from "something to ship that did not". This root reached as the built-in default
+goes dormant instead, because a build that never mentioned descriptors asked for nothing
+and so cannot have failed to get it.
 
 This file also keeps the directory present in a fresh checkout. Git tracks no empty
 directory, and the cache variable's set-but-not-a-directory check is a fatal, so deleting

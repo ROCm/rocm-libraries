@@ -327,6 +327,26 @@ function(hkp_wire_pack_target)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_record_dormant_pack(<name>)
+#   Record <name> as a pack this configuration knows about and deliberately left
+#   unwired.
+#
+#   The same global registry hkp_wire_pack_target() fills, because a consumer asking
+#   about one name has THREE answers to tell apart, not two: wired, dormant, unknown.
+#   Absence from HKP_PACK_LABELS alone collapses the last two, and a misspelled name
+#   produces exactly the evidence a legitimate dormancy does -- so a consumer that
+#   treats absence as a mistake reports an architecture this build does not pack for
+#   as a wiring error, and the reader goes looking for a typo that is not there.
+#
+#   A dormant name carries no OUT_ROOT, no arch list and no stamp: nothing was packed,
+#   so there is no output tree to address and no arch it was addressed for. The name
+#   is the whole record, which is all the distinction above needs.
+# ---------------------------------------------------------------------------
+function(_hkp_record_dormant_pack name)
+    set_property(GLOBAL APPEND PROPERTY HKP_PACK_DORMANT_LABELS "${name}")
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_key_manifest_args(<out_arg> <out_dep> <target>)
 #   Resolve the key manifest <target> published, as a command argument and a
 #   dependency.
@@ -1098,8 +1118,9 @@ loaded is the one named here.")
     # A KDP is what arch pruning consumes, so a root holding none has nothing to ship
     # and packing it fails rather than shipping an empty tree. Standalone UKD/UMD/UED/
     # UDD/KMD/UHD files, kernel sources and READMEs do not make a pack. A KDP that is
-    # present but pruned on every arch stays a hard failure: this distinguishes
-    # "nothing to ship" from "something to ship that did not".
+    # present but pruned on every arch stays a hard failure for a NAMED root, which
+    # distinguishes "nothing to ship" from "something to ship that did not"; the
+    # default root goes dormant there instead, per the arch check below.
     _hkp_root_has_kdp(_product_has_content "${_source_root}")
     if(NOT _source_root)
         set(_product_dormant_reason "empty-root")
@@ -1139,6 +1160,13 @@ loaded is the one named here.")
             ${_rocke_args}
             PACK_JOBS 2)
     else()
+        # Every dormant reason passes through here, ahead of the split below, so the
+        # registry records the name once and no reason can be added later that reaches
+        # a `message(STATUS)` without also reaching this call. A reason that skipped it
+        # would leave 'product' looking misspelled to hkp_register_census_tests(), which
+        # is the one reading that has to stay fatal.
+        _hkp_record_dormant_pack(product)
+
         # A tree left over from an earlier configuration that did pack keeps
         # being loaded: the engine selects the plugin-relative directory on
         # existence alone, and nothing else removes it once the pack target and
@@ -1431,9 +1459,14 @@ endfunction()
 # is declarable only where it reads exactly one pack's shard. Call this once per packed
 # target, beside hkp_verify_embedded_sources(); a missing PACK_NAME, TARGET or recorded
 # arch list is fatal rather than a silent drop, because a census that registers nothing
-# is indistinguishable from one that passed. Entries carry positive controls, registered
-# by _hkp_add_census_entry() above, because a gate nobody can watch fail is
-# indistinguishable from no gate.
+# is indistinguishable from one that passed.
+#
+# A PACK_NAME the registry knows only as DORMANT registers nothing and says so at
+# STATUS; an unknown name stays fatal. _hkp_record_dormant_pack() above owns why the
+# two are told apart rather than guessed at.
+#
+# Entries carry positive controls, registered by _hkp_add_census_entry() above, because
+# a gate nobody can watch fail is indistinguishable from no gate.
 #
 # EXPECTED_CASES pins one suite's case-name set. The execution guard proves everything
 # REGISTERED ran and passed; only the pin proves everything EXPECTED was registered, so
@@ -1483,11 +1516,26 @@ function(hkp_register_census_tests)
     endif()
 
     get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    get_property(_dormant_labels GLOBAL PROPERTY HKP_PACK_DORMANT_LABELS)
     if(NOT ARG_PACK_NAME IN_LIST _labels)
+        # Registering nothing and saying so keeps a generated integration's census call
+        # valid across every configuration, instead of legal only where the arch lists
+        # happen to intersect. The reason is not restated: hkp_add_packaging() emits one
+        # line per dormant reason earlier in the same configure, and a second authority
+        # on which reason applies is one that can disagree with the first.
+        if(ARG_PACK_NAME IN_LIST _dormant_labels)
+            message(STATUS
+                "hkp: pack target '${ARG_PACK_NAME}' is dormant in this configuration, "
+                "so it stages no shard and the census suites declared against it "
+                "(${ARG_SUITES}) are not registered. The dormancy message earlier in "
+                "this configure names the reason.")
+            return()
+        endif()
         message(FATAL_ERROR
             "hkp: census suites are declared (${ARG_SUITES}) at pack target "
             "'${ARG_PACK_NAME}', which no hkp_wire_pack_target() call wired, so "
-            "there is no shard to census. Wired roots: ${_labels}.")
+            "there is no shard to census. Wired roots: ${_labels}. Roots left "
+            "dormant by this configuration: ${_dormant_labels}.")
     endif()
 
     get_property(_out_root GLOBAL PROPERTY HKP_PACK_OUT_ROOT_${ARG_PACK_NAME})

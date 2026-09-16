@@ -23,10 +23,16 @@ sets (`shared` packs twice, once into each test binary's discovery root).
 
 Production wiring is gated on the root holding at least one non-hidden `*.kdp.json`,
 since a KDP is what arch pruning consumes. With none, packaging is **dormant**, any
-stale product tree is removed, and neither is an error; a KDP that is present but
-pruned on every arch stays a hard failure, which is what separates "nothing to ship"
-from "something to ship that did not". A root that is set but is not a directory is
-fatal at configure.
+stale product tree is removed, and neither is an error.
+
+A KDP that is present but prunes on every arch depends on who chose the root. A root
+this build NAMED is an assertion that it ships here, so packing it and getting nothing
+stays a hard failure — that is what separates "nothing to ship" from "something to ship
+that did not". The built-in default root is inherited by every build that never
+mentioned descriptors, including builds targeting an architecture the shipped bundle
+does not declare; those asked for nothing and so cannot have failed to get it, and the
+root goes dormant instead. A root that is set but is not a directory is fatal at
+configure.
 
 Two rules govern the walk itself:
 
@@ -221,9 +227,17 @@ satisfy the census. Repeated partial runs cannot accumulate coverage.
 
 The call is made where the target is defined and after it exists; there is no
 deferral machinery. Each missing prerequisite is fatal rather than a silent drop,
-because a census that registers nothing is indistinguishable from one that passed: an
-unwired `PACK_NAME` (the message names the wired roots), an absent or nonexistent
-`TARGET`, an empty recorded arch list. Tests OFF and an empty `SUITES` register
+because a census that registers nothing is indistinguishable from one that passed: a
+`PACK_NAME` no pack target carries at all (the message names both the wired roots and
+the ones this configuration left dormant), an absent or nonexistent `TARGET`, an empty
+recorded arch list.
+
+A `PACK_NAME` the registry records as DORMANT is the one absence that is not a mistake:
+that pack was considered and deliberately left unwired, for one of the reasons the
+production-root section above gives, so it stages no shard for anyone to read. Such a
+call registers nothing and says so at STATUS, naming the dormant pack, which keeps a
+generated integration's census declaration valid on every configuration rather than only
+where the arch lists happen to intersect. Tests OFF and an empty `SUITES` register
 nothing, which is absence of evidence. Normal non-census invocations retain their
 filtering and skip behavior. Neither structural nor host loading proves numerical
 device behavior. The
@@ -311,6 +325,15 @@ The matcher field list is resolved in a fixed order of precedence: an explicit
 no contract. Desk-checking a bundle against the fields it actually declares is the
 point — falling back to the generic list for a bundle that states its own would check
 a different set of columns and still print a result.
+
+The metadata/spec **drift** list (`--drift-field`, invariant 1) resolves separately
+and never inherits any of that. Absent an explicit `--drift-field`, it is every field
+carrying both a spec value and a metadata value — the widest comparison the data
+admits. The declared contract is an input to invariant 1, not a bound on it: a bundle
+whose contract names two fields would otherwise confine its own audit to those two,
+and genuine drift on a third would exit 0. A field whose two sides speak deliberately
+different vocabularies no alias table can bridge is what `--drift-field` narrows,
+explicitly and in the log.
 
 `tools/hkp_desk_check.py --mode {full,structural} [--kpack-python-dir D]
 [--field F] [--drift-field F] <path/to/*.kdp.json>` selects the intended proof

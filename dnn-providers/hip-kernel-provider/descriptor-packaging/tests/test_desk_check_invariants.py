@@ -580,13 +580,21 @@ class TestDriftAndTupleFieldsAreIndependent:
         assert report.duplicate_tuples == {("BFLOAT16", 64): 2}
         assert not report.ok
 
-    def test_drift_fields_defaults_to_fields(self):
+    def test_the_drift_default_is_wider_than_the_matcher_field_list(self):
+        """The independence runs in BOTH directions. A caller narrowing the
+        matcher tuple is answering a question about reachability, not granting
+        invariant 1 permission to stop comparing a field -- so the drift default
+        is every field with a spec value and a metadata value, in
+        first-appearance order, and owes nothing to `fields`.
+
+        Breaking mutation: `drift_comparable_fields`'s `return tuple(fields)`
+        -> `return tuple(fields[:1])`, which drops `head_size` and reports the
+        injected drift as clean."""
         kernels = self._two_variants_differing_only_in_dtype()
         kernels[0]["metadata"]["head_size"] = 999  # real drift
-        report = DeskCheckReport(
-            kernels, fields=("dtype", "head_size"), mode="structural"
-        )
-        assert report.drift_fields == report.fields
+        report = DeskCheckReport(kernels, fields=("dtype",), mode="structural")
+        assert report.fields == ("dtype",)
+        assert report.drift_fields == ("dtype", "head_size")
         assert report.drift == [("bf16", "head_size")]
 
 
@@ -701,10 +709,11 @@ class TestCliOnRealShippedBundles:
 class TestMatcherFieldsComeFromTheBundlesOwnContract:
     """The matcher-tuple identity is the bundle's OWN declaration of what the
     producing compiler specialized on. A generic list standing in for that
-    declaration collapses genuinely distinct kernels onto one tuple: the
-    shipped 2733-kernel bundle declares fourteen fields, five of which the
-    generic list never carried, and it reported 661 false duplicate-matcher
-    collisions and exited 1 the first time the CLI was pointed at it."""
+    declaration collapses genuinely distinct kernels onto one tuple: a
+    2733-kernel rocKE attention bundle declares fourteen fields, five of which
+    the generic list never carried, and it reported 661 false duplicate-matcher
+    collisions and exited 1 the first time the CLI was pointed at it. The scale
+    is what makes the count meaningful, so the two are quoted together."""
 
     def _two_kernels_differing_only_in_a_declared_field(self):
         return [
@@ -762,6 +771,145 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
         than the bundle is, and must not be overruled by it."""
         kdp = self._bundle(tmp_path, ("head_size", "waves_per_eu"))
         proc = _run_cli(str(kdp), "--field", "head_size")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "duplicate matcher tuples: {(64,): 2}" in proc.stdout
+
+
+@pytest.mark.quick
+class TestDriftFieldsAreNotBoundedByTheDeclaredContract:
+    """The declared contract sets the matcher-tuple identity (invariant 2) and
+    must NOT set the drift comparison (invariant 1). The two relationships are
+    opposite in kind: for the tuple the bundle's declaration is the authority on
+    what distinguishes its own variants, while for drift the bundle is the thing
+    under audit. Feeding the declaration into both lets an artifact set the width
+    of the check that polices it -- declare one field, and a metadata value that
+    disagrees with the spec the compiler actually consumed on any other field is
+    never compared and the CLI exits 0.
+
+    Each case here uses a bundle declaring ONE field and drifting on a second,
+    which is the shape that separates the two lists; a bundle whose declaration
+    happens to cover everything cannot tell them apart.
+    """
+
+    #: Deliberately narrow: `block_m` is real, specialized and undeclared.
+    _NARROW_CONTRACT = ("head_size",)
+
+    def _bundle(self, tmp_path, *, metadata_block_m, name="narrow"):
+        """One kernel declaring only `head_size`, whose `block_m` metadata the
+        caller sets to agree with or contradict the spec's 256."""
+        doc = {
+            "kernelDescriptors": [
+                {
+                    "id": "ukd-narrow",
+                    "name": "narrow",
+                    "kernel_source": {"spec": {"head_size": 64, "block_m": 256}},
+                    "metadata": {"head_size": 64, "block_m": metadata_block_m},
+                }
+            ],
+            "provenance": {
+                "specialization_contract": {
+                    "schema_version": 1,
+                    "consumers": [{"metadata_fields": list(self._NARROW_CONTRACT)}],
+                }
+            },
+        }
+        root = tmp_path / name
+        root.mkdir()
+        kdp = root / f"{name}.kdp.json"
+        kdp.write_text(json.dumps(doc))
+        return kdp
+
+    def test_drift_outside_the_declared_contract_is_reported(self, tmp_path):
+        """The decisive case. `block_m` 256 was compiled in; the metadata the
+        matcher reads says 128. The bundle declares only `head_size`, so a drift
+        list drawn from the declaration compares one column, finds it clean, and
+        exits 0 on a kernel that is not the kernel the matcher thinks it picked.
+
+        Breaking mutation: `DeskCheckReport.__init__`'s
+        `drift_comparable_fields(kernels)` -> `self.fields`."""
+        kdp = self._bundle(tmp_path, metadata_block_m=128)
+        # The premise: the declaration really is narrow, so the coupled default
+        # would have had nothing to say about block_m.
+        assert load_variant_set(kdp)[1] == self._NARROW_CONTRACT
+        proc = _run_cli(str(kdp))
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "block_m" in proc.stdout
+
+    def test_the_same_bundle_without_drift_stays_clean(self, tmp_path):
+        """The control the case above is worthless without: the identical narrow
+        bundle whose `block_m` agrees reports none and exits 0, so the failure
+        above is a detected disagreement rather than a check that fails
+        everything it is now allowed to look at.
+
+        Breaking mutation: `_values_agree`'s final
+        `return str(spec_v).lower() == str(meta_v).lower()` -> `return False`."""
+        kdp = self._bundle(tmp_path, metadata_block_m=256)
+        proc = _run_cli(str(kdp))
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "metadata/authored-spec drift: none" in proc.stdout
+
+    def test_the_generic_fallback_would_also_miss_this_field(self, tmp_path):
+        """`DEFAULT_MATCHER_FIELDS` is independent of the artifact, which is the
+        property the declared list lacks -- but it is a fixed attention-shaped
+        guess, and `block_m` is not in it. The shipped gfx942_attention_dense
+        bundle carries five such fields (block_m, waves_per_eu, persistent,
+        num_persistent, use_exp2_fast), every one of them specialized and every
+        one of them outside that list. Independence alone is not width.
+
+        Breaking mutation: `DeskCheckReport.__init__`'s
+        `drift_comparable_fields(kernels)` -> `DEFAULT_MATCHER_FIELDS`."""
+        kdp = self._bundle(tmp_path, metadata_block_m=128)
+        kernels, declared = load_variant_set(kdp)
+        assert "block_m" not in DEFAULT_MATCHER_FIELDS
+        assert metadata_spec_drift(kernels, DEFAULT_MATCHER_FIELDS) == []
+        assert metadata_spec_drift(kernels, declared) == []
+        report = DeskCheckReport(kernels, fields=declared, mode="structural")
+        assert report.drift == [("narrow", "block_m")]
+
+    def test_drift_field_still_narrows_deliberately(self, tmp_path):
+        """A wide default is not a locked one. `--drift-field` remains the
+        explicit escape for a field whose two sides speak vocabularies no alias
+        table can bridge, and naming `head_size` confines the comparison to it
+        even though `block_m` is drifting -- the narrowing is a decision in the
+        command line and in the log, not a property the artifact asserted.
+
+        Breaking mutation: `hkp_desk_check.main`'s `drift_fields =
+        tuple(args.drift_fields) if args.drift_fields else None` ->
+        `drift_fields = None`."""
+        kdp = self._bundle(tmp_path, metadata_block_m=128)
+        proc = _run_cli(str(kdp), "--drift-field", "head_size")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "metadata/authored-spec drift: none" in proc.stdout
+
+    def test_widening_the_drift_list_does_not_widen_the_matcher_tuple(self, tmp_path):
+        """Invariant 2 is untouched. Two kernels agreeing with their own specs
+        but differing in the undeclared `block_m` are genuinely indistinguishable
+        to a matcher keyed on the declared `head_size` alone, so the collision
+        must still be reported. Had the wider drift list leaked into the tuple
+        identity, `block_m` would separate them and the real unreachable-variant
+        finding would vanish.
+
+        Breaking mutation: `DeskCheckReport.__init__`'s
+        `duplicate_matcher_tuples(kernels, self.fields)` ->
+        `duplicate_matcher_tuples(kernels, self.drift_fields)`."""
+        kdp = self._bundle(tmp_path, metadata_block_m=256)
+        doc = _read(kdp)
+        twin = json.loads(json.dumps(doc["kernelDescriptors"][0]))
+        twin["id"] = "ukd-narrow-twin"
+        twin["name"] = "narrow twin"
+        twin["kernel_source"]["spec"]["block_m"] = 128
+        twin["metadata"]["block_m"] = 128  # agrees with its own spec: no drift
+        doc["kernelDescriptors"].append(twin)
+        kdp.write_text(json.dumps(doc))
+
+        kernels, declared = load_variant_set(kdp)
+        report = DeskCheckReport(kernels, fields=declared, mode="structural")
+        assert report.fields == self._NARROW_CONTRACT
+        assert "block_m" in report.drift_fields
+        assert report.drift == []
+        assert report.duplicate_tuples == {(64,): 2}
+
+        proc = _run_cli(str(kdp))
         assert proc.returncode == 1, proc.stdout + proc.stderr
         assert "duplicate matcher tuples: {(64,): 2}" in proc.stdout
 

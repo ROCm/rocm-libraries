@@ -266,9 +266,11 @@ by themselves make a pack, because a KDP is what arch pruning consumes.
 With no KDP under the root, production packaging is **dormant**, any stale product
 tree from an earlier configure is removed, and neither is an error — a consumer sees
 that path only by overriding the cache variable at an empty directory. A KDP that
-*is* present but is pruned on every arch remains a **hard failure**: the gate
-separates "nothing to ship" from "something to ship that did not". A root that is set
-but is not a directory is fatal at configure.
+*is* present but is pruned on every arch remains a **hard failure** for a root this
+build NAMED, since naming a root asserts it ships here: the gate separates "nothing to
+ship" from "something to ship that did not". The built-in default root goes **dormant**
+in that case instead, so configuring for an arch your bundle does not declare is not a
+build error. A root that is set but is not a directory is fatal at configure.
 
 The [packaging dependencies](../../../../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md)
 are still required, and rocKE is resolved once for **every** root, test roots

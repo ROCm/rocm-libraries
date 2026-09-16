@@ -118,7 +118,8 @@ def _parse_args(argv):
         "MATCHER-TUPLE identity (invariant 2). Defaults to the fields the "
         "bundle's own specialization_contract declares it specialized on, and "
         "only falls back to a generic attention-shaped list for a bundle that "
-        "declares no contract. Narrowing this does NOT narrow --drift-field.",
+        "declares no contract. Neither this flag nor that declaration narrows "
+        "--drift-field.",
     )
     p.add_argument(
         "--drift-field",
@@ -126,10 +127,14 @@ def _parse_args(argv):
         dest="drift_fields",
         default=[],
         help="A field to compare between metadata and the authored spec "
-        "(invariant 1); repeatable. Defaults to whatever --field resolves "
-        "to. Separate from --field on purpose: dropping a field here to "
-        "silence a drift report must never remove it from the matcher-tuple "
-        "identity, which would manufacture false duplicate collisions.",
+        "(invariant 1); repeatable. Defaults to EVERY field carrying both a "
+        "spec and a metadata value, never to --field or to the bundle's "
+        "declared contract: this check audits the bundle, so letting the "
+        "bundle's own declaration set its width would let a narrow "
+        "declaration hide real drift on an undeclared field. Separate from "
+        "--field on purpose: dropping a field here to silence a drift report "
+        "must never remove it from the matcher-tuple identity, which would "
+        "manufacture false duplicate collisions.",
     )
     return p.parse_args(argv)
 

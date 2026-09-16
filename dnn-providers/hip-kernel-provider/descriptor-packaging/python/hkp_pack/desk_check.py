@@ -315,9 +315,47 @@ def _authored_spec(kernel: dict) -> dict:
     )
 
 
-def metadata_spec_drift(
-    kernels: list[dict], fields=DEFAULT_MATCHER_FIELDS
-) -> list[tuple[str, str]]:
+def drift_comparable_fields(kernels: list[dict]) -> tuple[str, ...]:
+    """Every field invariant 1 is able to compare: one carrying BOTH a spec
+    value and a metadata value on at least one kernel, unioned across the set in
+    first-appearance order so one bundle always renders one field list.
+
+    Derived from the descriptors in hand rather than from the bundle's declared
+    specialization contract, because that declaration is one of the things
+    invariant 1 polices. A narrow declaration would otherwise confine the drift
+    comparison to the fields the artifact chose to mention, and a genuine
+    spec-vs-metadata disagreement on any other field -- a `block_m` in the
+    metadata that is not the `block_m` the compiler baked in -- would never be
+    compared at all, leaving a clean exit as the only possible verdict. An
+    artifact does not get to set the width of the audit that polices it.
+
+    Widest is also nearly free: `metadata_spec_drift` already skips any field
+    missing from either side, so this set asks for no comparison that function
+    would have refused to make. The residual cost is a field whose two sides
+    speak deliberately different vocabularies that `_values_agree` cannot
+    normalise -- an engine-translated `layout`, say -- which reports as drift.
+    That is what `--drift-field` deliberately narrows, and a false report that
+    argues with a human beats a field silently never compared.
+
+    A kernel with no spec anywhere contributes nothing here rather than raising:
+    `metadata_spec_drift` owns that refusal, and raising from the field
+    derivation would move a COULD-NOT-CHECK verdict out of the check that
+    reports it.
+    """
+    fields: list[str] = []
+    for kernel in kernels:
+        try:
+            spec = _authored_spec(kernel)
+        except DeskCheckNoSpecFound:
+            continue
+        metadata = kernel.get("metadata") or {}
+        for field in spec:
+            if field in metadata and field not in fields:
+                fields.append(field)
+    return tuple(fields)
+
+
+def metadata_spec_drift(kernels: list[dict], fields=None) -> list[tuple[str, str]]:
     """Invariant 1: metadata must agree with the spec it claims to describe.
 
     The matcher reads ``metadata``; the compiler read ``spec``. A drift
@@ -334,8 +372,12 @@ def metadata_spec_drift(
     positives (spec ``"bf16"`` against metadata ``"HALF"`` still fails).
     This function's `fields` is INDEPENDENT of the matcher-tuple identity
     used by `duplicate_matcher_tuples`: narrowing one must never silently
-    narrow the other.
+    narrow the other. `None` means `drift_comparable_fields` -- the widest
+    set this data admits, and specifically NOT the bundle's declared contract,
+    which is an input to this check rather than a bound on it.
     """
+    if fields is None:
+        fields = drift_comparable_fields(kernels)
     bad = []
     for k in kernels:
         spec = _authored_spec(k)
@@ -419,10 +461,18 @@ class DeskCheckReport:
     "all None -- collision".
 
     `fields` is the MATCHER-TUPLE identity (invariant 2); `drift_fields` is what
-    invariant 1 compares against the spec and defaults to it. One list feeding both
-    would be a trap: narrowing the comparison to silence a drift report would also
-    narrow the tuple identity and manufacture false collisions in the check whose
-    entire job is catching unreachable variants.
+    invariant 1 compares against the spec. One list feeding both would be a trap:
+    narrowing the comparison to silence a drift report would also narrow the tuple
+    identity and manufacture false collisions in the check whose entire job is
+    catching unreachable variants.
+
+    So the two defaults are drawn from different places on purpose. `fields`
+    falls back to the bundle's own declared contract, which is the only
+    statement of what distinguishes one variant from another. `drift_fields`
+    falls back to `drift_comparable_fields` -- every field carrying both a spec
+    and a metadata value -- because a bundle that declared its way to a narrow
+    contract would otherwise also narrow the check that audits that bundle,
+    and real drift on a field it does not declare would exit 0.
 
     `mode` decides what the verdict is allowed to MEAN (see `MODES`). ``full``
     additionally requires `compiled_agreement`'s result, of which only an empty
@@ -453,7 +503,11 @@ class DeskCheckReport:
         self.agreement_verified = agreement_verified
         self.kernel_count = len(kernels)
         self.fields = tuple(fields)
-        self.drift_fields = self.fields if drift_fields is None else tuple(drift_fields)
+        self.drift_fields = (
+            drift_comparable_fields(kernels)
+            if drift_fields is None
+            else tuple(drift_fields)
+        )
         self.spec_drift_error: str | None = None
         self.drift: list[tuple[str, str]] = []
         try:
