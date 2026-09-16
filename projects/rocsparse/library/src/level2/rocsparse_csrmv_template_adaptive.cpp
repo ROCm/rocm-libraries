@@ -722,8 +722,13 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         // to build wg_ids in analysis, which is derived the same way from m/nnz).
         const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
 
-        // Run different csrmv kernels
-        dim3 csrmvn_blocks((info->adaptive.size) - 1);
+        // Run different csrmv kernels. Clamp grid.x against the device limit; the
+        // row-block count is a size_t derived from J m and would otherwise narrow
+        // into unsigned int at ~2.1e9 row blocks.
+        const int64_t csrmvn_grid_x
+            = rocsparse::min(static_cast<int64_t>((info->adaptive.size) - 1),
+                             static_cast<int64_t>(handle->properties.maxGridSize[0]));
+        dim3 csrmvn_blocks(csrmvn_grid_x);
         dim3 csrmvn_threads(gen_wg);
 #define ROCSPARSE_LAUNCH_CSRMVN_ADAPTIVE(GEN_WG)                      \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
@@ -797,7 +802,11 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m, beta_device_host, y));
 
-        dim3 csrmvn_blocks(info->adaptive.size - 1);
+        // Clamp grid.x against the device limit (see general path above).
+        const int64_t csrmvn_grid_x
+            = rocsparse::min(static_cast<int64_t>(info->adaptive.size - 1),
+                             static_cast<int64_t>(handle->properties.maxGridSize[0]));
+        dim3 csrmvn_blocks(csrmvn_grid_x);
         dim3 csrmvn_threads(WG_SIZE);
 
         I max_rows = static_cast<I>(info->max_rows);
