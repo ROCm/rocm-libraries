@@ -3,6 +3,7 @@ import { parseReport } from "../benchmark/report";
 import { SAMPLE_LABEL, sampleReport } from "../benchmark/sample";
 import type { BenchmarkReport, EngineResult, GraphResults } from "../benchmark/types";
 import { platform } from "../platform";
+import type { DirectoryRef, FileHandleRef, ReadBase } from "../platform/types";
 import { BenchmarkReportView } from "./BenchmarkReportView";
 import { TensorView, type TensorHint } from "./TensorView";
 
@@ -15,9 +16,11 @@ interface Loaded {
   readonly report: BenchmarkReport;
   readonly label: string;
   readonly sample: boolean;
+  /** The file the report was opened from, if any — a real base for `readRelated`. */
+  readonly handle: FileHandleRef | null;
 }
 
-const SAMPLE: Loaded = { report: sampleReport, label: SAMPLE_LABEL, sample: true };
+const SAMPLE: Loaded = { report: sampleReport, label: SAMPLE_LABEL, sample: true, handle: null };
 
 interface VerifyReportProps {
   /** A Studio execution, shown in place of the opened report until dismissed. */
@@ -31,12 +34,21 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
   // Non-null means the tensor inspector is showing; the array carries the
   // manifest paths the report recorded for the chosen row.
   const [hints, setHints] = useState<readonly TensorHint[] | null>(null);
+  // A folder the user granted this session, used once the report's own
+  // handle cannot resolve relative paths (the web build's file handle names
+  // no parent directory). Persists across reports so it is asked once.
+  const [granted, setGranted] = useState<DirectoryRef | null>(null);
 
   const openReport = async () => {
     const opened = await platform.openTextFile(".json,application/json");
     if (!opened) return;
     try {
-      setLoaded({ report: parseReport(opened.contents), label: opened.handle.name, sample: false });
+      setLoaded({
+        report: parseReport(opened.contents),
+        label: opened.handle.name,
+        sample: false,
+        handle: opened.handle,
+      });
       setError(null);
       onDismissNative?.();
       setHints(null);
@@ -45,11 +57,28 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
     }
   };
 
-  const shown: Loaded = native
-    ? { report: native, label: "current execution", sample: false }
-    : loaded;
+  const requestDirectory = async () => {
+    const dir = await platform.openDirectory();
+    if (dir) setGranted(dir);
+  };
 
-  if (hints) return <TensorView hints={hints} onBack={() => setHints(null)} />;
+  const shown: Loaded = native
+    ? { report: native, label: "current execution", sample: false, handle: null }
+    : loaded;
+  // A granted folder outlives whichever report is on screen; it wins once it
+  // exists since it is the more general base (also good for tensor manifests).
+  const base: ReadBase | null = granted ?? shown.handle;
+
+  if (hints) {
+    return (
+      <TensorView
+        hints={hints}
+        onBack={() => setHints(null)}
+        base={base}
+        onGrantDirectory={requestDirectory}
+      />
+    );
+  }
 
   return (
     <div className="verify">
@@ -78,6 +107,8 @@ export function VerifyReport({ native, onDismissNative }: VerifyReportProps) {
         sourceLabel={shown.label}
         sample={shown.sample}
         onOpenTensors={(graph, row) => setHints(tensorHints(graph, row))}
+        base={base}
+        onGrantDirectory={requestDirectory}
       />
     </div>
   );

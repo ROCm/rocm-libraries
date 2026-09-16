@@ -144,11 +144,18 @@ comparison, and later canvas edits are not included. **Close execution** returns
 the opened report. Use **Export hipDNN JSON**, not ordinary Save, for the existing
 benchmarking handoff.
 
-For an available profiling trace, select the `.pftrace` file explicitly. A report
-path does not grant access to that file. Trace bytes go to a sandboxed
-`https://ui.perfetto.dev/` iframe, not an upload endpoint. Perfetto requires network
-access; report viewing does not. Confirm **Open trace?** inside the frame if asked.
-The parent reports byte handoff only; Perfetto owns parsing and trace diagnostics.
+Traces and captured tensors load themselves whenever the app can resolve the
+paths the report names. The desktop build always can: it knows where the report
+came from and reads beside it. The browser cannot read by path at all, so it asks
+once — **Use run folder…** — and resolves every artifact in that folder from then
+on. Manual pickers stay for everything else, and a report can never reach outside
+its own directory: a path that escapes it is refused, and a failed read says so
+instead of quietly showing an empty picker.
+
+Trace bytes go to a sandboxed `https://ui.perfetto.dev/` iframe, not an upload
+endpoint. Perfetto requires network access; report viewing does not. Confirm
+**Open trace?** inside the frame if asked. The parent reports byte handoff only;
+Perfetto owns parsing and trace diagnostics.
 
 ### Checking the trace viewer without a GPU
 
@@ -159,7 +166,8 @@ exist for this. The trace is a real Perfetto protobuf trace with three slices on
 1. `bun run dev`, then open the **Verify** tab.
 2. **Open report…** → `tests/fixtures/report-with-trace.json`.
 3. **Inspect** on the `MIOPEN_ENGINE` row, then expand **Profiling trace & artifacts**.
-4. Select `tests/fixtures/traces/sample.pftrace` in the picker, or drop it there.
+4. In the desktop build the trace is already loading. In the browser, click
+   **Use run folder…** and pick this directory; the trace then loads by itself.
 
 Perfetto then shows `conv_fwd`, `bias_add`, and `relu`. The second row in the same
 report records a skipped trace, so the suppressed state is visible beside it.

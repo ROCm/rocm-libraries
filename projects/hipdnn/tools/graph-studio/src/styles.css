@@ -842,6 +842,17 @@ body,
 .perfetto-frame__drop button {
   margin-right: 6px;
 }
+/* One-time folder grant offered when a report-declared path cannot autoload. */
+.grant-button {
+  align-self: flex-start;
+  background: var(--bg-elev);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
 .perfetto-frame__error {
   color: #fca5a5;
 }

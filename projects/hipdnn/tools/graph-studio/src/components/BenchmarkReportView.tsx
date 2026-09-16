@@ -8,6 +8,7 @@ import {
   validationState,
 } from "../benchmark/metrics";
 import type { BenchmarkReport, EngineResult, GraphResults } from "../benchmark/types";
+import type { ReadBase } from "../platform/types";
 import { EngineDetail } from "./EngineDetail";
 
 /**
@@ -32,6 +33,10 @@ interface BenchmarkReportViewProps {
   sample?: boolean;
   /** Opens the tensor inspector for one row. Omitted hides the row action. */
   onOpenTensors?: (graph: GraphResults, row: EngineResult) => void;
+  /** Where a row's report-declared relative paths (e.g. a trace) resolve from. */
+  base: ReadBase | null;
+  /** Prompts for a folder grant, used once resolution fails without one. */
+  onGrantDirectory: () => Promise<void>;
 }
 
 export function BenchmarkReportView({
@@ -39,6 +44,8 @@ export function BenchmarkReportView({
   sourceLabel,
   sample,
   onOpenTensors,
+  base,
+  onGrantDirectory,
 }: BenchmarkReportViewProps) {
   const { metadata, graphs } = report;
   const [graphName, setGraphName] = useState(graphs[0]?.graph_name ?? "");
@@ -64,7 +71,14 @@ export function BenchmarkReportView({
 
   if (detail) {
     return (
-      <EngineDetail report={report} graph={detail.graph} row={detail.row} onClose={() => setDetail(null)} />
+      <EngineDetail
+        report={report}
+        graph={detail.graph}
+        row={detail.row}
+        onClose={() => setDetail(null)}
+        base={base}
+        onGrantDirectory={onGrantDirectory}
+      />
     );
   }
 
