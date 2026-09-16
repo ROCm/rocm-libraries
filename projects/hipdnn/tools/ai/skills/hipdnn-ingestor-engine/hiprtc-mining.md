@@ -31,14 +31,19 @@ also dispatch on `kernel_source.kind`, i.e. call `buildIngestorKernelCode`. Grep
 handler's `prepare()` for that call before authoring anything: a handler that calls
 `_kernelCompiler.compile(kernel.source.sourceFile, …)` directly serves `embedded_source`
 only, and a `hiprtc_file` descriptor under it throws at `prepare()` no matter how correct
-the descriptor is. As of this writing Pointwise routes
-(`PointwiseNative.cpp:432-433`); ConvFwd does not (`ConvNative.cpp:501-502`). Routing a
-pack is a two-line handler change and a rebuild.
+the descriptor is. This is a per-pack property, not a property of the format: as of this
+writing Pointwise (`PointwiseNative.cpp:432-433`) and BatchnormInference
+(`BatchnormInferenceNative.cpp:632-633`) route; ConvFwd (`ConvNative.cpp:501-502`) does
+not. Routing a pack is a two-line handler change and a rebuild.
 
-**The two packs whose symbols are installed today are reference scaffolds.**
-`PointwiseAdd` computes one element under `if(blockIdx.x == 0 && threadIdx.x == 0)`
-(`kernels/PointwiseAdd.cpp:11-12`); `ConvFwd` is a naive direct convolution serving 6 of
-1218 `ConvolutionFwd` bundle cases. They exist to exercise this path. If neither is a
+**Three packs have installed symbols today, and this page still serves only the one you
+shipped.** It adds no native symbol, so it can never widen the set of packs, and of the
+three only the two named above can serve a `hiprtc_file` descriptor at all. Two of the
+three are reference scaffolds in any case — `PointwiseAdd` computes one element under
+`if(blockIdx.x == 0 && threadIdx.x == 0)` (`kernels/PointwiseAdd.cpp:11-12`) and
+`ConvFwd` is a naive direct convolution serving 6 of 1218 `ConvolutionFwd` bundle cases —
+so the only pack here that is a real extension target is `BatchnormInference`, and only
+for the person who shipped it (`IngestorPacks.cpp:16-26`). If none of the three is a
 pack *you* shipped, this page is not the one you want.
 
 ### Two drop-in shapes, and only one of them is observable
@@ -237,7 +242,7 @@ these, reproducibly, as a worked reference:
    UMD.** `build_operation_umd` in `IngestorGenerator/codegen/generator.py` returns `None`
    unless the engine is multi-pack, so a single-pack engine's KDP lists only its
    kernel-scoped matchers. Whether that is complete is a property of **your**
-   `graph_match`, not of this path, and the two shipped packs fall on opposite sides of it:
+   `graph_match`, not of this path, and these two shipped matchers fall on opposite sides:
 
    - `pointwiseGraphMatches` (`PointwiseNative.cpp:191`) checks shape and arity and says
      nothing about the operation — the operation lives in separate graph-scoped matchers
