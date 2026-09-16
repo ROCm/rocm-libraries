@@ -13,6 +13,47 @@
 namespace rocblaslt
 {
     /**
+ * @brief A kernel offered for one of the reserved exploration slots.
+ *
+ * Only what ordering them needs: the macro tile the tuning reports name kernels
+ * by, and the solution index that breaks ties between equally good tiles.
+ */
+    struct EqualitySlotCandidate
+    {
+        int    m_solutionIndex = 0;
+        size_t m_tileM         = 1;
+        size_t m_tileN         = 1;
+        size_t m_depthU        = 0;
+    };
+
+    /**
+ * @brief Order a pool of slot candidates, best first, and return positions
+ * into pool.
+ *
+ * The candidates a reserved slot draws on are ones the cost model cannot order
+ * -- that is why they need a slot -- so this ordering decides what measurement
+ * ever gets to see. Two rules set it.
+ *
+ * Candidates the ranking already offers are dropped, whether by solution index
+ * or by macro tile: a slot spent on a tile already in the ranked list buys
+ * nothing exploration would have missed.
+ *
+ * What is left is ordered by how close the tile's own M:N aspect ratio is to
+ * the problem's. The coverage gap that makes a reserved slot worth having is
+ * geometric -- the known case is an outer product (m=1, n=960000) whose best
+ * kernel is a wide-N MT8x512x32 with no counterpart in the ranked pool -- and
+ * aspect ratio is the cheapest signal that reaches that family.
+ *
+ * Ties fall back to pool order, so a caller that supplies the pool in a
+ * deterministic order gets a deterministic result.
+ */
+    std::vector<size_t>
+        orderEqualitySlotCandidates(const std::vector<EqualitySlotCandidate>& pool,
+                                    const std::vector<EqualitySlotCandidate>& ranked,
+                                    size_t                                    problemM,
+                                    size_t                                    problemN);
+
+    /**
  * @brief Explore-then-cache kernel selection on top of the Origami ranking.
  *
  * The first topK() * repeats() times a problem is seen, each of the top-K
@@ -20,6 +61,12 @@ namespace rocblaslt
  * candidate has been sampled the measured winner is pinned for every later
  * call with that problem. statistic() decides how a candidate's repeats are
  * reduced to the one score the winner is chosen on.
+ *
+ * equalitySlots() of those positions may be filled by the caller from a source
+ * the ranking cannot order at all. Such a candidate has to occupy a slot rather
+ * than sit below the exploration window, because nothing outside the window is
+ * ever measured; the trace records which candidates arrived that way so a win
+ * can be attributed.
  *
  * Timing is deferred-read. beginMeasurement() hands back an event pair for the
  * caller to wrap the launch with, and the elapsed time is only read on a later
@@ -81,18 +128,42 @@ namespace rocblaslt
         }
 
         /**
+     * @brief How many of the topK() exploration slots are reserved for
+     * candidates the Origami ranking did not supply.
+     *
+     * Set by HIPBLASLT_ORIGAMI_ONLINE_TUNE_EQUALITY_SLOTS, 0 by default, and
+     * clamped to topK() - 1 so a model-ranked candidate is always among the
+     * ones measured. The caller decides what fills the slots; this only says
+     * how many there are.
+     */
+        int equalitySlots() const
+        {
+            return m_equalitySlots;
+        }
+
+        /**
      * @brief Pick which of the ranked candidates should run next.
      *
      * Registers the problem's candidate list on first sight. Returns the
      * position within rankedSolutionIndices to promote to the front, or -1 to
      * leave the caller's ordering alone.
+     *
+     * [equalityBegin, equalityBegin + equalityCount) names the contiguous run
+     * of rankedSolutionIndices the caller sourced from the Equality pool rather
+     * than from the Origami ranking. It is only read when the problem is
+     * registered, which fixes each candidate's provenance for the life of the
+     * process, and it is reported on the register and winner trace lines.
      */
-        int selectCandidate(size_t problemKey, const std::vector<int>& rankedSolutionIndices)
+        int selectCandidate(size_t                  problemKey,
+                            const std::vector<int>& rankedSolutionIndices,
+                            int                     equalityBegin = 0,
+                            int                     equalityCount = 0)
         {
             if(!m_enabled)
                 return -1;
 
-            return selectCandidateImpl(problemKey, rankedSolutionIndices);
+            return selectCandidateImpl(
+                problemKey, rankedSolutionIndices, equalityBegin, equalityCount);
         }
 
         /**
@@ -153,23 +224,31 @@ namespace rocblaslt
         // budget: no further launch is measured, but m_pending is still drained
         // before a winner is picked, so samples already paid for are not thrown
         // away. m_declined counts launches refused because the cap was full.
+        //
+        // [m_equalityBegin, m_equalityEnd) are the m_candidates positions the
+        // caller filled from the Equality pool.
         struct ProblemState
         {
             std::vector<int>                m_candidates;
             std::vector<std::vector<float>> m_samples;
             std::vector<int>                m_issued;
             std::vector<PendingMeasurement> m_pending;
-            int                             m_calls    = 0;
-            int                             m_declined = 0;
-            int                             m_winner   = -1;
-            bool                            m_gaveUp   = false;
-            bool                            m_resolved = false;
+            int                             m_calls         = 0;
+            int                             m_declined      = 0;
+            int                             m_winner        = -1;
+            int                             m_equalityBegin = 0;
+            int                             m_equalityEnd   = 0;
+            bool                            m_gaveUp        = false;
+            bool                            m_resolved      = false;
         };
 
         OnlineTuner();
         ~OnlineTuner();
 
-        int  selectCandidateImpl(size_t problemKey, const std::vector<int>& rankedSolutionIndices);
+        int  selectCandidateImpl(size_t                  problemKey,
+                                 const std::vector<int>& rankedSolutionIndices,
+                                 int                     equalityBegin,
+                                 int                     equalityCount);
         void harvestPendingImpl(size_t problemKey);
         bool beginMeasurementImpl(size_t      problemKey,
                                   int         solutionIndex,
@@ -180,7 +259,10 @@ namespace rocblaslt
         // exclusively where they mutate state or the event pool.
         void registerProblem(size_t                  problemKey,
                              ProblemState&           state,
-                             const std::vector<int>& rankedSolutionIndices);
+                             const std::vector<int>& rankedSolutionIndices,
+                             int                     equalityBegin,
+                             int                     equalityCount);
+        bool fromEquality(const ProblemState& state, int candidate) const;
         int  nextCandidate(const ProblemState& state) const;
         int  measurableCandidate(const ProblemState& state, int solutionIndex) const;
         int  inFlightCap(const ProblemState& state) const;
@@ -191,11 +273,12 @@ namespace rocblaslt
         void  recycleEvents(hipEvent_t start, hipEvent_t stop);
         void  retireEvents(hipEvent_t start, hipEvent_t stop);
 
-        bool      m_enabled   = false;
-        int       m_topK      = 0;
-        int       m_repeats   = 0;
-        bool      m_verbose   = false;
-        Statistic m_statistic = Statistic::Median;
+        bool      m_enabled       = false;
+        int       m_topK          = 0;
+        int       m_repeats       = 0;
+        int       m_equalitySlots = 0;
+        bool      m_verbose       = false;
+        Statistic m_statistic     = Statistic::Median;
 
         std::unordered_map<size_t, ProblemState> m_problems;
         std::vector<EventPair>                   m_pairs;

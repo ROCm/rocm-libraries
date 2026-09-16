@@ -26,6 +26,12 @@ namespace rocblaslt
 
         constexpr const char* c_tracePrefix = "[hipblaslt-online-tune]";
 
+        // Provenance markers on the register and winner lines: whether a
+        // candidate came from the Origami ranking or from a reserved slot.
+        constexpr char c_rankedSource   = 'o';
+        constexpr char c_equalitySource = 'e';
+        constexpr char c_noSource       = '-';
+
         int envInt(const char* name, int defaultValue)
         {
             const char* env = std::getenv(name);
@@ -88,6 +94,22 @@ namespace rocblaslt
             return *std::min_element(samples.begin(), samples.end());
         }
 
+        bool sameTile(const EqualitySlotCandidate& a, const EqualitySlotCandidate& b)
+        {
+            return a.m_tileM == b.m_tileM && a.m_tileN == b.m_tileN && a.m_depthU == b.m_depthU;
+        }
+
+        // How far a tile's aspect ratio is from the problem's, as the ratio of
+        // the two cross products: no logarithm, no signed compare, and exactly
+        // 1 when MT_N / MT_M equals n / m. Every term is at least one.
+        double aspectDistance(const EqualitySlotCandidate& candidate, size_t m, size_t n)
+        {
+            const double tileTerm    = static_cast<double>(candidate.m_tileN * m);
+            const double problemTerm = static_cast<double>(candidate.m_tileM * n);
+
+            return std::max(tileTerm, problemTerm) / std::min(tileTerm, problemTerm);
+        }
+
         std::ostringstream traceLine(const char* event, size_t problemKey)
         {
             std::ostringstream msg;
@@ -95,6 +117,39 @@ namespace rocblaslt
             msg << c_tracePrefix << " event=" << event << " key=" << problemKey;
             return msg;
         }
+    }
+
+    std::vector<size_t>
+        orderEqualitySlotCandidates(const std::vector<EqualitySlotCandidate>& pool,
+                                    const std::vector<EqualitySlotCandidate>& ranked,
+                                    size_t                                    problemM,
+                                    size_t                                    problemN)
+    {
+        const size_t m = std::max<size_t>(1, problemM);
+        const size_t n = std::max<size_t>(1, problemN);
+
+        std::vector<size_t> order;
+        std::vector<double> distance(pool.size());
+        order.reserve(pool.size());
+
+        for(size_t i = 0; i < pool.size(); ++i)
+        {
+            distance[i] = aspectDistance(pool[i], m, n);
+
+            const bool offered
+                = std::any_of(ranked.begin(), ranked.end(), [&](const EqualitySlotCandidate& r) {
+                      return r.m_solutionIndex == pool[i].m_solutionIndex || sameTile(r, pool[i]);
+                  });
+
+            if(!offered)
+                order.push_back(i);
+        }
+
+        std::stable_sort(order.begin(), order.end(), [&distance](size_t a, size_t b) {
+            return distance[a] < distance[b];
+        });
+
+        return order;
     }
 
     OnlineTuner::OnlineTuner()
@@ -107,6 +162,12 @@ namespace rocblaslt
         m_verbose   = std::getenv("HIPBLASLT_ORIGAMI_ONLINE_TUNE_VERBOSE") != nullptr;
         m_statistic = envStatistic("HIPBLASLT_ORIGAMI_ONLINE_TUNE_STAT", Statistic::Median);
         m_enabled   = m_topK >= 2;
+
+        // Clamped rather than rejected so no value of the knob can produce an
+        // exploration set with nothing from the ranking left in it to beat.
+        m_equalitySlots
+            = std::min(std::max(envInt("HIPBLASLT_ORIGAMI_ONLINE_TUNE_EQUALITY_SLOTS", 0), 0),
+                       std::max(m_topK - 1, 0));
     }
 
     // The pooled events are deliberately not destroyed. This is a function-local
@@ -116,7 +177,9 @@ namespace rocblaslt
     OnlineTuner::~OnlineTuner() {}
 
     int OnlineTuner::selectCandidateImpl(size_t                  problemKey,
-                                         const std::vector<int>& rankedSolutionIndices)
+                                         const std::vector<int>& rankedSolutionIndices,
+                                         int                     equalityBegin,
+                                         int                     equalityCount)
     {
         if(rankedSolutionIndices.empty())
             return -1;
@@ -133,7 +196,7 @@ namespace rocblaslt
 
         ProblemState& state = m_problems[problemKey];
         if(state.m_candidates.empty())
-            registerProblem(problemKey, state, rankedSolutionIndices);
+            registerProblem(problemKey, state, rankedSolutionIndices, equalityBegin, equalityCount);
 
         if(!state.m_resolved)
         {
@@ -301,7 +364,9 @@ namespace rocblaslt
 
     void OnlineTuner::registerProblem(size_t                  problemKey,
                                       ProblemState&           state,
-                                      const std::vector<int>& rankedSolutionIndices)
+                                      const std::vector<int>& rankedSolutionIndices,
+                                      int                     equalityBegin,
+                                      int                     equalityCount)
     {
         const size_t count
             = std::min(rankedSolutionIndices.size(), static_cast<size_t>(m_topK));
@@ -310,6 +375,13 @@ namespace rocblaslt
                                   rankedSolutionIndices.begin() + count);
         state.m_samples.resize(count);
         state.m_issued.assign(count, 0);
+
+        // The caller's range is against its whole ranked list, which may be
+        // longer than the exploration window; anything past the window is not
+        // a candidate and so has no provenance to record.
+        state.m_equalityBegin = std::min(std::max(equalityBegin, 0), static_cast<int>(count));
+        state.m_equalityEnd   = std::min(state.m_equalityBegin + std::max(equalityCount, 0),
+                                       static_cast<int>(count));
 
         // Nothing to compare against, so the problem is born resolved with no
         // winner and every later call takes the read-only path.
@@ -324,9 +396,19 @@ namespace rocblaslt
             msg << " candidates=" << count << " repeats=" << m_repeats << " sols=";
             for(size_t i = 0; i < count; ++i)
                 msg << (i ? "," : "") << state.m_candidates[i];
+            msg << " eqslots=" << m_equalitySlots << " src=";
+            for(size_t i = 0; i < count; ++i)
+                msg << (i ? "," : "")
+                    << (fromEquality(state, static_cast<int>(i)) ? c_equalitySource
+                                                                 : c_rankedSource);
             msg << "\n";
             std::cerr << msg.str();
         }
+    }
+
+    bool OnlineTuner::fromEquality(const ProblemState& state, int candidate) const
+    {
+        return candidate >= state.m_equalityBegin && candidate < state.m_equalityEnd;
     }
 
     int OnlineTuner::nextCandidate(const ProblemState& state) const
@@ -415,7 +497,12 @@ namespace rocblaslt
                 << " samples=" << samples << " calls=" << state.m_calls
                 << " declined=" << state.m_declined
                 << " gaveup=" << (state.m_gaveUp ? 1 : 0)
-                << " stat=" << statisticName(m_statistic) << "\n";
+                << " stat=" << statisticName(m_statistic) << " eqslots=" << m_equalitySlots
+                << " src="
+                << (winnerIndex < 0 ? c_noSource
+                                    : (fromEquality(state, winnerIndex) ? c_equalitySource
+                                                                        : c_rankedSource))
+                << "\n";
             std::cerr << msg.str();
         }
     }
