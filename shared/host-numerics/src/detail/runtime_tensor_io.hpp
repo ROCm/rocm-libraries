@@ -52,6 +52,24 @@ void runtimeLoadMatrixBlock(std::span<const std::byte> storage, ptrdiff_t offset
                             ptrdiff_t rowStride, ptrdiff_t columnStride, size_t rowBase,
                             size_t columnBase, size_t rows, size_t columns,
                             std::span<Accumulator> destination) {
+    const auto strideMagnitude = [](ptrdiff_t stride) {
+        using Unsigned = std::make_unsigned_t<ptrdiff_t>;
+        const Unsigned value = static_cast<Unsigned>(stride);
+        return stride >= 0 ? value : Unsigned(0) - value;
+    };
+    if (strideMagnitude(rowStride) < strideMagnitude(columnStride)) {
+        for (size_t column = 0; column < columns; ++column) {
+            const ptrdiff_t sourceColumn =
+                offset + static_cast<ptrdiff_t>(columnBase + column) * columnStride;
+            for (size_t row = 0; row < rows; ++row) {
+                const ptrdiff_t sourceOffset =
+                    sourceColumn + static_cast<ptrdiff_t>(rowBase + row) * rowStride;
+                destination[row * columns + column] =
+                    decodeScalarKnown<Tag, Accumulator>(storage, sourceOffset);
+            }
+        }
+        return;
+    }
     for (size_t row = 0; row < rows; ++row) {
         const ptrdiff_t sourceRow = offset + static_cast<ptrdiff_t>(rowBase + row) * rowStride;
         for (size_t column = 0; column < columns; ++column) {

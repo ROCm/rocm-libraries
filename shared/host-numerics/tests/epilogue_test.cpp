@@ -55,6 +55,36 @@ void testReferenceEpilogue() {
                 .passed(),
             "Reference epilogue fused input/addend scaling mismatch.");
 
+    constexpr size_t parallelRows = 128;
+    constexpr size_t parallelColumns = 256;
+    const std::vector<float> parallelInputValues(parallelRows * parallelColumns, 0.25f);
+    const std::vector<float> parallelAddendValues(parallelRows * parallelColumns, 0.5f);
+    const std::vector<float> parallelBiasValues(parallelColumns, 0.125f);
+    const Tensor parallelInput =
+        Tensor::copyNativeValues<float>(Shape{parallelRows, parallelColumns}, parallelInputValues);
+    Tensor parallelOutput(ScalarType::Float16, Shape{parallelRows, parallelColumns});
+    EpilogueOptions parallelOptions(ScalarType::Float32);
+    parallelOptions.inputScale = Tensor::scalar(ScalarType::Float32, 1.5f);
+    parallelOptions.inputScaleFactors.push_back(Tensor::scalar(ScalarType::Float32, 0.5f));
+    parallelOptions.inputScaleFactors.push_back(
+        Tensor::copyNativeValues<float>(Shape{1, parallelColumns}, parallelBiasValues));
+    parallelOptions.addend =
+        Tensor::copyNativeValues<float>(Shape{parallelRows, parallelColumns}, parallelAddendValues);
+    parallelOptions.addendScale = Tensor::scalar(ScalarType::Float32, 0.75f);
+    parallelOptions.bias =
+        Tensor::copyNativeValues<float>(Shape{1, parallelColumns}, parallelBiasValues);
+    parallelOptions.activation = ClampActivation{-2.0, 2.0};
+    parallelOptions.outputScale = Tensor::scalar(ScalarType::Float32, 2.0f);
+    referenceEpilogueInto(parallelInput, {.output = parallelOutput}, parallelOptions);
+    require(parallelOutput.loadAs<float>({0, 0}) == 1.046875f &&
+                parallelOutput.loadAs<float>({parallelRows - 1, parallelColumns - 1}) == 1.046875f,
+            "Parallel reference epilogue result mismatch.");
+    Tensor parallelAmax(ScalarType::Float32, Shape{1});
+    referenceEpilogueInto(parallelInput, {.output = parallelOutput, .amax = parallelAmax},
+                          parallelOptions);
+    require(parallelAmax.loadAs<float>({0}) == 0.5234375f,
+            "Parallel reference epilogue AMax mismatch.");
+
     Tensor aliasedAddend =
         Tensor::copyNativeValues<float>(Shape{2, 2}, std::array<float, 4>{10, 20, 30, 40});
     affineOptions.addend = aliasedAddend;

@@ -128,12 +128,12 @@ Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOf
                        Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
                        Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
                        Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
-                       Type == ScalarType::E4M3)
-        return convertScalarValue<Target>(
-            decodeBinaryFloat(
-                Type, readPackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits)),
-            options);
-    else if constexpr (Type == ScalarType::E8M0)
+                       Type == ScalarType::E4M3) {
+        constexpr uint16_t storageBits = scalarTypeInfo(Type).storageBits;
+        const uint32_t raw = storageBits == 8 ? readNative<uint8_t>(storage, offsetBytes)
+                                              : readPackedBits(storage, offsetBits, storageBits);
+        return convertScalarValue<Target>(decodeBinaryFloatKnown<Type>(raw), options);
+    } else if constexpr (Type == ScalarType::E8M0)
         return convertScalarValue<Target>(decodeE8M0(readNative<uint8_t>(storage, offsetBytes)),
                                           options);
     else if constexpr (Type == ScalarType::E8M0Zero)
@@ -192,10 +192,14 @@ void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, So
                        Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
                        Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
                        Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
-                       Type == ScalarType::E4M3)
-        writePackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits,
-                        encodeBinaryFloat(Type, convertScalarValue<float>(source, options)));
-    else if constexpr (Type == ScalarType::E8M0)
+                       Type == ScalarType::E4M3) {
+        constexpr uint16_t storageBits = scalarTypeInfo(Type).storageBits;
+        const uint32_t raw = encodeBinaryFloat(Type, convertScalarValue<float>(source, options));
+        if constexpr (storageBits == 8)
+            writeNative<uint8_t>(storage, offsetBytes, static_cast<uint8_t>(raw));
+        else
+            writePackedBits(storage, offsetBits, storageBits, raw);
+    } else if constexpr (Type == ScalarType::E8M0)
         writeNative<uint8_t>(storage, offsetBytes,
                              encodeE8M0(convertScalarValue<float>(source, options)));
     else if constexpr (Type == ScalarType::E8M0Zero)

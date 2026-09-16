@@ -47,7 +47,7 @@ void testAutomaticSelectionUsesBlockedBackend() {
     const GemmTestRunInfo sparse = referenceGemm(problem);
     require(sparse.backendUsed == GemmBackend::Blocked && !sparse.fallbackReason,
             "Automatic GEMM did not use Blocked for sparse work.");
-    require(sparse.outputElementsWritten == 1 && sparse.outputElementsCovered == rows * columns,
+    require(sparse.outputElementsWritten == 1 && sparse.outputElementsCovered == 1,
             "Sparse blocked GEMM reported the wrong write or coverage count.");
     require(output.loadAs<float>({0, 0}) == firstOutput,
             "Automatic backend selection changed the selected numerical result.");

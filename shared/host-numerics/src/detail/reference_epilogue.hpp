@@ -14,6 +14,7 @@
 #include <type_traits>
 
 #include "reference_common.hpp"
+#include "threading.hpp"
 
 namespace roc::host_numerics {
 namespace detail {
@@ -224,6 +225,19 @@ inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem
         }
         validateEpilogueValueType(problem.bias->type(), "bias");
     }
+    for (const Tensor& factor : problem.inputScaleFactors) {
+        try {
+            (void)factor.broadcastTo(problem.input.shape());
+        } catch (const std::invalid_argument&) {
+            throw std::invalid_argument(
+                "Reference epilogue input scale factor is not broadcast-compatible with the "
+                "input.");
+        }
+        validateEpilogueValueType(factor.type(), "input scale factor");
+        if (complexCompute != isComplexScalarType(factor.type()))
+            throw std::invalid_argument(
+                "Reference epilogue input scale factor complexity mismatch.");
+    }
     return {
         .selectedElements =
             problem.outputSelection.selectedCount(problem.input.shape().elementCount()),
@@ -288,6 +302,9 @@ inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request)
                     *output, *input,
                     "Reference epilogue output overlaps an input with an unsafe storage mapping.");
         }
+        for (const Tensor& factor : request.inputScaleFactors)
+            rejectOverlappingTensorStorage(
+                *output, factor, "Reference epilogue output overlaps an input scale factor.");
     }
     for (size_t left = 0; left < outputs.size(); ++left) {
         if (!outputs[left]) continue;
@@ -314,12 +331,16 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     std::optional<RuntimeMatrixReader<Accumulator>> gateResidual;
     std::optional<RuntimeMatrixReader<Accumulator>> bias;
     std::optional<RuntimeMatrixReader<Accumulator>> addend;
+    std::vector<RuntimeMatrixReader<Accumulator>> inputScaleFactors;
     if (problem.rawOutput) rawOutput.emplace(*problem.rawOutput);
     if (problem.auxiliaryOutput) auxiliaryOutput.emplace(*problem.auxiliaryOutput);
     if (problem.auxiliaryInput) auxiliaryInput.emplace(*problem.auxiliaryInput);
     if (problem.gateResidual) gateResidual.emplace(*problem.gateResidual);
     if (problem.bias) bias.emplace(problem.bias->broadcastTo(problem.input.shape()));
     if (problem.addend) addend.emplace(*problem.addend);
+    inputScaleFactors.reserve(problem.inputScaleFactors.size());
+    for (const Tensor& factor : problem.inputScaleFactors)
+        inputScaleFactors.emplace_back(factor.broadcastTo(problem.input.shape()));
 
     const Accumulator inputScale =
         problem.inputScale ? runtimeScalar<Accumulator>(*problem.inputScale, "input scale")
@@ -337,10 +358,15 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     Accumulator maximum = Accumulator(0);
     if (problem.amax && problem.accumulateAmax) maximum = problem.amax->loadAs<Accumulator>({0});
 
-    const size_t rows = problem.output.shape()[0];
     const size_t columns = problem.output.shape()[1];
     auto computeOutput = [&](size_t row, size_t column) {
         Accumulator value = quantize(input(row, column));
+        if (!inputScaleFactors.empty()) {
+            Accumulator factor = Accumulator(1);
+            for (const auto& scale : inputScaleFactors)
+                factor = quantize(wrappingMultiply(factor, scale(row, column)));
+            value = quantize(wrappingMultiply(value, factor));
+        }
         if (problem.inputScale) value = quantize(wrappingMultiply(value, inputScale));
         if (addend) {
             const Accumulator addendValue =
@@ -364,10 +390,9 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
             }
         }
 
-        if constexpr (!IsComplex<Accumulator>::value) {
-            if (problem.amax)
-                maximum = std::max(maximum, static_cast<Accumulator>(std::abs(value)));
-        }
+        Accumulator magnitude = Accumulator(0);
+        if constexpr (!IsComplex<Accumulator>::value)
+            if (problem.amax) magnitude = static_cast<Accumulator>(std::abs(value));
 
         value = quantize(wrappingMultiply(value, outputScale));
         if (rawOutput) rawOutput->store(row, column, value);
@@ -376,19 +401,61 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
             value = quantize(wrappingAdd(quantize(wrappingMultiply(gate, value)), gate));
         }
         output.store(row, column, value);
+        return magnitude;
     };
 
     const size_t logicalElements = problem.output.shape().elementCount();
+    const bool independentOutputs =
+        hasProvablyIndependentElements(problem.output) &&
+        (!problem.rawOutput || hasProvablyIndependentElements(*problem.rawOutput)) &&
+        (!problem.auxiliaryOutput || hasProvablyIndependentElements(*problem.auxiliaryOutput));
+    constexpr size_t minimumElementsPerThread = 16'384;
     if (problem.outputSelection.selectsAll()) {
-        for (size_t row = 0; row < rows; ++row) {
-            for (size_t column = 0; column < columns; ++column) computeOutput(row, column);
+        if constexpr (!IsComplex<Accumulator>::value) {
+            if (problem.amax) {
+                maximum = transformReduceParallelIndices(
+                    logicalElements, logicalElements, independentOutputs, minimumElementsPerThread,
+                    maximum,
+                    [&](size_t logicalIndex) {
+                        return computeOutput(logicalIndex / columns, logicalIndex % columns);
+                    },
+                    [](Accumulator left, Accumulator right) { return std::max(left, right); });
+            } else {
+                forEachParallelIndex(logicalElements, logicalElements, independentOutputs,
+                                     minimumElementsPerThread, [&](size_t logicalIndex) {
+                                         (void)computeOutput(logicalIndex / columns,
+                                                             logicalIndex % columns);
+                                     });
+            }
+        } else {
+            forEachParallelIndex(logicalElements, logicalElements, independentOutputs,
+                                 minimumElementsPerThread, [&](size_t logicalIndex) {
+                                     (void)computeOutput(logicalIndex / columns,
+                                                         logicalIndex % columns);
+                                 });
         }
     } else {
         const auto selected = problem.outputSelection.indices(logicalElements);
-        for (const size_t logicalIndex : selected) {
+        const auto computeSelectedOutput = [&](size_t selectedIndex) {
             const auto coordinates = problem.output.shape().coordinates(
-                logicalIndex, problem.outputSelection.indexOrder());
-            computeOutput(coordinates[0], coordinates[1]);
+                selected[selectedIndex], problem.outputSelection.indexOrder());
+            return computeOutput(coordinates[0], coordinates[1]);
+        };
+        if constexpr (!IsComplex<Accumulator>::value) {
+            if (problem.amax) {
+                maximum = transformReduceParallelIndices(
+                    selected.size(), selected.size(), independentOutputs, minimumElementsPerThread,
+                    maximum, computeSelectedOutput,
+                    [](Accumulator left, Accumulator right) { return std::max(left, right); });
+            } else {
+                forEachParallelIndex(
+                    selected.size(), selected.size(), independentOutputs, minimumElementsPerThread,
+                    [&](size_t selectedIndex) { (void)computeSelectedOutput(selectedIndex); });
+            }
+        } else {
+            forEachParallelIndex(
+                selected.size(), selected.size(), independentOutputs, minimumElementsPerThread,
+                [&](size_t selectedIndex) { (void)computeSelectedOutput(selectedIndex); });
         }
     }
 

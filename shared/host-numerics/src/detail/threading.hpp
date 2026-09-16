@@ -86,4 +86,44 @@ void forEachParallelIndex(size_t count, size_t workItemCount, bool canParalleliz
 #endif
     for (size_t index = 0; index < count; ++index) function(index);
 }
+
+template <typename Value, typename Transform, typename Reduction>
+Value transformReduceParallelIndices(size_t count, size_t workItemCount, bool canParallelize,
+                                     size_t minimumWorkItemsPerThread, Value initial,
+                                     Transform&& transform, Reduction&& reduction) {
+    if (count == 0) return initial;
+    const int threadCount = std::min<int>(
+        canParallelize ? operationThreadCount(workItemCount, minimumWorkItemsPerThread) : 1,
+        static_cast<int>(std::min(count, static_cast<size_t>(std::numeric_limits<int>::max()))));
+#ifdef _OPENMP
+    if (threadCount > 1 && count <= static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
+        std::vector<Value> partials(static_cast<size_t>(threadCount), initial);
+        std::exception_ptr error;
+#pragma omp parallel num_threads(threadCount)
+        {
+            const size_t thread = static_cast<size_t>(omp_get_thread_num());
+            Value partial = initial;
+#pragma omp for schedule(static)
+            for (ptrdiff_t index = 0; index < static_cast<ptrdiff_t>(count); ++index) {
+                try {
+                    partial = reduction(partial, transform(static_cast<size_t>(index)));
+                } catch (...) {
+#pragma omp critical(roc_host_numerics_parallel_error)
+                    {
+                        if (!error) error = std::current_exception();
+                    }
+                }
+            }
+            partials[thread] = partial;
+        }
+        if (error) std::rethrow_exception(error);
+        for (const Value& partial : partials) initial = reduction(initial, partial);
+        return initial;
+    }
+#else
+    (void)threadCount;
+#endif
+    for (size_t index = 0; index < count; ++index) initial = reduction(initial, transform(index));
+    return initial;
+}
 }  // namespace roc::host_numerics::detail

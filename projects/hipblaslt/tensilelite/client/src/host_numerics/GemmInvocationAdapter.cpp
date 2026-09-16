@@ -982,32 +982,14 @@ namespace TensileLite::Client::HostNumerics
 
     void TranslatedGemmBatch::runGemm(roc::host_numerics::GemmBackend backend) const
     {
-        using roc::host_numerics::ScalarType;
         using roc::host_numerics::Tensor;
         using roc::host_numerics::matmulInto;
-        using roc::host_numerics::multiply;
-        using roc::host_numerics::multiplyInto;
 
         const auto isZero = [](const Tensor& value) {
             return value.item<std::complex<double>>() == std::complex<double>(0.0, 0.0);
         };
-        const ScalarType computeType = options.accumulatorType;
         if(!isZero(alpha) && a.shape()[1] != 0)
-        {
             matmulInto(a, b, d, options, outputSelection, backend);
-
-            if(scaleA || scaleB || scaleAlpha)
-            {
-                Tensor effectiveScale = Tensor::scalar(computeType, 1);
-                if(scaleA)
-                    effectiveScale = multiply(effectiveScale, *scaleA, computeType, computeType);
-                if(scaleB)
-                    effectiveScale = multiply(effectiveScale, *scaleB, computeType, computeType);
-                if(scaleAlpha)
-                    effectiveScale = multiply(effectiveScale, *scaleAlpha, computeType, computeType);
-                multiplyInto(d, effectiveScale, d, computeType, outputSelection);
-            }
-        }
     }
 
     void TranslatedGemmBatch::runPostGemmOperationsAndCopyOutputs() const
@@ -1145,7 +1127,15 @@ namespace TensileLite::Client::HostNumerics
                     epilogue.options.bias = source.bias;
                 if(m_state->alpha != std::complex<double>(0.0, 0.0)
                    && translated.a.shape()[1] != 0)
+                {
+                    if(translated.scaleA)
+                        epilogue.options.inputScaleFactors.push_back(*translated.scaleA);
+                    if(translated.scaleB)
+                        epilogue.options.inputScaleFactors.push_back(*translated.scaleB);
+                    if(translated.scaleAlpha)
+                        epilogue.options.inputScaleFactors.push_back(*translated.scaleAlpha);
                     epilogue.options.inputScale = translated.alpha;
+                }
                 if(m_state->beta != std::complex<double>(0.0, 0.0))
                 {
                     epilogue.options.addend = translated.c;

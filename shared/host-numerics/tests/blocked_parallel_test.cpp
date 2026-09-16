@@ -25,9 +25,9 @@ void testParallelSparseSelection() {
     const GemmTestRunInfo run = referenceGemm(problem, GemmBackend::Blocked);
 
     const std::vector<size_t> selected = problem.outputSelection.indices(output.elementCount());
-    require(
-        run.outputElementsWritten == selected.size() && run.outputElementsCovered == rows * columns,
-        "Sparse blocked GEMM did not report its touched output blocks.");
+    require(run.outputElementsWritten == selected.size() &&
+                run.outputElementsCovered == selected.size(),
+            "Sparse blocked GEMM did not report its directly computed outputs.");
     for (const size_t linearIndex : selected) {
         const size_t row = linearIndex / columns;
         const size_t column = linearIndex % columns;
