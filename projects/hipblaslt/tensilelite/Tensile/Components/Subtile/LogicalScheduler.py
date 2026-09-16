@@ -595,6 +595,9 @@ class GRIncOp(BaseOp):
     """Pointer update + LDS swap for global reads on a specific tensor."""
     tensor: str = ""
     unrollId: int = 0
+    # Set on the PGR=2 pre-loop advance between the two prefetch clusters, where
+    # the SRD must stay put when LoopCounterL <= 1. See emitSrdAdvance.
+    holdOnLastIter: bool = False
 
     def __post_init__(self):
         self.kind = 'gr_inc'
@@ -3230,10 +3233,10 @@ class LogicalScheduler:
             placements.append(lr)
         return placements
 
-    def _make_depops_all_tensors(self, cls) -> List[BaseOp]:
+    def _make_depops_all_tensors(self, cls, holdOnLastIter=False) -> List[BaseOp]:
         """Create a BaseOp subclass instance for each tensor (and uid for GRIncOp)."""
         if cls is GRIncOp:
-            return [GRIncOp(tensor=t, unrollId=uid)
+            return [GRIncOp(tensor=t, unrollId=uid, holdOnLastIter=holdOnLastIter)
                     for t in self.tensors
                     for uid in range(self.config.numUnroll.get(t, 1))]
         return [cls(tensor=tensor) for tensor in self.tensors]
@@ -3264,7 +3267,7 @@ class LogicalScheduler:
                 tensor, mt, uid_tile, uid))
         return result
 
-    def _make_depops_uid(self, cls, uid: int) -> List[BaseOp]:
+    def _make_depops_uid(self, cls, uid: int, holdOnLastIter=False) -> List[BaseOp]:
         """Create a BaseOp subclass instance for a single uid across all tensors.
 
         Only emits for tensors where uid < numUnroll[tensor].
@@ -3275,7 +3278,8 @@ class LogicalScheduler:
             if uid >= nUnroll:
                 continue
             if cls is GRIncOp:
-                result.append(GRIncOp(tensor=tensor, unrollId=uid))
+                result.append(GRIncOp(tensor=tensor, unrollId=uid,
+                                      holdOnLastIter=holdOnLastIter))
             else:
                 result.append(cls(tensor=tensor))
         return result
@@ -3477,7 +3481,8 @@ class LogicalScheduler:
                 preloop_ops = []
                 for uid in range(maxUnroll):
                     preloop_ops.extend(self._make_gr_all_tensors_uid(0, all_tiles, uid))
-                    preloop_ops.extend(self._make_depops_uid(GRIncOp, uid))
+                    preloop_ops.extend(self._make_depops_uid(GRIncOp, uid,
+                                                             holdOnLastIter=True))
                 mt1_ops = []
                 for uid in range(maxUnroll):
                     mt1_ops.extend(self._make_preloop_mt1_grs_uid(uid))
@@ -3496,7 +3501,7 @@ class LogicalScheduler:
             else:
                 emitted = self._to_emitted([
                     *self._make_gr_all_tensors(0, all_tiles),
-                    *self._make_depops_all_tensors(GRIncOp),
+                    *self._make_depops_all_tensors(GRIncOp, holdOnLastIter=True),
                     initC_op,
                     WaitGROp(wait_gr_counts=WaitGRCounts()),
                     SyncOp(),

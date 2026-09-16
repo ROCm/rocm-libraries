@@ -348,11 +348,12 @@ class InstructionEmitter:
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
+        hold = getattr(source, 'holdOnLastIter', False)
         module = Module()
         if tensor in ('SA', 'SB'):
-            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel, hold))
         else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
+            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold))
         if not (tensor == 'B' and useDirectToVgprPreSwizzledB(self.kernel)):
             module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
