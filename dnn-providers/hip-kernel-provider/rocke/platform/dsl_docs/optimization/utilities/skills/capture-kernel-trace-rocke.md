@@ -1,45 +1,59 @@
 ---
 name: capture-kernel-trace-rocke
 description: >
-  Capture GPU kernel ATT (Advanced Thread Trace) via rocprofv3 for CK DSL kernels.
-  Discovers kernel names from compiled HSACO, configures input.yaml with target
-  kernel_include_regex, runs rocprofv3 with debug info enabled, and downloads
-  the latest ui_output_agent_* directory for analysis.
+  Capture WaveScope evidence for CK DSL kernels with ATT instruction traces,
+  PMC counter bundles, or both. ATT locates source-level stalls; PMC supplies
+  dispatch-wide bottleneck rules and repeatable before/after verdicts.
   Usage: /capture-kernel-trace-rocke <kernel_script.py> [kernel_name_pattern]
 tools: Bash,Read,Write,Edit,Grep,Glob
 ---
 
-# Capture Kernel Trace (CK DSL)
+# Capture WaveScope Evidence (CK DSL)
 
-⚠️ **IMPORTANT**: ATT (Advanced Thread Trace) requires the `rocprof-trace-decoder` library.
-It does **not** ship with ROCm and is not in the ROCm apt repository — it is distributed
-separately from <https://github.com/ROCm/rocprof-trace-decoder> (pick the release asset matching
-the distro; it installs a single `librocprof-trace-decoder.so` into `/opt/rocm/lib`). Override the
-location with `ROCPROF_TRACE_DECODER_LIB` if it lives elsewhere. If you cannot install it, use
-**PMC (Performance Counter) profiling** instead (see Alternative: PMC Profiling below).
+ATT and PMC answer different questions and can be used independently or together:
 
-Capture rocprofv3 ATT traces from CK DSL kernels running on local GPU or remote Docker container,
-then download the trace output for analysis.
+- **ATT** shows where and why waves stall, down to ISA and Python source locations.
+- **PMC** measures dispatch-wide LDS, L2, VALU and matrix activity, then compares
+  repeated runs against a noise floor.
+- **Combined** is the preferred optimization loop: ATT identifies what to change;
+  PMC and the perf verdict establish whether the change helped.
 
-## Quick path: one command
+ATT requires `rocprof-trace-decoder`, distributed separately from
+<https://github.com/ROCm/rocprof-trace-decoder>. Install the release matching the
+distro into `/opt/rocm/lib`, or set `ROCPROF_TRACE_DECODER_LIB`. PMC capture does
+not require that decoder and remains available when ATT cannot run.
 
-`tools/stage2_capture/capture_att_trace.py` does the whole of Steps 2-5 — preflights the decoder,
-discovers the kernel name, runs the capture, and reports each decoded dispatch with the numbers
-that say whether it is usable:
+## Quick path: choose an evidence mode
+
+Run these commands from `dnn-providers/hip-kernel-provider/rocke/platform/`.
+
+**ATT only — instruction and source diagnosis:**
 
 ```bash
-python3 tools/stage2_capture/capture_att_trace.py --output-dir ./att_out \
-  -- python3 -m rocke.run_manifest out/kernel.hsaco out/manifest.json
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py \
+  --output-dir ./att-out --kernel-regex '<kernel-name>' -- python3 bench.py
 ```
 
-Each invocation writes a fresh `capture-<trace-id>` generation below `att_out`
-and prints the exact decoded dispatch folder to open. Completed, truncated, and
-nonempty unfinalized generations remain separate and cannot satisfy a later
-capture that matched no dispatch. A generation is removed automatically only
-when the current attempt published nothing and `rmdir()` proves it is empty.
+**PMC only — counter diagnosis and repeatable verification:**
 
-Pass `--kernel-regex` to skip the discovery pass. The manual steps below remain the reference for
-remote/Docker captures and for anything the wrapper does not cover.
+```bash
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py \
+  --output-dir ./pmc-out --arch '<arch>' --op '<operation>' \
+  --shape '<shape-json>' --kernel-name '<kernel-name>' \
+  --match-kernel '<kernel-name>' --repeats 3 --warmup 5 --per-dispatch \
+  -- python3 bench.py
+```
+
+**Combined — recommended for optimization:** run both commands with the same
+launcher, shape, GPU and binary. Open the reported ATT dispatch in WaveScope, then
+upload a CSV path printed by the PMC utility in **Bottlenecks**. The two captures
+are separate executions and remain `UNBOUND`; matching identifiers are evidence to
+check, not proof that the workload or binary was identical.
+
+Each ATT invocation writes a fresh `capture-<trace-id>` generation below its output
+directory. The PMC output directory must also be new and contains original profiler
+CSVs plus versioned measurement JSON. The manual ATT steps below remain the reference
+for remote/Docker captures and for anything the wrapper does not cover.
 
 ## Arguments
 
@@ -73,13 +87,16 @@ PYTHONPATH=/path/to/rocke <CMD>
 
 ## Workflow
 
+```text
+Shared setup: deploy the launcher and identify the target kernel.
+ATT branch: capture/decode the dispatch, then inspect its ISA/source timeline.
+PMC branch: capture repeatable counters and the before/after perf verdict.
+Combined branch: use ATT to choose an edit, PMC to validate it, then repeat.
 ```
-Step 1: Deploy kernel script to remote container (if remote)
-Step 2: Discover kernel names (if pattern not provided)
-Step 3: Configure input.yaml with kernel_include_regex
-Step 4: Run rocprofv3 -i input.yaml to collect ATT trace
-Step 5: Find and download latest ui_output_agent_* to local
-```
+
+Steps 1-6 below describe the manual ATT branch. See
+[PMC profiling and the combined pipeline](#pmc-profiling-and-the-combined-pipeline)
+for the counter branch.
 
 ---
 
@@ -298,6 +315,17 @@ After capture, report:
 5. **Next step**: Open the folder in WaveScope (Step 6), or run `/kernel-trace-analysis` for a
    text-only bottleneck report
 
+For a PMC or combined run, also report:
+
+1. **Bundle location** and per-sample profiler status
+2. **Counter groups** and the recommended successful-sample CSV path
+3. **Derived diagnostics** (`l2_hit_rate`, `lds_bank_conflict_rate`,
+   `valu_utilization`, `matrix_share`) when their inputs are usable
+4. **Verification verdict** (`no_baseline`, `improved`, `within_noise`, or
+   `regressed`) and its noise floor
+5. **Association**: `UNBOUND` unless ATT/PMC workload, GPU and binary identity were
+   independently established
+
 Example output:
 ```
 Trace captured: ./trace_data/20260516_153000_conv_implicit_gemm/
@@ -318,54 +346,68 @@ inclusive of `Stall`, so a class's actual compute is `latency - stall`.
 
 ---
 
-## Alternative: PMC Profiling
+## PMC Profiling and the Combined Pipeline
 
-If ATT is blocked due to missing `rocprof-trace-decoder`, use PMC (Performance Monitor Counters) instead:
+PMC is not merely an ATT fallback. It provides dispatch-wide evidence ATT does not:
+repeat-to-repeat spread, before/after comparison, LDS conflict rate, L2 hit rate,
+VALU utilization, and the matrix-work guard. Use PMC alone when instruction tracing
+is unavailable or unnecessary; use ATT and PMC together when optimizing a kernel.
 
-```yaml
-# pmc_config.yaml
-jobs:
-   -
-       kernel_include_regex: <KERNEL_NAME>
-       output_file: pmc_pass1
-       output_directory: pmc_output
-       output_format: [csv]
-       pmc: true
-       counters:
-          - MfmaUtil
-          - VALUBusy
-          - MemUnitBusy
-          - MemUnitStalled
-          - ALUStalledByLDS
-          - LDSBankConflict
-          - MeanOccupancyPerActiveCU
-   -
-       kernel_include_regex: <KERNEL_NAME>
-       output_file: pmc_pass2
-       output_directory: pmc_output
-       output_format: [csv]
-       pmc: true
-       counters:
-          - FetchSize
-          - WriteSize
-          - VFetchInsts
-          - VWriteInsts
-```
+Do not hand-write a rocprofv3 counter YAML. Counter names, availability and hardware
+block limits differ by architecture. The shared utility probes the installed
+profiler, normalizes names, and groups ratio inputs into coherent replay passes:
 
-Run:
 ```bash
-rocprofv3 -i pmc_config.yaml -- python kernel.py
+export ARCH='<arch>'
+export OP='<operation>'
+export SHAPE_JSON='<shape-json>'
+export KERNEL_NAME='<kernel-name>'
 ```
 
-PMC gives high-level bottleneck categories (MFMA utilization, memory stalls, LDS conflicts) without instruction-level detail.
+```bash
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_pmc.py \
+  --output-dir ./pmc-before --store-history \
+  --cache /tmp/rocke-perf-history \
+  --arch "$ARCH" --op "$OP" --shape "$SHAPE_JSON" \
+  --kernel-name "$KERNEL_NAME" --match-kernel "$KERNEL_NAME" \
+  --repeats 3 --warmup 5 --per-dispatch \
+  -- python3 kernel.py
+```
 
----
+On the tested CDNA selection, all inputs for WaveScope's LDS, L2 and VALU PMC rules
+land in `pmc_1`; `pmc_2` contains LDS instruction and wait counts. RDNA uses one
+pass on the tested gfx1201 system, but several diagnostic inputs returned zero and
+the corresponding rules were explicitly skipped. Always use the groups and sample
+status recorded in `manifest.json` rather than assuming a fixed layout.
+
+For the complete agent optimization loop:
+
+1. **Establish a baseline.** Run the PMC command above. The first stored run reports
+   `no_baseline` and preserves the raw evidence.
+2. **Locate the bottleneck.** Capture ATT with the same launcher and inspect the
+   WaveScope timeline, ISA/source attribution and dependency waits. Upload the
+   successful CSV recommended by the PMC utility (`pmc_1` for the tested full
+   CDNA selection) to add counter-backed rules.
+3. **Make one kernel change.** Keep launch shape, GPU and binary inputs controlled.
+4. **Verify the change.** Capture to a new output directory with the same PMC
+   identity and history cache. Accept `improved`; treat `within_noise` as no proven
+   change; stop on `regressed` (the CLI exits 1).
+5. **Re-capture ATT when needed.** Use it to confirm the original bottleneck moved
+   or to select the next change. Do not infer per-instruction attribution from a
+   dispatch-wide PMC counter.
+
+WaveScope reads one uploaded CSV at a time. Use one successful sample and one replay
+pass; never merge repeats. The utility also writes versioned JSON for agents and
+other consumers, including medians, spread, normalized counters and the verdict.
+
+PMC capture does not need WaveScope or the ATT decoder. Viewing the CSV beside an
+ATT trace does require WaveScope and does not bind the two separate executions.
 
 ## Error Handling
 
 | Error | Fix |
 |-------|-----|
-| `rocprof-trace-decoder library path not found` | Install it from <https://github.com/ROCm/rocprof-trace-decoder>, or set `ROCPROF_TRACE_DECODER_LIB`. Failing that, **use PMC profiling** (see Alternative section) |
+| `rocprof-trace-decoder library path not found` | Install it or set `ROCPROF_TRACE_DECODER_LIB`; use the PMC-only mode when ATT is unavailable |
 | `INVALID_SHADER_DATA` | aqlprofile/decoder version mismatch, update both |
 | Empty ui_output_agent_* | kernel_include_regex didn't match -- re-check kernel name from Step 2 |
 | No source mapping in code.json | The kernel was built without `ROCKE_DEBUG_LOC=1`, so there is no DWARF. Rebuild with it set and re-capture, or analyze with ISA disassembly / WaveScope's Trace tab |
@@ -509,7 +551,8 @@ Save this as `bench_conv_profile.py` and use it with rocprofv3.
 
 ## See Also
 
-- `tools/stage2_capture/capture_att_trace.py` - One-command capture (the Quick path above)
+- `tools/wavescope/capture_wavescope_trace.py` - Source-correlated ATT capture
+- `tools/wavescope/capture_wavescope_pmc.py` - PMC capture, artifact export and verification
 - `/kernel-trace-analysis` - Analyze captured ATT traces
 - `src/stage3_extract_isa/extract_isa.py` - Extract ISA from CK DSL HSACO
 - `.claude/OPTIMIZATION_RUNBOOK.md` Section 10 - Profiling methodology
