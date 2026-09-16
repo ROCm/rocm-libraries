@@ -5,7 +5,7 @@
  * AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
  *
  * Generated from: arch_specs.json
- * Generated at: 2026-09-16T01:47:34.242393
+ * Generated at: 2026-09-16T02:11:39.813508
  *
  * To update this file:
  * 1. Edit arch_specs.json
@@ -282,6 +282,25 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline)
         case Pipeline::PreShuffleV1: return 32768;
         default: return 65536;
         }
+    }
+}
+
+// Total physical LDS per architecture, in bytes. Mirrors get_lds_size() in
+// include/ck_tile/core/arch/arch.hpp.
+inline std::size_t get_lds_total_capacity(GpuArch arch)
+{
+    switch(arch)
+    {
+    case GpuArch::GFX_908: return 65536;
+    case GpuArch::GFX_90A: return 65536;
+    case GpuArch::GFX_942: return 65536;
+    case GpuArch::GFX_950: return 163840;
+    case GpuArch::GFX_1100: return 65536;
+    case GpuArch::GFX_1200: return 65536;
+    case GpuArch::GFX_1201: return 65536;
+    case GpuArch::GFX_1250: return 327680;
+    case GpuArch::UNKNOWN:
+    default: return 65536;
     }
 }
 

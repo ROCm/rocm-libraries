@@ -264,12 +264,18 @@ except ImportError:
         arch: dict(_FALLBACK_LDS_BUDGET) for arch in ARCH_FAMILY_MAP
     }
 
-    def get_lds_limit(gpu_arch: str, pipeline: str) -> int:
+    def get_lds_limit(
+        gpu_arch: str, pipeline: str, double_smem_buffer: bool = False
+    ) -> int:
         """Get the LDS staging budget in bytes for an architecture and pipeline."""
         per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(
             gpu_arch.lower(), _FALLBACK_LDS_BUDGET
         )
-        return per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+        budget = per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+        if double_smem_buffer:
+            # Conservative: the fallback assumes the smallest capacity we ship.
+            budget = min(budget, _FALLBACK_LDS_BUDGET["default"] // 2)
+        return budget
 
     TRAIT_UNSUPPORTED_COMBINATIONS = {
         ("compv3", "cshuffle", "interwave"),
@@ -380,6 +386,11 @@ class KernelConfig:
     pipeline: str = "compv4"
     epilogue: str = "cshuffle"
     scheduler: str = "intrawave"
+
+    # Ping-pong LDS staging. Only meaningful for the pipelines that make it a
+    # choice (mem, compv3, compv5, compv6); the ones that always double already
+    # carry it in their per-pipeline budget.
+    double_smem_buffer: bool = False
 
     # Layout (for whole-workgroup cover validation)
     layout: str = "rcr"
@@ -561,6 +572,7 @@ class ArchFilter:
         scheduler: str = "intrawave",
         layout: str = "rcr",
         operator: Optional[OperatorType] = None,
+        double_smem_buffer: bool = False,
     ) -> bool:
         """
         Quick validation check for a kernel configuration.
@@ -572,6 +584,8 @@ class ArchFilter:
             warp_tile_m, warp_tile_n, warp_tile_k: Warp tile dimensions
             pipeline, epilogue, scheduler: Kernel traits
             layout: Matrix layout (e.g., "rcr")
+            double_smem_buffer: Ping-pong LDS staging. Halves the staging
+                     budget for the pipelines that make it a choice.
             operator: Operator type (GEMM, CONV_FWD, CONV_BWD_DATA, etc.)
                      Affects validation rules for tile constraints.
                      Defaults to GEMM if not specified.
@@ -596,6 +610,7 @@ class ArchFilter:
             epilogue=epilogue.lower(),
             scheduler=scheduler.lower(),
             layout=layout.lower(),
+            double_smem_buffer=double_smem_buffer,
             operator=operator if operator is not None else OperatorType.GEMM,
         )
         return self.validate_kernel(config).valid
@@ -743,12 +758,15 @@ class ArchFilter:
 
         # The budget depends on the target, not just the pipeline: a tile that
         # overflows one architecture's LDS may fit comfortably in another's.
-        max_lds = get_lds_limit(self.gpu_arch, config.pipeline)
+        max_lds = get_lds_limit(
+            self.gpu_arch, config.pipeline, config.double_smem_buffer
+        )
 
         if total_lds > max_lds:
+            staging = " double-buffered" if config.double_smem_buffer else ""
             result.add_error(
                 f"LDS capacity exceeded on {self.gpu_arch} "
-                f"(pipeline={config.pipeline}): "
+                f"(pipeline={config.pipeline}{staging}): "
                 f"{total_lds} bytes > {max_lds} bytes limit. "
                 f"Matrix A: {config.tile_m}x{config.tile_k}x{elem_size_a}={matrix_a_size}B, "
                 f"Matrix B: {config.tile_n}x{config.tile_k}x{elem_size_b}={matrix_b_size}B"

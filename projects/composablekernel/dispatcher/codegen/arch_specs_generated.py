@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-16T01:47:34.240021
+Generated at: 2026-09-16T02:11:39.811195
 
 To update this file:
 1. Edit arch_specs.json
@@ -249,11 +249,25 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
     },
 }
 
+# Total physical LDS per architecture, in bytes. Mirrors get_lds_size() in
+# include/ck_tile/core/arch/arch.hpp.
+LDS_TOTAL_CAPACITY_BY_ARCH: Dict[str, int] = {
+    "gfx908": 65536,
+    "gfx90a": 65536,
+    "gfx942": 65536,
+    "gfx950": 163840,
+    "gfx1100": 65536,
+    "gfx1200": 65536,
+    "gfx1201": 65536,
+    "gfx1250": 327680,
+}
+
 # Smallest budget shipped, handed to architectures we do not recognise.
 _SMALLEST_LDS_BUDGET: Dict[str, int] = LDS_CAPACITY_LIMITS_BY_ARCH[
     min(LDS_CAPACITY_LIMITS_BY_ARCH,
         key=lambda a: LDS_CAPACITY_LIMITS_BY_ARCH[a]["default"])
 ]
+_SMALLEST_LDS_CAPACITY: int = min(LDS_TOTAL_CAPACITY_BY_ARCH.values())
 
 # Unsupported trait combinations: (pipeline, epilogue, scheduler)
 TRAIT_UNSUPPORTED_COMBINATIONS: Set[Tuple[str, str, str]] = {
@@ -312,15 +326,30 @@ def get_warp_tile_combos(gpu_arch: str, dtype_key: str) -> List[List[int]]:
     return gpu_combos.get(dtype_key.lower(), [])
 
 
-def get_lds_limit(gpu_arch: str, pipeline: str) -> int:
-    """Get the LDS staging budget in bytes for an architecture and pipeline."""
-    per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(gpu_arch.lower())
+def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False) -> int:
+    """Get the LDS staging budget in bytes for an architecture and pipeline.
+
+    double_smem_buffer covers the pipelines that stage two LDS buffers by
+    configuration rather than by construction (mem, compv3, compv5, compv6).
+    Those allocate 2 * (A + B), so the A + B budget is halved. Pipelines that
+    always double already carry that in their per-pipeline budget, hence the
+    min(): the budget is never halved twice.
+    """
+    arch = gpu_arch.lower()
+    per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(arch)
     if per_pipeline is None:
         # Unrecognised target: hand back the smallest budget we ship, never the
         # largest. Too small only costs us kernels; too large produces kernels
         # that cannot launch.
         per_pipeline = _SMALLEST_LDS_BUDGET
-    return per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+
+    budget = per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+
+    if double_smem_buffer:
+        capacity = LDS_TOTAL_CAPACITY_BY_ARCH.get(arch, _SMALLEST_LDS_CAPACITY)
+        budget = min(budget, capacity // 2)
+
+    return budget
 
 
 def is_trait_combo_unsupported(pipeline: str, epilogue: str, scheduler: str) -> bool:

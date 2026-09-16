@@ -33,6 +33,7 @@ sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 from arch_filter import ArchFilter, KernelConfig  # noqa: E402
 from arch_specs_generated import (  # noqa: E402
     LDS_CAPACITY_LIMITS_BY_ARCH,
+    LDS_TOTAL_CAPACITY_BY_ARCH,
     get_lds_limit,
 )
 
@@ -141,19 +142,75 @@ class TestLdsBudgetIsSafe(unittest.TestCase):
                 with self.subTest(arch=arch, pipeline=pipeline):
                     self.assertEqual(per_pipeline[pipeline], capacity // 2)
 
+    def test_total_capacity_matches_hardware(self):
+        for arch, capacity_kb in HARDWARE_LDS_KB.items():
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    LDS_TOTAL_CAPACITY_BY_ARCH[arch], capacity_kb * 1024
+                )
+
     def test_unknown_arch_gets_the_smallest_budget(self):
         """An unrecognised target must not be handed more LDS than it may have."""
         smallest = min(p["default"] for p in LDS_CAPACITY_LIMITS_BY_ARCH.values())
         self.assertEqual(get_lds_limit("gfx9999", "default"), smallest)
 
 
+class TestDoubleBufferedStaging(unittest.TestCase):
+    """Ping-pong staging allocates 2 * (A + B), so the budget must halve.
+
+    The pipeline name alone does not imply it: mem, compv3, compv5 and compv6
+    make double buffering a configuration choice, so the flag has to reach the
+    capacity check or those kernels get twice the LDS they are budgeted for.
+    """
+
+    def test_configurable_pipelines_halve_when_double_buffered(self):
+        for arch in LDS_CAPACITY_LIMITS_BY_ARCH:
+            capacity = LDS_TOTAL_CAPACITY_BY_ARCH[arch]
+            for pipeline in ("mem", "compv3", "compv5"):
+                with self.subTest(arch=arch, pipeline=pipeline):
+                    self.assertEqual(
+                        get_lds_limit(arch, pipeline, double_smem_buffer=True),
+                        capacity // 2,
+                    )
+
+    def test_double_buffered_budget_exactly_fits_capacity(self):
+        """Two buffers of the budgeted size must not exceed the silicon."""
+        for arch in LDS_CAPACITY_LIMITS_BY_ARCH:
+            capacity = LDS_TOTAL_CAPACITY_BY_ARCH[arch]
+            for pipeline in LDS_CAPACITY_LIMITS_BY_ARCH[arch]:
+                with self.subTest(arch=arch, pipeline=pipeline):
+                    budget = get_lds_limit(arch, pipeline, double_smem_buffer=True)
+                    self.assertLessEqual(2 * budget, capacity)
+
+    def test_always_double_pipelines_are_not_halved_twice(self):
+        """compv4/preshufflev2 already carry the halving in their budget."""
+        for arch in LDS_CAPACITY_LIMITS_BY_ARCH:
+            for pipeline in ("compv4", "preshufflev2"):
+                with self.subTest(arch=arch, pipeline=pipeline):
+                    self.assertEqual(
+                        get_lds_limit(arch, pipeline, double_smem_buffer=True),
+                        get_lds_limit(arch, pipeline),
+                    )
+
+    def test_single_buffered_is_the_default(self):
+        """Existing callers pass no flag and must see no change."""
+        for arch in LDS_CAPACITY_LIMITS_BY_ARCH:
+            for pipeline in LDS_CAPACITY_LIMITS_BY_ARCH[arch]:
+                with self.subTest(arch=arch, pipeline=pipeline):
+                    self.assertEqual(
+                        get_lds_limit(arch, pipeline),
+                        LDS_CAPACITY_LIMITS_BY_ARCH[arch][pipeline],
+                    )
+
+
 class TestLdsValidationEndToEnd(unittest.TestCase):
     """The budget has to actually reach the validator, not just the table."""
 
     @staticmethod
-    def _config(pipeline, tile_m=128, tile_n=256, tile_k=128):
+    def _config(pipeline, tile_m=128, tile_n=256, tile_k=128, double_smem_buffer=False):
         # fp16 A and B: 128x128x2 + 256x128x2 = 96 KB of staging.
         return KernelConfig(
+            double_smem_buffer=double_smem_buffer,
             datatype_a="fp16",
             datatype_b="fp16",
             datatype_c="fp16",
@@ -183,6 +240,19 @@ class TestLdsValidationEndToEnd(unittest.TestCase):
         self.assertFalse(
             self._lds_errors("gfx950", config),
             "96 KB of staging fits comfortably in gfx950's 160 KB.",
+        )
+
+    def test_double_buffered_96kb_tile_rejected_on_gfx950(self):
+        """96 KB fits gfx950 once, but not twice: 2 x 96 KB > 160 KB."""
+        self.assertFalse(
+            self._lds_errors("gfx950", self._config("compv3")),
+            "single-buffered 96 KB fits gfx950",
+        )
+        self.assertTrue(
+            self._lds_errors(
+                "gfx950", self._config("compv3", double_smem_buffer=True)
+            ),
+            "double-buffered 96 KB needs 192 KB and must be rejected on gfx950.",
         )
 
     def test_error_message_names_the_architecture(self):

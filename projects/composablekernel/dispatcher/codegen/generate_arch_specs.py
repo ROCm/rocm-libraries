@@ -142,7 +142,10 @@ def generate_python_module(specs: Dict[str, Any], output_path: Path):
         lds_budgets_str += "    },\n"
     lds_budgets_str += "}"
 
-    smallest_default = min(p["default"] for p in lds_budgets.values())
+    lds_total_str = "{\n"
+    for arch in lds_budgets:
+        lds_total_str += f'    "{arch}": {archs[arch]["lds_capacity_kb"] * 1024},\n'
+    lds_total_str += "}"
 
     # Build dtype combinations dict
     dtype_combos = specs.get("dtype_combinations", {})
@@ -212,11 +215,16 @@ PRESHUFFLE_PIPELINES: List[str] = {preshuffle_pipelines_str}
 # Resolved from each architecture's lds_capacity_kb in arch_specs.json.
 LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {lds_budgets_str}
 
+# Total physical LDS per architecture, in bytes. Mirrors get_lds_size() in
+# include/ck_tile/core/arch/arch.hpp.
+LDS_TOTAL_CAPACITY_BY_ARCH: Dict[str, int] = {lds_total_str}
+
 # Smallest budget shipped, handed to architectures we do not recognise.
 _SMALLEST_LDS_BUDGET: Dict[str, int] = LDS_CAPACITY_LIMITS_BY_ARCH[
     min(LDS_CAPACITY_LIMITS_BY_ARCH,
         key=lambda a: LDS_CAPACITY_LIMITS_BY_ARCH[a]["default"])
 ]
+_SMALLEST_LDS_CAPACITY: int = min(LDS_TOTAL_CAPACITY_BY_ARCH.values())
 
 # Unsupported trait combinations: (pipeline, epilogue, scheduler)
 TRAIT_UNSUPPORTED_COMBINATIONS: Set[Tuple[str, str, str]] = {unsupported_str}
@@ -254,15 +262,30 @@ def get_warp_tile_combos(gpu_arch: str, dtype_key: str) -> List[List[int]]:
     return gpu_combos.get(dtype_key.lower(), [])
 
 
-def get_lds_limit(gpu_arch: str, pipeline: str) -> int:
-    """Get the LDS staging budget in bytes for an architecture and pipeline."""
-    per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(gpu_arch.lower())
+def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False) -> int:
+    """Get the LDS staging budget in bytes for an architecture and pipeline.
+
+    double_smem_buffer covers the pipelines that stage two LDS buffers by
+    configuration rather than by construction (mem, compv3, compv5, compv6).
+    Those allocate 2 * (A + B), so the A + B budget is halved. Pipelines that
+    always double already carry that in their per-pipeline budget, hence the
+    min(): the budget is never halved twice.
+    """
+    arch = gpu_arch.lower()
+    per_pipeline = LDS_CAPACITY_LIMITS_BY_ARCH.get(arch)
     if per_pipeline is None:
         # Unrecognised target: hand back the smallest budget we ship, never the
         # largest. Too small only costs us kernels; too large produces kernels
         # that cannot launch.
         per_pipeline = _SMALLEST_LDS_BUDGET
-    return per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+
+    budget = per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+
+    if double_smem_buffer:
+        capacity = LDS_TOTAL_CAPACITY_BY_ARCH.get(arch, _SMALLEST_LDS_CAPACITY)
+        budget = min(budget, capacity // 2)
+
+    return budget
 
 
 def is_trait_combo_unsupported(pipeline: str, epilogue: str, scheduler: str) -> bool:
@@ -388,6 +411,18 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
     lds_budget_cases.append("    default:")
     lds_budget_cases.extend(_lds_pipeline_switch(lds_budgets[smallest_arch], "        "))
 
+    # Total physical LDS per architecture, used to halve the budget for
+    # pipelines that stage two buffers by configuration.
+    lds_total_cases = []
+    for arch in lds_budgets:
+        enum_name = arch.upper().replace("GFX", "GFX_")
+        lds_total_cases.append(
+            f"    case GpuArch::{enum_name}: return {archs[arch]['lds_capacity_kb'] * 1024};"
+        )
+    smallest_capacity = min(archs[a]["lds_capacity_kb"] for a in lds_budgets) * 1024
+    lds_total_cases.append("    case GpuArch::UNKNOWN:")
+    lds_total_cases.append(f"    default: return {smallest_capacity};")
+
     content = f"""// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
@@ -474,6 +509,15 @@ inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline) {{
     switch(arch)
     {{
 {chr(10).join(lds_budget_cases)}
+    }}
+}}
+
+// Total physical LDS per architecture, in bytes. Mirrors get_lds_size() in
+// include/ck_tile/core/arch/arch.hpp.
+inline std::size_t get_lds_total_capacity(GpuArch arch) {{
+    switch(arch)
+    {{
+{chr(10).join(lds_total_cases)}
     }}
 }}
 
