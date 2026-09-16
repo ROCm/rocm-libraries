@@ -124,6 +124,19 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
         TestCase{{datatype, miopenTensorNCHW, {64, 2, 56, 56}},
                  {datatype, miopenTensorNCHW, {2, 1, 7, 7}},
                  datatype, {{3, 3}, {1, 1}, {1, 1}, 2}},
+        // Non-square 3x3 stride-1 tiles. NBatch=1, so cover both the tuned batch size and N > 1.
+        TestCase{{datatype, miopenTensorNCHW, {1, 384, 3, 80}},
+                 {datatype, miopenTensorNCHW, {384, 1, 3, 3}},
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 384}},
+        TestCase{{datatype, miopenTensorNCHW, {1, 192, 6, 80}},
+                 {datatype, miopenTensorNCHW, {192, 1, 3, 3}},
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 192}},
+        TestCase{{datatype, miopenTensorNCHW, {1, 96, 12, 80}},
+                 {datatype, miopenTensorNCHW, {96, 1, 3, 3}},
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 96}},
+        TestCase{{datatype, miopenTensorNCHW, {64, 2, 6, 80}},
+                 {datatype, miopenTensorNCHW, {2, 1, 3, 3}},
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 2}},
         // clang-format on
     };
 }
