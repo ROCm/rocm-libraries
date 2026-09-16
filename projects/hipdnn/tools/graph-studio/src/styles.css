@@ -465,7 +465,8 @@ body,
   color: var(--text-dim);
   font-size: 12px;
 }
-.report__field select {
+.report__field select,
+.report__field input {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -473,6 +474,12 @@ body,
   padding: 8px 10px;
   font-size: 13px;
   min-width: 0;
+}
+.report__field input {
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+}
+.report__field input[aria-invalid="true"] {
+  border-color: #fca5a5;
 }
 .report__chart-head {
   display: flex;
@@ -1073,6 +1080,14 @@ body,
 }
 
 /* ── Tensor artifacts ────────────────────────────────── */
+
+/* The tab panel is a flex column with no scroller of its own, so the view owns
+   its overflow — as .command__main does for the Verify tab. */
+.tensors {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 
 .tensors__slots {
   display: grid;

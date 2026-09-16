@@ -31,6 +31,13 @@ import { resolveRelated } from "./PerfettoFrame";
 
 const BUCKET_CHOICES = [16, 32, 64, 128] as const;
 
+/** Null for anything the comparison cannot use; `Number("")` is 0, so blanks fail here too. */
+function tolerance(text: string): number | null {
+  if (text.trim() === "") return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 /** Where a capture came from, shown so the right directory is easy to find. */
 export interface TensorHint {
   readonly label: string;
@@ -187,9 +194,9 @@ export function TensorView({ hints, onBack, base = null, onGrantDirectory = asyn
 
   const comparison = useMemo(() => {
     if (!selected || !partner) return null;
-    const r = Number(rtol);
-    const a = Number(atol);
-    if (!Number.isFinite(r) || !Number.isFinite(a) || r < 0 || a < 0) return null;
+    const r = tolerance(rtol);
+    const a = tolerance(atol);
+    if (r === null || a === null) return null;
     if (selected.values.length !== partner.values.length) return null;
     return compareTensors(selected.values, partner.values, r, a);
   }, [selected, partner, rtol, atol]);
@@ -417,11 +424,21 @@ function renderComparison(props: ComparisonPanelProps) {
       <div className="report__filters">
         <label className="report__field">
           <span>Relative tolerance</span>
-          <input value={rtol} onChange={(e) => props.setRtol(e.target.value)} />
+          <input
+            value={rtol}
+            inputMode="decimal"
+            aria-invalid={tolerance(rtol) === null}
+            onChange={(e) => props.setRtol(e.target.value)}
+          />
         </label>
         <label className="report__field">
           <span>Absolute tolerance</span>
-          <input value={atol} onChange={(e) => props.setAtol(e.target.value)} />
+          <input
+            value={atol}
+            inputMode="decimal"
+            aria-invalid={tolerance(atol) === null}
+            onChange={(e) => props.setAtol(e.target.value)}
+          />
         </label>
       </div>
 
