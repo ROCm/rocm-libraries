@@ -151,7 +151,7 @@ inline constexpr const char* kSkipList[] = {
     "Image_Filter/GaussianFilterTest.Correctness/HOST_*_PLN3_PartialRoi_*_k5_sd1",
     "Image_Filter/GaussianFilterTest.Correctness/HOST_*_PLN1_PartialRoi_*_k5_sd5",
     "Image_Filter/GaussianFilterTest.Correctness/HOST_*_PLN3_PartialRoi_*_k5_sd5",
-    "Image_Filter/SobelFilterTest.Correctness/*_I8toI8_PLN1_*_k3",
+    "Image_Filter/SobelFilterTest.Correctness/HIP_I8toI8_PLN1_*_k3",
     "Image_Morphological/DilateTest.Correctness/HOST_F16toF16_PKD3_*_1x45x13_k7",
     "Image_Morphological/DilateTest.Correctness/HOST_F32toF32_PKD3_*_1x45x13_k7",
     "Image_Morphological/DilateTest.Correctness/HOST_F16toF16_PKD3_FullRoi_1x45x13_k9",

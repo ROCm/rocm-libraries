@@ -61,10 +61,19 @@ Expression
   dst = sobelType == 0 ? gx : sobelType == 1 ? gy : sqrt(gx^2 + gy^2)
 
 Per-type form
-  The result is quantized via quantize_stored: U8 round + clamp[0,255], I8
-  round + clamp[-128,127], F16/F32 clamp[0,1]. Gradients can be negative or
-  out of range, so clamping is the intended "same depth as src" behaviour; any
-  resulting diff is a finding, not a reference bug.
+  The gradient is an *intensity*, so it is computed in the dtype's intensity
+  space and written back with the dtype's store rule. For I8 that space is the
+  stored value lifted by +128 (I8 pixels are U8 intensities shifted by -128),
+  and the store subtracts it again -- the same convention emboss_ref uses, and
+  the one the API's "dstPtr depth ... same depth as srcPtr" implies. Because Gx
+  and Gy both sum to zero the lift cancels in the convolution itself; it is the
+  *store* that differs, and storing the raw gradient as if it were already in
+  I8 units is off by a full 128 levels on every pixel.
+
+  After the shift the result is quantized via quantize_stored: U8 round +
+  clamp[0,255], I8 round + clamp[-128,127], F16/F32 clamp[0,1]. Gradients can
+  be negative or out of range, so clamping is the intended "same depth as src"
+  behaviour.
 
 Notes
   Scope is PLN1 only, kernelSize = 3 only. sobel_filter's dstDesc is always
@@ -79,16 +88,17 @@ void sobel_filter_reference(const T* src, T* dst, const RpptDesc& d, DType dt, c
                             RpptRoiType type, Rpp32u sobelType, Rpp32u kernelSize) {
     static const double Gx[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
     static const double Gy[9] = {-1, -2, -1, 0, 0, 0, 1, 2, 1};
+    const double shift = (dt == DType::I8) ? 128.0 : 0.0;
     filter_reference<T>(src, d, dst, d, roi, type, kernelSize, [&](const double* w, int kk) {
         double gx = 0.0, gy = 0.0;
         for (int k = 0; k < kk; ++k) {
-            gx += Gx[k] * w[k];
-            gy += Gy[k] * w[k];
+            gx += Gx[k] * (w[k] + shift);
+            gy += Gy[k] * (w[k] + shift);
         }
         const double result = sobelType == 0   ? gx
                               : sobelType == 1 ? gy
                                                : std::sqrt(gx * gx + gy * gy);
-        return quantize_stored(result, dt);
+        return quantize_stored(result - shift, dt);
     });
 }
 
