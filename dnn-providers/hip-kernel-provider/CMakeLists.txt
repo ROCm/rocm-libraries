@@ -523,11 +523,7 @@ install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 
-if(ENABLE_ASM_SDPA_ENGINE)
-    install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
-            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
-            FILES_MATCHING PATTERN "*.co")
-endif()
+# .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The two descriptor trees are installed here and nowhere else. Every producer --
