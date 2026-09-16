@@ -32,15 +32,70 @@
 
 #include <map>
 #include <mutex>
+#include <set>
 #include <stdlib.h>
+
+#include <hip/hip_runtime.h>
 
 #include "hipblas_test.hpp"
 #include "host_alloc.hpp"
+
+// Under HSA_XNACK=1 on a discrete GPU (e.g. gfx942 MI300X), a plain pageable
+// host allocation is part of the SVM address space: an H2D copy can pull its
+// pages into VRAM, and a later CPU write (e.g. the OpenMP-parallel
+// hipblas_init_matrix fill) then faults them back RAM<-VRAM through
+// svm_migrate_to_ram. With many OpenMP threads faulting at once this serializes
+// on the amdgpu SVM migration mutex (perf: ~98% osq_lock), turning client init
+// into an hours-long stall. Integrated APUs (e.g. MI300A) have unified coherent
+// memory and never hit this path.
+//
+// Pinned (page-locked) host memory is not pageable and not SVM-migratable, so
+// these host-only buffers stay in RAM and the init writes never trigger
+// migration -- while preserving full OpenMP parallelism. The pinned pool is
+// finite, so allocation falls back to ordinary malloc/calloc when hipHostMalloc
+// fails; free() therefore must know which allocator produced each pointer.
+static bool host_use_pinned()
+{
+    // Allow opting out (e.g. to A/B against pageable memory) via env.
+    static const bool disabled = [] {
+        const char* e = getenv("HIPBLAS_CLIENT_NO_PINNED_HOST_ALLOC");
+        return e && *e && *e != '0';
+    }();
+    return !disabled;
+}
 
 // light weight memory tracking for threshold limit on total use
 static size_t                  mem_used{0};
 static std::map<void*, size_t> mem_allocated;
 static std::mutex              mem_mutex;
+
+// Pointers allocated via hipHostMalloc; these are freed with hipHostFree.
+// Guarded by mem_mutex (same critical sections as the tracking map).
+static std::set<void*> pinned_ptrs;
+
+// Allocate `size` bytes of pinned host memory, falling back to malloc/calloc on
+// failure. When `zero` is true the buffer is zero-initialized (calloc semantics).
+// A returned pinned pointer is recorded so free_ptr_use() releases it with
+// hipHostFree instead of free.
+static void* host_pinned_alloc(size_t size, bool zero)
+{
+    if(host_use_pinned())
+    {
+        void* ptr = nullptr;
+        if(hipHostMalloc(&ptr, size, hipHostMallocDefault) == hipSuccess && ptr)
+        {
+            if(zero)
+                memset(ptr, 0, size);
+            {
+                std::lock_guard<std::mutex> lock(mem_mutex);
+                pinned_ptrs.insert(ptr);
+            }
+            return ptr;
+        }
+        // hipHostMalloc failed (pool exhausted, etc.): fall through to pageable.
+    }
+    return zero ? calloc(1, size) : malloc(size);
+}
 
 void alloc_ptr_use(void* ptr, size_t size)
 {
@@ -54,23 +109,39 @@ void alloc_ptr_use(void* ptr, size_t size)
 
 void free_ptr_use(void* ptr, bool call_free)
 {
-    std::lock_guard<std::mutex> lock(mem_mutex);
-    auto                        it = mem_allocated.find(ptr);
+    bool pinned = false;
+    {
+        std::lock_guard<std::mutex> lock(mem_mutex);
+        auto                        it = mem_allocated.find(ptr);
 
-    if(ptr && it != mem_allocated.end())
-    {
-        mem_used -= it->second;
-        mem_allocated.erase(it);
-    }
-    else if(ptr && call_free)
-    {
-        std::cerr << "Warning: Freeing untracked pointer " << ptr
-                  << " - untracked memory released (potential double-free or memory corruption)"
-                  << std::endl;
+        if(ptr && it != mem_allocated.end())
+        {
+            mem_used -= it->second;
+            mem_allocated.erase(it);
+        }
+        else if(ptr && call_free)
+        {
+            std::cerr << "Warning: Freeing untracked pointer " << ptr
+                      << " - untracked memory released (potential double-free or memory corruption)"
+                      << std::endl;
+        }
+
+        auto pit = pinned_ptrs.find(ptr);
+        if(pit != pinned_ptrs.end())
+        {
+            pinned = true;
+            pinned_ptrs.erase(pit);
+        }
     }
 
     if(call_free)
-        free(ptr);
+    {
+        // Pinned buffers must be released with hipHostFree, pageable with free.
+        if(pinned)
+            (void)hipHostFree(ptr);
+        else
+            free(ptr);
+    }
 }
 
 size_t host_bytes_allocated()
@@ -195,7 +266,7 @@ void* host_malloc(size_t size)
 {
     if(host_mem_safe(size))
     {
-        void* ptr = malloc(size);
+        void* ptr = host_pinned_alloc(size, false);
 
         static int value = -1;
 
@@ -225,7 +296,7 @@ void* host_calloc(size_t nmemb, size_t size)
 {
     if(host_mem_safe(nmemb * size))
     {
-        void* ptr = calloc(nmemb, size);
+        void* ptr = host_pinned_alloc(nmemb * size, true);
         alloc_ptr_use(ptr, nmemb * size);
         return ptr;
     }
