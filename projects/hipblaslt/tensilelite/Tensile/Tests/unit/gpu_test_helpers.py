@@ -778,7 +778,8 @@ def generate_srd_setup():
     return module
 
 
-def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2, mi_wave_group=None):
+def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2, mi_wave_group=None,
+                           geometry_b=None):
     """Create and configure a writer for roundtrip kernel tests.
 
     Calls create_writer, reserves sgprs for HW regs + strides + SRD + DTL + swap,
@@ -790,12 +791,17 @@ def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2, mi_wave_group=N
     extent (MacroTile / MIWaveGroup), not of the macro tile alone, so the
     inferred grouping is not always a legal one to test under.
 
+    geometry_b gives B a geometry of its own, defaulting to `geometry` when
+    omitted.  Forwarded verbatim to create_writer, which is where the NN case
+    (TLU=1 A paired with a TLU=0 B) is documented.
+
     Returns:
         (writer, kernel, tileInfoA, tileInfoB, lds_size)
     """
     init_rocisa()
     writer, kernel, tileInfoA, tileInfoB = create_writer(
-        cfg, geometry=geometry, inst_k=inst_k, bpe=bpe, mi_wave_group=mi_wave_group)
+        cfg, geometry=geometry, inst_k=inst_k, bpe=bpe, mi_wave_group=mi_wave_group,
+        geometry_b=geometry_b)
 
     # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
     # s[4:5]=input_A_ptr, s[6:7]=input_B_ptr, s[8:9]=output_ptr,
