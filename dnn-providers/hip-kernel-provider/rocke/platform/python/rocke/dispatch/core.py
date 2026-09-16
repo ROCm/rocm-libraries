@@ -400,6 +400,55 @@ class KernelCandidate:
         return self._supports(request)
 
 
+def selector_matches(
+    request: OperatorRequest, candidate: KernelCandidate
+) -> Tuple[bool, str]:
+    """Match an explicit ``algorithm``/``spec_id`` pin against one candidate.
+
+    ``"auto"`` (the default on every family request) matches any candidate; a
+    set value must equal the candidate's. Shared by every operator family so the
+    pin semantics cannot drift between them.
+
+    Both fields are read directly, not via ``getattr`` with a default: a
+    request type that never declared them is a family wiring bug, and it should
+    raise here as it did when each family had its own copy. Defaulting to
+    ``"auto"`` would make it match every candidate instead -- a pin silently
+    ignored, which is the worst failure this function has.
+    """
+    algorithm = str(request.algorithm).strip().lower()
+    spec_id = str(request.spec_id).strip().lower()
+    if algorithm not in ("auto", candidate.algorithm):
+        return (
+            False,
+            f"request algorithm {request.algorithm!r} != {candidate.algorithm!r}",
+        )
+    if spec_id not in ("auto", candidate.spec_id):
+        return False, f"request spec_id {request.spec_id!r} != {candidate.spec_id!r}"
+    return True, "ok"
+
+
+def make_kernel_id(
+    request: OperatorRequest, candidate: KernelCandidate, spec: Any, *, op: str
+) -> KernelId:
+    """The stable identity shared by caches/manifests/benchmarks for one pick.
+
+    Identical across families except the operator name ``op``; the family is
+    taken from the candidate and the request/spec hashes from their normalized
+    forms, so a family cannot hash a pick differently from its peers.
+    """
+    return KernelId(
+        op=op,
+        family=candidate.family,
+        candidate=candidate.name,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+        arch=request.arch,
+        abi_version=candidate.abi_version,
+        request_hash=stable_json_hash(request.normalized(), n=16),
+        spec_hash=stable_json_hash(asdict(spec), n=16),
+    )
+
+
 Ranker = Callable[
     [OperatorRequest, Sequence[KernelCandidate]], Sequence[KernelCandidate]
 ]

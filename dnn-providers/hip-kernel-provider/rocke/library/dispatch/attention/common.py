@@ -59,7 +59,7 @@ from kernels.common.attention_unified import (
     UNIFIED_HEAD_SIZES,
 )
 from rocke.core.arch import ArchTarget
-from rocke.dispatch.core import KernelCandidate, OperatorRequest
+from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
 
 FAMILY = "attention_unified"
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
@@ -275,16 +275,9 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     )
 
 
-def _selector_matches(
-    req: AttentionRequest, candidate: KernelCandidate
-) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
+# Shared pin-selector: identical across families, so it lives in the dispatch
+# core and each family re-exports it under its own name.
+_selector_matches = selector_matches
 
 
 @dataclass(frozen=True)
