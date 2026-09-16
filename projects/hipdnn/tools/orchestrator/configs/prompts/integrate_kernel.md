@@ -206,9 +206,31 @@ appending a case to an existing `sweep.json` is allowed; **editing a case that i
 there is not**, and it is separately detected and separately reported. If a case looks
 wrong, say so in `summary` and leave it alone.
 
-Do not build, install or run the test suite yourself. The orchestrator configures,
-builds, installs and runs every gate immediately after you finish and feeds you the
-result. Time spent building here is time not spent on the pack.
+# Build and test what you write
+
+You have cmake, ninja, clang and the ROCm runtime on your PATH, and the build tree is
+at `${vars.ingestor_build_dir}`. Use them. An edit you have not compiled is a guess,
+and a round that spends an agent session producing a guess and then fails on a typo is
+the most expensive way to find a typo.
+
+The cheap loop, in the order that pays:
+
+```
+cmake --build ${vars.ingestor_build_dir} --parallel 16 --target <the one target you touched>
+${vars.build_bin}/hip_kernel_provider_tests --gtest_filter=<YourSuite>.*
+```
+
+Build the target you changed, not the world, and run the focused suite rather than the
+whole matrix. A full rebuild-and-run cycle inside this step is time not spent on the
+pack, and the orchestrator is going to do the authoritative pass immediately after you
+finish anyway.
+
+That last point is the one to keep hold of: **your build is for catching your own
+mistakes, not for producing the verdict.** The orchestrator reconfigures, rebuilds,
+installs and runs every gate against the INSTALL tree after you return, and its result
+is the one the loop reads. A green run in your session and a red gate afterwards is a
+difference worth understanding rather than arguing with -- it usually means you tested
+the build tree and the gate tested the install.
 
 # What the orchestrator checks after you finish
 

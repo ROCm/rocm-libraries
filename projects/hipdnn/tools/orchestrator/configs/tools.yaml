@@ -105,10 +105,23 @@ profiles:
 
 tools:
   # Claude Code CLI. Verify the path resolves on this machine before first use.
+  # The agent is expected to build what it writes and run the focused test, so it gets
+  # the same PATH the build and test steps get. Without this it inherits an environment
+  # that has cmake but no ninja and no clang: `cmake --build` dies with "unable to find
+  # a build program corresponding to Ninja", and any test binary it launches is killed
+  # by the loader before main for want of the HIP runtime. Both failures read as "the
+  # agent cannot build", which is how a prompt ends up telling it not to try.
+  #
+  # build_dir rather than ingestor_build_dir: this is the tree most flows build, and a
+  # flow with its own tree passes that path to the agent in its prompt.
   claude:
     exe:
       windows: C:/Users/dev/.local/bin/claude.exe
       linux: claude
+    path_prepend:
+      - "${vars.ninja_bin}"
+      - "${vars.build_dir}/bin"
+      - "${vars.rocm_bin}"
 
   # path_prepend, not an -DCMAKE_MAKE_PROGRAM in the flow: where ninja lives is a
   # property of the machine, and a flow that spelled the path would be this machine's
