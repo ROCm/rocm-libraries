@@ -1,0 +1,16 @@
+ROCBLAS_ABI_5 {
+  global:
+    rocblas_create_handle;
+    rocblas_destroy_handle;
+    rocblas_get_pointer_mode;
+    rocblas_get_stream;
+    rocblas_saxpy;
+    rocblas_sdot;
+    rocblas_set_pointer_mode;
+    rocblas_set_stream;
+    rocblas_sgemm;
+    rocblas_sgemm_64;
+    rocblas_sgemm_strided_batched;
+  local:
+    *;
+};

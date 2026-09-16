@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(hip CONFIG)
+find_dependency(nlohmann_json CONFIG)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ROCmInterfacesTargets.cmake")
+check_required_components(ROCmInterfacesShadow)

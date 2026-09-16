@@ -1,0 +1,2348 @@
+{
+  "declarations": [
+    {
+      "align_bits": 32,
+      "fields": [
+        {
+          "name": "x",
+          "type": "uint32_t"
+        },
+        {
+          "name": "f",
+          "type": "float"
+        }
+      ],
+      "file": "hipblaslt_e8.h",
+      "kind": "union",
+      "layout_available": true,
+      "line": 49,
+      "name": "(unnamed union at hipblaslt_e8.h:49:9)",
+      "size_bits": 32
+    },
+    {
+      "align_bits": 32,
+      "fields": [
+        {
+          "name": "x",
+          "type": "uint32_t"
+        },
+        {
+          "name": "f",
+          "type": "float"
+        }
+      ],
+      "file": "hipblaslt_e8.h",
+      "kind": "union",
+      "layout_available": true,
+      "line": 78,
+      "name": "(unnamed union at hipblaslt_e8.h:78:9)",
+      "size_bits": 32
+    },
+    {
+      "align_bits": 16,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint16_t"
+        }
+      ],
+      "file": "hipblaslt-types.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 69,
+      "name": "_hipblasLtHalf",
+      "size_bits": 16
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint8_t[16]"
+        },
+        {
+          "name": "max_workspace_bytes",
+          "type": "size_t"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 436,
+      "name": "_hipblasLtMatmulAlgo_t",
+      "size_bits": 192
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "algo",
+          "type": "hipblasLtMatmulAlgo_t"
+        },
+        {
+          "name": "workspaceSize",
+          "type": "size_t"
+        },
+        {
+          "name": "state",
+          "type": "hipblasStatus_t"
+        },
+        {
+          "name": "wavesCount",
+          "type": "float"
+        },
+        {
+          "name": "reserved",
+          "type": "int[4]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 457,
+      "name": "_hipblasLtMatmulHeuristicResult_t",
+      "size_bits": 448
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 115,
+      "name": "hipblasLtBatchMode_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_BATCH_MODE_STRIDED",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_BATCH_MODE_POINTER_ARRAY",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 118,
+      "name": "hipblasLtBatchMode_t",
+      "underlying_type": "enum hipblasLtBatchMode_t"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 75,
+      "name": "hipblasLtBfloat16",
+      "underlying_type": "hip_bfloat16"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 637,
+      "linkage_name": "hipblasLtCheckNumericsDrain",
+      "name": "hipblasLtCheckNumericsDrain",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "first_nan_call_id",
+          "type": "uint32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, uint32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 498,
+      "linkage_name": "hipblasLtCreate",
+      "name": "hipblasLtCreate",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 519,
+      "linkage_name": "hipblasLtDestroy",
+      "name": "hipblasLtDestroy",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "const hipblasLtHandle_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtHandle_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 85,
+      "name": "hipblasLtEpilogue_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_EPILOGUE_DEFAULT",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_BIAS",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU_BIAS",
+          "value": "6"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU",
+          "value": "32"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU_BIAS",
+          "value": "36"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU_AUX",
+          "value": "130"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_RELU_AUX_BIAS",
+          "value": "134"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DRELU",
+          "value": "136"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DRELU_BGRAD",
+          "value": "152"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU_AUX",
+          "value": "160"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_GELU_AUX_BIAS",
+          "value": "164"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DGELU",
+          "value": "192"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_DGELU_BGRAD",
+          "value": "208"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_BGRADA",
+          "value": "256"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_BGRADB",
+          "value": "512"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_SIGMOID",
+          "value": "1024"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_SWISH_EXT",
+          "value": "65536"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT",
+          "value": "65540"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_EXT",
+          "value": "131072"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT",
+          "value": "131076"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT",
+          "value": "131200"
+        },
+        {
+          "name": "HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT",
+          "value": "131204"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 109,
+      "name": "hipblasLtEpilogue_t",
+      "underlying_type": "enum hipblasLtEpilogue_t"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 63,
+      "name": "hipblasLtFloat",
+      "underlying_type": "float"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 478,
+      "linkage_name": "hipblasLtGetArchName",
+      "name": "hipblasLtGetArchName",
+      "parameters": [
+        {
+          "name": "archName",
+          "type": "char **"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (char **)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 475,
+      "linkage_name": "hipblasLtGetGitRevision",
+      "name": "hipblasLtGetGitRevision",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "rev",
+          "type": "char *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, char *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 568,
+      "linkage_name": "hipblasLtGetSmCountTarget",
+      "name": "hipblasLtGetSmCountTarget",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "smCountTarget",
+          "type": "int32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 609,
+      "linkage_name": "hipblasLtGetUniformSummationOrder",
+      "name": "hipblasLtGetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
+          "type": "int32_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 473,
+      "linkage_name": "hipblasLtGetVersion",
+      "name": "hipblasLtGetVersion",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "version",
+          "type": "int *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 72,
+      "name": "hipblasLtHalf",
+      "underlying_type": "struct _hipblasLtHalf"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 388,
+      "name": "hipblasLtHandle_t",
+      "underlying_type": "void *"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 78,
+      "name": "hipblasLtInt32",
+      "underlying_type": "int32_t"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 77,
+      "name": "hipblasLtInt8",
+      "underlying_type": "int8_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1070,
+      "linkage_name": "hipblasLtMatmul",
+      "name": "hipblasLtMatmul",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "A",
+          "type": "const void *"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "B",
+          "type": "const void *"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "C",
+          "type": "const void *"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "D",
+          "type": "void *"
+        },
+        {
+          "name": "Ddesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "algo",
+          "type": "const hipblasLtMatmulAlgo_t *"
+        },
+        {
+          "name": "workspace",
+          "type": "void *"
+        },
+        {
+          "name": "workspaceSizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, hipblasLtMatmulDesc_t, const void *, const void *, hipblasLtMatrixLayout_t, const void *, hipblasLtMatrixLayout_t, const void *, const void *, hipblasLtMatrixLayout_t, void *, hipblasLtMatrixLayout_t, const hipblasLtMatmulAlgo_t *, void *, size_t, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 998,
+      "linkage_name": "hipblasLtMatmulAlgoGetHeuristic",
+      "name": "hipblasLtMatmulAlgoGetHeuristic",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "Ddesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t"
+        },
+        {
+          "name": "requestedAlgoCount",
+          "type": "int"
+        },
+        {
+          "name": "heuristicResultsArray",
+          "type": "hipblasLtMatmulHeuristicResult_t *"
+        },
+        {
+          "name": "returnAlgoCount",
+          "type": "int *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, hipblasLtMatmulDesc_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatrixLayout_t, hipblasLtMatmulPreference_t, int, hipblasLtMatmulHeuristicResult_t *, int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 444,
+      "name": "hipblasLtMatmulAlgo_t",
+      "underlying_type": "struct _hipblasLtMatmulAlgo_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 230,
+      "name": "hipblasLtMatmulDescAttributes_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_TRANSA",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_TRANSB",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_BIAS_POINTER",
+          "value": "3"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER",
+          "value": "5"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER",
+          "value": "6"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER",
+          "value": "7"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER",
+          "value": "8"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER",
+          "value": "9"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER",
+          "value": "10"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD",
+          "value": "11"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE",
+          "value": "12"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_POINTER_MODE",
+          "value": "13"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER",
+          "value": "14"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE",
+          "value": "22"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE",
+          "value": "23"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_A_SCALE_MODE",
+          "value": "31"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_B_SCALE_MODE",
+          "value": "32"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET",
+          "value": "33"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT",
+          "value": "100"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT",
+          "value": "101"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT",
+          "value": "102"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT",
+          "value": "103"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT",
+          "value": "104"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT",
+          "value": "105"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_DESC_MAX",
+          "value": "106"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 258,
+      "name": "hipblasLtMatmulDescAttributes_t",
+      "underlying_type": "enum hipblasLtMatmulDescAttributes_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 770,
+      "linkage_name": "hipblasLtMatmulDescCreate",
+      "name": "hipblasLtMatmulDescCreate",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t *"
+        },
+        {
+          "name": "computeType",
+          "type": "hipblasComputeType_t"
+        },
+        {
+          "name": "scaleType",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t *, hipblasComputeType_t, hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 788,
+      "linkage_name": "hipblasLtMatmulDescDestroy",
+      "name": "hipblasLtMatmulDescDestroy",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "const hipblasLtMatmulDesc_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatmulDesc_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 849,
+      "linkage_name": "hipblasLtMatmulDescGetAttribute",
+      "name": "hipblasLtMatmulDescGetAttribute",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t, hipblasLtMatmulDescAttributes_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[4]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 343,
+      "name": "hipblasLtMatmulDescOpaque_t",
+      "size_bits": 256
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 345,
+      "name": "hipblasLtMatmulDescOpaque_t",
+      "underlying_type": "struct hipblasLtMatmulDescOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 813,
+      "linkage_name": "hipblasLtMatmulDescSetAttribute",
+      "name": "hipblasLtMatmulDescSetAttribute",
+      "parameters": [
+        {
+          "name": "matmulDesc",
+          "type": "hipblasLtMatmulDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulDesc_t, hipblasLtMatmulDescAttributes_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 400,
+      "name": "hipblasLtMatmulDesc_t",
+      "underlying_type": "hipblasLtMatmulDescOpaque_t *"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 463,
+      "name": "hipblasLtMatmulHeuristicResult_t",
+      "underlying_type": "struct _hipblasLtMatmulHeuristicResult_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 212,
+      "name": "hipblasLtMatmulMatrixScale_t",
+      "underlying_type": "enum hipblasLtMatmulMatrixScale_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 199,
+      "name": "hipblasLtMatmulMatrixScale_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F",
+          "value": "3"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F",
+          "value": "5"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT",
+          "value": "1001"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT",
+          "value": "1002"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT",
+          "value": "1003"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT",
+          "value": "1004"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT",
+          "value": "1005"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_MATRIX_SCALE_END",
+          "value": "1006"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 263,
+      "name": "hipblasLtMatmulPreferenceAttributes_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_SEARCH_MODE",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATMUL_PREF_MAX",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 268,
+      "name": "hipblasLtMatmulPreferenceAttributes_t",
+      "underlying_type": "enum hipblasLtMatmulPreferenceAttributes_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 871,
+      "linkage_name": "hipblasLtMatmulPreferenceCreate",
+      "name": "hipblasLtMatmulPreferenceCreate",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulPreference_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 888,
+      "linkage_name": "hipblasLtMatmulPreferenceDestroy",
+      "name": "hipblasLtMatmulPreferenceDestroy",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "const hipblasLtMatmulPreference_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatmulPreference_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 951,
+      "linkage_name": "hipblasLtMatmulPreferenceGetAttribute",
+      "name": "hipblasLtMatmulPreferenceGetAttribute",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulPreferenceAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulPreference_t, hipblasLtMatmulPreferenceAttributes_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[5]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 349,
+      "name": "hipblasLtMatmulPreferenceOpaque_t",
+      "size_bits": 320
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 351,
+      "name": "hipblasLtMatmulPreferenceOpaque_t",
+      "underlying_type": "struct hipblasLtMatmulPreferenceOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 914,
+      "linkage_name": "hipblasLtMatmulPreferenceSetAttribute",
+      "name": "hipblasLtMatmulPreferenceSetAttribute",
+      "parameters": [
+        {
+          "name": "pref",
+          "type": "hipblasLtMatmulPreference_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatmulPreferenceAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatmulPreference_t, hipblasLtMatmulPreferenceAttributes_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 426,
+      "name": "hipblasLtMatmulPreference_t",
+      "underlying_type": "hipblasLtMatmulPreferenceOpaque_t *"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 124,
+      "name": "hipblasLtMatrixLayoutAttribute_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_TYPE",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_ORDER",
+          "value": "3"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_ROWS",
+          "value": "4"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_COLS",
+          "value": "5"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_LD",
+          "value": "6"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE",
+          "value": "7"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_LAYOUT_OFFSET",
+          "value": "8"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 185,
+      "name": "hipblasLtMatrixLayoutAttribute_t",
+      "underlying_type": "enum hipblasLtMatrixLayoutAttribute_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 666,
+      "linkage_name": "hipblasLtMatrixLayoutCreate",
+      "name": "hipblasLtMatrixLayoutCreate",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "hipblasLtMatrixLayout_t *"
+        },
+        {
+          "name": "type",
+          "type": "hipDataType"
+        },
+        {
+          "name": "rows",
+          "type": "uint64_t"
+        },
+        {
+          "name": "cols",
+          "type": "uint64_t"
+        },
+        {
+          "name": "ld",
+          "type": "int64_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixLayout_t *, hipDataType, uint64_t, uint64_t, int64_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 682,
+      "linkage_name": "hipblasLtMatrixLayoutDestroy",
+      "name": "hipblasLtMatrixLayoutDestroy",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "const hipblasLtMatrixLayout_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (const hipblasLtMatrixLayout_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 743,
+      "linkage_name": "hipblasLtMatrixLayoutGetAttribute",
+      "name": "hipblasLtMatrixLayoutGetAttribute",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixLayoutAttribute_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixLayout_t, hipblasLtMatrixLayoutAttribute_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[4]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 346,
+      "name": "hipblasLtMatrixLayoutOpaque_t",
+      "size_bits": 256
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 348,
+      "name": "hipblasLtMatrixLayoutOpaque_t",
+      "underlying_type": "struct hipblasLtMatrixLayoutOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 707,
+      "linkage_name": "hipblasLtMatrixLayoutSetAttribute",
+      "name": "hipblasLtMatrixLayoutSetAttribute",
+      "parameters": [
+        {
+          "name": "matLayout",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixLayoutAttribute_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixLayout_t, hipblasLtMatrixLayoutAttribute_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 413,
+      "name": "hipblasLtMatrixLayout_t",
+      "underlying_type": "hipblasLtMatrixLayoutOpaque_t *"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1173,
+      "linkage_name": "hipblasLtMatrixTransform",
+      "name": "hipblasLtMatrixTransform",
+      "parameters": [
+        {
+          "name": "lightHandle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        },
+        {
+          "name": "alpha",
+          "type": "const void *"
+        },
+        {
+          "name": "A",
+          "type": "const void *"
+        },
+        {
+          "name": "Adesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "beta",
+          "type": "const void *"
+        },
+        {
+          "name": "B",
+          "type": "const void *"
+        },
+        {
+          "name": "Bdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "C",
+          "type": "void *"
+        },
+        {
+          "name": "Cdesc",
+          "type": "hipblasLtMatrixLayout_t"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, hipblasLtMatrixTransformDesc_t, const void *, const void *, hipblasLtMatrixLayout_t, const void *, const void *, hipblasLtMatrixLayout_t, void *, hipblasLtMatrixLayout_t, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 315,
+      "name": "hipblasLtMatrixTransformDescAttributes_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_SCALE_TYPE",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_POINTER_MODE",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSA",
+          "value": "2"
+        },
+        {
+          "name": "HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSB",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 340,
+      "name": "hipblasLtMatrixTransformDescAttributes_t",
+      "underlying_type": "enum hipblasLtMatrixTransformDescAttributes_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1093,
+      "linkage_name": "hipblasLtMatrixTransformDescCreate",
+      "name": "hipblasLtMatrixTransformDescCreate",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t *"
+        },
+        {
+          "name": "scaleType",
+          "type": "hipDataType"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t *, hipDataType)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1101,
+      "linkage_name": "hipblasLtMatrixTransformDescDestroy",
+      "name": "hipblasLtMatrixTransformDescDestroy",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1139,
+      "linkage_name": "hipblasLtMatrixTransformDescGetAttribute",
+      "name": "hipblasLtMatrixTransformDescGetAttribute",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixTransformDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        },
+        {
+          "name": "sizeWritten",
+          "type": "size_t *"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t, hipblasLtMatrixTransformDescAttributes_t, void *, size_t, size_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 64,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint64_t[8]"
+        }
+      ],
+      "file": "hipblaslt.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 354,
+      "name": "hipblasLtMatrixTransformDescOpaque_t",
+      "size_bits": 512
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 356,
+      "name": "hipblasLtMatrixTransformDescOpaque_t",
+      "underlying_type": "struct hipblasLtMatrixTransformDescOpaque_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 1115,
+      "linkage_name": "hipblasLtMatrixTransformDescSetAttribute",
+      "name": "hipblasLtMatrixTransformDescSetAttribute",
+      "parameters": [
+        {
+          "name": "transformDesc",
+          "type": "hipblasLtMatrixTransformDesc_t"
+        },
+        {
+          "name": "attr",
+          "type": "hipblasLtMatrixTransformDescAttributes_t"
+        },
+        {
+          "name": "buf",
+          "type": "const void *"
+        },
+        {
+          "name": "sizeInBytes",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtMatrixTransformDesc_t, hipblasLtMatrixTransformDescAttributes_t, const void *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 370,
+      "name": "hipblasLtMatrixTransformDesc_t",
+      "underlying_type": "hipblasLtMatrixTransformDescOpaque_t *"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 273,
+      "name": "hipblasLtOrder_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_ORDER_COL",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_ROW",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R32",
+          "value": "99"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R16",
+          "value": "100"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R8",
+          "value": "101"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R4",
+          "value": "102"
+        },
+        {
+          "name": "HIPBLASLT_ORDER_COL16_4R2",
+          "value": "103"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 311,
+      "name": "hipblasLtOrder_t",
+      "underlying_type": "enum hipblasLtOrder_t"
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 190,
+      "name": "hipblasLtPointerMode_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_POINTER_MODE_HOST",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_POINTER_MODE_DEVICE",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST",
+          "value": "4"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 194,
+      "name": "hipblasLtPointerMode_t",
+      "underlying_type": "enum hipblasLtPointerMode_t"
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 548,
+      "linkage_name": "hipblasLtSetSmCountTarget",
+      "name": "hipblasLtSetSmCountTarget",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "smCountTarget",
+          "type": "int32_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hipblaslt.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 589,
+      "linkage_name": "hipblasLtSetUniformSummationOrder",
+      "name": "hipblasLtSetUniformSummationOrder",
+      "parameters": [
+        {
+          "name": "handle",
+          "type": "hipblasLtHandle_t"
+        },
+        {
+          "name": "uniformSummationOrder",
+          "type": "int32_t"
+        }
+      ],
+      "return_type": "hipblasStatus_t",
+      "templated_kind": 0,
+      "type": "hipblasStatus_t (hipblasLtHandle_t, int32_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "enum",
+      "line": 221,
+      "name": "hipblasLtStreamKTileSchedulingMode_t",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF",
+          "value": "0"
+        },
+        {
+          "name": "HIPBLASLT_STREAMK_TILE_SCHEDULING_ON",
+          "value": "1"
+        },
+        {
+          "name": "HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO",
+          "value": "2"
+        }
+      ]
+    },
+    {
+      "file": "hipblaslt.h",
+      "kind": "typedef",
+      "line": 225,
+      "name": "hipblasLtStreamKTileSchedulingMode_t",
+      "underlying_type": "enum hipblasLtStreamKTileSchedulingMode_t"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 48,
+      "name": "hipblaslt_bf8",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 51,
+      "name": "hipblaslt_bf8",
+      "underlying_type": "struct hipblaslt_bf8"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 38,
+      "name": "hipblaslt_bf8_fnuz",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 41,
+      "name": "hipblaslt_bf8_fnuz",
+      "underlying_type": "struct hipblaslt_bf8_fnuz"
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 51,
+      "linkage_name": "_ZL23hipblaslt_cast_from_uf8hiib",
+      "name": "hipblaslt_cast_from_uf8",
+      "parameters": [
+        {
+          "name": "x",
+          "type": "uint8_t"
+        },
+        {
+          "name": "wm",
+          "type": "int"
+        },
+        {
+          "name": "we",
+          "type": "int"
+        },
+        {
+          "name": "clip",
+          "type": "_Bool"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (uint8_t, int, int, _Bool)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 47,
+      "linkage_name": "_ZL21hipblaslt_cast_to_uf8fiibbj",
+      "name": "hipblaslt_cast_to_uf8",
+      "parameters": [
+        {
+          "name": "_x",
+          "type": "float"
+        },
+        {
+          "name": "wm",
+          "type": "int"
+        },
+        {
+          "name": "we",
+          "type": "int"
+        },
+        {
+          "name": "clip",
+          "type": "_Bool"
+        },
+        {
+          "name": "stoch",
+          "type": "_Bool"
+        },
+        {
+          "name": "rng",
+          "type": "unsigned int"
+        }
+      ],
+      "return_type": "uint8_t",
+      "templated_kind": 0,
+      "type": "uint8_t (float, int, int, _Bool, _Bool, unsigned int)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 55,
+      "name": "hipblaslt_complex_double",
+      "underlying_type": "std::complex<double>"
+    },
+    {
+      "file": "hipblaslt-types.h",
+      "kind": "typedef",
+      "line": 54,
+      "name": "hipblaslt_complex_float",
+      "underlying_type": "std::complex<float>"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_e5m3.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 63,
+      "name": "hipblaslt_e5m3",
+      "size_bits": 8
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 66,
+      "linkage_name": "_ZN14hipblaslt_e5m3C1Ev",
+      "name": "hipblaslt_e5m3::hipblaslt_e5m3",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 68,
+      "linkage_name": "_ZN14hipblaslt_e5m3C1ERKS_",
+      "name": "hipblaslt_e5m3::hipblaslt_e5m3",
+      "parameters": [
+        {
+          "name": "",
+          "type": "const hipblaslt_e5m3 &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const hipblaslt_e5m3 &) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 70,
+      "linkage_name": "_ZN14hipblaslt_e5m3C1Ef",
+      "name": "hipblaslt_e5m3::hipblaslt_e5m3",
+      "parameters": [
+        {
+          "name": "f",
+          "type": "const float"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 101,
+      "linkage_name": "_ZNK14hipblaslt_e5m36is_infEv",
+      "name": "hipblaslt_e5m3::is_inf",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 95,
+      "linkage_name": "_ZNK14hipblaslt_e5m36is_nanEv",
+      "name": "hipblaslt_e5m3::is_nan",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 89,
+      "linkage_name": "_ZNK14hipblaslt_e5m37is_zeroEv",
+      "name": "hipblaslt_e5m3::is_zero",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 80,
+      "linkage_name": "_ZNK14hipblaslt_e5m3cvfEv",
+      "name": "hipblaslt_e5m3::operator float",
+      "parameters": [],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 106,
+      "linkage_name": "_ZNK14hipblaslt_e5m3ngEv",
+      "name": "hipblaslt_e5m3::operator-",
+      "parameters": [],
+      "return_type": "hipblaslt_e5m3",
+      "templated_kind": 0,
+      "type": "hipblaslt_e5m3 (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "data",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_e8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 38,
+      "name": "hipblaslt_e8",
+      "size_bits": 8
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 43,
+      "linkage_name": "_ZN12hipblaslt_e8C1Ev",
+      "name": "hipblaslt_e8::hipblaslt_e8",
+      "parameters": [],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (void)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 45,
+      "linkage_name": "_ZN12hipblaslt_e8C1ERKS_",
+      "name": "hipblaslt_e8::hipblaslt_e8",
+      "parameters": [
+        {
+          "name": "other",
+          "type": "const hipblaslt_e8 &"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (const hipblaslt_e8 &) noexcept",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 47,
+      "linkage_name": "_ZN12hipblaslt_e8C1Ef",
+      "name": "hipblaslt_e8::hipblaslt_e8",
+      "parameters": [
+        {
+          "name": "v0",
+          "type": "float"
+        }
+      ],
+      "return_type": "void",
+      "templated_kind": 0,
+      "type": "void (float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 71,
+      "linkage_name": "_ZNK12hipblaslt_e86is_infEv",
+      "name": "hipblaslt_e8::is_inf",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 65,
+      "linkage_name": "_ZNK12hipblaslt_e86is_nanEv",
+      "name": "hipblaslt_e8::is_nan",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 59,
+      "linkage_name": "_ZNK12hipblaslt_e87is_zeroEv",
+      "name": "hipblaslt_e8::is_zero",
+      "parameters": [],
+      "return_type": "_Bool",
+      "templated_kind": 0,
+      "type": "_Bool (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 76,
+      "linkage_name": "_ZNK12hipblaslt_e8cvfEv",
+      "name": "hipblaslt_e8::operator float",
+      "parameters": [],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 92,
+      "linkage_name": "_ZNK12hipblaslt_e8ngEv",
+      "name": "hipblaslt_e8::operator-",
+      "parameters": [],
+      "return_type": "hipblaslt_e8",
+      "templated_kind": 0,
+      "type": "hipblaslt_e8 (void) const",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 43,
+      "name": "hipblaslt_f8",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 46,
+      "name": "hipblaslt_f8",
+      "underlying_type": "struct hipblaslt_f8"
+    },
+    {
+      "align_bits": 8,
+      "fields": [
+        {
+          "name": "__x",
+          "type": "uint8_t"
+        }
+      ],
+      "file": "hipblaslt_float8.h",
+      "kind": "record",
+      "layout_available": true,
+      "line": 33,
+      "name": "hipblaslt_f8_fnuz",
+      "size_bits": 8
+    },
+    {
+      "file": "hipblaslt_float8.h",
+      "kind": "typedef",
+      "line": 36,
+      "name": "hipblaslt_f8_fnuz",
+      "underlying_type": "struct hipblaslt_f8_fnuz"
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 98,
+      "linkage_name": "_Zml12hipblaslt_e8f",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "hipblaslt_e8"
+        },
+        {
+          "name": "b",
+          "type": "float"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (hipblaslt_e8, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 103,
+      "linkage_name": "_Zmlf12hipblaslt_e8",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "float"
+        },
+        {
+          "name": "b",
+          "type": "hipblaslt_e8"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (float, hipblaslt_e8)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 112,
+      "linkage_name": "_Zml14hipblaslt_e5m3f",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "hipblaslt_e5m3"
+        },
+        {
+          "name": "b",
+          "type": "float"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (hipblaslt_e5m3, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 117,
+      "linkage_name": "_Zmlf14hipblaslt_e5m3",
+      "name": "operator*",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "float"
+        },
+        {
+          "name": "b",
+          "type": "hipblaslt_e5m3"
+        }
+      ],
+      "return_type": "float",
+      "templated_kind": 0,
+      "type": "float (float, hipblaslt_e5m3)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 115,
+      "linkage_name": "_ZStlsRSoRK12hipblaslt_e8",
+      "name": "std::operator<<",
+      "parameters": [
+        {
+          "name": "stream",
+          "type": "std::ostream &"
+        },
+        {
+          "name": "a",
+          "type": "const hipblaslt_e8 &"
+        }
+      ],
+      "return_type": "std::ostream &",
+      "templated_kind": 0,
+      "type": "std::ostream &(std::ostream &, const hipblaslt_e8 &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 129,
+      "linkage_name": "_ZStlsRSoRK14hipblaslt_e5m3",
+      "name": "std::operator<<",
+      "parameters": [
+        {
+          "name": "stream",
+          "type": "std::ostream &"
+        },
+        {
+          "name": "a",
+          "type": "const hipblaslt_e5m3 &"
+        }
+      ],
+      "return_type": "std::ostream &",
+      "templated_kind": 0,
+      "type": "std::ostream &(std::ostream &, const hipblaslt_e5m3 &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e8.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 110,
+      "linkage_name": "_ZSt9to_stringB5cxx11RK12hipblaslt_e8",
+      "name": "std::to_string",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "const hipblaslt_e8 &"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (const hipblaslt_e8 &)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": false,
+      "file": "hipblaslt_e5m3.h",
+      "inline_specified": true,
+      "kind": "function",
+      "line": 124,
+      "linkage_name": "_ZSt9to_stringB5cxx11RK14hipblaslt_e5m3",
+      "name": "std::to_string",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "const hipblaslt_e5m3 &"
+        }
+      ],
+      "return_type": "std::string",
+      "templated_kind": 0,
+      "type": "std::string (const hipblaslt_e5m3 &)",
+      "variadic": false,
+      "visibility": 2
+    }
+  ],
+  "schema_version": 1
+}

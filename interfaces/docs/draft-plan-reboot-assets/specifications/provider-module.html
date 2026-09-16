@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Provider module specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Provider module specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#scope" id="toc-scope">Scope</a></li>
+<li><a href="#non-goals" id="toc-non-goals">Non-goals</a></li>
+<li><a href="#terminology" id="toc-terminology">Terminology</a></li>
+<li><a href="#artifact-form-and-filename"
+id="toc-artifact-form-and-filename">Artifact form and filename</a></li>
+<li><a href="#provider-identity" id="toc-provider-identity">Provider
+identity</a></li>
+<li><a href="#installation-location-and-colocation"
+id="toc-installation-location-and-colocation">Installation location and
+colocation</a></li>
+<li><a href="#query-symbol" id="toc-query-symbol">Query symbol</a></li>
+<li><a href="#allowed-exports-visibility-and-version-nodes"
+id="toc-allowed-exports-visibility-and-version-nodes">Allowed exports,
+visibility, and version nodes</a></li>
+<li><a href="#module-relationships" id="toc-module-relationships">Module
+relationships</a></li>
+<li><a href="#dependencies" id="toc-dependencies">Dependencies</a></li>
+<li><a href="#loading-scope-and-residency"
+id="toc-loading-scope-and-residency">Loading scope and
+residency</a></li>
+<li><a href="#relocation-and-search-path-behavior"
+id="toc-relocation-and-search-path-behavior">Relocation and search-path
+behavior</a></li>
+<li><a href="#platform-rules" id="toc-platform-rules">Platform
+rules</a></li>
+<li><a href="#trust-of-the-module-file"
+id="toc-trust-of-the-module-file">Trust of the module file</a></li>
+<li><a href="#binary-inspection-requirements"
+id="toc-binary-inspection-requirements">Binary inspection
+requirements</a></li>
+<li><a href="#conformance-evidence"
+id="toc-conformance-evidence">Conformance evidence</a></li>
+<li><a href="#open-decisions-tbd" id="toc-open-decisions-tbd">Open
+decisions (TBD)</a></li>
+<li><a href="#cross-links" id="toc-cross-links">Cross-links</a></li>
+</ul>
+</nav>
+<p>Normative. Requirements are stated with MUST / MUST NOT / SHOULD /
+MAY. Implementation status, source citations, prototype evidence, test
+inventories, and rationale live in <a
+href="provider-module.html">ledger/provider-module</a>; the obligations
+below hold whether or not a check enforces them today.</p>
+<h2 id="scope">Scope</h2>
+<p>This document specifies the provider module: the loadable binary
+artifact that carries a provider's protocol entry point and adapter
+code. It owns</p>
+<ul>
+<li>artifact form, filename, and provider identity as published by the
+module,</li>
+<li>installation location and colocation with a manifest,</li>
+<li>query-symbol naming and resolution,</li>
+<li>the allowed export set, symbol visibility, and ELF version
+nodes,</li>
+<li>module-to-provider, module-to-domain, and module-to-cohort
+multiplicity,</li>
+<li>link-time and load-time dependencies,</li>
+<li>load flags, residency, and unload,</li>
+<li>relocation and search-path behavior,</li>
+<li>platform rules and filesystem trust of the module file,</li>
+<li>the binary inspections a conforming build MUST perform.</li>
+</ul>
+<h2 id="non-goals">Non-goals</h2>
+<ul>
+<li>Query request, response, dispatch-table shape, and status taxonomy.
+See <a href="provider-protocol.html">Provider protocol</a>.</li>
+<li>Manifest schema, keys, parsing, and trust of the manifest document.
+See <a href="manifest.html">Manifest</a>.</li>
+<li>Candidate ordering, capability gating, selection. See <a
+href="broker.html">Broker</a>.</li>
+<li>Cohort membership and consistency rules. See <a
+href="cohort.html">Cohort</a>.</li>
+<li>Adapter internals: status translation, ownership, threading. See <a
+href="provider-adapter.html">Provider adapter</a>.</li>
+<li>Lease semantics. See <a href="provider-binding.html">Provider
+binding</a>.</li>
+<li>Public facade DSOs. They are not provider modules. See <a
+href="facade.html">Facade</a>.</li>
+</ul>
+<h2 id="terminology">Terminology</h2>
+<p>Terms are used as defined in ../draft-plan-reboot. Local to this
+document:</p>
+<ul>
+<li><strong>Provider module</strong>: a loadable binary artifact
+containing some or all of a provider's executable components, including
+its protocol entry point and adapter code. It is a packaging and loading
+unit. A provider is logical; a module is physical.</li>
+<li>A rule is <strong>conventional</strong> when ELF, the dynamic
+loader, or the toolchain supplies the mechanism (visibility, version
+nodes, <code>DT_NEEDED</code>, <code>DT_RUNPATH</code>,
+<code>RTLD_LOCAL</code>, <code>$ORIGIN</code>).</li>
+<li>A rule is <strong>project policy</strong> when this project must
+enforce it itself (the one-export allowlist, the node name, the install
+directory, the trusted-path checks, the no-canonical-dependency
+rule).</li>
+</ul>
+<h2 id="artifact-form-and-filename">Artifact form and filename</h2>
+<p>A provider module MUST be a shared object built as a CMake
+<code>MODULE</code> library, not a versioned <code>SHARED</code>
+library.</p>
+<p>A provider module MUST NOT carry a SONAME or a symlink chain. It is
+opened by an exact pathname derived from its manifest entry, never by
+SONAME resolution, so <code>SOVERSION</code> would be inert metadata
+implying a linkable identity that does not exist. This is project
+policy; ELF would accept a SONAME here.</p>
+<p>A module SHOULD be named
+<code>lib&lt;implementation&gt;-provider-&lt;variant&gt;.so</code>.
+Nothing in the runtime derives meaning from a basename: the broker
+consumes the manifest <code>module</code> string verbatim. Packaging
+MUST NOT rely on a basename convention for behavior.</p>
+<p>Modules built only as in-tree test fixtures MUST NOT be installed and
+MUST NOT ship a manifest. They MUST otherwise meet the export and
+visibility rules below, so that a fixture cannot pass a check a
+delivered module would fail.</p>
+<h2 id="provider-identity">Provider identity</h2>
+<p>A module does not name itself in its filename for selection purposes.
+Identity is a string that appears in two places and MUST agree: the
+manifest entry's <code>id</code>, and the <code>provider_id</code> field
+the module writes into its query response.</p>
+<p>A module MUST publish a stable, nonempty <code>provider_id</code>.
+Its packaging MUST declare the same string. The broker rejects a
+candidate whose <code>provider_id</code> is null, empty, or unequal to
+the identity the entry declares.</p>
+<p>A module MUST write a nonempty <code>build_id</code> in the query
+response. No consumer may today treat <code>build_id</code> as a
+selection or compatibility constraint; a build-identity constraint
+requires a manifest-side key that does not exist (TBD-1).</p>
+<p>Uniqueness of an identity across manifests is not defined
+(TBD-3).</p>
+<h2 id="installation-location-and-colocation">Installation location and
+colocation</h2>
+<p>A provider module MUST install to
+<code>${CMAKE_INSTALL_LIBDIR}/rocm/interfaces/providers</code> under
+CMake component <code>providers</code>.</p>
+<p>A module MUST install into the same directory as the manifest that
+names it, and MUST be reachable from that manifest without leaving the
+directory. How a manifest <code>module</code> value is spelled,
+resolved, and rejected is specified in <a
+href="manifest.html">Manifest</a>.</p>
+<p>Packaging MUST preserve closure in both directions: every module
+named by a packaged manifest MUST be present in the package, and every
+packaged module in the provider directory MUST be referenced by some
+manifest.</p>
+<p>Discovery is single-file: a facade names one manifest path, and
+nothing globs the provider directory. Installing a module plus manifest
+therefore does NOT by itself make the module discoverable.
+Multi-manifest and multi-vendor co-delivery into one directory is not
+defined (TBD-4). Manifest discovery is specified in <a
+href="manifest.html">Manifest</a> and <a
+href="broker.html">Broker</a>.</p>
+<h2 id="query-symbol">Query symbol</h2>
+<p>A provider module MUST export exactly one function. Its default name
+is <code>rocm_interfaces_provider_query_v1</code>, spelled by the macro
+<code>ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL</code>, with the type</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>rocm_interfaces_status <span class="op">(</span>ROCM_INTERFACES_CALL<span class="op">*</span> rocm_interfaces_provider_query_fn<span class="op">)(</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">const</span> rocm_interfaces_provider_request<span class="op">*,</span> rocm_interfaces_provider_response<span class="op">*);</span></span></code></pre></div>
+<p>The definition MUST be <code>extern "C"</code>, MUST carry
+<code>ROCM_INTERFACES_EXPORT</code>, and MUST be <code>noexcept</code>.
+The <code>noexcept</code> obligation is the same one stated in <a
+href="provider-protocol.html">provider-protocol</a> and <a
+href="provider-adapter.html">provider-adapter</a>; the typedef is not
+<code>noexcept</code>-qualified, so the compiler does not impose it.</p>
+<p>The <code>v1</code> suffix names the bootstrap generation; it is not
+a version node. A second, incompatible bootstrap generation SHOULD take
+a new symbol name rather than reinterpret this one. That rule is not
+adopted (TBD-20).</p>
+<p>Resolution is by bare name through <code>dlsym</code> on the module
+handle; the broker does not request a version node, and a null result
+MUST be a load-time rejection of the candidate.</p>
+<p>A manifest entry MAY carry an optional <code>query_symbol</code>
+override, but a module built with the project's version script cannot
+honour it, because the script makes every other name local. A module
+MUST NOT rely on <code>query_symbol</code> (TBD-2).</p>
+<p>A provider module MUST NOT export
+<code>rocblas_internal_backend_query_v1</code>. That is a different
+contract, exported by canonical rocBLAS.</p>
+<h2 id="allowed-exports-visibility-and-version-nodes">Allowed exports,
+visibility, and version nodes</h2>
+<p>Threat: a module that leaks a global symbol becomes an interposition
+surface and an implicit ABI that nothing versions. Three mechanisms
+stack against it.</p>
+<p><strong>Compiler visibility (conventional).</strong> Every provider
+target MUST set <code>C_VISIBILITY_PRESET hidden</code>,
+<code>CXX_VISIBILITY_PRESET hidden</code>, and
+<code>VISIBILITY_INLINES_HIDDEN ON</code>, so only
+<code>ROCM_INTERFACES_EXPORT</code>-annotated definitions are export
+candidates.</p>
+<p><strong>Version script (conventional mechanism, project-chosen
+contents).</strong> Every provider target MUST link with the project
+version script <code>providers/provider.map</code>:</p>
+<pre><code>ROCM_INTERFACES_PROVIDER_1 {
+  global:
+    rocm_interfaces_provider_query_v1;
+  local:
+    *;
+};</code></pre>
+<p>The node name <code>ROCM_INTERFACES_PROVIDER_1</code> is project
+policy. The <code>local: *;</code> catch-all is what makes the
+one-export rule structural: a new global added to an adapter is hidden
+by default rather than leaked. A provider target SHOULD list the map in
+<code>LINK_DEPENDS</code> so that editing the map relinks the
+module.</p>
+<p><strong>Export audit (project policy).</strong> The built module MUST
+export exactly the single name
+<code>rocm_interfaces_provider_query_v1</code>, and that name MUST carry
+the version node <code>ROCM_INTERFACES_PROVIDER_1</code>. Absence of a
+node and a wrong node MUST be distinguishable failures. The audit MUST
+NOT be skippable by omission: an undefined provider count, and a zero
+count without an explicit no-providers opt-in, MUST both be hard
+configure errors. The audited target list MUST be cross-checked against
+an independently collected set of every <code>MODULE</code> library in
+the project, so that a module added in a new subdirectory cannot escape
+inspection. Test-fixture modules MUST be in the audited set.</p>
+<h2 id="module-relationships">Module relationships</h2>
+<p><strong>Module to domain.</strong> A single query function receives
+<code>request-&gt;domain</code> and MUST answer
+<code>NOT_SUPPORTED</code> for a domain it does not implement. A module
+MAY answer several domains. A module that answers more than one domain
+MUST answer each with a table whose ABI header and size are correct for
+that domain independently.</p>
+<p><strong>Module to provider.</strong> One provider MAY span several
+modules. A provider whose facility spans modules MUST express that
+through cohort membership, not through inter-module linkage: modules
+MUST NOT link each other.</p>
+<p><strong>Module to cohort.</strong> Cohort is a manifest assertion,
+not a property the module proves. A module MUST NOT assume anything
+about a peer beyond what the broker validated. Cohort rules are
+specified in <a href="cohort.html">Cohort</a>.</p>
+<pre class="mermaid"><code>graph TD
+  M[Provider module .so] --&gt;|exports| Q[rocm_interfaces_provider_query_v1]
+  Q --&gt;|domain 1..n| T1[Dispatch table, domain A]
+  Q -.-&gt;|optional| T2[Dispatch table, domain B]
+  MF[Manifest entry] --&gt;|module: bare filename| M
+  MF --&gt;|id| ID[provider_id]
+  MF --&gt;|cohort| C[Cohort name]
+  ID --&gt;|must equal| Q
+  C --&gt;|groups| MF2[Peer manifest entry -&gt; peer module]</code></pre>
+<h2 id="dependencies">Dependencies</h2>
+<p><strong>Link-time.</strong> A provider module MUST NOT take a direct
+link dependency on a canonical math library: no <code>DT_NEEDED</code>
+naming <code>librocblas</code>, <code>librocrand</code>,
+<code>libhipblas</code>, <code>libhipblaslt</code>,
+<code>libhipsolver</code>, <code>librocsolver</code>, or
+<code>libhiprand</code>. The equivalent configure-time link properties
+MUST also be rejected.</p>
+<p>A provider module MAY link header-only interface targets of the
+library it adapts, the project's protocol interface targets, the
+platform dynamic-loading library, the project's dynamic-loader lock DSO,
+and a device-code runtime when the module implements its own
+kernels.</p>
+<p><strong>Load-time.</strong> A provider module SHOULD reach its
+canonical implementation by <code>dlopen</code> at first successful
+query rather than by linkage, performed once under a one-time guard,
+resolving an environment override over a compile-time SONAME default. A
+module that performs its own <code>dlopen</code> MUST serialize it
+through the project's process-wide dynamic-loader lock (TBD-7).</p>
+<p><strong>Backend failure.</strong> A module MUST fail its query rather
+than abort or partially publish when its backend cannot be loaded or is
+incompatible. Because the query is <code>noexcept</code>, a module whose
+query can throw MUST convert every escaping exception into a protocol
+status before returning. Whether a catch chain is auditable or an author
+obligation is open (TBD-17).</p>
+<h2 id="loading-scope-and-residency">Loading scope and residency</h2>
+<p>The broker opens a module with
+<code>dlopen(path, RTLD_NOW | RTLD_LOCAL)</code>. A provider module MUST
+be loadable under those flags.</p>
+<ul>
+<li><code>RTLD_NOW</code>: the module MUST have no unresolved symbols at
+load. A missing dependency is a load failure, not a later crash.</li>
+<li><code>RTLD_LOCAL</code>: no other object may rely on the module's
+symbols. A module MUST NOT act as a symbol provider for anything but its
+own query, and MUST NOT assume it can see, or be seen by, a peer module
+in the same cohort.</li>
+</ul>
+<p>A module MUST NOT call <code>dlopen</code>, <code>dlclose</code>, or
+<code>dlsym</code> outside the project's process-wide dynamic-loader
+lock.</p>
+<p><strong>Residency is lease-scoped.</strong> The registry retains only
+a weak reference; a lease holds the strong one. The module is loaded
+when no live lease holds it and unloaded when the last lease drops. A
+module MUST therefore tolerate being unloaded after the last lease drops
+and reloaded afterwards in the same process. Whether repeated load and
+unload churn is acceptable, or a pinning policy is required, is open
+(TBD-8). Lease semantics are specified in <a
+href="provider-binding.html">Provider binding</a>.</p>
+<p><strong>Static destruction.</strong> Because a module can be unloaded
+while the process continues, a module MUST NOT register process-lifetime
+state outside itself that outlives its own unload, and MUST NOT leave a
+callback pointer with the host after its last context is destroyed. This
+is an author obligation the build does not police (TBD-21).</p>
+<h2 id="relocation-and-search-path-behavior">Relocation and search-path
+behavior</h2>
+<p>Threat: a baked-in search path lets an artifact resolve a dependency
+from a directory the distribution does not control.</p>
+<p>A provider module MUST be built with an empty install RPATH, MUST NOT
+inherit link-path or environment RPATH into the installed artifact, and
+MUST carry neither <code>RPATH</code> nor <code>RUNPATH</code> in the
+packaged file. A module MUST NOT encode an installation-specific
+absolute path. Its backend MUST therefore be resolvable by SONAME
+through the system loader path or by an explicit environment
+override.</p>
+<p>A module MAY use <code>$ORIGIN</code> for its own private satellite
+libraries; the broker opens the canonical module pathname so that
+<code>$ORIGIN</code> expands beside the module rather than beside the
+caller. Where a satellite may live and what validates it is not defined,
+and the trust checks below do not reach an object the dynamic loader
+pulls in after <code>dlopen</code> (TBD-19).</p>
+<p>Symbol-binding hardening (<code>-Bsymbolic</code>,
+<code>-Bsymbolic-functions</code>, <code>-z defs</code>) is deliberately
+not applied to provider modules: a module exports one symbol and is
+loaded <code>RTLD_LOCAL</code>, so it has no public names to be
+interposed on. A module that begins exporting or importing canonical
+public names would need a relocation rule (TBD-11).</p>
+<h2 id="platform-rules">Platform rules</h2>
+<p>A conforming provider module MUST target Linux/ELF. A configuration
+for any other platform MUST be refused at configure time, before and
+after <code>project()</code>, with the message</p>
+<pre><code>rocm-library-interfaces provider runtime supports Linux/ELF only;
+Windows/PE and macOS/Mach-O are outside the current runtime scope</code></pre>
+<p>Export macros and module-open code carry non-Linux arms, but the
+trust checks below compile only on Linux; on other platforms they
+degrade to a regular-file test. A further platform MUST NOT be enabled
+until an equivalent trust check exists (TBD-9).</p>
+<h2 id="trust-of-the-module-file">Trust of the module file</h2>
+<p>Threat: anything that can write the module file, or any directory on
+the path to it, executes code inside every process that loads a facade.
+There is no signature, no certificate, and no provenance verification.
+Trust is filesystem trust only, and it is project policy.</p>
+<p>A provider module MUST be installed on a path that passes the
+trusted-path validation for purpose <code>provider module</code>, or the
+broker MUST refuse to open it. That validation - ownership, component
+type and mode, symlink handling, and the device/inode recheck - is
+specified once in <a href="manifest.html">Manifest</a> and applies
+unchanged to the module file. Because <code>dlopen</code> takes a path
+and not a descriptor, the recheck MUST be repeated immediately after the
+module is loaded, and the module MUST be unloaded when it fails.</p>
+<p>Packaging therefore MUST place a module only where every path
+component is distribution-owned and not group- or other-writable; a
+module installed anywhere else is unloadable, not merely insecure.</p>
+<p>What this does not give: a module writable only by root in a
+root-owned directory is trusted regardless of who built it or whether it
+matches the distribution that shipped the manifest. No document may
+claim that provider modules are signed or provenance-checked
+(TBD-10).</p>
+<h2 id="binary-inspection-requirements">Binary inspection
+requirements</h2>
+<p>A conforming build MUST perform the following inspections on every
+provider module it produces, and MUST fail rather than skip when the ELF
+reader is absent.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Inspection</th>
+<th>Tool</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Defined dynamic exports</td>
+<td><code>nm -D --defined-only</code></td>
+<td>Exactly <code>rocm_interfaces_provider_query_v1</code></td>
+</tr>
+<tr class="even">
+<td>Version node on that export</td>
+<td>same <code>nm</code> output, <code>sym@@node</code> parse</td>
+<td><code>ROCM_INTERFACES_PROVIDER_1</code>; unversioned and wrong-node
+are distinct failures</td>
+</tr>
+<tr class="odd">
+<td>Direct dependencies</td>
+<td><code>readelf -d</code></td>
+<td>No
+<code>librocblas</code>/<code>librocrand</code>/<code>libhipblas</code>/<code>libhipblaslt</code>/<code>libhipsolver</code>/<code>librocsolver</code>/<code>libhiprand</code>
+<code>DT_NEEDED</code></td>
+</tr>
+<tr class="even">
+<td>Search paths in the package</td>
+<td><code>readelf -d</code></td>
+<td>No <code>RPATH</code>, no <code>RUNPATH</code> on any packaged
+<code>.so</code> or <code>.so.N</code></td>
+</tr>
+<tr class="odd">
+<td>Module set completeness</td>
+<td>CMake target walk vs. audited list</td>
+<td>Byte-identical</td>
+</tr>
+<tr class="even">
+<td>Manifest/module closure in the package</td>
+<td>file glob plus JSON read</td>
+<td>Every referenced module present; every present module
+referenced</td>
+</tr>
+</tbody>
+</table>
+<p>Not inspected on provider modules today: <code>DT_SONAME</code>
+absence, relocation and <code>-Bsymbolic</code>,
+<code>GNU_RELRO</code>/<code>BIND_NOW</code>, build-ID extraction,
+stripped-symbol policy, section or size audit (TBD-12).</p>
+<h2 id="conformance-evidence">Conformance evidence</h2>
+<p>The ctest names that prove each rule, their skip and non-registration
+caveats, and the current ENFORCED NOW / PROTOTYPE EVIDENCE / unenforced
+status of every mechanism are in <a
+href="provider-module.html">ledger/provider-module</a>. A green run is
+not conformance evidence until the caveats recorded there are read
+(TBD-13, TBD-14, TBD-16).</p>
+<h2 id="open-decisions-tbd">Open decisions (TBD)</h2>
+<p>Each row blocks a contract this document would otherwise state.</p>
+<table>
+<thead>
+<tr class="header">
+<th>ID</th>
+<th>Open question</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>Is <code>build_id</code> ever a selection or compatibility
+constraint?</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>Is the <code>query_symbol</code> manifest override supported or
+vestigial against a version script that cannot honour it?</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Is cross-manifest duplication of <code>(id, domain, gfx)</code>
+legal, and who wins?</td>
+</tr>
+<tr class="even">
+<td>TBD-4</td>
+<td>May several manifests in the provider directory be discovered
+together?</td>
+</tr>
+<tr class="odd">
+<td>TBD-5</td>
+<td>Is the module filename pattern normative, or are basenames
+free-form?</td>
+</tr>
+<tr class="even">
+<td>TBD-6</td>
+<td>Are recording modules permanently test-only?</td>
+</tr>
+<tr class="odd">
+<td>TBD-7</td>
+<td>Must a provider module route its own <code>dlopen</code> through the
+dynamic-loader lock, checked as facades are?</td>
+</tr>
+<tr class="even">
+<td>TBD-8</td>
+<td>Is lease-scoped unload-and-reload the adopted residency policy, or
+is pinning required?</td>
+</tr>
+<tr class="odd">
+<td>TBD-9</td>
+<td>Is a non-Linux trust equivalent required before another platform can
+be enabled?</td>
+</tr>
+<tr class="even">
+<td>TBD-10</td>
+<td>Are provider modules ever signed or provenance-checked?</td>
+</tr>
+<tr class="odd">
+<td>TBD-11</td>
+<td>Do provider modules need a relocation or symbol-binding rule?</td>
+</tr>
+<tr class="even">
+<td>TBD-12</td>
+<td>Are <code>DT_SONAME</code> absence, stripped symbols,
+<code>BIND_NOW</code>/<code>RELRO</code>, and build-ID extraction part
+of the binary-inspection contract?</td>
+</tr>
+<tr class="odd">
+<td>TBD-13</td>
+<td>Must a configuration register a minimum test set, given that missing
+canonical libraries drop whole families with only a warning?</td>
+</tr>
+<tr class="even">
+<td>TBD-14</td>
+<td>Should a missing canonical library make provider-facing test
+families skip visibly, as the packaging stubs do?</td>
+</tr>
+<tr class="odd">
+<td>TBD-15</td>
+<td>Is <code>schema_version</code> forward-compatibility
+reject-or-ignore? Owned with <a href="manifest.html">Manifest</a>.</td>
+</tr>
+<tr class="even">
+<td>TBD-16</td>
+<td>Must a conformance run include a root-capable lane, since owner
+rejection is only exercised as root?</td>
+</tr>
+<tr class="odd">
+<td>TBD-17</td>
+<td>Is the <code>noexcept</code> query required to carry a catch chain,
+or is the signature alone the contract?</td>
+</tr>
+<tr class="even">
+<td>TBD-18</td>
+<td>Must package closure be checked in a configuration with no real
+provider?</td>
+</tr>
+<tr class="odd">
+<td>TBD-19</td>
+<td>Where may a module's private <code>$ORIGIN</code> satellite live,
+and what validates it?</td>
+</tr>
+<tr class="even">
+<td>TBD-20</td>
+<td>Does a second bootstrap generation take a new symbol name or
+reinterpret <code>rocm_interfaces_provider_query_v1</code>?</td>
+</tr>
+<tr class="odd">
+<td>TBD-21</td>
+<td>Is "no process-lifetime state and no host callback surviving unload"
+auditable, or an author obligation?</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cross-links">Cross-links</h2>
+<ul>
+<li>../draft-plan-reboot - concepts and adopted terminology.</li>
+<li><a href="provider.html">Provider</a> - the logical facility a module
+packages.</li>
+<li><a href="provider-protocol.html">Provider protocol</a> - the query
+envelope and dispatch tables the single export carries.</li>
+<li><a href="provider-adapter.html">Provider adapter</a> - what lives
+inside the module.</li>
+<li><a href="provider-binding.html">Provider binding</a> - the lease
+that keeps a module resident.</li>
+<li><a href="manifest.html">Manifest</a> - the document that names the
+module.</li>
+<li><a href="broker.html">Broker</a> - discovery, trust enforcement,
+ordering, and selection.</li>
+<li><a href="cohort.html">Cohort</a> - how modules are grouped into an
+atomic set.</li>
+<li><a href="facade.html">Facade</a> - the public DSOs, which are not
+provider modules.</li>
+<li><a href="architecture-component-model.html">Architecture component
+model</a> - how these pieces compose.</li>
+<li><a href="provider-module.html">ledger/provider-module</a> -
+non-normative evidence.</li>
+</ul>
+</body>
+</html>
