@@ -178,3 +178,25 @@ Tests:
   N: [1]
   denseld: [18375512]
   matrix: [rocsparse_matrix_random]
+
+# AISPARSE-691 regression: on the medium path (m > 1024) the forward elimination and
+# backward substitution launches put batch_count straight onto grid.y, which the
+# hardware caps at 65535, and both kernels read hipBlockIdx_y with no loop. The same
+# routine therefore succeeded or failed depending only on the system size, because the
+# eleven small-path launches put batch_count on grid.x with proper bounds checks. The
+# medium path now clamps grid.y through rocsparse::get_batch_grid_size and both kernels
+# grid-stride over the batch.
+#
+# m = 1025 is the smallest size that forces the medium path: a small-m case passes
+# against the unfixed code and proves nothing. batch_count = 65537 is the smallest count
+# the runtime actually rejects, since it accepts a grid.y of 65536 even though the device
+# reports 65535, so the last two systems of the batch are reachable only through the new
+# loop, and the harness residual check verifies every system of the batch numerically.
+- name: gtsv_no_pivot_strided_batch
+  category: pre_checkin
+  function: gtsv_no_pivot_strided_batch
+  precision: *single_precision
+  M: [1025]
+  N: [65537]
+  denseld: [1025]
+  matrix: [rocsparse_matrix_random]

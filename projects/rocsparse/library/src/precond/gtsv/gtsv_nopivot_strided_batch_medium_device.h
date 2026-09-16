@@ -28,31 +28,35 @@
 
 namespace rocsparse
 {
+    // bidy is the system of the batch handled by this call. The kernel wrapper drives
+    // it from a grid-stride loop so that a grid.y clamped to the hardware maximum
+    // still covers every system. It is 64 bit because it now ranges over the full
+    // batch_count instead of the clamped grid extent, and it scales the m and
+    // num_spikes offsets below (stride and ldb are already 64 bit).
     template <uint32_t BLOCKSIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel(rocsparse_int m,
-                                                             rocsparse_int n,
-                                                             int64_t       stride,
-                                                             int64_t       ldb,
-                                                             rocsparse_int num_spikes,
-                                                             const T* __restrict__ dl,
-                                                             const T* __restrict__ d,
-                                                             const T* __restrict__ du,
-                                                             const T* __restrict__ B,
-                                                             T* __restrict__ dl_modified,
-                                                             T* __restrict__ d_modified,
-                                                             T* __restrict__ du_modified,
-                                                             T* __restrict__ B_modified,
-                                                             T* __restrict__ dl_spike,
-                                                             T* __restrict__ d_spike,
-                                                             T* __restrict__ du_spike,
-                                                             T* __restrict__ B_spike)
+    ROCSPARSE_DEVICE_ILF void
+        gtsv_nopivot_strided_batch_pcr_tiled_forward_device(int64_t       bidy,
+                                                            rocsparse_int m,
+                                                            rocsparse_int n,
+                                                            int64_t       stride,
+                                                            int64_t       ldb,
+                                                            rocsparse_int num_spikes,
+                                                            const T* __restrict__ dl,
+                                                            const T* __restrict__ d,
+                                                            const T* __restrict__ du,
+                                                            const T* __restrict__ B,
+                                                            T* __restrict__ dl_modified,
+                                                            T* __restrict__ d_modified,
+                                                            T* __restrict__ du_modified,
+                                                            T* __restrict__ B_modified,
+                                                            T* __restrict__ dl_spike,
+                                                            T* __restrict__ d_spike,
+                                                            T* __restrict__ du_spike,
+                                                            T* __restrict__ B_spike)
     {
         const rocsparse_int tidx = hipThreadIdx_x;
         const rocsparse_int bidx = hipBlockIdx_x;
         const rocsparse_int gidx = bidx * BLOCKSIZE + tidx;
-
-        const rocsparse_int bidy = hipBlockIdx_y;
 
         T a = (gidx < m && gidx != 0) ? dl[stride * bidy + gidx] : static_cast<T>(0);
         T b = (gidx < m) ? d[stride * bidy + gidx] : static_cast<T>(1);
@@ -198,6 +202,59 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel(rocsparse_int m,
+                                                             rocsparse_int n,
+                                                             int64_t       stride,
+                                                             int64_t       ldb,
+                                                             rocsparse_int num_spikes,
+                                                             const T* __restrict__ dl,
+                                                             const T* __restrict__ d,
+                                                             const T* __restrict__ du,
+                                                             const T* __restrict__ B,
+                                                             T* __restrict__ dl_modified,
+                                                             T* __restrict__ d_modified,
+                                                             T* __restrict__ du_modified,
+                                                             T* __restrict__ B_modified,
+                                                             T* __restrict__ dl_spike,
+                                                             T* __restrict__ d_spike,
+                                                             T* __restrict__ du_spike,
+                                                             T* __restrict__ B_spike)
+    {
+        // n is the batch count. grid.y is clamped to the hardware maximum, so
+        // grid-stride over the batch, matching the small path which puts the batch on
+        // grid.x with a bounds check. The bound depends only on n, hipBlockIdx_y and
+        // hipGridDim_y, all block uniform, so every thread of a block runs the same
+        // number of iterations and the barriers inside the device function stay
+        // convergent.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_device<BLOCKSIZE>(bidy,
+                                                                                      m,
+                                                                                      n,
+                                                                                      stride,
+                                                                                      ldb,
+                                                                                      num_spikes,
+                                                                                      dl,
+                                                                                      d,
+                                                                                      du,
+                                                                                      B,
+                                                                                      dl_modified,
+                                                                                      d_modified,
+                                                                                      du_modified,
+                                                                                      B_modified,
+                                                                                      dl_spike,
+                                                                                      d_spike,
+                                                                                      du_spike,
+                                                                                      B_spike);
+
+            // The shared PCR tiles are still being read when the device function
+            // returns; synchronise before the next system of the batch overwrites them.
+            __syncthreads();
+        }
+    }
+
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_strided_batch_spike_solver_pcr_kernel(rocsparse_int num_spikes,
                                                             rocsparse_int n,
                                                             const T* __restrict__ dl_spike,
@@ -273,25 +330,28 @@ namespace rocsparse
         }
     }
 
+    // bidy is the system of the batch handled by this call, supplied by the kernel
+    // wrapper from a grid-stride loop, and 64 bit because it scales the m and
+    // num_spikes offsets over the full batch_count (ldb is already 64 bit).
     template <uint32_t BLOCKSIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel(rocsparse_int m,
-                                                              rocsparse_int n,
-                                                              int64_t       ldb,
-                                                              int           num_spikes,
-                                                              const T* __restrict__ dl_modified,
-                                                              const T* __restrict__ d_modified,
-                                                              const T* __restrict__ du_modified,
-                                                              const T* __restrict__ B_modified,
-                                                              const T* __restrict__ B_spike,
-                                                              T* __restrict__ B)
+    ROCSPARSE_DEVICE_ILF void
+        gtsv_nopivot_strided_batch_pcr_tiled_backward_device(int64_t       bidy,
+                                                             rocsparse_int m,
+                                                             rocsparse_int n,
+                                                             int64_t       ldb,
+                                                             int           num_spikes,
+                                                             const T* __restrict__ dl_modified,
+                                                             const T* __restrict__ d_modified,
+                                                             const T* __restrict__ du_modified,
+                                                             const T* __restrict__ B_modified,
+                                                             const T* __restrict__ B_spike,
+                                                             T* __restrict__ B)
     {
         const rocsparse_int tidx = hipThreadIdx_x;
         const rocsparse_int bidx = hipBlockIdx_x;
         const rocsparse_int gidx = BLOCKSIZE * bidx + tidx;
 
-        const rocsparse_int bidy = hipBlockIdx_y;
-        const rocsparse_int N    = hipGridDim_x;
+        const rocsparse_int N = hipGridDim_x;
 
         if(gidx >= m)
             return;
@@ -315,5 +375,37 @@ namespace rocsparse
 
         // Store result to global memory
         B[ldb * bidy + gidx] = x_final;
+    }
+
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel(rocsparse_int m,
+                                                              rocsparse_int n,
+                                                              int64_t       ldb,
+                                                              int           num_spikes,
+                                                              const T* __restrict__ dl_modified,
+                                                              const T* __restrict__ d_modified,
+                                                              const T* __restrict__ du_modified,
+                                                              const T* __restrict__ B_modified,
+                                                              const T* __restrict__ B_spike,
+                                                              T* __restrict__ B)
+    {
+        // n is the batch count. grid.y is clamped to the hardware maximum, so
+        // grid-stride over the batch. The bound is block uniform and this kernel has
+        // no shared state, so no extra barrier is needed.
+        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
+        {
+            rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_device<BLOCKSIZE>(bidy,
+                                                                                       m,
+                                                                                       n,
+                                                                                       ldb,
+                                                                                       num_spikes,
+                                                                                       dl_modified,
+                                                                                       d_modified,
+                                                                                       du_modified,
+                                                                                       B_modified,
+                                                                                       B_spike,
+                                                                                       B);
+        }
     }
 }

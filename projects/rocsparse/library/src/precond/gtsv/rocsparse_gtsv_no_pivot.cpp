@@ -515,6 +515,15 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    // Maximum extent of the y grid dimension on all supported architectures. The
+    // medium path maps the count of NUM_RHS sized right-hand side blocks onto grid.y,
+    // so it has to be clamped and the kernels grid-stride over the full count. The
+    // small path is already correct because it puts the same count on grid.x.
+    // AISPARSE-696 (PR #11512) adds
+    // rocsparse::get_grid_size(count, rocsparse::max_batch_grid_size) to
+    // rocsparse_common.hpp; once that lands both clamps below become a call to it.
+    static constexpr uint32_t gtsv_no_pivot_max_grid_size_y = 65535;
+
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
     rocsparse_status launch_backward_substitution_kernel(rocsparse_handle handle,
                                                          rocsparse_int    m,
@@ -530,7 +539,9 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_no_pivot_pcr_tiled_backward_kernel<BLOCKSIZE, NUM_RHS>),
-            dim3((m - 1) / BLOCKSIZE + 1, (n - 1) / NUM_RHS + 1, 1),
+            dim3((m - 1) / BLOCKSIZE + 1,
+                 rocsparse::min((n - 1) / NUM_RHS + 1, rocsparse::gtsv_no_pivot_max_grid_size_y),
+                 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
@@ -568,7 +579,9 @@ namespace rocsparse
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::gtsv_no_pivot_pcr_tiled_forward_kernel<BLOCKSIZE, NUM_RHS>),
-            dim3((m - 1) / BLOCKSIZE + 1, (n - 1) / NUM_RHS + 1, 1),
+            dim3((m - 1) / BLOCKSIZE + 1,
+                 rocsparse::min((n - 1) / NUM_RHS + 1, rocsparse::gtsv_no_pivot_max_grid_size_y),
+                 1),
             dim3(BLOCKSIZE),
             0,
             handle->stream,
