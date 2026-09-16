@@ -1450,6 +1450,7 @@
     'NonVolatileC',
     'NonVolatileD',
     'NonVolatileE',
+    'NonVolatileGate',
     'NonVolatileMXSA',
     'NonVolatileMXSB',
     'NonVolatileMetadata',
@@ -1499,6 +1500,7 @@
     'TemporalHintC',
     'TemporalHintD',
     'TemporalHintE',
+    'TemporalHintGate',
     'TemporalHintMXSA',
     'TemporalHintMXSB',
     'TemporalHintMetadata',
@@ -2334,6 +2336,14 @@
       'len': 2,
       'type': 'list',
     }),
+    'NonVolatileGate': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'NonVolatileMXSA': dict({
       'head': list([
         0,
@@ -2738,6 +2748,15 @@
       'type': 'list',
     }),
     'TemporalHintE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintGate': dict({
       'head': list([
         0,
         1,
