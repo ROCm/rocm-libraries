@@ -199,13 +199,37 @@ to [extend.md](extend.md).
 
 **Inventory the packs before you choose a dialect.** Ask, in this order:
 
-1. **Does an ingestor pack already exist for this operation, and is it yours?** Only
-   `ConvNative.cpp` and `PointwiseNative.cpp` exist under
-   `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`;
-   batchnorm, layernorm, RMSnorm and resample are `hip_mlops_engine` plan builders with
-   no ingestor pack. Those two are reference scaffolds — `PointwiseAdd` computes one
-   element (`kernels/PointwiseAdd.cpp:11-12`), `ConvFwd` serves 6 of 1218
-   `ConvolutionFwd` bundle cases — so neither is an extension target for a real kernel.
+1. **Does an ingestor pack already exist for this operation, and is it yours?** Three
+   packs exist — `ConvNative.cpp`, `PointwiseNative.cpp` and
+   `BatchnormInferenceNative.cpp` under
+   `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`,
+   registered at `IngestorPacks.cpp:16-26`. The answer turns on **ownership**, with one
+   independent disqualifier on top of it:
+   - **No pack for the operation** — layernorm, RMSnorm, resample and most requests.
+     Those three are `hip_mlops_engine` plan builders with no ingestor pack. Create
+     path.
+   - **The only candidate is `PointwiseAdd` or `ConvFwd`** — still no, on their own
+     merits: `PointwiseAdd` computes one element
+     (`kernels/PointwiseAdd.cpp:11-12`), `ConvFwd` serves 6 of 1218 `ConvolutionFwd`
+     bundle cases. Both are reference scaffolds, and a real kernel attached to either
+     inherits a matcher, a geometry and an ABI chosen for a toy.
+   - **The candidate is `BatchnormInference`** — the first legitimate yes, and it is
+     conditional on the pack being yours. It is no scaffold: a full-tensor kernel with
+     its own bounds guard (`kernels/BatchnormInference.cpp:64-94`), a computed grid
+     (`BatchnormInferenceNative.cpp:642-647`), three io dtypes
+     (`BatchnormInferenceNative.cpp:97-101`), nine shipped variants
+     (`TestBatchnormInferencePacks.cpp:44-63`) and a matcher refusing 15 parameterized
+     cases against 9 acceptances (`TestBatchnormInferenceMatchers.cpp:165-314`,
+     `TestBatchnormInferenceMatchers.cpp:65-129`). Extending it means another block
+     size, io dtype, architecture or variant *of batchnorm inference*, by whoever
+     shipped it — never an unrelated kernel hung off it. Its open axes are exactly its
+     limits: one proved architecture
+     (`IngestorGenerator/configs/batchnorm_inference.yaml:49`) and no device-level
+     integration test wiring it, with its 10 of 82 `BatchnormInference/Default` bundle
+     cases mirroring its own unit-test shapes rather than an independent corpus. Note
+     that batchnorm now has *both* an ingestor pack and the `hip_mlops_engine` builder
+     still claiming the same single-node graph (`BatchnormPlanBuilder.cpp:371-374`,
+     `BatchnormPlanBuilder.cpp:550-554`).
 2. **If no, this is the create path.** Go to
    [hipdnn-kernel-integration](../hipdnn-kernel-integration/SKILL.md) and return here for
    corpus, sweeps, tuning and packaging once the pack exists.

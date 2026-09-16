@@ -183,7 +183,7 @@ Decide which of these this kernel needs, and name each one. **New by default.**
 existing pack exists" is not the reason; "this is another block size for the pack I
 shipped last month" is.
 
-**The two shipped packs are reference scaffolds and are never that reason.**
+**Two of the three shipped packs are reference scaffolds and are never that reason.**
 `PointwiseAdd` is one thread writing `c[0]` under
 `if(blockIdx.x == 0 && threadIdx.x == 0)` (`kernels/PointwiseAdd.cpp:11-12`) with grid
 1×1×1 (`PointwiseNative.cpp:436`); `ConvFwd` is a naive direct convolution admitting only
@@ -193,11 +193,32 @@ and to be read as worked examples. Attaching a real kernel to either inherits it
 matcher, its geometry and its ABI — all three chosen for a toy — and it is not what
 "extend an existing pack" means.
 
-Most requests have no pack at all: only `ConvNative.cpp` and `PointwiseNative.cpp` exist
-under `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`.
-Batchnorm, layernorm, RMSnorm and resample are `hip_mlops_engine` plan builders with no
-ingestor pack. For those the answer to "which existing pack" is **none**, and step 3 is
-where the work is.
+**The third, `hipkernel:BatchnormInference`, is the one pack for which "yes" is
+available — and it is available only to whoever shipped it.** Nothing about it is a
+toy: a full-tensor kernel with its own bounds guard
+(`kernels/BatchnormInference.cpp:64-94`), a grid computed from the element count
+(`BatchnormInferenceNative.cpp:642-647`), three io dtypes
+(`BatchnormInferenceNative.cpp:97-101`), nine shipped variants
+(`TestBatchnormInferencePacks.cpp:44-63`), and a matcher that refuses 15 parameterized
+cases and admits 9 (`TestBatchnormInferenceMatchers.cpp:165-314`,
+`TestBatchnormInferenceMatchers.cpp:65-129`). Extending it means another block size,
+another io dtype, another architecture or another variant *of batchnorm inference* —
+and its stated gaps are exactly the live axes: one proved architecture
+(`IngestorGenerator/configs/batchnorm_inference.yaml:49`), no device-level integration
+test wiring it, 10 of 82 `BatchnormInference/Default` bundle cases mirroring its own
+unit-test shapes, and a per-channel parameter dtype pinned to FLOAT
+(`BatchnormInferenceNative.cpp:103-107`). Hanging an unrelated kernel off it is not an
+extension, and if you did not ship it you are on the create path.
+
+Most requests have no pack at all: only `ConvNative.cpp`, `PointwiseNative.cpp` and
+`BatchnormInferenceNative.cpp` exist under
+`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`, and
+`IngestorPacks.cpp:16-26` registers exactly those three. Layernorm, RMSnorm and resample
+are `hip_mlops_engine` plan builders with no ingestor pack; batchnorm has both, the
+hand-written builder still serving the same single-node graph
+(`BatchnormPlanBuilder.cpp:371-374`, `BatchnormPlanBuilder.cpp:550-554`). For the three
+without a pack the answer to "which existing pack" is **none**, and step 3 is where the
+work is.
 
 **Artifact:** a written symbol decision — one row per hook, with its symbol name, new or
 reused, and the reason.
@@ -229,6 +250,16 @@ registration, and the row in `IngestorPacks.cpp`. `PointwiseNative.cpp:498-507` 
 worked example of the first, with its graph matcher, its three graph-scoped operation
 matchers, its kernel matcher, its score and its dispatch handler all added to one scope.
 Add the pack's source and test files to the engine's `target_sources` in the same pass.
+
+**Landing a pack obliges you to refresh the named pack examples.** The
+create-versus-extend decision is argued from which packs exist, which are scaffolds and
+which is genuinely extendable, so a new file under
+`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/` or a new
+row in `IngestorPacks.cpp:16-26` makes those examples stale in the commit that adds it.
+Four places carry them and must be updated in that same commit: step 2 above,
+SKILL.md §New symbols are the default, `hipdnn-ingestor-engine/RUNBOOK.md` §1 entry
+question 1, and `hipdnn-ingestor-engine/hiprtc-mining.md` §Scope — say in each which
+your pack is, and whether it routes `kernel_source.kind`.
 
 **The `IngestorPacks.cpp` row's cache fields follow your handler, not your dialect.** The
 row is `(label, registerSymbols, ownsModuleCache, resetModuleCache)`, and
