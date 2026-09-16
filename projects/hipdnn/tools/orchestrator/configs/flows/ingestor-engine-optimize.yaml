@@ -1,0 +1,837 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+#
+# Make an existing kernel-ingestor engine faster, without letting it get faster by
+# getting wronger.
+#
+# The exit gate is the standard test gate, NOT a speed-up. That is deliberate. A loop
+# that exits on a ratio exits on the round whose cache was warmest, and a loop that
+# refuses to exit until a ratio appears will keep spending opus rounds on a kernel that
+# is already sitting on its oracle. So every round measures, every round puts the
+# measurement in front of the agent, and the run ends when the engine still passes
+# everything it passed before -- with the timings recorded as evidence of what the
+# optimisation actually bought.
+#
+# The reference to beat is dnn-benchmarking's own oracle, not a stopwatch. `--oracle-mode
+# plan` times the plan hipDNN's auto-tuner picks and reports the ratio against the
+# heuristic pick; `exhaustive` additionally forces provider kernel benchmarking. The
+# ratio it reports is the honest headroom: if the oracle is 1.00x the heuristic, the
+# heuristic is already choosing the best compiled plan and the win is not in selection.
+# bench_report.py refuses a row where `tuning_available` is false, because "no oracle"
+# and "no headroom" look identical in a report and mean opposite things.
+#
+#   python orchestrate.py run configs/flows/ingestor-engine-optimize.yaml \
+#       --input engine_name=hipkernel:ConvBias --input prior_run=<run> \
+#       --input graph=<graph.json> --input arch=gfx1151 \
+#       --input bench_exe=<build>/install/bin/dnn-benchmark.bat
+version: 1
+name: ingestor-engine-optimize
+description: Optimise an installed ingestor engine; the tests are the gate, the oracle is the yardstick.
+
+inputs:
+  engine_name:
+    description: >-
+      The `<namespace>:<Local>` engine to work on. It must ALREADY exist in the
+      checkout: this flow changes an engine, it does not create one.
+    required: true
+  prior_run:
+    description: >-
+      A completed run directory for this engine, whose authoring.json describes the
+      kernel's admitted shapes and ABI. Adopted read-only; it is what tells the agent
+      what the kernel currently promises.
+    type: path
+    required: true
+    exists: true
+  graph:
+    description: The graph that anchors the gtest filter and the benchmark.
+    type: path
+    required: true
+  arch:
+    description: Target GPU architecture; checked against the device before anything expensive runs.
+    required: true
+  bench_exe:
+    description: >-
+      The `dnn-benchmark` entry point produced by setup_env.py -- usually
+      `<build>/install/bin/dnn-benchmark.bat`. Passed as an input rather than a
+      registry tool because it lives in a build tree this flow does not own.
+    type: path
+    required: true
+  tier:
+    description: Bundle tier the integration filter selects from - quick, standard, comprehensive or full
+    default: quick
+  test_filter:
+    description: GTest filter for the suite run. Empty derives it from the graph's node types.
+    default: ""
+  build_parallel:
+    description: Compile jobs for the rebuilds this flow does. 16 is AGENTS.md's cap.
+    type: int
+    default: 16
+  notes:
+    description: Extra constraints for the agent (use =@file.md for a long brief)
+    default: ""
+  bench_iterations:
+    description: Timed iterations per benchmark round.
+    type: int
+    default: 200
+  bench_warmup:
+    description: >-
+      Warmup iterations. Must be >= 1 for an exhaustive oracle pass, and a 0 here puts
+      first-execute compilation inside both timed loops.
+    type: int
+    default: 20
+  oracle_mode:
+    description: >-
+      off, plan or exhaustive. `plan` times hipDNN's auto-tuned plan against the
+      heuristic pick and is the cheap oracle; `exhaustive` also forces provider kernel
+      benchmarking and is much slower. This flow defaults to `plan` because the number
+      it produces is the one worth optimising against.
+    default: plan
+  measurable_floor_ms:
+    description: >-
+      Kernel median below which a round is treated as unmeasurable. The submit-plus-drain
+      floor on this class of device is around 0.03 ms, and below it the benchmark cannot
+      tell a good kernel from no kernel.
+    default: "0.05"
+
+vars:
+  provider_dir: "${vars.repo_root}/dnn-providers/hip-kernel-provider"
+  ingestor_dir: "${vars.provider_dir}/src/engines/kernel_ingestor_engine"
+  provider_tests_dir: "${vars.provider_dir}/src/tests/engines/kernel_ingestor_engine"
+  generator_dir: "${vars.hipdnn_root}/tools/IngestorGenerator"
+  generator_venv: "${vars.hipdnn_root}/tools/IngestorGenerator/.venv"
+  scripts_dir: "${vars.hipdnn_root}/tools/orchestrator/scripts"
+  superbuild_scripts: "${vars.hipdnn_root}/tools/ai/skills/hipdnn-superbuild/scripts"
+  skills_dir: "${vars.hipdnn_root}/tools/ai/skills"
+  build_bin: "${vars.ingestor_build_dir}/bin"
+  install_bin: "${vars.ingestor_install_dir}/bin"
+  integration_tests_exe: "${vars.build_bin}/hipdnn_integration_tests${platform.exe_suffix}"
+  provider_tests_exe: "${vars.build_bin}/hip_kernel_provider_tests${platform.exe_suffix}"
+  validator_exe: "${vars.build_bin}/hipdnn_validate_descriptors${platform.exe_suffix}"
+  profile_file: "${run.dir}/profile.json"
+  identity_file: "${run.dir}/identity.json"
+  authoring_file: "${inputs.prior_run}/authoring.json"
+  integration_file: "${run.dir}/integration.json"
+  ingestor_file: "${run.dir}/ingestor.json"
+  kernel_dir: "${inputs.prior_run}/kernel"
+  scope_stage1: "${run.dir}/scope-baseline.json"
+  # The plugin directory dnn-benchmark loads engines from. It is the INSTALL tree, not
+  # the build tree: an engine that only exists where it was compiled is an engine no
+  # customer can load, and the suite gates below already measure the install.
+  bench_plugin_dir: "${vars.install_bin}/hipdnn_plugins/engines"
+
+steps:
+
+  # ---------------------------------------------------------------- preflight
+
+  - id: device_arch
+    tool: python
+    args:
+      - "${vars.scripts_dir}/exec_at.py"
+      - "--exe"
+      - "${vars.rocm_bin}/hipInfo${platform.exe_suffix}"
+      - "--produced-by"
+      - "the ROCm installation named by rocm_path in configs/tools.yaml"
+      - "--path-prepend"
+      - "${vars.rocm_bin}"
+    cwd: "${vars.rocm_bin}"
+    timeout: 300
+    outputs:
+      detected: { regex: 'gcnArchName:\s*(\S+)' }
+    assert:
+      - that: "${steps.device_arch.outputs.detected} == ${inputs.arch}"
+        message: "--input arch does not match the GPU in this machine; re-run with the architecture this step detected"
+
+  - id: profile
+    tool: python
+    args:
+      - "${vars.scripts_dir}/graph_profile.py"
+      - "--graph"
+      - "${inputs.graph}"
+      - "--tier"
+      - "${inputs.tier}"
+      - "--filter-override"
+      - "${inputs.test_filter}"
+      - "--out"
+      - "${vars.profile_file}"
+    cwd: "${vars.repo_root}"
+    result_file: "${vars.profile_file}"
+    result_schema:
+      required: [graph, tier, node_types, op_tokens, op_tokens_text, derived_filter, gtest_filter, op_count]
+    timeout: 300
+    outputs:
+      gtest_filter: { json_file: result, path: "$.gtest_filter" }
+      op_count: { json_file: result, path: "$.op_count", type: int }
+      op_tokens_text: { json_file: result, path: "$.op_tokens_text" }
+    assert:
+      - that: "${steps.profile.outputs.op_count} > 0"
+        message: "the graph declares no operations, so nothing can be derived from it"
+
+  # The create path asserts `collisions == 0` because it is choosing a new name. Here
+  # the engine must already be installed in the checkout -- that is the thing being
+  # worked on -- so the assertion is inverted. A zero means this flow was pointed at a
+  # checkout where the engine was never integrated, and every gate below would be
+  # measuring an engine that is not there.
+  - id: identity
+    tool: python
+    args:
+      - "${vars.scripts_dir}/identity.py"
+      - "--engine-name"
+      - "${inputs.engine_name}"
+      - "--repo"
+      - "${vars.repo_root}"
+      - "--out"
+      - "${vars.identity_file}"
+    cwd: "${vars.repo_root}"
+    result_file: "${vars.identity_file}"
+    result_schema:
+      required: [engine_name, pack_class, descriptor_slug, register_symbol, native_file, descriptor_dir, engine_toml, external_test_target, census_suite, collisions]
+    timeout: 120
+    outputs:
+      pack_class: { json_file: result, path: "$.pack_class" }
+      descriptor_dir: { json_file: result, path: "$.descriptor_dir" }
+      external_test_target: { json_file: result, path: "$.external_test_target" }
+      census_suite: { json_file: result, path: "$.census_suite" }
+      collisions: { json_file: result, path: "$.collisions", type: int }
+    assert:
+      - that: "${steps.identity.outputs.collisions} > 0"
+        message: "this engine is not present in the checkout, so there is nothing to work on - run the create flow first"
+
+  - id: engine_id
+    tool: python
+    args:
+      - "${vars.scripts_dir}/engine_id.py"
+      - "--engine-name"
+      - "${inputs.engine_name}"
+      - "--out"
+      - "${run.dir}/engine-id.json"
+    cwd: "${vars.repo_root}"
+    result_file: "${run.dir}/engine-id.json"
+    result_schema:
+      required: [engine_name, engine_id, engine_id_unsigned]
+    timeout: 120
+    outputs:
+      id: { json_file: result, path: "$.engine_id" }
+
+  # Named `author` because the gates below read ${steps.author.outputs.digest} to prove
+  # they consumed the kernel's contract rather than re-deriving it from the tree. There
+  # is no authoring agent in this flow: the contract already exists and is adopted from
+  # the prior run, read-only. `result_file` names this check's own output, never the
+  # adopted contract -- the engine clears a declared result file before the step runs.
+  - id: author
+    tool: python
+    args:
+      - "${vars.scripts_dir}/contract_check.py"
+      - "--contract"
+      - "authoring"
+      - "--file"
+      - "${vars.authoring_file}"
+      - "--repo"
+      - "${vars.repo_root}"
+      - "--graph"
+      - "${inputs.graph}"
+      - "--out"
+      - "${run.dir}/adopted-authoring-check.json"
+    cwd: "${vars.repo_root}"
+    result_file: "${run.dir}/adopted-authoring-check.json"
+    result_schema:
+      required: [kind, checks, failed_checks, failed_check_count, ok, feedback]
+    timeout: 300
+    outputs:
+      ok: { json_file: result, path: "$.ok", type: int }
+      digest: { sha256: "${vars.authoring_file}" }
+    assert:
+      - that: "${steps.author.outputs.ok} == 1"
+        message: "the adopted authoring contract does not describe the files it points at - this step's stdout.log names each failing check"
+
+  - id: generator_venv
+    tool: python
+    args:
+      - "${vars.scripts_dir}/ensure_venv.py"
+      - "--dir"
+      - "${vars.generator_venv}"
+      - "--requirements"
+      - "${vars.generator_dir}/requirements.txt"
+      - "--out"
+      - "${run.dir}/venv.json"
+    cwd: "${vars.repo_root}"
+    result_file: "${run.dir}/venv.json"
+    result_schema:
+      required: [venv_dir, python, created, installed, ready, packages, feedback]
+    timeout: 1800
+    outputs:
+      ready: { json_file: result, path: "$.ready", type: int }
+      python: { json_file: result, path: "$.python" }
+    assert:
+      - that: "${steps.generator_venv.outputs.ready} == 1"
+        message: "the generator venv cannot import its dependencies - see venv.json for pip's own diagnostic"
+
+  - id: scope_baseline
+    tool: python
+    args:
+      - "${vars.scripts_dir}/guard_scope.py"
+      - "--repo"
+      - "${vars.repo_root}"
+      - "--mode"
+      - "baseline"
+      - "--out"
+      - "${vars.scope_stage1}"
+      - "--watch"
+      - "dnn-providers/**/*"
+      - "--watch"
+      - "projects/hipdnn/tools/IngestorGenerator/codegen/**/*"
+      - "--watch"
+      - "projects/hipdnn/tools/IngestorGenerator/templates/**/*"
+      - "--allow-grow"
+      - "dnn-providers/integration-tests/integration-test-bundles/**/sweep.json"
+      - "--allow-added"
+      - "dnn-providers/integration-tests/integration-test-bundles/**/*"
+      - "--allow-added"
+      - "dnn-providers/hip-kernel-provider/config/*.toml"
+      - "--allow-added"
+      - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
+      - "--allow-added"
+      - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/**/*"
+      - "--expect-change"
+      - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
+      # Bytecode caches. Anything that imports the generator writes these, so they
+      # appear under a watched tree without anybody editing a file -- and a .pyc that
+      # already existed is REWRITTEN rather than added, so allow-added alone does not
+      # cover it. Both spellings, both trees. A run has failed on exactly this.
+      - "--allow-added"
+      - "**/__pycache__/*"
+      - "--allow-modified"
+      - "**/__pycache__/*"
+    cwd: "${vars.repo_root}"
+    result_file: "${vars.scope_stage1}"
+    result_schema:
+      required: [repo, watched_count, work_count, files]
+    timeout: 900
+    outputs:
+      watched: { json_file: result, path: "$.watched_count", type: int }
+      work_files: { json_file: result, path: "$.work_count", type: int }
+    assert:
+      - that: "${steps.scope_baseline.outputs.watched} > 0"
+        message: "the scope guard matched no files to protect - every --watch glob is wrong"
+
+  # The floor every later suite run is measured against: what the engine accepts TODAY,
+  # before this flow touches it. `passed + failed` rather than `passed`, because an
+  # engine that declines everything also reports zero failures.
+  - id: baseline_suite
+    tool: python
+    args:
+      - "${vars.scripts_dir}/exec_at.py"
+      - "--exe"
+      - "${vars.integration_tests_exe}"
+      - "--produced-by"
+      - "an earlier build of this engine"
+      - "--path-prepend"
+      - "${vars.install_bin}"
+      - "--path-prepend"
+      - "${vars.rocm_bin}"
+      - "--"
+      - "--test-article"
+      - "${vars.installed_plugin}"
+      - "--test-engine"
+      - "${inputs.engine_name}"
+      - "--gtest_filter=${steps.profile.outputs.gtest_filter}"
+    cwd: "${vars.install_bin}"
+    expect_exit: [0, 1]
+    timeout: 3600
+    outputs:
+      passed: { regex: 'Passed:\s+(\d+)', from: stderr, type: int }
+      selected: { regex: 'Passed:\s+\d+ / (\d+)', from: stderr, type: int }
+      skipped: { regex: 'Skipped:\s+(\d+)', from: stderr, type: int }
+      failed: { regex: 'Failed:\s+(\d+)', from: stderr, type: int }
+    assert:
+      - that: "${steps.baseline_suite.outputs.selected} > 0"
+        message: "the derived gtest filter selected no tests - nothing would gate this run"
+      - that: "${steps.baseline_suite.outputs.passed} + ${steps.baseline_suite.outputs.failed} > 0"
+        message: "the engine accepts none of the selected cases, so there is no floor to hold or to raise"
+
+  # ---------------------------------------------------- the optimisation cycle
+
+  - id: optimize_cycle
+    loop:
+      max_iterations: 4
+      until: "${steps.gate.outputs.meets_target} == 1"
+      on_exhausted: fail
+      on_step_failure: retry
+      feedback_from: "${steps.gate.outputs.feedback}"
+    steps:
+
+      - id: integrate
+        tool: claude
+        args:
+          - "--print"
+          - "--output-format"
+          - "stream-json"
+          - "--verbose"
+          - "--model"
+          - "claude-opus-5[1m]"
+          - "--permission-mode"
+          - "auto"
+          - "--add-dir"
+          - "${vars.repo_root}"
+          - "--add-dir"
+          - "${run.dir}"
+        cwd: "${vars.repo_root}"
+        prompt_file: ../prompts/optimize_kernel.md
+        result_file: "${vars.integration_file}"
+        result_schema:
+          required: [engine_name, pack_class, descriptor_slug, generator_config, generated_dir, kernel_source_kind, native_file, hooks, registration, cmake_splices, descriptor_files, external_test_target, engine_toml, bundle_case_ids, bundle_gtest_filter, entry_point_launched, launch_arg_order, consumed_authoring_sha256, changed_files, addressed_feedback, summary]
+        timeout: 7200
+        outputs:
+          generator_config: { json_file: result, path: "$.generator_config", type: path }
+          generated_dir: { json_file: result, path: "$.generated_dir" }
+          bundle_gtest_filter: { json_file: result, path: "$.bundle_gtest_filter" }
+          bundle_case_count: { json_file: result, path: "$.bundle_case_ids", type: count }
+          hook_count: { json_file: result, path: "$.hooks", type: count }
+          changed_files: { json_file: result, path: "$.changed_files", type: count }
+          echoed_digest: { json_file: result, path: "$.consumed_authoring_sha256" }
+          session_id: { regex: '"session_id":"([^"]+)"' }
+        assert:
+          - that: "${steps.integrate.outputs.changed_files} > 0"
+            message: "the agent reported changing no files"
+          - that: "${steps.integrate.outputs.bundle_case_count} > 0"
+            message: "no bundle graph cases were added, so nothing verifies the pack"
+          # Checked here as well as inside contract_check, because this one comparison is
+          # what makes every ABI claim below traceable to the kernel this run authored.
+          - that: "${steps.integrate.outputs.echoed_digest} == ${steps.author.outputs.digest}"
+            message: "the integration did not consume this run's authoring contract - an ABI taken from any other source is the defect the digest exists to catch"
+
+      # The measurement half is byte-identical; the bundle tree may only grow; something
+      # under the ingestor engine must have changed. All three, because each failure alone
+      # produces a green run: an edited bundle case, an edited sibling pack, or an agent
+      # that wrote nothing and let the previous round's build be re-measured.
+      - id: scope
+        tool: python
+        args:
+          - "${vars.scripts_dir}/guard_scope.py"
+          - "--repo"
+          - "${vars.repo_root}"
+          - "--mode"
+          - "check"
+          - "--baseline"
+          - "${vars.scope_stage1}"
+          - "--out"
+          - "${loop.attempt_dir}/scope.json"
+          - "--watch"
+          - "dnn-providers/**/*"
+          - "--watch"
+          - "projects/hipdnn/tools/IngestorGenerator/codegen/**/*"
+          - "--watch"
+          - "projects/hipdnn/tools/IngestorGenerator/templates/**/*"
+          - "--allow-grow"
+          - "dnn-providers/integration-tests/integration-test-bundles/**/sweep.json"
+          - "--allow-added"
+          - "dnn-providers/integration-tests/integration-test-bundles/**/*"
+          - "--allow-added"
+          - "dnn-providers/hip-kernel-provider/config/*.toml"
+          - "--allow-added"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
+          - "--allow-added"
+          - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/**/*"
+          # The registration splices. A pack is not landed by adding files alone: it has to
+          # be named in a CMake source list and in the pack registry, and this subtree lists
+          # its sources explicitly rather than globbing them (kernel_ingestor_engine/
+          # CMakeLists.txt:22). Without these, `--expect-change` below and the registration
+          # the integrate prompt requires contradict each other -- the splice is mandatory
+          # and every way of making it is a violation. Named files only, never a tree.
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/CMakeLists.txt"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/CMakeLists.txt"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/CMakeLists.txt"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorKernels.cmake"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorPacks.cpp"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorPacks.hpp"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt"
+          # Bytecode caches are a side effect of running the migration scripts, not an edit.
+          # The baseline is taken once at preflight, so without this a single stray .pyc
+          # fails every remaining iteration of the loop.
+          - "--allow-added"
+          - "dnn-providers/**/__pycache__/*"
+          - "--expect-change"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
+          # Bytecode caches. Anything that imports the generator writes these, so they
+          # appear under a watched tree without anybody editing a file -- and a .pyc that
+          # already existed is REWRITTEN rather than added, so allow-added alone does not
+          # cover it. Both spellings, both trees. A run has failed on exactly this.
+          - "--allow-added"
+          - "**/__pycache__/*"
+          - "--allow-modified"
+          - "**/__pycache__/*"
+        cwd: "${vars.repo_root}"
+        result_file: "${loop.attempt_dir}/scope.json"
+        result_schema:
+          required: [watched_count, outside_count, modified, removed, added, work_changed_count, allowed_added_count, allowed_modified_count, grown_count, feedback]
+        timeout: 900
+        outputs:
+          outside_count: { json_file: result, path: "$.outside_count", type: int }
+          work_changed_count: { json_file: result, path: "$.work_changed_count", type: int }
+          grown_count: { json_file: result, path: "$.grown_count", type: int }
+        assert:
+          - that: "${steps.scope.outputs.outside_count} == 0"
+            message: "files that define how this run is measured were edited - see scope.json; a bundle case may be added or appended, never rewritten"
+          - that: "${steps.scope.outputs.work_changed_count} > 0"
+            message: "no file under the ingestor engine changed - whatever was reported, nothing reached disk"
+
+      # One command that fails for both halves of "the generator's output is in the
+      # provider": a hook body still carrying FILL THIS OUT, and an emitted file that was
+      # never spliced anywhere. It derives the file set from the config, so it cannot miss
+      # a file a hand-written glob forgot.
+      - id: placeholders
+        tool: python
+        args:
+          - "${vars.scripts_dir}/exec_at.py"
+          - "--exe"
+          - "${steps.generator_venv.outputs.python}"
+          - "--produced-by"
+          - "the generator_venv step"
+          - "--"
+          - "${vars.generator_dir}/generate.py"
+          - "--config"
+          - "${steps.integrate.outputs.generator_config}"
+          - "--output-dir"
+          - "${steps.integrate.outputs.generated_dir}"
+          - "--check-placeholders"
+          - "--emitted-root"
+          - "${vars.ingestor_dir}"
+          - "--emitted-root"
+          - "${vars.provider_tests_dir}"
+        cwd: "${vars.repo_root}"
+        timeout: 900
+        outputs:
+          located: { regex: 'across all (\d+) located files' }
+        assert:
+          - that: "${steps.placeholders.outputs.located} > 0"
+            message: "the generator located none of this engine's shippable files under the provider roots"
+
+      # The seam. Both sides state launch()'s argument list and nothing in the toolchain
+      # compares them; this does, name by name and in order.
+      - id: integration_contract
+        tool: python
+        args:
+          - "${vars.scripts_dir}/contract_check.py"
+          - "--contract"
+          - "integration"
+          - "--file"
+          - "${vars.integration_file}"
+          - "--repo"
+          - "${vars.repo_root}"
+          - "--identity"
+          - "${vars.identity_file}"
+          - "--authoring"
+          - "${vars.authoring_file}"
+          - "--out"
+          - "${loop.attempt_dir}/contract.json"
+        cwd: "${vars.repo_root}"
+        result_file: "${loop.attempt_dir}/contract.json"
+        result_schema:
+          required: [kind, checks, failed_checks, failed_check_count, ok, feedback]
+        timeout: 300
+        outputs:
+          ok: { json_file: result, path: "$.ok", type: int }
+          failed: { json_file: result, path: "$.failed_check_count", type: int }
+        assert:
+          - that: "${steps.integration_contract.outputs.ok} == 1"
+            message: "the integration contract disagrees with the checkout or with the kernel's ABI - this step's stdout.log names each failing check"
+
+      - id: build
+        tool: cmake
+        args:
+          - "--build"
+          - "${vars.ingestor_build_dir}"
+          - "--parallel"
+          - "${inputs.build_parallel}"
+        cwd: "${vars.repo_root}"
+        timeout: 14400
+
+      # Every gate below runs against the install, not the build tree: that is where a
+      # customer meets the engine, and an engine registered only in the build tree is not
+      # exercisable against an install.
+      - id: install
+        tool: cmake
+        args:
+          - "--install"
+          - "${vars.ingestor_build_dir}"
+        cwd: "${vars.repo_root}"
+        timeout: 3600
+        outputs:
+          plugin: { file: "${vars.installed_plugin}", type: path }
+
+      # --json prints one document to stdout and nothing else; exec_at's own launch line
+      # goes to stderr, so stdout_path below is a parseable JSON file.
+      - id: validate_descriptors
+        tool: python
+        args:
+          - "${vars.scripts_dir}/exec_at.py"
+          - "--exe"
+          - "${vars.validator_exe}"
+          - "--produced-by"
+          - "the build step"
+          - "--path-prepend"
+          - "${vars.build_bin}"
+          - "--path-prepend"
+          - "${vars.rocm_bin}"
+          - "--"
+          - "${steps.identity.outputs.descriptor_dir}"
+          - "--expect-engine"
+          - "${inputs.engine_name}"
+          - "--json"
+        cwd: "${vars.build_bin}"
+        expect_exit: [0, 1]
+        timeout: 900
+        outputs:
+          success: { json: 0, path: "$.success", type: bool }
+          engines: { json: 0, path: "$.engines", type: count }
+          missing: { json: 0, path: "$.expected_engines_missing", type: count }
+        assert:
+          - that: "${steps.validate_descriptors.outputs.missing} == 0"
+            message: "the validator did not find the expected engine in the descriptor tree"
+          - that: "${steps.validate_descriptors.outputs.engines} > 0"
+            message: "the descriptor tree declares no engines at all"
+
+      # The generator emits this suite complete rather than as a stub: it exercises
+      # discoverDescriptorSets() and the provider's real loading path, in a fresh process,
+      # because registration and discovery are memoized per process.
+      - id: census
+        tool: python
+        args:
+          - "${vars.scripts_dir}/exec_at.py"
+          - "--exe"
+          - "${vars.provider_tests_exe}"
+          - "--produced-by"
+          - "the build and install steps, under HIPKERNELPROVIDER_ENABLE_TESTS=ON"
+          - "--path-prepend"
+          - "${vars.build_bin}"
+          - "--path-prepend"
+          - "${vars.rocm_bin}"
+          - "--"
+          - "--gtest_filter=${steps.identity.outputs.census_suite}.*"
+        cwd: "${vars.build_bin}"
+        expect_exit: [0, 1]
+        timeout: 1800
+        outputs:
+          # The footer line, which is also the last match of this pattern. The failure
+          # count is not extracted: gtest prints that line only when something failed, so
+          # a regex for it fails the step on a clean run. The exit code says the same
+          # thing exactly -- non-zero iff a case failed -- and is always present.
+          ran: { regex: '\[==========\] (\d+) test[s]? from', type: int }
+        assert:
+          - that: "${steps.census.outputs.ran} > 0"
+            message: "the generated pack census ran no cases; tests built OFF or a filter that matches nothing is absence of evidence, not a pass"
+
+      # Pinned to the new engine and filtered to exactly the cases the integration says it
+      # added, so "passed" is a statement about those graphs rather than about whatever the
+      # tier happened to contain.
+      - id: suite
+        tool: python
+        args:
+          - "${vars.scripts_dir}/exec_at.py"
+          - "--exe"
+          - "${vars.integration_tests_exe}"
+          - "--produced-by"
+          - "the build and install steps"
+          - "--path-prepend"
+          - "${vars.install_bin}"
+          - "--path-prepend"
+          - "${vars.rocm_bin}"
+          - "--"
+          - "--test-article"
+          - "${vars.installed_plugin}"
+          - "--test-engine"
+          - "${inputs.engine_name}"
+          - "--verification-mode"
+          - "gpu"
+          - "--gtest_filter=${steps.integrate.outputs.bundle_gtest_filter}"
+        cwd: "${vars.install_bin}"
+        expect_exit: [0, 1]
+        timeout: 7200
+        outputs:
+          passed: { regex: 'Passed:\s+(\d+)', from: stderr, type: int }
+          selected: { regex: 'Passed:\s+\d+ / (\d+)', from: stderr, type: int }
+          skipped: { regex: 'Skipped:\s+(\d+)', from: stderr, type: int }
+          failed: { regex: 'Failed:\s+(\d+)', from: stderr, type: int }
+
+      # The negative control, and the single most load-bearing step in the stage. Naming an
+      # engine that is not loaded is a hard failure -- `Error: Engine '<name>' is not
+      # loaded.`, exit 1, zero tests run -- not a skip. Without it, a run in which the
+      # engine was never loaded at all is indistinguishable from a run in which it served
+      # everything, because unservable cases skip and the binary exits 0 either way.
+      - id: absent_control
+        tool: python
+        args:
+          - "${vars.scripts_dir}/exec_at.py"
+          - "--exe"
+          - "${vars.integration_tests_exe}"
+          - "--produced-by"
+          - "the build and install steps"
+          - "--path-prepend"
+          - "${vars.install_bin}"
+          - "--path-prepend"
+          - "${vars.rocm_bin}"
+          - "--"
+          - "--test-article"
+          - "${vars.installed_plugin}"
+          - "--test-engine"
+          - "${inputs.engine_name}_DOES_NOT_EXIST"
+          - "--verification-mode"
+          - "gpu"
+          - "--gtest_filter=${steps.integrate.outputs.bundle_gtest_filter}"
+        cwd: "${vars.build_bin}"
+        expect_exit: [0, 1]
+        timeout: 1800
+        outputs:
+          tail: { tail: 20, from: stderr }
+        assert:
+          - that: "${steps.absent_control.outputs.exit_code} == 1"
+            message: "naming an engine that is not loaded did not fail; the suite is not resolving --test-engine, so the positive run above proved nothing about which engine served it"
+          - that: "${steps.absent_control.outputs.stderr} contains 'is not loaded'"
+            message: "the suite did not report the absent engine as not loaded; whatever it did instead, it was not the control this stage depends on"
+
+      # Registration proved from the install prefix, not from the build tree. `ctest -N`
+      # against a root that holds nothing lists nothing and exits 0, so the count is the
+      # evidence and --no-tests=error is what turns an empty listing into a failure.
+      - id: ctest_listing
+        tool: ctest
+        args:
+          - "--test-dir"
+          - "${vars.ingestor_ctest_root}"
+          - "--no-tests=error"
+          - "-N"
+          - "-V"
+          - "-R"
+          - "^${steps.identity.outputs.external_test_target}$"
+        cwd: "${vars.ingestor_install_dir}"
+        timeout: 900
+        outputs:
+          listed: { regex: 'Total Tests: (\d+)', type: int }
+        assert:
+          - that: "${steps.ctest_listing.outputs.listed} == 1"
+            message: "the engine's external integration entry is not registered in the install tree; an engine registered only in the build tree is not exercisable against an install"
+          - that: "${steps.ctest_listing.outputs.stdout} contains ${inputs.engine_name}"
+            message: "the registered entry's command line does not name this engine"
+
+      # The arithmetic and the loop's exit condition. Nine checks, one integer.
+
+      # Evidence, not a gate. Perf is measured every round and put in front of the
+      # agent; what ENDS the loop is the test gate below. A loop that exits on a
+      # speed-up number rewards the round that got lucky with a cache, and a loop that
+      # cannot exit until one appears will keep spending agent time on a kernel that
+      # is already at its oracle.
+      - id: bench
+        tool: python
+        args:
+          - "${vars.scripts_dir}/exec_at.py"
+          - "--exe"
+          - "${inputs.bench_exe}"
+          - "--produced-by"
+          - "dnn-benchmarking's setup_env.py --graph-studio"
+          - "--path-prepend"
+          - "${vars.install_bin}"
+          - "--path-prepend"
+          - "${vars.rocm_bin}"
+          - "--"
+          - "--graph"
+          - "${inputs.graph}"
+          - "--engine"
+          - "${steps.engine_id.outputs.id}"
+          - "--plugin-path"
+          - "${vars.bench_plugin_dir}"
+          - "--warmup"
+          - "${inputs.bench_warmup}"
+          - "--iters"
+          - "${inputs.bench_iterations}"
+          - "--oracle-mode"
+          - "${inputs.oracle_mode}"
+          - "--cache-dir"
+          - "${loop.attempt_dir}/bench-cache"
+          - "--run-dir"
+          - "${loop.attempt_dir}/bench"
+        cwd: "${vars.install_bin}"
+        timeout: 5400
+
+      # One engine's row, by name, flattened. The flow's JSON extractor cannot select a
+      # row by engine_name, so without this a step reads whichever engine sorted first.
+      - id: bench_read
+        tool: python
+        args:
+          - "${vars.scripts_dir}/bench_report.py"
+          - "--report"
+          - "${loop.attempt_dir}/bench/results.json"
+          - "--engine"
+          - "${inputs.engine_name}"
+          - "--out"
+          - "${loop.attempt_dir}/bench-summary.json"
+          - "--floor-ms"
+          - "${inputs.measurable_floor_ms}"
+          - "--oracle-required"
+        cwd: "${vars.repo_root}"
+        result_file: "${loop.attempt_dir}/bench-summary.json"
+        result_schema:
+          required: [engine, graph, status, ran, kernel_median_ms, measurable, oracle_speedup, tuning_available, correctness_failed, ok, feedback]
+        timeout: 600
+        outputs:
+          ran: { json_file: result, path: "$.ran", type: int }
+          kernel_median_ms: { json_file: result, path: "$.kernel_median_ms", type: float }
+          measurable: { json_file: result, path: "$.measurable", type: int }
+          oracle_speedup: { json_file: result, path: "$.oracle_speedup", type: float }
+          tuning_available: { json_file: result, path: "$.tuning_available", type: int }
+          correctness_failed: { json_file: result, path: "$.correctness_failed", type: int }
+          bench_ok: { json_file: result, path: "$.ok", type: int }
+          feedback: { json_file: result, path: "$.feedback" }
+        assert:
+          - that: "${steps.bench_read.outputs.ran} == 1"
+            message: "the engine did not run the graph under the benchmark - an engine that declines the graph it is being optimised for cannot be measured"
+          - that: "${steps.bench_read.outputs.correctness_failed} == 0"
+            message: "the benchmarked run did not match the reference - a faster wrong kernel is not an optimisation"
+          - that: "${steps.bench_read.outputs.measurable} == 1"
+            message: "the graph is at or below the measurement floor, so every timing this round is noise - optimise against a larger graph"
+
+      - id: gate
+        tool: python
+        args:
+          - "${vars.scripts_dir}/integration_gate.py"
+          - "--out"
+          - "${loop.attempt_dir}/gate.json"
+          - "--contract"
+          - "${vars.integration_file}"
+          - "--suite-passed"
+          - "${steps.suite.outputs.passed}"
+          - "--suite-failed"
+          - "${steps.suite.outputs.failed}"
+          - "--suite-selected"
+          - "${steps.suite.outputs.selected}"
+          - "--suite-skipped"
+          - "${steps.suite.outputs.skipped}"
+          - "--absent-exit"
+          - "${steps.absent_control.outputs.exit_code}"
+          - "--absent-passed"
+          - "0"
+          - "--validator"
+          - "${steps.validate_descriptors.outputs.stdout_path}"
+          - "--census-ran"
+          - "${steps.census.outputs.ran}"
+          - "--census-failed"
+          - "${steps.census.outputs.exit_code}"
+          - "--ctest-listed"
+          - "${steps.ctest_listing.outputs.listed}"
+        cwd: "${vars.repo_root}"
+        after: [ctest_listing, suite, absent_control, census, validate_descriptors]
+        result_file: "${loop.attempt_dir}/gate.json"
+        result_schema:
+          required: [meets_target, checks, failed_checks, failed_check_count, declared_cases, engine_name, feedback]
+        timeout: 300
+        outputs:
+          meets_target: { json_file: result, path: "$.meets_target", type: int }
+          failed_check_count: { json_file: result, path: "$.failed_check_count", type: int }
+          feedback: { json_file: result, path: "$.feedback" }
+
+  # ------------------------------------------------------- stage 3: ingestor
+

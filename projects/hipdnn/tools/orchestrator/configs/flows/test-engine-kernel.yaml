@@ -223,6 +223,14 @@ steps:
       - "dnn-providers/hip-kernel-provider/*test_categories*.yaml"
       - "--expect-change"
       - "dnn-providers/hip-kernel-provider/src/engines/test_engine/**/*"
+      # Bytecode caches. Anything that imports the generator writes these, so they
+      # appear under a watched tree without anybody editing a file -- and a .pyc that
+      # already existed is REWRITTEN rather than added, so allow-added alone does not
+      # cover it. Both spellings, both trees. A run has failed on exactly this.
+      - "--allow-added"
+      - "**/__pycache__/*"
+      - "--allow-modified"
+      - "**/__pycache__/*"
     cwd: "${vars.repo_root}"
     timeout: 600
     outputs:
@@ -342,6 +350,14 @@ steps:
           - "dnn-providers/hip-kernel-provider/*test_categories*.yaml"
           - "--expect-change"
           - "dnn-providers/hip-kernel-provider/src/engines/test_engine/**/*"
+          # Bytecode caches. Anything that imports the generator writes these, so they
+          # appear under a watched tree without anybody editing a file -- and a .pyc that
+          # already existed is REWRITTEN rather than added, so allow-added alone does not
+          # cover it. Both spellings, both trees. A run has failed on exactly this.
+          - "--allow-added"
+          - "**/__pycache__/*"
+          - "--allow-modified"
+          - "**/__pycache__/*"
         cwd: "${vars.repo_root}"
         result_file: "${loop.attempt_dir}/scope.json"
         result_schema:

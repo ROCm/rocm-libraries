@@ -487,6 +487,14 @@ steps:
       - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/**/*"
       - "--expect-change"
       - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
+      # Bytecode caches. Anything that imports the generator writes these, so they
+      # appear under a watched tree without anybody editing a file -- and a .pyc that
+      # already existed is REWRITTEN rather than added, so allow-added alone does not
+      # cover it. Both spellings, both trees. A run has failed on exactly this.
+      - "--allow-added"
+      - "**/__pycache__/*"
+      - "--allow-modified"
+      - "**/__pycache__/*"
     cwd: "${vars.repo_root}"
     result_file: "${vars.scope_stage1}"
     result_schema:
@@ -566,6 +574,14 @@ steps:
           - "projects/hipdnn/tools/IngestorGenerator/codegen/**/*"
           - "--watch"
           - "projects/hipdnn/tools/IngestorGenerator/templates/**/*"
+          # Bytecode caches are a side effect of anything importing the generator, not an
+          # edit the author made. The integration guard already carves these out; without
+          # the same carve-out here a single stray .pyc fails this round and every round
+          # after it, for a file nobody wrote.
+          - "--allow-added"
+          - "dnn-providers/**/__pycache__/*"
+          - "--allow-added"
+          - "projects/hipdnn/tools/IngestorGenerator/**/__pycache__/*"
         cwd: "${vars.repo_root}"
         result_file: "${loop.attempt_dir}/scope.json"
         result_schema:
@@ -794,6 +810,14 @@ steps:
           - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorPacks.hpp"
           - "--allow-modified"
           - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt"
+          # The generated per-engine test sources. They are emitted by the generator and
+          # then have to be corrected in place when what they assume is wrong for this
+          # engine -- a census that hard-codes an expectation the engine never receives
+          # cannot be fixed any other way, and every attempt to fix it was a violation.
+          # Both files this matched in practice were exactly that. Narrow on purpose:
+          # these two generated names, not the tests tree, which stays add-only.
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/Test*.cpp"
           # Bytecode caches are a side effect of running the migration scripts, not an edit.
           # The baseline is taken once at preflight, so without this a single stray .pyc
           # fails every remaining iteration of the loop.
@@ -801,6 +825,14 @@ steps:
           - "dnn-providers/**/__pycache__/*"
           - "--expect-change"
           - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
+          # Bytecode caches. Anything that imports the generator writes these, so they
+          # appear under a watched tree without anybody editing a file -- and a .pyc that
+          # already existed is REWRITTEN rather than added, so allow-added alone does not
+          # cover it. Both spellings, both trees. A run has failed on exactly this.
+          - "--allow-added"
+          - "**/__pycache__/*"
+          - "--allow-modified"
+          - "**/__pycache__/*"
         cwd: "${vars.repo_root}"
         result_file: "${loop.attempt_dir}/scope.json"
         result_schema:
