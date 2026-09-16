@@ -75,7 +75,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
-          WR_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           WR_EVENT: ${{ github.event.workflow_run.event }}
           PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -85,9 +84,12 @@ jobs:
             echo "Manual dispatch; running."
             echo "should_run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # workflow_run: only proceed for a successful pull_request build.
-          if [ "$WR_CONCLUSION" != "success" ] || [ "$WR_EVENT" != "pull_request" ]; then
-            echo "Build not a successful PR run ($WR_EVENT/$WR_CONCLUSION); skipping."
+          # workflow_run: proceed for any COMPLETED pull_request build. We do NOT
+          # require the whole multi-arch run to succeed — only that the gfx1250 build
+          # produced an artifact, which the fetch step checks. This keeps an unrelated
+          # arch's failure from blocking gfx1250 testing.
+          if [ "$WR_EVENT" != "pull_request" ]; then
+            echo "Not a pull_request build ($WR_EVENT); skipping."
             echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # Resolve the PR: same-repo PRs are in the event; fork PRs are not, so
@@ -150,7 +152,7 @@ jobs:
       PIP_BREAK_SYSTEM_PACKAGES: "1"
 
     steps:
-      - name: Checkout rocm-libraries (.github for ci-env)
+      - name: Checkout rocm-libraries
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: .github
