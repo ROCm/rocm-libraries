@@ -126,6 +126,18 @@ def formProblemTypeYamlData(problemTypeState: dict) -> dict:
             data[problemTypeKey] = problemTypeValue
             continue
 
+        # Not in _defaultProblemType; emit only non-default values (defaults on
+        # load: ActivationType -> 'none', ActivationComputeDataType ->
+        # ComputeDataType).
+        if problemTypeKey == "ActivationType":
+            if problemTypeValue != "none":
+                data[problemTypeKey] = makeFlow(problemTypeValue)
+            continue
+        if problemTypeKey == "ActivationComputeDataType":
+            if problemTypeValue != problemTypeState.get("ComputeDataType"):
+                data[problemTypeKey] = makeFlow(problemTypeValue)
+            continue
+
         # Print default keys with no default values
         if problemTypeKey in defaultProblemType:
             if problemTypeValue != defaultProblemType[problemTypeKey]:
