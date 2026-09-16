@@ -1503,8 +1503,32 @@ body,
 .app__body {
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: 220px 1fr 300px;
+  /* palette | divider | canvas | divider | inspector */
+  grid-template-columns: var(--palette-w, 220px) auto minmax(0, 1fr) auto var(--rightbar-w, 300px);
   min-height: 0;
+}
+
+/* ── Pane dividers ───────────────────────────────────── */
+/* Kept transparent so the panel borders still draw the seam; the strip is
+   wider than the border only to give the pointer something to grab. */
+.resizer {
+  flex: 0 0 auto;
+  background: transparent;
+  touch-action: none;
+}
+.resizer:hover,
+.resizer:active,
+.resizer:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+.resizer--x {
+  width: 6px;
+  cursor: col-resize;
+}
+.resizer--y {
+  height: 6px;
+  cursor: row-resize;
 }
 
 .panel {
@@ -1763,14 +1787,13 @@ body,
 /* ── Engine panel ────────────────────────────────────── */
 .engine {
   flex: 0 0 auto;
-  height: 240px;
   display: flex;
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
   min-height: 0;
 }
 .engine__controls {
-  flex: 0 0 330px;
+  flex: 0 0 var(--engine-controls-w, 330px);
   display: flex;
   flex-direction: column;
   padding: 8px 12px;

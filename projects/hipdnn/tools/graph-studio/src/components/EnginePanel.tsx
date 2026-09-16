@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   engine,
   type BuildHandle,
@@ -12,6 +12,7 @@ import { serializeGraph } from "../graph/serialize";
 import { platform } from "../platform";
 import type { Graph } from "../graph/model";
 import type { NativeExecutionSnapshot } from "../benchmark/native";
+import { Resizer, useStoredSize } from "./Resizer";
 
 /**
  * Engine control panel: build and execute the current graph through the hipDNN
@@ -31,13 +32,21 @@ const LOG_LEVELS: readonly LogLevel[] = ["off", "error", "warn", "info"];
 interface EnginePanelProps {
   /** Produces the current graph on demand (avoids re-render churn on every edit). */
   getGraph(): Graph;
+  /** Height of the dock, owned by the surrounding workspace layout. */
+  height: number;
   /** Bumped by New/Open so the panel drops a stale build (disables Execute). */
   resetKey: number;
   onExecutionResult(snapshot: NativeExecutionSnapshot): void;
   onResultsReset(): void;
 }
 
-export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsReset }: EnginePanelProps) {
+export function EnginePanel({
+  getGraph,
+  height,
+  resetKey,
+  onExecutionResult,
+  onResultsReset,
+}: EnginePanelProps) {
   const [info, setInfo] = useState<EngineInfo | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState<string>("");
@@ -53,6 +62,7 @@ export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsRe
   const [serializedGraph, setSerializedGraph] = useState<string | null>(null);
   // Which JSON produced the live plan: the canvas graph, or an imported hipDNN one.
   const [planSource, setPlanSource] = useState<"studio" | "imported">("studio");
+  const [controlsWidth, setControlsWidth] = useStoredSize("engineControls", 330);
   const logRef = useRef<HTMLDivElement>(null);
   const generationRef = useRef(0);
   const acceptedBuild = useRef<AcceptedBuild | null>(null);
@@ -318,7 +328,10 @@ export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsRe
   const available = info?.available ?? false;
 
   return (
-    <div className="engine">
+    <div
+      className="engine"
+      style={{ height, "--engine-controls-w": `${controlsWidth}px` } as CSSProperties}
+    >
       <div className="engine__controls">
         <div className="engine__header">
           <h2 className="panel__title">hipDNN Engine</h2>
@@ -411,7 +424,15 @@ export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsRe
           </pre>
         )}
       </div>
-
+      <Resizer
+        axis="x"
+        pane="before"
+        size={controlsWidth}
+        min={240}
+        max={700}
+        onResize={setControlsWidth}
+        label="Resize engine controls"
+      />
       <div className="engine__logpane">
         <div className="engine__loghead">
           <span>Log capture ({entries.length})</span>

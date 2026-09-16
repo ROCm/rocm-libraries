@@ -15,7 +15,7 @@ import {
   type OnConnect,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ImplementPanel } from "./components/ImplementPanel";
 import { TensorView, reportTensorHints } from "./components/TensorView";
 import { VerifyReport, type ShownReport } from "./components/VerifyReport";
@@ -25,6 +25,7 @@ import { EnginePanel } from "./components/EnginePanel";
 import { MainTabs, TabPanel, type TabId } from "./components/MainTabs";
 import { DND_MIME, Palette } from "./components/Palette";
 import { OpNodeView } from "./components/OpNodeView";
+import { Resizer, useStoredSize } from "./components/Resizer";
 import { Toolbar } from "./components/Toolbar";
 import { catalogEntry } from "./graph/catalog";
 import {
@@ -344,6 +345,10 @@ function Studio() {
 
   const emptyHintRef = useRef<HTMLDivElement>(null);
 
+  const [paletteWidth, setPaletteWidth] = useStoredSize("palette", 220);
+  const [inspectorWidth, setInspectorWidth] = useStoredSize("inspector", 300);
+  const [dockHeight, setDockHeight] = useStoredSize("dock", 240);
+
   return (
     <div className="app">
       <Toolbar
@@ -361,8 +366,25 @@ function Studio() {
       />
       <MainTabs active={activeTab} onSelect={setActiveTab} />
       <TabPanel id="create" active={activeTab} className="workspace">
-        <div className="app__body">
+        <div
+          className="app__body"
+          style={
+            {
+              "--palette-w": `${paletteWidth}px`,
+              "--rightbar-w": `${inspectorWidth}px`,
+            } as CSSProperties
+          }
+        >
           <Palette onAdd={onPaletteAdd} />
+          <Resizer
+            axis="x"
+            pane="before"
+            size={paletteWidth}
+            min={160}
+            max={480}
+            onResize={setPaletteWidth}
+            label="Resize operators panel"
+          />
           <div className="canvas" onDrop={onDrop} onDragOver={onDragOver}>
             <ReactFlow
               nodes={nodes}
@@ -398,6 +420,15 @@ function Studio() {
               </div>
             )}
           </div>
+          <Resizer
+            axis="x"
+            pane="after"
+            size={inspectorWidth}
+            min={200}
+            max={560}
+            onResize={setInspectorWidth}
+            label="Resize properties panel"
+          />
           <div className="rightbar">
             <Inspector
               node={selectedNode}
@@ -407,7 +438,17 @@ function Studio() {
             />
           </div>
         </div>
+        <Resizer
+          axis="y"
+          pane="after"
+          size={dockHeight}
+          min={120}
+          max={800}
+          onResize={setDockHeight}
+          label="Resize engine panel"
+        />
         <EnginePanel
+          height={dockHeight}
           getGraph={getGraph}
           resetKey={engineResetKey}
           onExecutionResult={onExecutionResult}

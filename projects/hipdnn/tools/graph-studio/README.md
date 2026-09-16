@@ -19,6 +19,8 @@ graph out without writing any code.
 - Let hipDNN infer output shapes, or clear **Use defaults** on an Output node to
   pin its dimensions yourself.
 - Save and load graphs as JSON. Your work is also auto-saved between sessions.
+- Drag the dividers between the operators, properties, and engine/log panels to
+  resize them; the layout is remembered between sessions.
 - Pick which hipDNN engine to use, or let hipDNN choose the best one.
 - Run the graph with randomly filled tensors and see how long it took.
 - Import and export hipDNN's own JSON format, so graphs can be shared with
