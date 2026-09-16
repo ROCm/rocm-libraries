@@ -347,7 +347,7 @@ class TensorQuantGpuGemmRunner:
 # Subprocess helpers (self-contained, do not call ctypes_utils.py)
 # =============================================================================
 
-_SUPPORTED_ARCHS = ("gfx942", "gfx950")
+_SUPPORTED_ARCHS = ("gfx942", "gfx950", "gfx1250")
 
 
 def _validate_arch(arch: str) -> str:
@@ -426,6 +426,10 @@ def _compile_tensor_quant_kernel(
     # CMakeLists.txt definitions normally injected by CMake but absent in the
     # standalone hipcc build path.
     arch_defines = []
+    # OCP fp8 encoding is a whole-gfx12-family property (gfx1200/gfx1201/gfx1250
+    # all use OCP e4m3/e5m2), so this substring test is intentional and must NOT
+    # be narrowed to an exact gfx1250 match the way _is_gfx1250 is used for
+    # warp_tile_k -- narrowing it would break fp8 on gfx1200/gfx1201.
     if "gfx12" in gfx_arch or "gfx950" in gfx_arch:
         arch_defines += ["-DCK_USE_OCP_FP8", "-DCK_TILE_USE_OCP_FP8"]
     if "gfx950" in gfx_arch:
@@ -604,6 +608,27 @@ def expand_tensor_quant_sweep(
 # =============================================================================
 
 
+def _is_gfx1250(gfx_arch):
+    """EXACT gfx1250 match, tolerant of feature suffixes (``gfx1250:xnack-``).
+
+    Deliberately exact, NOT a ``"gfx12" in gfx_arch`` family test.  Two distinct
+    kinds of gfx12 predicate live in this file and must never be "tidied" into
+    each other:
+
+      * OCP fp8 encoding / ``-DCK_TILE_USE_OCP_FP8`` compile defines: family-wide
+        ``"gfx12" in ...`` is CORRECT -- every gfx12xx part uses OCP e4m3/e5m2,
+        so narrowing those would break fp8 on gfx1200/gfx1201.
+      * 8-bit ``warp_tile_k`` selection (this helper): family-wide is a BUG.
+        gfx1200/gfx1201 expose only a 16x16x16 8-bit WMMA fragment, so the K=128
+        warp tile does not exist on them; the kernel would still compile and
+        silently return garbage.
+
+    #11043 adds a shared ``normalize_gfx_arch()`` to ``codegen_common.py``; this
+    private helper should collapse onto it once that PR lands.
+    """
+    return (gfx_arch or "").split(":")[0] == "gfx1250"
+
+
 def fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
     """Arch-derived WarpTileK for fp8/bf8 with M_Warp_Tile=16.
 
@@ -611,20 +636,23 @@ def fp8_warp_tile_k_for_arch(gfx_arch: str) -> int:
     (include/ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp):
 
       - gfx950 (CK_GFX950_SUPPORT): is_8bit_float -> 128
-      - gfx942 (and other non-950): IsFlatMM==false -> 32
+      - gfx1250 (WMMA, EXACT match -- see _is_gfx1250): is_8bit_float -> 128.
+        NOT the whole gfx12 family: gfx1200/gfx1201 have only a 16x16x16 8-bit
+        fragment and would silently mis-execute at K=128.
+      - gfx942 (and other legacy MFMA archs): IsFlatMM==false -> 32
 
     Picking 128 on gfx942 is a silent-correctness bug: there is no valid
     16x16x128 fp8/bf8 warp-gemm on gfx942, so the kernel compiles but outputs
     all-zeros (confirmed on GPU, MI300X). 32 is bit-exact and at parity with
     Old-TE (which launches ...16x16x32 on gfx942).
     """
-    return 128 if "gfx950" in gfx_arch else 32
+    return 128 if ("gfx950" in gfx_arch or _is_gfx1250(gfx_arch)) else 32
 
 
 def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
     """Default fp8 TensorQuant config (tile = 16x64x256, warp = 1x4x1).
 
-    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950, mirroring
+    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950/gfx1250, mirroring
     ck_tile::get_k_warp_tile<fp8_t, M_Warp_Tile=16>().
     """
     return TensorQuantKernelConfig(
@@ -644,7 +672,7 @@ def default_fp8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelCo
 def default_bf8_config(gfx_arch: str = _DEFAULT_GFX_ARCH) -> TensorQuantKernelConfig:
     """Default bf8 TensorQuant config (tile = 16x64x256, warp = 1x4x1).
 
-    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950, mirroring
+    WarpTileK is arch-derived: 32 on gfx942, 128 on gfx950/gfx1250, mirroring
     ck_tile::get_k_warp_tile<bf8_t, M_Warp_Tile=16>().
     """
     return TensorQuantKernelConfig(
