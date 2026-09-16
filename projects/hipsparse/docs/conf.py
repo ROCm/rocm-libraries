@@ -63,3 +63,15 @@ if "html_js_files" not in globals():
 html_js_files.append("custom_tabs.js")
 
 extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]
+
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/hipsparse/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
+
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
