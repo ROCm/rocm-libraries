@@ -336,6 +336,24 @@ class StreamK(Component):
         assert(0)
 
     @staticmethod
+    def _summationStride(writer, kernel, tc):
+        """K stride for the StreamK partial-tile offset.
+
+        A swizzled scale is block-linear and walks blocks by Strides<tc>+0
+        whatever the layout, but on TLU=1 strideRef hands back a constStride
+        literal, which would scale the offset by 1 instead of the block stride.
+        computeLoadSrd applies the same correction to the tile stride; without
+        it here a workgroup starting mid-tile reads its scales from the wrong K.
+        """
+        strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
+        mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+        isMxSwizzledScaleLayout = ("MXS" in tc) and mxScaleFormat in ("InMemorySwizzle",
+                                                                     "HostPreSwizzle")
+        if isMxSwizzledScaleLayout and writer.isConstUnitStride(strideL):
+            strideL = sgpr("Strides%s" % tc)
+        return strideL
+
+    @staticmethod
     def _depthUForTc(kernel, tc):
         """Return the per-StreamK-iteration K-stride (element count) for a tensor.
 
@@ -1089,7 +1107,7 @@ class StreamK(Component):
         depthU = self._depthUForTc(kernel, tc)
         # StreamK partial tile - offset to tile start index
         module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr("StreamKLocalStart"), src1=depthU, comment="StreamK tile start offset"))
-        strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
+        strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(sTmp), sgpr(sTmp+1), sgpr(sTmp), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
         # if kernel["CheckDimOverflow"] >=2:
@@ -1178,7 +1196,7 @@ class StreamK(Component):
         # StreamK partial tile - offset to tile start index
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
         module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
-        strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
+        strideL = self._summationStride(writer, kernel, tc)
         module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
         # if kernel["CheckDimOverflow"] >=2:
