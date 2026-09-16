@@ -48,9 +48,8 @@ engine_name: hipkernel:AttentionDenseGfx950
 engine_ued_name: hipkernel:AttentionDenseGfx950
 
 # Corpora are measured separately and answer different questions. Do not merge them:
-# each corpus stands for a different population, and the servable
-# corpus is what this integration generated for. Reporting one number over both hides
-# which population a win came from.
+# each corpus stands for a different population of graphs. Reporting one number over
+# both hides which population a win came from.
 #
 # expected_graphs is a gate, not documentation. A corpus that silently grew or shrank
 # between runs is not the same experiment, and resume is bound to the CONTENT of

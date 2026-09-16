@@ -26,7 +26,7 @@ exposes for the op.
                        --out configs/<slug>_A.yaml
 
 THE TWO DENOMINATORS. "Does the kernel support this shape?" has two answers and
-they differ by 59 on the reference corpus. A support check that only calls the
+they can differ by dozens of shapes on a real corpus. A support check that only calls the
 predicate misses every shape rejected at SPEC CONSTRUCTION -- those raise
 ``ValueError`` before a predicate ever runs, so the constructor must be inside the
 try. Both rejection kinds are reported here, separately and by reason, because

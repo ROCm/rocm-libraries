@@ -100,7 +100,7 @@ ragged offsets, block-sparse masks (`block_mask_tensor_uid`), sink tokens
 **CPU is not a fallback for any of these.** A decline is an unmeasured bucket. Under
 the integration tests' `auto` verification mode a decline becomes a skip, and a skip
 is aggregate-indistinguishable from a pass
-(`notes/hipdnn/integration-tests-green-is-not-coverage.md`) — which is why this
+— which is why this
 harness must assert the reference ran rather than infer it from an exit code.
 
 If the graph needs a declined feature: narrow the graph and state the narrowing,
@@ -113,8 +113,8 @@ Both buffer sets must receive byte-identical inputs. The integration harness ach
 this by seeding once and visiting UIDs in **sorted** order so the draw sequence does
 not depend on discovery order, then filling each bundle with the same per-UID seeds
 (`dnn-providers/integration-tests/src/harness/input-init/FillInputs.cpp`). Restructuring
-that loop has already produced a false kernel-defect report once
-(`notes/hipdnn/harness-reference-input-parity.md`). Reproduce the pattern; do not
+that loop has already produced a false kernel-defect report once. Reproduce the
+pattern; do not
 improve on it.
 
 Fill values matter. Uniform random over a wide range will make an

@@ -88,7 +88,7 @@ and work from the blob — one form, post-expansion, for the rest of the workflo
   It is what makes a graph fused, and it is what a multi-launch decomposition must
   find scratch for.
 - **Absent and explicitly null are both absence** — read them identically and
-  explicitly at the read site (`notes/hipdnn/dnn-benchmarking-null-attribute-defaults.md`).
+  explicitly at the read site.
 
 ### Role is not a tensor field — derive it from the node edges
 
@@ -158,7 +158,7 @@ framework the graph came from; another library's omission default is not hipDNN'
 - **Mask semantics (SDPA).** Deprecated `causal_mask` / `causal_mask_bottom_right`
   booleans take precedence over `diagonal_alignment` in the shared `getMaskType`, so
   a bottom-right-causal graph can be silently read as top-left — wrong triangle, no
-  error (`notes/hipdnn/sdpa-mask-attribute-precedence.md`). Read the precedence,
+  error. Read the precedence,
   do not infer it.
 - **Independent operand widths.** Q/K contraction width does not fix V/output width.
 - **Scale, epsilon and other scalars.** A scalar may arrive as an attribute, as a
@@ -209,7 +209,7 @@ generality would change the code's structure.
 | scalars (scale, epsilon, alpha) | kernel argument, unless the graph fixes them | a value bound as a macro cannot be rendered if it is a float — see [device-envelope.md](device-envelope.md) |
 | element type | `-D` specialization | changes the declared types |
 | tile shape, unroll factor, shared-memory budget, vector width | `-D` specialization | changes the code's structure |
-| "supported shapes" as an enumerated table | do not | this is the coverage model of existing engines, recorded as a limitation, not a design to copy (`notes/hipdnn/rocke-gfx950-supported-shapes-are-a-descriptor-table.md`) |
+| "supported shapes" as an enumerated table | do not | this is the coverage model of existing engines, recorded as a limitation, not a design to copy |
 
 A generality claim is bounded by what ran. Parameterizing over a dimension and
 validating it at one value is "parameterized, validated at one point" — and a kernel

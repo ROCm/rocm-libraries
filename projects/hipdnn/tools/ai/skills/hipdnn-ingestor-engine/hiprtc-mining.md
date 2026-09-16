@@ -81,9 +81,7 @@ observe that **your** kernel did.
 *verbatim* satisfies the scope constraint above — it adds no native symbol — while giving
 the drop-in its own engine name, therefore its own id, therefore an appearance and a
 disappearance you can assert on. This is the shape that has actually been run end to end on
-device; the worked example is `Results/hiprtc-dropin-kernels/phase5/` in the
-workspace (`pointwise_dropin.yaml`, `pointwise_dropin_sources/`, written up in
-`PHASE5-endtoend.md`). The KDP-only shape remains **unrun**.
+device. The KDP-only shape remains **unrun**.
 
 Choose the KDP-only shape only when you are adding a variant to an engine you already trust
 and never need to tell apart from the shipped kernels. Choose your own UED whenever anyone —
@@ -338,9 +336,7 @@ extern "C" __global__ void PointwiseDropin(const DropinElement* a,
 
 Guard each bound macro with `#ifndef <NAME> / #error` before using it: an unbound token
 otherwise compiles against whatever the tag happens to mean and fails only in the numbers.
-This block is the one compiled on device; the verified copy is
-`pointwise_dropin_sources/PointwiseDropinTypes.h` under the phase 5 evidence directory in
-the workspace, outside this repository.
+This block is the one compiled on device.
 
 **Generate**, from the worktree root:
 

@@ -149,31 +149,25 @@ published specification table ([prior-art.md](prior-art.md)), declared as such.
 ## Authoring for an architecture you do not have
 
 This is the common case and it is supported: the kernel is authored against the
-target's facts, and the correctness proof is run on that target through the
-scheduler.
+target's facts, and the correctness proof is run on that target through whatever
+batch scheduler or remote runner the environment provides.
 
-Use the workspace's `scheduled-runner` skill to run anything — a `rocminfo` probe, the
-compile, the harness — on the exact GPU class:
+Whatever that runner is, it has to carry the same three payloads to the exact GPU
+class — the `rocminfo` probe, the compile, and the harness. Run the probe first, so
+that everything below is a fact about the target rather than about this host.
 
-```bash
-<scheduler>/launch-gpu-test.sh run \
-  --gpu gfx942-mi300x --constraint SITE-A \
-  --image <container-image> \
-  --time 00:30:00 --name kernel-probe \
-  --command 'hostname -s; rocminfo | head -40'
-```
+Three properties of scheduled multi-node environments are load-bearing, and each one
+fails quietly rather than loudly:
 
-Three constraints that are load-bearing, from `the scheduler notes`:
-
-- `--constraint SITE-A` is required whenever the command reads `$HOME`: each site
-  has an unrelated `/home`, and the worktrees exist only on SITE-A's.
-- Every `gfx950-mi355x` node is SITE-B, so a worktree-reading payload can never be
-  scheduled on one. Probe it container-only with
-  `--partition <partition> --account <account> --no-constraint`, or stage sources to the
-  node's own `/tmp`.
-- A worktree reached through a symlink into login-node-local `/var/tmp` is invisible
-  from every compute node. Stage the actual checkout to shared storage or to the
-  node.
+- **`$HOME` need not be the same filesystem on every node.** Where it is not, a job
+  that reads a checkout under `$HOME` must be pinned to nodes mounting the one that
+  holds it, or it will silently run against a different tree, or none.
+- **A GPU class may exist only on nodes that cannot see that filesystem.** Then a
+  checkout-reading payload can never be scheduled on it. Run container-only, or stage
+  the sources to the node's own local disk.
+- **A checkout reached through a symlink into login-node-local storage is invisible
+  from every compute node.** Resolve the link before staging; `ls -d` on the symlink
+  succeeds either way, which is exactly what hides it.
 
 Two architectures means two compiles and two runs. A result on `gfx942` says nothing
 about `gfx950`; report each separately, and do not let one stand in for the other.
@@ -182,6 +176,6 @@ about `gfx950`; report each separately, and do not let one stand in for the othe
 
 Architecture name (with suffixes), wavefront size, CUs, LDS bytes per workgroup,
 maximum threads per block, register budget, and — once a kernel exists — its actual
-resource usage. Occupancy and spill claims are `llvm-objdump` / profiler
-observations; the workspace's `gpu-profile` skill owns them. They are optional
-context for a correctness deliverable and must be labelled as measured or not.
+resource usage. Occupancy and spill claims are `llvm-objdump` or profiler
+observations, never inferences. They are optional context for a correctness
+deliverable and must be labelled as measured or not.

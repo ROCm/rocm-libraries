@@ -66,17 +66,16 @@ None of this is rediscoverable from an error message. Read the half that applies
 
 Skip this entire subsection on a local box — none of it applies.
 
-- **A worktree under `workspace/worktrees/` may be a symlink into the login
-  node's `/var/tmp`**, which is login-node-local storage no compute node can see —
-  `--constraint SITE-A` or not. A bare `ls -d` on the symlink succeeds even when the
-  target is invisible, which is exactly what hides it. Check what the link resolves to,
-  not that the link exists.
-- **`rsync` the checkout to the shared SITE-A home before any scheduled job**, minus
-  the build directory and any `.venv`, and build from the copy.
+- **A checkout may be a symlink into login-node-local storage** such as `/var/tmp`,
+  which no compute node can see, however the job is pinned. A bare `ls -d` on the
+  symlink succeeds even when the target is invisible, which is exactly what hides it.
+  Check what the link resolves to, not that the link exists.
+- **Copy the checkout to storage the compute nodes actually mount before any
+  scheduled job**, minus the build directory and any `.venv`, and build from the copy.
 - **Build inside the container, in its own build directory.** The container's ROCm and
   the login node's differ, so a login-node build tree is not reusable inside the image
   and must not be overwritten by one.
-- **Do not run GPU work on a login host**; go through the scheduler skill.
+- **Do not run GPU work on a login host**; go through the scheduler.
 
 ## Read these before you write the kernel
 

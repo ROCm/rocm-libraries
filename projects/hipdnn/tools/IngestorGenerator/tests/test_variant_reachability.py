@@ -349,8 +349,8 @@ class TestGfx950RealBundle:
     Consequence worth stating, because it is the measurement trap: tied
     candidates mean the shipped set is only as good as its TIE-BREAK unless
     something measures them. That is why every sweep over this pack must export
-    `HIPDNN_FORCE_BENCHMARKING=1` (notes/hipdnn/gpu-perf-comparison-
-    methodology.md trap 3 -- unforced, the identical set measured 1.195 -> 0.999).
+    `HIPDNN_FORCE_BENCHMARKING=1` (unforced, the identical set measured
+    1.195 -> 0.999).
     """
 
     _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)

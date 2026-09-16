@@ -2,7 +2,7 @@
   "schema_version": 1,
   "metadata": {
     "timestamp": "2026-09-14T22:00:54.400618+00:00",
-    "hostname": "benchmark-host",
+    "hostname": "fixture-host",
     "total_graphs": 1,
     "total_combinations": 2,
     "pass_combinations": 2,

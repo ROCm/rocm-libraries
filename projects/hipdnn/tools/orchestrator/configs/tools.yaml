@@ -52,8 +52,9 @@ vars:
 
 # A profile is an overlay on the `vars` and `tools` above, selected with
 # `--profile NAME`. It exists because this registry is the one machine-local file and
-# the values above describe a Windows workstation: a second machine that edits them in place
-# makes every later diff of this file a merge conflict about somebody's home directory.
+# the values above describe one Windows workstation: a second machine that edits them
+# in place makes every later diff of this file a merge conflict about somebody's home
+# directory.
 # Only the leaves need restating -- `_resolve_vars` runs after the merge, so derived
 # vars like `rocm_bin` and `ingestor_build_dir` pick the overridden roots up themselves.
 profiles:
@@ -82,7 +83,7 @@ profiles:
       # CTest files to CMAKE_INSTALL_BINDIR/hip_kernel_provider on both platforms.
 
 tools:
-  # Claude Code CLI. Verified present at this path on a Windows workstation (2026-09).
+  # Claude Code CLI. Verify the path resolves on this machine before first use.
   claude:
     exe:
       windows: C:/Users/dev/.local/bin/claude.exe

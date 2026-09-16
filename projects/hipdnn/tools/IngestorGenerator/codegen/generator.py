@@ -5,8 +5,8 @@
 
 Descriptor JSON is built as plain Python dicts and serialized with
 ``json.dumps`` -- not Jinja2 -- because every key emitted must be on that
-type's allow-list (notes/hipdnn/ingestor/02-descriptor-format.md:
-"unknown keys are a hard error"), and a dict literal makes "every key this
+type's allow-list (unknown keys are a hard error), and a dict literal makes
+"every key this
 function writes is a key I chose" a property of the code, not of template
 whitespace. Jinja2 (``keep_trailing_newline``/``trim_blocks``/
 ``lstrip_blocks``, ``undefined=StrictUndefined``) renders the C++ stub/test

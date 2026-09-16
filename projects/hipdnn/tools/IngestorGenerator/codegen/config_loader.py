@@ -9,8 +9,7 @@ run **before** ``generator.py`` mints a single UUID. The five checks below
 each catch a failure mode that the real ``DescriptorLoader.hpp`` either
 lets through silently (knobs, arch shape) or only reports after dropping
 an entire pack/engine with a generic message (metadata, arch-covers,
-engine name collision) -- see ``notes/hipdnn/ingestor/07-descriptor-
-generation.md`` §3 and ``06-gotchas.md``.
+engine name collision).
 """
 
 import gzip
@@ -946,8 +945,7 @@ def _reject_deprecated_keys(raw: dict) -> None:
 
     Both rejected ``kmd_fields[]`` keys are exactly RFC 0017 §4's own example
     field (``{"name":"tile_m","type":"int","optional":true,"default":1}``),
-    which ``notes/hipdnn/ingestor/02-descriptor-format.md`` documents as
-    rejected on both keys by the real loader -- only ``default_value`` is a
+    and the real loader rejects both keys -- only ``default_value`` is a
     real field, and there is no ``optional`` key at all, ever.
     """
     _reject_deprecated_dict_key(
@@ -1017,9 +1015,9 @@ def _check_knobs_int_typed(config: IngestorConfig) -> None:
 
     A non-int knob is accepted by the real loader and produces **no** knob
     at all, silently -- GenericPlanBuilder::getCustomKnobs filters to
-    int64_t alternatives only (notes/hipdnn/ingestor/06-gotchas.md
-    "getCustomKnobs silently drops non-integer knobs"). This is the only
-    point in the whole pipeline where that drop is generation-time
+    int64_t alternatives only, so a non-integer knob is dropped without a
+    diagnostic. This is the only point in the whole pipeline where that drop
+    is generation-time
     reachable at all, per the plan's research findings.
     """
     declared = config.kmd_field_by_name
@@ -1057,8 +1055,8 @@ def _check_kernel_metadata_against_kmd(config: IngestorConfig) -> None:
     with no mandatory field omitted.
 
     Mirrors the loader's own consequence exactly: "A wrong type, an
-    undeclared field, or an omitted mandatory field drops the whole pack"
-    (notes/hipdnn/ingestor/02-descriptor-format.md, UKD key table).
+    undeclared field, or an omitted mandatory field drops the whole pack",
+    per the UKD key table.
     """
     declared = config.kmd_field_by_name
     for field_type in {f.type for f in config.kmd_fields}:

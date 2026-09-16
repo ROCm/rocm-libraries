@@ -54,16 +54,14 @@ step 4.
 If you already have an install, this step is a check, not a skip: an old install or a
 copied command is not an observation.
 
-**Build and install.** Use the workspace skills rather than a build system of this
-skill's own. `the repository build path` configures and builds `$HIPDNN` under a
-ROCm toolchain into its `build/` directory; `the repository install path` installs
-that build tree into the branch's install prefix beneath the workspace WIP root. Take
-the invocation and the prefix from those two pages. `$INSTALL` is then that prefix —
-the directory whose `lib/cmake/` holds `hipdnn_frontend/`, `hipdnn_data_sdk/` and
-`hipdnn_test_sdk/`, which is what [harness.md](harness.md)'s `find_package` calls
-resolve against.
+**Build and install.** Use the repository's own build and install path rather than a
+build system of this skill's own: configure and build `$HIPDNN` under a ROCm
+toolchain into its `build/` directory, then install that build tree into an install
+prefix you keep for this branch. `$INSTALL` is then that prefix — the directory whose
+`lib/cmake/` holds `hipdnn_frontend/`, `hipdnn_data_sdk/` and `hipdnn_test_sdk/`,
+which is what [harness.md](harness.md)'s `find_package` calls resolve against.
 
-**Those two pages carry no feature flags, and the defaults are off.** They configure a
+**That build step sets no feature flags, and the defaults are off.** It configures a
 toolchain and a prefix, nothing more. The flags that decide whether your graph's
 operation exists in the build at all are owned by
 [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md)'s option table — read it and set what
@@ -119,7 +117,7 @@ conventions it depends on, and the disposition of every schema field.
 
 Do not begin from the operation's popular name. `SDPA_FWD` names a family whose
 masking, scaling, GQA, layout and deprecated-field precedence differ per graph, and
-at least one precedence rule in tree is a live trap (`notes/hipdnn/sdpa-mask-attribute-precedence.md`).
+at least one precedence rule in tree is a live trap.
 
 **Gate:** every node classified, every tensor classified input/output/virtual with
 its UID resolved and its role derived as [graph-analysis.md](graph-analysis.md)
@@ -154,9 +152,9 @@ Use [device-envelope.md](device-envelope.md) to pin the compile envelope and the
 target device's facts. When the target architecture is not the local one, obtain its
 facts from that device, not from memory — and obtain them by **running the probe, not
 by describing one**: `device_probe.py --mode early --arch <exact gfx token>
---sweep-root <dir>` for an architecture this host might hold, or the
-`scheduled-runner` path in [device-envelope.md](device-envelope.md) for one it does
-not. Record what came back. Three outcomes, all acceptable, all reported:
+--sweep-root <dir>` for an architecture this host might hold, or the scheduled-runner
+path in [device-envelope.md](device-envelope.md) for one it does not. Record what
+came back. Three outcomes, all acceptable, all reported:
 
 - **observed** — a utility ran and the device answered. The facts are that device's.
 - **unobserved** — exit 3, `ProbeUnavailable`: no inspection utility could be run at

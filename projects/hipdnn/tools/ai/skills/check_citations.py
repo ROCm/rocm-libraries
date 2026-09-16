@@ -79,8 +79,8 @@ A reference anchored somewhere this checkout does not contain is neither passed 
 failed: it is named, counted in its own class, and left out of the resolved totals,
 because nothing here can confirm or refute it. That is an absolute or `$VAR`-rooted
 path, or a path whose leading component is not in this repository root and whose file
-name the repository does not know anywhere — the workspace's `notes/` and
-`Results/` trees, a sibling checkout such as `miopen/`. A path anchored *in* this
+name the repository does not know anywhere — an external notes tree, or a sibling
+checkout such as `miopen/`. A path anchored *in* this
 repository that does not resolve is rot, and still fails.
 
 Boundary check

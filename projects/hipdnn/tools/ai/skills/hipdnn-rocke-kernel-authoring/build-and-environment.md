@@ -34,9 +34,8 @@ checks which engine was selected proves yours did.
 
 ## A build invocation that has been executed
 
-Start from this rather than composing a new one. It is recorded in the workspace knowledge
-base as an executed gfx950 ingestor build (`notes/hipdnn/ingestor/08-rocke-integration.md`,
-"A working gfx950 ingestor build"), and it builds off the `hip-kernel-provider` preset —
+Start from this rather than composing a new one. It is an executed gfx950 ingestor
+build, and it builds off the `hip-kernel-provider` preset —
 read the superbuild skill first, because the preset already solves the toolchain file and
 the component scoping, and hand-rolling around it costs configures.
 
