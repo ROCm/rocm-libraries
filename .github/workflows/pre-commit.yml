@@ -67,6 +67,7 @@ jobs:
             if grep -qE "^(projects|shared)/$project/" "$CHANGED_FILES_FILE"; then
               echo "${project}_changed=true" >> "$GITHUB_OUTPUT"
             else
+              # grep exits 1 for "no match" (fine) vs >1 for a real error (e.g. unreadable file).
               grep_status=$?
               if [ "$grep_status" -ne 1 ]; then
                 exit "$grep_status"
