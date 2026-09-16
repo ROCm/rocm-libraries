@@ -918,6 +918,97 @@ public:
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
+    /// \brief Performs exclusive scan across threads in a logical warp.
+    ///
+    /// \tparam BinaryFunction type of binary function used for scan. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param [in] init initial value used to start the exclusive scan. Should be the same
+    /// for all threads in a logical warp.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] scan_op binary operation function object that will be used for scan.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// The examples present exclusive min scan operations performed on groups of 32 threads,
+    /// each provides one \p float value, result is returned using the same variable as for input.
+    /// Hardware warp size is 64. Block (tile) size is 256.
+    ///
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...) // blockDim.x = 256
+    /// {
+    ///     // specialize warp_scan for float and logical warp of 32 threads
+    ///     using warp_scan_f = rocprim::warp_scan<float, 32>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ warp_scan_float::storage_type temp[8]; // 256/32 = 8
+    ///
+    ///     int logical_warp_id = threadIdx.x/32;
+    ///     float value = ...;
+    ///     int block_valid_items = 36;
+    ///     int valid_items = block_valid_items - logical_warp_id * 32;
+    ///     // execute exclusive min scan
+    ///     warp_scan_float().partial_exclusive_scan(
+    ///         value, // input
+    ///         value, // output
+    ///         valid_items,
+    ///         100.0f, // init
+    ///         temp[logical_warp_id],
+    ///         rocprim::minimum<float>()
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// If the initial value is \p 100 and input values across threads in a block/tile are
+    /// <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then output values in the first logical
+    /// warp will be <tt>{100, 1, -2, -2, -4, ..., -30},</tt> in the second:
+    /// <tt>{100, 33, -34, -34, 35, -36, ... , 63, -64}</tt> etc.
+    /// \endparblock
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T              init,
+                                storage_type&  storage,
+                                BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
+                                void>::type
+    {
+        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
+        {
+            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
+            {
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+            }
+        }
+        base_type::partial_exclusive_scan(input, output, valid_items, init, storage, scan_op);
+    }
+
+    /// \brief Performs exclusive scan across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(
+        T, T&, int, T, storage_type&, BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    {
+        (void)scan_op;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+
     /// \brief Performs exclusive scan and reduction across threads in a logical warp.
     ///
     /// \tparam BinaryFunction type of binary function used for scan. Default type
@@ -1005,6 +1096,108 @@ public:
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
+    /// \brief Performs exclusive scan and reduction across threads in a logical warp.
+    ///
+    /// \tparam BinaryFunction type of binary function used for scan. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param [in] init initial value used to start the exclusive scan. Should be the same
+    /// for all threads in a logical warp.
+    /// \param [out] reduction result of reducing of all \p input values in logical warp.
+    /// \p init value is not included in the reduction.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] scan_op binary operation function object that will be used for scan.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// The examples present exclusive prefix sum operations performed on groups of 64 threads,
+    /// each thread provides one \p int value. Hardware warp size is 64. Block (tile) size is 256.
+    ///
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...) // blockDim.x = 256
+    /// {
+    ///     // specialize warp_scan for int and logical warp of 64 threads
+    ///     using warp_scan_int = rocprim::warp_scan<int, 64>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ warp_scan_int::storage_type temp[4]; // 256/64 = 4
+    ///
+    ///     int logical_warp_id = threadIdx.x/64;
+    ///     int input = ...;
+    ///     int output, reduction;
+    ///     int block_valid_items = 36;
+    ///     int valid_items = block_valid_items - logical_warp_id * 64;
+    ///     // exclusive prefix sum
+    ///     warp_scan_int().partial_exclusive_scan(
+    ///         input,
+    ///         output,
+    ///         valid_items,
+    ///         10, // init
+    ///         reduction,
+    ///         temp[logical_warp_id]
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// If the initial value is \p 10 and \p input values across threads in a block/tile are
+    /// <tt>{1, 1, ..., 1, 1}</tt>, then \p output values in the first logical warp will be
+    /// <tt>{10, 11, 12, 13, ..., 73}</tt>, in the second warp will be
+    /// <tt>{10, 11, 12, 13, 1, ..., 1}</tt> and for subsequent warps <tt>{1, 1, 1, 1, ..., 1, 1}</tt>.
+    /// The \p reduction will be equal to \p 73 for the first logical warp, \p 13 for the second one,
+    /// and it will be undefined for subsequent warps.
+    /// \endparblock
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                T              init,
+                                T&             reduction,
+                                storage_type&  storage,
+                                BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize <= arch::wavefront::max_size()),
+                                void>::type
+    {
+        if constexpr(TargetWaveSize == ::rocprim::arch::wavefront::target::dynamic)
+        {
+            if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
+            {
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+            }
+        }
+        base_type::partial_exclusive_scan(input,
+                                          output,
+                                          valid_items,
+                                          init,
+                                          reduction,
+                                          storage,
+                                          scan_op);
+    }
+
+    /// \brief Performs exclusive scan and reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction                 = ::rocprim::plus<T>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(
+        T, T&, int, T, T&, storage_type&, BinaryFunction scan_op = BinaryFunction()) ->
+        typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
+    {
+        (void)scan_op;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+
     /// \brief Performs exclusive scan without an initial value across threads in a logical warp
     /// \tparam BinaryFunction binary function used for scan
     /// \param input Thread input value
@@ -1037,6 +1230,47 @@ public:
                         T& /*output*/,
                         storage_type& /*storage*/,
                         BinaryFunction /*scan_op*/ = BinaryFunction())
+        -> std::enable_if_t<(FunctionVirtualWaveSize > arch::wavefront::max_size())>
+    {
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+    /// \endcond
+
+    /// \brief Performs exclusive scan without an initial value across threads in a logical warp
+    /// \tparam BinaryFunction binary function used for scan
+    /// \param input Thread input value
+    /// \param[out] output Reference to thread output value. Each threads value for the scan will
+    /// be written to it. May be aliased with `input`. The value written is unspecified for the first
+    /// thread of each logical warp.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param [in] storage Reference to a temporary storage object of type storage_type.
+    /// \param scan_op The function object used to combine elements used for the scan
+    template<class BinaryFunction                 = ::rocprim::plus<>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                storage_type&  storage,
+                                BinaryFunction scan_op = BinaryFunction())
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+        -> std::enable_if_t<FunctionVirtualWaveSize <= arch::wavefront::max_size()>
+#else
+        -> void
+#endif
+    {
+        base_type::partial_exclusive_scan(input, output, valid_items, storage, scan_op);
+    }
+
+    /// \cond
+    template<class BinaryFunction                 = ::rocprim::plus<>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(T /*input*/,
+                                T& /*output*/,
+                                int /*valid_items*/,
+                                storage_type& /*storage*/,
+                                BinaryFunction /*scan_op*/ = BinaryFunction())
         -> std::enable_if_t<(FunctionVirtualWaveSize > arch::wavefront::max_size())>
     {
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
@@ -1079,6 +1313,51 @@ public:
                         storage_type& /*storage*/,
                         T& /*reduction*/,
                         BinaryFunction /*scan_op*/ = BinaryFunction())
+        -> std::enable_if_t<(FunctionVirtualWaveSize > arch::wavefront::max_size())>
+    {
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
+    }
+    /// \endcond
+
+    /// \brief Performs exclusive scan and reduction without an initial value across threads in
+    /// a logical warp
+    /// \tparam BinaryFunction binary function used for scan
+    /// \param input Thread input value
+    /// \param[out] output Reference to thread output value. Each threads value for the scan will
+    /// be written to it. May be aliased with `input`. The value written is unspecified for the first
+    /// thread of each logical warp.
+    /// \param [in] valid_items number of valid items to apply the operation to.
+    /// \param[out] reduction Result of reducing of all `input` values in the logical warp.
+    /// \param [in] storage Reference to a temporary storage object of type storage_type.
+    /// \param scan_op The function object used to combine elements used for the scan
+    template<class BinaryFunction                 = ::rocprim::plus<>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(T              input,
+                                T&             output,
+                                int            valid_items,
+                                storage_type&  storage,
+                                T&             reduction,
+                                BinaryFunction scan_op = BinaryFunction())
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+        -> std::enable_if_t<FunctionVirtualWaveSize <= arch::wavefront::max_size()>
+#else
+        -> void
+#endif
+    {
+        base_type::partial_exclusive_scan(input, output, valid_items, storage, reduction, scan_op);
+    }
+
+    /// \cond
+    template<class BinaryFunction                 = ::rocprim::plus<>,
+             unsigned int FunctionVirtualWaveSize = VirtualWaveSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(T /*input*/,
+                                T& /*output*/,
+                                int /*valid_items*/,
+                                storage_type& /*storage*/,
+                                T& /*reduction*/,
+                                BinaryFunction /*scan_op*/ = BinaryFunction())
         -> std::enable_if_t<(FunctionVirtualWaveSize > arch::wavefront::max_size())>
     {
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
@@ -1361,6 +1640,15 @@ public:
     {
         dispatch{}([](auto impl, auto&&... args)
                    { impl.exclusive_scan(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto partial_exclusive_scan(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.partial_exclusive_scan(std::forward<decltype(args)>(args)...); },
                    std::forward<Args>(args)...);
     }
 
