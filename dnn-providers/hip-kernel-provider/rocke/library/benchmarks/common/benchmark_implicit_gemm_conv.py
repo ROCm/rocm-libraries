@@ -806,6 +806,20 @@ def main() -> int:
     )
 
     parser.add_argument(
+        "--csv-top",
+        type=int,
+        default=5,
+        dest="csv_top",
+        metavar="N",
+        help=(
+            "how many ranked results per case to write to --csv (default: 5, "
+            "the long-standing hardcoded cap). Raise it to dump the whole "
+            "sweep for offline analysis; the top-5 default keeps the CK "
+            "comparison report short."
+        ),
+    )
+
+    parser.add_argument(
         "--split-k-prune",
         type=float,
         default=None,
@@ -940,6 +954,14 @@ def main() -> int:
     )
 
     args = parser.parse_args()
+
+    # Checked here rather than left to the slice: --csv-top is a bare bound on
+    # rocke_results, so 0 would write a headers-only CSV and a negative value
+    # would drop that many of the worst-ranked rows -- both after a full sweep
+    # and both exiting 0, which reads as a successful run that found nothing.
+    if args.csv_top < 1:
+        print(f"--csv-top must be >= 1 (got {args.csv_top})", file=sys.stderr)
+        return 2
 
     if args.miopen_cmd is None and args.miopen_file is None and args.json_file is None:
         if args.Di is not None and args.Z is None:
@@ -1210,7 +1232,7 @@ def main() -> int:
                 _shape = problem.short()
                 _key = (_shape, dtype, direction)
                 _ck = ck_best.get(_key)
-                for rank, r in enumerate(rocke_results[:5], 1):
+                for rank, r in enumerate(rocke_results[: args.csv_top], 1):
                     speedup = (r.tflops / _ck["tflops"]) if _ck else None
                     _csv_writer.writerow(
                         {
