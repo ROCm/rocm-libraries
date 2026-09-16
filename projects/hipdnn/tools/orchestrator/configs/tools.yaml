@@ -50,6 +50,37 @@ vars:
   # preset at it on Windows.
   clang_bin: D:/develop/dist/clang/bin
 
+# A profile is an overlay on the `vars` and `tools` above, selected with
+# `--profile NAME`. It exists because this registry is the one machine-local file and
+# the values above describe a Windows workstation: a second machine that edits them in place
+# makes every later diff of this file a merge conflict about somebody's home directory.
+# Only the leaves need restating -- `_resolve_vars` runs after the merge, so derived
+# vars like `rocm_bin` and `ingestor_build_dir` pick the overridden roots up themselves.
+profiles:
+
+  # A Linux workstation, MI200-class (gfx90a:sramecc+:xnack-), ROCm 7.16 at the
+  # system prefix rather than a wheel. Verified 2026-09.
+  linux-gfx90a:
+    vars:
+      repo_root: /path/to/rocm-libraries
+      rocm_path: /opt/rocm
+      # Only reaches -DCMAKE_PROGRAM_PATH, which is a Windows-only crutch:
+      # cmake/toolchains/rocm-clang.cmake derives clang from ROCM_PATH on Linux and
+      # this never gets consulted. Pointed at the real directory anyway, because a
+      # variable naming a path that does not exist is a trap for the next reader.
+      clang_bin: /opt/rocm/lib/llvm/bin
+      # Two differences from the Windows spellings above, and both are load-bearing.
+      # HIPDNN_PLUGIN_ROOTDIR is CMAKE_INSTALL_BINDIR only under WIN32 and
+      # CMAKE_INSTALL_LIBDIR otherwise, so plugins land in lib/ rather than bin/; and
+      # a CMake SHARED target is libhip_kernel_provider.so, not hip_kernel_provider.dll.
+      # `lib` rather than `lib64`: GNUInstallDirs only multiarch-ifies LIBDIR for a /usr
+      # prefix, and every prefix here is out-of-tree. Check `ls` if install ever moves.
+      hip_kernel_plugin: "${vars.build_dir}/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
+      ingestor_plugin: "${vars.ingestor_build_dir}/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
+      installed_plugin: "${vars.ingestor_install_dir}/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
+      # ingestor_ctest_root is deliberately NOT restated: the provider installs its
+      # CTest files to CMAKE_INSTALL_BINDIR/hip_kernel_provider on both platforms.
+
 tools:
   # Claude Code CLI. Verified present at this path on a Windows workstation (2026-09).
   claude:
