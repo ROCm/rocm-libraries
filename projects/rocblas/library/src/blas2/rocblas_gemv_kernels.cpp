@@ -118,40 +118,59 @@ inline int rocblas_gemvn_sm_split_count(rocblas_int n)
     return int(std::min(split, size_t(rocblas_gemvn_sm_max_split())));
 }
 
-// Largest m the split is used for. gemvn tiles the output as
-// (m - 1) / (DIM_X * 4) + 1 for real/complex-float types, and
-// (m - 1) / DIM_X + 1 for double-complex (one quarter as many tiles).
-// Below the crossover the grid cannot fill the device and the split is a
-// large win; above it the arch-tuned single-stage kernel already saturates
-// and the extra reduction pass is a small loss.
-//
-// For m=1024, the split preempts the CDNA-tuned 512-thread kernel already
-// fast at that size. Therefore, we set the crossover to 512 for all real
-// and complex-float types, where the performance gains are solid across all
-// the archs. For double-complex the block formula uses DIM_X (not DIM_X*4),
-// so the equivalent tile count is reached at m=256.
-template <typename T>
-inline size_t rocblas_gemvn_sm_crossover()
-{
-    if constexpr(std::is_same_v<T, rocblas_double_complex>)
-        return 256;
-    return 512;
-}
-
 // Below this the reduction is not long enough to cover a second launch.
 inline size_t rocblas_gemvn_sm_min_elems()
 {
     return size_t(1) << 20;
 }
 
+// Returns the number of output tiles the ordinary gemvn kernel uses for a
+// given m. This matches the blocks formula in the launcher:
+//   real / complex-float: (m - 1) / (DIM_X * 4) + 1
+//   double-complex:       (m - 1) / DIM_X + 1   (DIM_X * 4 is too wide)
+// Both use DIM_X = 32. The launcher keys the double-complex formula off the
+// element (Tex) type, so strip pointer/cv from T to recognise the batched
+// case, where T is a pointer (e.g. rocblas_double_complex* const).
+template <typename T>
+inline rocblas_int rocblas_gemvn_output_tiles(rocblas_int m)
+{
+    constexpr int DIM_X = 32;
+    using element       = std::remove_cv_t<std::remove_pointer_t<T>>;
+    if constexpr(std::is_same_v<element, rocblas_double_complex>)
+        return (m - 1) / DIM_X + 1;
+    return (m - 1) / (DIM_X * 4) + 1;
+}
+
+// Minimum number of column splits required to justify the second launch.
+// Fewer splits means the split adds launch overhead without proportional
+// parallelism — the regression at (m=1024, n=2048) is one such case (n_split=1).
+constexpr int rocblas_gemvn_sm_min_splits()
+{
+    return 4;
+}
+
+// Gate: use the split path when:
+//   1. transA == none, m and n are positive
+//   2. m * n is large enough to amortise a second launch
+//   3. the output grid (tiled by m) has at most 8 tiles — below this the
+//      device cannot be filled from m alone and the split is a large win
+//   4. the split produces at least min_splits parallel column blocks —
+//      below this the extra launch is overhead on an already-fast single-stage
+//      kernel (e.g. the CDNA-tuned 512-thread path at m=1024, n=2048)
+//
+// Conditions 3 and 4 together admit any m with 8 or fewer output tiles AND
+// a long enough n to create real parallelism, without an explicit crossover
+// constant that must be re-tuned per architecture.
 template <typename T>
 inline bool rocblas_gemvn_skinny_m(rocblas_operation transA, rocblas_int m, rocblas_int n)
 {
     if(transA != rocblas_operation_none || m <= 0 || n <= 0)
         return false;
-    if(size_t(m) > rocblas_gemvn_sm_crossover<T>())
+    if(size_t(m) * size_t(n) < rocblas_gemvn_sm_min_elems())
         return false;
-    return size_t(m) * size_t(n) >= rocblas_gemvn_sm_min_elems();
+    if(rocblas_gemvn_output_tiles<T>(m) > 8)
+        return false;
+    return rocblas_gemvn_sm_split_count(n) >= rocblas_gemvn_sm_min_splits();
 }
 
 template <typename T>
