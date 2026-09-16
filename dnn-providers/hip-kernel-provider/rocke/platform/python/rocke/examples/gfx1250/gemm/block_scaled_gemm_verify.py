@@ -187,11 +187,12 @@ def _u8_buffer(array: np.ndarray):
     return (ctypes.c_uint8 * int(array.nbytes)).from_buffer_copy(array)
 
 
-def _launch(rt, fn, spec, inputs):
+def _launch(rt, fn, spec, inputs, *, tensor_scales=None):
     import ml_dtypes
 
     # A NaN sentinel makes missing output stores fail, including expected zeros.
-    out = np.full((spec.M, spec.N), np.nan, dtype=ml_dtypes.bfloat16)
+    dtype = ml_dtypes.bfloat16 if spec.dtype_c == "bf16" else np.float16
+    out = np.full((spec.M, spec.N), np.nan, dtype=dtype)
     allocations = []
     try:
         for array in (*inputs, out):
@@ -199,12 +200,14 @@ def _launch(rt, fn, spec, inputs):
             allocations.append(ptr)
             rt.memcpy_h2d(ptr, _u8_buffer(array), array.nbytes)
         packed = struct.pack("<QQQQQiii", *allocations, spec.M, spec.N, spec.K)
+        if tensor_scales is not None:
+            packed += struct.pack("<ff", *tensor_scales)
         rt.launch(fn, block_scaled_gemm_grid(spec), (spec.block_size, 1, 1), packed)
         rt.sync()
         host_out = (ctypes.c_uint8 * int(out.nbytes))()
         rt.memcpy_d2h(host_out, allocations[-1], out.nbytes)
         return (
-            np.frombuffer(bytes(host_out), dtype=ml_dtypes.bfloat16)
+            np.frombuffer(bytes(host_out), dtype=dtype)
             .reshape(spec.M, spec.N)
             .astype(np.float32)
         )

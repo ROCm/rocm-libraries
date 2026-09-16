@@ -18,6 +18,7 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
+#include "rocke/scaled_wmma_internal.h"
 
 /* ===================================================================== */
 /*  target-neutral MMA metadata                                          */
@@ -611,6 +612,47 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
 }
 
+rocke_value_t* rocke_b_mma_scaled(rocke_ir_builder_t* b,
+                                  const char* op_id,
+                                  rocke_value_t* a,
+                                  rocke_value_t* bb,
+                                  rocke_value_t* c,
+                                  rocke_value_t* a_scale,
+                                  rocke_value_t* b_scale,
+                                  const char* scale_dtype_a,
+                                  const char* scale_dtype_b)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    bool scale16;
+    int fa, fb;
+    if(!op_id || !rocke_wmma_scaled_formats(op_id, &scale16, &fa, &fb) || fa != fb
+       || (fa != 0 && fa != 4))
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "scale dtype selectors require a gfx1250 scaled WMMA atom");
+    }
+    int sa = rocke_wmma_scale_format(scale_dtype_a);
+    int sb = rocke_wmma_scale_format(scale_dtype_b);
+    if(const char* error = rocke_wmma_scale_error(fa, fb, sa, sb))
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", error);
+    }
+    rocke_value_t* scales[] = {a_scale, b_scale};
+    rocke_value_t* result = rocke_b_mma(b, op_id, a, bb, c, scales, 2);
+    if(result && sa)
+    {
+        rocke_attr_set_str(b, &result->op->attrs, "scale_dtype_a", scale_dtype_a);
+    }
+    if(result && sb)
+    {
+        rocke_attr_set_str(b, &result->op->attrs, "scale_dtype_b", scale_dtype_b);
+    }
+    return result;
+}
+
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma) ----- */
 
 #define ROCKE_MMA_WRAP(fn, opid)                                                      \
@@ -719,6 +761,39 @@ rocke_value_t* rocke_b_register_p_from_qk_c(rocke_ir_builder_t* b,
 /* ===================================================================== */
 /*  inline asm                                                           */
 /* ===================================================================== */
+
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!value || !value->type || value->type->kind != ROCKE_TYPE_SCALAR
+       || value->type->scalar < ROCKE_SCALAR_I1 || value->type->scalar >= ROCKE_SCALAR__COUNT)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "optimization_barrier requires a numeric scalar or i1");
+    }
+    if(value->type->scalar == ROCKE_SCALAR_I1 || value->type->scalar == ROCKE_SCALAR_I8
+       || value->type->scalar == ROCKE_SCALAR_FP8E4M3
+       || value->type->scalar == ROCKE_SCALAR_BF8E5M2)
+    {
+        bool encoded_float = value->type->scalar == ROCKE_SCALAR_FP8E4M3
+                             || value->type->scalar == ROCKE_SCALAR_BF8E5M2;
+        rocke_value_t* raw = encoded_float ? rocke_b_bitcast(b, value, rocke_i8()) : value;
+        rocke_value_t* wide = rocke_b_zext(b, raw, rocke_i32());
+        rocke_value_t* opaque = rocke_b_optimization_barrier(b, wide);
+        rocke_value_t* narrow = rocke_b_trunc(b, opaque, raw->type);
+        return encoded_float ? rocke_b_bitcast(b, narrow, value->type) : narrow;
+    }
+    rocke_inline_asm_opts_t opts = {};
+    opts.sideeffect_set = true;
+    opts.sideeffect = false;
+    rocke_value_t* operands[] = {value};
+    const rocke_type_t* types[] = {value->type};
+    rocke_op_t* op = rocke_b_inline_asm(b, "", "=v,0", operands, 1, types, 1, &opts);
+    return op ? op->results[0] : NULL;
+}
 
 rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const char* asm_template,

@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .scaled_wmma import SCALED_WMMA_OPS, scale_formats
+
 # ----------------------------- Types --------------------------------------
 
 
@@ -1826,6 +1828,8 @@ class IRBuilder:
         b: Value,
         c: Value,
         *extra: Value,
+        scale_dtype_a: str | None = None,
+        scale_dtype_b: str | None = None,
     ) -> Value:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
@@ -1850,6 +1854,20 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
+        attrs = {"op_id": op_id}
+        if scale_dtype_a is not None or scale_dtype_b is not None:
+            if op_id not in SCALED_WMMA_OPS:
+                raise ValueError(
+                    "scale dtype selectors require a gfx1250 scaled WMMA atom"
+                )
+            _, fa, fb = SCALED_WMMA_OPS[op_id]
+            da = scale_dtype_a if scale_dtype_a is not None else "e8m0"
+            db = scale_dtype_b if scale_dtype_b is not None else "e8m0"
+            sa, sb = scale_formats(fa, fb, da, db)
+            if sa:
+                attrs["scale_dtype_a"] = da
+            if sb:
+                attrs["scale_dtype_b"] = db
         c_frag_len = (
             op.c_frag_len
             if hasattr(op, "c_frag_len") and op.c_frag_len
@@ -1866,7 +1884,7 @@ class IRBuilder:
             "tile.mma",
             [a, b, c, *extra],
             [VectorType(c_elem, c_frag_len)],
-            attrs={"op_id": op_id},
+            attrs=attrs,
             result_name_hint=hint,
         ).result
 
@@ -2088,6 +2106,31 @@ class IRBuilder:
 
     def mfma_f32_32x32x16_bf8(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_32x32x16_bf8", a, b, c)
+
+    def optimization_barrier(self, value: Value) -> Value:
+        """Preserve a scalar value while hiding its definition from consumers.
+
+        Use the returned value to prevent arithmetic contraction/reassociation
+        across this dependency, e.g. ``fadd(optimization_barrier(fmul(a,b)),c)``.
+        This preserves an intermediate rounding boundary; it does not disable
+        optimization within the producer or consumer expression.
+
+        Supports numeric scalars and i1 predicates. AMDGPU uses an empty
+        tied-VGPR asm: no instruction is emitted by the barrier itself, but it
+        can require register moves and prevent profitable instruction combines.
+        It has no memory/thread ordering or side effects; unused results may
+        be eliminated. Pointers and vectors are rejected; apply it to extracted
+        vector elements when needed.
+        """
+        if value.type in (I1, I8, FP8E4M3, BF8E5M2):
+            # Lane predicates and byte values cannot directly tie a VGPR.
+            raw = value if value.type in (I1, I8) else self.bitcast(value, I8)
+            wide = self.optimization_barrier(self.zext(raw, I32))
+            narrow = self.trunc(wide, raw.type)
+            return narrow if raw is value else self.bitcast(narrow, value.type)
+        if value.type not in (I8, I16, I32, I64, BF16, F16, F32, FP8E4M3, BF8E5M2):
+            raise ValueError("optimization_barrier requires a numeric scalar or i1")
+        return self.inline_asm("", "=v,0", [value], value.type, sideeffect=False)
 
     def inline_asm(
         self,

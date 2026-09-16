@@ -2,6 +2,54 @@
 
 This page documents the DSL primitives that map closely to GPU hardware behavior. Everything below is verified against `helpers/atoms.py`, `helpers/loads.py`, `helpers/layouts.py`, `helpers/schedule.py`, `helpers/pipeline.py`, `helpers/epilogues.py`, `helpers/reduction.py`, `core/ir.py`, and `core/lower_llvm.py`.
 
+## Keeping operations separate
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar value and type.
+It stops the compiler from combining the operation that produces the value
+with an operation that uses the returned value. Use it when combining those
+operations would change rounding:
+
+```python
+product = ir.optimization_barrier(ir.fmul(a, b))
+result = ir.fadd(product, c)
+```
+
+In this example, the multiplication rounds to the value's type before the
+addition. The compiler cannot replace the pair with a fused multiply-add that
+rounds only once. The same tool can keep FP32 multiplication separate from FP16
+conversion. **Use the returned value** in the next operation; calling the
+barrier and then using the original value does not protect that operation.
+
+The C API is `rocke_b_optimization_barrier(builder, value)`. Both APIs use the
+existing inline-assembly operation. The assembly text is empty, and its output
+uses the same vector register as its input. This preserves the value while
+preventing the compiler from looking through the barrier.
+
+Supported scalar types are `i8`, `i16`, `i32`, `i64`, `f16`, `bf16`, `f32`,
+`fp8e4m3`, and `bf8e5m2`. The stored bits of the low-bit float types are preserved.
+Booleans (`i1`) are supported too. A boolean can be stored as a lane mask, and
+an 8-bit value cannot directly use the required vector-register constraint.
+For these types, the helper widens the value to `i32`, applies the barrier,
+then restores the original type. Pointers and vectors are rejected. For a
+vector, extract its elements and apply the barrier to each element as needed.
+
+### How this differs from `sched_barrier`
+
+| API | What it controls |
+| --- | --- |
+| `optimization_barrier(value)` | Whether the compiler can combine operations across a particular value. |
+| `sched_barrier(mask)` | Which machine-instruction classes can move across a point during scheduling. |
+
+Fusion can happen before instruction scheduling. A scheduling barrier can
+control where a fused instruction runs, but it does not restore the intermediate
+result that fusion removed. Use the value barrier to keep that result.
+
+The value barrier does not order memory accesses or synchronize threads. It
+also does not fix instruction order or disable optimizations within either
+neighboring expression. The compiler can remove it if its result is unused.
+The empty assembly adds no instruction itself, but register moves and keeping
+operations separate can still have a cost.
+
 ## MFMA Atoms
 
 `helpers/atoms.py::MfmaAtom` packages one MFMA intrinsic's shape, per-lane widths, accumulator width, dispatch to `IRBuilder`, and lane-to-output mapping.

@@ -953,7 +953,26 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
                            rocke_value_t* const* extra,
                            int num_extra);
 
+/* gfx1250 scaled WMMA with independently selected A/B scale formats.
+ * NULL scale dtypes preserve E8M0. Matrix formats come from op_id. */
+rocke_value_t* rocke_b_mma_scaled(rocke_ir_builder_t* b,
+                                  const char* op_id,
+                                  rocke_value_t* a,
+                                  rocke_value_t* bb,
+                                  rocke_value_t* c,
+                                  rocke_value_t* a_scale,
+                                  rocke_value_t* b_scale,
+                                  const char* scale_dtype_a,
+                                  const char* scale_dtype_b);
+
 /* ----- inline asm ----- */
+/* Value-preserving optimization boundary for numeric scalars and i1 predicates.
+ * Use the returned value; unused results may be eliminated. Empty tied
+ * VGPR asm hides the producer from consumers without memory/thread ordering.
+ * Predicates and byte storage bridge through i32. Pointers/vectors are rejected. Register moves
+ * may still be required. */
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value);
+
 /* operands/result_types are explicit arrays; constraints/template are strings.
  * Returns the op (results accessible via op->results) since asm may be 0/1/N
  * results. */

@@ -74,7 +74,7 @@ def _wmma_k64(a_kind, b_kind):
     return build
 
 
-def _wmma_scaled(a_kind, b_kind, scale_mode):
+def _wmma_scaled(a_kind, b_kind, scale_mode, scale_dtype=None):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
     op_id = f"wmma_{scale_mode}_f32_16x16x128_{a_kind}_{b_kind}"
@@ -105,7 +105,16 @@ def _wmma_scaled(a_kind, b_kind, scale_mode):
         bb = b.vec_concat(b_lo, b_hi)
         c = b.global_load_vN(c_ptr, tid, dtype=F32, n=8)
         scale = b.global_load(scale_ptr, tid, dtype=scale_ty)
-        d = b.mma(op_id, a, bb, c, scale, scale)
+        d = b.mma(
+            op_id,
+            a,
+            bb,
+            c,
+            scale,
+            scale,
+            scale_dtype_a=scale_dtype,
+            scale_dtype_b=scale_dtype,
+        )
         b.global_store(c_ptr, tid, d)
         b.ret()
 
@@ -254,6 +263,13 @@ CONFIGS = [
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
 ]
+
+
+CONFIGS.extend(
+    (_wmma_scaled("fp4", "fp4", mode, dtype), "gfx1250")
+    for mode in ("scale", "scale16")
+    for dtype in ("e4m3", "e5m3")
+)
 
 
 def _spec(idx: int):
