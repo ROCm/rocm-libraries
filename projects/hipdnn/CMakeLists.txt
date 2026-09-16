@@ -342,6 +342,15 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
+        # hipdnn_frontend_dynamic_load_tests is the only object here that maps
+        # DynamicBackendLibrary.hpp's resolveSymbol and its resolveBackendSymbol<>
+        # instantiations; dropping it under-reports coverage for that header.
+        # resolveSymbol's null-handle early return stays uncovered regardless --
+        # nothing reaches it while the backend loads -- and the never-run static-check
+        # translation unit's inline instantiations are COMDAT-folded onto counters the
+        # executed tests already increment.
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_dynamic_load_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object
