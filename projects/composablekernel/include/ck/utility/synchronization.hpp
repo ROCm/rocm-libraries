@@ -17,23 +17,14 @@ __device__ void block_sync_lds()
 {
 #if CK_EXPERIMENTAL_BLOCK_SYNC_LDS_WITHOUT_SYNC_VMEM
 #if defined(__gfx12__)
-    llvm_amdgcn_s_wait_dscnt(0);
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
-#elif defined(__gfx11__)
-    // asm volatile("\
-    // s_waitcnt lgkmcnt(0) \n \
-    // s_barrier \
-    // " ::);
-    __builtin_amdgcn_s_waitcnt(0xfc07);
-    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #else
-    // asm volatile("\
-    // s_waitcnt lgkmcnt(0) \n \
-    // s_barrier \
-    // " ::);
-    __builtin_amdgcn_s_waitcnt(0xc07f);
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #endif
 #else
     __syncthreads();
