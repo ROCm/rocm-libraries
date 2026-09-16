@@ -1,0 +1,59 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R13 - gfx942 UseScaleAB=Vector store-state addressing characterization.
+#
+# The existing _codegen suite never emits a UseScaleAB == "Vector" GEMM, so the
+# ScaleAVec column-address allocation / per-element load-address / cleanup arms
+# of Tensile/AsmStoreState.py are uncovered:
+#
+#   StoreState.__init__ (optSingleColVgpr)        line 316  (sharedColScaleAVecVgprs checkout)
+#   StoreState.__init__ (numVgprsPerElement)      line 380  (ScaleAVec address reg count)
+#   StoreState.setupStoreElementsForBatch         line 1056-1057 (addrScaleAVecVgpr per element)
+#   StoreState.__del__                            line 1119-1120 (sharedColScaleAVecVgprs checkIn)
+#
+# All gated by `kernel["ProblemType"]["UseScaleAB"] == "Vector"` AND isSingleKernel
+# (GSU==1 here). Plain HHS GEMM, single buffer, so the store path takes the
+# optSingleColVgpr branch (the only store branch reachable in GEMM-only TensileLite).
+#
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+
+BenchmarkProblems:
+  ########################################
+  # NN half (h->h, compute=s) + UseScaleAB Vector
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseScaleAB: Vector
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 1, 1, 1, 1]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [3]
+        - PrefetchLocalRead: [0]
+        - PrefetchGlobalRead: [0]
+        - StoreVectorWidth: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
