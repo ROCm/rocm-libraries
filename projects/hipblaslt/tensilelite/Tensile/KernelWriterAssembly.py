@@ -1755,6 +1755,19 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("s", "sgpr"+skey, self.sgprs[skey]))
     # module.addComment0("max SGPR=%u"%self.sgprPool.size())
 
+    if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) \
+       and kernel.get("UseSubtileImpl"):
+      # The prologue overwrites Strides<MXS*> with the scale group span
+      # (paddedKBlocks * 32), so after that point the register no longer holds a
+      # stride.  Alias it rather than allocate: same register, a name that says
+      # what it contains, so a reader reaching for a K stride cannot pick it up
+      # by mistake.
+      module.addSpaceLine()
+      module.addComment0("MX scale group span (Strides<tc> renamed after the prologue rewrites it)")
+      for tc in ("MXSA", "MXSB"):
+        if kernel["ProblemType"]["MXBlock%s" % tc[-1]]:
+          module.add(RegSet("s", "sgprScaleGroupSpan%s" % tc, "sgprStrides%s" % tc, 0))
+
     if self.states.streamK.emitsParallelReductionSgprAliases:
       module.addSpaceLine()
       module.addComment0("StreamK Parallel Reduction Assignments")

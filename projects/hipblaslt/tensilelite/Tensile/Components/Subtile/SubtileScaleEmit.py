@@ -287,7 +287,7 @@ def _graTileAssignmentScaleSwizzledCommon(tc, writer, kernel):
       comment="%s: groupId = serial / %u, threadId = serial %% %u"
               % (tc, numThreadsPerGroup, numThreadsPerGroup)))
   writer.vgprPool.checkIn(divTmp)
-  module.add(SLShiftLeftB32(sgpr(stmp), int(math.log2(ti_.bpe)), sgpr("Strides%s"%tc), comment="*= bpe (%d)"%(ti_.bpe)))
+  module.add(SLShiftLeftB32(sgpr(stmp), int(math.log2(ti_.bpe)), sgpr("ScaleGroupSpan%s"%tc), comment="*= bpe (%d)"%(ti_.bpe)))
 
   module.add(VMulLOU32(dst=vgpr(vtmp), src1=vgpr(vtmp), src0=sgpr(stmp), comment="Apply scale%s stride to each group"%tc))
   module.add(VLShiftLeftB32(dst=vgpr(ti_.sharedVgprGROffset[0]),
