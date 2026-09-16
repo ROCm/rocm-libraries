@@ -490,11 +490,11 @@ enum class sink_kind
 // sink phase is carried by the local-window tuples below instead.
 constexpr auto kStreamLlmMask = "b:-1,0,2";
 
-class QuantScale : public TestWithParam<
-                       std::tuple<mode_enum,
-                                  const char*,
-                                  sink_kind,
-                                  std::tuple<int, int, int, int, int, std::string>>>
+class QuantScale
+    : public TestWithParam<std::tuple<mode_enum,
+                                      const char*,
+                                      sink_kind,
+                                      std::tuple<int, int, int, int, int, std::string>>>
 {
 };
 
@@ -507,11 +507,11 @@ INSTANTIATE_TEST_SUITE_P(
     Combine(ModeValues,
             QScaleValues,
             Values(sink_kind::none, sink_kind::gptoss, sink_kind::streamllm),
-            Values(std::tuple{2, 2, 1, 55, 256, "0"},     // GQA, seqlen_q << seqlen_k
-                   std::tuple{1, 3, -1, 100, 51, "0"},    // plain MHA, seqlen_q > seqlen_k
-                   std::tuple{2, 1, -1, 99, 256, "1"},    // causal
-                   std::tuple{1, 2, 1, 1024, 256, "2"},   // GQA, causal bottom-right
-                   std::tuple{1, 4, 2, 256, 256, "0"}, // Pack-GQA: ratio 2, no mask, s%128==0
+            Values(std::tuple{2, 2, 1, 55, 256, "0"},   // GQA, seqlen_q << seqlen_k
+                   std::tuple{1, 3, -1, 100, 51, "0"},  // plain MHA, seqlen_q > seqlen_k
+                   std::tuple{2, 1, -1, 99, 256, "1"},  // causal
+                   std::tuple{1, 2, 1, 1024, 256, "2"}, // GQA, causal bottom-right
+                   std::tuple{1, 4, 2, 256, 256, "0"},  // Pack-GQA: ratio 2, no mask, s%128==0
                    // The two local-window tuples below are the only non-empty sink phases
                    // here; causal masks collapse it, and only then does the descale index
                    // leave k_origin. sink=128 == kN0 is the prologue jump.
@@ -539,44 +539,44 @@ TEST_P(QuantScale, DataTypeConfig)
     const std::string mask = sink == sink_kind::streamllm ? kStreamLlmMask : mask_str;
     const int init_sink    = sink == sink_kind::gptoss ? 1 : 0;
 
-    auto result = fmha_fwd_run<DataTypeConfig>(mode,
-                                               batch,
-                                               nhead,
-                                               nhead_k,
-                                               {adjust_seqlen(seqlen_q)},
-                                               {adjust_seqlen(seqlen_k)},
-                                               adjust_hdim(128),
-                                               adjust_hdim(128),
-                                               0,    // seqlen_knew
-                                               {-1}, // seqlen_qpads
-                                               {-1}, // seqlen_kpads
-                                               {},   // q_eff_lens_per_batch
-                                               {},   // kv_eff_lens_per_batch
-                                               0,    // rotary_dim
-                                               true, // i_perm
-                                               true, // o_perm
-                                               0,    // scale_s
-                                               0,    // logits_soft_cap
-                                               def_is_v_rowmajor,
-                                               def_lse,
-                                               0,     // page_block_size
-                                               false, // use_cache_batch_idx
-                                               "n",   // bias_str
-                                               0.0f,  // p_drop
-                                               0,     // drop_seed
-                                               0,     // drop_offset
-                                               false, // drop_prefs
-                                               mask,
-                                               qscale,
-                                               true, // is_rotary_interleaved
-                                               1, // num_splits
-                                               qscale_init_method(qscale),
-                                               static_cast<uint32_t>(ck_tile::EnvValue(
-                                                   CK_TILE_ENV(CK_TILE_TEST_SEED))),
-                                               1,         // do_validation
-                                               init_sink, // init_sink_value
-                                               1,         // pack_gqa
-                                               stream_config);
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode,
+        batch,
+        nhead,
+        nhead_k,
+        {adjust_seqlen(seqlen_q)},
+        {adjust_seqlen(seqlen_k)},
+        adjust_hdim(128),
+        adjust_hdim(128),
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff_lens_per_batch
+        {},   // kv_eff_lens_per_batch
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        def_is_v_rowmajor,
+        def_lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask,
+        qscale,
+        true, // is_rotary_interleaved
+        1,    // num_splits
+        qscale_init_method(qscale),
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1,         // do_validation
+        init_sink, // init_sink_value
+        1,         // pack_gqa
+        stream_config);
     CHECK_RESULT(result);
 }
 #endif

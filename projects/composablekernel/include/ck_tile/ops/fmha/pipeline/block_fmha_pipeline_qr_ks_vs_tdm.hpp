@@ -358,8 +358,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
-                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                         kHasLogitsSoftCap)
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
@@ -685,7 +684,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             {
                 const auto current_k_origin = make_tuple(kv_tile_start, 0);
-                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                constexpr auto s_spans      = decltype(s_acc)::get_distributed_spans();
                 sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
                         const auto tile_idx = get_x_indices_from_distributed_indices(
@@ -1052,8 +1051,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
-                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                         kHasLogitsSoftCap)
+                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
                 set_tile(m, sink_v * scale_s * C_LOG2E);
             else
                 set_tile(m, sink_v * C_LOG2E);
@@ -1397,7 +1395,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             {
                 const auto current_k_origin = make_tuple(kv_tile_start, 0);
-                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+                constexpr auto s_spans      = decltype(s_acc)::get_distributed_spans();
                 sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
                         const auto tile_idx = get_x_indices_from_distributed_indices(
