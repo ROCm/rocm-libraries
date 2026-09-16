@@ -347,7 +347,10 @@ class _StubLabels:
 class _ClassicPapWrapperWriter:
     def __init__(self):
         self.labels = _StubLabels()
-        self.states = SimpleNamespace(unrollIdx=0)
+        # rapInPapNextTilePrefetch: prefetchAcrossPersistent raises it over the
+        # window where WorkGroup* names the next tile, so RAP's A silencing can
+        # tell a next-tile load from an in-loop one.
+        self.states = SimpleNamespace(unrollIdx=0, rapInPapNextTilePrefetch=False)
         self.vgprPool = _TrackingRegisterPool(RegisterType.Vgpr)
 
     def isPrefetchAcrossPersistentEnabled(self, kernel):
@@ -424,6 +427,7 @@ _CLASSIC_KERNEL_BASE = {
     "PrefetchGlobalRead": 2,
     "PrefetchGL2": 0,
     "ProblemType": _problem_type(),
+    "ReuseAcrossPersistent": 0,
     "StreamKForceDPOnly": 0,
     "UseGeneralizedNLCOneA": False,
     "UseGeneralizedNLCOneB": False,
@@ -1212,3 +1216,72 @@ def test_sk4_pap_setup_next_tile_uses_stashed_work_item(monkeypatch):
     rendered = str(module)
     assert "s[sgprSkNextWorkItem]" in rendered
     assert "unit: tile identity" in rendered
+
+
+# ---------------------------------------------------------------------------
+# ReuseAcrossPersistent silences A for the whole reuse copy, but one load in it
+# belongs to the next tile, and that tile may not be able to reuse A.
+# ---------------------------------------------------------------------------
+class _RapTdmNullWriter:
+    """Just enough writer to render rapNullTdmDescriptorForEvenWaves.
+
+    tdmParityPackedInArgType picks the parity form that needs no scratch, so what
+    comes out is the parity compare plus the selects under test and nothing else.
+    The real _emitTdmWaveParitySCC is borrowed rather than stubbed: the point of
+    the test is how the batch condition composes with parity.
+    """
+
+    _emitTdmWaveParitySCC = kwa_module.KernelWriterAssembly._emitTdmWaveParitySCC
+
+    def __init__(self, in_pap_next_tile_prefetch):
+        self.states = SimpleNamespace(
+            rapDropAResidentLoads=True,
+            rapInPapNextTilePrefetch=in_pap_next_tile_prefetch,
+            tdmParityPackedInArgType=True,
+        )
+
+    def isTdmWaveIdxLive(self, kernel):
+        return False
+
+    @contextmanager
+    def allocTmpSgpr(self, num, alignment=None, tag=None):
+        yield SimpleNamespace(idx=90, size=num)
+
+
+def _rap_null_tdm(in_pap_next_tile_prefetch):
+    return str(
+        kwa_module.KernelWriterAssembly.rapNullTdmDescriptorForEvenWaves(
+            _RapTdmNullWriter(in_pap_next_tile_prefetch),
+            {"WavefrontSize": 32},
+            "tdmAGroup0+0",
+        )
+    )
+
+
+def test_rap_silences_a_unconditionally_for_the_reuse_copy_own_loads():
+    """Every in-loop load in the reuse copy serves the tile A is resident for."""
+    rendered = _rap_null_tdm(in_pap_next_tile_prefetch=False)
+    assert "s[sgprtdmAGroup0+0]" in rendered
+    for batchState in ("sgprRAPResidentBatch", "sgprWorkGroup2"):
+        assert batchState not in rendered, (
+            "an in-loop load consulted %s; the tile it serves cannot have changed "
+            "batch mid-iteration" % batchState
+        )
+
+
+def test_rap_lets_the_next_tile_prefetch_fetch_a_when_the_batch_changes():
+    """The last load in the reuse copy is PAP's, and it feeds the next tile.
+
+    Silencing A there is only right while that tile goes on reusing the resident
+    registers. When it changes batch the RAP_IterN guard diverts it to the fill
+    copy, which computes from whatever this prefetch left behind -- so A has to be
+    fetched. Silencing it unconditionally is invisible to any MX test (the client
+    generator gives every batch the same A) and to any single-batch test, which is
+    how it survived the first round of this fix.
+
+    WorkGroup2 is the next tile's here: prefetchAcrossPersistent raises the flag
+    only between setupNextTile and papRestoreCurrentTileIdentity.
+    """
+    rendered = _rap_null_tdm(in_pap_next_tile_prefetch=True)
+    assert "s[sgprWorkGroup2], s[sgprRAPResidentBatch]" in rendered
+    assert "s[sgprtdmAGroup0+0]" in rendered
