@@ -61,6 +61,22 @@ class GL2PrefetchLoad(GL2Prefetch):
             # Convert the cluster free-dimension extent to MX scale-row units.
             coalescedDim = mxGl2CoalescedDim(mt, numTileWGs, mxUnit, mxTile)
             perpendicularDim = kernel["DepthU"] // kernel["MatrixInstK"]
+        elif tp.get("isSwizzledTDM"):
+            # gfx1250 pre-swizzled A/B is laid out as a sequence of free-dimension
+            # MI rows. One row's DepthU slice is contiguous, while consecutive rows
+            # are separated by MI*paddedK. Treat each row as the perpendicular
+            # dimension and its cache regions as the coalesced dimension.
+            du: int = kernel["_DepthU%s" % subTc]
+            swizzleMi: int = kernel["MatrixInstM"] if subTc == "A" else kernel["MatrixInstN"]
+            rowSliceBytes: int = round(swizzleMi * du * bpe)
+            assert mt % swizzleMi == 0, "swizzled-TDM MacroTile must contain whole MI rows"
+            assert du % tp["swizzleK"] == 0, \
+                "swizzled-TDM DepthU must contain whole swizzle-K blocks"
+            assert rowSliceBytes % globalPrefetchSize == 0, \
+                "swizzled-TDM DepthU row slice must contain whole GL2 cache regions"
+            tp["gl2SwizzleMi"] = swizzleMi
+            coalescedDim = swizzleMi * du
+            perpendicularDim = mt * numTileWGs // swizzleMi
         else:
             du: int = kernel["_DepthU%s" % subTc]
             coalescedDim, perpendicularDim = (mt * numTileWGs, du) if tp["tlu"] else (du, mt * numTileWGs)
@@ -207,6 +223,14 @@ class GL2PrefetchLoad(GL2Prefetch):
                 src0, src1 = sgpr(incName), kBytes
             else:
                 src0, src1 = sgpr("Size%s"%INDEX_CHARS[tIdx]), kBytes
+        elif tp.get("isSwizzledTDM"):
+            # One DepthU step of a swizzled tensor spans MI*DepthU contiguous elements.
+            swizzleMi: int = tp["gl2SwizzleMi"]
+            mod.add(SMovB32(dst=sgpr(incName), src=round(swizzleMi * du * bpe), \
+                comment=f"swizzled-TDM addr increment = MI({swizzleMi}) * DepthU({du}) * bpe({bpe})"))
+            if is64:
+                mod.add(SMovB32(dst=sgpr(f"{incName}+1"), src=0, comment="addr increment hi"))
+            return mod
         elif tp["tlu"]:
             src0, src1 = writer.strideRef(subTc, 3), round(du * bpe)
         else:
@@ -234,6 +258,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         tIdx: int = tp['idx']
         tlu: bool = tp["tlu"]
         isMX: bool = tc.startswith("MX")
+        isSwizzledTDM: bool = bool(tp.get("isSwizzledTDM"))
         isM: bool = tp.get("isM", False)
         subTc: str = tc if isM else tc[-1]
         mt: int = kernel["MacroTile%s" % subTc]
@@ -339,13 +364,43 @@ class GL2PrefetchLoad(GL2Prefetch):
                     mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
                     mod.add(SMulI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), mxUnit))
                     mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
+            elif isSwizzledTDM:
+                # Convert the cluster's base macro-tile and the free-dimension edge
+                # from elements to outer MI-row coordinates. The host pads the free
+                # dimension to a whole MI row, so the last partially populated row
+                # is a valid prefetch target.
+                swizzleMi: int = tp["gl2SwizzleMi"]
+                assert swizzleMi > 0 and (swizzleMi & (swizzleMi - 1)) == 0, \
+                    "swizzled-TDM MI free dimension must be a power of two"
+                mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt // swizzleMi, \
+                    comment=f"clusterBaseTile * MT({mt}) / MI({swizzleMi})"))
+                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
+                mod.add(SLShiftRightB32(sgpr(tmpSgprIdx1), int(log2(swizzleMi)), sgpr(tmpSgprIdx1), \
+                    comment=f"last valid outer MI({swizzleMi}) row"))
+                mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), \
+                    comment="max outer MI row inside cluster tiles"))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx0), mt, comment=f"clusterBaseTile * MT({mt})"))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(sgprSizeFreeName), 1))
                 mod.add(SSubI32(sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx1), sgpr(tmpSgprIdx0), comment="max offset inside cluster tiles"))
 
+            # Swizzled A/B rows are separated by MI*paddedK elements. Compute that
+            # physical stride directly in bytes so fractional element sizes do not
+            # lose precision by scaling the row coordinate before multiplication.
+            if isSwizzledTDM:
+                swizzleK: int = tp["swizzleK"]
+                swizzleMi: int = tp["gl2SwizzleMi"]
+                assert swizzleK > 0 and (swizzleK & (swizzleK - 1)) == 0, \
+                    "swizzled-TDM K granule must be a power of two"
+                perpStride = sgpr(tmpSgprIdx2)
+                mod.add(SAddU32(perpStride, sgpr("SizeL"), swizzleK - 1, \
+                    comment=f"paddedK = SizeL + swizzleK({swizzleK}) - 1"))
+                mod.add(SAndB32(perpStride, perpStride, hex(0xFFFFFFFF & ~(swizzleK - 1)), \
+                    comment="paddedK = alignUp(SizeL, swizzleK)"))
+                mod.add(SMulI32(perpStride, perpStride, round(swizzleMi * bpe), \
+                    comment=f"swizzled row stride bytes = MI({swizzleMi}) * paddedK * bpe({bpe})"))
             # will we have MX stride later?
-            if isMX:
+            elif isMX:
                 perpStride = sgpr(tmpSgprIdx2)
                 if mxTile > 1:
                     # Host 2D is [K_blocks][scale_rows]; pitch to the next K-block
@@ -365,13 +420,15 @@ class GL2PrefetchLoad(GL2Prefetch):
                     mod.add(VMovB32(vgpr(tmpVgprCoalIdx), vgpr(vgprAddrName)))
                     mod.add(vectorStaticDivideAndRemainder(vgprAddrName, tmpVgprCoalIdx, tmpVgprCoalIdx, \
                         ncc, ContinuousRegister(tmpVgprIdx, 2), comment="coal/perp index calc"))
-                    mod.add(VMulLOU32(vgpr(tmpVgprCoalIdx), vgpr(tmpVgprCoalIdx), round(globalPrefetchSize / bpe), \
-                        comment="coal * globalPrefetchSize / bpe"))
+                    # Swizzled addresses are built directly in bytes (no trailing bpe scale).
+                    coalScale = globalPrefetchSize if isSwizzledTDM else round(globalPrefetchSize / bpe)
+                    mod.add(VMulLOU32(vgpr(tmpVgprCoalIdx), vgpr(tmpVgprCoalIdx), coalScale, \
+                        comment="cache-region byte offset" if isSwizzledTDM else "coal * globalPrefetchSize / bpe"))
                 else:
                     mod.add(VMovB32(vgpr(tmpVgprCoalIdx), 0, comment="coalesced index"))
                 
-                # edge protection
-                if isMX or tlu:
+                # edge protection (swizzled: clamp the outer MI-row index)
+                if (isMX or tlu) and not isSwizzledTDM:
                     mod.add(VCmpGtU32(VCC(), vgpr(tmpVgprCoalIdx), sgpr(tmpSgprIdx1), comment="> edge limit?"))
                     mod.add(VCndMaskB32(vgpr(tmpVgprCoalIdx), vgpr(tmpVgprCoalIdx), sgpr(tmpSgprIdx1), VCC()))
                 else:
@@ -381,7 +438,8 @@ class GL2PrefetchLoad(GL2Prefetch):
                     # the per-lane byte offset must fit in 32 bits
                     mod.add(VMulLOU32(vgpr(vgprAddrName), vgpr(vgprAddrName), perpStride, comment="perp *= stride"))
                     mod.add(VAddU32(vgpr(vgprAddrName), vgpr(vgprAddrName), vgpr(tmpVgprCoalIdx), comment="coal + perp"))
-                    mod.add(vectorMultiplyBpe(vgprAddrName, vgprAddrName, bpe, comment="scale by bpe"))
+                    if not isSwizzledTDM:
+                        mod.add(vectorMultiplyBpe(vgprAddrName, vgprAddrName, bpe, comment="scale by bpe"))
                     continue
                 # perp stride
                 mod.add(VMulHIU32(vgpr(vgprAddrNameHi), vgpr(vgprAddrName), perpStride, comment="perp *= stride"))
@@ -389,7 +447,8 @@ class GL2PrefetchLoad(GL2Prefetch):
                 # coal + perp
                 mod.add(VAddCOU32(vgpr(vgprAddrName), VCC(), vgpr(vgprAddrName), vgpr(tmpVgprCoalIdx), comment="coal + perp"))
                 mod.add(VAddCCOU32(vgpr(vgprAddrNameHi), VCC(), vgpr(vgprAddrNameHi), 0, VCC()))
-                mod.add(vectorMultiply64Bpe(vgprAddrName, vgprAddrName, bpe, tmpVgprIdx, comment="scale by bpe"))
+                if not isSwizzledTDM:
+                    mod.add(vectorMultiply64Bpe(vgprAddrName, vgprAddrName, bpe, tmpVgprIdx, comment="scale by bpe"))
 
             # MT offset (in units of bytes). Moved out of the tmp sgprs here because
             # resolving a pointer-array base below needs all four of them. SAddr
@@ -412,6 +471,12 @@ class GL2PrefetchLoad(GL2Prefetch):
                 else:
                     mod.add(SMovB32(sgpr(tmpSgprIdx1), 0, comment="MT offset hi"))
                 mod.add(scalarMultiply64Bpe(tmpSgprIdx0, tmpSgprIdx0, bpe, tmpSgprIdx2))
+            elif isSwizzledTDM:
+                # tmpSgprIdx0 is an outer MI-row index; perpStride is already in bytes.
+                mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
+                    sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
+                    sgpr(tmpSgprIdx0), perpStride,
+                    tmpVgprIdx, comment="MI row * swizzled row stride bytes"))
             elif tlu:
                 mod.add(SMovB32(sgpr(tmpSgprIdx1), 0, comment="MT offset hi"))
                 mod.add(scalarMultiply64Bpe(tmpSgprIdx0, tmpSgprIdx0, bpe, tmpSgprIdx2))
