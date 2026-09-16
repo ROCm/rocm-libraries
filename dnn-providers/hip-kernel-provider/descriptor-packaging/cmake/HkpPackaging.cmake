@@ -994,6 +994,10 @@ endfunction()
 #   for a newly targeted arch must re-run configure and wire the target.
 # ---------------------------------------------------------------------------
 function(_hkp_root_covers_any_arch out_var root arches)
+    # cmake-lint: disable=E1120
+    #   cmake-lint carries no argument spec for foreach(... RANGE ...) and reports
+    #   every spelling of it as missing a positional argument. The index loop below
+    #   is valid CMake.
     set(${out_var} FALSE PARENT_SCOPE)
     if(NOT root)
         return()
@@ -1044,6 +1048,57 @@ function(_hkp_root_covers_any_arch out_var root arches)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_rocke_args(out_args out_comgr_lib)
+#
+#   Resolves the rocKE toolchain once and returns the keyword list every pack
+#   target is wired with, alongside the comgr library the ctest entries forward.
+#   The resolution happens once for every root: hkp_rocke_wheel_python_interp
+#   declares both a custom command OUTPUT and a target, so a second call would
+#   duplicate each.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_rocke_args out_args out_comgr_lib)
+    set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
+        "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
+ROCKE_COMGR_LIB for the pack step and the ctest entries. Needed on Windows, \
+where a System32 amd_comgr.dll can shadow the ROCm one; empty lets rocke \
+resolve normally. rocke itself treats this as the first CANDIDATE and falls \
+through when it does not load, so configure asserts that the library which \
+loaded is the one named here.")
+
+    # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: the
+    # value comes from our own cache entry and is forwarded into the environment rocke
+    # reads.
+    set(_rocke_comgr_lib "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
+
+    hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
+    if(NOT _comgr_ok)
+        message(FATAL_ERROR
+            "hkp: comgr could not be resolved, so no rocKE kernel can be "
+            "lowered and no descriptor root can be packed. comgr ships with "
+            "ROCm and is required. Set HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an "
+            "explicit libamd_comgr, or make one discoverable. Resolver said:\n"
+            "${_comgr_detail}")
+    endif()
+    hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
+    hkp_rocke_wheel_python_interp(_rocke_interp _rocke_ready "${_rocke_wheel_stamp}")
+
+    # One list for every root, so "every root is wired to rocKE identically" is
+    # structural rather than six sites that have to agree. COMGR_LIB is appended
+    # only when set: an empty element does not survive unquoted expansion, and
+    # losing one would shift every following keyword into the wrong slot.
+    set(_rocke_args
+        ROCKE_INTERP "${_rocke_interp}"
+        ROCKE_READY "${_rocke_ready}"
+        ROCKE_WHEEL_STAMP "${_rocke_wheel_stamp}")
+    if(_rocke_comgr_lib)
+        list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
+    endif()
+
+    set(${out_args} "${_rocke_args}" PARENT_SCOPE)
+    set(${out_comgr_lib} "${_rocke_comgr_lib}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root. The root names a location;
 #   producer selection is per-UKD on kernel_source.kind, so both producers are
@@ -1076,44 +1131,7 @@ function(hkp_add_packaging)
 
     _hkp_resolve_production_root(_source_root _source_root_is_default)
 
-    set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "" CACHE PATH
-        "Explicit libamd_comgr for the rocKE producer to load. Forwarded into \
-ROCKE_COMGR_LIB for the pack step and the ctest entries. Needed on Windows, \
-where a System32 amd_comgr.dll can shadow the ROCm one; empty lets rocke \
-resolve normally. rocke itself treats this as the first CANDIDATE and falls \
-through when it does not load, so configure asserts that the library which \
-loaded is the one named here.")
-
-    # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: the
-    # value comes from our own cache entry and is forwarded into the environment rocke
-    # reads.
-    set(_rocke_comgr_lib "${HIPKERNELPROVIDER_ROCKE_COMGR_LIB}")
-
-    # Resolved once, for every root. hkp_rocke_wheel_python_interp declares both a
-    # custom command OUTPUT and a target, so a second call is a duplicate of each.
-    hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
-    if(NOT _comgr_ok)
-        message(FATAL_ERROR
-            "hkp: comgr could not be resolved, so no rocKE kernel can be "
-            "lowered and no descriptor root can be packed. comgr ships with "
-            "ROCm and is required. Set HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an "
-            "explicit libamd_comgr, or make one discoverable. Resolver said:\n"
-            "${_comgr_detail}")
-    endif()
-    hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
-    hkp_rocke_wheel_python_interp(_rocke_interp _rocke_ready "${_rocke_wheel_stamp}")
-
-    # One list for every root, so "every root is wired to rocKE identically" is
-    # structural rather than six sites that have to agree. COMGR_LIB is appended
-    # only when set: an empty element does not survive unquoted expansion, and
-    # losing one would shift every following keyword into the wrong slot.
-    set(_rocke_args
-        ROCKE_INTERP "${_rocke_interp}"
-        ROCKE_READY "${_rocke_ready}"
-        ROCKE_WHEEL_STAMP "${_rocke_wheel_stamp}")
-    if(_rocke_comgr_lib)
-        list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
-    endif()
+    _hkp_resolve_rocke_args(_rocke_args _rocke_comgr_lib)
 
     # A KDP is what arch pruning consumes, so a root holding none has nothing to ship
     # and packing it fails rather than shipping an empty tree. Standalone UKD/UMD/UED/
@@ -1445,6 +1463,34 @@ endfunction()
 
 
 # ---------------------------------------------------------------------------
+# _hkp_require_census_declaration(suites target pack_name)
+#
+#   Fails configure when a census declaration names suites but omits what would
+#   run them. Each condition is independently fatal, and each message repeats the
+#   suites that prompted the check so the report names the declaration at fault
+#   rather than only the missing keyword.
+# ---------------------------------------------------------------------------
+function(_hkp_require_census_declaration suites target pack_name)
+    if(NOT target)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${suites}) without a TARGET, so "
+            "no binary could run them.")
+    endif()
+    if(NOT pack_name)
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${suites}) without a PACK_NAME, "
+            "so no shard could be named.")
+    endif()
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR
+            "hkp: census suites are declared (${suites}) but the target "
+            "${target} does not exist, so no census could be registered. This "
+            "call must run after that target is created.")
+    endif()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
 # The emitted-bundle census. Each generated engine ships a GTest suite that reads what
 # actually loaded through discoverDescriptorSets() and then
 # loadValidatedDescriptorSets<Handle>(), and compares the loaded pack/kernel identities,
@@ -1498,22 +1544,7 @@ function(hkp_register_census_tests)
             "or drop the keyword.")
     endif()
 
-    if(NOT ARG_TARGET)
-        message(FATAL_ERROR
-            "hkp: census suites are declared (${ARG_SUITES}) without a TARGET, so "
-            "no binary could run them.")
-    endif()
-    if(NOT ARG_PACK_NAME)
-        message(FATAL_ERROR
-            "hkp: census suites are declared (${ARG_SUITES}) without a PACK_NAME, "
-            "so no shard could be named.")
-    endif()
-    if(NOT TARGET ${ARG_TARGET})
-        message(FATAL_ERROR
-            "hkp: census suites are declared (${ARG_SUITES}) but the target "
-            "${ARG_TARGET} does not exist, so no census could be registered. This "
-            "call must run after that target is created.")
-    endif()
+    _hkp_require_census_declaration("${ARG_SUITES}" "${ARG_TARGET}" "${ARG_PACK_NAME}")
 
     get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
     get_property(_dormant_labels GLOBAL PROPERTY HKP_PACK_DORMANT_LABELS)

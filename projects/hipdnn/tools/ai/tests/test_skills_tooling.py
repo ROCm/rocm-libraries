@@ -110,7 +110,9 @@ def test_validate_skill_allows_relative_link_to_a_sibling_skill(validate_mod, tm
     be rejected, so this passing cannot mean the check stopped firing.
     """
     skill = tmp_path / "demo-skill"
-    _write_skill(skill, body="See [the runbook](../hipdnn-demo/RUNBOOK.md) for steps.\n")
+    _write_skill(
+        skill, body="See [the runbook](../hipdnn-demo/RUNBOOK.md) for steps.\n"
+    )
     errors = validate_mod.validate_skill(skill)
     assert not any("slash-command reference" in error for error in errors)
 
