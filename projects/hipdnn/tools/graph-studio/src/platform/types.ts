@@ -78,6 +78,13 @@ export interface PlatformBridge {
    * the File System Access API, where no folder grant is possible at all.
    */
   canGrantDirectory(): boolean;
+
+  /**
+   * Names of the files directly inside a granted folder, so a caller can find
+   * the report in a run directory without a second pick. Subdirectories are
+   * not descended into and are not listed.
+   */
+  listFiles(base: DirectoryRef): Promise<readonly string[]>;
 }
 
 export interface KeyValueStore {

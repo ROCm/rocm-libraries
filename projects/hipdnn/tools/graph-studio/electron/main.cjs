@@ -117,6 +117,11 @@ ipcMain.handle("platform:openDirectory", async () => {
   return { path: dirPath, name: path.basename(dirPath) };
 });
 
+ipcMain.handle("platform:listFiles", async (_event, dirPath) => {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+});
+
 // ── Key/value store, persisted as JSON in userData ─────────────────────
 const storePath = () => path.join(app.getPath("userData"), "studio-store.json");
 

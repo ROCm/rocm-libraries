@@ -32,6 +32,7 @@ export interface ElectronApi {
   ): Promise<{ path: string; name: string } | null>;
   readRelated(base: IpcReadBase, relativePath: string): Promise<Uint8Array>;
   openDirectory(): Promise<{ path: string; name: string } | null>;
+  listFiles(dirPath: string): Promise<string[]>;
   store: {
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
@@ -101,6 +102,11 @@ export function detectElectronPlatform(): PlatformBridge | null {
       const result = await api.openDirectory();
       if (!result) return null;
       return { name: result.name, token: { path: result.path } };
+    },
+
+    async listFiles(base: DirectoryRef): Promise<readonly string[]> {
+      const ipcBase = toIpcBase(base);
+      return ipcBase ? api.listFiles(ipcBase.path) : [];
     },
   };
 }

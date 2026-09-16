@@ -70,3 +70,33 @@ test("asks for no grant in a browser that cannot grant one, and says why", async
     reason: "this browser cannot read a folder — pick the file, or use the desktop build",
   });
 });
+
+test("a run folder with several JSON files asks rather than guessing", async () => {
+  const { findReportIn } = await import("../src/components/VerifyReport");
+  const dir = { name: "run-dir", token: {} };
+  const bytes = (text: string) => new TextEncoder().encode(text);
+
+  // The harness's own name wins even when other JSON sits beside it.
+  expect(
+    await findReportIn(
+      { listFiles: async () => ["graph.json", "results.json"], readRelated: async () => bytes("{}") },
+      dir,
+    ),
+  ).toEqual({ name: "results.json", text: "{}" });
+
+  // A lone JSON file is unambiguous, whatever it is called.
+  expect(
+    await findReportIn(
+      { listFiles: async () => ["run-7.json", "trace.pftrace"], readRelated: async () => bytes("{}") },
+      dir,
+    ),
+  ).toEqual({ name: "run-7.json", text: "{}" });
+
+  const rejects = async (files: string[]) =>
+    await findReportIn({ listFiles: async () => files, readRelated: async () => bytes("{}") }, dir)
+      .then(() => null)
+      .catch((error: Error) => error.message);
+
+  expect(await rejects(["a.json", "b.json"])).toContain("2 JSON files");
+  expect(await rejects(["trace.pftrace"])).toContain("no JSON file");
+});

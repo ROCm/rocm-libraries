@@ -35,6 +35,7 @@ export interface FSDirectoryHandle {
   readonly name: string;
   getDirectoryHandle(name: string): Promise<FSDirectoryHandle>;
   getFileHandle(name: string): Promise<FSLeafFileHandle>;
+  entries?: () => AsyncIterableIterator<[string, { kind: string }]>;
 }
 interface FSWindow {
   showOpenFilePicker?: (opts?: {
@@ -217,6 +218,15 @@ export const webPlatform: PlatformBridge = {
   async readRelated(base, relativePath) {
     if (!isDirectoryHandle(base.token)) return null;
     return readRelatedFromDirectory(base.token, relativePath);
+  },
+  async listFiles(base) {
+    const dir = base.token;
+    if (!isDirectoryHandle(dir) || !dir.entries) return [];
+    const names: string[] = [];
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === "file") names.push(name);
+    }
+    return names;
   },
   canGrantDirectory(): boolean {
     return typeof fsWindow.showDirectoryPicker === "function";
