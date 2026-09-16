@@ -21,6 +21,9 @@ struct EpilogueOptions {
           auxiliaryScale(Tensor::scalar(compute, 1)) {}
 
     ScalarType computeType;
+    std::optional<Tensor> inputScale;   // Optional rank-zero factor applied to input.
+    std::optional<Tensor> addend;       // Optional matrix added before bias and activation.
+    std::optional<Tensor> addendScale;  // Optional rank-zero factor applied to addend.
     std::optional<Tensor> auxiliaryInput;
     std::optional<Tensor> gateResidual;
     std::optional<Tensor> bias;  // Any shape broadcast-compatible with input.

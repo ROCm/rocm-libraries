@@ -131,6 +131,8 @@ inline void validateEpilogueActivation(const EpilogueOptions& problem) {
 
 template <typename Accumulator>
 inline void validateEpilogueScalars(const EpilogueOptions& problem) {
+    if (problem.inputScale) (void)runtimeScalar<Accumulator>(*problem.inputScale, "input scale");
+    if (problem.addendScale) (void)runtimeScalar<Accumulator>(*problem.addendScale, "addend scale");
     (void)runtimeScalar<Accumulator>(problem.outputScale, "output scale");
     (void)runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
     (void)runtimeActivation<Accumulator>(problem.activation);
@@ -208,6 +210,7 @@ inline EpiloguePlan validateEpilogueInvocation(const EpilogueInvocation& problem
                                         " shape mismatch.");
         validateEpilogueValueType(view.type(), name);
     };
+    if (problem.addend) validateMatrix(*problem.addend, "addend");
     if (problem.auxiliaryInput) validateMatrix(*problem.auxiliaryInput, "auxiliary input");
     if (problem.gateResidual) validateMatrix(*problem.gateResidual, "gate residual");
     if (problem.activationApplication == ActivationApplication::Gradient && !problem.auxiliaryInput)
@@ -261,8 +264,9 @@ inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request)
         request.auxiliaryOutput ? &*request.auxiliaryOutput : nullptr,
         request.amax ? &*request.amax : nullptr,
     };
-    const std::array<const Tensor*, 4> inputs{
+    const std::array<const Tensor*, 5> inputs{
         &request.input,
+        request.addend ? &*request.addend : nullptr,
         request.auxiliaryInput ? &*request.auxiliaryInput : nullptr,
         request.gateResidual ? &*request.gateResidual : nullptr,
         request.bias ? &*request.bias : nullptr,
@@ -273,7 +277,8 @@ inline void validateEpilogueInvocationStorage(const EpilogueInvocation& request)
         for (const Tensor* input : inputs) {
             if (!input) continue;
             const bool allowIdenticalInputOutput =
-                output == &request.output && input == &request.input;
+                output == &request.output &&
+                (input == &request.input || (request.addend && input == &*request.addend));
             if (allowIdenticalInputOutput)
                 rejectOverlappingTensorStorageUnlessIdenticallyMapped(
                     *output, *input,
@@ -308,12 +313,20 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     std::optional<RuntimeMatrixReader<Accumulator>> auxiliaryInput;
     std::optional<RuntimeMatrixReader<Accumulator>> gateResidual;
     std::optional<RuntimeMatrixReader<Accumulator>> bias;
+    std::optional<RuntimeMatrixReader<Accumulator>> addend;
     if (problem.rawOutput) rawOutput.emplace(*problem.rawOutput);
     if (problem.auxiliaryOutput) auxiliaryOutput.emplace(*problem.auxiliaryOutput);
     if (problem.auxiliaryInput) auxiliaryInput.emplace(*problem.auxiliaryInput);
     if (problem.gateResidual) gateResidual.emplace(*problem.gateResidual);
     if (problem.bias) bias.emplace(problem.bias->broadcastTo(problem.input.shape()));
+    if (problem.addend) addend.emplace(*problem.addend);
 
+    const Accumulator inputScale =
+        problem.inputScale ? runtimeScalar<Accumulator>(*problem.inputScale, "input scale")
+                           : Accumulator(1);
+    const Accumulator addendScale =
+        problem.addendScale ? runtimeScalar<Accumulator>(*problem.addendScale, "addend scale")
+                            : Accumulator(1);
     const Accumulator outputScale = runtimeScalar<Accumulator>(problem.outputScale, "output scale");
     const Accumulator auxiliaryScale =
         runtimeScalar<Accumulator>(problem.auxiliaryScale, "auxiliary scale");
@@ -328,6 +341,12 @@ void referenceEpilogueTyped(const EpilogueInvocation& problem) {
     const size_t columns = problem.output.shape()[1];
     auto computeOutput = [&](size_t row, size_t column) {
         Accumulator value = quantize(input(row, column));
+        if (problem.inputScale) value = quantize(wrappingMultiply(value, inputScale));
+        if (addend) {
+            const Accumulator addendValue =
+                quantize(wrappingMultiply((*addend)(row, column), addendScale));
+            value = quantize(wrappingAdd(value, addendValue));
+        }
         if (bias) value = quantize(wrappingAdd(value, (*bias)(row, column)));
 
         if (auxiliaryOutput)

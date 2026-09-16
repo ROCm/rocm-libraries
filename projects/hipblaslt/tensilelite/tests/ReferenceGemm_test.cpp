@@ -1848,6 +1848,8 @@ TEST(ReferenceRuntimeGemm, SupportsEveryConfiguredActivation)
         SCOPED_TRACE("activation=" + ToString(activation));
         executeReferenceGemm(problem, inputs, /*elementsToValidate=*/-1);
         EXPECT_TRUE(std::isfinite(d[0])) << "activation=" << ToString(activation);
+        if(activation == ActivationType::Clamp)
+            EXPECT_EQ(d[0], 1.5f);
     }
 }
 

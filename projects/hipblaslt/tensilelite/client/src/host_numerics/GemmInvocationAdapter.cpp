@@ -984,7 +984,6 @@ namespace TensileLite::Client::HostNumerics
     {
         using roc::host_numerics::ScalarType;
         using roc::host_numerics::Tensor;
-        using roc::host_numerics::addInto;
         using roc::host_numerics::matmulInto;
         using roc::host_numerics::multiply;
         using roc::host_numerics::multiplyInto;
@@ -997,22 +996,17 @@ namespace TensileLite::Client::HostNumerics
         {
             matmulInto(a, b, d, options, outputSelection, backend);
 
-            Tensor effectiveScale = alpha;
-            if(scaleA)
-                effectiveScale = multiply(effectiveScale, *scaleA, computeType, computeType);
-            if(scaleB)
-                effectiveScale = multiply(effectiveScale, *scaleB, computeType, computeType);
-            if(scaleAlpha)
-                effectiveScale = multiply(effectiveScale, *scaleAlpha, computeType, computeType);
-            multiplyInto(d, effectiveScale, d, computeType, outputSelection);
-        }
-
-        if(!isZero(beta))
-        {
-            const Tensor cScale = multiply(beta, scaleC, computeType, computeType);
-            Tensor cTerm(computeType, d.shape());
-            multiplyInto(c, cScale, cTerm, computeType, outputSelection);
-            addInto(d, cTerm, d, computeType, outputSelection);
+            if(scaleA || scaleB || scaleAlpha)
+            {
+                Tensor effectiveScale = Tensor::scalar(computeType, 1);
+                if(scaleA)
+                    effectiveScale = multiply(effectiveScale, *scaleA, computeType, computeType);
+                if(scaleB)
+                    effectiveScale = multiply(effectiveScale, *scaleB, computeType, computeType);
+                if(scaleAlpha)
+                    effectiveScale = multiply(effectiveScale, *scaleAlpha, computeType, computeType);
+                multiplyInto(d, effectiveScale, d, computeType, outputSelection);
+            }
         }
     }
 
@@ -1149,6 +1143,15 @@ namespace TensileLite::Client::HostNumerics
                     gemmOutput, productOutput, accumulatorType);
                 if(!m_state->useGradient)
                     epilogue.options.bias = source.bias;
+                if(m_state->alpha != std::complex<double>(0.0, 0.0)
+                   && translated.a.shape()[1] != 0)
+                    epilogue.options.inputScale = translated.alpha;
+                if(m_state->beta != std::complex<double>(0.0, 0.0))
+                {
+                    epilogue.options.addend = translated.c;
+                    epilogue.options.addendScale = multiply(
+                        translated.beta, translated.scaleC, accumulatorType, accumulatorType);
+                }
                 epilogue.options.activation = m_state->activation;
                 std::visit(
                     [&](auto& function) {
@@ -1177,6 +1180,12 @@ namespace TensileLite::Client::HostNumerics
                         else if constexpr(
                             std::is_same_v<Function, roc::host_numerics::SwishActivation>)
                             function.beta = m_state->activationParameter0;
+                        else if constexpr(
+                            std::is_same_v<Function, roc::host_numerics::ClampActivation>)
+                        {
+                            function.minimum = m_state->activationParameter0;
+                            function.maximum = m_state->activationParameter1;
+                        }
                     },
                     epilogue.options.activation);
                 epilogue.options.outputScale
