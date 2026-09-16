@@ -1143,6 +1143,11 @@ validParameters = { # we need to make sure this matches develop
     "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
+    # Per-tensor override for LDSTrInst.
+    # -1: not specified, follow "LDSTrInst"
+    #  False/True: explicit override for this tensor
+    "LDSTrInstA": [-1, False, True],
+    "LDSTrInstB": [-1, False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
     #        unroll indices. The local sum from those WorkItems are reduced through LDS.
     # True:  Use WaveSplitK. Number of WorkGroup[2] threads in the same wave compute the same output elements (matrix D) along different unroll indices.
