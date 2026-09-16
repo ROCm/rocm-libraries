@@ -1558,26 +1558,22 @@ namespace TensileLite
                     return "BufferStoreOffsetLimitCheck";
                 }
 
-                // Guards against dispatching BufferStore=True solutions whose
-                // post-loop store SRD cannot address the full output tensor.
-                // allocPostLoopSrd (KernelWriterAssembly.py) initializes that SRD
-                // once, with the base address fixed at D's start for the life of
-                // the kernel; it is never re-based per workgroup. The byte offset
-                // a workgroup's buffer store issues is therefore an absolute
-                // coordinate into the full D tensor, so the true worst-case
-                // reachable offset is the full column extent, stride[1]*size[1],
-                // not one tile's worth of it. Checking the full extent, uncapped,
-                // is conservative for the rarer case of a solution whose SRD base
-                // is re-based per workgroup, which would only need the tighter
-                // per-tile bound.
+                // Guards against dispatching BufferStore=True solutions whose D
+                // extent exceeds the hardware store SRD's addressable range.
+                // num_records is a 32-bit field that bounds every buffer store a
+                // kernel issues; once D's full byte extent (stride[1]*size[1]*
+                // elementBytes) reaches the BufferOOB sentinel below, a
+                // workgroup's store can land at or past the SRD's declared
+                // bound and is silently dropped by hardware rather than
+                // faulting. The full extent must be checked, uncapped, because
+                // num_records caps the total reachable span regardless of how
+                // far the SRD base itself is re-based per workgroup.
                 //
                 // The threshold mirrors KernelWriterAssembly.py's BufferOOB
                 // sentinel (0xfffff000, ~4 GiB - 4 KiB) that allocPostLoopSrd
-                // programs as the SRD's num_records; at or past that offset a
-                // hardware buffer store/load is out of range and is silently
-                // dropped rather than faulting. This does not reuse
-                // BufferLoadOffsetLimitCheck's 2^32 constant, which is looser
-                // than the real hardware ceiling by ~4 KiB.
+                // programs as the SRD's num_records. This is tighter than the
+                // 2^32 field width by design, so it also catches shapes whose
+                // num_records would otherwise only wrap at exactly 2^32.
                 static constexpr uint64_t BufferOOBBytes = 0xfffff000ull;
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
