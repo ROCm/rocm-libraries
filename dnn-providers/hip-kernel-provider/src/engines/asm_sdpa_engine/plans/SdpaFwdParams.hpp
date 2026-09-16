@@ -28,6 +28,17 @@ struct SdpaFwdParams
     int64_t oUid;
     int64_t lseUid = -1; // LSE output, -1 = disabled
 
+    // FP8 descale tensor UIDs (-1 = absent, i.e. non-fp8 path). When present these
+    // dequantize the fp8 Q/K/V inputs; the kernel reads them via ptr_*_descale.
+    int64_t qDescaleUid = -1;
+    int64_t kDescaleUid = -1;
+    int64_t vDescaleUid = -1;
+
+    // Bytes per element for the Q/K/V inputs: 1 for fp8, 2 for bf16. The output is
+    // always 2-byte BF16 regardless. Element strides are multiplied by this to get
+    // the byte strides the kernel expects.
+    unsigned int inBytesPerElement = 2;
+
     // Tensor dimensions
     unsigned int batchSize; // B
     unsigned int numHeadsQ; // H_q
