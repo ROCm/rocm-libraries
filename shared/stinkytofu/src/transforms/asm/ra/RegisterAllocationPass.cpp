@@ -275,14 +275,24 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     // The live-ins left unpinned. Named because moving them rests on nothing
     // having defined them, which holds only while lifting saw every definition.
     // Silent when there are none, like the rules above.
+    //
+    // A count and a bounded sample, not the list. A kernel lifted mid-stream
+    // names hundreds of vector registers it never defines, and a line naming
+    // every one is long enough that nobody reads any of it. The sample is for
+    // spot-checking that the hints look like what the producer used; the count
+    // is the figure worth watching.
     const std::span<const SSAValueID> undefined = constraints.undefinedLiveIns();
     if (!undefined.empty()) {
-        text += " undefinedLiveIn[";
-        for (size_t i = 0; i < undefined.size(); ++i) {
-            text += (i > 0 ? " %" : "%") + std::to_string(undefined[i]);
+        constexpr size_t kSampleSize = 8;
+        const size_t sampled = std::min(kSampleSize, undefined.size());
+        text += " undefinedLiveIn[" + std::to_string(undefined.size());
+        for (size_t i = 0; i < sampled; ++i) {
+            text += " %" + std::to_string(undefined[i]);
             if (const std::optional<RegKey> hint = constraints.hintFor(undefined[i]))
                 text += "=" + regKeyToString(*hint);
         }
+        if (sampled != undefined.size())
+            text += " +" + std::to_string(undefined.size() - sampled) + " more";
         text += "]";
     }
     // What was done about operands that cannot name a bank. Reported in both
