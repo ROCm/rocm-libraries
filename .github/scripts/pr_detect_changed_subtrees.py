@@ -107,14 +107,37 @@ def get_valid_prefixes(
 def find_matched_subtrees(
     changed_files: List[str], valid_prefixes: Set[str]
 ) -> List[str]:
-    """Find subtrees that match the changed files."""
-    changed_subtrees = {
-        "/".join(path.split("/", 2)[:2])
-        for path in changed_files
-        if len(path.split("/")) >= 2
-    }
-    matched = sorted(changed_subtrees & valid_prefixes)
-    skipped = sorted(changed_subtrees - valid_prefixes)
+    """Find subtrees that match the changed files via longest-prefix match.
+
+    A changed file's subtree is the LONGEST registered prefix (`category/name`,
+    or a nested `category/name/subname`) that matches its path -- checked from
+    most to least specific -- not a fixed 2-segment truncation. A fixed
+    2-segment truncation would make a nested subtree registered in
+    repos-config.json (e.g. `projects/hipblaslt/tensilelite`, nested inside
+    `projects/hipblaslt`) indistinguishable from a change to its parent: both
+    would collapse to `projects/hipblaslt`, silently losing the more specific
+    match. Matching longest-prefix-first, and attributing each changed file to
+    exactly one subtree, keeps a tensilelite-only change from also being
+    reported as a hipblaslt-proper change.
+    """
+    # Longest prefixes first, so a nested subtree wins over its parent.
+    prefixes_by_specificity = sorted(
+        valid_prefixes, key=lambda p: p.count("/"), reverse=True
+    )
+    matched_set: Set[str] = set()
+    skipped_set: Set[str] = set()
+    for path in changed_files:
+        segments = path.split("/")
+        for prefix in prefixes_by_specificity:
+            prefix_segments = prefix.split("/")
+            if segments[: len(prefix_segments)] == prefix_segments:
+                matched_set.add(prefix)
+                break
+        else:
+            if len(segments) >= 2:
+                skipped_set.add("/".join(segments[:2]))
+    matched = sorted(matched_set)
+    skipped = sorted(skipped_set - matched_set)
     if skipped:
         logger.debug(f"Skipped subtrees: {skipped}")
     logger.debug(f"Matched subtrees: {matched}")

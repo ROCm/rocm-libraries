@@ -20,6 +20,7 @@ import sys
 import pytest
 from contextlib import contextmanager
 from types import SimpleNamespace
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -36,11 +37,13 @@ def _init_rocisa_gfx1250():
     ri.setKernel(isa, WAVESIZE_32)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _rocisa_gfx1250():
     # The emitted-asm tests (computeMasks / applyToDescriptor / undeclareSgprs)
-    # need the rocIsa singleton initialized for gfx1250; do it once per session.
-    _init_rocisa_gfx1250()
+    # need the rocIsa singleton initialized for gfx1250 while this module runs.
+    with preserve_rocisa_kernel_state():
+        _init_rocisa_gfx1250()
+        yield
 
 
 def _c():

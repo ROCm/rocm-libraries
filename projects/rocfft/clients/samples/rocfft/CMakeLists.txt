@@ -120,9 +120,6 @@ foreach( sample ${sample_list} )
 
 endforeach( )
 
-# callback functions need to be built as relocatable device code
-# (causes failure at link stage on Windows)
-if (NOT WIN32)
-  target_compile_options( rocfft_example_callback PRIVATE -fgpu-rdc )
-  target_link_options( rocfft_example_callback PRIVATE -fgpu-rdc )
-endif()
+# JIT callbacks are built using hiprtc
+find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
+target_link_libraries( rocfft_example_callback PRIVATE hiprtc::hiprtc )
