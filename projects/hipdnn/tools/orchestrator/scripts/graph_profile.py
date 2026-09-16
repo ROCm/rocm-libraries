@@ -12,9 +12,12 @@ The mapping is mechanical, not clever. A node's `type` is the attribute class na
 (`BatchnormInferenceAttributes`, `MatmulAttributes`); the bundle directories under
 `integration-test-bundles/<tier>/` are the same names with `Attributes` dropped
 (`BatchnormInference/`, `Matmul/`), and fused bundles concatenate them
-(`ConvolutionFwdPointwise/`). So each node type becomes one `<tier>_*<Token>*`
-pattern, and a graph's filter is those patterns joined -- which selects the plain
-suite for each op the graph uses plus every fused suite that op appears in.
+(`ConvolutionFwdPointwise/`). So each node type becomes one `<tier>_<Token>_*`
+pattern, and a multi-op graph contributes one more for the concatenation of its
+tokens in node order -- so the filter selects the plain suite for each op the graph
+uses, plus the fused suite named for the whole graph when there is one. It does NOT
+select every fusion an op merely appears in; see PATTERN on why that anchoring is
+deliberate.
 
     graph_profile.py --graph g.json --tier quick --out profile.json
 
@@ -36,7 +39,9 @@ from pathlib import Path
 #: between `_` separators is what keeps a single-op graph from dragging in every fusion that
 #: merely starts with the same name: `quick_BatchnormInference_*` selects
 #: `quick_BatchnormInference_Default` and not `quick_BatchnormInferencePointwise_Default`.
-#: A graph that genuinely contains both ops contributes both tokens and selects both.
+#: A graph that genuinely contains both ops contributes both plain tokens AND their
+#: concatenation, so it selects both plain suites and the fused one -- the concatenation
+#: is added at the call site, because anchoring alone would never reach the fused suite.
 PATTERN = "{tier}_{token}_*"
 
 ATTRIBUTE_SUFFIX = "Attributes"
@@ -86,7 +91,26 @@ def main() -> int:
         if token and token not in tokens:
             tokens.append(token)
 
-    derived = ":".join(PATTERN.format(tier=args.tier, token=token) for token in tokens)
+    # A fused graph needs the fused bundle's own token, not just its parts. The tokens
+    # above are anchored between `_` separators (see PATTERN), so `quick_ConvolutionFwd_*`
+    # selects `quick_ConvolutionFwd_Default` and deliberately NOT
+    # `quick_ConvolutionFwdPointwise_Default`. That anchoring is right, but on its own it
+    # leaves a conv+pointwise graph selecting the two plain suites -- every case of which
+    # a fused engine must decline -- and never the one suite that describes it. The
+    # operation-wide gate then sees every selected case skip and nothing pass. Bundle
+    # directories concatenate op names in node order (`ConvolutionFwdPointwise`), so a
+    # multi-op graph contributes that concatenation as well. A pattern matching no suite
+    # costs nothing; the plain tokens stay, because an engine may legitimately serve those
+    # too and a decline is still an outcome worth selecting.
+    filter_tokens = list(tokens)
+    if len(tokens) > 1:
+        fused_token = "".join(tokens)
+        if fused_token not in filter_tokens:
+            filter_tokens.append(fused_token)
+
+    derived = ":".join(
+        PATTERN.format(tier=args.tier, token=token) for token in filter_tokens
+    )
     override = args.filter_override.strip()
 
     gtest_filter = override or derived
@@ -101,6 +125,7 @@ def main() -> int:
         # ${...} comes out as a Python repr, which is not what you want an agent to
         # read back as "the operations in your graph".
         "op_tokens_text": ", ".join(tokens),
+        "filter_tokens": filter_tokens,
         "derived_filter": derived,
         "filter_override": override,
         "gtest_filter": gtest_filter,

@@ -670,12 +670,37 @@ steps:
           - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
           - "--allow-added"
           - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/**/*"
+          # The registration splices. A pack is not landed by adding files alone: it has to
+          # be named in a CMake source list and in the pack registry, and this subtree lists
+          # its sources explicitly rather than globbing them (kernel_ingestor_engine/
+          # CMakeLists.txt:22). Without these, `--expect-change` below and the registration
+          # the integrate prompt requires contradict each other -- the splice is mandatory
+          # and every way of making it is a violation. Named files only, never a tree.
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/CMakeLists.txt"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/CMakeLists.txt"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/CMakeLists.txt"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorKernels.cmake"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorPacks.cpp"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorPacks.hpp"
+          - "--allow-modified"
+          - "dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt"
+          # Bytecode caches are a side effect of running the migration scripts, not an edit.
+          # The baseline is taken once at preflight, so without this a single stray .pyc
+          # fails every remaining iteration of the loop.
+          - "--allow-added"
+          - "dnn-providers/**/__pycache__/*"
           - "--expect-change"
           - "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/**/*"
         cwd: "${vars.repo_root}"
         result_file: "${loop.attempt_dir}/scope.json"
         result_schema:
-          required: [watched_count, outside_count, modified, removed, added, work_changed_count, allowed_added_count, grown_count, feedback]
+          required: [watched_count, outside_count, modified, removed, added, work_changed_count, allowed_added_count, allowed_modified_count, grown_count, feedback]
         timeout: 900
         outputs:
           outside_count: { json_file: result, path: "$.outside_count", type: int }

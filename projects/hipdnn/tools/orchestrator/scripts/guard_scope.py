@@ -52,6 +52,18 @@ no `grow_files`, and a check against it cannot prove growth for anything, so it 
 closed -- every `--allow-grow` candidate stays a violation until the baseline is
 retaken.
 
+`--allow-modified GLOB` (repeatable) is the widest carve-out and the one to reach for
+last: a matching file may be edited freely and is reported in `allowed_modified`
+instead of counted as a violation. It exists because some work cannot be expressed as
+an addition. Landing a new pack means splicing it into files that already exist -- a
+source list in CMake, a registry translation unit -- and a subtree that lists its
+sources explicitly rather than globbing them (see the comment in the ingestor engine's
+own CMakeLists) leaves no add-only path. Without this, `--expect-change` and the
+registration the flow asks for are in direct contradiction: the splice is mandatory
+and every way of performing it is a violation. Keep these globs to named files, never
+a tree -- each one is a file an agent may rewrite at will, and this guard then says
+nothing about what it rewrote it to.
+
 Patterns are repo-relative globs (`**` recurses). Directories and files that do not
 exist are not an error: a pattern matching nothing contributes nothing, which is
 reported as `watched_count`/`work_count` so a typo'd pattern is visible as zero
@@ -186,6 +198,17 @@ def main() -> int:
             "change is JSON-prefix growth only (see _json_grew); repeatable"
         ),
     )
+    parser.add_argument(
+        "--allow-modified",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help=(
+            "repo-relative glob of pre-existing files allowed to be edited under "
+            "--watch, for splices that cannot be expressed as an addition (pack "
+            "registration); name files, not trees; repeatable"
+        ),
+    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -254,14 +277,20 @@ def main() -> int:
     allow_grow_paths = (
         _matched_paths(repo, args.allow_grow) if args.allow_grow else set()
     )
+    allow_modified_paths = (
+        _matched_paths(repo, args.allow_modified) if args.allow_modified else set()
+    )
 
     allowed_added = sorted(k for k in added_all if k in allow_added_paths)
     added = sorted(k for k in added_all if k not in allow_added_paths)
+    allowed_modified = sorted(k for k in modified_all if k in allow_modified_paths)
 
     grown: list[str] = []
     grow_rejected: list[str] = []
     for path in modified_all:
-        if path not in allow_grow_paths:
+        if path not in allow_grow_paths or path in allow_modified_paths:
+            # An --allow-modified file is permitted to be edited outright, so
+            # "it changed without growing" is not a finding to report about it.
             continue
         old_text = grow_baseline.get(path)
         if old_text is None:
@@ -282,7 +311,11 @@ def main() -> int:
             grow_rejected.append(path)
 
     grown_set = set(grown)
-    modified = sorted(k for k in modified_all if k not in grown_set)
+    modified = sorted(
+        k
+        for k in modified_all
+        if k not in grown_set and k not in allow_modified_paths
+    )
     outside = modified + removed + added
 
     # The other half of the contract. Every gate after this one can be satisfied by an
@@ -332,6 +365,8 @@ def main() -> int:
                 "added": added,
                 "allowed_added": allowed_added,
                 "allowed_added_count": len(allowed_added),
+                "allowed_modified": allowed_modified,
+                "allowed_modified_count": len(allowed_modified),
                 "grown": grown,
                 "grown_count": len(grown),
                 "work_count": len(work),
@@ -345,13 +380,16 @@ def main() -> int:
     )
     print(
         f"watched {len(manifest)} file(s); {len(outside)} unexpected change(s), "
-        f"{len(allowed_added)} allowed-added, {len(grown)} grown. "
+        f"{len(allowed_added)} allowed-added, {len(allowed_modified)} allowed-modified, "
+        f"{len(grown)} grown. "
         f"engine: {len(work)} file(s), {len(work_changed)} changed."
     )
     for path in outside:
         print(f"  unexpected: {path}")
     for path in allowed_added:
         print(f"  allowed:    {path}")
+    for path in allowed_modified:
+        print(f"  allowed-mod:{path}")
     for path in grown:
         print(f"  grown:      {path}")
     for path in work_changed:
