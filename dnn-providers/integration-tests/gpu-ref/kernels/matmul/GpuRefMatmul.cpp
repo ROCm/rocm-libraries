@@ -20,7 +20,6 @@ extern "C" __global__ void MatmulRef(MatmulArgs args)
     long long lidN = threadIdx.y;
     long long idxM = TILE_SIZE * gidM + lidM;
     long long idxN = TILE_SIZE * gidN + lidN;
-    long long idx = MATMUL_N * idxM + idxN;
     long long lid = TILE_SIZE * lidM + lidN;
 
     __shared__ COMPUTE_TYPE aTile[TILE_SIZE * TILE_SIZE];
@@ -34,24 +33,22 @@ extern "C" __global__ void MatmulRef(MatmulArgs args)
 
     for(long long cBatch = 0; cBatch < batchDimSize; ++cBatch)
     {
-        long long aBatch = 0;
-        long long bBatch = 0;
+        long long aBatchIdx = 0;
+        long long bBatchIdx = 0;
+        long long cBatchIdx = 0;
         long long remainingBatch = cBatch;
         for(int d = 0; d < MATMUL_BATCH_DIM_COUNT; ++d)
         {
-            long long aStride = 1;
-            long long bStride = 1;
-            long long cStride = 1;
+            long long cBatchStride = 1;
             for(int s = d + 1; s < MATMUL_BATCH_DIM_COUNT; ++s)
             {
-                aStride *= args.aDims[s];
-                bStride *= args.bDims[s];
-                cStride *= args.cDims[s];
+                cBatchStride *= args.cDims[s];
             }
-            long long idxD = remainingBatch / cStride;
-            aBatch += aStride * (idxD * args.aDims[d] / args.cDims[d]);
-            bBatch += bStride * (idxD * args.bDims[d] / args.cDims[d]);
-            remainingBatch -= idxD * cStride;
+            long long idxCD = remainingBatch / cBatchStride;
+            aBatchIdx += args.aStrides[d] * (idxCD * args.aDims[d] / args.cDims[d]);
+            bBatchIdx += args.bStrides[d] * (idxCD * args.bDims[d] / args.cDims[d]);
+            cBatchIdx += args.cStrides[d] * idxCD;
+            remainingBatch -= idxCD * cBatchStride;
         }
 
         auto value = static_cast<COMPUTE_TYPE>(0.0f);
@@ -59,8 +56,10 @@ extern "C" __global__ void MatmulRef(MatmulArgs args)
         {
             if(TILE_SIZE * k + lidN < MATMUL_K && idxM < MATMUL_M)
             {
-                long long idxA = MATMUL_K * idxM + TILE_SIZE * k + lidN;
-                aTile[lid] = static_cast<COMPUTE_TYPE>(a[MATMUL_M * MATMUL_K * aBatch + idxA]);
+                long long idxA
+                    = aBatchIdx + idxM * args.aStrides[MATMUL_BATCH_DIM_COUNT]
+                      + (TILE_SIZE * k + lidN) * args.aStrides[MATMUL_BATCH_DIM_COUNT + 1];
+                aTile[lid] = static_cast<COMPUTE_TYPE>(a[idxA]);
             }
             else
             {
@@ -68,8 +67,10 @@ extern "C" __global__ void MatmulRef(MatmulArgs args)
             }
             if(TILE_SIZE * k + lidM < MATMUL_K && idxN < MATMUL_N)
             {
-                long long idxB = MATMUL_N * TILE_SIZE * k + MATMUL_N * lidM + idxN;
-                bTile[lid] = static_cast<COMPUTE_TYPE>(b[MATMUL_K * MATMUL_N * bBatch + idxB]);
+                long long idxB = bBatchIdx
+                                 + (TILE_SIZE * k + lidM) * args.bStrides[MATMUL_BATCH_DIM_COUNT]
+                                 + idxN * args.bStrides[MATMUL_BATCH_DIM_COUNT + 1];
+                bTile[lid] = static_cast<COMPUTE_TYPE>(b[idxB]);
             }
             else
             {
@@ -88,7 +89,9 @@ extern "C" __global__ void MatmulRef(MatmulArgs args)
 
         if(idxM < MATMUL_M && idxN < MATMUL_N)
         {
-            c[MATMUL_M * MATMUL_N * cBatch + idx] = static_cast<C_TYPE>(value);
+            long long idxC = cBatchIdx + idxM * args.cStrides[MATMUL_BATCH_DIM_COUNT]
+                             + idxN * args.cStrides[MATMUL_BATCH_DIM_COUNT + 1];
+            c[idxC] = static_cast<C_TYPE>(value);
         }
     }
 }

@@ -126,30 +126,6 @@ private:
         }
     }
 
-    static void validateConsistentLayouts(const std::vector<int64_t>& aStrides,
-                                          const std::vector<int64_t>& bStrides,
-                                          const std::vector<int64_t>& cStrides)
-    {
-        const auto aStrideOrder = extractStrideOrder(aStrides);
-        const auto bStrideOrder = extractStrideOrder(bStrides);
-        const auto cStrideOrder = extractStrideOrder(cStrides);
-
-        if(aStrideOrder != bStrideOrder || aStrideOrder != cStrideOrder)
-        {
-            throw std::invalid_argument(
-                "Matmul requires A, B and C tensors to have the same stride order.");
-        }
-
-        for(size_t i = 1; i < aStrides.size(); ++i)
-        {
-            if(aStrides[i] > aStrides[i - 1])
-            {
-                throw std::invalid_argument(
-                    "Matmul requires A, B and C tensors to have a contiguous layout.");
-            }
-        }
-    }
-
     template <class ADataType, class BDataType, class CDataType>
     static void validateMatmul(const TensorBase<ADataType>& a,
                                const TensorBase<BDataType>& b,
@@ -157,12 +133,6 @@ private:
     {
         // Validate tensor dimensions
         validateConsistentDimensions(a.dims(), b.dims(), c.dims());
-        validateConsistentLayouts(a.strides(), b.strides(), c.strides());
-        if(!a.isPacked() || !b.isPacked() || !c.isPacked())
-        {
-            throw std::invalid_argument(
-                "Matmul requires A, B and C tensors to have a contiguous layout.");
-        }
 
         // Validate data types
         static_assert(IS_SUPPORTED_DATA_TYPE<ADataType>,
