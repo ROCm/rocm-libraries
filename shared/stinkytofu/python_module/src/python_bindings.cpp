@@ -218,7 +218,7 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("type"), nb::arg("index"), nb::arg("count") = 1,
             "Create a register (e.g., Register('v', 0, 1) for v0). Raises on unknown type.")
-        .def(nb::init<float>(), nb::arg("value"), "Create a float literal")
+        .def(nb::init<double>(), nb::arg("value"), "Create a float/double literal")
         .def(nb::init<int>(), nb::arg("value"), "Create an int literal")
         // Single-string ctor → LiteralString. Used for keywords like MUBUF "off".
         // Distinct from the (type,index,count) overload by arg count.
@@ -481,8 +481,8 @@ NB_MODULE(_stinkytofu, m) {
         nb::arg("index"), nb::arg("count") = 1, "Create an MGPR (Memory descriptor) register");
 
     m.def(
-        "literal", [](float value) { return StinkyRegister(value); }, nb::arg("value"),
-        "Create a float literal");
+        "literal", [](double value) { return StinkyRegister(value); }, nb::arg("value"),
+        "Create a float/double literal");
 
     // ========================================================================
     // Architecture IDs
