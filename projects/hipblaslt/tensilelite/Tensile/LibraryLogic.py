@@ -26,12 +26,12 @@ from pathlib import Path
 from typing import Dict
 from . import LibraryIO
 from . import SolutionSelectionLibrary
-from Tensile.Common import print1, print2, HR, printExit, \
+from .Common import print1, print2, HR, printExit, \
   assignParameterWithDefault, ProgressBar, printWarning, ensurePath, \
   LIBRARY_LOGIC_DIR, BENCHMARK_DATA_DIR, getVerbosity, IsaInfo
-from Tensile.Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
-from Tensile.Common.TimingInstrumentation import timing_context
-from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
+from .Common.GlobalParameters import defaultAnalysisParameters, globalParameters, startTime, libraryLogicTypeOverrides
+from .Common.TimingInstrumentation import timing_context
+from .SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin, getSolutionNameFull
 
 from copy import deepcopy
 from sys import stdout
@@ -1441,7 +1441,7 @@ def generateLogic(
   print2("# DefaultAnalysisParameters: " % defaultAnalysisParameters)
 
   if config:
-    from Tensile.Common.TypeValidationErrors import (
+    from .Common.TypeValidationErrors import (
         ConfigTypeError, formatMismatch,
     )
     for key, value in config.items():
