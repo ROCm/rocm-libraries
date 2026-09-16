@@ -270,9 +270,20 @@ private:
 
     ~LoggerSingleton()
     {
-        if(log_file_ofs.is_open())
+        // close() flushes, and open_log_stream arms this stream to throw on
+        // failure, so a log file that filled up or hit an I/O error throws out
+        // of this destructor and terminates the process at exit. The log is
+        // already lost at that point; taking the application down with it is
+        // not an improvement.
+        try
         {
-            log_file_ofs.close();
+            if(log_file_ofs.is_open())
+            {
+                log_file_ofs.close();
+            }
+        }
+        catch(...)
+        {
         }
     }
 };

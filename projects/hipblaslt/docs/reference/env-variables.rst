@@ -26,6 +26,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_LEVEL``
         | Controls the verbosity level of hipBLASLt logging output.
+        | Levels are cumulative: each one also enables the levels below it.
       - | 0: Off (logging disabled, default)
         | 1: Error (only errors are logged)
         | 2: Trace (API calls with kernel launches log parameters)
@@ -35,6 +36,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_MASK``
         | Controls logging output using bit mask flags (can be combined).
+        | Consulted only when ``HIPBLASLT_LOG_LEVEL`` is unset.
       - | 0: Off
         | 1: Error
         | 2: Trace
@@ -47,8 +49,9 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_FILE``
         | Specifies path to logging file. Can contain ``%i`` for process ID replacement.
+        | Has no effect unless a level or mask has enabled logging.
       - | Path to log file (for example, ``logfile_%i.log``)
-        | If not defined: log messages printed to stdout
+        | If not defined: log messages printed to stderr
 
     * - | ``HIPBLASLT_ENABLE_MARKER``
         | Enables marker trace for ROCProfiler profiling.
@@ -83,6 +86,93 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
         | Sets maximum workspace size constraint during tuning stage.
       - | Integer value in bytes (default: 128 * 1024 * 1024)
         | Limits workspace size for solution selection
+
+Runtime tuning cache
+====================
+
+Every variable in this section requires a build configured with
+``-DHIPBLASLT_ENABLE_TUNING_CACHE=ON``. A default build does not contain the
+feature, and these variables are ignored.
+
+Runtime tuning is opt-in. ``HIPBLASLT_TUNING_MODE`` and
+``HIPBLASLT_TUNING_CACHE_PATH`` are read when tuning is first used in a process;
+set them before the first hipBLASLt call. The scratch cap is read on the first
+scratch allocation. For more information, see
+:doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
+
+Setting ``cache`` or ``tune`` mode emits a few concise lifecycle notices without
+requiring any logging variable, because tuning can block the first call on a new
+shape for minutes and a silent pause is indistinguishable from a hang. The notices
+are bounded: one line naming the mode and what loaded, one start and one result
+per shape that is actually tuned, and one closing summary. Replaying a cache adds
+no output per call. Where they are written depends on whether logging is on:
+
+* No level or mask: the notices go to stderr. ``HIPBLASLT_LOG_FILE`` alone does
+  not open a log file, so it does not capture them.
+* ``HIPBLASLT_LOG_LEVEL`` 1 to 3, or a mask without the info bit: the notices go
+  to whichever sink logging already opened, including ``HIPBLASLT_LOG_FILE``.
+* ``HIPBLASLT_LOG_LEVEL=4`` or higher, or ``HIPBLASLT_LOG_MASK`` including ``8``:
+  the notices are timestamped like every other log line, and detailed tuning
+  diagnostics are added (cache hit, miss and invalidation per problem, scratch and
+  candidate setup, a progress heartbeat, and measurement results).
+
+Setting ``off``, or leaving the mode unset, produces no tuning output at any level.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_TUNING_MODE``
+        | Selects runtime tuning behavior.
+      - | ``off``: Disable runtime tuning (default)
+        | ``cache``: Replay valid cache entries only
+        | ``tune``: Benchmark uncached supported problems and append winners
+
+    * - | ``HIPBLASLT_TUNING_CACHE_PATH``
+        | Specifies the runtime cache file.
+      - | Path to a tuning file
+        | Required for ``cache`` and ``tune`` modes
+
+    * - | ``HIPBLASLT_TUNING_ALL_KERNELS``
+        | Selects exhaustive or ranked-prefix candidate enumeration.
+      - | 1: Enumerate every candidate (default)
+        | 0: Use a ranked prefix
+
+    * - | ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+        | Limits the ranked prefix when exhaustive enumeration is disabled.
+      - | Positive integer (default: 128)
+
+    * - | ``HIPBLASLT_TUNING_COLD_ITERS``
+        | Sets untimed warm-up launches per candidate.
+      - | Non-negative integer (default: 1000)
+        | 0 disables warm-up
+
+    * - | ``HIPBLASLT_TUNING_HOT_ITERS``
+        | Sets timed launches per candidate.
+      - | Positive integer (default: 1000)
+
+    * - | ``HIPBLASLT_TUNING_ROTATING_MB``
+        | Sets the target rotating-buffer footprint.
+      - | MiB (default: 512)
+        | 0 disables rotation
+
+    * - | ``HIPBLASLT_TUNING_FLUSH_ICACHE``
+        | Invalidates the instruction cache between timed launches, matching the bench client.
+      - | 1: Flush (default); costs about 5% of tuning time
+        | 0: Do not flush; winners become less reproducible
+
+    * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
+        | Sets a soft wall-clock limit checked between candidates.
+      - | Milliseconds (default: 300000, five minutes; 0 is unlimited)
+        | A truncated search records its best candidate as incomplete
+        | A single candidate can overrun the limit
+
+    * - | ``HIPBLASLT_TUNING_SCRATCH_MAX_BYTES``
+        | Caps library-owned tuning scratch per device.
+      - | Bytes (default: 1 GiB)
 
 Origami with Stream-K configuration
 ===================================
