@@ -128,8 +128,29 @@ def _configure_git_user(repo_path: Path) -> None:
 
 
 def _apply_patch(repo_path: Path, patch_path: Path) -> None:
-    """Apply a patch file to the working tree."""
-    _run_git(["apply", str(patch_path)], cwd=repo_path)
+    """Apply a patch file to the working tree.
+
+    Uses a 3-way merge strategy so small drift between monorepo subtree and
+    sub-repository branch can still be merged. If the patch was already applied,
+    this is treated as a no-op.
+    """
+    # If reverse-check succeeds, this patch has already been applied.
+    try:
+        _run_git(["apply", "--reverse", "--check", str(patch_path)], cwd=repo_path)
+        logger.info(f"Patch already applied in {repo_path}; skipping.")
+        return
+    except RuntimeError as exc:
+        # Expected when the patch is not yet applied; anything else should surface.
+        if "patch does not apply" not in str(exc):
+            raise
+
+    try:
+        _run_git(["apply", "--3way", str(patch_path)], cwd=repo_path)
+    except RuntimeError:
+        # Ensure the temporary clone is left clean if a 3-way apply fails.
+        _run_git(["reset", "--hard", "HEAD"], cwd=repo_path)
+        raise
+
     logger.info(f"Applied patch to working tree at {repo_path}")
 
 
