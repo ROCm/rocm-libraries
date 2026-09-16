@@ -495,10 +495,16 @@ function SlotPicker({ title, hint, slot, onFiles }: SlotPickerProps) {
     >
       <div className="tensors__slot-head">
         <strong>{title}</strong>
-        <span className="tensors__slot-cta">Choose files…</span>
+        <span className="tensors__slot-cta">
+          {slot.set ? "Use a different capture…" : "Choose files…"}
+        </span>
       </div>
       <p className="tensors__slot-hint">
-        {slot.busy ? "Reading…" : `${hint} Click anywhere here, or drop in manifest.json and its .bin files.`}
+        {slot.busy
+          ? "Reading…"
+          : slot.set
+            ? "Loaded from the run folder. Pick files only to override it."
+            : `${hint} Click anywhere here, or drop in manifest.json and its .bin files.`}
       </p>
       {slot.set && <p className="tensors__slot-state">{describeSet(slot.set)}</p>}
       {slot.error && (

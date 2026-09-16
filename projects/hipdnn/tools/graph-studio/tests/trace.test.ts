@@ -1,5 +1,5 @@
 // Guards the profiling-trace fixtures the embedded Perfetto viewer is checked
-// against by hand. `tests/fixtures/traces/sample.pftrace` is a real Perfetto
+// against by hand. `tests/fixtures/run/traces/sample.pftrace` is a real Perfetto
 // protobuf trace: `trace_processor -q ... sample.pftrace` reports three slices
 // (conv_fwd, bias_add, relu) on a `hipdnn` thread track.
 import { expect, test } from "bun:test";
@@ -8,12 +8,13 @@ import { join } from "node:path";
 
 import { parseReport } from "../src/benchmark/report";
 import { traceAvailable } from "../src/benchmark/metrics";
-import { buildSampleTrace } from "./fixtures/traces/make-trace";
+import { buildSampleTrace } from "./fixtures/run/traces/make-trace";
 
 const fixtures = join(import.meta.dir, "fixtures");
+const run = join(fixtures, "run");
 
 test("the committed trace fixture matches its generator", () => {
-  const committed = new Uint8Array(readFileSync(join(fixtures, "traces", "sample.pftrace")));
+  const committed = new Uint8Array(readFileSync(join(run, "traces", "sample.pftrace")));
   expect(committed).toEqual(buildSampleTrace());
 });
 
@@ -26,18 +27,18 @@ test("the trace fixture carries the slices Perfetto is expected to show", () => 
 });
 
 test("the trace report fixture offers exactly one loadable trace", () => {
-  const report = parseReport(readFileSync(join(fixtures, "report-with-trace.json"), "utf8"));
+  const report = parseReport(readFileSync(join(fixtures, "run/results.json"), "utf8"));
   const [withTrace, skipped] = report.graphs[0].results;
 
   expect(traceAvailable(withTrace)).toBe(true);
-  expect(withTrace.extra_metrics?.trace?.path).toBe("tests/fixtures/traces/sample.pftrace");
+  expect(withTrace.extra_metrics?.trace?.path).toBe("traces/sample.pftrace");
   // The second row proves the suppressed state stays reachable in the same report.
   expect(traceAvailable(skipped)).toBe(false);
   expect(skipped.extra_metrics?.trace?.skipped).toBe("rocprofv3 is not installed on this host");
 });
 
 test("a descriptor missing any piece of the handoff is not loadable", () => {
-  const row = parseReport(readFileSync(join(fixtures, "report-with-trace.json"), "utf8")).graphs[0]
+  const row = parseReport(readFileSync(join(fixtures, "run/results.json"), "utf8")).graphs[0]
     .results[0];
   const withTrace = (trace: Record<string, unknown>) => ({
     ...row,

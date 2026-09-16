@@ -2,7 +2,7 @@
  * Writes `sample.pftrace`: a real Perfetto protobuf trace, small enough to read
  * by hand, used to check the embedded trace viewer without a GPU or rocprofv3.
  *
- * Regenerate with `bun run tests/fixtures/traces/make-trace.ts`.
+ * Regenerate with `bun run tests/fixtures/run/traces/make-trace.ts`.
  * The field numbers below come from Perfetto's `trace.proto` family; the
  * encoding is plain protobuf, so no dependency is needed to produce them.
  */

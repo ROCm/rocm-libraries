@@ -320,7 +320,7 @@ export function BenchmarkReportView({
                             className="report__rowaction"
                             onClick={() => graph && onOpenTensors(graph, r)}
                           >
-                            Inspect
+                            Tensors
                           </button>
                         ) : (
                           <span className="report__engine-ver">not captured</span>
@@ -333,7 +333,7 @@ export function BenchmarkReportView({
                         className="report__rowaction"
                         onClick={() => graph && setDetail({ graph, row: r })}
                       >
-                        Inspect
+                        Details
                       </button>
                     </td>
                   </tr>
