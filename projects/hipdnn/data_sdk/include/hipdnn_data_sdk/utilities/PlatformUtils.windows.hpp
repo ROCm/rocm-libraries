@@ -33,6 +33,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 #include "StringUtil.hpp"
@@ -110,13 +111,13 @@ inline std::string expandUser(const std::string& path)
                                  && (path.size() == 1 || path[1] == '/' || path[1] == '\\');
 
     // "%USERPROFILE%" matched as a literal leading token, case-insensitively.
-    static const std::string kUserProfileToken = "%userprofile%";
+    constexpr std::string_view USER_PROFILE_TOKEN = "%userprofile%";
     const std::string lowerPath = toLower(path);
     const bool hasLeadingToken
-        = lowerPath.size() >= kUserProfileToken.size()
-          && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
-          && (lowerPath.size() == kUserProfileToken.size() || path[kUserProfileToken.size()] == '/'
-              || path[kUserProfileToken.size()] == '\\');
+        = lowerPath.size() >= USER_PROFILE_TOKEN.size()
+          && lowerPath.compare(0, USER_PROFILE_TOKEN.size(), USER_PROFILE_TOKEN) == 0
+          && (lowerPath.size() == USER_PROFILE_TOKEN.size()
+              || path[USER_PROFILE_TOKEN.size()] == '/' || path[USER_PROFILE_TOKEN.size()] == '\\');
 
     if(!hasLeadingTilde && !hasLeadingToken)
     {
@@ -129,7 +130,7 @@ inline std::string expandUser(const std::string& path)
         return path;
     }
 
-    const size_t tokenLength = hasLeadingTilde ? 1 : kUserProfileToken.size();
+    const size_t tokenLength = hasLeadingTilde ? 1 : USER_PROFILE_TOKEN.size();
     return userProfile + path.substr(tokenLength);
 }
 
@@ -151,14 +152,15 @@ inline std::wstring expandUserW(const std::wstring& path)
                                  && (path.size() == 1 || path[1] == L'/' || path[1] == L'\\');
 
     // "%USERPROFILE%" matched as a literal leading token, case-insensitively.
-    static const std::wstring kUserProfileToken = L"%userprofile%";
+    constexpr std::wstring_view USER_PROFILE_TOKEN = L"%userprofile%";
     std::wstring lowerPath = path;
     std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
     const bool hasLeadingToken
-        = lowerPath.size() >= kUserProfileToken.size()
-          && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
-          && (lowerPath.size() == kUserProfileToken.size() || path[kUserProfileToken.size()] == L'/'
-              || path[kUserProfileToken.size()] == L'\\');
+        = lowerPath.size() >= USER_PROFILE_TOKEN.size()
+          && lowerPath.compare(0, USER_PROFILE_TOKEN.size(), USER_PROFILE_TOKEN) == 0
+          && (lowerPath.size() == USER_PROFILE_TOKEN.size()
+              || path[USER_PROFILE_TOKEN.size()] == L'/'
+              || path[USER_PROFILE_TOKEN.size()] == L'\\');
 
     if(!hasLeadingTilde && !hasLeadingToken)
     {
@@ -171,7 +173,7 @@ inline std::wstring expandUserW(const std::wstring& path)
         return path;
     }
 
-    const size_t tokenLength = hasLeadingTilde ? 1 : kUserProfileToken.size();
+    const size_t tokenLength = hasLeadingTilde ? 1 : USER_PROFILE_TOKEN.size();
     return userProfile + path.substr(tokenLength);
 }
 

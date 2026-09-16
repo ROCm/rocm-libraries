@@ -45,20 +45,39 @@ has run. Report all four or report the integration as incomplete.
 
 An integration almost always adds its own symbols. **Reuse is the narrow exception**:
 another kernel into a pack that is already yours, with the pack named and the reason
-stated. Two things follow, and both are load-bearing:
+stated. Three things follow, and all are load-bearing:
 
-- **The two shipped ingestor packs are reference scaffolds, not integration targets.**
-  `PointwiseAdd` computes one element under `if(blockIdx.x == 0 && threadIdx.x == 0)`
-  (`kernels/PointwiseAdd.cpp:11-12`) at grid 1×1×1 (`PointwiseNative.cpp:436`), and
-  `ConvFwd` is a naive direct convolution that serves 6 of 1218 `ConvolutionFwd` bundle
-  cases. They exist to exercise the ingestor path end to end. Hanging a real kernel off
-  one is never the answer to "is there an existing pack".
-- **The operations people ask for mostly have no pack at all.** Only `ConvNative.cpp`
-  and `PointwiseNative.cpp` exist under
-  `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`.
-  Batchnorm, layernorm, RMSnorm and resample live on `hip_mlops_engine` as hand-written
-  plan builders and have no ingestor pack to extend. For those, "write the symbols" is
-  not a fallback, it is the job.
+- **Two of the three shipped ingestor packs are reference scaffolds, not integration
+  targets.** `PointwiseAdd` computes one element under
+  `if(blockIdx.x == 0 && threadIdx.x == 0)` (`kernels/PointwiseAdd.cpp:11-12`) at grid
+  1×1×1 (`PointwiseNative.cpp:436`), and `ConvFwd` is a naive direct convolution that
+  serves 6 of 1218 `ConvolutionFwd` bundle cases. They exist to exercise the ingestor
+  path end to end. Hanging a real kernel off one is never the answer to "is there an
+  existing pack".
+- **The third, `hipkernel:BatchnormInference`, is a real pack — and extending it still
+  turns on whether it is yours.** It is not a scaffold by any of the tests above: a
+  full-tensor kernel computing one element per thread across N·C·H·W with its own
+  bounds guard (`kernels/BatchnormInference.cpp:64-94`), a computed grid rather than a
+  fixed one (`BatchnormInferenceNative.cpp:642-647`), three io dtypes
+  (`BatchnormInferenceNative.cpp:97-101`), nine shipped variants
+  (`TestBatchnormInferencePacks.cpp:44-63`) and a matcher with a real refusal surface —
+  15 parameterized refusals against 9 acceptances
+  (`TestBatchnormInferenceMatchers.cpp:165-314`,
+  `TestBatchnormInferenceMatchers.cpp:65-129`). Its limits are equally concrete and are
+  the axes an extension would move: one proved architecture
+  (`IngestorGenerator/configs/batchnorm_inference.yaml:49`), no device-level
+  integration test wiring it, and 10 of 82 `BatchnormInference/Default` bundle cases
+  that mirror its own unit-test shapes. A reader who did not ship it is still on the
+  create path.
+- **The operations people ask for mostly have no pack at all.** Only `ConvNative.cpp`,
+  `PointwiseNative.cpp` and `BatchnormInferenceNative.cpp` exist under
+  `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/`, and
+  the registration table names exactly those three (`IngestorPacks.cpp:16-26`).
+  Layernorm, RMSnorm and resample live on `hip_mlops_engine` as hand-written plan
+  builders with no ingestor pack; batchnorm now has both, because
+  `hip_mlops_engine`'s builder still claims the identical single-node graph
+  (`BatchnormPlanBuilder.cpp:371-374`, `BatchnormPlanBuilder.cpp:550-554`). For the
+  three with no pack, "write the symbols" is not a fallback, it is the job.
 
 Adding a pack to this engine is ordinary work with a rebuild in it. It is not a reason
 to look for something to attach to.
@@ -68,8 +87,10 @@ to look for something to attach to.
 `kind: hiprtc_file` — descriptors plus a source bundle copied into an installed tree and
 compiled at `prepare()` — is real and proved on device. It is **the reuse branch with a
 rebuild avoided**: it adds no native symbol, so it can only ever serve a pack whose
-symbols are already installed, and today the only such packs are the two scaffolds
-above. Use it to iterate on variants of a pack you already shipped. Do not choose it
+symbols are already installed *and* whose handler routes `kernel_source.kind` —
+Pointwise (`PointwiseNative.cpp:432-433`) and BatchnormInference
+(`BatchnormInferenceNative.cpp:632-633`) do, ConvFwd (`ConvNative.cpp:501-502`) does
+not. Use it to iterate on variants of a pack you already shipped. Do not choose it
 because it looks cheaper than writing symbols; it cannot produce deliverable 2, and a
 kernel that needs deliverable 2 cannot be dropped in at all. The page that owns that
 case is [hiprtc-mining.md](../hipdnn-ingestor-engine/hiprtc-mining.md).

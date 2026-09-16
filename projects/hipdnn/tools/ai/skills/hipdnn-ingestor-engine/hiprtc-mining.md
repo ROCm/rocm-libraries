@@ -31,15 +31,32 @@ also dispatch on `kernel_source.kind`, i.e. call `buildIngestorKernelCode`. Grep
 handler's `prepare()` for that call before authoring anything: a handler that calls
 `_kernelCompiler.compile(kernel.source.sourceFile, …)` directly serves `embedded_source`
 only, and a `hiprtc_file` descriptor under it throws at `prepare()` no matter how correct
-the descriptor is. As of this writing Pointwise routes
-(`PointwiseNative.cpp:432-433`); ConvFwd does not (`ConvNative.cpp:501-502`). Routing a
-pack is a two-line handler change and a rebuild.
+the descriptor is. This is a per-pack property, not a property of the format: as of this
+writing Pointwise (`PointwiseNative.cpp:432-433`) and BatchnormInference
+(`BatchnormInferenceNative.cpp:632-633`) route; ConvFwd (`ConvNative.cpp:501-502`) does
+not. Routing a pack is a two-line handler change and a rebuild.
 
-**The two packs whose symbols are installed today are reference scaffolds.**
-`PointwiseAdd` computes one element under `if(blockIdx.x == 0 && threadIdx.x == 0)`
-(`kernels/PointwiseAdd.cpp:11-12`); `ConvFwd` is a naive direct convolution serving 6 of
-1218 `ConvolutionFwd` bundle cases. They exist to exercise this path. If neither is a
+**Three packs have installed symbols today, and this page still serves only the one you
+shipped.** It adds no native symbol, so it can never widen the set of packs, and of the
+three only the two named above can serve a `hiprtc_file` descriptor at all. Two of the
+three are reference scaffolds in any case — `PointwiseAdd` computes one element under
+`if(blockIdx.x == 0 && threadIdx.x == 0)` (`kernels/PointwiseAdd.cpp:11-12`) and
+`ConvFwd` is a naive direct convolution serving 6 of 1218 `ConvolutionFwd` bundle cases —
+so the only pack here that is a real extension target is `BatchnormInference`, and only
+for the person who shipped it (`IngestorPacks.cpp:16-26`). If none of the three is a
 pack *you* shipped, this page is not the one you want.
+
+**Within those bounds it is the cheapest vehicle for an exhaustive sweep.** A variant here
+costs a descriptor entry and a file in the bundle rather than a rebuild, so the whole
+descriptor-cost tier of a tuning space — block sizes and any metadata value the
+substituter can render into a `-D` — can be enumerated and measured against one installed
+provider. That tier is what an exhaustive sweep is scoped to; axes that cost a rebuild or
+new authored source stay on `knob_sweep.py`'s staged isolate-then-pair order in
+[RUNBOOK.md](RUNBOOK.md) §6. The two constraints just argued are what bound the cheapness
+and they do not relax for a sweep: this page adds no native symbol, so it serves only a
+pack already installed — and only the one you shipped — and only a pack whose handler
+routes `kernel_source.kind`. An exhaustive sweep over a pack failing either is a rebuild
+wearing a descriptor's clothes, and it is priced accordingly.
 
 ### Two drop-in shapes, and only one of them is observable
 
@@ -65,9 +82,8 @@ observe that **your** kernel did.
 the drop-in its own engine name, therefore its own id, therefore an appearance and a
 disappearance you can assert on. This is the shape that has actually been run end to end on
 device; the worked example is `Results/hiprtc-dropin-kernels/phase5/` in the
-claude-workspace (`pointwise_dropin.yaml`, `pointwise_dropin_sources/`,
-`assemble-dropin.py`, written up in `PHASE5-endtoend.md`). The KDP-only shape remains
-**unrun**.
+claude-workspace (`pointwise_dropin.yaml`, `pointwise_dropin_sources/`, written up in
+`PHASE5-endtoend.md`). The KDP-only shape remains **unrun**.
 
 Choose the KDP-only shape only when you are adding a variant to an engine you already trust
 and never need to tell apart from the shipped kernels. Choose your own UED whenever anyone —
@@ -222,8 +238,7 @@ not grow it.
 3. `float` and `int_list` cannot be bound into defines.
 
 The phase 3 generator cannot express four things a drop-in needs. Each is a hand edit after
-`generate.py`, and `Results/hiprtc-dropin-kernels/phase5/assemble-dropin.py` applies exactly
-these, reproducibly, as a worked reference:
+`generate.py`:
 
 4. **No "installed symbols, new engine name".** The native symbol namespace is *derived
    from* the engine name in `IngestorGenerator/codegen/models.py`:
@@ -237,7 +252,7 @@ these, reproducibly, as a worked reference:
    UMD.** `build_operation_umd` in `IngestorGenerator/codegen/generator.py` returns `None`
    unless the engine is multi-pack, so a single-pack engine's KDP lists only its
    kernel-scoped matchers. Whether that is complete is a property of **your**
-   `graph_match`, not of this path, and the two shipped packs fall on opposite sides of it:
+   `graph_match`, not of this path, and these two shipped matchers fall on opposite sides:
 
    - `pointwiseGraphMatches` (`PointwiseNative.cpp:191`) checks shape and arity and says
      nothing about the operation — the operation lives in separate graph-scoped matchers

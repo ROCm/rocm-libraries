@@ -39,6 +39,18 @@ set(GRAPH_STUDIO_PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
 set(GRAPH_STUDIO_ROCM_RUNTIME_DIRS "" CACHE STRING "External ROCm runtime library directories")
 set(GRAPH_STUDIO_ROCM_BIN_DIRS "" CACHE STRING "Python and ROCm tool executable directories")
 
+# The configs below are assembled as JSON text, where a native Windows backslash would read
+# as an escape. Everything CMake produces itself is already forward-slashed; these come from
+# the command line, so normalize them once here.
+foreach(_studio_path_var GRAPH_STUDIO_PYTHON_EXECUTABLE GRAPH_STUDIO_ROCM_RUNTIME_DIRS
+                         GRAPH_STUDIO_ROCM_BIN_DIRS ROCM_PATH
+)
+    if(${_studio_path_var})
+        file(TO_CMAKE_PATH "${${_studio_path_var}}" _studio_normalized)
+        set(${_studio_path_var} "${_studio_normalized}")
+    endif()
+endforeach()
+
 set(_studio_libraries "$<TARGET_LINKER_FILE:hipdnn_backend>" "${HIPDNN_GRAPH_STUDIO_HIP_LIB}")
 set(_studio_runtime_dirs "$<TARGET_FILE_DIR:hipdnn_backend>" ${GRAPH_STUDIO_ROCM_RUNTIME_DIRS}
                          "${_studio_hip_libdir}"
