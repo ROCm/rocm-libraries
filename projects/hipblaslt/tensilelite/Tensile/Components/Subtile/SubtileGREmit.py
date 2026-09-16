@@ -1212,9 +1212,13 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
   numWaves = prod(kernel["MIWaveGroup"])
   mod = Module(f"TDM Global Offset Subtile {tc}")
 
-  with writer.allocTmpSgpr(3) as tmpSgprRes:
+  with writer.allocTmpSgpr(max(3, writer.states.laneSGPRCount)) as tmpSgprRes:
     tmp = tmpSgprRes.idx
     waveOff = tmpSgprRes.idx + 2
+
+    # Load tc[batch] into Address{tc} before tile and strided-batch offsets.
+    mod.add(writer._resolveTDMGlobalAddr(
+        kernel, tc, f"Address{tc}", tmpSgprRes))
 
     tileStride = writer.strideRef(tc, ti)
     mod.add(SMulI32(dst=sgpr(tmp), src0=tileStride, src1=int(mt * bpe),
@@ -1241,8 +1245,18 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
     if kernel["ProblemType"]["Batched"] and kernel["ProblemType"]["StridedBatched"]:
       ia = tP["ia"]
       batchStrideName = f"Stride{tc}{writer.states.indexChars[ia[2]]}"
+      batchIdx = sgpr("WorkGroup2")
+      if kernel["ProblemType"]["SupportUserArgs"] and tc in ("A", "B"):
+        writer.cmpNamedArgTypeEq(
+            mod, 3, "ArgType == 3 for General Batched GEMM")
+        mod.add(SCSelectB32(
+            dst=sgpr(waveOff),
+            src0=0,
+            src1=batchIdx,
+            comment="general batch uses an already-dereferenced matrix base"))
+        batchIdx = sgpr(waveOff)
       mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmp), sgpr(tmp+1),
-                                                     sgpr(batchStrideName), sgpr("WorkGroup2"),
+                                                     sgpr(batchStrideName), batchIdx,
                                                      comment="Batch: Stride*WG"))
       mod.add(SLShiftLeftB64(dst=sgpr(tmp, 2), src=sgpr(tmp, 2),
                               shiftHex=int(log2(bpe)), comment="scale by bpe"))

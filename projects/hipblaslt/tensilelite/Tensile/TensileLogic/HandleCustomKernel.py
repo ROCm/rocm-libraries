@@ -31,7 +31,6 @@ from Tensile.Common import print1, print2, IsaVersion, IsaInfo
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
 
 from Tensile.CustomKernels import isCustomKernelConfig, getCustomKernelConfig
-from Tensile import CUSTOM_KERNEL_PATH
 
 
 def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tuple[dict, bool]:
@@ -50,8 +49,7 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
         return sol, False
 
     name = sol["CustomKernelName"]
-    dir = CUSTOM_KERNEL_PATH
-    config = getCustomKernelConfig(name, {}, dir)
+    config = getCustomKernelConfig(name, {})
     sol.update(config)
 
     mi = sol["MatrixInstruction"]
@@ -67,7 +65,7 @@ def handleCustomKernel(sol: dict, isaInfoMap: Dict[IsaVersion, IsaInfo]) -> Tupl
         ptype = sol["ProblemType"]
         workgroup = sol.get("WorkGroup", None)
         miParams = matrixInstructionToMIParameters(
-            mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap
+            mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap, sol.get("SourceSwap", False)
         )
         print2(
             f">>     Hint: Replace 'MatrixInstruction' in {name}.s with following diff:\n"

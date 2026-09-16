@@ -114,8 +114,16 @@ set(MIOPEN_ENABLE_SQLITE On CACHE BOOL "")
 # Use SQLITE for compiled kernels, when turned off this will use raw files
 set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 
-# By default build shared libraries
-option(BUILD_SHARED_LIBS "Create shared libraries" ON)
+# By default build shared libraries. Use a directory-scoped (non-cache) default
+# rather than option()/a cache entry: a cache write to the global BUILD_SHARED_LIBS
+# leaks out of MIOpen's subtree and forces sibling subprojects in a parent
+# superbuild to build shared too (e.g. hipDNN's internal, un-exported
+# hipdnn_backend_private, which then breaks install(EXPORT)). An explicit
+# user/parent value (cache or -D) is still honored because we only set a default
+# when BUILD_SHARED_LIBS is not already defined.
+if(NOT DEFINED BUILD_SHARED_LIBS)
+    set(BUILD_SHARED_LIBS ON)
+endif()
 
 # PREPEND (rather than APPEND) so MIOpen's local cmake helpers (ClangTidy,
 # ClangCheck, etc.) take precedence over any same-named modules a parent
@@ -351,6 +359,34 @@ endif()
 message(STATUS "Hip compiler flags: ${HIP_COMPILER_FLAGS}")
 
 add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPILER_FLAGS}>)
+
+# MIOpen's HIP device code is compiled in the same translation units as host code, so a host
+# sanitizer request (e.g. CI's debug '-fsanitize=undefined -fno-sanitize-recover=undefined')
+# also instruments AMDGPU device code. ROCm/TheRock ships a device sanitizer runtime only for
+# ASan (amdgcn asanrtl.bc); there is no device UBSan runtime, so instrumented device objects
+# fail to link with undefined __ubsan_handle_*_abort symbols. When UBSan is requested, disable
+# UBSan on the device side only -- via '-Xarch_device -fno-sanitize=undefined' -- so device code
+# is left uninstrumented while host code stays instrumented. Gated on 'undefined' specifically,
+# so ASan-only builds keep their working device ASan.
+#
+# Note: -fno-gpu-sanitize is deliberately NOT used. On this toolchain it drops the user -I include
+# directories from the AMDGPU device compilation pass, so device-side '#include <miopen/...>'
+# then fails with "file not found". -Xarch_device scopes the flag to the device sub-compile
+# without that side effect.
+#
+# Detection lives here (before add_subdirectory); the flag is applied narrowly with
+# target_compile_options on the MIOpen library target in src/CMakeLists.txt so it only touches
+# the device-code library and not host tools (addkernels), tests, driver, or fin.
+if(HAS_HIP)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" MIOPEN_BUILD_TYPE_UPPER)
+    set(MIOPEN_EFFECTIVE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MIOPEN_BUILD_TYPE_UPPER}}")
+    if(MIOPEN_EFFECTIVE_CXX_FLAGS MATCHES "-fsanitize=[^ ]*undefined")
+        message(STATUS "UBSan requested: will disable device-side UBSan on MIOpen HIP targets via "
+                       "'-Xarch_device -fno-sanitize=undefined' so AMDGPU device code links without "
+                       "a device UBSan runtime (host instrumentation retained)")
+        set(MIOPEN_DISABLE_DEVICE_UBSAN ON)
+    endif()
+endif()
 
 # HIP
 if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
