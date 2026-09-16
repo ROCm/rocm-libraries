@@ -169,6 +169,10 @@ class Supervisor:
         self.poll_interval_s = poll_interval_s
         self._emit_event = emit
         self._runs: dict[str, _Run] = {}
+        #: Slots reserved by a launch that has passed the concurrency check but
+        #: whose run is not in `_runs` yet. Counted against the cap so two
+        #: concurrent launches cannot both claim the last slot.
+        self._pending = 0
         self._subscriptions: set[str] = set()
         self._lock = threading.RLock()
         self._stop = threading.Event()
@@ -181,6 +185,12 @@ class Supervisor:
         one, and it only has one after this object exists."""
         self._emit_event = emit
 
+    def _release_slot(self) -> None:
+        """Give back a reservation whose launch never produced a run."""
+        with self._lock:
+            if self._pending:
+                self._pending -= 1
+
     def start(self) -> None:
         self.record_dir.mkdir(parents=True, exist_ok=True)
         self.reconcile()
@@ -190,9 +200,20 @@ class Supervisor:
         self._poller.start()
 
     def close(self) -> None:
+        """Stop the poller, and take every worker we started down with us.
+
+        Killing here rather than only in `cancel` is what makes the promise
+        hold on the paths nobody chose: transport EOF, a crashed client, a
+        killed server. A worker outliving this process keeps an agent session
+        running -- spending tokens, holding write access to the checkout --
+        with nothing left that can report it or stop it.
+        """
         self._stop.set()
         if self._poller is not None:
             self._poller.join(timeout=self.poll_interval_s * 2)
+        for run in list(self._runs.values()):
+            if run.process.poll() is None:
+                self._kill_run(run)
         for run in list(self._runs.values()):
             for thread in run.threads:
                 thread.join(timeout=1)
@@ -373,13 +394,19 @@ class Supervisor:
             raise SupervisorError(str(failure)) from None
 
         applied, warnings = self._clamp(loaded, max_iterations)
+        # Reserved, not just checked. A run does not enter `_runs` until its
+        # worker is spawned and its spec delivered, and every tool call runs on
+        # its own thread, so two launches could both see room where there was
+        # room for one. The reservation is released in the `finally` below,
+        # whether the launch succeeds, fails or raises.
         with self._lock:
-            live = self._live_count()
+            live = self._live_count() + self._pending
             if live >= self.max_concurrent:
                 raise SupervisorError(
                     f"Concurrency cap reached ({live} running). Cancel a run or "
                     f"raise --max-concurrent."
                 )
+            self._pending += 1
 
         run_id = _new_run_id()
         run_dir = self.run_root / loaded.name / run_id
@@ -449,9 +476,30 @@ class Supervisor:
             "runDir": str(run_dir),
             "maxIterations": applied,
         }
-        assert process.stdin is not None
-        process.stdin.write(json.dumps(spec, default=str))
-        process.stdin.close()
+        # Inside the guard, and before any `_Run` exists to reap the child. A
+        # worker that dies before reading its spec -- a broken virtualenv, an
+        # unimportable `runner` -- breaks this pipe, and an escape here would
+        # leave the record saying `running` forever with nothing waiting on the
+        # process and `cancel` reporting it was never here.
+        try:
+            assert process.stdin is not None
+            process.stdin.write(json.dumps(spec, default=str))
+            process.stdin.close()
+        except OSError as failure:
+            process.kill()
+            process.wait(timeout=5)
+            stderr = ""
+            if process.stderr is not None:
+                stderr = process.stderr.read() or ""
+            record["state"] = PROCESS_FAILED_TO_START
+            record["endedAt"] = _now()
+            record["exitCode"] = process.poll()
+            record["stderr"] = stderr.strip() or str(failure)
+            self._write_record(record)
+            self._release_slot()
+            raise SupervisorError(
+                f"the worker exited before it could be given its run: {failure}"
+            ) from None
 
         run = _Run(
             run_id=run_id,
@@ -462,7 +510,11 @@ class Supervisor:
             record=record,
         )
         with self._lock:
+            # The run now counts itself, so the reservation standing in for it
+            # is handed over inside the same lock -- releasing it first would
+            # reopen the window it exists to close.
             self._runs[run_id] = run
+            self._pending -= 1
         run.threads = [
             threading.Thread(
                 target=self._pump_stderr,
@@ -667,31 +719,47 @@ class Supervisor:
             run.record["cancelledAt"] = _now()
             self._write_record(run.record)
 
-        kill_tree(process)
-        if os.name != "nt":
-            # `launch()` gives every agent its own session, so the worker's
-            # process group does not contain them. On Windows `taskkill /T`
-            # walks parent-pid links and has already reached them.
-            with run.lock:
-                relayed = list(run.agent_pids)
-            for agent in relayed:
-                _terminate(agent)
-        alive = not _await_exit(process)
+        killed = self._kill_run(run)
         with run.lock:
             run.record["exitCode"] = process.poll()
             self._write_record(run.record)
         return schema.flow_cancel_result(
             run_id=run_id,
-            cancelled=not alive,
+            cancelled=killed,
             state="cancelled",
             killed_pid=pid,
             message=(
                 f"Run cancelled; the last {schema.MANIFEST_NAME} checkpoint is "
                 f"preserved."
-                if not alive
-                else f"Kill signalled but worker {pid} is still alive."
+                if killed
+                else f"Kill signalled for worker {pid}, but something it started "
+                f"is still alive. Check for agent processes by hand."
             ),
         )
+
+    def _kill_run(self, run: "_Run") -> bool:
+        """Kill a run's worker and the agents it started. True if all are gone.
+
+        The agents matter as much as the worker: `launch()` gives each its own
+        session, so on POSIX killing the worker's group does not reach them, and
+        an agent that outlives the kill keeps spending tokens against the
+        checkout. On Windows `taskkill /T` walks parent-pid links and has
+        already taken them.
+
+        Their fate is folded into the answer rather than discarded. Reporting a
+        cancellation that left an agent running is the one failure a caller
+        cannot detect for itself.
+        """
+        process = run.process
+        kill_tree(process)
+        agents_gone = True
+        if os.name != "nt":
+            with run.lock:
+                relayed = list(run.agent_pids)
+            # Not short-circuiting: every agent gets a signal even if an
+            # earlier one refuses to die.
+            agents_gone = all([_terminate(agent) for agent in relayed])
+        return _await_exit(process) and agents_gone
 
     # -- status -------------------------------------------------------------
 
@@ -869,8 +937,14 @@ def _terminate(pid: int, timeout: float = 5.0) -> bool:
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.kill(pid, sig)
-        except (ProcessLookupError, PermissionError, OSError):
+        except ProcessLookupError:
+            # Already gone, which is the outcome we wanted.
             return True
+        except (PermissionError, OSError):
+            # EPERM means the process exists and we may not signal it -- the
+            # one case where answering "it is gone" is actively wrong. Fall
+            # through and let the check below measure it instead.
+            pass
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:

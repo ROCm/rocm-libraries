@@ -1,4 +1,4 @@
-// Regression suite for the Authoring tab's projection (src/flow/timeline.ts).
+// Regression suite for the Implement tab's projection (src/flow/timeline.ts).
 // Bun's built-in test runner; no framework dependency.
 //
 // The point of this suite is genericity. Every assertion reads the names it
