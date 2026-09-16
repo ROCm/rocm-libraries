@@ -491,7 +491,7 @@ void testing_spsm_csr_reuse_descr(Arguments argus)
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
     const std::vector<hipsparseFillMode_t> uplos
         = {HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER};
-    const std::vector<hipsparseDiagType_t> diags = {HIPSPARSE_DIAG_TYPE_NON_UNIT};
+    const std::vector<hipsparseDiagType_t> diags = {argus.diag_type};
     const std::vector<hipsparseSpSMAlg_t>  algs  = {HIPSPARSE_SPSM_ALG_DEFAULT};
 
     constexpr int number_of_passes = 3;

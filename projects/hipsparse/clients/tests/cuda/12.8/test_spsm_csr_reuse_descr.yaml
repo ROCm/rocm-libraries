@@ -37,6 +37,7 @@ Tests:
   K: [22]
   alpha: [2.0]
   alphai: [0.5]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT, HIPSPARSE_DIAG_TYPE_UNIT]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 
 # Pre-checkin
@@ -50,6 +51,7 @@ Tests:
   K: [16]
   alpha: [2.0]
   alphai: [-0.5]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos1,
              nos3,
@@ -66,8 +68,8 @@ Tests:
   K: [32]
   alpha: [1.5]
   alphai: [0.0]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos2,
              nos4,
-             nos6,
-             nos7]
+             nos6]

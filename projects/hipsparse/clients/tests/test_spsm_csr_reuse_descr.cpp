@@ -32,4 +32,5 @@ TEST_ROUTINE_WITH_CONFIG(spsm_csr_reuse_descr,
                          arg.K,
                          arg.alpha,
                          arg.alphai,
-                         arg.baseA);
+                         arg.baseA,
+                         arg.diag_type);
