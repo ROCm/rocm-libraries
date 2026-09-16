@@ -22,8 +22,7 @@
 #
 #   python orchestrate.py run configs/flows/ingestor-engine-optimize.yaml \
 #       --input engine_name=hipkernel:ConvBias --input prior_run=<run> \
-#       --input graph=<graph.json> --input arch=gfx1151 \
-#       --input bench_exe=<build>/install/bin/dnn-benchmark.bat
+#       --input graph=<graph.json> --input arch=gfx1151
 version: 1
 name: ingestor-engine-optimize
 description: Optimise an installed ingestor engine; the tests are the gate, the oracle is the yardstick.
@@ -48,13 +47,6 @@ inputs:
     required: true
   arch:
     description: Target GPU architecture; checked against the device before anything expensive runs.
-    required: true
-  bench_exe:
-    description: >-
-      The `dnn-benchmark` entry point produced by setup_env.py -- usually
-      `<build>/install/bin/dnn-benchmark.bat`. Passed as an input rather than a
-      registry tool because it lives in a build tree this flow does not own.
-    type: path
     required: true
   tier:
     description: Bundle tier the integration filter selects from - quick, standard, comprehensive or full
@@ -738,7 +730,7 @@ steps:
         args:
           - "${vars.scripts_dir}/exec_at.py"
           - "--exe"
-          - "${inputs.bench_exe}"
+          - "${vars.bench_exe}"
           - "--produced-by"
           - "dnn-benchmarking's setup_env.py --graph-studio"
           - "--path-prepend"

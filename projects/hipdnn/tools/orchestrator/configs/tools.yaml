@@ -25,6 +25,12 @@ vars:
   # Here rather than in a flow because the library suffix is machine-local: a flow
   # that spelled `.dll` would be a Windows flow.
   hip_kernel_plugin: "${vars.build_dir}/bin/hipdnn_plugins/engines/hip_kernel_provider.dll"
+  # The benchmark entry point setup_env.py produces. A var rather than a flow input:
+  # where the build tree sits and what the launcher is called are properties of this
+  # machine, and a flow that asked for the path would make every operator retype it.
+  # `.bat` rather than an exe suffix -- it is a wrapper that sets the plugin search
+  # path before exec'ing the binary, and running the binary directly finds no engines.
+  bench_exe: "${vars.build_dir}/install/bin/dnn-benchmark.bat"
 
   # --- ingestor-engine-kernel ------------------------------------------------
   #
@@ -100,6 +106,8 @@ profiles:
       hip_kernel_plugin: "${vars.build_dir}/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
       ingestor_plugin: "${vars.ingestor_build_dir}/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
       installed_plugin: "${vars.ingestor_install_dir}/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
+      # The same wrapper, without the Windows extension.
+      bench_exe: "${vars.build_dir}/install/bin/dnn-benchmark"
       # ingestor_ctest_root is deliberately NOT restated: the provider installs its
       # CTest files to CMAKE_INSTALL_BINDIR/hip_kernel_provider on both platforms.
 
