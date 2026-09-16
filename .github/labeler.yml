@@ -35,12 +35,11 @@
 
 "rocke-lib: convolution":
 - changed-files:
-  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*conv*'
-  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*wgrad*'
-  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*dgrad*'
-  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*implicit_gemm*'
-  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*img2col*'
-  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/conv*/**/*'
+  - any-glob-to-any-file:
+    - 'dnn-providers/hip-kernel-provider/rocke/library/**/*{conv[!e],wgrad,dgrad,implicit_gemm,2col}*'
+    - 'dnn-providers/hip-kernel-provider/rocke/library/**/*{conv[!e],wgrad,dgrad,implicit_gemm,2col}*/**'
+    - 'dnn-providers/hip-kernel-provider/rocke/library/**/*conv'
+    - 'dnn-providers/hip-kernel-provider/rocke/library/**/*conv/**'
 
 # This label serves to distiguish work being done in RocKE platform, for the reviewing team and internal tools
 
