@@ -40,6 +40,10 @@ from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, se
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from Tensile.CustomKernelCompatibility import (
+    compareCustomKernelProblemTypes,
+    formatCustomKernelProblemTypeMismatches,
+)
 from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
@@ -152,9 +156,28 @@ def _runChecks(
             solutions = all_solutions
 
         for list_idx, s in enumerate(solutions):
-            s, isCustom = handleCustomKernel(s, isaInfoMap)
+            s, isCustom, customConfig = handleCustomKernel(s, isaInfoMap)
             if check.OnlyCustomKernels and not isCustom:
                 continue
+
+            if isCustom:
+                # Read from the config, not the merged solution: after
+                # sol.update(config) an undeclared ProblemType is
+                # indistinguishable from a declared one.
+                mismatches = compareCustomKernelProblemTypes(
+                    problemType, (customConfig or {}).get("ProblemType")
+                )
+                if mismatches:
+                    print(
+                        formatCustomKernelProblemTypeMismatches(
+                            mismatches,
+                            file,
+                            s.get("SolutionIndex", list_idx),
+                            s.get("CustomKernelName", "<missing>"),
+                        )
+                    )
+                    total += 1
+                    continue
 
             s["ProblemType"] = problemType
             sol_name = s.get("SolutionNameMin")
