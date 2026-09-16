@@ -168,7 +168,7 @@ Each of these failures is otherwise indistinguishable from success:
 |---|---|
 | The reference executed | check the executor's return/exception path explicitly; a declined or skipped reference fails the gate |
 | Your kernel launched and wrote | fill outputs with a sentinel before launch (`fillWithSentinelValue()`), synchronize, and confirm they changed; check `hipGetLastError()` after the launch |
-| Every output was compared | iterate the graph's non-virtual output UIDs from the tensor map, not a hand-written list |
+| Every output was compared | derive the output uids rather than hand-writing a list: `graph.visit()` plus `INode::getNodeOutputTensorAttributes()` on a live graph, or each node's output-position `*_tensor_uid` fields on a serialized one, minus the uids the tensor map marks virtual ([graph-analysis.md](graph-analysis.md), *Role is not a tensor field*) |
 
 Add a fourth where a multi-launch decomposition is used: assert the launch order and
 that each intermediate was written before it was read, by sentinel-filling the

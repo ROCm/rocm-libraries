@@ -29,7 +29,18 @@ layouts, and the shape envelope requested. State whether the request is "serve t
 graph" or "serve this operation family"; the second is a scope decision, not an
 assumption you may make.
 
-**Gate:** a graph in hand, a named architecture, and a stated ABI position.
+Write the dtypes, the layouts — derived from strides, never assumed — and the shape
+envelope down as a **claim**, not a note. That claim is what decides the
+runtime-versus-`-D` split at step 6 and step 7, and it is the thing step 8's coverage
+is measured against; an envelope nobody wrote down cannot be reported as
+under-covered.
+
+**Gate:** all five entry-contract facts recorded — the graph and its form, a named
+architecture with its local availability, a stated ABI position, and the written
+dtype/layout/shape-envelope claim. The fifth, a capable reference for this graph, is
+the one this step cannot settle alone: name the reference you intend here, step 2's
+gate turns that name into an `isApplicable` answer for *this* graph, and step 4
+settles it. The other four are blocked here when missing, never defaulted.
 
 ## 2. Build and install hipDNN, and run a minimal driver against it
 
@@ -90,8 +101,9 @@ masking, scaling, GQA, layout and deprecated-field precedence differ per graph, 
 at least one precedence rule in tree is a live trap (`notes/hipdnn/sdpa-mask-attribute-precedence.md`).
 
 **Gate:** every node classified, every tensor classified input/output/virtual with
-its UID resolved as [graph-analysis.md](graph-analysis.md) describes, every matched
-schema field consumed, rejected or proven inert, and the specification written down.
+its UID resolved and its role derived as [graph-analysis.md](graph-analysis.md)
+describes, every matched schema field consumed, rejected or proven inert — per
+enumerator where the field is an enum — and the specification written down.
 An unresolved semantic question blocks the affected path.
 
 ## 4. Establish the oracle
@@ -119,10 +131,28 @@ what you took from where, and what you deliberately did not take.
 
 Use [device-envelope.md](device-envelope.md) to pin the compile envelope and the
 target device's facts. When the target architecture is not the local one, obtain its
-facts from that device, not from memory.
+facts from that device, not from memory — and obtain them by **running the probe, not
+by describing one**: `device_probe.py --mode early --arch <exact gfx token>
+--sweep-root <dir>` for an architecture this host might hold, or the
+`scheduled-runner` path in [device-envelope.md](device-envelope.md) for one it does
+not. Record what came back. Three outcomes, all acceptable, all reported:
 
-**Gate:** a named algorithm with a source, and a recorded compile envelope and
-device-fact set for each target architecture.
+- **observed** — a utility ran and the device answered. The facts are that device's.
+- **unobserved** — exit 3, `ProbeUnavailable`: no inspection utility could be run at
+  all. That is a statement about the tooling, not about the host, and it does **not**
+  fail this gate. Carry it forward as a stated limitation.
+- **device-absent** — a utility ran and contradicted the request. That is a real
+  observation too, and the architecture then needs the scheduler rather than this host.
+
+Where a fact could not be observed, say so and name the documented source used
+instead — the ROCm per-architecture specification table [prior-art.md](prior-art.md)
+links is the intended one. What this gate forbids is a device fact reported as
+observed when no probe ran.
+
+**Gate:** a named algorithm with a source, and per target architecture a recorded
+compile envelope, a device-fact set, and the probe attempt with its outcome —
+observed, unobserved or device-absent. An unobserved outcome passes this gate as a
+stated limitation; facts taken from documentation instead are labelled as such.
 
 ## 6. Decompose
 
@@ -194,11 +224,35 @@ otherwise indistinguishable from success:
 
 Run the shape set you claim, not one point of it, plus the boundary cases the
 specification implies: a non-contiguous stride, a dimension of 1, a
-non-tile-multiple size, and the smallest and largest shapes in the claimed envelope.
+non-tile-multiple size, and the smallest and largest shapes in the claimed envelope —
+across every dtype and every architecture claimed at step 1.
 
-**Gate:** per-output pass at a stated tolerance on named shapes on a named device,
-with the three assertions above satisfied. A skipped reference, an unlaunched kernel
-or an all-zero comparison is a failed gate.
+**When the numbers do not match.** The expected first run, not an exception. Work in
+this order and stop at the first thing that explains it:
+
+1. **Reduce.** Smallest failing shape, one failing dtype, one failing output. A
+   mismatch you can read by hand is a different problem from the one you cannot.
+2. **Hand-compare one element** against the step-3 operation specification — the
+   mathematics you wrote down, not the kernel you wrote.
+3. **Sentinel-check.** Confirm the kernel wrote at all, and for a multi-launch plan
+   that each scratch intermediate was written before it was read; [harness.md](harness.md)
+   describes both fills.
+4. **Re-check the precedence traps** [graph-analysis.md](graph-analysis.md) names —
+   mask precedence, a scalar arriving by a different route than you assumed, a
+   window or offset convention off by one — against *this* graph, not the family.
+5. **Run the contiguous variant** of the same shape. Still wrong means arithmetic;
+   suddenly right means indexing, and the strides are where to look.
+6. **Only then tolerance**, and only with a named cause — accumulation order, a
+   reference that does not split input and output dtypes, a genuinely wider
+   intermediate. A number chosen because it made the test pass is a defect report in
+   disguise ([harness.md](harness.md)).
+
+**Gate:** the coverage run, reported against the coverage claimed. Per output, a pass
+at a stated tolerance on named shapes on a named device, with the three assertions
+above satisfied; and each boundary case, dtype and architecture claimed either run
+and passed, or named NOT RUN. Coverage you did not run does not fail this gate — an
+unreported gap does. A skipped reference, an unlaunched kernel or an all-zero
+comparison is a failed gate.
 
 ## 9. Report and hand off
 
