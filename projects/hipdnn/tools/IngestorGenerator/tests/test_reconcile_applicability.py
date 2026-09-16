@@ -4,8 +4,8 @@
 """The reference library is the applicability oracle, and a decline it does not
 share is a defect.
 
-An engine's own bundles cannot establish this. They test the graphs the author
-thought of against a reference the author chose, and they go green exactly when the
+An engine's own bundles cannot establish this: they test the graphs the author
+thought of against a reference the author chose, and go green exactly when the
 author's model of "what we support" is self-consistent -- which is also the state an
 integration is in when it is silently under-covering.
 
@@ -15,16 +15,14 @@ The rule these tests defend:
     integration must serve it too. A decline the reference does not share is missing
     coverage or a matcher bug -- never a scope decision.
 
-The fourth case is real and deliberately out of scope here: a reference that ACCEPTS
-a request it then computes wrongly. That is a reference defect and a finding to
-report; it is not licence to decline quietly. This tool asks only about
-applicability, never numerics, and its docstring says so.
+A reference that ACCEPTS a request it then computes wrongly is deliberately out of
+scope: that is a reference defect and a finding to report, not licence to decline
+quietly. This tool asks only about applicability, never numerics.
 
 Fixtures use a stub library rather than importing the real one: what is under test is
 the RECONCILIATION LOGIC -- which combinations pass, which fail, and what the
-diagnostic says -- not any particular kernel's support matrix. Binding these to a
-real library would make them an integration test that breaks whenever that library's
-coverage changes, which is the opposite of what they are for.
+diagnostic says -- not any particular kernel's support matrix, which would make these
+break whenever that library's coverage changes.
 """
 
 from __future__ import annotations
@@ -210,10 +208,9 @@ class TestBothServe:
 class TestScopingIsTheWholeDesign:
     """A sibling kernel's coverage is not this integration's gap.
 
-    Comparing library-wide was tried against a real corpus and reported 51 shapes as
-    gaps in a dense integration -- decode and large head sizes that the dense kernel
-    declines for exactly the reasons hipDNN does, being served by sibling candidates.
-    A false alarm with a plausible story attached is the expensive kind.
+    Comparing library-wide reports as gaps the shapes a sibling candidate serves and
+    the dense kernel declines for exactly the reasons hipDNN does -- 51 of them on a
+    real corpus. A false alarm with a plausible story attached is the expensive kind.
     """
 
     def test_a_shape_only_a_SIBLING_family_serves_is_not_a_gap(self, env):
@@ -322,7 +319,6 @@ class TestOracleDeclaration:
 
 class TestRuntimeDeclinesOverrideTheOfflineAnswer:
     def test_a_runtime_decline_beats_what_the_dispatcher_says(self, env, tmp_path):
-        """What the engine ACTUALLY did outranks what the dispatcher says it could do."""
         declines = tmp_path / "declines.json"
         declines.write_text(json.dumps({"0": "no engine configurations available"}))
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
@@ -334,21 +330,15 @@ class TestTheCompleteEligibilityQuestion:
     """Ask `admits`, not the raw predicate.
 
     Registered candidates keep their arch and dtype gates in `capability`, so the
-    underscore predicate carries only the RESIDUAL checks -- the library's own
-    docstring calls admits "the only eligibility question a caller should ask" and
-    gives the worked example of a predicate that happily accepts a target its
-    capability block forbids.
-
-    Calling the predicate alone therefore reports the reference as serving a shape it
-    cannot, which turns a CORRECT hipDNN decline into a phantom coverage gap -- the
-    same class of false alarm as comparing library-wide, arriving by a different route.
+    underscore predicate carries only the RESIDUAL checks and can happily accept a
+    target its capability block forbids. Calling it alone reports the reference as
+    serving a shape it cannot, turning a CORRECT hipDNN decline into a phantom
+    coverage gap.
     """
 
     def test_a_candidate_gated_out_by_capability_does_not_count_as_serving(self, env):
         """`other_arch` shares the dense family and its predicate accepts a short
-        sequence, but its capability block excludes this arch. If the tool asked the
-        predicate directly it would report the short shape as served by the reference,
-        and flag our correct decline as a gap."""
+        sequence, but its capability block excludes this arch."""
         result = env.run(env.profile(family="dense"), env.shapes(_SHORT))
         assert result.returncode == 0, result.stdout + result.stderr
         assert (
@@ -379,15 +369,12 @@ class TestTheCompleteEligibilityQuestion:
 class TestDeclineReasonsAreNotMaskedBySiblings:
     """The verdict can be right while every recorded reason is wrong.
 
-    Scoping on a shared attribute matches several candidates. If one rejects on
-    CAPABILITY (wrong arch) that says only "this sibling is not the one for this
-    target" -- true, and useless as evidence. Keeping whichever decline came last
-    made every recorded reason the capability one and masked the real,
-    kernel-specific reason on every shape.
-
-    Counts were unaffected, which is what makes it dangerous: the gate passes, the
-    write-up records a uniformly wrong root cause, and nothing looks broken. On the
-    real corpus this contaminated 51 of 51 decline reasons.
+    Scoping on a shared attribute matches several candidates. A rejection on
+    CAPABILITY (wrong arch) says only "this sibling is not the one for this target"
+    -- true, and useless as evidence. Recording it in place of the real,
+    kernel-specific reason leaves the counts unaffected, which is what makes it
+    dangerous: the gate passes, the write-up records a uniformly wrong root cause,
+    and nothing looks broken.
     """
 
     def test_the_substantive_reason_wins_over_a_capability_rejection(self, env):
@@ -410,15 +397,14 @@ class TestDeclineReasonsAreNotMaskedBySiblings:
 
 
 class TestAGateThatCannotPassByAskingNothing:
-    """Three ways this tool reported success without comparing anything."""
+    """Three ways this tool could report success without comparing anything."""
 
     def test_a_declines_key_matching_no_shape_is_a_hard_failure(self, env, tmp_path):
-        """A typo'd graph name was silently ignored: the shape it marked stayed
-        counted as served and the run exited 0 having asked nothing about it.
-
-        Index keys make this worse, not better -- they are the only option for a
-        corpus without graph names, and they shift when the corpus is re-mined with
-        different flags, so the same file quietly marks a DIFFERENT shape."""
+        """A typo'd graph name silently ignored leaves the shape it marked counted as
+        served, and the run exits 0 having asked nothing about it. Index keys make
+        this worse, not better: they are the only option for a corpus without graph
+        names, and they shift when it is re-mined with different flags, so the same
+        file quietly marks a DIFFERENT shape."""
         declines = tmp_path / "typo.json"
         declines.write_text(json.dumps({"no_such_graph_name": "engine declined"}))
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(declines))
@@ -437,11 +423,10 @@ class TestAGateThatCannotPassByAskingNothing:
     def test_neither_side_serving_anything_is_not_agreement(self, env):
         """A profile whose request.defaults omits the opt-in selector makes the
         reference decline every shape -- and this integration decline them for the
-        same reason. The tool used to print RECONCILED over 0-of-N served.
-
-        The gate needs BOTH conditions: NOTHING served by either side, and the
-        scoping key absent from request.defaults. A shape either side serves proves
-        the comparison is live; a corpus nothing serves is otherwise legitimate."""
+        same reason -- which is RECONCILED over 0-of-N served. The gate needs BOTH
+        conditions: NOTHING served by either side, and the scoping key absent from
+        request.defaults. A shape either side serves proves the comparison is live;
+        a corpus nothing serves is otherwise legitimate."""
         result = env.run(env.profile(family="dense", opt_in=False), env.shapes(_SHORT))
         assert result.returncode == 2, result.stdout
         assert "agreement about nothing" in result.stderr
@@ -458,7 +443,6 @@ class TestAGateThatCannotPassByAskingNothing:
         assert result.returncode == 0
 
     def test_an_unreadable_declines_path_names_the_problem(self, env, tmp_path):
-        """It used to raise IsADirectoryError through the traceback."""
         result = env.run(env.profile(), env.shapes(_LONG), "--declines", str(tmp_path))
         assert result.returncode == 2
         assert "FAIL: --declines" in result.stderr
@@ -477,10 +461,10 @@ class TestReferenceRequestOverride:
     reference, and the failure looks exactly like a decline.
 
     rocKE's candidates isinstance-check their argument and refuse anything else with
-    "expected AttentionRequest, got X". Duck-typing does not satisfy a type check.
-    That refusal is raised per shape and is recorded as a decline, so the tool
-    reported RECONCILED -- every decline is one the reference makes too -- having
-    never consulted the reference on a single shape. Same failure mode as
+    "expected AttentionRequest, got X"; duck-typing does not satisfy a type check.
+    That refusal is raised per shape and recorded as a decline, so every decline is
+    one "the reference makes too" and the run reconciles having never consulted the
+    reference on a single shape -- the same failure mode as
     `TestAGateThatCannotPassByAskingNothing`, reached a different way.
 
     `reference_request:` overrides `request:` for the reference side only, with an
@@ -551,11 +535,11 @@ class TestReferenceRequestOverride:
 
 
 class TestServingWhatTheReferenceDeclines:
-    """The opposite direction, which used to be filed as agreement.
+    """The opposite direction, which is neither a gap nor agreement.
 
-    The bucket branch keyed only on the reference's answer, so a shape WE serve and
-    the reference declines landed in "both decline" -- counted as reconciled, with
-    the reference's decline reason printed as though we shared it.
+    A bucket keyed only on the reference's answer files a shape WE serve and the
+    reference declines under "both decline", counting it as reconciled and printing
+    the reference's decline reason as though we shared it.
     """
 
     def test_a_shape_only_we_serve_is_reported_separately(self, env, tmp_path):
@@ -723,10 +707,8 @@ def test_a_broken_candidate_registry_is_operational_under_every_flag(
 ):
     """The registry is the oracle's entry point. Every way of failing to obtain the
     candidate list means the reference was never asked -- which is exit 2, not a run
-    in which nothing happened to be unreconciled.
-
-    Without this the "function_absent" and "not_callable" rows exited 0 reporting
-    RECONCILED: the tool had compared this integration against an empty family."""
+    in which nothing happened to be unreconciled, and not a comparison of this
+    integration against an empty family."""
     (tmp_path / "rocke" / "library" / "reg.py").write_text(body + "\n")
     path = env.profile()
     _point_registry_at(path, "reg")
@@ -753,11 +735,10 @@ def test_a_failing_spec_factory_is_operational_under_every_flag(
 ):
     """`resolve_shapes` builds this integration's spec through the profile's own
     factory. A factory that RAISES has not declined the shape -- it has failed to
-    answer, and the two are not interchangeable.
-
-    The ValueError row matters most: a spec factory's validation error reads exactly
-    like a support decision, and treating it as one turns a broken profile into a
-    clean report of shapes 'this integration does not serve'."""
+    answer, and the two are not interchangeable. The ValueError row matters most: a
+    validation error reads exactly like a support decision, and treating it as one
+    turns a broken profile into a clean report of shapes 'this integration does not
+    serve'."""
     (tmp_path / "rocke" / "library" / "badfab.py").write_text(
         "import stublib\n"
         f"def kernel_spec(req): raise {raised}\n"
@@ -802,8 +783,7 @@ def test_a_broken_reference_translator_is_operational_under_every_flag(
     """`reference_request.via` exists so a profile whose request class is an adapter
     can still ask the reference in its own vocabulary. A translator that cannot
     produce a request means the reference was never asked about that shape -- the
-    same silent-vacuity failure the override was added to fix, arriving through the
-    fix itself."""
+    same silent vacuity, arriving through the mechanism that prevents it."""
     (tmp_path / "rocke" / "library" / "trans.py").write_text(
         "import stublib\n" + via + "\n"
     )

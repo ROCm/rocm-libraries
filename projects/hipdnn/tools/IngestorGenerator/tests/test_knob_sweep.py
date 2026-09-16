@@ -3,19 +3,13 @@
 
 """An arm may only carry shapes the engine will actually serve at that setting.
 
-A knob value can be legal for some shapes and illegal for others, and there are two
-different ways a shape can be out of reach. The spec constructor rejects an outright
-illegal combination and raises, which `_arm` has always caught. The other kind
-constructs perfectly well and is simply NOT SUPPORTED -- an unsupported head_size,
-a `use_cfvst` combination the kernel declines -- and only the engine's own
-eligibility predicate knows.
-
-That second kind is invisible unless the predicate is asked about the FINAL spec:
-after promotion to the builder's class and after this arm's overrides. Asking
-before the overrides answers a question about a different kernel, and the arm then
-ships a variant nothing will ever serve while the sweep reads as a clean comparison
-against parity -- the shape of the failure that once put 180 unbuildable descriptors
-on a device because no host gate had constructed the spec.
+An illegal knob combination raises from the spec constructor; an unsupported one --
+an unsupported head_size, a `use_cfvst` combination the kernel declines --
+constructs perfectly well, and only the engine's own eligibility predicate knows.
+That makes the answer depend on this arm's overrides, so the predicate has to be
+asked about the FINAL spec: after promotion to the builder's class and after the
+overrides. Asked earlier it answers about a different kernel, and the arm ships a
+variant nothing will ever serve while the sweep reads as a clean comparison.
 
 Nothing here imports rocKE: the dispatcher's resolution, the builder's spec class
 and the engine's predicate are all supplied as stubs, because what is under test is
@@ -90,9 +84,9 @@ def sweep(tmp_path, monkeypatch):
 
 class TestSupportIsCheckedOnTheFinalSpec:
     def test_the_baseline_arm_carries_every_resolved_shape(self, sweep):
-        """The control. Without overrides both shapes are supported, so an
-        exclusion below is caused by the perturbation and not by a predicate that
-        refuses this corpus outright."""
+        """The control: with no overrides both shapes are supported, so an exclusion
+        below is caused by the perturbation and not by a predicate that refuses this
+        corpus outright."""
         profile, resolutions = sweep
         config, unbuildable = knob_sweep._arm(resolutions, profile, {})
         assert unbuildable == []
@@ -101,10 +95,8 @@ class TestSupportIsCheckedOnTheFinalSpec:
     def test_a_shape_unsupported_only_after_the_override_is_excluded_and_named(
         self, sweep
     ):
-        """`head_size=64` constructs for both shapes and is declined for one of
-        them. The declined shape must not reach the arm, and the caller must be
-        able to say which one and why -- an arm covering a subset of the corpus is
-        measurable, a silently narrowed one is not."""
+        """Naming the excluded shape is what makes an arm covering a subset of the
+        corpus measurable; a silently narrowed one is not."""
         profile, resolutions = sweep
         config, unbuildable = knob_sweep._arm(resolutions, profile, {"head_size": 64})
 
@@ -118,9 +110,8 @@ class TestSupportIsCheckedOnTheFinalSpec:
         assert kernels[0]["kernel_source"]["spec"]["head_size"] == 64
 
     def test_a_profile_with_no_predicate_still_builds_every_arm(self, sweep):
-        """A profile that declares no eligibility API has not said anything about
-        support, and this tool must not invent an answer: every constructible shape
-        stays in the arm."""
+        """A profile that declares no eligibility API has said nothing about support,
+        and this tool must not invent an answer."""
         profile, resolutions = sweep
         profile.pop("predicate")
         _config, unbuildable = knob_sweep._arm(resolutions, profile, {"head_size": 64})
@@ -129,10 +120,9 @@ class TestSupportIsCheckedOnTheFinalSpec:
 
 class TestTheDeclarationReachesTheEmittedConfig:
     def test_the_arm_carries_the_specialization_block(self, sweep):
-        """An arm is a generator config like any other. Dropping the declaration
-        here would emit descriptors with no specialization_contract, and the
-        machine that receives the archive would have nothing to check the compiled
-        bytes against."""
+        """Without the declaration the arm emits descriptors carrying no
+        specialization_contract, leaving the machine that receives the archive
+        nothing to check the compiled bytes against."""
         profile, resolutions = sweep
         config, _unbuildable = knob_sweep._arm(resolutions, profile, {})
         assert config["specialization"] == profile["specialization"]
@@ -144,13 +134,12 @@ class TestTheDeclarationReachesTheEmittedConfig:
             knob_sweep._arm(resolutions, profile, {})
 
     def test_a_callback_resolved_knob_with_no_declared_readout_is_refused(self, sweep):
-        """The waiver that must not exist. A knob this profile settles with its own
-        policy callback has to name the builder-owned attribute or zero-argument
-        accessor that answers the same question on the object the compiler hands the
-        builder. There is no naming convention to infer one from, copying the
-        formula into the declaration would certify the compile against something
-        other than what built it, and moving the knob to matcher_only_fields would
-        claim the compiler does not specialize on a field it does."""
+        """A knob settled by this profile's own policy callback must name the
+        builder-owned attribute or zero-argument accessor answering the same question
+        on the object the compiler hands the builder. There is nothing to infer one
+        from, copying the formula in would certify the compile against something other
+        than what built it, and matcher_only_fields would claim the compiler does not
+        specialize on a field it does."""
         profile, resolutions = sweep
         profile["policies"] = {
             "use_cfvst": {"module": "stub_engine", "function": "supports"}

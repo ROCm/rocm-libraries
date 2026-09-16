@@ -374,8 +374,6 @@ def _validate_kdp(desc, log=print):
             f"{where} 'arch' must be a list of strings (empty = wildcard)"
         )
     _reject_nonbare_arch(arch, where)
-    # A KDP may declare the `specialization_contract` its inline kernels inherit,
-    # so the block is checked here too rather than only where a kernel repeats it.
     _validate_provenance(doc.get("provenance", {}), where)
     kds = doc["kernelDescriptors"]
     if not isinstance(kds, list) or not kds:

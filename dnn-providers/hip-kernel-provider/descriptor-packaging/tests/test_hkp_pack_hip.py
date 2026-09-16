@@ -1177,10 +1177,8 @@ def _share_contract_onto_kdp(kdp_path):
 def test_kdp_level_contract_is_inherited_and_ships(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # A declaration written once on the KDP covers every inline kernel under it:
-    # the pack succeeds, the shipped shard carries the declaration on the KDP and
-    # on no kernel, and a reader with only the shard resolves a full consumer list
-    # for each of them.
+    # A declaration written once on the KDP covers every inline kernel under it, so a
+    # reader with only the shipped shard still resolves a full consumer list for each.
     src = _copy_fixture(tmp_path, main_fixture)
     _share_contract_onto_kdp(src / "pointwise.kdp.json")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])

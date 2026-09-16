@@ -4,20 +4,16 @@
 """The converse of the desk check: can any graph SELECT this variant?
 
 The desk check (`hkp_desk_check.py`) and the variant-set gate
-(`verify_variant_sets.py`) both ask, in different ways, "does a shipped variant
-match this graph?" and "is the set internally consistent?". Neither ever asks the
-question backwards, and backwards is where dead weight hides: a real integration
-shipped 48 variants of which 24 could not be selected by ANY graph the author
-could write. Every shipped shape happened to have a sequence length divisible by
-the wider of two tiles, so both tiles were always APPLICABLE and the scorer --
-which ranks the wider tile higher -- picked it every single time. The suite was
-green throughout; nothing had ever asked "for the narrow tile, is there a shape
-where it wins?"
+(`verify_variant_sets.py`) both ask "does a shipped variant match this graph?" and
+"is the set internally consistent?". Neither asks the question backwards, and
+backwards is where dead weight hides: a real integration shipped 48 variants of
+which 24 could not be selected by ANY graph the author could write, because every
+shipped shape had a sequence length divisible by the wider of two tiles, so both
+were always APPLICABLE and the scorer picked the wider one every time. The suite
+was green throughout.
 
-`TestGfx942AttentionDenseScore.RanksTheWiderKvTileHigher` and
-`TestGfx942AttentionDenseKernelMatch.AcceptsEitherShippedTileForA256KeyGraph`
-(TestGfx942AttentionDenseMatchers.cpp) are the real engine's own version of this
-exact shape: applicability is `seqlen_kv % block_n == 0`, not equality, and both
+`TestGfx942AttentionDenseMatchers.cpp` carries the real engine's version of the
+same shape: applicability is `seqlen_kv % block_n == 0`, not equality, so both
 shipped tiles are simultaneously legal at the shapes the corpus actually has.
 `TestHistoricalCase` below reproduces that structure without a build or a device.
 """
@@ -62,10 +58,7 @@ def env(tmp_path):
 
     The bundle's schema is reached through `KDP.engine -> UED.metadata -> KMD`,
     the same chain the loader and the variant-set gate walk, so the fixture has to
-    carry the UED that links them. A KDP and a KMD merely sharing a filename stem
-    are two unrelated documents here, which is the point: scoring a bundle against
-    whatever schema sits beside it decides every default and every applicability
-    verdict with a coincidence of naming.
+    carry the UED that links them.
     """
 
     def write_bundle(variants: list[dict], fields=None) -> Path:
@@ -155,14 +148,10 @@ class TestControlPasses:
     def test_the_two_dtype_vocabularies_are_the_same_value(self, env):
         """Metadata says `BF16`; a request corpus says `bf16`. Same value.
 
-        Comparing them raw made EVERY variant unreachable -- observed as 91 of 91
-        on a set generated from the very corpus it was checked against. A false
-        alarm that total is worse than no check: it teaches an author to pass
-        --allow-unreachable and stop reading the output.
-
         The rest of this pipeline translates between the two spellings on purpose
         (the gate's `vocabulary:` block exists for exactly this), so a reachability
-        check that does not is the one component still comparing apples to oranges.
+        check comparing them raw reports EVERY variant unreachable -- a false alarm
+        total enough to teach an author to pass --allow-unreachable and stop reading.
         """
         kdp = env.write_bundle([_variant("upper", block_n=64, dtype="BF16")])
         shapes = env.write_shapes(_DIVISIBLE_SHAPES)  # corpus carries "bf16"
@@ -243,10 +232,9 @@ class TestNoRankingDeclared:
             [_variant("wide", block_n=64), _variant("narrow", block_n=32)]
         )
         shapes = env.write_shapes(_DIVISIBLE_SHAPES)
-        # No --score-field, no --divides at all: block_n then compares by
-        # equality and is simply never applicable to a differently-valued rival,
-        # so both are "applicable to itself" trivially -- the point of this
-        # test is the declared-ranking message, not the bucket counts.
+        # With no --divides, block_n compares by equality, so each variant is only
+        # "applicable to itself" -- this test is about the declared-ranking message,
+        # not the bucket counts.
         result = env.run(kdp, shapes)
         assert result.returncode == 0, result.stdout + result.stderr
         assert "NO RANKING DECLARED" in result.stdout
@@ -270,13 +258,10 @@ class TestAllowUnreachableFlag:
 class TestTheSchemaIsReachedByReference:
     """The bundle's KMD is found by walking the ids the documents declare.
 
-    Everything below depends on the KMD: `default_value` decides what an absent
-    metadata key resolves to, and that resolution decides applicability. Reaching
-    the schema by swapping a filename suffix on the same stem picks whichever
-    document happens to sit beside the KDP, so a tree with two unrelated bundles
-    in one directory -- or one whose real schema lives above it -- is scored
-    against the wrong defaults and every verdict here is about a bundle nobody
-    ships.
+    `default_value` decides what an absent metadata key resolves to, and that
+    decides applicability. Reaching the schema by swapping a filename suffix picks
+    whichever document happens to sit beside the KDP, so a tree with two unrelated
+    bundles in one directory is scored against the wrong defaults entirely.
     """
 
     def test_a_correctly_wired_bundle_resolves(self, env):
@@ -300,8 +285,6 @@ class TestTheSchemaIsReachedByReference:
     def test_a_same_stem_kmd_that_nothing_references_is_not_accepted(
         self, env, tmp_path
     ):
-        """The defect this replaces: a KDP and a KMD sharing a stem, with nothing
-        in either document connecting them."""
         kdp = env.write_bundle([_variant("only", 64)])
         (tmp_path / "engine.ued.json").unlink()
         shapes = env.write_shapes(_DIVISIBLE_SHAPES)
@@ -311,46 +294,13 @@ class TestTheSchemaIsReachedByReference:
 
 
 class TestGfx950RealBundle:
-    """The real gfx950 bundle against the real 93-shape corpus -- the case the
-    module docstring and `TestHistoricalCase` above only model in miniature.
-    Nothing here needs a device or a build: `.kdp.json`/`.kmd.json` are
-    committed descriptor JSON and the corpus is a committed shape list.
+    """The real gfx950 bundle against the real shape corpus -- the case the module
+    docstring and `TestHistoricalCase` above only model in miniature.
 
-    WHAT THESE USED TO ASSERT, AND WHY THAT EXPIRED. When the pack shipped 84
-    variants, a second-pass review established that no corpus shape had more
-    than ONE applicable variant, so the profile's missing `score:` block was
-    inert -- no ranking, tie, or fall-through was ever evaluated. These tests
-    pinned that with literal counts (84 variants, `SELECTED 82`, `UNREACHABLE
-    2`) and an `applicable() <= 1` assertion.
-
-    `329865eb878` ("full coverage + block_m variants, 1612 kernels") ENDED that
-    inertness ON PURPOSE: it ships both `block_m` geometries per shape, so every
-    covered shape now admits exactly the twin. `<= 1` therefore had to fail, and
-    the literal counts moved with every resize (84 -> 1612 -> 1678 -> 1694).
-    Those literals were fixture, not invariant, and they were asserting the
-    absence of the very feature that commit added.
-
-    WHAT ACTUALLY HAS TO HOLD, and what these now check instead -- derived from
-    the bundle rather than hard-coded, so a resize cannot make them stale again:
-
-      1. Every candidate set a shape presents is TIED ON `block_n`. That is the
-         real precondition for the native `scoreKernel`, which ranks on
-         `block_n` ALONE (Gfx950AttentionDenseNative.cpp): while all candidates
-         for a shape share one `block_n`, the declared ranking cannot reorder
-         them and the choice falls to tuning. The day a second `block_n` reaches
-         one shape's candidate set, `score` starts doing real work and its
-         correctness needs verifying rather than assuming -- which is the alarm
-         the old `<= 1` was reaching for, stated in terms of the thing that
-         actually matters.
-      2. Declaring the ranking still changes NOTHING observable: the narrowed
-         and declared runs must agree line for line. That is the profile
-         comment's claim, and it survives the resize untouched.
-
-    Consequence worth stating, because it is the measurement trap: tied
-    candidates mean the shipped set is only as good as its TIE-BREAK unless
-    something measures them. That is why every sweep over this pack must export
-    `HIPDNN_FORCE_BENCHMARKING=1` (Knowledge/hipdnn/gpu-perf-comparison-
-    methodology.md trap 3 -- unforced, the identical set measured 1.195 -> 0.999).
+    Nothing here needs a device or a build: `.kdp.json`/`.kmd.json` are committed
+    descriptor JSON and the corpus is a committed shape list. Both properties are
+    derived from the bundle rather than hard-coded, so resizing the variant set
+    cannot make them stale.
     """
 
     _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)
@@ -382,13 +332,10 @@ class TestGfx950RealBundle:
 
     @classmethod
     def _require_assets(cls):
-        """The bundle, the corpus and the profile are gfx950 deliverables that
-        exist only on a branch carrying that pack. On a checkout without them --
-        the tooling branch these shared tests also run on -- there is nothing to
-        assert about, so skip rather than fail: an absent asset is a branch fact,
+        """The bundle, the corpus and the profile are gfx950 deliverables that exist
+        only on a branch carrying that pack, so an absent asset is a branch fact and
         not a regression. `TestHistoricalCase` above models the same property in
-        miniature and runs everywhere, so skipping here does not leave the
-        behaviour unguarded."""
+        miniature and runs everywhere, so skipping here leaves nothing unguarded."""
         for label, path in (
             ("gfx950_attention_dense.kdp.json", cls._KDP),
             ("gfx950_attention_dense.shapes.json", cls._SHAPES),
@@ -398,20 +345,14 @@ class TestGfx950RealBundle:
                 pytest.skip(f"{label} not present in this checkout")
 
     def test_every_candidate_set_is_tied_on_block_n(self):
-        """The precondition for the native `scoreKernel`, checked directly
-        rather than inferred from the tool's own report.
+        """The precondition for the native `scoreKernel`, checked directly rather
+        than inferred from the tool's own report.
 
-        `scoreKernel` ranks on `block_n` ALONE. So long as every candidate set a
-        shape presents holds ONE distinct `block_n`, the declared ranking is a
-        tie it cannot break, and which variant runs is decided by tuning rather
-        than by `score`. That is the property the pack's own comment says to
-        re-check whenever the variant set changes, and it is what makes
-        `HIPDNN_FORCE_BENCHMARKING=1` mandatory for any perf claim about it.
-
-        This deliberately does NOT assert `len(candidates) <= 1`. Shipping both
-        `block_m` geometries per shape (329865eb878) made multi-candidate sets
-        the intended state; the question is no longer "is there a choice?" but
-        "can `score` see a difference?", and the answer must stay no.
+        `scoreKernel` ranks on `block_n` ALONE, so while every candidate set holds
+        ONE distinct `block_n` the declared ranking is a tie it cannot break and the
+        choice falls to tuning. Multi-candidate sets are the intended state; the
+        question is not "is there a choice?" but "can `score` see a difference?",
+        and the answer must stay no.
         """
         self._require_assets()
         defaults, descriptors = variant_reachability.load_bundle(str(self._KDP))
@@ -457,15 +398,13 @@ class TestGfx950RealBundle:
         )
 
     def test_declared_ranking_matches_the_narrowed_verdict(self, tmp_path):
-        """Runs the real tool twice against the real bundle: once with no
-        ranking declared (narrowed), once with the profile's `score:` block.
+        """Runs the real tool twice against the real bundle: once with no ranking
+        declared (narrowed), once with the profile's `score:` block.
 
-        The two must agree on EVERY tally. That is the profile comment's claim
-        -- declaring the ranking changes nothing observable -- and it is the
-        thing worth pinning. The tallies are compared to EACH OTHER rather than
-        to literals: the old form hard-coded `SELECTED 82` from an 84-variant
-        bundle and went stale three resizes running (84 -> 1612 -> 1678 -> 1694)
-        while the property it meant to protect never changed.
+        The two must agree on EVERY tally -- that is the profile comment's claim,
+        that declaring the ranking changes nothing observable. The tallies are
+        compared to EACH OTHER rather than to literals, which go stale on every
+        resize while the property they meant to protect does not change.
         """
 
         self._require_assets()

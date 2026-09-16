@@ -397,24 +397,19 @@ def _selected_entries(doc, arch, ukd_by_id):
 def _agreement_inputs(flat, arch):
     """Every consumer's declaration and observation request, before any compile.
 
-    Two variants of one builder share a compile result, and two KDPs can reference
-    one standalone UKD, so the requests a compile must satisfy are a property of the
-    whole selected set rather than of the descriptor the walk happens to reach
-    first. Collecting them all up front is what lets the compile capture every
-    consumer's readouts in a single pass over the builder object -- a request
-    discovered later could only be answered by recompiling or by certifying one
-    consumer against another's observations.
+    The requests a compile must satisfy belong to the whole selected set, not to the
+    descriptor the walk happens to reach first: two variants of one builder share a
+    compile result, and two KDPs can reference one standalone UKD. Collecting them
+    up front is what lets a single pass over the builder object capture every
+    consumer's readouts -- a request discovered later could only be answered by
+    recompiling, or by certifying one consumer against another's observations.
 
-    References resolve by UUID -- KDP `engine` to the UED, the UED's `metadata` to
-    the KMD -- never by filename, stem or sibling. Returns
+    References resolve by UUID, never by filename, stem or sibling. Returns
     `({ukd id: [consumer record]}, {variant key: {digest: request}})`.
 
-    A KDP may author `engine` as null, which the loader accepts and simply does not
-    resolve. Such a pack has no engine and therefore no metadata catalog, so its
-    UKDs have no consumer and no specialization obligation -- there are no KMD
-    fields for a claim to be about. That is an EMPTY obligation, not a waived one,
-    and the distinction is enforced: a UKD under an engine-less KDP that
-    nonetheless declares a contract is naming a consumer that does not exist.
+    A KDP may author `engine` as null, leaving its UKDs no consumer and no KMD
+    fields for a claim to be about. That is an EMPTY specialization obligation, not
+    a waived one, so a contract declared under an engine-less KDP is rejected.
     """
     generics = {d.id: d.doc for d in flat.generics()}
     schemas = {d.id: d.doc for d in flat.generics() if d.type == "kmd"}
@@ -458,9 +453,7 @@ def _agreement_inputs(flat, arch):
             kind = ukd["kernel_source"]["kind"]
             # A passthrough kind is emitted exactly as authored and no producer ever
             # runs for it, so there is no producing compiler whose specialization a
-            # contract could state and no observation for one to certify. The
-            # obligation is therefore scoped to the compiling kinds it is defined
-            # for; it stays mandatory for every one of those.
+            # contract could state and no observation for one to certify.
             if kind in _PASSTHROUGH_KINDS:
                 continue
             # A standalone UKD is its own file and several KDPs may reference it,

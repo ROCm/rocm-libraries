@@ -3,28 +3,18 @@
 
 """The sweep, probe and audit CLIs, exercised as programs.
 
-These are not unit tests of helper functions. Every case below runs the actual
-`tools/*.py` entry point as a subprocess, from a directory unrelated to the
-generator tree and to the sweep's own inputs, because the defects these guard
-against were all in the wiring: a driver that resolved a path against the caller's
-cwd, a gate that never ran because the phase short-circuited, a resume that trusted
-a filename.
+Every case below runs the actual `tools/*.py` entry point as a subprocess, from a
+directory unrelated to the generator tree and to the sweep's own inputs, because
+the defects these guard against were all in the wiring: a driver that resolved a
+path against the caller's cwd, a gate that never ran because the phase
+short-circuited, a resume that trusted a filename.
 
 CONTROL-FLOW FIXTURES. `bin/rocminfo`, `bin/python3` and each install tree's
-`bin/hipdnn_list_engines` below are FIXTURES, not models of the real tools. They
-exist so the driver's control flow -- which gate fires, which phase re-runs, what
-the resume decision is -- can be steered deterministically without a GPU. They
-emit the field names and shapes the real `dnn_benchmarking` result schema defines
-(`reporting/suite_results.py`: `SuiteResult.to_dict` ->
-`{"metadata", "graphs"}`, `GraphResult.to_dict` ->
-`{"graph_name", "graph_path", "results"}`, `ProviderEngineResult.to_dict` ->
-`provider`/`engine_id`/`engine_name`/`status`/`role`/`plugin_path`/
-`gpu_kernel_stats`/`correctness`, and `CorrectnessResult.to_dict` ->
-`passed`/`execution_success`/`tolerance_match`/`rtol`/`atol`) and nothing more.
-They prove NOTHING about the real benchmark, the real engine, or any device: no
-case here establishes that a kernel ran, that a number is correct, or that an
-install tree is loadable. What they establish is that when the evidence says a
-given thing, the driver reaches the intended verdict.
+`bin/hipdnn_list_engines` below emit the field names and shapes the real
+`dnn_benchmarking` result schema defines (`reporting/suite_results.py`) and nothing
+more. They exist so the driver's control flow can be steered deterministically
+without a GPU; no case here establishes that a kernel ran, that a number is
+correct, or that an install tree is loadable.
 """
 
 from __future__ import annotations
@@ -67,13 +57,11 @@ print("Engines:")
 print("  {name} (0x{eid:x})")
 """
 
-#: CONTROL-FLOW FIXTURE, and deliberately TWO programs in one file.
-#:
-#: The driver identifies the benchmark's Python environment by running the same
-#: executable with `-c <probe>`, then runs it again as the benchmark. A single file
-#: answering both is what lets a test control the whole benchmark side without a
-#: venv: the identity answer stays cheap and content-bound, and the benchmark answer
-#: is steered entirely by the scenario JSON at $FAKE_SCENARIO.
+#: CONTROL-FLOW FIXTURE, and deliberately TWO programs in one file: the driver
+#: identifies the benchmark's Python environment by running the same executable with
+#: `-c <probe>`, then runs it again as the benchmark. Answering both here is what
+#: lets a test steer the whole benchmark side, via the scenario JSON at
+#: $FAKE_SCENARIO, without a venv.
 _FAKE_BENCH = """\
 import glob, json, os, sys
 from pathlib import Path
@@ -456,9 +444,8 @@ class TestTheCLIsRunAsPrograms:
 class TestGatesFailIndependently:
     """Each gate must be able to be the ONLY thing that failed.
 
-    A driver where one gate's failure suppresses another's evaluation reports a
-    single cause for a run with several, and the second one is then found only by a
-    later, more expensive step.
+    Where one gate's failure suppresses another's evaluation, a run with several
+    causes reports one, and the rest surface only at a later, more expensive step.
     """
 
     def _only_failing(self, gates: dict) -> set:
@@ -467,8 +454,8 @@ class TestGatesFailIndependently:
     def test_a_nonzero_benchmark_status_fails_the_run_despite_valid_evidence(
         self, sweep
     ):
-        """rc 7 with a complete, well-formed, fully served timing artifact. The
-        artifact is exactly what a passing run produces; only the status differs."""
+        """rc 7 with exactly the artifact a passing run produces; only the status
+        differs."""
         sweep.scenario(rc=7)
         result = sweep.run()
         assert result.returncode == 1
@@ -654,10 +641,10 @@ class TestTheDriverRefusesAnUnsafeConfig:
         assert "shell launchers are not sweep executables" in result.stderr
 
     def test_a_wrapper_that_selects_a_shell_is_refused_by_its_shebang(self, sweep):
-        """Refusing only argv[0]'s FILENAME lets any differently-named wrapper
-        through the config gate; it is then caught much later by the interpreter
-        identity gate, which declines the sweep (exit 1) instead of rejecting the
-        config (exit 2). What makes it unusable is what it SELECTS, not its name."""
+        """What makes a launcher unusable is what it SELECTS, not its name. Refusing
+        only argv[0]'s filename leaves a differently-named wrapper to the much later
+        interpreter identity gate, which declines the sweep (exit 1) rather than
+        rejecting the config (exit 2)."""
         wrapper = _script(sweep.bin / "run-benchmark", "")
         wrapper.write_text('#!/bin/sh\nexec "%s" "$@"\n' % (sweep.bin / "python3"))
         config = json.loads(sweep.config_path.read_text())
@@ -718,9 +705,8 @@ class TestTheDriverRefusesAnUnsafeConfig:
         self, sweep
     ):
         """An OSError is a broken execution host, not a measured decline. Reported
-        as SWEEP_INCOMPLETE it reads as an ordinary gated-out result, and a harness
-        driving several arches carries on as though this one had simply produced
-        nothing to compare."""
+        as SWEEP_INCOMPLETE, a harness driving several arches carries on as though
+        this one had simply produced nothing to compare."""
         sweep.root.chmod(0o555)
         try:
             result = sweep.run()

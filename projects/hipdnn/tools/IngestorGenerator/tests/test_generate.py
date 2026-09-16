@@ -3,9 +3,8 @@
 
 """CLI subprocess tests for generate.py.
 
-Exit-code contract (frozen in the phase-2 shared contract):
-exit 0 success; exit 1 on ConfigError or a render failure; exit 2 from
-argparse on a bad flag. --dry-run must not create the output dir.
+Exit-code contract: exit 0 success; exit 1 on ConfigError or a render failure;
+exit 2 from argparse on a bad flag. --dry-run must not create the output dir.
 --force is required to overwrite an existing non-empty output directory.
 """
 
@@ -97,7 +96,6 @@ class TestForceOverwrite:
         )
         assert result.returncode == 1
         assert "--force" in result.stderr
-        # The pre-existing file must survive untouched.
         assert (output_dir / "existing_file.txt").read_text() == "hand-authored content"
 
     def test_existing_nonempty_dir_with_force_succeeds(self, tmp_path):
@@ -115,7 +113,6 @@ class TestForceOverwrite:
         assert result.returncode == 0, result.stderr
 
     def test_existing_empty_dir_without_force_succeeds(self, tmp_path):
-        """--force only guards a NON-empty directory."""
         output_dir = tmp_path / "out"
         output_dir.mkdir()
 

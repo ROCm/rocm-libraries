@@ -1,65 +1,19 @@
-"""Every decline must be reconciled against the reference, WITHIN THE SAME KERNEL FAMILY.
+"""Reconcile every decline against the reference, WITHIN THE SAME KERNEL FAMILY.
 
-THE RULE, and it is not negotiable:
+The rule: if the reference's implementation OF THE KERNEL BEING INTEGRATED serves an
+equivalent request and its result validates, hipDNN must serve it too. A decline that
+kernel does not share is a defect -- missing coverage, or wrong applicability logic --
+not a scope decision.
 
-    If rocKE's implementation OF THE KERNEL YOU ARE INTEGRATING serves an equivalent
-    request and its result validates, hipDNN must serve it too. A hipDNN decline that
-    that kernel does not share is a DEFECT in this integration -- missing coverage, or
-    applicability logic that is wrong -- not a scope decision.
+Scoped by `family` from the profile, never library-wide: a library registers several
+candidates per operation (for attention, a dense kernel, tiled paths, decode
+specialists) and a shape only a sibling serves is that sibling's job, not this
+integration's gap. The profile also names the attribute to match on, because a library
+may give every candidate the same `family` while `algorithm` is the real discriminator.
 
-An engine's own bundles cannot show this. They test the graphs the author thought of,
-against a reference the author chose, and they are green precisely when the author's
-model of "what we support" is self-consistent. This tool compares that model against
-the kernel's own, which is the only comparison that can find a gap the author does not
-already know about.
-
-SCOPE IS THE WHOLE DESIGN, AND GETTING IT WRONG INVENTS WORK. A library typically
-registers several candidates for one operation -- for attention: a dense kernel, a
-couple of unified tiled paths, decode specialists. They are DIFFERENT KERNELS with
-different capabilities. If you are integrating the dense kernel, a shape that only the
-tiled path serves is NOT your coverage gap: it is a different kernel's job, and
-"integrate the tiled path too" is a separate piece of work with its own variant set.
-
-Comparing against every registered candidate was tried and is wrong. On one real
-corpus it reported 51 shapes -- decode and large head sizes -- as gaps in a dense
-integration, when the dense kernel declines every one of them for exactly the reasons
-hipDNN does, and the shapes were being served by sibling candidates. That is a false
-alarm with a plausible story attached, which is the expensive kind.
-
-So the oracle is scoped by `family` from the profile: only candidates whose algorithm
-(or family, or spec_id -- whichever the library keys on) matches the kernel under
-integration. Note that a library may give every candidate the same `family` string
-while the real discriminator is `algorithm`; the profile says which attribute to match
-on, because this tool cannot know.
-
-OPT-IN KERNELS NEED THEIR SELECTOR SET. Where a candidate only matches when the
-request names it, the oracle must set that selector or the kernel declines everything
-and every decline reconciles trivially -- a gate that passes by asking nothing. That
-is what `request.defaults` is for here, and it is the one place those defaults SHOULD
-be inherited.
-
-THREE OUTCOMES, and only the first two are a pass:
-
-  * BOTH SERVE   -- fine, nothing owed.
-  * BOTH DECLINE -- fine, and the reasons should agree. Record the reference's reason;
-                    it is better evidence than your own matcher's, because it is
-                    independent.
-  * ONLY THE REFERENCE SERVES -- **FAIL**. Either the variant set is missing this
-                    shape, or the matcher rejects something it should accept.
-
-THE FOURTH CASE, which is real and must not be silently swallowed: the reference
-accepts a request it then computes WRONGLY. That is a reference defect, and a finding
-to report -- not licence for hipDNN to decline quietly. This tool cannot detect it,
-because it asks only about applicability, never about numerics. Correctness comes from
-the benchmark sweep with `--validate`.
-
-    reconcile_applicability.py --profile <p.yaml> --shapes <corpus.json> \\
-                               [--declines <hipdnn-declines.json>]
-
-Without `--declines` it reports what the reference kernel serves against what THIS
-integration's dispatcher-resolved parity set would serve, which is the cheap offline
-form. With a declines file -- graph names and reasons harvested from a real run -- it
-reconciles actual runtime behaviour, which is the form step 9 requires.
+Only applicability is asked about, never numerics, so a reference that accepts a request
+it then computes WRONGLY is invisible here. That is a reference defect to report, not
+licence to decline quietly; correctness comes from the benchmark sweep with `--validate`.
 """
 
 from __future__ import annotations
@@ -86,11 +40,8 @@ from dispatch_parity import (  # noqa: E402
 def reference_serves(shapes: list[dict], profile: dict) -> dict:
     """For each shape: does the reference kernel FAMILY serve it, and which candidate?
 
-    Scoped, never library-wide. A sibling candidate serving a shape this kernel refuses
-    is a different kernel's job, not this integration's gap.
-
-    Request construction and reference API failures are operational errors. Only
-    a validated false eligibility result is an ordinary decline.
+    Request construction and reference API failures are operational errors; only a
+    validated false eligibility result is an ordinary decline.
     """
     entry = profile.get("reference_candidates") or {}
     if not entry:
@@ -128,46 +79,32 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
             f"exist would report EVERY shape as unreconciled."
         )
 
-    # The REFERENCE's request class, which is not always the one the generator side
-    # uses. `reference_request:` overrides `request:` when present.
-    #
-    # Why the override exists. A profile whose `request.class` is an ADAPTER -- because
-    # the kernel's own dispatch entry point needs a different vocabulary than the
-    # library's registry does -- cannot use that adapter here: rocKE's candidates
-    # `isinstance`-check their argument and refuse anything else with
-    # "expected AttentionRequest, got X". Duck-typing does not satisfy a type check.
-    #
-    # That refusal is per-shape and looks exactly like a decline, so WITHOUT this the
-    # tool reports `RECONCILED: every decline is one the reference makes too` having
-    # never consulted the reference at all -- the "gate that passes by asking nothing"
-    # this file's own header warns about, and indistinguishable from a real pass.
+    # The REFERENCE's request class; `reference_request:` overrides `request:` when
+    # present. An adapter class cannot be reused here, because candidates
+    # `isinstance`-check their argument and duck-typing does not satisfy a type check.
+    # That refusal is per-shape and looks exactly like a decline, so without the
+    # override every decline reconciles against a reference never actually consulted.
     reference_decl = profile.get("reference_request") or profile.get("request") or {}
     request_cls = _import(
         *_required(reference_decl, "reference_request", "module", "class")
     )
     arch = profile.get("arch")
-    # Opt-in defaults ARE inherited here, unlike a library-wide oracle. A candidate that
-    # only matches when the request names it declines everything without its selector,
-    # and every decline would then reconcile trivially -- a gate that passes by asking
-    # nothing at all.
+    # Opt-in defaults ARE inherited here: without its selector, a candidate that only
+    # matches when the request names it declines everything and reconciles trivially.
     defaults = dict(reference_decl.get("defaults") or {})
 
-    # An optional TRANSLATOR, for the case where the corpus is written in the
-    # generator side's vocabulary and the reference wants its own. Declared as
-    # `reference_request.via: {module, function}`; it takes the shape dict and returns
-    # the reference request object, so the mapping lives in the integration's own
-    # adapter rather than being guessed here.
+    # An optional TRANSLATOR (`reference_request.via: {module, function}`) taking the
+    # shape dict to a reference request, for a corpus written in the generator side's
+    # vocabulary. The mapping lives in the integration's adapter, not guessed here.
     via = None
     via_decl = reference_decl.get("via") or {}
     if via_decl:
         via = _import(
             *_required(via_decl, "reference_request.via", "module", "function")
         )
-        # DECLARED and unusable is an error, never a fallback. A profile that names
-        # a translator has said its corpus is in the wrong vocabulary for the
-        # reference; quietly constructing the request class directly instead asks
-        # the reference a question the profile said it would not understand, and
-        # every per-shape type rejection then reads as a decline.
+        # DECLARED and unusable is an error, never a fallback: a profile naming a
+        # translator has said its corpus is in the wrong vocabulary, so constructing
+        # the request class directly would make every type rejection read as a decline.
         if not callable(via):
             raise ParityError("reference_request.via must name a callable")
     if not isinstance(request_cls, type):
@@ -195,20 +132,15 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
                 f"reference request {index} construction failed: {exc}"
             ) from exc
         served, why = False, None
-        # Collect EVERY candidate's verdict, then choose the reason deliberately. The
-        # naive loop kept whichever decline came last, and on a family with more than
-        # one member that is arbitrary: scoping on a shared `algorithm` matches both the
-        # gfx942 and gfx950 dense candidates, and gfx950's capability gate rejects a
-        # gfx942 request BEFORE reaching the shared predicate -- so every recorded reason
-        # became "arch not in (gfx950,)" and the real, kernel-specific reason
-        # (seqlen_q % 256, head_size, ...) was masked on every shape. The verdict was
-        # still right; the evidence step 9 exists to collect was uniformly wrong.
+        # Collect EVERY candidate's verdict, then choose the reason deliberately. On a
+        # multi-member family the last decline is arbitrary: a sibling's capability gate
+        # rejects on arch BEFORE the shared predicate runs, masking the kernel-specific
+        # reason that is the evidence worth collecting. See `_decline_reason`.
         reasons = []
         for candidate in candidates:
-            # Every candidate is consulted, even after an acceptance: a later
-            # broken API must not be hidden by an earlier successful predicate. A
-            # candidate whose eligibility API is missing or unusable raises
-            # ParityError out of `_eligible`; only a validated verdict returns here.
+            # Every candidate is consulted, even after an acceptance: a later broken
+            # API must not be hidden by an earlier successful predicate. `_eligible`
+            # raises ParityError rather than returning an unvalidated verdict.
             ok, reason = _eligible(candidate, request)
             if ok and not served:
                 served = True
@@ -224,12 +156,9 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
 def _decline_reason(reasons: list[tuple[str, str]]) -> str:
     """Pick the most informative decline from a family's candidates.
 
-    A capability rejection ("wrong arch", "wrong dtype") says only that THIS member of
-    the family is not the one for this target -- true, and useless as evidence. The
-    kernel-specific reason from the member that actually targets this request is what a
-    write-up needs. Prefer a non-capability reason; fall back to the first if every
-    member rejected on capability, and name the candidate either way so a reader can
-    tell which sibling spoke.
+    A capability rejection ("wrong arch", "wrong dtype") says only that this member is
+    not the one for this target -- true, and useless as evidence. Prefer a
+    non-capability reason, falling back to the first, and name the candidate either way.
     """
     if not reasons:
         return "no candidate in this family accepted it"
@@ -300,14 +229,9 @@ def main(argv=None) -> int:
             shape_names.append(names)
         ours = resolve_shapes(shapes, profile)
         theirs = reference_serves(shapes, profile)
-    # Everything above is setup and interrogation: loading the profile, binding the
-    # provider, reading the corpus, building requests through the integration's own
-    # factory, and asking the reference. Every failure in there is OPERATIONAL --
-    # the comparison did not happen -- so it exits 2 whatever it was raised as. An
-    # enumerated exception list let a factory that raised, say, TypeError instead of
-    # the expected ValueError escape as a traceback with exit 1, which reads as an
-    # ordinary unreconciled-decline result. The escape flags below are about what a
-    # COMPLETED comparison found and cannot reach this.
+    # Every failure above is OPERATIONAL -- the comparison did not happen -- so it
+    # exits 2 whatever it was raised as. An enumerated exception list would let an
+    # unexpected type escape as exit 1, which reads as an unreconciled-decline result.
     except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
@@ -362,20 +286,14 @@ def main(argv=None) -> int:
                 )
             )
         elif we_serve:
-            # WE serve a shape the reference declines. Not a coverage gap -- the
-            # opposite -- but it must not be filed under "both decline", which is
-            # what a branch keying only on `they_serve` did. Either this integration
-            # is serving something the reference knows it cannot compute correctly,
-            # or the reference is missing a capability. Both are worth a look, and
-            # neither is "agreed".
+            # WE serve a shape the reference declines -- not a coverage gap, but not
+            # agreement either, so it must not be filed under "both decline". Either
+            # this integration serves something the reference knows it computes wrongly,
+            # or the reference is missing a capability. Both are worth a look.
             only_ours.append((index, why))
         else:
             both_decline.append((index, why))
 
-    # A declines key that matches nothing is a gate that passed because the question
-    # was never asked. Index keys are the only option for a published-CSV corpus (no
-    # graph names), and they are not stable across a re-mine with different flags --
-    # so the same file silently attributes a decline to a different shape.
     if args.declines:
         unmatched = sorted(set(declines) - matched_keys)
         if unmatched:
@@ -402,18 +320,10 @@ def main(argv=None) -> int:
     if only_ours:
         print(f"  only this integration   {len(only_ours)}")
 
-    # The signature of a misconfigured scope. An opt-in kernel only admits a request
-    # that NAMES it, so if the profile scopes the reference on `algorithm: dense` but
-    # `request.defaults` never sets `algorithm`, the reference declines every shape --
-    # and this integration declines them for the same reason. The tool then printed
-    # "RECONCILED" over a comparison that agreed about nothing, which is the gate
-    # passing by asking nothing this tool's own docstring warns against.
-    #
-    # Both conditions are required. A corpus where nothing is served can be perfectly
-    # legitimate (every shape genuinely out of scope, correctly declined by both
-    # sides), so an empty-serve count alone is not evidence of anything.
-    # A shape either side serves proves the comparison is live, so only a run where
-    # NOTHING was served by anyone can be vacuous.
+    # The signature of a misconfigured scope, and BOTH conditions are required. A
+    # corpus where nothing is served can be perfectly legitimate -- every shape out of
+    # scope and correctly declined by both sides -- so an empty serve count alone is
+    # evidence of nothing. A shape either side serves proves the comparison is live.
     match_key = ((profile.get("reference_candidates") or {}).get("match")) or ""
     request_defaults = (profile.get("request") or {}).get("defaults") or {}
     nothing_served = not both_serve and not only_reference and not only_ours

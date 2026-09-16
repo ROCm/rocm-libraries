@@ -55,7 +55,7 @@ std::set<std::string> splitCaseNames(const std::string& packed)
 // pinned set closes that hole. It is compared by NAME and in both directions -- a lost
 // case and a new one cancel in a count, and the two call for opposite remedies.
 //
-// The pin is optional. Absent, this is exactly the execution guard it has always been.
+// The pin is optional. Absent, only the execution guard runs.
 class CensusExecutionListener : public testing::EmptyTestEventListener
 {
 public:
@@ -163,7 +163,7 @@ int main(int argc, char** argv)
     if(!censusSuite.empty())
     {
         // Validate the caller's explicit shard before default-root setup can supply
-        // another tree. The production loader's fallback remains unchanged.
+        // another tree.
         const auto arch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
         const auto root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
         std::error_code error;
@@ -191,7 +191,7 @@ int main(int argc, char** argv)
             std::cerr << "Census suite '" << censusSuite << "' is absent or empty.\n";
             return 1;
         }
-        // Optional, and unset means the pre-pin behaviour: the execution guard alone.
+        // Optional; unset leaves the execution guard alone in effect.
         // The registration comparison happens here, before RUN_ALL_TESTS, because it
         // reads the static registration rather than any result -- and because a suite
         // that shrank should say so even if the surviving cases all pass.

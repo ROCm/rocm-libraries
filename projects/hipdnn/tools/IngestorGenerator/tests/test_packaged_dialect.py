@@ -3,22 +3,8 @@
 
 """The packaged dialect: rocKE/hip descriptors that hkp_pack lowers.
 
-What these defend, stated as the failure each would catch:
-
-- Emitting a direct_load key (``source_file``) on a rocKE kernel, or a rocKE
-  key (``builder``) on an embedded_source one. Both are hard errors downstream
-  -- the runtime loader rejects unknown keys outright, and hkp_pack validates a
-  closed field set per kind -- but only after the bundle looks finished.
-- Putting packaged descriptors in ``descriptors/<slug>/`` instead of at their
-  authored subpath. The subpath is preserved verbatim into the staged and
-  installed trees, so getting it wrong relocates the shipped layout.
-- Emitting a CMake edit for descriptor installation at all. Both roots are
-  installed by directory, so any list to append to would be a second source of
-  truth: for a packaged bundle it would install an unlowered ``kind: rocke``
-  copy the runtime loader rejects, dropping the pack and then the engine.
-- Accepting a packaged pack with no ``arch``. hkp_pack requires it and the
-  runtime loader does not, so this passes every runtime-shaped check and then
-  fails at pack time.
+``arch`` is required by hkp_pack and not by the runtime loader, so a pack
+missing it passes every runtime-shaped check and fails only at pack time.
 """
 
 import json
@@ -160,13 +146,6 @@ class TestPackagedFragments:
         The call is spliced verbatim, so the suite in its SUITES list has to be a
         suite this run actually wrote: a census whose gtest filter matches nothing
         registers, runs zero cases and reports success.
-
-        The suite name is anchored to the END OF ITS LINE, and the call's closing
-        paren asserted separately. ``SUITES`` takes a list and EXPECTED_CASES pins
-        ONE suite's case set -- a second name on that line is a configure error --
-        so "the rest of the line is the suite name and nothing else" is what is
-        true of a well-formed call now that the suite is no longer its last
-        argument. An unanchored match would accept a name with anything after it.
         """
         written = generator.render(gfx950_attention_dense_config, tmp_path)
         text, _payload = self._payload(tmp_path, "cmake_test_sources.txt")
@@ -184,10 +163,9 @@ class TestPackagedFragments:
     ):
         """Installation is by directory in BOTH roots.
 
-        The direct-load branch used to emit a list to append to. There is none to
-        append to now, and re-growing one would put the shard's contents under two
-        authorities -- the directory walk and a hand-maintained list -- which
-        disagree exactly when a file is added.
+        A hand-maintained list would put the shard's contents under two
+        authorities -- the directory walk and the list -- which disagree exactly
+        when a file is added.
         """
         generator.render(scale_add_config, tmp_path)
         text, payload = self._payload(tmp_path, "cmake_descriptor_files.txt")
@@ -250,7 +228,6 @@ class TestPackagedValidation:
             _check_kernel_source_fields(config)
 
     def test_the_shipped_gfx950_config_loads_clean(self, gfx950_attention_dense_config):
-        """The worked example is real: it must survive every pre-mint check."""
         config = gfx950_attention_dense_config
         assert config.dialect == DIALECT_PACKAGED
         assert config.kernel_source_kind == "rocke"
@@ -259,7 +236,6 @@ class TestPackagedValidation:
 
 class TestDialectDefaultIsBackwardCompatible:
     def test_config_without_dialect_key_is_direct_load(self, scale_add_config):
-        """Every config written before dialects existed keeps its behaviour."""
         assert scale_add_config.dialect == DIALECT_DIRECT_LOAD
 
     def test_direct_load_output_is_unchanged_by_the_dialect_work(

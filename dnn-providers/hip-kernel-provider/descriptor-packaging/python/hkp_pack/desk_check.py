@@ -1,41 +1,16 @@
 """RUNBOOK.md step 5d's four desk-check invariants, as real, importable code.
 
-Extracted from a shell-embedded Python snippet the RUNBOOK carried in prose.
-Prose could not be tested, so nothing tested it: invariant 1 read
-``kernel_source.spec``, which packing rewrites away (the authored spec moves
-to ``provenance.spec``; ``kernel_source`` becomes ``{kind: kpack, library,
-toc_key, symbol, sha256}``), so on the exact packed tree the step told an
-agent to point it at, the check silently printed "none" regardless of real
-drift. This module is the fix, plus the three invariants that were already
-correct, all in one place a test can import instead of copy.
-
 Runs over a single loaded KDP document's ``kernelDescriptors`` list -- works
 on an authored (pre-pack) tree via ``kernel_source.spec`` or a shipped
 (post-pack) one via ``provenance.spec`` interchangeably, and treats "neither
 location has a spec" as a distinct, reported outcome rather than a silent
 "no drift".
 
-Three things this module got wrong in its first form, all invisible to its
-own 179 tests and all found by pointing the CLI at a real 32-kernel bundle:
-
-1. ``dtype`` compared two DELIBERATE vocabularies as if they were one. rocKE
-   specs spell it ``"bf16"``; hipDNN metadata carries the enum name
-   ``"BFLOAT16"`` (or, in the tiled bundle, ``"BF16"``). Both describe the
-   same type, so a raw string compare false-positived on every rocKE kernel
-   that ships. See ``_DTYPE_ALIASES`` -- the fix normalises the vocabularies
-   rather than dropping the field, because dtype is the field most worth
-   checking: ``spec "bf16"`` against ``metadata "HALF"`` is a real, fatal
-   drift and still fails.
-2. One field list fed BOTH invariant 1 and invariant 2. Narrowing it to
-   silence a drift false-positive silently removed the same field from the
-   matcher-tuple identity, manufacturing false collisions in the check whose
-   entire job is catching unreachable variants. The two now take independent
-   lists (``fields`` vs ``drift_fields``).
-3. ``duplicate_matcher_tuples`` derived its field set from ``kernels[0]``
-   alone, so a heterogeneous variant set either raised ``KeyError`` or --
-   depending only on list order -- silently dropped a field from the tuple
-   identity and reported false collisions. It now takes the union across all
-   kernels and represents an absent field explicitly.
+``dtype`` names one type in two DELIBERATE vocabularies: rocKE specs spell it
+``"bf16"``, hipDNN metadata carries the enum name ``"BFLOAT16"`` (or, in the
+tiled bundle, ``"BF16"``). ``_DTYPE_ALIASES`` normalises them rather than
+dropping the field, because dtype is the field most worth checking: ``spec
+"bf16"`` against ``metadata "HALF"`` is a real, fatal drift and must still fail.
 """
 
 from __future__ import annotations
@@ -128,9 +103,9 @@ class DeskCheckNoSpecFound(RuntimeError):
     """Raised when a kernel's authored spec cannot be found anywhere this
     check knows to look (neither ``kernel_source.spec`` nor
     ``provenance.spec``) -- distinct from finding a spec that agrees with
-    metadata, which is a genuine "no drift" result. Conflating the two was
-    exactly how the original invariant went dead: "found nothing to check"
-    and "checked, found nothing wrong" rendered identically."""
+    metadata, which is a genuine "no drift" result. Conflating the two would
+    render "found nothing to check" identically to "checked, found nothing
+    wrong", which is a dead check."""
 
 
 def _resolve(kdp_path: Path) -> tuple[dict, list[descriptor_context.Entry]]:
@@ -231,26 +206,18 @@ def compiled_agreement(
 ) -> tuple[list[str], list[str], int]:
     """Compiled-specialization agreement over one shipped KDP.
 
-    The self-contained declaration and the producing-build record are checked
-    against the descriptors and archive bytes in hand. Nothing imports the producer,
-    so a valid artifact verifies on a machine that has never had rocKE installed --
-    and an artifact that cannot present a record is a failure, not an unchecked
-    property, because the absence is exactly the state a forged or stale tree is in.
-
-    Only the packed dialect can be checked: before packing there are no bytes, so a
-    non-kpack kernel is a failure rather than a quiet pass. That is the same refusal
+    Checks the declaration and the producing-build record against the descriptors
+    and archive bytes in hand; nothing imports the producer, so a valid artifact
+    verifies on a machine that has never had rocKE installed. An artifact that
+    cannot present a record is a failure rather than an unchecked property --
+    absence is exactly the state a forged or stale tree is in. A non-kpack kernel
+    fails too, having no bytes to bind before packing; that is the same refusal
     `verify_variant_sets` makes, so both readers agree about one artifact.
 
     Returns `(failures, unclaimed, verified)`. A packed declaration with no
-    `metadata_fields` states that the compiler specialized on nothing, which is the
-    legitimate and mandatory declaration for a non-compiled source -- there is no
-    producing-build record for it to bind, so it is reported as NOT VERIFIED HERE
-    and counted separately. Folding it into the pass would put "declaration and
-    producing-build record bind the archive bytes" behind a kernel for which no
-    record was ever read, which is a claim this check did not make. Only
-    rocKE-origin kernels carry that evidence today; a hip kernel AOT-built with
-    specializing preprocessor defines is a real compiled specialization this check
-    does not yet cover.
+    `metadata_fields` is the legitimate shape for a non-compiled source and binds no
+    record, so it counts as unclaimed rather than as a pass nothing was read for.
+    Only rocKE-origin kernels carry that evidence today.
     """
     kdp_path = Path(kdp_path).resolve()
     index = descriptor_context.Index(str(kdp_path.parent))
@@ -359,9 +326,9 @@ def duplicate_matcher_tuples(
 
     The compared field set is the UNION of `fields` present in ANY kernel's
     metadata, not the fields of ``kernels[0]``. Keying off the first kernel
-    made the tuple identity depend on list order: a set where only a later
-    kernel declared a field either raised ``KeyError`` or silently dropped
-    that field from the identity and reported collisions that do not exist.
+    would make the tuple identity depend on list order: a set where only a
+    later kernel declared a field would either raise ``KeyError`` or silently
+    drop that field from the identity and report collisions that do not exist.
     A kernel that does not declare a field in the union gets `_ABSENT` for
     it, which is itself distinguishing -- "declares no block_n" and
     "declares block_n=64" are genuinely different variants.
@@ -416,33 +383,19 @@ MODES = ("full", "structural")
 class DeskCheckReport:
     """All four invariants over one kernel list, plus a pass/fail verdict.
 
-    Works on both an authored (pre-pack) tree and a shipped (post-pack) one:
-    invariants 3 and 4 key on ``toc_key``/``symbol``, which packing assigns,
-    so on an authored tree they report NOT-APPLICABLE rather than a false
-    "all None -- collision". Invariant 4 is informational and never fails
-    the report even when applicable -- a shared symbol with distinct
-    toc_keys is a documented, tolerated shape, not a defect.
+    Invariants 3 and 4 key on ``toc_key``/``symbol``, which packing assigns, so an
+    authored (pre-pack) tree reports them NOT-APPLICABLE rather than a false
+    "all None -- collision".
 
-    `fields` is the MATCHER-TUPLE identity (invariant 2). `drift_fields` is
-    the set invariant 1 compares against the spec, and defaults to `fields`
-    only because they usually coincide. They are separate parameters because
-    one list feeding both is a trap: narrowing the comparison to silence a
-    drift report used to delete the same field from the tuple identity and
-    manufacture false collisions in the check whose entire job is catching
-    unreachable variants. Narrow one, and the other is untouched.
+    `fields` is the MATCHER-TUPLE identity (invariant 2); `drift_fields` is what
+    invariant 1 compares against the spec and defaults to it. One list feeding both
+    would be a trap: narrowing the comparison to silence a drift report would also
+    narrow the tuple identity and manufacture false collisions in the check whose
+    entire job is catching unreachable variants.
 
-    `mode` decides what the verdict is allowed to MEAN. Under ``structural`` the
-    report names compiled agreement as not checked and can never read as though it
-    held; the drift line says it compared the AUTHORED spec, which is a claim about
-    what was asked for rather than about what was built. Under ``full``,
-    `agreement_failures` carries `compiled_agreement`'s failures and an empty list
-    is the only clean outcome -- a missing or stale record arrives here as a
-    failure message, never as an absent one. `agreement_unclaimed` carries the
-    packed kernels that declare no specialized metadata_fields: they are stated as
-    NOT VERIFIED HERE rather than absorbed into the pass line, because no
-    producing-build record was read for them and a verdict that says otherwise is a
-    success this check never earned. Only rocKE-origin kernels carry that evidence
-    today, so the heading describes this tool's reach, not the kernel's nature.
+    `mode` decides what the verdict is allowed to MEAN (see `MODES`). ``full``
+    additionally requires `compiled_agreement`'s result, of which only an empty
+    `agreement_failures` is clean.
     """
 
     def __init__(

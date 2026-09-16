@@ -1,50 +1,33 @@
 """Three checks that answer three different questions. Counts answer none of them.
 
-A descriptor-count gate once passed on an arm that served ZERO graphs. The count was
-right: the descriptors were on disk, all of them, correctly named. They just never
-reached a GPU, because a duplicate catalog tuple made the loader reject the whole
-engine and every graph fell through to a different one -- while the phase ran to
-completion and exited 0.
-
-So "did it work" decomposes, and each rung sees a failure the others cannot:
+A descriptor-count gate once passed on an arm that served ZERO graphs: the descriptors
+were all on disk and correctly named, but a duplicate catalog tuple made the loader
+reject the whole engine, and the phase still exited 0. So "did it work" decomposes,
+and each rung sees a failure the others cannot:
 
   1. STATIC -- do the descriptors describe what they claim? (`verify_variant_sets.py`:
      binary nesting, catalog-tuple uniqueness, no sentinel, metadata matches binary,
-     matcher vocabulary.) Runs on any machine, needs no build and no rocKE.
-
-     This rung makes ONE OF TWO CLAIMS and `--mode` says which. `--mode full` checks
-     the producing compiler's own evidence -- the specialization declaration each UKD
-     carries and the effective-spec record the compile wrote onto it -- against these
-     descriptors, this schema, this architecture and the payload bytes they name; a
-     missing or mismatched record fails. `--mode structural` runs only the checks
-     that need no compiled evidence and reports compiled specialization agreement as
-     NOT CHECKED. A structural pass is reported as structural throughout and can
-     never be read as compiled agreement, which is why there is no default: a gate
-     that silently picks the weaker claim and prints the stronger one's line is the
-     defect this whole tool exists to prevent.
+     matcher vocabulary.) Runs on any machine, needs no build and no rocKE. `--mode`
+     picks which of its two claims is made, and has no default on purpose.
   2. LOADS  -- does the ENGINE survive the loader's own rules?
      (`hipdnn_validate_descriptors`, which round-trips a bundle exactly as a provider
      would at plugin-load time.) Needs a build, no GPU. This is the rung that catches
      the dropped engine, and the only cheap one that can.
-  3. SERVES -- does it serve graphs ON A DEVICE, and how many? Needs a GPU. The
-     preflight that caught two failures every static check passed.
+  3. SERVES -- does it serve graphs ON A DEVICE, and how many? Needs a GPU.
 
 This tool runs 1 and 2 and reports 3's requirement explicitly rather than pretending
-the first two imply it. Rungs 1 and 2 both passing means the descriptors are
-well-formed and the engine loads. It does NOT mean anything was served.
+the first two imply it.
 
     coverage_gate.py --tree <descriptors> --mode full \\
                      --profile <profile.yaml> \\
                      --validator <build>/bin/hipdnn_validate_descriptors \\
                      --expect-engine hipkernel:Gfx942AttentionDense
 
-DIALECTS. Rung 2 wants the PACKED tree, not the authored one. A `kind: rocke`
-descriptor is an authoring form that `hkp_pack` lowers to `kind: kpack` at build
-time; the runtime loader has never heard of `builder` and rejects it. Pointing rung 2
-at the authored tree therefore fails with a genuine-looking error about an unknown
-key, which is the loader being right. The gate says so rather than leaving it to be
-rediscovered. `--mode full` wants the packed tree for the same reason from the other
-side: the compiler's evidence exists only once the bytes do.
+DIALECTS. Rung 2 and `--mode full` both want the PACKED tree, not the authored one. A
+`kind: rocke` descriptor is an authoring form that `hkp_pack` lowers to `kind: kpack`
+at build time; the runtime loader has never heard of `builder` and rejects it, so
+pointing rung 2 at the authored tree fails with a genuine-looking unknown-key error
+that is really the loader being right.
 """
 
 from __future__ import annotations
@@ -70,13 +53,11 @@ def run_static(
 ) -> tuple[bool, str]:
     """Rung 1. Structural properties of the SET, plus compiled agreement in full mode.
 
-    Both modes are read off `verify_variant_sets`' own exit code, which encodes
-    what each mode claims: under `--mode full` a check that could not run is a
-    gap and the tool fails on it, while under `--mode structural` compiled
-    specialization agreement is NOT CHECKED BY DEFINITION -- that is what the
-    mode is -- so the line is expected, the rung reports itself as
-    structural-only, and the caller is told in the same breath that the strong
-    claim was never made.
+    Both modes are read off `verify_variant_sets`' own exit code. Under `--mode full`
+    a check that could not run is a gap and the tool fails on it; under `--mode
+    structural` compiled specialization agreement is NOT CHECKED BY DEFINITION, so the
+    rung reports itself as structural-only and the caller is told in the same breath
+    that the strong claim was never made.
     """
     argv = [sys.executable, str(tool), "set", str(tree), "--mode", mode]
     if profile:

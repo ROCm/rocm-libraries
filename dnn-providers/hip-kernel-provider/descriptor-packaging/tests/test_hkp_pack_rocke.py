@@ -676,17 +676,9 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
 def test_real_gfx942_attention_dense_is_accepted(rocke_importable):
     """gfx942's dense builder satisfies the `(spec, *, arch)` contract.
 
-    This was the corpus's one genuine REFUSAL case: `build_attention_dense`
-    took a keyword-only `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` that no
-    descriptor could set, so packing it would silently freeze a performance
-    knob. PR #11237 folded that parameter into the spec dataclass, so the
-    refusal no longer exists to assert -- and the shipped example tree now
-    packs this very builder, which is the stronger statement.
-
-    The guard itself has not weakened: `test_hkp_pack_producer_guards.py`
-    covers all four rejection shapes synthetically (a keyword-only extra, a
-    `**kwargs`, a second positional, and the accepting case). Read the two
-    files together for full coverage.
+    Asserting against the real builder catches a regression that reintroduces
+    an unsuppliable keyword-only knob; `test_hkp_pack_producer_guards.py`
+    covers the rejection shapes synthetically.
     """
     from kernels.gfx942 import attention_dense as m
 

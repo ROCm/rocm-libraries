@@ -72,9 +72,9 @@ constexpr std::string_view {{ pack.discriminator.upper() }}_MATCHER_SYMBOL = "{{
  *
  * @warning Returning std::nullopt empties this engine's WHOLE catalog and skips
  *          EVERY remaining pack, not just whichever shape this function was meant to
- *          gate (KernelIngestorStateManager.hpp:450-455). This is the widest blast
- *          radius in the system: a bug here can make an engine serve nothing on a
- *          device where some of its packs should still apply.
+ *          gate (KernelIngestorStateManager.hpp). This is the widest blast radius in
+ *          the system: a bug here can make an engine serve nothing on a device where
+ *          some of its packs should still apply.
  */
 std::optional<BoundTokens> {{ config.engine.camel_name }}GraphMatches(const MatchContext& /*context*/)
 {

@@ -898,7 +898,7 @@ def reader_artifact(tmp_path, rocm_kpack_dir):
 
 
 class TestRealArchiveReaders:
-    """T03/T04/T07/T08 through actual archive IO and both shipped CLI readers."""
+    """Agreement through actual archive IO and both shipped CLI readers."""
 
     def test_literal_bracket_root_preserves_desk_selection_and_agreement(
         self, tmp_path, rocm_kpack_dir

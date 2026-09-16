@@ -255,10 +255,10 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets)
 /// Registers a no-op stub per unique harvested name into each registry. Names are
 /// pre-deduped into `std::set`s by `harvestSymbols`, which is required: two descriptor
 /// sets may legally share a symbol name (e.g. two engines' matchers), and
-/// `NativeRegistry::registerSymbol` throws `std::runtime_error` on a duplicate. That
-/// throw must never reach here -- it is Phase 1's halt condition, not a validator
-/// failure mode -- so registering from a `std::set` rather than a raw harvested list
-/// keeps the registration itself well-formed regardless of what the descriptors name.
+/// `NativeRegistry::registerSymbol` throws `std::runtime_error` on a duplicate. That throw
+/// must never reach here -- it is not a validator failure mode -- so registering from a
+/// `std::set` rather than a raw harvested list keeps the registration itself well-formed
+/// regardless of what the descriptors name.
 StubDispatchHandler stubDispatchHandler;
 
 void registerStubs(const HarvestedSymbols& harvested)

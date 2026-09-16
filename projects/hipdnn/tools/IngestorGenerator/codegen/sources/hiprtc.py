@@ -4,11 +4,9 @@
 """Scans one or more ``.cpp``/``.hip`` files for ``__global__`` entry points
 and candidate KMD field names.
 
-This is text-based extraction, not a real preprocessor or parser -- it is
-deliberately conservative: a source shape it does not recognize yields no
-candidates for that function rather than a wrong guess, since every
-candidate here is re-confirmed by a human before it becomes a real KMD
-field (see ``sources/base.py``'s module doc).
+This is text-based extraction, not a real preprocessor or parser, and is
+deliberately conservative: an unrecognized source shape yields no candidates for
+that function rather than a wrong guess.
 """
 
 import re
@@ -23,9 +21,8 @@ _ENTRY_POINT_PATTERN = re.compile(
     r'extern\s+"C"\s+__global__\s+void\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\('
 )
 
-#: A compile-time #define this file itself does not set -- a strong signal
-#: it is expected to arrive from the compile command, exactly how
-#: ConvFwd.cpp's HIP_PLUGIN_CONV_TYPE/HIP_PLUGIN_CONV_BLOCK_SIZE do.
+#: A compile-time #define this file itself does not set -- a strong signal it is
+#: expected to arrive from the compile command.
 _DEFINE_USE_PATTERN = re.compile(r"\b(HIP_PLUGIN_[A-Z0-9_]+)\b")
 _DEFINE_SET_PATTERN = re.compile(r"#\s*define\s+(HIP_PLUGIN_[A-Z0-9_]+)")
 
@@ -70,10 +67,8 @@ class HiprtcAdapter:
                     )
                 )
 
-        # One pack per distinct source file: several entry points in one
-        # file are the same operation's instantiations (mirrors ConvFwd.cpp
-        # holding one entry point, and the pointwise kernels each holding
-        # exactly one) -- the fan-out-by-file heuristic 07 §2 documents.
+        # One pack per distinct source file: several entry points in one file are
+        # the same operation's instantiations.
         distinct_files = {k.source_file for k in kernels}
         return SourceAdapterResult(
             kernels=kernels,

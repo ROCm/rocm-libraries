@@ -5,19 +5,12 @@
 round trip, and the discriminating mutation fixtures under
 ``tests/fixtures/validate_descriptors/``.
 
-This is deliberately NOT part of the default ``pytest`` run: it depends on
-``hipdnn_validate_descriptors``, a C++ binary this Python tool's own test
-suite does not and should not build. Point ``HIPDNN_VALIDATE_DESCRIPTORS``
-at a build configured with ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON`` and run
-with the ``round_trip`` marker selected:
+These depend on ``hipdnn_validate_descriptors``, a C++ binary this Python tool's
+own suite does not and should not build, so they skip rather than fail unless
+pointed at one -- it exists only under ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON``:
 
     HIPDNN_VALIDATE_DESCRIPTORS=<build-dir>/bin/hipdnn_validate_descriptors \\
         .venv/bin/python -m pytest -m round_trip
-
-Skipped (not failed) when the env var is unset or names a nonexistent path
--- there is no default hipDNN build containing this binary (it only exists
-under HIPDNN_ENABLE_KERNEL_INGESTOR=ON), so a bare `pytest` run must not
-fail on a missing tool it was never asked to find.
 """
 
 import json
@@ -54,13 +47,11 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "validate_descriptors"
 FIXTURE_ENGINE = "hipkernel:ValidateFixture"
 
 # Each malformed bundle differs from valid/ by exactly one field. The marker is a token
-# the loader can only be emitting because it reached THAT mutation -- for three of them
-# the value the field was mutated to, and for duplicate_tuple the id of the kernel the
-# mutation was applied to, since that diagnostic identifies the offending kernel by id
-# rather than echoing the colliding value. Asserting on it is what makes the case
-# discriminating: a bundle that failed for an unrelated reason -- a stray typo, a field
-# lost to copy-paste -- would still exit non-zero and would still drop the engine, but
-# would not name this token. See the fixtures' README for the mechanism each one trips.
+# the loader can only emit because it reached THAT mutation, which is what keeps the
+# case discriminating -- a bundle failing for an unrelated reason would still exit
+# non-zero without naming it. For three it is the mutated value; for duplicate_tuple it
+# is the kernel id, since that diagnostic names the offending kernel rather than the
+# colliding value. See the fixtures' README for the mechanism each one trips.
 MALFORMED_FIXTURES = [
     ("bad_arch", "GFX942"),
     ("dangling_uuid", "9341b3cb-3540-44f6-9066-f3695a3b6a2d"),
@@ -72,10 +63,9 @@ MALFORMED_FIXTURES = [
 def _run_validator(validator, root):
     """Validate a fixture bundle, always naming the engine it is supposed to expose.
 
-    ``--expect-engine`` is not optional here. Every malformed bundle fails by making
-    the loader DROP the engine, and a drop on its own leaves no error behind -- the
-    validator would report an empty engine list and exit 0. Naming the engine is what
-    turns a silent drop into a non-zero exit.
+    Every malformed bundle fails by making the loader DROP the engine, which leaves
+    no error behind; ``--expect-engine`` is what turns that silent drop into a
+    non-zero exit.
     """
     result = subprocess.run(
         [str(validator), str(root), "--expect-engine", FIXTURE_ENGINE, "--json"],

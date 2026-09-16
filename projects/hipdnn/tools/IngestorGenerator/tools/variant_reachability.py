@@ -1,64 +1,14 @@
 """The converse of the desk check: can any graph SELECT this variant at all?
 
-Every existing check asks "does a shipped variant match this graph?" (the desk
-check, `hkp_desk_check.py`) or "is the set internally consistent?"
-(`verify_variant_sets.py`). Neither one is ever asked backwards, and the backwards
-question is where dead weight hides: a real integration shipped 48 variants of
-which 24 could not be selected by ANY graph the author could write. The cause was
-not laziness -- every shipped shape had a sequence length divisible by the wider
-tile, so both tiles were always APPLICABLE and the scorer, which ranks the wider
-tile higher, chose it every single time. Half the tuning axis was unreachable and
-the suite was green throughout, because nothing had ever asked "for the narrow
-tile, is there a shape where it wins?"
+The backwards question is where dead weight hides -- a real integration shipped 48
+variants of which 24 no graph could select, with the suite green throughout.
 
-A variant no graph can select is not neutral. It still costs a compile, a slot in
-the catalog, and a benchmark run to advertise a choice that does not exist.
-
-THE MODEL, and its two honest gaps.
-
-Selection happens in two stages and this tool models both, badly on purpose where
-it must be honest about it:
-
-  1. APPLICABILITY. A variant's shape-valued metadata (KMD default substituted for
-     anything absent, exactly as the loader substitutes it) must be consistent
-     with the graph's shape. Most fields compare by EQUALITY on a shared name
-     (dtype, head counts, ...). Tile-style knobs compare by DIVISIBILITY instead
-     -- `block_n` does not equal a shape field, it must evenly divide one
-     (`seqlen_kv % block_n == 0`), and a corpus where every shape is divisible by
-     every shipped tile is exactly the historical failure. Divisibility rules are
-     therefore DECLARED (`--divides block_n=seqlen_kv`), never guessed: guessing
-     which fields are tiles from their names would be exactly the kind of silent
-     assumption this tool exists to refuse to make.
-
-  2. SCORING. Among the applicable variants for one shape, something ranks them
-     and picks a winner. That something is native C++ per engine -- this tool
-     cannot call it and does not pretend to. The ranking is instead DECLARED
-     (`--score-field block_n --score-prefer max`, or the same under `score:` in a
-     --profile), same spirit as the specialization declaration a UKD carries for
-     `verify_variant_sets.py`: a fact only the kernel knows, supplied as data
-     rather than invented here. WITHOUT a
-     declared ranking every applicable variant is reported reachable, and the
-     output SAYS the ranking was not declared -- a gate that quietly stops
-     checking a property is worse than one that admits it never checked it.
-
-THREE BUCKETS, not two, because "applicable" and "selected" are different claims:
-
-  * SELECTED -- wins outright for at least one corpus shape (or a ranking was
-    never declared, in which case "applicable" and "wins" are the same claim by
-    construction, and the output says so).
-  * APPLICABLE-BUT-NEVER-WINS -- the dangerous one. The variant is legal for at
-    least one shape, and something else always outranks it there. This is the
-    24-of-48 case exactly: the fix is a shape where the RIVAL is illegal, not
-    another variant, and the diagnostic says that rather than "add coverage".
-  * UNREACHABLE -- applicable to nothing in the corpus at all. Either the corpus
-    is missing a shape family or the variant should never have been built.
-
-WHAT THIS CANNOT KNOW. A shape corpus field this tool was not told to compare
-(no shared name, not named in --divides) is invisible to applicability -- the
-corpus and the declared rules are the only inputs, and a rule nobody declared is
-a rule this tool cannot enforce. A declared ranking field absent from an
-applicable variant's metadata is a configuration error, not a silent "call it a
-tie": scoring on a value that is not there is not scoring, it is guessing.
+Applicability and ranking are DECLARED (`--divides`, `--score-field`), never
+inferred from field names: the scorer is native C++ per engine and this tool cannot
+call it. WHAT THIS CANNOT KNOW follows from that: a corpus field no rule names is
+invisible to applicability, and without a declared ranking every applicable variant
+is reported reachable -- the output says so rather than implying the native scorer
+was checked.
 """
 
 from __future__ import annotations
@@ -103,21 +53,11 @@ def _load_profile(path: str) -> dict:
 def load_bundle(kdp_path: str, tree: str | None = None) -> tuple[dict, list[dict]]:
     """(name -> KMD default_value, kernelDescriptors) for one *.kdp.json.
 
-    The schema is reached BY REFERENCE, through the id chain the documents declare
-    -- `KDP.engine` names a UED, `UED.metadata` names a KMD -- resolved across every
-    descriptor under `tree` (the KDP's own directory unless one is given). Binding to
-    a same-stem sibling instead answers "which schema governs this bundle" with a
-    filename, so a bundle wired to one KMD is scored against another and every
-    reachability verdict below is about the wrong defaults. The shared
-    `hkp_pack.descriptor_context` resolves the references for all offline readers,
-    so they cannot disagree about which schema a bundle has.
-
-    The KMD is read for its defaults, not its schema in the abstract: the loader
-    substitutes `default_value` for any field a descriptor's metadata omits, and
-    two descriptors that differ only in "wrote the default explicitly" vs. "left
-    it absent" are the SAME variant at runtime. Comparing raw `metadata` dicts
-    instead would report them as differently-shaped and could hide or invent an
-    applicability difference that is not real.
+    The schema is reached BY REFERENCE through the id chain the documents declare,
+    resolved across `tree` by the shared `hkp_pack.descriptor_context` so no two
+    offline readers disagree about which KMD governs a bundle. Its defaults are what
+    make "wrote the default explicitly" and "left it absent" the same variant at
+    runtime -- see `_resolved_metadata`.
     """
     kdp = Path(kdp_path)
     if not kdp.name.endswith(".kdp.json"):
@@ -153,10 +93,9 @@ def _resolved_metadata(descriptor: dict, defaults: dict) -> dict:
 def _remap(shape: dict, field_map: dict) -> dict:
     """Rename a corpus field to the metadata name it corresponds to.
 
-    The shape corpus speaks whatever vocabulary its own producer chose
-    (`dispatch_parity.py --shapes` uses `nhead_q`/`hdim_q`/...); KMD metadata
-    speaks the matcher's. Where the two differ, --field-map says so explicitly
-    rather than this tool guessing a mapping from field names alone.
+    The corpus speaks its producer's vocabulary, KMD metadata the matcher's; where
+    they differ, --field-map declares the mapping rather than this tool guessing one
+    from field names alone.
     """
     out = dict(shape)
     for old, new in field_map.items():
@@ -168,10 +107,9 @@ def _remap(shape: dict, field_map: dict) -> dict:
 def _same_value(shape_value, metadata_value) -> bool:
     """Are these the same value, allowing for the two vocabularies?
 
-    Numbers compare numerically (a bool is an int here: a `causal` metadata 1 and a
-    corpus `True` are the same graph). Strings compare case-insensitively, because
-    metadata carries the matcher's spelling and a request corpus carries the
-    builder's -- see `applicable`.
+    Numbers compare numerically (a bool is an int here, so a `causal` metadata 1 and
+    a corpus `True` are the same graph); strings compare case-insensitively, for the
+    reason `applicable` gives.
     """
     if isinstance(shape_value, str) and isinstance(metadata_value, str):
         return shape_value.strip().lower() == metadata_value.strip().lower()
@@ -250,9 +188,8 @@ def classify(
     """One Verdict per descriptor, against the whole corpus.
 
     `score` is `{"field": ..., "prefer": "max" | "min"}` or None. None means no
-    ranking was declared: every applicable variant is, by construction, a winner
-    everywhere it applies (there is nothing here that could rank it out), so the
-    only real finding left is UNREACHABLE.
+    ranking was declared, so every applicable variant wins by construction and
+    UNREACHABLE is the only finding left.
     """
     if score is not None and score.get("prefer") not in ("max", "min"):
         raise ReachabilityError("score.prefer must be 'max' or 'min'")

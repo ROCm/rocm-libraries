@@ -1,10 +1,5 @@
 """RUNBOOK.md step 5d's desk-check invariants, as a real, runnable CLI.
 
-The invariants used to live only as a shell-embedded Python snippet inside
-markdown; that snippet's invariant 1 was dead on every real packed tree (it
-read `kernel_source.spec`, which packing rewrites away) and nothing noticed
-because nothing could run it. This is the fix, made runnable:
-
     python3 tools/hkp_desk_check.py --mode structural <path/to/*.kdp.json>
     python3 tools/hkp_desk_check.py --mode full <path/to/shipped.kdp.json>
 

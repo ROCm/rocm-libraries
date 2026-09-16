@@ -4,8 +4,7 @@
 """Unit tests for tools/factorise_config.py.
 
 The tool's contract is one sentence: the compact config it writes expands to the
-enumeration it was given, kernel-for-kernel and key-for-key. Everything here either
-checks that contract directly or checks one thing that would silently break it.
+enumeration it was given, kernel-for-kernel and key-for-key.
 """
 
 import copy
@@ -230,13 +229,10 @@ class TestTriState:
 #: The SAME four kernels as `SAMPLE`, with the policy-decided knob written in its
 #: other legal spelling: PRESENT AND None rather than omitted.
 #:
-#: Both spellings mean "the kernel's own policy decides this at build time"; which
-#: one a config carries is an artefact of how the spec was produced, not a
-#: difference in meaning. A hand-authored spec omits the key.
-#: `dispatch_parity.build_config` dumps the builder's dataclass wholesale
-#: (`dataclasses.fields(resolution.spec)`), so every declared-but-unset policy knob
-#: arrives present-and-None -- which is what every real dispatcher-derived config
-#: looks like.
+#: Both spellings mean "the kernel's own policy decides this at build time". A
+#: hand-authored spec omits the key; `dispatch_parity.build_config` dumps the
+#: builder's dataclass wholesale (`dataclasses.fields(resolution.spec)`), so every
+#: declared-but-unset policy knob arrives present-and-None.
 SAMPLE_NONE_SPELLING = _enumerated(
     [
         _kernel(
@@ -266,24 +262,20 @@ SAMPLE_NONE_SPELLING = _enumerated(
 class TestTriStateNoneSpelling:
     """A spec key present as None means "policy decides", exactly like omitting it.
 
-    Three predicates decide this, and each one used to be a membership test that the
-    present-and-None form falls straight through:
+    Three predicates decide this, and a membership test at any of them falls
+    straight through the present-and-None form:
 
       factorise_config `resolved`     `field not in entry["spec"]`
       factorise_config `policy_knobs` `f not in e["spec"]`
       config_loader    metadata       `elif field_name in spec`
 
-    Every test below fails if any of the three regresses to a membership test. They
-    are the regression guard for that fix: the enumerated fixtures elsewhere in this
-    file all use the OMITTED spelling, so nothing else here exercises this path.
+    The enumerated fixtures elsewhere in this file all use the OMITTED spelling, so
+    nothing else here exercises this path.
     """
 
     def test_a_none_spec_records_what_the_policy_chose(self):
-        """Guards `resolved`.
-
-        A membership test treats None as a pinned value, so no `resolved` block is
-        emitted and the policy's actual answer is lost.
-        """
+        """Guards `resolved`: a membership test treats None as a pinned value, so
+        no `resolved` block is emitted and the policy's answer is lost."""
         group = factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY)[
             "packs"
         ][0]["variants"][0]
@@ -299,17 +291,13 @@ class TestTriStateNoneSpelling:
         assert group["policy_knobs"] == ["use_exp2_fast"]
 
     def test_a_none_spec_does_not_reach_metadata(self, tmp_path):
-        """Guards the config_loader arm, and is the failure the real set hit.
+        """Guards the config_loader arm.
 
         On the gfx942 set `use_exp2_fast` is None in all 64 specs while metadata
         carries the policy's real per-shape 0/1. A membership test writes the None
-        into metadata, which then fails its own declared kmd_fields type:
-
-            metadata 'use_exp2_fast' = None does not match its declared
-            kmd_fields type 'int'
-
-        Either that error, or -- with a looser type -- None silently becomes the
-        catalog key for a binary built from the policy's actual answer.
+        into metadata, which either fails its declared kmd_fields `int` type or --
+        with a looser type -- silently becomes the catalog key for a binary built
+        from the policy's actual answer.
         """
         compact = factorise_config.factorise(SAMPLE_NONE_SPELLING, KNOBS, VOCABULARY)
         for kernel in _expand(tmp_path, compact):
@@ -317,8 +305,6 @@ class TestTriStateNoneSpelling:
             assert isinstance(kernel.metadata["use_exp2_fast"], int)
 
     def test_both_spellings_produce_the_same_kernels(self, tmp_path):
-        """The two spellings differ only in provenance, so they must agree on every
-        expanded kernel -- name, spec and metadata alike."""
         omitted_dir = tmp_path / "a"
         none_dir = tmp_path / "b"
         omitted_dir.mkdir()
@@ -334,9 +320,8 @@ class TestTriStateNoneSpelling:
         ]
 
     def test_none_and_pinned_false_stay_distinguishable(self, tmp_path):
-        """The tri-state's whole point. `False` is a pinned value that builds a
-        specific binary; None is the policy deciding. Collapsing them ships the
-        wrong kernel under the right name."""
+        """`False` is a pinned value that builds a specific binary; collapsing it
+        onto None ships the wrong kernel under the right name."""
         by_name = {
             k.name: k
             for k in _expand(
@@ -371,11 +356,9 @@ class TestNameTemplates:
 
         Entry 0's `bm128` agrees with `block_m`. Entry 1's `bm999` agrees with
         nothing -- its block_m is 256. A binder that checked only the first entry
-        would bind `bm{block_m}` and render entry 1 as `bm256`: a name that is not
-        its own, and a silent rename of a shipped kernel.
-
-        Sound behaviour is to refuse the binding and let the token fall into the
-        per-arm `tag`, which is what the assertions below pin.
+        would bind `bm{block_m}` and render entry 1 as `bm256`: a silent rename of
+        a shipped kernel. Refusing the binding lets the token fall into the per-arm
+        `tag` instead.
         """
         config = _enumerated(
             [
@@ -485,8 +468,7 @@ class TestCommandLine:
     """The CLI is what every real user goes through, so it needs its own coverage.
 
     Calling `factorise`/`_round_trip` directly proves those functions work; it does
-    not prove `main` WIRES them together. Deleting the round-trip guard from `main`
-    is invisible to a test that calls the guard itself.
+    not prove `main` WIRES them together.
     """
 
     def _write(self, tmp_path, config):
@@ -516,13 +498,10 @@ class TestCommandLine:
         assert [k.metadata for k in got] == [k.metadata for k in want]
 
     def test_main_refuses_to_write_when_the_round_trip_fails(self, tmp_path):
-        """The guard must be WIRED INTO the CLI, not merely exist.
-
-        Omitting `--vocabulary` when the set needs it is the realistic way to get a
-        lossy conversion: the metadata keeps the builder's spelling (`bf16`) where
+        """Omitting `--vocabulary` when the set needs it is the realistic way to get
+        a lossy conversion: the metadata keeps the builder's spelling (`bf16`) where
         the matcher expects hipDNN's (`BF16`), which loads cleanly and matches
-        nothing. `main` must exit non-zero and leave no file behind rather than
-        write a config that generates a different descriptor set.
+        nothing. `main` must exit non-zero and leave no file behind.
         """
         src = self._write(tmp_path, SAMPLE)
         out = tmp_path / "compact.yaml"
@@ -542,12 +521,11 @@ class TestCommandLine:
 class TestTheSpecializationDeclarationSurvives:
     """A source config's `specialization` block reaches the compact form unchanged.
 
-    It is the one thing a shipped descriptor carries that says which metadata
-    fields the producing compiler specialized on and how each is read off the
-    builder object, and it reaches exactly one UKD field rather than one per
-    kernel. The kernel-for-kernel round trip therefore cannot see it go missing,
-    and a set that lost it converts to a bundle whose compiled bytes nothing on
-    the receiving machine can check against anything.
+    It says which metadata fields the producing compiler specialized on and how each
+    is read off the builder object, and it reaches exactly one UKD field rather than
+    one per kernel -- so the kernel-for-kernel round trip cannot see it go missing,
+    and a set that lost it converts to a bundle whose compiled bytes nothing on the
+    receiving machine can check.
     """
 
     # Every kmd_field of SAMPLE is a key of the rocke kernels' spec, so the

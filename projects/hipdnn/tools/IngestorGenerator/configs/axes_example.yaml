@@ -1,4 +1,4 @@
-# Worked example: pack-level `axes` (finding H14).
+# Worked example: pack-level `axes`.
 #
 # An enumerated variant set is fine at roughly a hundred kernels -- one YAML block
 # per kernel, hand-picked and hand-readable. It stops being fine the moment the

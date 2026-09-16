@@ -155,7 +155,7 @@ class TestInvariant1MetadataSpecDrift:
         """A tree that is neither authored (kernel_source.spec) nor packed
         (provenance.spec) -- e.g. a hip-producer UKD, or a badly hand-edited
         one -- must not silently report 'no drift'. Distinguishing 'clean'
-        from 'nothing to check' is the whole point of the fix."""
+        from 'nothing to check' is the whole point of this check."""
         kernel = {
             "name": "mystery",
             "kernel_source": {"kind": "kpack"},
@@ -242,8 +242,7 @@ class TestInvariant3TocKeyUniqueness:
 class TestInvariant4SymbolNonUniquenessTolerated:
     def test_distinct_shapes_get_distinct_symbols(self, packed_desk_check):
         # head_size 64 vs 128 changes the kernel_name() the builder derives,
-        # so THIS fixture happens to show distinct symbols per kernel --
-        # itself a real, verified fact worth pinning.
+        # so THIS fixture shows distinct symbols per kernel.
         distinct, total = symbol_distinctness(_kernels(packed_desk_check))
         assert distinct == total == 2
 
@@ -284,10 +283,9 @@ class TestInvariant4SymbolNonUniquenessTolerated:
 
 # ---------------------------------------------------------------------------
 # The CLI itself, end to end: `tools/hkp_desk_check.py` is the shipped thing
-# RUNBOOK step 5d will actually tell an agent to run -- these are not
-# redundant with the invariant-function tests above, which import the
-# library directly and would stay green even if the CLI's argument parsing,
-# exit-code mapping, or output path were broken.
+# RUNBOOK step 5d tells an agent to run. The invariant-function tests above
+# import the library directly and would stay green even if the CLI's argument
+# parsing, exit-code mapping, or output path were broken.
 # ---------------------------------------------------------------------------
 _TOOL = Path(__file__).resolve().parent.parent / "tools" / "hkp_desk_check.py"
 
@@ -386,18 +384,16 @@ class TestCliEndToEnd:
 
 # ---------------------------------------------------------------------------
 # Real-bundle regressions. Every test above this line runs against a fixture
-# built for the test; all three defects below survived those 179 tests and a
-# careful reading, and appeared the moment the CLI was pointed at a REAL
-# shipped bundle. So these run against every real, git-tracked bundle this
+# built for the test; these run against every real, git-tracked bundle this
 # repository carries -- no pack, no hipcc, no GPU, so they run everywhere the
 # suite does.
 #
 # There are two such roots and both are read. `examples/descriptors` is the
 # documented sample tree; the root under the engine is what a consumer
-# actually loads. The two differ in ways that have each hidden a defect --
-# where the specialization contract is declared, how many kernels a shard
-# carries, which dtype spellings appear -- so a regression that reads one of
-# them is a regression against half the bundles that exist.
+# actually loads. The two differ in where the specialization contract is
+# declared, how many kernels a shard carries, and which dtype spellings
+# appear -- so a check that reads only one of them covers half the bundles
+# that exist.
 # ---------------------------------------------------------------------------
 _PACKAGING = Path(__file__).resolve().parent.parent
 _EXAMPLES = [
@@ -496,12 +492,10 @@ class TestRealBundleDtypeVocabulary:
 
 @pytest.mark.quick
 class TestDriftAndTupleFieldsAreIndependent:
-    """One field list used to feed both invariant 1 and invariant 2. An
-    agent following the tool's own advice -- drop `dtype` to silence the
-    false drift above -- also dropped it from the matcher-tuple identity,
-    and the duplicate check then reported 16 false collisions on the
-    32-kernel gfx950 bundle: one false positive silenced, another
-    manufactured, in the check whose entire job is catching unreachable
+    """Invariant 1's drift fields and invariant 2's matcher-tuple fields are
+    separate lists. Dropping `dtype` to silence the false drift above must not
+    remove it from the tuple identity, which would manufacture false duplicate
+    collisions in the check whose entire job is catching unreachable
     variants."""
 
     def _two_variants_differing_only_in_dtype(self):
@@ -597,11 +591,9 @@ class TestDriftAndTupleFieldsAreIndependent:
 
 @pytest.mark.quick
 class TestHeterogeneousMetadataTupleIdentity:
-    """`duplicate_matcher_tuples` derived its field set from `kernels[0]`
-    alone. A set where only a LATER kernel declared a field raised
-    KeyError; in the other list order it silently dropped the field from
-    the identity and reported a collision between two genuinely distinct
-    variants. The tuple identity must not depend on list order."""
+    """A field only some kernels declare still takes part in the tuple
+    identity, wherever those kernels sit in the list: the identity must not
+    depend on list order."""
 
     def _mixed(self):
         return [
@@ -654,8 +646,7 @@ class TestHeterogeneousMetadataTupleIdentity:
 @pytest.mark.quick
 class TestCliOnRealShippedBundles:
     """The CLI, run exactly as RUNBOOK step 5d tells an agent to run it,
-    against the real bundles this repository ships. The out-of-box run on a
-    real bundle is the case that was never exercised."""
+    against the real bundles this repository ships."""
 
     @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
     def test_real_rocke_example_passes_out_of_the_box(self, rocke_root):
@@ -678,9 +669,6 @@ class TestCliOnRealShippedBundles:
             assert "COULD-NOT-CHECK" in proc.stdout, kdp
 
     def test_drift_field_flag_is_independent_of_field_flag(self, tmp_path):
-        """End-to-end proof of the escape hatch that used to corrupt a
-        second invariant: narrowing --drift-field leaves --field's tuple
-        identity intact."""
         kernels = [
             {
                 "name": "bf16",

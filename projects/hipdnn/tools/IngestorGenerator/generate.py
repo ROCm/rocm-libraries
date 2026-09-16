@@ -117,10 +117,7 @@ def main() -> None:
         failed = False
         if ambiguous:
             # One relative path resolving twice: the scan cannot tell which is
-            # yours, and picking one made the verdict depend on directory order --
-            # a filled stale copy would report green while the real file kept its
-            # markers. Roots are unioned first, so a second root holding the same
-            # relative path is caught here rather than silently preferred.
+            # yours. See `locate_emitted`.
             print(f"{len(ambiguous)} file(s) matched in more than one place:")
             for rel, paths in ambiguous.items():
                 print(f"        {rel}")

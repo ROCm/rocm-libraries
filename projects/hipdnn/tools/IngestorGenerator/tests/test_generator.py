@@ -31,14 +31,10 @@ from tests.helpers import make_kernel, make_minimal_config, make_pack
 def emitted_cases(rendered: str, macro: str, suite: str) -> dict:
     """The gtest cases one suite of an emitted C++ stub carries, name -> body.
 
-    Keyed by each case's OWN name, because that is the only thing a deletion or a
-    rename cannot satisfy: a substring check for the text a case happens to contain
-    still passes once the case is gone, since the surrounding comment argues for it
-    in the same words.
-
-    ``macro`` is ``TEST`` or ``TEST_F``. A body ends at the first closing brace in
-    column 0, which is the case's own -- every nested block in these templates is
-    indented.
+    Keyed by each case's OWN name, because a substring check for the text a case
+    contains still passes once the case is gone -- the surrounding comment argues
+    for it in the same words. ``macro`` is ``TEST`` or ``TEST_F``; a body ends at
+    the first closing brace in column 0, every nested block being indented.
     """
     pattern = rf"{macro}\({re.escape(suite)}, (\w+)\)\n\{{\n(.*?)\n\}}"
     return {m.group(1): m.group(2) for m in re.finditer(pattern, rendered, re.DOTALL)}
@@ -97,20 +93,16 @@ class TestUuidThreading:
         assert kdp["id"] not in kernel_ids
 
     def test_ids_are_minted_fresh_per_call(self, scale_add_config):
-        """mint_ids() must never return the same UUID twice across two calls --
-        AC #4 is one mint per RUN, not one mint globally, but within a run every
-        id must still be unique."""
+        """One mint per RUN, not one mint globally -- but within a run every id
+        must still be unique."""
         ids_a = mint_ids(scale_add_config)
         ids_b = mint_ids(scale_add_config)
         assert ids_a["ued"] != ids_b["ued"]
 
     def test_every_minted_id_is_distinct(self, binary_ops_config):
-        """Randomness carries uniqueness, so assert it rather than assume it.
-
-        Deriving ids from names was tried and reverted: it made an id only as unique
-        as the field it keyed on, and neither kernel names nor pack names are
-        guaranteed unique by the config. This is the property that replaced it.
-        """
+        """Randomness carries uniqueness, so assert it rather than assume it:
+        neither kernel names nor pack names are guaranteed unique by the config,
+        so no id may be derived from one."""
         ids = mint_ids(binary_ops_config)
         values = list(ids.values())
         assert len(values) == len(set(values))
@@ -119,11 +111,10 @@ class TestUuidThreading:
 class TestDuplicateKernelNamesAreSurvivable:
     """Kernel names are NOT validated unique, so nothing may be keyed on them.
 
-    Nothing in the config loader rejects two kernels sharing a name within a pack.
-    An earlier revision keyed both the id and the id-lookup on the name, which gave
-    two genuinely distinct variants one id -- and the loader de-duplicates catalog
-    entries by id, so a real variant vanished with no error. Ids are random and the
-    lookup is keyed on position; this test is what stops either regressing.
+    Nothing in the config loader rejects two kernels sharing a name within a pack,
+    and the loader de-duplicates catalog entries by id -- so two distinct variants
+    sharing an id lose one with no error. Ids are random; the lookup keys on
+    position.
     """
 
     def test_same_name_different_metadata_gets_distinct_ids(self, scale_add_config):
@@ -201,14 +192,11 @@ class TestVariantDeduplication:
         """An omitted optional field must not collapse onto an explicit one.
 
         The loader substitutes a field's KMD ``default_value`` for anything absent,
-        then requires the resulting tuple to be unique per device. So "omit the key"
-        and "write the default" are the SAME catalog entry at load time even though
-        the JSON differs -- and a collision is not a dropped entry, it drops the whole
-        engine, which reaches production as an arm that silently serves nothing.
-
-        The assertion above (unique raw metadata) does not catch this: the two entries
-        differ on disk and collide only after defaults are applied. That gap shipped a
-        variant set whose engine failed to load while every generator test passed.
+        then requires the resulting tuple to be unique per device, so "omit the key"
+        and "write the default" are one catalog entry even though the JSON differs --
+        and a collision drops the whole engine, not the entry. The assertion above
+        (unique raw metadata) cannot see it: the two differ on disk and collide only
+        once defaults are applied.
         """
         import copy
 
@@ -249,15 +237,12 @@ class TestVariantDeduplication:
     def test_a_knob_stated_in_neither_layer_is_refused(self, scale_add_config):
         """The sentinel's silent twin: say nothing at all, anywhere.
 
-        ``-1`` is a value somebody chose to write, so it can be grepped for and it
-        gets caught. Simply never mentioning an optional knob produces a descriptor
-        that looks clean and is not: at load the KMD's ``default_value`` becomes the
-        catalog key, while the binary was compiled from the BUILDER's own default.
-        Nothing requires those two defaults to agree, and when they disagree the
-        descriptor advertises a kernel other than the one it names.
-
-        This is the direction that actually shipped. A check that only rejects the
-        stated sentinel catches the careful author and waves the hurried one through.
+        ``-1`` is a value somebody chose to write, so it can be grepped for. Never
+        mentioning an optional knob produces a descriptor that looks clean and is
+        not: at load the KMD's ``default_value`` becomes the catalog key while the
+        binary was compiled from the BUILDER's own default, and nothing requires
+        those two to agree. A check that only rejects the stated sentinel catches
+        the careful author and waves the hurried one through.
         """
         import copy
 
@@ -284,12 +269,9 @@ class TestVariantDeduplication:
 
         A knob absent from metadata but PINNED in ``kernel_source.spec`` is fully
         decided -- the spec is what the binary is built from -- so it must emit, with
-        the spec's value derived into the metadata the matcher reads.
-
-        Runs on the PACKAGED fixture deliberately. Only that dialect carries a
-        ``kernel_source.spec``, so on the embedded-source config this assertion would
-        skip -- and a guard whose positive half never executes is indistinguishable
-        from one that refuses everything.
+        the spec's value derived into the metadata the matcher reads. Runs on the
+        PACKAGED fixture because only that dialect carries a ``kernel_source.spec``;
+        on the embedded-source config this assertion would skip.
         """
         import copy
 
@@ -317,13 +299,9 @@ class TestVariantDeduplication:
     ):
         """The loader groups packs by ENGINE ID, so the scope has to be the engine.
 
-        Per-pack de-duplication cannot see a variant the sibling pack already emitted.
-        Both then ship: the runtime benchmarks two candidates that can never resolve
-        to different code, and -- worse -- identical metadata is a duplicate CATALOG
-        TUPLE, which does not drop the entry but drops the WHOLE ENGINE at load.
-
-        This is the mechanism that makes "ship a second bundle for the coverage gap"
-        the wrong instinct: the right shape is one de-duplicated union per engine.
+        Per-pack de-duplication cannot see a variant the sibling pack already emitted,
+        and identical metadata across the two is a duplicate CATALOG TUPLE -- which
+        does not drop the entry but drops the WHOLE ENGINE at load.
         """
         import copy
 
@@ -572,15 +550,10 @@ class TestFragmentsNameRealFiles:
     Installation is by DIRECTORY: the build walks the root the bundle targets and
     picks up whatever is there. The fragment is what tells the author which files
     belong at that path, so a name with no file behind it sends them somewhere the
-    build will never look, and the engine loses the descriptor with no build error
-    -- the same silent-drop class the generator exists to prevent.
+    build will never look, and the engine loses the descriptor with no build error.
 
-    Regression: the fragment template hardcoded ``<slug>_<pack>.kdp.json`` while
-    the writer uses ``kdp_stem()``, which is the BARE slug for a single-pack
-    engine. Every single-pack bundle therefore named a nonexistent
-    ``<slug>_<slug>.kdp.json``. Multi-pack happened to agree, which is why the
-    existing suite stayed green -- so the single-pack case below is the one that
-    actually defends the fix.
+    The single-pack case is the discriminating one: ``kdp_stem()`` is the BARE slug
+    there, where multi-pack agrees with the ``<slug>_<pack>`` shape.
     """
 
     @staticmethod
@@ -631,12 +604,10 @@ class TestFragmentsNameRealFiles:
 class TestSpecializationContractEmission:
     """The declaration in force for every kernel of a bundle.
 
-    The bundle is checked on a machine that does not have the rocKE that compiled
-    it. The contract riding on the descriptors is the whole input to that check:
-    which metadata fields the compiler consumed, how each is read back off the
-    builder object, and which are the matcher's alone. Where it is WRITTEN is the
-    packager's resolution rule and not a property these assert; what each kernel
-    resolves to is.
+    The bundle is checked on a machine without the rocKE that compiled it, so the
+    contract riding on the descriptors is the whole input to that check. These
+    assert what each kernel RESOLVES to, not where the declaration is written --
+    that is the packager's resolution rule.
     """
 
     @staticmethod
@@ -651,11 +622,8 @@ class TestSpecializationContractEmission:
         ]
 
     def test_the_entry_carries_the_minted_engine_and_kmd_ids(self, scale_add_config):
-        """Ids are threaded from the one mint, never re-derived.
-
-        A re-derived id points at whatever engine shares a name, and the ids are
-        random precisely because names guarantee nothing.
-        """
+        """Ids are threaded from the one mint: a re-derived one points at whatever
+        engine happens to share a name."""
         ids = mint_ids(scale_add_config)
         kdp = build_kdp(scale_add_config, scale_add_config.packs[0], ids)
         for contract in self._consumers(kdp):
@@ -682,7 +650,6 @@ class TestSpecializationContractEmission:
             }
 
     def test_a_direct_load_declaration_emits_its_matcher_only_partition(self):
-        """The non-compiled path declares its fields rather than staying silent."""
         config = make_minimal_config(
             specialization={
                 "metadata_fields": [],
@@ -698,8 +665,8 @@ class TestSpecializationContractEmission:
 
     def test_the_declaration_is_written_once_for_the_whole_pack(self, scale_add_config):
         """Every inline kernel of a bundle is one engine's, one KMD's, one field
-        partition's, so repeating the declaration per kernel says nothing extra --
-        and on a 2733-kernel pack it was 2.8x the file."""
+        partition's, so repeating the declaration per kernel says nothing extra and
+        costs 2.8x the file on a 2733-kernel pack."""
         kdp = build_kdp(
             scale_add_config, scale_add_config.packs[0], mint_ids(scale_add_config)
         )
@@ -714,12 +681,11 @@ class TestSpecializationContractEmission:
     def test_a_config_with_no_declaration_refuses_to_emit(self, dialect, kind):
         """Silence is not a waiver, on either path.
 
-        An engine emitting descriptors with no declaration ships UKDs that cannot
-        be checked against the builder they were compiled from -- and on the
-        receiving machine there is no builder left to ask. The rocKE row is the one
-        with a real obligation to waive; the direct-load row is there because a
-        gate that only fires on the dialect an author is already careful about is
-        the gate that never fires.
+        An engine emitting descriptors with no declaration ships UKDs that cannot be
+        checked against the builder they were compiled from, and on the receiving
+        machine there is no builder left to ask. The direct-load row is parametrized
+        alongside the rocKE one because a gate that fires only on the dialect an
+        author is already careful about is the gate that never fires.
         """
         config = make_minimal_config(
             dialect=dialect,
@@ -862,14 +828,11 @@ class TestCatalogIdentity:
         """The collision that only appears after the loader completes the tuple.
 
         One tuple omits an optional field; the other states it at exactly the KMD
-        default. The documents differ, the catalog keys must not -- the loader
-        substitutes the default before comparing, so those are one entry to it.
-
-        Keyed on the identity function rather than on an emitted pair, because
+        default. The documents differ, the catalog keys must not. Keyed on the
+        identity function rather than on an emitted pair, because
         `_check_metadata_resolved` refuses to EMIT a descriptor that omits a
-        defaulted field at all: an omission that reached a descriptor would already
-        have been rejected one layer up. What has to hold here is that the key
-        cannot be fooled if it ever did.
+        defaulted field at all -- what has to hold here is that the key could not be
+        fooled if one ever reached it.
         """
         config, _pack, _left, _right = self._twin_config()
         omitted = _dedup_key({"dtype": "FLOAT"}, config)
@@ -1057,12 +1020,9 @@ _BOTH_DIRECTIONS = {
 class TestMatcherStubDirections:
     """Both matcher directions, which only the rendered output can hold.
 
-    ``test_matchers.cpp.j2`` argues -- correctly -- that an accept-only test passes
-    for a matcher stuck on ``true`` and a decline-only test for one stuck on
-    ``false``, so a generated engine must be handed both. The argument lived only in
-    a comment: deleting the decline case left every check in this suite green, and
-    the omission would first be visible as an engine over-accepting on a device,
-    days later and on someone else's schedule.
+    An accept-only test passes for a matcher stuck on ``true`` and a decline-only
+    test for one stuck on ``false``, so a generated engine must be handed both; an
+    engine missing one is first visible as over-acceptance on a device.
     """
 
     @staticmethod
@@ -1121,12 +1081,11 @@ class TestMatcherStubDirections:
 class TestHeuristicFreeArms:
     """``heuristic: none``: the arm every shipped config declines to take.
 
-    All three configs under ``configs/`` declare ``heuristic: native``, so the
-    ``{% else %}`` arms of ``test_packs.cpp.j2``, ``test_matchers.cpp.j2`` and the
-    omitted ``SCORE_SYMBOL`` paths of ``native.cpp.j2`` were never rendered, never
-    compiled and never read. An engine without a ranking model is legal -- it ranks
-    on priority, then descriptor id -- so these arms exist for a real integration,
-    which would be the first to find out whether they work.
+    All three configs under ``configs/`` declare ``heuristic: native``, so nothing
+    else renders the ``{% else %}`` arms of ``test_packs.cpp.j2`` and
+    ``test_matchers.cpp.j2``, or the omitted ``SCORE_SYMBOL`` paths of
+    ``native.cpp.j2``. An engine without a ranking model is legal: it ranks on
+    priority, then descriptor id.
     """
 
     def test_every_template_renders_for_an_engine_with_no_ranking_model(
@@ -1246,10 +1205,9 @@ class TestMatcherStubDeviceFixture:
     def _fixture_body(rendered: str) -> str:
         """The body of the emitted ``fixedDeviceProperties()``.
 
-        Scoped to that function rather than matched against the whole file: the
-        surrounding comment names both fields and the wave sizes in prose, so a
-        file-wide substring check for ``warpSize = 32`` can be satisfied by the
-        documentation of the rule instead of by the code implementing it.
+        Scoped to that function because the surrounding comment names both fields
+        and the wave sizes in prose, so a file-wide check for ``warpSize = 32`` can
+        be satisfied by the documentation of the rule rather than the code.
         """
         match = re.search(
             r"DeviceProperties fixedDeviceProperties\(\)\n\{\n(.*?)\n\}",
@@ -1271,11 +1229,8 @@ class TestMatcherStubDeviceFixture:
         assert "properties.warpSize = 64;" in body
 
     def test_a_wave32_arch_renders_a_wave32_device(self, generator):
-        """The case the hard-coded 64 got wrong, and the only one that catches it.
-
-        Every config under ``configs/`` targets CDNA, so a constant 64 agrees with
-        all of them and the defect is invisible until an RDNA bundle is generated.
-        """
+        """Every config under ``configs/`` targets CDNA, so a constant 64 agrees with
+        all of them and only an RDNA arch can catch one."""
         config = make_minimal_config(packs=[make_pack(arch=["gfx1250"])])
         body = self._rendered_fixture(generator, config)
         assert 'properties.gcnArchName = "gfx1250";' in body

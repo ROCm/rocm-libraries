@@ -417,7 +417,6 @@ class TestDeprecatedKeys:
             load_config(path)
 
     def test_kmd_field_optional_key_rejected_even_when_false(self, tmp_path):
-        """Detection is presence, not value-truthy."""
         raw = self._base_raw()
         raw["kmd_fields"][0]["optional"] = False
         path = tmp_path / "c.yaml"
@@ -486,10 +485,9 @@ class TestDirectLoadAuthoredSubpath:
 class TestPackKernelDefaults:
     """A pack may hoist what every kernel repeats; a kernel overrides by restating.
 
-    Generated variant sets restate `kind`, `source`, `builder` and every spec field
-    the sweep does not vary, once per kernel. On the shipped gfx942 dense sets that
-    was five spec fields and all three kernel_source keys identical across 2107
-    kernels -- about half the file, and it buries the fields that actually differ.
+    Without hoisting, a generated variant set restates `kind`, `source`, `builder`
+    and every unvaried spec field once per kernel -- about half the file on the
+    shipped gfx942 dense sets, burying the fields that actually differ.
     """
 
     def _raw(self, **pack_extra):
@@ -539,7 +537,6 @@ class TestPackKernelDefaults:
         ks = config.packs[0].kernels
         assert [k.kernel_source.kind for k in ks] == ["rocke", "rocke"]
         assert [k.kernel_source.builder for k in ks] == ["build_attention_dense"] * 2
-        # Hoisted spec fields reach every kernel; per-kernel fields survive.
         assert [k.kernel_source.spec["head_size"] for k in ks] == [128, 128]
         assert [k.kernel_source.spec["seqlen_q"] for k in ks] == [256, 512]
 
@@ -560,7 +557,6 @@ class TestPackKernelDefaults:
         ]
 
     def test_missing_kind_still_rejected_when_no_defaults(self, tmp_path):
-        """The default is a convenience, not a way to omit a required key."""
         raw = self._raw()
         with pytest.raises(ConfigError, match="kind"):
             self._load(tmp_path, raw)
@@ -570,9 +566,7 @@ class TestGzippedConfig:
     """A `.gz` config loads identically to its plain-text twin.
 
     A generated variant set belongs in the repo as plain text, so `.gz` is a
-    retained capability rather than the way a config is expected to ship. It still
-    has to work: a config that arrives compressed must load identically, not
-    almost-identically.
+    supported input rather than the way a config is expected to ship.
     """
 
     def _raw(self):
@@ -622,7 +616,6 @@ class TestGzippedConfig:
         )
 
     def test_gzipped_config_still_validated(self, tmp_path):
-        """Compression is transport, not an escape from the pre-mint checks."""
         import gzip as _gzip
 
         raw = self._raw()
@@ -636,15 +629,8 @@ class TestGzippedConfig:
 
 class TestAxisExpansion:
     """Pack-level `axes` cross-products a `kernel_template` into ordinary
-    enumerated kernels at load time (finding H14).
-
-    An enumerated variant set is fine at roughly a hundred kernels; it stops
-    being fine the moment the variant set is driven by tuning axes instead of
-    hand-picked shapes -- five two-valued knobs over a few hundred shapes is a
-    line count no build step reads and no reviewer reads either, when the
-    actual information content is the axes plus the shape source, about 30
-    lines. `axes` lets a pack author declare that instead of the six-figure
-    enumeration it stands for.
+    enumerated kernels at load time, so a pack author declares the axes rather
+    than the six-figure enumeration they stand for.
     """
 
     def _raw(self, axes, spec_extra=None, clear_template_spec=False, pack_extra=None):
@@ -705,16 +691,12 @@ class TestAxisExpansion:
             # the metadata is what the runtime and the dedup pass actually see.
             assert kernel.metadata["block_n"] == block_n
             assert kernel.metadata["waves_per_eu"] == waves
-            # A non-axis template field (spec.seqlen_q) survives untouched.
             assert kernel.kernel_source.spec["seqlen_q"] == 256
 
     def test_expanded_names_are_distinct_by_construction_not_luck(self, tmp_path):
-        """There is precedent for a naming helper shipping a collision: a prior
-        `_kernel_name` hardcoded a subset of one op's own field names and, on
-        any other op, found none of them -- every variant collapsed onto one
-        string. Encoding every axis value into the name, always, in a fixed
-        order, must not repeat that: this asserts distinctness directly rather
-        than trusting that the axes chosen happen to vary the name.
+        """Every axis value is encoded into the name, in a fixed order. This
+        asserts distinctness directly rather than trusting that the axes chosen
+        happen to vary the name.
         """
         raw = self._raw({"block_n": [1, 2, 3], "waves_per_eu": [10, 20, 30]})
         config = self._load(tmp_path, raw)
@@ -733,19 +715,16 @@ class TestAxisExpansion:
             self._load(tmp_path, raw)
 
     def test_single_valued_axis_warns(self, tmp_path):
-        """Enumeration wearing a costume: a lone value contributes nothing to
-        the cross-product and usually means a typo (a second value never
-        added)."""
+        """A lone value contributes nothing to the cross-product and usually means
+        a typo -- a second value never added."""
         raw = self._raw({"block_n": [64], "waves_per_eu": [2, 4]})
         with pytest.warns(UserWarning, match="single value"):
             config = self._load(tmp_path, raw)
         assert len(config.packs[0].kernels) == 2
 
     def test_axes_compose_with_kernel_defaults(self, tmp_path):
-        """kernel_defaults hoists what every kernel repeats; axes expands one
-        template into many. The two must stack: an axis-expanded kernel is
-        just another entry in the same per-kernel loop that already merges
-        kernel_defaults underneath it.
+        """An axis-expanded kernel is just another entry in the same per-kernel
+        loop that merges kernel_defaults underneath it.
         """
         raw = self._raw(
             {"block_n": [64, 32]},
@@ -771,9 +750,6 @@ class TestAxisExpansion:
     def test_template_field_already_stated_is_not_overwritten_by_the_axis(
         self, tmp_path
     ):
-        """The template may pin an axis field itself (e.g. a fixed default
-        that one combination should not disturb); the axis only fills in what
-        the template left unstated."""
         raw = self._raw(
             {"block_n": [64, 32]},
             spec_extra={"block_n": -1},
@@ -804,14 +780,11 @@ class TestAxisExpansion:
 class TestUnknownKeysAreRefused:
     """A key this loader does not read must not generate cleanly.
 
-    Every unrecognised key was previously dropped by `raw.get(key, default)`: exit 0,
-    a cheerful success banner, and a bundle silently missing whatever the author
-    thought they had configured. `engine.knobbs` for `engine.knobs` emits a UED with
-    no knobs at all.
-
-    That is the worst failure this loader can have, because the author is not
-    debugging -- they believe it took effect. The loader already refused three
-    specific deprecated keys on exactly this reasoning; these tests generalise it.
+    A silently dropped key means exit 0, a success banner, and a bundle missing
+    whatever the author thought they had configured -- `engine.knobbs` for
+    `engine.knobs` emits a UED with no knobs at all. That is the worst failure this
+    loader can have, because the author is not debugging: they believe it took
+    effect.
     """
 
     def _load(self, tmp_path, raw):
@@ -871,7 +844,6 @@ class TestUnknownKeysAreRefused:
             self._load(tmp_path, raw)
 
     def test_the_diagnostic_lists_the_keys_that_ARE_read(self, tmp_path):
-        """Naming the offender is half the fix; naming the alternatives is the rest."""
         raw = self._valid()
         raw["engine"]["knobbs"] = []
         with pytest.raises(ConfigError, match="Known keys"):
@@ -881,11 +853,10 @@ class TestUnknownKeysAreRefused:
 class TestMappingShapedKeysAreGuarded:
     """A key the loader merges as a dict must actually be one.
 
-    `dict("oops")` raises `ValueError: dictionary update sequence element #0 has
-    length 1; 2 is required` from inside the merge -- naming neither the kernel nor
-    the key, and generate.py catches only ConfigError, so the raw traceback reaches
-    the author. The loader HAS a "must be a mapping" diagnostic; it was simply
-    unreachable because the crash came first. A check that cannot fire is not a check.
+    Unguarded, `dict("oops")` raises `ValueError: dictionary update sequence element
+    #0 has length 1; 2 is required` from inside the merge -- naming neither the
+    kernel nor the key, and generate.py catches only ConfigError, so the raw
+    traceback reaches the author instead of the "must be a mapping" diagnostic.
     """
 
     def _load(self, tmp_path, mutate):

@@ -1,15 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Data models for generic-kernel-ingestor descriptor generation.
-
-Convention inherited from ``DescriptorGenerator/codegen/models.py``: a
-dataclass field for anything a human might reasonably override, a
-``@property`` for anything mechanically derivable from those fields (a
-filename, a UUID cross-reference, a fragment name). Nothing here parses
-YAML directly -- that is ``config_loader.py``'s job -- and nothing here
-talks to Jinja2 -- that is ``generator.py``'s.
-"""
+"""Data models for generic-kernel-ingestor descriptor generation."""
 
 import re
 from dataclasses import dataclass, field
@@ -18,35 +10,22 @@ from typing import Optional
 #: KMD field types the loader accepts (``DescriptorLoader.hpp``'s ``MetadataField``).
 KMD_FIELD_TYPES: tuple[str, ...] = ("bool", "int", "float", "string", "int_list")
 
-#: --- Dialects -------------------------------------------------------------
-#:
-#: Two authored dialects exist, and they are NOT interchangeable. Which one a
-#: bundle is written in decides the ``kernel_source`` key names, the accepted
-#: ``kind`` vocabulary, and who consumes the output.
-#:
-#: ``direct_load``: read straight by ``DescriptorLoader.hpp`` out of the
-#:   provider's installed ``test_descriptors/`` tree. ``kind: embedded_source``
-#:   (``source_file``/``entry_point``); the provider compiles the kernel at
-#:   plan-build time.
-#: ``packaged``: read by the build-time packager ``hkp_pack``, which compiles
-#:   or lowers the kernel, writes it into a per-arch ``.kpack`` archive, and
-#:   REWRITES the shipped descriptor to ``kind: kpack`` before the loader ever
-#:   sees it. ``kind: hip`` (``source``/``entry``/``build``) or ``kind: rocke``
-#:   (``source``/``builder``/``spec``).
-#:
-#: The rocKE path exists only in ``packaged``: the runtime has no
-#: ``rocke_builder`` adapter and never will need one, because a rocKE kernel
-#: reaches the loader already lowered to ``kpack``.
+#: The two authored dialects, not interchangeable: which one a bundle is written
+#: in decides the ``kernel_source`` key names, the accepted ``kind`` vocabulary,
+#: and who consumes the output. ``direct_load`` is read straight by
+#: ``DescriptorLoader.hpp`` out of the provider's installed ``test_descriptors/``
+#: tree; ``packaged`` is read by the build-time packager ``hkp_pack``, which
+#: compiles or lowers the kernel and rewrites the shipped descriptor to
+#: ``kind: kpack`` before the loader ever sees it.
 DIALECT_DIRECT_LOAD = "direct_load"
 DIALECT_PACKAGED = "packaged"
 DIALECTS: tuple[str, ...] = (DIALECT_DIRECT_LOAD, DIALECT_PACKAGED)
 
 #: The one runtime-dispatchable kind authored directly, in ``direct_load``.
 KERNEL_SOURCE_KIND_EMBEDDED = "embedded_source"
-#: Runtime kind, but never AUTHORED: ``hkp_pack`` produces it. A config naming
-#: it is rejected -- the packager stamps ``library``/``toc_key``/``symbol``/
-#: ``sha256`` from the artifact it actually built, and a hand-authored value
-#: would be a second, wrong source of truth.
+#: Runtime kind, but never AUTHORED: ``hkp_pack`` stamps ``library``/``toc_key``/
+#: ``symbol``/``sha256`` from the artifact it actually built, so a config naming
+#: this kind is rejected.
 KERNEL_SOURCE_KIND_KPACK = "kpack"
 #: No adapter on either path; needs ``supportsSourceKind()``, which does not
 #: exist. The config loader rejects it explicitly.
@@ -84,12 +63,9 @@ EMITTABLE_KINDS_BY_DIALECT: dict[str, tuple[str, ...]] = {
 WORKSPACE_POLICIES: tuple[str, ...] = ("none", "fixed", "derived")
 
 #: The authored descriptor sets under the provider's ``test_descriptors/`` tree.
-#:
 #: Each is wired as its own pack target, so the set a direct-load bundle names
 #: decides which shard its descriptors reach and therefore which binary can read
-#: them. Nothing in a config implies the answer -- it is the CONSUMING binary's
-#: choice -- so ``authored_subpath`` states it and the loader refuses a bundle
-#: that leaves it open.
+#: them.
 AUTHORED_TEST_SETS: tuple[str, ...] = (
     "shared",
     "unit",
@@ -103,15 +79,13 @@ BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation",)
 ENGINE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
 
 #: ``DescriptorLoader.hpp``'s ``isPlausibleArchBaseId``: ``gfx`` + lowercase
-#: alnum/``-``/``_``, no feature suffix. This is the *shape* check the loader
-#: itself enforces; a well-formed-but-unrecognized id (``gfx94``) still passes
-#: it and only trips the generator's own recognized-arch warning (rule 5).
+#: alnum/``-``/``_``, no feature suffix. A well-formed-but-unrecognized id
+#: (``gfx94``) passes this shape check and only trips pre-mint check #5.
 ARCH_BASE_ID_PATTERN = re.compile(r"^gfx[a-z0-9_-]+$")
 
-#: Known real base target ids, for the plausible-but-unrecognized warning
-#: (config-loader rule 5). Deliberately conservative and easy to extend --
-#: unrecognized is a WARNING, never an error, so a missing entry here never
-#: blocks a legitimate new arch from being generated.
+#: Known real base target ids, for pre-mint check #5's warning. Unrecognized is
+#: a WARNING, never an error, so a missing entry here never blocks a legitimate
+#: new arch from being generated.
 KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
     {
         "gfx900",
@@ -137,20 +111,11 @@ KNOWN_ARCH_BASE_IDS: frozenset[str] = frozenset(
 DEFAULT_FIXTURE_ARCH = "gfx942"
 
 #: Base-id prefixes whose targets run a 32-lane wavefront. Everything else is 64.
-#:
 #: Mirrored BY HAND from rocKE's architecture SSOT,
 #: ``dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/core/arch/data/
-#: arch_specs.json`` (``gfx90a``/``gfx942``/``gfx950`` -> 64;
-#: ``gfx1151``/``gfx1201``/``gfx1250``/``gfx11-generic`` -> 32) -- check there for
-#: drift when a new target lands. Mirroring rather than importing is this repo's
-#: established shape for this datum: rocKE's own C99 tables under
-#: ``rocke/platform/cpp/core/arch/data.cpp`` are a second hand-mirror of the same
-#: file. Importing ``rocke.core.arch`` here would make descriptor generation
-#: require the kernel toolchain to be installed, which it deliberately does not.
-#:
-#: A PREFIX rule rather than a per-id table, because the datum this tool needs is
-#: the family's, and an id absent from a table would have to fall back to a
-#: default that is wrong for exactly the new RDNA target nobody has added yet.
+#: arch_specs.json`` -- check there for drift when a new target lands. Importing
+#: ``rocke.core.arch`` instead would make descriptor generation require the
+#: kernel toolchain to be installed, which it deliberately does not.
 WAVE32_ARCH_PREFIXES: tuple[str, ...] = ("gfx10", "gfx11", "gfx12")
 
 WAVE32_SIZE = 32
@@ -160,11 +125,9 @@ WAVE64_SIZE = 64
 def wave_size_for_arch(arch: str) -> int:
     """The wavefront width of ``arch``'s family.
 
-    Paired with the arch wherever a device is described, never defaulted beside
-    a templated arch: ``warpSize`` participates in ``DeviceKey``'s equality and
-    hash (``plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DeviceKey.hpp``), so an
-    arch/wave pair chosen independently describes a device that does not exist
-    and a wave-size-gated matcher gets tested against it.
+    ``warpSize`` participates in ``DeviceKey``'s equality and hash
+    (``plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DeviceKey.hpp``), so an
+    arch/wave pair chosen independently describes a device that does not exist.
     """
     return WAVE32_SIZE if arch.startswith(WAVE32_ARCH_PREFIXES) else WAVE64_SIZE
 
@@ -177,11 +140,7 @@ def _to_pascal_case(snake: str) -> str:
 
 @dataclass
 class KmdField:
-    """One ``fields[]`` entry of the engine's KMD (``*.kmd.json``).
-
-    Declared verbatim from YAML -- everything here is something a human
-    chooses; nothing is derivable.
-    """
+    """One ``fields[]`` entry of the engine's KMD (``*.kmd.json``)."""
 
     name: str
     type: str
@@ -197,10 +156,8 @@ class KmdField:
     def is_int_typed(self) -> bool:
         """Whether this field can back a usable UED knob.
 
-        A non-``int`` knob is accepted by the loader and produces no
-        ``KnobT`` at all, silently (``getCustomKnobs`` filters to
-        ``int64_t`` alternatives only) -- config-loader check #2 exists
-        because of exactly this property.
+        A non-``int`` knob is accepted by the loader and silently produces no
+        ``KnobT`` -- ``getCustomKnobs`` filters to ``int64_t`` alternatives only.
         """
         return self.type == "int"
 
@@ -210,10 +167,7 @@ class KernelSource:
     """A kernel's ``kernel_source`` object, in either authored dialect.
 
     One dataclass rather than one per dialect: the fields are disjoint per
-    ``kind``, and the emitter writes only the ones that ``kind`` owns (see
-    ``as_document``). The config loader rejects a kind the configured dialect
-    cannot emit, and rejects fields belonging to a different kind, so an
-    inconsistent combination never reaches a template.
+    ``kind``, and ``as_document`` writes only the ones that ``kind`` owns.
     """
 
     kind: str
@@ -223,8 +177,7 @@ class KernelSource:
     #: ``packaged`` / both kinds. For ``hip`` a path relative to the
     #: descriptor that names it; for ``rocke`` a DOTTED PYTHON MODULE PATH
     #: resolved through the importable ``kernels`` package -- not a file under
-    #: the descriptor root. That asymmetry is the format's sharpest trap, so
-    #: it is restated wherever ``source`` is written.
+    #: the descriptor root.
     source: str = ""
     #: ``packaged`` / ``hip``: the ``__global__`` entry point.
     entry: str = ""
@@ -232,8 +185,7 @@ class KernelSource:
     build: dict = field(default_factory=dict)
     #: ``packaged`` / ``rocke``: the builder function, which MUST take exactly
     #: ``(spec, *, arch)`` -- ``hkp_pack``'s ``_require_spec_arch_signature``
-    #: refuses anything else rather than freeze an unsuppliable parameter at
-    #: its default.
+    #: refuses anything else.
     builder: str = ""
     #: ``packaged`` / ``rocke``: the builder's own spec dataclass, as a plain
     #: dict. ``hkp_pack`` hydrates it with ``Spec(**fields)``, so every
@@ -243,9 +195,8 @@ class KernelSource:
     def as_document(self) -> dict:
         """The ``kernel_source`` JSON object for this kind, and nothing more.
 
-        Emitting a key another kind owns is not harmless: the runtime loader
-        hard-fails an unknown key, and ``hkp_pack`` validates a closed field
-        set per kind. So this returns exactly the kind's own keys.
+        The runtime loader hard-fails an unknown key and ``hkp_pack`` validates a
+        closed field set per kind, so a key another kind owns is not harmless.
         """
         if self.kind == KERNEL_SOURCE_KIND_EMBEDDED:
             return {
@@ -277,9 +228,8 @@ class KernelSource:
 class KernelSpec:
     """One kernel within a pack -- inline in the emitted KDP.
 
-    ``metadata`` is a plain dict of KMD field name -> authored value;
-    the config loader type-checks it against the engine's ``kmd_fields``
-    before any UUID is minted (pre-mint check #3).
+    ``metadata`` is a plain dict of KMD field name -> authored value, type-checked
+    against the engine's ``kmd_fields`` by pre-mint check #3.
     """
 
     name: str
@@ -314,11 +264,9 @@ class PackSpec:
 class GraphMatchSpec:
     """The engine-level ``graph_match`` shape.
 
-    ``shape`` and ``discriminator`` are documentation of *why* the config
-    is laid out the way it is (mirroring ``07-descriptor-generation.md``
-    §2's two structurally distinct shapes); they do not change what is
-    emitted; the pack-level ``discriminator`` field on each ``PackSpec``
-    is what actually drives whether an operation-scoped UMD is emitted.
+    Documentation only: neither field changes what is emitted. The pack-level
+    ``discriminator`` on each ``PackSpec`` is what drives whether an
+    operation-scoped UMD is emitted.
     """
 
     shape: str = "shared_shape"
@@ -329,9 +277,8 @@ class GraphMatchSpec:
 class EngineSpec:
     """The engine-level YAML block (``engine:`` in the config).
 
-    This is also the shape the ``sources/`` adapters (Task 2A.3) produce,
-    so a config built by hand and one inferred from a kernel source both
-    resolve to this same normalized dataclass before generation.
+    Also the shape the ``sources/`` adapters produce, so a hand-built config and
+    one inferred from a kernel source resolve to the same dataclass.
     """
 
     name: str
@@ -377,40 +324,29 @@ class EngineSpec:
 class IngestorConfig:
     """Complete configuration for one engine's descriptor bundle.
 
-    Every value a human might override is a declared field above this
-    class's own fields (nested in ``engine``/``kmd_fields``/``packs``);
-    every value below is mechanically derivable and is a ``@property``.
+    Anything a human overrides is a declared field; anything mechanically
+    derivable from those fields is a ``@property``.
     """
 
     engine: EngineSpec
     kmd_fields: list[KmdField] = field(default_factory=list)
     packs: list[PackSpec] = field(default_factory=list)
     graph_match: GraphMatchSpec = field(default_factory=GraphMatchSpec)
-    #: Which authored dialect to emit. Defaults to ``direct_load`` so every
-    #: config written before dialects existed keeps generating exactly what it
-    #: generated before.
     dialect: str = DIALECT_DIRECT_LOAD
     kernel_source_kind: str = KERNEL_SOURCE_KIND_EMBEDDED
     workspace_policy: str = "none"
-    #: PARSED AND NEVER READ. No emitter, template or check consults this, so
-    #: setting it changes nothing about the generated bundle. Kept because it is
-    #: part of the documented config surface and silently dropping a key an author
-    #: wrote is worse than honouring it inertly -- but say so HERE, because the
-    #: failure mode of a dead key is that the author believes it took effect.
-    #: `workspace_policy` immediately above IS consumed (it branches in the native
-    #: template); the two look alike and behave differently.
+    #: PARSED AND NEVER READ: no emitter, template or check consults this, so
+    #: setting it changes nothing about the generated bundle. `workspace_policy`
+    #: immediately above looks alike and IS consumed (it branches in the native
+    #: template).
     delegates_to_existing_plan: bool = False
     #: Where the bundle is authored, in whichever tree its dialect writes into.
-    #:
     #: ``packaged``: the subpath under the packager's ONE source root, e.g.
-    #: ``rocKE/gfx950_attention_dense``. Preserved verbatim into the staged and
-    #: installed trees, so it is part of the shipped layout rather than a scratch
-    #: detail. Defaults to ``<kind>/<slug>``.
-    #:
+    #: ``rocKE/gfx950_attention_dense``, preserved verbatim into the staged and
+    #: installed trees; defaults to ``<kind>/<slug>``.
     #: ``direct_load``: the authored SET under ``test_descriptors/`` -- one of
     #: `AUTHORED_TEST_SETS`, and REQUIRED, because the set is the consuming
-    #: binary's choice and no default can stand in for it. The config loader
-    #: rejects a direct-load bundle that omits it.
+    #: binary's choice and no default can stand in for it.
     authored_subpath: str = ""
     specialization: dict = field(default_factory=dict)
 
@@ -426,12 +362,10 @@ class IngestorConfig:
     def descriptor_dir(self) -> str:
         """Where this bundle's descriptor files go, relative to the output dir.
 
-        ``direct_load`` writes into the provider's ``test_descriptors/`` tree,
-        under the authored set the bundle belongs to. Each set is its own pack
-        target, walked by directory, so the set -- not a list edit -- is what puts
-        the descriptors in a shard some binary reads.
-        ``packaged`` mirrors the packager's source root, where the authored
-        subpath is meaningful and is carried through to the install layout.
+        ``direct_load`` writes into the provider's ``test_descriptors/`` tree under
+        the authored set, each of which is its own pack target walked by directory.
+        ``packaged`` mirrors the packager's source root, which is carried through
+        to the install layout.
         """
         if not self.is_packaged:
             return f"test_descriptors/{self.authored_subpath}/{self.engine.slug}"
@@ -456,8 +390,7 @@ class IngestorConfig:
         """The architecture the emitted matcher-test device fixture names.
 
         The first pack's first arch, because that is the device this bundle is
-        authored against; `DEFAULT_FIXTURE_ARCH` where the config restricts none,
-        since a by-value device still has to be some device.
+        authored against; `DEFAULT_FIXTURE_ARCH` where the config restricts none.
         """
         first_pack_arch = self.packs[0].arch if self.packs else []
         return first_pack_arch[0] if first_pack_arch else DEFAULT_FIXTURE_ARCH
@@ -466,10 +399,8 @@ class IngestorConfig:
     def device_fixture_wave_size(self) -> int:
         """That fixture's ``warpSize``, DERIVED from `device_fixture_arch`.
 
-        Derived rather than written beside it: the two are one fact about one
-        device, and a generator that templates the arch while hard-coding the wave
-        emits an impossible device for every wave32 target -- silently, because
-        every mechanical check still passes.
+        Templating the arch while hard-coding the wave emits an impossible device
+        for every wave32 target, silently -- every mechanical check still passes.
         """
         return wave_size_for_arch(self.device_fixture_arch)
 
@@ -486,8 +417,7 @@ class IngestorConfig:
         """The dotted namespace native symbols live under, e.g. ``hipkernel.conv_fwd``.
 
         Derived from the engine's scoped name: ``hipkernel:ConvFwd`` walks to
-        ``hipkernel.conv_fwd`` -- the exact prefix every symbol in
-        ``ConvNative.cpp`` shares.
+        ``hipkernel.conv_fwd``.
         """
         local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", self.engine.local_name).lower()
         return f"{self.engine.namespace}.{local_snake}"

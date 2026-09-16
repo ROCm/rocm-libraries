@@ -67,15 +67,10 @@ def heuristic_free_config():
     """An engine declaring ``heuristic: none`` -- legal, and shipped by nothing.
 
     Every config under ``configs/`` declares ``heuristic: native`` and
-    ``EngineSpec.heuristic`` defaults to it, so the ``{% else %}`` arm of every
-    template that branches on ``has_heuristic`` renders for no fixture at all. An
-    engine may ship no ranking model (it then ranks on priority, then descriptor
-    id), and the first integration that does would be the first to render those
-    arms -- on its own deadline.
-
-    Built from the unit helpers rather than added as a fourth file under
-    ``configs/``: the arms belong to the templates, while a config in ``configs/``
-    is also a worked example this tool tells its readers to copy.
+    ``EngineSpec.heuristic`` defaults to it, so without this fixture the
+    ``{% else %}`` arm of every template branching on ``has_heuristic`` renders
+    for nothing. An engine with no ranking model ranks on priority, then
+    descriptor id.
     """
     return make_minimal_config(engine=make_engine(heuristic="none"))
 

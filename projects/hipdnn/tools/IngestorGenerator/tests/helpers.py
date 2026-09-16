@@ -49,12 +49,10 @@ def make_minimal_config(**overrides) -> IngestorConfig:
     """A minimal valid single-pack IngestorConfig, for unit tests.
 
     ``specialization`` is DERIVED from whatever ``kmd_fields`` the caller ends up
-    with, as the all-matcher-only declaration the direct-load dialect requires --
-    the shape every generated bundle must carry, since a UKD without one cannot be
-    checked against the builder it was compiled from. Deriving it means a test that
-    overrides ``kmd_fields`` still gets a declaration that partitions them, instead
-    of a stale one that fails for a reason the test is not about. A test that IS
-    about the declaration passes its own.
+    with, as the all-matcher-only declaration the direct-load dialect requires, so
+    a test that overrides ``kmd_fields`` still gets a declaration that partitions
+    them rather than a stale one. A test that IS about the declaration passes its
+    own.
     """
     defaults = dict(
         engine=make_engine(),

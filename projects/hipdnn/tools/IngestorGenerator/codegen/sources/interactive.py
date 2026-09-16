@@ -10,11 +10,8 @@ from .base import SourceAdapterResult
 
 
 class InteractiveAdapter:
-    """No inference. ``infer()`` always returns an empty result -- callers
-    using this adapter are expected to build the ``IngestorConfig`` fields
-    themselves (e.g. the skill's create flow after its own Step 2 inference
-    conversation with a human), not to read anything from ``sources``.
-    """
+    """No inference. ``infer()`` always returns an empty result -- callers build
+    the ``IngestorConfig`` fields themselves rather than read ``sources``."""
 
     def infer(self, *sources: Path) -> SourceAdapterResult:
         return SourceAdapterResult(kernels=[], suggested_pack_count=1)

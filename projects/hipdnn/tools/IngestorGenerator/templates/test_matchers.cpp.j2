@@ -33,8 +33,8 @@ using hipdnn_plugin_sdk::ingestor::DeviceProperties;
 /// A fixed device, constructed BY VALUE rather than queried from the host. An
 /// arch-gated matcher test that instead calls hipGetDeviceProperties() is vacuous
 /// everywhere except whatever arch happens to be running CI
-/// (TestAsmSdpaForwardMatchers.cpp:27-33) -- it would silently stop testing the one
-/// thing an arch-gated matcher exists to gate the moment CI's hardware changes.
+/// (TestAsmSdpaForwardMatchers.cpp) -- it would silently stop testing the one thing an
+/// arch-gated matcher exists to gate the moment CI's hardware changes.
 ///
 /// Both fields come from this bundle's own architecture: `warpSize` is that arch's
 /// wavefront width (codegen/models.py's `wave_size_for_arch`), not a constant, because
@@ -59,7 +59,7 @@ DeviceProperties fixedDeviceProperties()
 {% endif %}
 
 // Two directions, deliberately pre-wired and deliberately skipping until you fill them
-// in. A matcher has a DIRECTION, and nothing before stage 8 tests which way it answers:
+// in. A matcher has a DIRECTION, and no mechanical check tests which way it answers:
 // an engine that declines everything passes generation, packing, validation and
 // enumeration with every mechanical check green, and the first evidence arrives on a
 // device days later. These make that evidence local. Keep BOTH -- an accept-only test

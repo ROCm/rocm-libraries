@@ -3,9 +3,8 @@
 
 """Unit tests for the compact `variants` config form.
 
-The property under test throughout is that the compact form and the enumeration it
-stands for generate the SAME descriptors. Everything below defends one way that can
-silently stop being true.
+The property under test throughout is that the compact form and the enumeration
+it stands for generate the SAME descriptors.
 """
 
 import pytest
@@ -209,13 +208,11 @@ class TestTriState:
         assert kernel.metadata["use_exp2_fast"] == expect_metadata
 
     def test_absent_and_pinned_false_are_different_kernels(self, tmp_path):
-        """Same metadata, DIFFERENT binary. The distinction is the whole point.
+        """Same metadata, DIFFERENT binary.
 
         Both reach the matcher as 0, so the metadata mirror cannot tell them apart
-        and the name has to: each arm carries its own tag. That is not a quirk of
-        this test -- it is why the shipped grammar spells policy-decided-off `ed` and
-        pinned-off `e0`. Only the spec says which binary was built, and an arm that
-        omits the knob must keep omitting it.
+        and the name has to: each arm carries its own tag. The shipped grammar
+        spells policy-decided-off `ed` and pinned-off `e0`.
         """
         kernels = _kernels(
             tmp_path,
@@ -243,11 +240,10 @@ class TestTriState:
     def test_arm_metadata_wins_over_the_same_field_in_the_spec(self, tmp_path):
         """The discriminating case for the precedence order.
 
-        When a field is in BOTH the arm's `metadata` and its spec, only one order is
-        right: the arm's stated metadata is what the MATCHER compares, and the spec
-        is what the binary was built from. They are allowed to differ -- that is how
-        a knob gets swept in the catalog over a spec the dispatcher fixed -- so the
-        loader must not overwrite the stated value with the spec's.
+        The arm's stated metadata is what the MATCHER compares and the spec is what
+        the binary was built from; they are allowed to differ -- that is how a knob
+        gets swept in the catalog over a spec the dispatcher fixed -- so the loader
+        must not overwrite the stated value with the spec's.
 
         Without this the two branches are indistinguishable: every other test has the
         field in exactly one of the two places, so swapping the branch order changes
@@ -286,8 +282,7 @@ class TestTriState:
 
         The dispatcher returns the shared spec and leaves arch-private knobs to the
         kernel's policy, so sweeping such a knob pins what the MATCHER compares
-        without changing what is compiled. Both arms are real descriptors and the
-        format has to be able to say that -- writing the pin into the spec instead
+        without changing what is compiled. Writing the pin into the spec instead
         would claim a binary that was never built.
         """
         kernels = _kernels(
@@ -335,10 +330,8 @@ class TestNameInjectivity:
 
     The loader rejects a pack whose expansion produces duplicate names, because
     nothing after it would: the dedup pass keys on metadata rather than name, so a
-    collision that got through would ship as two descriptors impossible to tell apart
-    in a log, a winner record or a failure message. A
-    previous version hardcoded a subset of attention's field names and gave two
-    distinct conv variants the same name.
+    collision that got through would ship as two descriptors impossible to tell
+    apart in a log, a winner record or a failure message.
     """
 
     @pytest.mark.parametrize("field,other", [("dtype", "fp16"), ("seqlen_q", 1024)])
@@ -442,9 +435,7 @@ class TestRejections:
     def test_two_shapes_rendering_one_name_are_rejected(self, tmp_path):
         """The guarantee the whole naming discipline rests on.
 
-        Nothing after the loader catches this: the dedup pass keys on metadata, so a
-        collision that got through ships as two descriptors nothing can tell apart.
-        Here the template omits seqlen_q, the only field the two shapes differ in.
+        The template omits seqlen_q, the only field the two shapes differ in.
         """
         with pytest.raises(ConfigError, match="duplicated kernel name"):
             _kernels(
@@ -531,8 +522,8 @@ class TestRejections:
             _kernels(tmp_path, **override)
 
     def test_a_name_template_that_cannot_render_is_rejected(self, tmp_path):
-        """An unmatched brace raises ValueError from str.format, not KeyError, so it
-        escaped the diagnostic and reached the author as a bare traceback."""
+        """An unmatched brace raises ValueError from str.format, not KeyError, so
+        it would otherwise reach the author as a bare traceback."""
         with pytest.raises(ConfigError, match="could not be rendered"):
             _kernels(tmp_path, name="attn.{dtype")
 
@@ -614,14 +605,12 @@ class TestPackDefaultsComposeBeforeMetadataProjection:
     """A pack-level ``kernel_defaults.spec`` decides the binary, so it must reach
     the metadata projection -- and an OMITTED key must stay omitted.
 
-    The spec is what the kernel is compiled from; metadata is what the matcher
-    compares. If the pack default composes only into the emitted ``kernel_source``
-    and not into the projection, the descriptor advertises the KMD default while
-    the binary carries the pack's -- two independent defaults that are not required
-    to agree, and whose disagreement is silent. And an omitted key is a THIRD
-    state: it tells the builder its own policy decides, which is not the same as
-    pinning the knob to ``false``/``0``, and both would otherwise reach metadata
-    as the same value.
+    If the pack default composes only into the emitted ``kernel_source`` and not
+    into the projection, the descriptor advertises the KMD default while the binary
+    carries the pack's -- two independent defaults that are not required to agree,
+    and whose disagreement is silent. An omitted key is a THIRD state: it tells the
+    builder its own policy decides, which is not the same as pinning the knob to
+    ``false``/``0``, and both would otherwise reach metadata as the same value.
     """
 
     @staticmethod
@@ -668,11 +657,9 @@ class TestPackDefaultsComposeBeforeMetadataProjection:
         """Omission is the third state, not a synonym for false.
 
         ``use_exp2_fast`` is absent from the pack default and from the arm, which
-        is what tells the builder its own policy decides it at build time. Writing
-        ``false`` there instead would compile a different binary -- and the two
-        reach metadata as the same 0, so nothing downstream could tell them apart.
-        The shape's ``resolved`` block is what states the answer the policy gave,
-        so the matcher still compares something true of the binary.
+        tells the builder its own policy decides it at build time. The shape's
+        ``resolved`` block states the answer the policy gave, so the matcher still
+        compares something true of the binary.
         """
         emitted = self._emitted(
             tmp_path,

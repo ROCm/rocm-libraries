@@ -1,44 +1,18 @@
-"""Plan a knob sweep: isolate first, then pair the survivors, then ship what mattered.
+"""Plan a knob sweep: isolate each knob, pair only the survivors, ship what moved.
 
-The last sweep moved 2 of 22 knobs, chose them by hand, and shipped a cross-product.
-The uplift landed almost entirely on one synthetic shape family, and the wide arm
-bought nothing measurable over the condensed one on either corpus. This tool exists
-to make the disciplined order the easy one.
-
-ORDER, AND WHY IT IS NOT NEGOTIABLE
-
-  1. ISOLATE. One knob at a time, two arms: the dispatcher's own value against the
-     knob perturbed, everything else held at parity. A two-arm set is small enough to
-     build quickly, and an effect measured here is attributable to that knob alone.
-  2. PAIR THE SURVIVORS. Only knobs that moved individually. Occupancy knobs interact
-     -- waves_per_eu against block_n is the obvious one -- so the pairwise pass is
-     where a real interaction shows up, and restricting it to survivors keeps it from
-     being the cross-product again.
-  3. SHIP WHAT SURVIVED. Not everything nameable. A cross-product IS what the wide arm
-     was, and it bought nothing.
-
-WHAT IS NOT A CANDIDATE, decided before any GPU time:
-
-  * A knob CONSTANT across every dispatch decision. The dispatcher fixing a value is
-    the library shipping it; sweeping it measures a configuration rocKE would never
-    resolve to. `dispatch_parity.py --report-knobs` prints this partition.
-  * A knob with a MEASURED VERDICT in the kernel's own source or history. "The author
-    swept it" means it was explored, not that it ships, and a knob marked
-    proven-negative is settled rather than open.
-  * A knob the source says FAULTS at other values, or whose alternative the predicate
-    rejects outright. Those are gated here rather than discovered on a device.
-
-Declared hazards travel with each knob so the reason is attached to the decision
-instead of living in someone's memory of a commit message.
+Isolation first because a two-arm set holds everything else at parity, so an effect is
+attributable to one knob; restricting the pairwise pass to survivors keeps it from
+becoming the cross-product again. A knob the dispatcher already varies per shape, or
+one carrying a measured verdict in the kernel's own source, is not an open question
+and is excluded before any GPU time -- `--plan` prints that partition with reasons.
 
     knob_sweep.py --profile <p.yaml> --shapes <corpus.json> --plan
     knob_sweep.py --profile <p.yaml> --shapes <corpus.json> --isolate --out-dir <d>
     knob_sweep.py --profile <p.yaml> --shapes <corpus.json> \\
                   --pairwise waves_per_eu,block_n --out-dir <d>
 
-Emits one generator config per arm. It never measures: measurement is the harness's
-job, on one node in one session, and this tool has no opinion about a number it
-cannot see.
+Emits one generator config per arm. It never measures: that is the harness's job, on
+one node in one session.
 """
 
 from __future__ import annotations
@@ -88,16 +62,10 @@ def load_knobs(profile: dict) -> list[Knob]:
 def _promote(spec, arch_spec_cls, overrides: dict):
     """Re-express `spec` as the arch subclass so a PRIVATE knob can be set.
 
-    The dispatcher deliberately returns the SHARED spec and touches no arch-private
-    codegen knob -- those are, in the factory's own words, "sweep-visible and
-    dispatch-invisible", and wiring one into the factory would make it a production
-    path needing its own measured verdict first. So the knobs most worth sweeping are
-    exactly the ones absent from what the dispatcher hands back, and an arm for one
-    has to promote the spec the way the BUILDER does rather than pretend the field
-    was there.
-
-    Every shared field is carried across unchanged, so the arm still differs from
-    parity in the named knobs and nothing else.
+    The dispatcher returns the SHARED spec and touches no arch-private codegen knob, so
+    the knobs most worth sweeping are exactly the ones absent from what it hands back.
+    Every shared field is carried across unchanged, so the arm still differs from parity
+    in the named knobs and nothing else.
     """
     shared = {f.name: getattr(spec, f.name) for f in dataclasses.fields(spec)}
     allowed = {f.name for f in dataclasses.fields(arch_spec_cls)}
@@ -128,35 +96,24 @@ def _arm(
 ) -> tuple[dict, list[tuple[int, str]]]:
     """One arm: the parity set with `overrides` forced onto every served spec.
 
-    Built by MUTATING the dispatcher's own resolution rather than by authoring a
-    config, so the arm differs from parity in exactly the knobs named and in nothing
-    else. Hand-authoring the comparand is how an arm acquires a second difference
-    nobody recorded.
+    Built by MUTATING the dispatcher's own resolution rather than by authoring a config,
+    so the arm differs from parity in exactly the knobs named and in nothing else. EVERY
+    arm is promoted to the arch spec when one is declared, including the baseline with
+    no overrides: the subclass adds its private fields at their defaults, so a promoted
+    arm and an unpromoted baseline differ in three or four fields rather than the one
+    under test, and the isolation pass would attribute all of that to the named knob.
 
-    EVERY arm is promoted to the arch spec when one is declared, including the
-    baseline with no overrides at all. Promoting only the arms that need it was tried
-    and is wrong: the subclass adds its private fields at their defaults, so a
-    promoted arm differed from an unpromoted baseline in three or four fields rather
-    than the one under test, and the isolation pass would have attributed all of that
-    to the named knob. The confound is silent -- every arm still generates, gates and
-    measures -- which is precisely why the arms are diffed against the baseline in
-    the test suite rather than trusted.
+    Returns `(config, unbuildable)`, where `unbuildable` lists `(shape_index, reason)`
+    for every served shape whose spec REFUSES this arm's value -- a real property of the
+    set, not a tool error. The caller must report that count: a bare ratio against
+    parity over a different shape population is not a comparison.
 
-    Returns `(config, unbuildable)`, where `unbuildable` lists
-    `(shape_index, reason)` for every served shape whose spec REFUSES this arm's
-    value -- a real property of the set, not a tool error. The caller must report
-    that count: an arm covering a subset of the corpus is measurable, but a bare
-    ratio against parity over a different shape population is not a comparison.
-
-    TWO WAYS TO REFUSE, and only one of them raises. A spec constructor rejects an
-    illegal combination outright. The other kind constructs perfectly and is simply
-    NOT SUPPORTED -- an unsupported `head_size`, a `use_cfvst` combination the
-    kernel declines -- and the only thing that knows is the engine's own
-    eligibility predicate. So the predicate is asked about the FINAL spec: after
-    promotion to the builder's class and after this arm's overrides, which is the
-    spec the descriptor would actually be built from. Asking before the overrides
-    answers a question about a different kernel, and the arm ships a variant nothing
-    can serve while the run reads as a clean comparison against parity.
+    Refusal comes two ways, and only one of them raises. A spec constructor rejects an
+    illegal combination outright; the other kind constructs perfectly and is simply NOT
+    SUPPORTED, and the only thing that knows is the engine's own eligibility predicate.
+    So the predicate is asked about the FINAL spec, after promotion to the builder's
+    class and after this arm's overrides -- asking earlier answers a question about a
+    different kernel.
     """
     mutated = []
     unbuildable: list[tuple[int, str]] = []
@@ -175,19 +132,11 @@ def _arm(
                 f"are exactly the ones the dispatcher leaves alone, so a sweep needs "
                 f"the builder's own spec class to reach them."
             )
-        # A KNOB VALUE CAN BE ILLEGAL FOR SOME SHAPES AND LEGAL FOR OTHERS, and that
-        # is a property of the SET, not an error in the tool. `wide_lds_dma` requires
+        # A KNOB VALUE CAN BE ILLEGAL FOR SOME SHAPES AND LEGAL FOR OTHERS, and that is
+        # a property of the SET, not an error in the tool: `wide_lds_dma` requires
         # `block_n=64`, so a `block_n=128` arm cannot express any shape the dispatcher
-        # resolved wide-DMA for -- 53 of 84 on the gfx950 shipping corpus. Letting the
-        # spec constructor's ValueError escape aborts the whole isolation pass on the
-        # first such shape and reports nothing about the 31 that ARE expressible;
-        # worse, the same class of illegal combination previously reached a DEVICE as
-        # 180 unbuildable descriptors because no host gate constructed the spec.
-        #
-        # So construct it here, drop what cannot be built, and RETURN the count so the
-        # caller can say which shapes the arm actually covers. A silently narrowed arm
-        # is the failure this avoids: it would measure a subset while reading as a
-        # full comparison against parity.
+        # resolved wide-DMA for. Letting the constructor's ValueError escape would abort
+        # the whole isolation pass on the first such shape, so drop them and count them.
         try:
             if arch_spec_cls is not None:
                 clone.spec = _promote(resolution.spec, arch_spec_cls, overrides)
@@ -202,12 +151,10 @@ def _arm(
             unbuildable.append((index, f"{type(exc).__name__}: {exc}"))
             continue
         if predicate is not None:
-            # THE FINAL SPEC, not the one the dispatcher returned. Composition is
-            # complete here: promoted to the builder's class and carrying this arm's
-            # overrides. A perturbation that constructs and is still declined --
-            # an unsupported head_size, a use_cfvst combination the kernel refuses --
-            # is invisible to the constructor above and to any check run earlier, and
-            # shipping it puts a variant in the catalog that nothing will ever serve.
+            # THE FINAL SPEC, not the one the dispatcher returned: promoted to the
+            # builder's class and carrying this arm's overrides. A perturbation that
+            # constructs and is still declined -- an unsupported head_size, a use_cfvst
+            # combination the kernel refuses -- is invisible to the constructor above.
             supported, why = _predicate_result(
                 predicate, clone.spec, **({"arch": arch} if arch else {})
             )
@@ -334,9 +281,8 @@ def main(argv=None) -> int:
                 name = f"arm_{knob.name}_{value}.yaml"
                 count = _write(arm, out / name)
                 # An arm whose value is what the dispatcher already resolves is the
-                # baseline under another name. It builds, gates and measures at
-                # exactly 1.000x, and the sweep then reports a knob as "no effect"
-                # having never tried the other side of it.
+                # baseline under another name: it measures exactly 1.000x, and the sweep
+                # reports the knob as "no effect" having never tried the other side.
                 arm_specs = [
                     k["kernel_source"]["spec"] for k in arm["packs"][0]["kernels"]
                 ]

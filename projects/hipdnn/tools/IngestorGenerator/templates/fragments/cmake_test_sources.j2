@@ -1,4 +1,4 @@
-## Splice point 5: .../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt:4-11
+## Splice point 5: .../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt
 ## Append these lines to the existing target_sources(hip_kernel_provider_tests PRIVATE
 ## ...) block. Do not replace the block -- append inside it. This tool's own output
 ## tree places both files under tests/ (see fragments header); the provider's test
@@ -37,7 +37,7 @@ hkp_register_census_tests(TARGET hip_kernel_provider_tests
 {% endfor %}
                           )
 ##
-## `PACK_NAME product` resolves because the shipped root is non-empty on this branch.
+## `PACK_NAME product` resolves because the shipped root is non-empty.
 ## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing
 ## this call, or the registered census will run against a shard that does not contain
 ## your descriptors.

@@ -125,8 +125,6 @@ class TestIngestorConfigDerivation:
         assert config.device_fixture_arch == DEFAULT_FIXTURE_ARCH
 
     def test_device_fixture_wave_size_follows_the_fixture_arch(self):
-        """The pairing itself, which is the whole point of deriving it: an arch and
-        a wave size chosen independently describe a device that does not exist."""
         cdna = make_minimal_config(packs=[make_pack(arch=["gfx942"])])
         rdna = make_minimal_config(packs=[make_pack(arch=["gfx1201"])])
         assert cdna.device_fixture_wave_size == 64
@@ -165,12 +163,7 @@ class TestWaveSizeForArch:
         assert wave_size_for_arch(arch) == 32
 
     def test_an_unrecognized_arch_takes_the_wave64_default(self):
-        """An id no table knows still has to answer.
-
-        64 rather than a raise, because the prefix rule is about the FAMILY and the
-        caller has a real arch in hand: refusing would fail generation for a target
-        whose wavefront the generator does not need to know precisely, while the
-        default is what every non-gfx10/11/12 AMD target has shipped.
-        """
+        """64 rather than a raise: the prefix rule is about the arch FAMILY, and
+        wave64 is what every non-gfx10/11/12 AMD target has shipped."""
         assert wave_size_for_arch("gfx999") == 64
         assert wave_size_for_arch("") == 64

@@ -4,11 +4,9 @@
 #
 # DATA, NOT CODE. This file is read with a safe YAML loader that refuses duplicate
 # keys and non-string keys, and nothing in it is ever sourced, expanded or executed.
-# The predecessor was a shell fragment the driver sourced, so a config could define
-# functions, shell out, and silently redefine any part of the harness -- which meant
-# reading a sweep's inputs required reading its config as a program. Every path here
-# is resolved relative to THIS FILE's directory, so a config and its inputs move
-# together. Commands are argument ARRAYS: no quoting, no word splitting, no shell.
+# Every path here is resolved relative to THIS FILE's directory, so a config and its
+# inputs move together. Commands are argument ARRAYS: no quoting, no word splitting,
+# no shell.
 #
 # This is the whole surface that differed between the two one-off sweeps the harness
 # was generalised from: an output directory, a corpus list, an arm list, the install

@@ -1,23 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The generated native stub -- the single most important artifact this tool
-produces.
+"""A real compiler's verdict on the emitted C++.
 
 ``packs/<Name>Native.cpp`` is what an agent (or a human) fills in to make an
-engine serve real graphs (see RUNBOOK.md). These tests observe a real compiler's
-verdict on the emitted C++.
-
-``TestRealCompile`` -- best-effort host compile of all three emitted C++ files:
-the native stub, the matcher-test stub and the pack-census test, guarded by a
-module fixture that skips (not fails) when the plugin SDK's CMake-baked
-version/config headers are unavailable, so the run reports honestly whether it
-happened. The compile is
-``-fsyntax-only``: it proves the emitted translation unit parses and
-type-checks against the real SDK headers, and nothing more. Linking, symbol
-registration, loader pre-flight, inventory and runtime behaviour are owned by
-the provider's compiled registration/load/inventory tests and by the native
-execution matrix, not by anything in this file.
+engine serve real graphs (see RUNBOOK.md).
 """
 
 import subprocess
@@ -41,14 +28,10 @@ def _find_include_dir(name: str) -> Path | None:
 def compile_env():
     """Best-effort host-compile environment for the emitted native stub.
 
-    The plugin SDK's ``version.h``/``CacheRootDefaults.h`` headers are
-    CMake-configured (``.h.in`` templates), so a from-scratch compile needs
-    stand-ins for them. Generates minimal ones from the real ``.in``
-    templates (substituting placeholder values -- the macros' actual values
-    are irrelevant to whether the emitted stub parses) rather than skipping
-    outright, so the check actually runs rather than silently reporting
-    nothing. Skips (never fails) when a prerequisite -- compiler, SDK
-    sources beside this checkout, or a vendored flatbuffers -- is absent.
+    The SDKs' ``version.h``/``CacheRootDefaults.h`` are CMake-configured
+    (``.h.in`` templates), so a from-scratch compile needs stand-ins; their
+    macro values are irrelevant to whether the stub parses. Skips rather than
+    fails when a prerequisite is absent.
     """
     gxx = shutil.which("g++") or shutil.which("clang++")
     if gxx is None:
@@ -80,10 +63,6 @@ def compile_env():
         pytest.skip("no flatbuffers/array.h found (checked /opt/rocm/include)")
 
     gen_dir = Path(tempfile.mkdtemp(prefix="ingestor_gen_include_"))
-    # Stand-in CMake-configured headers, generated from the real .in
-    # templates with placeholder substitutions -- their content is
-    # irrelevant to whether the emitted native stub parses; only their
-    # presence (and the macros they define) matters.
     configure_targets = {
         "hipdnn_data_sdk/utilities/CacheRootDefaults.h": (
             data_sdk
@@ -163,16 +142,10 @@ def _compile(compile_env, source: str, tmp_path: Path) -> subprocess.CompletedPr
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-#: A minimal stand-in for the gtest surface the emitted test files use. gtest is not
-#: a dependency of this tool, so those files are parsed against this rather than by
-#: pulling googletest into the generator's test environment. That is enough to catch
-#: the realistic defects -- an unbalanced stub, a bad string concatenation, a name
-#: that does not exist -- without taking on the dependency.
-#:
-#: Every expectation macro NAMES each operand it is handed. One expanding to
-#: ``(void)0`` discards them, so a typo'd identifier inside an expectation parses
-#: clean and this check reports success on a file that cannot build against real
-#: gtest -- which is the whole class of defect the parse exists to find.
+#: A minimal stand-in for the gtest surface the emitted test files use, so parsing
+#: them does not pull googletest into this tool's test environment. Every
+#: expectation macro must NAME each operand: one expanding to ``(void)0`` discards
+#: them, and a typo'd identifier inside an expectation would then parse clean.
 _GTEST_STUB_HEADER = """#pragma once
 
 struct GTestMsg
@@ -249,18 +222,10 @@ def _parse_test_stub(
 class TestRealCompile:
     """Host-compile the emitted stub with g++, best-effort.
 
-    The plugin SDK's ``version.h``/``CacheRootDefaults.h`` headers are
-    CMake-configured (``.h.in`` templates), so a from-scratch compile needs
-    stand-ins for them. The fixture generates minimal ones from the real
-    ``.in`` templates (substituting placeholder values -- the macros' actual
-    values are irrelevant to whether the emitted stub parses) rather than
-    skipping outright, so the check actually runs rather than silently
-    reporting nothing.
-
     Proof boundary: every case here runs ``-fsyntax-only``. A pass means the
     emitted translation unit parses and type-checks against the real headers;
-    it is not evidence that the engine links, registers its symbols, loads, or
-    dispatches.
+    linking, symbol registration, loading and dispatch belong to the provider's
+    own tests.
     """
 
     def test_single_pack_stub_compiles(
@@ -277,15 +242,9 @@ class TestRealCompile:
     def test_packaged_dialect_stub_compiles(
         self, compile_env, generator, gfx950_attention_dense_config, tmp_path
     ):
-        """The packaged branch emits code the other two configs never exercise.
-
-        Both compile tests above use direct_load configs, so the
-        `{% if config.is_packaged %}` block -- an entire extra function
-        definition, placed outside the pack's anonymous namespace so the
-        IngestorPacks.cpp row can reference it -- was emitted by nothing that
-        compiles. It was added to fix a link error; emitting a *syntax* error in
-        its place would have passed every test.
-        """
+        """The only config reaching the `{% if config.is_packaged %}` block: an
+        extra function definition placed outside the pack's anonymous namespace
+        so the IngestorPacks.cpp row can reference it."""
         config = gfx950_attention_dense_config
         assert config.is_packaged, "fixture is no longer the packaged-dialect one"
         rendered = generator._render_template(
@@ -299,13 +258,8 @@ class TestRealCompile:
     def test_matcher_test_stub_parses(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """The OTHER emitted C++ file. Nothing compiled it.
-
-        `test_matchers.cpp.j2` carries pre-wired `GTEST_SKIP()` stubs and no test
-        fed it to a compiler -- the same gap the packaged native stub had, one
-        template over. A malformed stub would ship and first fail inside the
-        provider's build, days later.
-        """
+        """`test_matchers.cpp.j2` ships pre-wired `GTEST_SKIP()` stubs; a
+        malformed one would first fail inside the provider's build."""
         rendered = generator._render_template(
             "test_matchers.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
@@ -317,15 +271,9 @@ class TestRealCompile:
     def test_pack_census_stub_parses(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """The THIRD emitted C++ file, and the one nothing had ever read.
-
-        `generator.py` renders `test_packs.cpp.j2` for every config and no test
-        under `tests/` named one of its identifiers, so `StrictUndefined` at render
-        time was the whole of its coverage -- it judges the template's names and
-        nothing about the C++ that comes out. The other two files are stubs an
-        author is expected to finish; this one is emitted COMPLETE and meant to run
-        as written, so a defect in it ships inside something that looks finished.
-        """
+        """Unlike the two stubs an author is expected to finish, the census is
+        emitted complete and meant to run as written, so a defect in it ships
+        inside something that looks finished."""
         rendered = generator._render_template(
             "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )
@@ -338,8 +286,7 @@ class TestRealCompile:
         self, compile_env, generator, binary_ops_config, tmp_path
     ):
         """The census's multi-pack arm counts one graph-scoped matcher per pack,
-        against the single-pack arm's zero -- different code, not a different
-        constant, so it needs its own parse."""
+        against the single-pack arm's zero -- different code, not a constant."""
         config = binary_ops_config
         assert config.is_multi_pack, "fixture is no longer the multi-pack one"
         rendered = generator._render_template(
@@ -353,13 +300,8 @@ class TestRealCompile:
     def test_heuristic_free_stubs_parse(
         self, compile_env, generator, heuristic_free_config, tmp_path
     ):
-        """`heuristic: none` reaches a compiler for the first time here.
-
-        Every shipped config declares `heuristic: native`, so the `{% else %}` arms
-        of the native stub, the matcher stub and the census were emitted by nothing
-        that parses. The first heuristic-free integration would have been the one to
-        discover whether they are valid C++.
-        """
+        """Every shipped config declares `heuristic: native`, so this is the only
+        case that parses the `{% else %}` arms of all three templates."""
         config = heuristic_free_config
         assert not config.engine.has_heuristic
         ids = mint_ids(config)
@@ -382,12 +324,9 @@ class TestRealCompile:
     def test_the_census_parse_catches_a_typo_inside_an_expectation(
         self, compile_env, generator, scale_add_config, tmp_path
     ):
-        """Sanity check on the gtest stand-in, where it is weakest.
-
-        `EXPECT_EQ`/`EXPECT_NE` used to expand to `(void)0`, discarding both
-        operands, so an undeclared name inside the census's most common statement
-        parsed clean and this class reported success on a file real gtest rejects.
-        """
+        """Sanity check on the gtest stand-in where it is weakest: an expectation
+        macro that discarded its operands would let this class report success on a
+        file real gtest rejects."""
         rendered = generator._render_template(
             "test_packs.cpp.j2", scale_add_config, ids=mint_ids(scale_add_config)
         )

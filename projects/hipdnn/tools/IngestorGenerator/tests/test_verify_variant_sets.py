@@ -3,26 +3,10 @@
 
 """The variant-set gate must fail on each defect it claims to catch.
 
-A gate is only worth its exit code if every branch can reach 1. The adversarial
-review of the gfx942 attention_dense work made exactly this point twice: it built
-five deliberately-corrupted trees to prove the original gate was failable, and it
-separately flagged a "negative control" fixture that did not actually exercise the
-defect its name advertised. This file makes that battery permanent, and adds the
-checks the generalised gate needs that the hardcoded one did not:
-
-  * that a clean pair PASSES (a gate that refuses everything is not a gate);
-  * that the schema is reached BY REFERENCE -- a dangling `engine`, a dangling
-    `metadata`, two documents claiming one id, and a same-stem pair nothing wires
-    together all FAIL, because binding a bundle to a filename gates whatever schema
-    happens to sit beside it;
-  * that `--mode structural` degrades LOUDLY -- compiled specialization agreement is
-    named as NOT CHECKED rather than quietly skipped, because "the gate passed" must
-    never mean "the gate stopped looking";
-  * that `--mode full` fails on every way the producing compiler's evidence can stop
-    describing the artifact in hand, and does so with no rocKE and no producer import
-    anywhere;
-  * that an ambiguous tree is refused rather than guessed at, since silently gating
-    the wrong engine would pass while the one under test is broken.
+A gate is only worth its exit code if every branch can reach 1, so each class below
+introduces one defect in isolation and asserts the branch that catches it -- with a
+clean pair passing as the control, because a gate that refuses everything is not a
+gate. Each class states the property it covers.
 
 NO PRODUCER IS IMPORTED, here or by the tool. The full-mode fixtures build the
 compiler's evidence with `hkp_pack.agreement` itself -- the same pure-stdlib module
@@ -108,10 +92,9 @@ def _contract(descriptor: dict) -> dict:
 def _descriptor(name: str, seqlen_q: int, use_exp2_fast: int | None = None) -> dict:
     """A descriptor whose metadata agrees with the spec it is built from.
 
-    `use_exp2_fast` absent from the spec is the authoring form that means "the
-    kernel settles this at build time"; the metadata still states which binary
-    resulted, because the matcher compares metadata and a field absent there
-    resolves to the KMD default, which is a different kernel.
+    `use_exp2_fast` absent from the spec is the authoring form for "the kernel
+    settles this at build time"; the metadata still states which binary resulted,
+    because a field absent there resolves to the KMD default -- a different kernel.
     """
     spec = {"dtype": "bf16", "head_size": 128, "seqlen_q": seqlen_q}
     if use_exp2_fast is not None:
@@ -229,13 +212,12 @@ class TestGatePasses:
 
 
 class TestTheSchemaIsReachedByReference:
-    """F09. A bundle's KMD is found by walking the ids the documents declare.
+    """A bundle's KMD is found by walking the ids the documents declare.
 
     Reaching it by filename surgery -- swapping `.kdp.json` for `.kmd.json` on the
     same stem -- answers "which schema governs this bundle" with a coincidence of
-    naming. A tree where the two are not wired together then gates the descriptors
-    against a schema nothing connects them to, and every defaulted field, every
-    completed tuple and every type below is decided by the wrong document.
+    naming, and every defaulted field, completed tuple and type below is then
+    decided by the wrong document.
     """
 
     def test_a_correctly_wired_bundle_resolves(self, gate):
@@ -274,9 +256,6 @@ class TestTheSchemaIsReachedByReference:
         assert "other_engine.kmd.json" in combined
 
     def test_a_same_stem_pair_that_is_not_wired_by_id_fails(self, gate):
-        """The defect this replaces. The KDP and the KMD share a filename stem and
-        sit in one directory, which is exactly what the old resolution accepted --
-        and nothing in either document references the other."""
         root = gate.write("stem_only", gate.small)
         doc = _kdp(gate.small)
         doc.pop("engine")
@@ -325,11 +304,9 @@ class TestGateCatchesEachDefect:
         assert "MISSING" in result.stdout
 
     def test_tuple_check_substitutes_kmd_defaults_like_the_loader(self, gate):
-        """Absent key and explicit default are ONE catalog entry, not two.
-
-        This is the collision the JSON does not show: the two descriptors differ on
-        disk and collide only after the loader applies default_value.
-        """
+        """Absent key and explicit default are ONE catalog entry, not two -- the
+        collision the JSON does not show, because the two descriptors differ on disk
+        and collide only after the loader applies default_value."""
         pinned = _descriptor("k_pinned", 512)
         unset = _descriptor("k_unset", 512)
         unset["metadata"].pop("seqlen_q")
@@ -340,7 +317,7 @@ class TestGateCatchesEachDefect:
 
 
 class TestTheDeskCheckIdentityIsEngineWideAndArchAware:
-    """F20. The loader assembles ONE catalog per engine per device.
+    """The loader assembles ONE catalog per engine per device.
 
     Two KDPs of one engine that each look unique alone still collide there, so the
     identity has to be engine-wide. It also has to carry the effective architecture:
@@ -504,20 +481,15 @@ class TestGateCatchesSpecializationTwins:
 
 
 class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
-    """Property (4a): a metadata key that is ALSO a spec key must match it.
+    """A metadata key that is ALSO a spec key must match it.
 
     This needs no evidence, no profile and no kernel knowledge -- it is the
-    descriptor checked against ITSELF, so it runs in both modes. It did not exist
-    until a review demonstrated the hole by mutation: property (4) iterated a
-    profile's policy block and nothing else, so a kernel with no policy-owned knob
-    had property (4) checking NOTHING while the gate printed a clean pass.
+    descriptor checked against ITSELF, so it runs in both modes.
 
-    The case that matters most is the one the shipping commit names as "the dangerous
-    direction": a descriptor labelled aligned whose binary is actually ragged. The C++
-    matcher tests catch that at the matcher rung; this is the STATIC rung, which
-    coverage_gate.py's docstring insists is separate precisely because each catches
-    what the other cannot. A mislabelled tree that reaches STATIC clean still builds
-    and still packs.
+    The dangerous direction is a descriptor labelled aligned whose binary is actually
+    ragged. The C++ matcher tests catch that at the matcher rung; this is the STATIC
+    rung, which is separate precisely because each catches what the other cannot. A
+    mislabelled tree that reaches STATIC clean still builds and still packs.
     """
 
     def test_catches_a_flag_whose_metadata_contradicts_its_spec(self, gate):
@@ -592,11 +564,10 @@ class TestMetadataMustAgreeWithTheSpecItIsBuiltFrom:
     def test_a_string_field_absent_from_a_declared_vocabulary_is_still_compared(
         self, gate
     ):
-        # Regression for the escape a review found on the real gfx950 tree: a
-        # profile's vocabulary declares dtype and says nothing about persist_decode,
-        # a second string field both layers carry. Once a vocabulary section exists
-        # the author had the exact place to declare it translated and did not, so an
-        # unmentioned string field is compared raw.
+        # The profile's vocabulary declares dtype and says nothing about
+        # persist_decode, a second string field both layers carry. Once a vocabulary
+        # section exists the author has the exact place to declare a field
+        # translated, so an unmentioned string field is compared raw.
         bad = copy.deepcopy(gate.small)
         bad[0]["kernel_source"]["spec"]["persist_decode"] = "auto"
         bad[0]["metadata"]["persist_decode"] = "manual"
@@ -620,10 +591,8 @@ class _Payloads:
 
     The gate's own reader pulls them out of the arch's `.kpack` archive, which needs
     rocm_kpack -- a build artifact. Everything the full-mode battery is about happens
-    AFTER the bytes are in hand: whether the compiler's evidence still describes this
-    descriptor, this schema, this architecture and these bytes. Substituting the
-    reader keeps the battery runnable on any machine while leaving the property under
-    test untouched.
+    AFTER the bytes are in hand, so substituting the reader keeps it runnable on any
+    machine while leaving the property under test untouched.
     """
 
     def __init__(self, payload: bytes = _PAYLOAD):
@@ -680,9 +649,9 @@ def _identity(name: str) -> dict:
 def _publish(ukd: dict, kmd: dict, kdp_doc: dict, ued: dict, observed_value=1) -> None:
     """Write the evidence a producing compile would have written onto `ukd`.
 
-    Built through `agreement` itself rather than by hand: the record's shape and
-    order are that module's business, and a fixture that reconstructed them would
-    pass or fail on its own guess about key order rather than on the property.
+    Built through `agreement` itself: the record's shape and order are that module's
+    business, and a fixture reconstructing them would pass or fail on its own guess
+    about key order rather than on the property.
     """
     declaration = agreement.select_declaration(ukd, ued, kmd, {kmd["id"]: kmd}, kdp_doc)
     request = agreement.observation_request(declaration, kmd)
@@ -710,15 +679,14 @@ def _publish(ukd: dict, kmd: dict, kdp_doc: dict, ued: dict, observed_value=1) -
 def packed(tmp_path):
     """A packed bundle carrying real compiler-written evidence, plus a mutator.
 
-    `build(mutate=...)` writes the tree, applying `mutate(docs)` AFTER the evidence
-    is published -- which is what a tamper is: the record was true of the artifact
-    that left the compiler, and something changed underneath it.
+    `build(mutate=...)` applies `mutate(docs)` AFTER the evidence is published --
+    which is what a tamper is: the record was true of the artifact that left the
+    compiler, and something changed underneath it.
 
-    The documents are round-tripped through JSON before the mutation, exactly as
-    writing them to disk does. Without that the record the compiler stored still
-    holds live references to the engine and schema objects, so altering the KMD
-    would alter the stored evidence at the same time and the tamper would be
-    invisible for the wrong reason.
+    The documents are round-tripped through JSON before the mutation, as writing them
+    to disk does. Without that the stored record still holds live references to the
+    engine and schema objects, so altering the KMD would alter the evidence with it
+    and the tamper would be invisible for the wrong reason.
     """
 
     def build(mutate=None, tag="packed"):
@@ -762,7 +730,7 @@ def _run_full(root, payloads=None, arch=_ARCH):
 
 
 class TestFullModeChecksTheProducingBuildRecord:
-    """F10/F21. The effective values come from the compiler's own evidence.
+    """The effective values come from the compiler's own evidence.
 
     Nothing here imports a producer, redirects an import root, or re-derives a
     policy: the descriptor carries the declaration and the record, and the gate
@@ -841,9 +809,9 @@ class TestFullModeChecksTheProducingBuildRecord:
         """Evidence authored into the input rather than written by the compiler.
 
         `provenance.effective_spec` is the producing compiler's alone. An authored
-        descriptor -- `kind: rocke`, no bytes yet -- that supplies one is claiming a
-        compile that has not happened, and no amount of internal consistency makes
-        it evidence about an artifact that does not exist.
+        descriptor -- `kind: rocke`, no bytes yet -- that supplies one claims a
+        compile that has not happened, and no internal consistency makes it evidence
+        about an artifact that does not exist.
         """
         kmd, ued = _kmd(), _ued()
         ukd = _packed_ukd()
@@ -888,9 +856,9 @@ class TestFullModeChecksTheProducingBuildRecord:
     def test_a_kdp_level_declaration_covers_every_kernel_under_it(self, tmp_path):
         """Shared carriage: the declaration is written once and inherited.
 
-        The property full mode checks is unchanged -- every kernel resolves to a
-        declaration and its evidence binds the bytes -- so a bundle that declares
-        once passes exactly as one that repeats itself per kernel does.
+        Every kernel still resolves to a declaration and its evidence still binds the
+        bytes, so a bundle declaring once passes exactly as one repeating itself per
+        kernel does.
         """
         kmd, ued = _kmd(), _ued()
         ukd = _packed_ukd()
@@ -914,8 +882,7 @@ class TestFullModeReportsAKernelWithNothingToBind:
     an AOT hip bundle has no builder object, so there is nothing to bind and no
     producing-build record to read. Failing it would make full mode unpassable for
     every hip bundle; passing it silently would claim a binding that was never made.
-    It is reported instead, exactly as `hkp_pack.desk_check` reports the same
-    artifact -- two readers of one tree must not disagree about it.
+    It is reported instead, exactly as `hkp_pack.desk_check` reports the same artifact.
     """
 
     @staticmethod
@@ -972,8 +939,7 @@ class TestFullModeCannotPassOnANarrowedRun:
 
     Asserted on this tool's own EXIT CODE, at `main`, rather than on the output: a
     caller that reads the claim off the exit status must not need a second tool to
-    scrape the caveat back out of stdout, and a narrowed run that exits 0 is a green
-    gate for a property nobody checked.
+    scrape the caveat back out of stdout.
     """
 
     def test_a_narrowed_full_run_exits_nonzero(self, packed, monkeypatch, capsys):
@@ -992,9 +958,9 @@ class TestStructuralModeNeverClaimsCompiledAgreement:
     """The same tampered trees, checked structurally.
 
     Structural mode cannot see any of the full-mode failures above -- that is what
-    the mode is -- so the property under test is that it says so. Reporting a clean
-    structural pass on a tree whose evidence no longer matches its bytes is only
-    dangerous if the output reads as though it checked.
+    the mode is -- so the property under test is that it says so: a clean structural
+    pass on a tree whose evidence no longer matches its bytes is only dangerous if
+    the output reads as though it checked.
     """
 
     def test_it_passes_its_own_properties_and_names_what_it_did_not_check(

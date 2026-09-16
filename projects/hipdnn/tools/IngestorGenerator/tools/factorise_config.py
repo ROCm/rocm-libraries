@@ -1,37 +1,23 @@
 """Rewrite an enumerated variant-set config into the compact ``variants`` form.
 
-WHY. A generated set is written one YAML block per kernel. The largest shipped
-gfx942 attention_dense config is 89,265 lines for 2,710 kernels, committed
-compressed because that is the only way it fits in a repo sensibly. Compression is
-not the fix: the file is unreviewable either way, and it is the ONE file worth
-reviewing in a descriptor PR, because the descriptors are its deterministic output.
-A mistake here is a mistake in everything downstream.
+An enumerated set is one template rendered thousands of times -- the largest shipped
+gfx942 attention_dense config is 89,265 lines for 2,710 kernels -- and it is the one
+file worth reviewing in a descriptor PR, because the descriptors are its deterministic
+output. `variants` states the same thing as a shape list, named knob sets and a name
+template, which `codegen/config_loader.py` expands at load time.
 
-The enumeration is not information. It is one template rendered thousands of times:
+For converting sets already generated and shipped; new sets come out of
+`dispatch_parity.py` in the compact form directly. Both paths must agree, so the round
+trip is not optional: the tool re-expands what it wrote and refuses to emit anything
+that does not reproduce the input kernel-for-kernel, key-for-key, in order.
 
-  * 11 lines are byte-identical in every entry -- `kind`, `source`, `builder` and
-    the spec fields the set does not vary. That is a third of the file saying the
-    same thing 2,710 times, and it buries the fields that DO differ.
-  * The rest is a shape x knob cross-product written longhand. 655 distinct shapes
-    crossed with a handful of arms.
-
-`variants` states that directly: the shape list, the named knob sets, and the name
-template. `codegen/config_loader.py` expands it at load time, so `generate.py`, the
-emitters and the dedup pass see ordinary kernel dicts and need no changes.
-
-WHAT THIS TOOL IS FOR. Converting the sets already generated and shipped. New sets
-come out of `dispatch_parity.py` in the compact form directly. Both paths must
-agree, so the round-trip below is not optional: the tool re-expands what it wrote
-and refuses to emit anything that does not reproduce the input kernel-for-kernel,
-key-for-key, in order.
-
-THE TRI-STATE. `use_exp2_fast` and its kind live in three layers that must agree:
-the spec decides the compiled binary (ABSENT means the kernel's own policy resolves
-it at build time), the metadata is what the matcher compares, and the KMD
-`default_value` is substituted for anything absent at load. "Absent from spec" and
-"explicitly false" are DIFFERENT and both reach metadata as 0. This tool preserves
-the distinction by construction: an arm that omits a knob emits a spec that omits
-it, and the shape records what the policy resolved to under `resolved`.
+THE TRI-STATE. `use_exp2_fast` and its kind live in three layers that must agree: the
+spec decides the compiled binary (ABSENT means the kernel's own policy resolves it at
+build time), the metadata is what the matcher compares, and the KMD `default_value` is
+substituted for anything absent at load. "Absent from spec" and "explicitly false" are
+DIFFERENT and both reach metadata as 0. The distinction is preserved by construction:
+an arm omitting a knob emits a spec that omits it, and the shape records what the
+policy resolved to under `resolved`.
 """
 
 from __future__ import annotations
@@ -43,10 +29,9 @@ import sys
 from collections import OrderedDict
 from pathlib import Path
 
-#: Spec fields a name template may render, beyond the metadata mirrors below.
-#: Deliberately not "every spec field": a name is an identifier, and binding a
-#: template slot to a field that merely happens to match on this input is how a
-#: template silently renders the wrong thing on the next one.
+#: Prefix marking a name-template slot bound to a metadata mirror rather than a spec
+#: field. Binding a slot to a field that merely happens to match on this input is how
+#: a template silently renders the wrong thing on the next one.
 _NAME_BINDABLE_SUFFIX = "md_"
 
 
@@ -65,16 +50,11 @@ def _load(path: Path) -> dict:
 def _flatten(config: dict) -> list:
     """Every kernel with its pack defaults already merged in.
 
-    The factoriser reasons about EFFECTIVE values, because that is what reaches a
-    descriptor; where a value was written is exactly the thing being changed. The
-    merge order matches the loader's own, so the effective spec's KEY ORDER is the
-    order the descriptor carries.
-
-    A pack default never hides the tri-state: a knob the shipped defaults do not
-    mention stays absent here, which is what "the kernel's policy decides" means.
+    EFFECTIVE values, because that is what reaches a descriptor, and the merge order
+    matches the loader's own so the effective spec's KEY ORDER is the descriptor's. A
+    knob the shipped defaults do not mention stays absent, preserving the tri-state.
     """
     pack = config["packs"][0]
-    # Refuse, by name, any pack key whose content the compact form would not carry.
     # `axes`/`kernel_template` expand to kernels this tool never sees, so it would
     # either crash on a missing `kernels` key or silently drop the expansion.
     unhandled = sorted({"axes", "kernel_template"} & set(pack))
@@ -147,10 +127,9 @@ def _shape_blocks(entries: list, knob_fields: list) -> list:
 def _merge_key_order(orders: list):
     """One key order every input order is a subsequence of, or None.
 
-    Spec key ORDER reaches the emitted descriptor, so two shape-blocks can only
-    share a group when a single `spec_order` renders both. Where one block omits a
-    key the other pins -- the tri-state again -- the orders still merge, because the
-    loader only emits the keys a kernel actually has.
+    Spec key ORDER reaches the emitted descriptor, so two shape-blocks share a group
+    only when a single `spec_order` renders both. A key one block omits and the other
+    pins still merges, because the loader emits only the keys a kernel actually has.
     """
     merged: list = []
     for order in orders:
@@ -183,15 +162,11 @@ def _name_value(entry: dict, field: str):
 def _is_abbreviation(prefix: str, bare: str) -> bool:
     """Does `prefix` read as a short form of the field name `bare`?
 
-    The shipped grammars abbreviate by taking initials, sometimes skipping a word:
-    `sq` <- seqlen_q, `hq` <- num_query_heads (skipping `num`), `kv` <- num_kv_heads,
-    `skv` <- seqlen_kv, `e` <- use_exp2_fast (`exp2`'s own initial), `d` <-
-    head_size. So the test is: `prefix` is a SUBSEQUENCE of the field's word
-    initials, or a prefix of the field name itself, or the initials of one word.
-
-    Deliberately generous. This only ranks candidates that already render every
-    name correctly, so a false accept costs readability, never correctness -- while
-    a false reject sends an honest token to `{tag}` and un-factorises a group.
+    Shipped grammars abbreviate by initials, sometimes skipping a word (`hq` <-
+    num_query_heads), so the test is: a SUBSEQUENCE of the field's word initials, or a
+    prefix of the field name, or of one word. Deliberately generous -- this only ranks
+    candidates that already render every name correctly, so a false accept costs
+    readability while a false reject un-factorises a group.
     """
     if not prefix:
         return False
@@ -210,14 +185,10 @@ def _is_abbreviation(prefix: str, bare: str) -> bool:
 def _binding_rank(prefix: str, field: str) -> tuple:
     """Prefer the field a reader would expect this token to mean.
 
-    Several fields can agree with a column by coincidence -- `persistent` and
-    `use_exp2_fast` are both 0 or 1, so `p0` binds to either on a group where they
-    happen to move together. Both render the same names, so both are CORRECT; only
-    one is honest. Rank so the template says what the token means:
-
-      1. the token's own prefix abbreviates the field (see `_is_abbreviation`), then
-      2. a spec field over its `md_` metadata mirror -- the spec decides the binary,
-         and the mirror only exists for a knob the spec may legitimately omit.
+    Several fields can agree with a column by coincidence -- two 0/1 knobs moving
+    together bind equally well and both render the same names, so both are CORRECT and
+    only one is honest. Rank by `_is_abbreviation` first, then a spec field over its
+    `md_` metadata mirror, since the spec is what decides the binary.
     """
     bare = (
         field[len(_NAME_BINDABLE_SUFFIX) :]
@@ -234,17 +205,9 @@ def _binding_rank(prefix: str, field: str) -> tuple:
 def _bind_column(column: list, group: list, fields: list):
     """`{field}` or `prefix{field}` if one field explains this column, else None.
 
-    A field binds only when its value matches the token for EVERY entry. A
-    coincidence -- `persistent` and `use_exp2_fast` both being 1 on some entries --
-    fails on the entries where they differ, so it cannot be mistaken for a real
-    binding. That check is the whole point: a template inferred from a subset of the
-    evidence is unique by luck. The loader refuses a pack whose expansion collides,
-    so the damage is a failed conversion rather than a bad one -- but a template that
-    needs that backstop is one nobody can safely edit, and the message it fails with
-    is about the symptom rather than the inference that caused it.
-
-    Where several fields survive that test, `_binding_rank` picks the one the token
-    is named after.
+    A field binds only when its value matches the token for EVERY entry: a template
+    inferred from a subset of the evidence is unique by luck. Where several fields
+    survive that test, `_binding_rank` picks the one the token is named after.
     """
     prefix_match = re.fullmatch(r"([a-zA-Z]+)(\d+)", column[0])
     prefix = prefix_match.group(1) if prefix_match else None
@@ -284,13 +247,12 @@ def _bind_ordinal(column: list):
 def _infer_template(group: list, fields: list):
     """A name template rendering every name in `group`, its ordinals, and its tags.
 
-    Tokens bind from BOTH ends. Whatever refuses to bind in the middle becomes a
-    per-arm ``tag``: two shipped grammars carry OPTIONAL tokens (`kpad8`,
-    `persist304`, `hkvmaj`) that change a name's token count, so a purely positional
-    template cannot span them.
+    Tokens bind from BOTH ends, and whatever refuses to bind in the middle becomes a
+    per-arm ``tag``: shipped grammars carry OPTIONAL tokens (`kpad8`, `persist304`)
+    that change a name's token count, so a purely positional template cannot span them.
 
-    Returns ``(template, ordinals, tags)``, or ``None`` if no template renders the
-    group -- which is not a failure, just a signal to start a new group.
+    ``None`` means no template renders the group -- not a failure, a signal to start a
+    new one.
     """
     rows = [entry["name"].split("_") for entry in group]
     shortest = min(len(row) for row in rows)
@@ -359,11 +321,9 @@ def _group(entries: list, knob_fields: list, fields: list) -> list:
             current_template = attempt(current)
             continue
         wider = attempt(current + block)
-        # `max(1, ...)` is the floor. Without it a FIRST block whose names no field
+        # `max(1, ...)` is the floor: without it a FIRST block whose names no field
         # explains seeds the run at zero bound slots, `0 >= 0` lets every later block
-        # merge, and the whole set collapses into one group whose template is bare
-        # `{tag}` -- valid, byte-identical, and exactly as unreadable as the
-        # enumeration it replaces. An odd block should cost one group, not the file.
+        # merge, and one odd block costs the whole file rather than one group.
         if wider and _bound_slots(wider[0]) >= max(
             1, _bound_slots(current_template[0])
         ):
@@ -381,20 +341,13 @@ def _group(entries: list, knob_fields: list, fields: list) -> list:
 def _tag_template(tag: str, entry: dict) -> str:
     """A tag written in terms of the metadata field it mirrors, where it does.
 
-    Every shipped grammar spells the RESOLVED value of the tri-state into the name
-    (`_e1`), including for the arms that leave it to the kernel's policy. A literal
-    tag would therefore need one knob_set per shape -- the enumeration again, one
-    level down. Binding it to the metadata mirror makes the tag a property of the
-    arm, which is what it is: pinned on, pinned off, or policy-decided.
+    Shipped grammars spell the RESOLVED tri-state value into the name (`_e1`) even for
+    policy-decided arms, so a literal tag would need one knob_set per shape.
 
     The substitution is ANCHORED to the letters immediately before the value, which
-    must abbreviate the field the same way `_binding_rank` requires of a column. An
-    unanchored value match is pure coincidence and round-trips clean, so nothing
-    downstream would catch it: `kpad8` on a shape that happens to have
-    `num_heads: 8` becomes `kpad{md_num_heads}`, and the next hand edit of an
-    unrelated field silently renames a shipped descriptor. Where two fields would
-    both match, none is chosen -- an ambiguous tag stays literal, which costs a
-    knob_set and states nothing false.
+    must abbreviate the field as `_binding_rank` requires. An unanchored match
+    round-trips clean, so nothing downstream catches a coincidence that renames a
+    shipped descriptor on the next unrelated edit. An ambiguous tag stays literal.
     """
     matches = []
     for name, value in entry["metadata"].items():
@@ -464,26 +417,14 @@ def _build_group(group: list, template: str, ordinals, tags: list, knob_fields: 
             if key not in knob_fields and key not in spec_defaults
         }
         shape["knobs"] = knob_sets[signature][0]
-        # What the kernel's own policy resolved to for the fields this shape's arms
-        # do not PIN in the spec. Without it the loader substitutes the KMD
-        # default as the catalog key while the binary was built from the policy's
-        # answer, and the descriptor then names one kernel and advertises another.
+        # What the kernel's own policy resolved to for fields this shape's arms do not
+        # PIN. Without it the loader substitutes the KMD default as the catalog key
+        # while the binary was built from the policy's answer, so the descriptor names
+        # one kernel and advertises another.
         #
-        # "Does not pin" has TWO spellings and they mean the same thing. A spec may
-        # OMIT the key, or carry it explicitly as None -- both say "the kernel's own
-        # policy decides this at build time". Which one you get is an artefact of
-        # how the spec was produced, not a difference in meaning: a hand-authored
-        # spec omits the key, while `dispatch_parity.build_config` dumps the
-        # builder's dataclass wholesale (`dataclasses.fields(resolution.spec)`), so
-        # every declared-but-unset policy knob arrives present-and-None.
-        #
-        # Testing only for absence silently dropped the whole `resolved` block for
-        # the dataclass-dumped case: gfx942's `use_exp2_fast` is None in all 64
-        # specs while its metadata is a real 0/1 per shape, so factorising hoisted
-        # None into spec_defaults, emitted no `resolved`, and re-expansion produced
-        # `metadata 'use_exp2_fast' = None does not match its declared kmd_fields
-        # type 'int'`. That is the exact tri-state this module's header promises to
-        # "preserve by construction", lost on the round-trip that exists to catch it.
+        # "Does not pin" has TWO spellings meaning the same thing -- the spec may OMIT
+        # the key, or carry it explicitly as None -- and testing only for absence drops
+        # the `resolved` block for every spec dumped from a builder dataclass.
         resolved = {
             field: value
             for entry in block
@@ -573,9 +514,9 @@ def factorise(config: dict, knob_fields: list, vocabulary: dict) -> dict:
 class _Row(dict):
     """A mapping YAML renders on ONE line.
 
-    A shape is a record, not a document section. Block style spends fifteen lines
-    per shape restating the same key names, which is the repetition this whole
-    change removes -- one shape per line is what makes 655 of them readable.
+    A shape is a record, not a document section: block style spends fifteen lines per
+    shape restating the same key names, and one shape per line is what makes 655 of
+    them readable.
     """
 
 
@@ -656,18 +597,12 @@ def dump(compact: dict) -> str:
 def _round_trip(original: dict, compact: dict) -> None:
     """Expand the compact form and refuse to emit unless it reproduces the input.
 
-    Kernel-for-kernel, key-for-key, in order. Descriptor ids are assigned by
-    position, metadata key order reaches the emitted JSON, and the dedup pass keys
-    on the resolved metadata -- so "the same kernels in a different order" is a
-    different descriptor set, not a cosmetic difference.
+    Kernel-for-kernel, key-for-key, IN ORDER: descriptor ids are assigned by position
+    and the dedup pass keys on the resolved metadata, so a reorder is a different set.
 
-    The bundle-level `specialization` declaration is compared too. It is the only
-    thing a shipped descriptor carries that says which metadata fields the producing
-    compiler specialized on and how each is read off the builder, and it reaches
-    exactly one UKD field rather than one per kernel -- so the kernel-for-kernel
-    comparison below cannot see it go missing. A set that lost it converts to a
-    bundle nothing can check its compiled bytes against, which is the failure this
-    whole round trip exists to refuse.
+    `specialization` is compared separately because it reaches one UKD field rather
+    than one per kernel, so the kernel-for-kernel comparison cannot see it go missing,
+    and a bundle that lost it has nothing to check its compiled bytes against.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from codegen.config_loader import load_config  # noqa: PLC0415

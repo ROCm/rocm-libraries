@@ -1,82 +1,31 @@
-"""Gate a set of variant sets on the five properties a comparison depends on.
+"""Gate a set of variant sets on five properties, over generated bundles or installed
+trees. Exits non-zero on any failure, so it can sit in front of a build or a sweep.
+The numbered sections in `check()` are keyed to this list.
 
-Run against generated bundles or installed trees. Exits non-zero on any failure, so
-it can sit in front of a build or a sweep.
+  1. BINARY NESTING. The larger set can still choose everything the smaller one
+     could, compared on compiled binaries: normalising metadata labels instead makes
+     diverging sets look nested.
 
-WHY FIVE AND NOT ONE. Each of these failed separately, and each was invisible to the
-check that caught the others:
-
-  1. BINARY NESTING. "Do more variants help?" is only answerable if the larger set can
-     still choose everything the smaller one could. That is about compiled binaries.
-     Checking metadata instead is what hid the defect for several rounds: normalising
-     labels made the sets look nested while the binaries diverged. 43 shapes shipped
-     where the larger set could not reproduce the smaller one's kernel.
-
-  2. LOADER-TUPLE UNIQUENESS. The loader substitutes a KMD field's `default_value` for
-     an absent key, then requires the resulting tuple to be unique per device. A
-     duplicate is not a dropped entry -- it rejects THE WHOLE ENGINE, and the arm then
-     serves every graph from another engine while exiting 0 and passing a
-     descriptor-count check. That shipped once and cost a full sweep.
+  2. LOADER-TUPLE UNIQUENESS. The loader substitutes a KMD field's `default_value`
+     for an absent key and requires the resulting tuple to be unique per device. A
+     duplicate is not a dropped entry -- it rejects THE WHOLE ENGINE, while exiting 0
+     and passing a descriptor-count check.
 
   3. NO SENTINEL IN A DESCRIPTOR. `-1` means "unresolved". Every compiled artifact has
-     a definite setting, so a descriptor claiming otherwise describes nothing that
-     exists, and downstream it aliases onto the KMD default and triggers (2).
+     a definite setting, and downstream a sentinel aliases onto the KMD default and
+     triggers (2).
 
   4. METADATA MATCHES ITS BINARY. The matcher selects on metadata; the spec decides
      what was built. When they disagree the runtime picks a kernel on false pretences.
-     364 descriptors advertised "policy decides" while pinning an override.
 
   5. VOCABULARY. Metadata carries the hipDNN spelling the matcher compares ("BF16");
      the spec carries the builder's ("bf16"). A descriptor written in the builder's
      vocabulary loads cleanly, reconciles on every count, and matches NOTHING.
 
-A count check answers none of these. Counts are about disk.
-
-HOW THE SCHEMA IS REACHED. By reference, never by filename. A bundle's KMD is found
-by walking the id chain the documents themselves declare -- `KDP.engine` names a UED,
-`UED.metadata` names a KMD -- across every descriptor under the selected root. A
-dangling hop fails naming the hop and the id; two documents claiming one id fail
-naming both files. Binding a KDP to a same-stem sibling instead is how a bundle gets
-gated against a schema nothing wires it to: the check passes, and the engine the
-loader actually assembles was never examined.
-
-TWO MODES, and `--mode` is required because they make different claims.
-
-  --mode full asks whether the shipped binary agrees with the metadata that selects
-  it. The answer comes from the producing compiler's own evidence, carried by the
-  descriptor: `provenance.specialization_contract` declares which metadata fields a
-  compiled kernel specialises on and how each is read off the builder's spec --
-  carried by the kernel, or once by the KDP it is inline in -- and
-  `provenance.effective_spec` records what the compiler observed when it built the
-  bytes this descriptor names. The gate rebuilds the consumer records from the
-  descriptors in front of it and hands them, with the named payload bytes, to
-  `hkp_pack.agreement.verify`. Nothing imports a producer: a packed artifact is
-  checkable on a machine that has never had rocKE installed. A missing, unsupported
-  or mismatched record is a FAILURE -- an artifact that cannot say what it was built
-  from has not established agreement.
-
-  A kernel declaring `metadata_fields: []` -- the mandatory declaration for a
-  non-compiled source, which is every AOT hip bundle -- has no producing-build
-  record to bind, so it is reported as NOT VERIFIED HERE. That is a third outcome,
-  neither a failure nor part of the pass: `hkp_pack.desk_check` states the same
-  thing about the same artifact, and two readers of one tree must not disagree.
-
-  Because full mode claims every property, a check it could not RUN is a gap in
-  that claim, and the run FAILS with exit 1 naming the unrun checks. Passing on a
-  narrowed full run would put the strong claim behind an exit code that did not
-  earn it, and leave the caveat to whatever reads the output.
-
-  --mode structural runs only what needs no compiled evidence: binary nesting on the
-  identities it can compute, loader-tuple uniqueness, sentinel absence, plain
-  spec-vs-metadata agreement, and vocabulary. It reports compiled specialization
-  agreement as NOT CHECKED, by name, in the output and in the exit summary, and its
-  passing line says so. A structural pass can never be read as compiled agreement:
-  a gate that quietly stops checking is the failure mode this whole file exists to
-  prevent.
-
-A PROFILE beside the config carries the two facts the artifacts do not: which bundle
-to gate when a tree hosts more than one engine, and the matcher's vocabulary where a
-declaration does not already state it. Everything else is read off the descriptors.
+`--mode` is required rather than defaulted because the two modes make different
+claims; see its `--help` for which. Schemas are reached by reference through the id
+chain the documents declare, never by filename -- binding a KDP to a same-stem
+sibling gates a bundle against a schema nothing wires it to.
 """
 
 from __future__ import annotations
@@ -92,8 +41,7 @@ from pathlib import Path
 SENTINEL = -1
 
 #: The two claims this gate can make. Selected explicitly on every run: a default
-#: would let the weaker run print under the stronger one's name, or the stronger
-#: one fail a tree that was only ever meant to be checked structurally.
+#: would let the weaker run print under the stronger one's name.
 MODES = ("full", "structural")
 
 
@@ -102,10 +50,7 @@ def _agreement_python_root() -> Path:
 
     Located by ascending to the ancestor that actually contains the subtree rather
     than by counting path components, so the tool answers the same run from the repo
-    root, from an installed checkout, or from three directories down. The gate cannot
-    reimplement declaration or evidence semantics -- there is one implementation of
-    those and it lives there -- so failing to find it is fatal rather than a
-    degraded run.
+    root, from an installed checkout, or from three directories down.
     """
     relative = Path("dnn-providers/hip-kernel-provider/descriptor-packaging/python")
     here = Path(__file__).resolve()
@@ -140,32 +85,22 @@ class Profile:
         vocabulary:
           dtype: [BF16, FP16]
 
-    ``bundle`` pins which engine to gate when a tree hosts more than one; without it
-    a multi-engine tree is refused rather than guessed at, since gating the wrong
-    engine would pass while the one under test is broken.
-
-    ``vocabulary`` declares the matcher's legal spellings for a field, as either a
-    builder-to-matcher mapping or the legal set. A UKD's
+    ``bundle`` pins which engine to gate when a tree hosts more than one; see
+    `select`. ``vocabulary`` declares the matcher's legal spellings for a field, as
+    either a builder-to-matcher mapping or the legal set. A UKD's
     ``specialization_contract`` -- its own, or the one it inherits from its KDP --
     states the same thing for the fields it specialises on and is merged in
     automatically, so a profile only has to speak for the fields no declaration
     covers.
-
-    Nothing in a profile names a policy function, a module or a provider root. What
-    a binary was built with is answered by the producing compiler's evidence under
-    ``--mode full``, not by importing the kernel on the machine running the gate.
     """
 
     def __init__(self, raw: dict, path: str | None = None):
         self.path = path
         self.bundle = raw.get("bundle")
         self.vocabulary = dict(raw.get("vocabulary") or {})
-        # ABSENT and EXPLICITLY EMPTY are different claims, and collapsing them is
-        # the same mistake this gate exists to catch one layer down. (4a) below must
-        # tell "no vocabulary block exists, so an undeclared string field is
-        # genuinely ambiguous" from "a vocabulary block exists and simply never
-        # mentions this field", which is not ambiguous -- the author had the exact
-        # place to declare a translation and did not.
+        # ABSENT and EXPLICITLY EMPTY are different claims: (4a) below treats an
+        # undeclared string field as ambiguous only when no vocabulary block exists at
+        # all, and `bool(self.vocabulary)` cannot tell those two apart.
         self.vocabulary_declared = "vocabulary" in raw
 
     @classmethod
@@ -199,8 +134,7 @@ def select(
 
     Several KDPs may declare one engine -- that is the shape the engine-wide desk
     check exists for -- but two engines under one root is a question only the author
-    can answer, and answering it by guessing would gate the wrong engine while the
-    one under test is broken.
+    can answer.
     """
     if not bundles:
         raise GateError("no *.kdp.json under this root -- is this a descriptor tree?")
@@ -225,16 +159,11 @@ def select(
 def _binary_key(descriptor: dict) -> str:
     """Identity of the compiled artifact this descriptor names.
 
-    Two dialects, strongest first, because a bundle is checkable at two points in
-    its life:
-
-      * PACKED. The spec is compiled away and the descriptor names a symbol in the
-        archive. The sha256 IS the binary, a stronger identity than any
-        reconstruction, so prefer it when present.
-      * AUTHORED. Pre-build there is only the builder and the spec AS AUTHORED. An
-        omitted key stays omitted: absence is the author's intent that the kernel
-        decide, and rewriting it to a default or to false would make two genuinely
-        different requests look like one.
+    Two dialects, strongest first: a PACKED descriptor names a symbol whose sha256 IS
+    the binary, so prefer it. AUTHORED pre-build there is only the builder and the
+    spec as written, and an omitted key stays omitted -- absence is the author's
+    intent that the kernel decide, and defaulting it would make two genuinely
+    different requests look like one.
     """
     source = descriptor["kernel_source"]
     if source.get("sha256") or source.get("symbol"):
@@ -255,10 +184,9 @@ def _binary_key(descriptor: dict) -> str:
 def _shape_key(descriptor: dict, knob: str) -> str:
     """Identity of a descriptor's shape with `knob` erased.
 
-    Two descriptors sharing this key describe the SAME shape at different
-    settings of `knob` -- candidates to be a "specialization twin" pair. Built from
-    metadata, not spec, because metadata is what a bigger set's author reads
-    when deciding "do I already carry this shape".
+    Two descriptors sharing this key are candidates to be a "specialization twin"
+    pair. Built from metadata, not spec, because metadata is what a bigger set's
+    author reads when deciding "do I already carry this shape".
     """
     metadata = descriptor["metadata"]
     return json.dumps(
@@ -274,16 +202,6 @@ def _specialization_twins(order: list, by_label: dict, knobs: set) -> list:
     fields: the ones a descriptor may legitimately leave out of its spec because the
     kernel settles them at build time. Nothing else can be left out that way, so
     nothing else can have a twin.
-
-    Binary nesting (property 1) already reports the symptom here -- "N binaries
-    absent from BIG" -- and that is correct, but it names no knob and implies no
-    fix. The fix that actually applies is never "resolve a conflict": the
-    smaller set's descriptor left `knob` for the kernel to settle at build time,
-    so the bigger set must carry THAT variant unchanged, with the override
-    sitting BESIDE it as a second binary -- not in its place. A reader told only
-    "a binary is missing" may reach for the wrong fix and repin the override
-    instead of restoring the twin, which is the same class of mistake that
-    shipped 364 mislabelled descriptors under property 4.
 
     A pinned value that happens to equal what the kernel would have settled on is
     not a violation -- it is the SAME binary under another spelling, which is
@@ -330,9 +248,8 @@ def effective_arch(
     """The single architecture a full-mode run is about.
 
     The producing compiler wrote its evidence for one arch, so the reader has to be
-    checking the same one. A shard that pins exactly one arch answers this itself;
-    anything wider is a question, and `--arch` is how the caller answers it rather
-    than the gate picking the first entry of a list.
+    checking the same one. A shard that pins exactly one answers this itself; anything
+    wider needs `--arch` rather than the gate picking the first entry of a list.
     """
     if requested:
         return requested
@@ -411,9 +328,8 @@ class Payloads:
 def _comparable(value):
     """One representation for values the two layers spell differently.
 
-    A spec carries Python `True`; metadata carries `1`. Normalising here rather
-    than special-casing bool keeps the check from reporting a mislabelling that is
-    only a spelling difference.
+    A spec carries Python `True`; metadata carries `1`. Without normalising, that
+    spelling difference is reported as a mislabelling.
     """
     if isinstance(value, bool):
         return str(int(value))
@@ -435,11 +351,9 @@ def check(
     the twin check keys on.
 
     `unchecked` and `unverified` are DIFFERENT outcomes and must not be merged.
-    `unchecked` is a check this run could not run, which under `--mode full` is a
-    gap in the claim and fails the gate. `unverified` is a check that ran and
-    reached a stated result: the kernel declares no specialized metadata field, so
-    there is no producing-build record to bind. That is a legitimate outcome, so it
-    neither fails the gate nor joins the pass line's list of things established.
+    `unchecked` is a check this run could not run, which under `--mode full` is a gap
+    in the claim and fails the gate. `unverified` is a check that ran and found
+    nothing to bind; it neither fails the gate nor joins the pass line.
     """
     index = descriptor_context.Index(root)
     schemas = index.schemas()
@@ -450,8 +364,6 @@ def check(
     descriptors = [entry.ukd for b in bundles for entry in b.entries]
     failures: list[str] = []
     unchecked: list[str] = []
-    # Kernels reported as NOT VERIFIED HERE: the check ran and there was nothing
-    # for it to bind, which is neither a failure nor a property established.
     unverified: list[str] = []
 
     declared = descriptor_context.declarations(bundles, schemas)
@@ -460,22 +372,17 @@ def check(
     for declaration in declared.values():
         vocabulary.update(declaration["vocabulary"])
     # A declaration's vocabulary speaks only for the fields that declaration
-    # specialises on, so it is merged into the translations above but does NOT
-    # answer "was there a place to declare a translation for THIS field". Only the
-    # profile's block does that, and treating a contract as a blanket answer would
-    # start comparing every matcher-only string field raw against a spec that spells
-    # it in the builder's vocabulary on purpose.
+    # specialises on, so it is merged into the translations above but does NOT answer
+    # "was there a place to declare a translation for THIS field". Only the profile's
+    # block does that.
     vocabulary_declared = profile.vocabulary_declared
 
-    # (2) Loader-tuple uniqueness, engine-wide and arch-aware, with each value
-    # canonicalised per its declared KMD type. Engine-wide because the loader
-    # assembles ONE catalog per engine per device: two KDPs of one engine that each
-    # look unique alone still collide there. Arch-aware because two candidates whose
-    # coverage is disjoint never meet in that catalog -- a gfx942 pack and a gfx950
-    # pack may legitimately carry the same tuple -- while a wildcard overlaps
-    # everything. Canonicalised because `1` and `1.0` on a FLOAT field are one
-    # catalog entry and a BOOL `true` is not an INT `1`; comparing raw values would
-    # miss the first collision and invent the second.
+    # (2) Loader-tuple uniqueness, engine-wide, arch-aware, and canonicalised per the
+    # declared KMD type. Engine-wide because the loader assembles ONE catalog per
+    # engine per device; arch-aware because candidates whose coverage is disjoint
+    # never meet in that catalog while a wildcard overlaps everything; canonicalised
+    # because `1` and `1.0` on a FLOAT field are one entry and a BOOL `true` is not an
+    # INT `1`.
     completed: list = []
     for bundle in bundles:
         for entry in bundle.entries:
@@ -526,10 +433,9 @@ def check(
     # compare against -- the right spelling is a matcher fact, not a derivable one.
     if vocabulary:
         for field, declared_spellings in vocabulary.items():
-            # A mapping declares builder-spelling -> matcher-spelling, which the
-            # parity generator uses to translate; the legal set is its VALUES. A
-            # bare list declares the legal set directly. Both spellings are
-            # accepted so one profile serves both tools without restating itself.
+            # A mapping declares builder-spelling -> matcher-spelling and its VALUES
+            # are the legal set; a bare list declares the legal set directly. Both are
+            # accepted so one profile serves this tool and the parity generator.
             allowed = (
                 declared_spellings.values()
                 if isinstance(declared_spellings, dict)
@@ -558,25 +464,14 @@ def check(
     #
     # (4a) PLAIN FIELDS: a metadata key that is ALSO a spec key. The spec is what the
     # builder compiles and the metadata is what the matcher compares, so if a
-    # descriptor carries both they must agree -- no evidence, no profile, no kernel
-    # knowledge required. This is a property of the descriptor against ITSELF, and it
-    # runs in both modes.
-    #
-    # A review demonstrated what its absence costs, by mutation: flipping a
-    # descriptor's metadata.ragged to 0 while its spec still said True passed the
-    # gate 84/84 OK. That is the "dangerous direction" the shipping commit names --
-    # an aligned-labelled descriptor whose binary is boundary-padded -- caught
-    # downstream by the C++ matcher unit tests but invisible at the STATIC rung,
-    # which coverage_gate.py's own docstring insists is a separate rung precisely
-    # because each catches what the other cannot. The same hole swallowed a head_size
-    # mismatch and, once they existed, varlen/paged both ways.
+    # descriptor carries both they must agree -- a property of the descriptor against
+    # ITSELF, needing no evidence and running in both modes.
     #
     # ANY field with a declared vocabulary is exempt from the plain comparison, not
     # just the dict-form ones. A vocabulary declaration means the two layers spell the
     # value DIFFERENTLY ON PURPOSE -- builder "bf16", matcher "BF16" -- so comparing
-    # them raw reports a mislabelling that is only a translation. Property (5) checks
-    # the metadata side against the legal set, which is the check that applies to a
-    # translated field.
+    # them raw reports a mislabelling that is only a translation. Property (5) owns
+    # the metadata side of such a field.
     translated_fields = set(vocabulary)
     vocabulary_maps = {
         field: mapping
@@ -596,34 +491,21 @@ def check(
             spec_value = spec[field]
             if field in translated_fields:
                 # Translated on purpose. Where the mapping is given, apply it and
-                # still compare -- that catches a descriptor whose metadata names a
-                # different dtype than its spec builds. Where only the legal set is
-                # declared, there is nothing to translate WITH, so property (5) owns
-                # the field entirely and this comparison must not guess.
+                # still compare. Where only the legal set is declared there is nothing
+                # to translate WITH, so property (5) owns the field entirely.
                 if field not in vocabulary_maps:
                     continue
                 if isinstance(spec_value, str):
                     spec_value = vocabulary_maps[field].get(spec_value, spec_value)
             elif isinstance(spec_value, str) or isinstance(meta_value, str):
-                # An UNDECLARED string field: no vocabulary entry names it. Whether
-                # that means "same spelling both layers" or "translated, just not
-                # written down" depends on whether a vocabulary was declared AT ALL.
-                #
-                # Nothing declared anywhere: there is nowhere an author COULD have
-                # said "translated", so an undeclared string is genuinely ambiguous
-                # -- the common, correct `spec: "bf16"` / `metadata: "BF16"` pairing
-                # must not become a false failure. Recorded rather than silently
-                # dropped: a field nobody can judge is a fact the author should see,
-                # not a check that quietly asked nothing.
-                #
-                # A vocabulary exists and just never mentions this field: the author
-                # had the exact place to say "this field is translated" and did not,
-                # so there is nothing left to guess -- compare it raw like any plain
-                # field. This is the branch that closes the escape a review found on
-                # the real gfx950 tree: `persist_decode` written only in
-                # kernel_source.spec, with a vocabulary that declares `dtype` and
-                # says nothing about `persist_decode`, let 84 descriptors carry a
-                # contradicting `metadata.persist_decode` and still pass.
+                # An UNDECLARED string field. Whether that means "same spelling in
+                # both layers" or "translated, just not written down" depends on
+                # whether a vocabulary was declared AT ALL. With none, there is
+                # nowhere an author COULD have said "translated", so the common and
+                # correct `spec: "bf16"` / `metadata: "BF16"` pairing must not become
+                # a false failure -- it is recorded instead. With one, the author had
+                # the exact place to say "translated" and did not, so there is nothing
+                # left to guess: compare it raw like any plain field.
                 if not vocabulary_declared:
                     undeclared_string_fields.add(field)
                     continue
@@ -638,8 +520,7 @@ def check(
             f"the spec their binary is built from, e.g. {plain_mismatches[0]}"
         )
     if undeclared_string_fields:
-        # A field nobody can judge is a liability the author should SEE, not a check
-        # that quietly asked nothing -- named rather than folded into an unqualified
+        # A field nobody can judge is named rather than folded into an unqualified
         # pass. Only reachable with no vocabulary declared anywhere: once one exists,
         # an unmentioned field is compared raw above instead of landing here.
         unchecked.append(
@@ -649,11 +530,10 @@ def check(
         )
 
     # (4b) COMPILED SPECIALIZATION: the fields a declaration marks as settled by the
-    # compiler. A descriptor may leave one out of its spec entirely, so nothing in
-    # the descriptor says what the binary was built with -- only the producing
-    # compile does, through the evidence it wrote onto the descriptor. Full mode
-    # checks that evidence against the descriptors and the payload bytes in hand;
-    # structural mode cannot, and says so by name.
+    # compiler. A descriptor may leave one out of its spec entirely, so only the
+    # producing compile's own evidence says what the binary was built with. Full mode
+    # checks it against the payload bytes in hand; structural mode cannot, and says so
+    # by name.
     if mode == "full":
         records = descriptor_context.consumer_records(all_bundles, schemas, arch)
         for bundle in bundles:
@@ -685,22 +565,15 @@ def check(
                     )
                     continue
                 bound = records[entry.ukd["id"]]
-                # A declaration with no `metadata_fields` states that the compiler
-                # specialized on nothing, which is the legitimate and MANDATORY
-                # declaration for a non-compiled source. There is no
-                # producing-build record for it to bind, so it is reported rather
-                # than failed -- and rather than absorbed into the pass, which
-                # would put "the record binds these bytes" behind a kernel for
-                # which no record was ever read. `hkp_pack.desk_check` says the
-                # same thing about the same artifact; the two readers of one tree
-                # have to agree.
+                # A declaration with no `metadata_fields` is the MANDATORY declaration
+                # for a non-compiled source: no producing-build record exists to bind,
+                # so it is reported rather than failed or absorbed into the pass.
+                # `hkp_pack.desk_check` says the same about the same artifact.
                 #
                 # A descriptor that CARRIES `provenance.effective_spec` is checked
-                # whatever its declaration claims. The evidence is in the file, so
-                # the check can run -- and skipping it would make relabelling the
-                # specialized field as matcher-only a waiver that turns a stale or
-                # forged record into a pass. Nothing in this tool reports "no
-                # record to bind" about a descriptor holding one.
+                # whatever its declaration claims -- otherwise relabelling the
+                # specialized field as matcher-only would waive a stale or forged
+                # record into a pass.
                 claimed = any(r["declaration"]["metadata_fields"] for r in bound)
                 if not claimed and "effective_spec" not in (
                     entry.ukd.get("provenance") or {}
@@ -839,12 +712,9 @@ def main(argv=None) -> int:
             bad.append(("specialization-twins", violation))
 
     if unverified:
-        # Stated by name and kept out of both verdict lists. It is not a failure:
-        # a kernel declaring no specialized metadata field is a bundle whose
-        # compiler settled nothing the matcher can be checked against, which is
-        # the mandatory declaration for a non-compiled source. It is not part of
-        # the pass either: no producing-build record was read for these, so the
-        # pass line must not say their binaries were bound.
+        # Stated by name and kept out of both verdict lists: not a failure, and not
+        # part of the pass either -- no producing-build record was read for these, so
+        # the pass line must not say their binaries were bound.
         print(f"  {len(unverified)} kernel(s) NOT VERIFIED HERE:")
         for u in unverified:
             print(f"      ? {u}")
@@ -863,10 +733,9 @@ def main(argv=None) -> int:
     if skipped:
         names = ", ".join(sorted(set(skipped)))
         if args.mode == "full":
-            # A full run claims every property, so a check that could not run is
-            # a gap in the claim rather than a narrower pass. Reported here, on
-            # this tool's own exit code: a caller reading the claim off the exit
-            # status must not need a second tool to scrape the caveat back out.
+            # A full run claims every property, so a check that could not run is a gap
+            # in the claim rather than a narrower pass -- and it lands on this tool's
+            # own exit code, so a caller need not scrape the caveat out of the output.
             print(f"GATE FAILED ({len(set(skipped))} check(s) NOT RUN: {names})")
             print(
                 "  --mode full claims compiled specialization agreement and "
