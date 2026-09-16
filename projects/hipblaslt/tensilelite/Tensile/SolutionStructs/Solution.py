@@ -1305,8 +1305,13 @@ class Solution(collections.abc.Mapping):
             # stride on a half byte and the elements-to-bytes shift truncates
             # it; every K step then drifts, silently.  Only the contiguous
             # operand is affected, so this must not become unconditional.
+            #
+            # 32 rather than the 2 that stride correctness alone needs: it is one
+            # 16B load, so the last workgroup's numToEnd is already load-aligned
+            # and computeLoadSrd can drop the round-up that guards DTL against a
+            # partial load (see the unit-stride K-window branch there).
             key = "AssertFree0ElementMultiple" if tc == 'A' else "AssertFree1ElementMultiple"
-            state[key] = max(state[key], 2)
+            state[key] = max(state[key], 32)
             # fp4 only: 6-bit shares this geometry's 0.5 bpe but neither
             # bank-conflict layout covers it, so it falls to the reject below.
             mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]

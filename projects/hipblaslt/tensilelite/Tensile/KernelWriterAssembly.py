@@ -4858,22 +4858,22 @@ class KernelWriterAssembly(KernelWriter):
           # Clamp the span to what is left of the tensor, as the strided branch
           # does with SMinU32: the last workgroup owns fewer than MT when the
           # size leaves a remainder, and that overhang lands off the allocation
-          # on the final K window (tile 96 over M 2048 faults).  Round up to a
-          # whole load first -- DTL drops the LDS write for a partial load, so
-          # cutting mid-lane leaves stale LDS for the valid elements in it.
+          # on the final K window (tile 96 over M 2048 faults).  numToEnd needs
+          # no rounding up to a whole load: a partial one would lose its DTL
+          # write, but the free-dim assert and MT are both multiples of it.
           grTileInfo = self.states.a.tileInfo if tc == 'A' else \
                        (self.states.b.tileInfo if tc == 'B' else None)
-          loadBytes  = int(getattr(grTileInfo, "loadWidthGR", 16) or 16)
-          chunkElems = max(1, int(loadBytes / float(tP["bpeGR"])))
+          chunkElems = max(1, int(int(getattr(grTileInfo, "loadWidthGR", 16) or 16)
+                                  / float(tP["bpeGR"])))
+          aem = kernel["AssertFree0ElementMultiple" if tc == 'A'
+                       else "AssertFree1ElementMultiple"]
+          assert aem % chunkElems == 0 and kernel[tP["mt"]] % chunkElems == 0, \
+              "%s: TLU=1 free dim and MT must be multiples of %u elements" % (tc, chunkElems)
           for i in range(0, numDim):
             idx = indices[i]
             if idx == kernel["ProblemType"]["Index0"] or idx == kernel["ProblemType"]["Index1"]:
               module.add(SSubU32(dst=sgpr(stmp+1), src0=self.sizeRef(idx), src1=sgpr(tileStart+0), \
                         comment="numToEnd = size - WG*MT"))
-              module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=(chunkElems - 1), \
-                        comment="round up to a whole %uB load (%u elements)"%(loadBytes, chunkElems)))
-              module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=hex(~(chunkElems - 1) & 0xffffffff), \
-                        comment="mask off the partial load"))
               module.add(SMinU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=freeSpan, \
                         comment="free span = min(that, MT %u)"%freeSpan))
               module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=prePadElems, \
