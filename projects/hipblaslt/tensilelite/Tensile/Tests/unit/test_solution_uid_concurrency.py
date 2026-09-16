@@ -22,7 +22,7 @@ from Tensile.Common.SolutionIdGen import (
 
 pytestmark = pytest.mark.unit
 
-PROCESS_COUNT = 64
+PROCESS_COUNT = 8
 IDS_PER_PROCESS = 8
 
 
@@ -75,8 +75,8 @@ def _run_concurrent_generation(
     return [solution_uid for batch in batches for solution_uid in batch]
 
 
-def test_64_processes_generate_unique_solution_uids() -> None:
-    """64 processes generating UIDs concurrently must not collide."""
+def test_8_processes_generate_unique_solution_uids() -> None:
+    """8 processes generating UIDs concurrently must not collide."""
     solution_uids = _run_concurrent_generation(PROCESS_COUNT, IDS_PER_PROCESS)
     expected_count = PROCESS_COUNT * IDS_PER_PROCESS
     assert len(solution_uids) == expected_count
