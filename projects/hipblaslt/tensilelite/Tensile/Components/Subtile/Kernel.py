@@ -312,6 +312,15 @@ AB_B16_2x2 = ABTilePair(
 )
 
 # Column-major A/B (TLU=1): GR and LR contiguous along M
+#
+# The LR side reads with ds_read_b64_tr_b16, which hands a lane 4 M-rows (unlike
+# ds_read_b64_tr_b4, where one lane covers a whole 16-row MFMA-M tile).  So the
+# LR loadShape is m=4 at loadWidth=8 regardless of the stack, and only the GR
+# side and subtileShape scale with the stack height.
+AB_B16_TLU1_4x1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(4, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),  # 128-bit GR: 8 bf16 along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(4, 1), loadShape=LoadShape(m=4, k=1), loadWidth=8),     #  64-bit LR: 4 bf16 along M (ds_read_b64_tr_b16)
+)
 AB_B16_TLU1 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), subtileCount=1, subtileStride=0, loadShape=LoadShape(m=8, k=1)),   # 128-bit GR: 8 bf16 along M
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(8, 1), loadShape=LoadShape(m=8, k=1)),                              # 128-bit LR: 8 bf16 along M
@@ -378,6 +387,7 @@ AB_GEOMETRY_MAP = {
   "AB_B4":       AB_B4,
   "AB_B4_2x2":   AB_B4_2x2,
   "AB_B8":       AB_B8,
+  "AB_B16_TLU1_4x1": AB_B16_TLU1_4x1,
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,

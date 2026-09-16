@@ -3,6 +3,7 @@
 
 import pytest
 
+from Tensile.Common.DataType import DataType
 from Tensile.SolutionStructs.Validators.Subtile import (
     _SUBTILE_STACK_FULL_LINE,
     _SUBTILE_STACK_SIZES,
@@ -74,9 +75,16 @@ MI_M = 16
 WAVE_GROUPS = [(1, 1), (1, 2), (2, 1), (1, 4), (2, 2), (4, 1)]
 
 
-def _state(mtTilesM, mtTilesN, waveGroup, isa=(9, 5, 0)):
-    """Minimal solution state carrying just what the TLU=1 stack rules read."""
+def _state(mtTilesM, mtTilesN, waveGroup, isa=(9, 5, 0), dtype="float4"):
+    """Minimal solution state carrying just what the TLU=1 stack rules read.
+
+    The strip-width rule reads the operand's own bpe (a bf16 strip is 4x an fp4
+    one at the same stack), so ProblemType has to be present even here.  Every
+    case below is fp4 unless it says otherwise.
+    """
+    dt = DataType(dtype)
     return {
+        "ProblemType": {"DataTypeA": dt, "DataTypeB": dt},
         "ISA": isa,
         "MIWaveGroup": list(waveGroup),
         "MIWaveTile": [mtTilesM // waveGroup[0], mtTilesN // waveGroup[1]],

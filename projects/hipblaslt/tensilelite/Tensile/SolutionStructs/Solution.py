@@ -82,7 +82,8 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
+from .Validators.Subtile import (subtileStackForTLU1, subtileStackForTLU1B16,
+                                 subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 
 
@@ -1215,13 +1216,14 @@ class Solution(collections.abc.Mapping):
         tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
-            # AB_B16_TLU1 exists but nothing gives the free dim the element
-            # multiple its 16B chunk needs, the way the fp4 branch below does.
-            # Without a reject here these solutions clear validation and then
-            # assert in kernelBodySubtile instead of failing cleanly.
-            reject(state, printRejectionReason,
-                   f"UseSubtileImpl=1 TLU=1 is not implemented for dtype {dtype}")
-            return
+            mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+            mtTiles = mtFree // state["MatrixInstM"]
+            stack = subtileStackForTLU1B16(state, tc, mtTiles)
+            stackReason = subtileTLU1StackReason(state, tc, mtTiles, stack)
+            if stackReason:
+              reject(state, printRejectionReason, stackReason)
+              return
+            state[f"_ABTilePair{tc}"] = {4: "AB_B16_TLU1_4x1"}[stack]
           elif dtype.isFloat4():
             # Two fp4 share a byte, so an odd free-dim extent leaves the K
             # stride on a half byte and the elements-to-bytes shift truncates

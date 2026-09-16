@@ -5381,25 +5381,46 @@ class KernelWriterAssembly(KernelWriter):
         return False
       return True
 
-    assert _eligible(tPA) and _eligible(tPB), \
-      "tailLoopBoundaryDtlLoadAB requires bf16/subtile eligibility for both A and B"
+    # Emit for whichever tensors are eligible, not only when both are.  The
+    # per-tensor blocks below are already independent, so a mixed pair is just a
+    # shorter loop.
+    #
+    # A TLU=1 operand is always ineligible, via the const-unit-stride test: its
+    # contiguous dim is the free dim, so one GR load covers M rows at a single
+    # K.  The hazard this fixup exists for -- a dwordx4 that straddles the K
+    # boundary, where HW zeroes the whole OOB dword and takes the trailing 16-bit
+    # K element with it -- cannot arise there, because no load spans more than
+    # one K.  A K past the end zeroes that load entirely, which is what it should
+    # do.  So an NN kernel (A TLU=1, B TLU=0) legitimately patches B only.
+    eligible = [tP for tP in (tPA, tPB) if _eligible(tP)]
+    if not eligible:
+      return module
 
-    # Both eligible — emit shared K math once, then per-tensor M/load blocks.
+    # Emit shared K math once, then per-tensor M/load blocks.
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
     waveSize        = kernel["WavefrontSize"]
     depthU          = kernel["DepthU"]
     laneMaskCount   = self.states.laneSGPRCount
 
-    # K-side geometry is identical for A and B in the bf16 subtile path.
-    bpe          = int(tPA["bpeGR"])
+    # K-side geometry is shared by the tensors this emits for, so take it from
+    # an eligible one rather than unconditionally from A -- A may be the tensor
+    # being skipped.
+    bpe          = int(eligible[0]["bpeGR"])
     elemsPerLane = 16 // bpe  # bf16 -> 8
-    tileInfoA       = self.states.a.tileInfo
-    subtileKElems   = int(tileInfoA.subtileShape[1]) * int(tileInfoA.mmaTileShape[1])
+    def _kElems(tP):
+      ti = self.states.a.tileInfo if tP["tensorChar"] == 'A' else self.states.b.tileInfo
+      return int(ti.subtileShape[1]) * int(ti.mmaTileShape[1])
+    subtileKElems   = _kElems(eligible[0])
     assert isPow2(subtileKElems)
+    assert all(_kElems(tP) == subtileKElems and int(tP["bpeGR"]) == bpe
+               for tP in eligible), \
+      "tailLoopBoundaryDtlLoadAB shares one K preamble across tensors, so the " \
+      "eligible ones must agree on subtileKElems and bpe"
 
     skipLabel = Label(self.labels.getNameInc("tailBoundarySkipAB"), "")
 
-    module.addComment1("Tail-loop boundary DTL load (A+B)")
+    module.addComment1("Tail-loop boundary DTL load (%s)"
+                       % "+".join(tP["tensorChar"] for tP in eligible))
 
     # ── Shared block: parity gate + K-derived values ──────────────────────────
     # Reserve sgprs that must outlive the per-tensor block.
@@ -5442,7 +5463,7 @@ class KernelWriterAssembly(KernelWriter):
       # per-tensor when we build sTarget.
 
       # ── Per-tensor block ────────────────────────────────────────────────
-      for tP in (tPA, tPB):
+      for tP in eligible:
         tc       = tP["tensorChar"]
         tileInfo = self.states.a.tileInfo if tc == 'A' else self.states.b.tileInfo
         regList  = tileInfo.localSubtilesRegister[0]

@@ -30,7 +30,7 @@ from rocisa.instruction import (
     SNop, SOrB32, SSubI32, SXorB32,
     SCBranchSCC1, SCmpEQU32, SCSelectB32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
-    VAddU32, VAndB32, VCmpLtI32, VCmpXEqU32, VCndMaskB32,
+    VAddU32, VAndB32, VBfeU32, VCmpLtI32, VCmpXEqU32, VCndMaskB32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32, VOrB32,
     TensorLoadToLds,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
@@ -39,10 +39,12 @@ from rocisa.instruction import (
 from .SubtileGeometry import (
     RegList,
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
+    ldsSwizzleMask, _SWZ_K_BITS_MSB_FIRST,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
 from .SubtileTLUSwizzle import (selectTLUSwizzle, selectTLUColScatter, stripStrideBytes,
-                                tluPadBytes, grLoadBlockBytes)
+                                tluPadBytes, grLoadBlockBytes,
+                                selectTLU1B16SwizzleBits)
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
@@ -886,12 +888,164 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
 def _b128ChunkTiling(tileInfo, mStripBytes):
   """How one lane's b128 divides a strip: (chunks per K row, elements per chunk).
 
-  A b128 covers 16/bpe contiguous free-dim elements at one K row.  Only fp4
-  subdivides a row; every other TLU dtype keeps one chunk per K row, making the
-  per-lane offset a pure K ramp.
+  A b128 covers elemsPerChunk (16/bpe) contiguous free-dim elements at one K
+  row, and a strip is mStripBytes wide, so a row holds mStripBytes/16 chunks.
+  Where that exceeds one, physical chunk P = loadIdx*wavesize + laneId splits
+  into a K row (P // chunksPerK) plus an intra-row M block (P % chunksPerK).
+
+  This is a property of the STRIP WIDTH, not of the dtype.  chunksPerK == 1 is
+  simply what a strip of 16 B or less gives you -- the baseline 2x1 fp4 stack --
+  and gating the split on `bpe == 0.5` only looked right while fp4 was the one
+  TLU=1 dtype.  Every bf16 TLU=1 geometry is wider than 16 B (a 4x1 bf16 strip
+  is 128 B, so 8 chunks per K row), and forcing the single-chunk ramp on it
+  would ramp the K row 8x too fast.
   """
-  chunksPerK = max(1, mStripBytes // 16) if float(tileInfo.bpe) == 0.5 else 1
+  chunksPerK = max(1, mStripBytes // 16)
+  assert chunksPerK == 1 or (mStripBytes % 16 == 0
+                             and not (chunksPerK & (chunksPerK - 1))), (
+      "TLU=1 GR (%s): mStripBytes=%d gives chunksPerK=%d, which must be a power "
+      "of two for the shift/mask split"
+      % (tileInfo.tc, mStripBytes, chunksPerK))
   return chunksPerK, int(16 / tileInfo.bpe)
+def _tluFetchGroupId(writer, kernel, module, tileInfo, dst):
+  """dst = this wave's index within the group cooperating on one K column.
+
+  The wave's K-row base is ``fetchGroupId * localKSpan``, where localKSpan is
+  the K extent its own chunk ramp covers.  Both cooperative modes reduce to that
+  same product, which is why one index serves both:
+
+    grWavesPerStrip > 1  axis waves share a strip and split its K rows;
+                         the index is the coop-wave id.
+    grKSplit > 1         one wave owns the strip and the other-axis waves take
+                         K slices of it; the index is the K-slice id.
+
+  Mirrors the derivations in _tluWaveAxisGlobalOffset and _tluKSliceTerms -- if
+  either moves, this has to move with it, or the swizzle will disagree with the
+  address it is supposed to permute.  Returns False when the index is
+  identically zero, so the caller can skip the term entirely.
+  """
+  tc = tileInfo.tc
+  perStrip = max(1, int(getattr(tileInfo, "grWavesPerStrip", 1)))
+  if perStrip > 1:
+    return _tluCoopWaveId(writer, kernel, module, tileInfo, dst)
+  kSplit, _, _, _ = _tluKWaveSlots(tileInfo)
+  if kSplit <= 1:
+    return False
+  _tluOtherAxisId(writer, kernel, module, tc, dst)
+  otherWaves = int(getattr(tileInfo, "grOtherAxisWaves", 1))
+  if kSplit < otherWaves:
+    # Narrower group than the other-axis wave count: several waves land on the
+    # same slice (a refetch the strip cannot avoid), so the id wraps at kSplit.
+    module.add(VAndB32(dst=vgpr(dst), src0=vgpr(dst), src1=hex(kSplit - 1),
+               comment="%s: K slice = index %% %d" % (tc, kSplit)))
+  return True
+
+
+def _emitTLU1GRSwizzleB16(module, tc, chunkVgpr, swzTmp, laneId, loadIdx,
+                          wavesize, swzBits, chunksPerK, elemsPerChunk, instM,
+                          localKSpan=None, groupVgpr=None, swzTmp2=None):
+  """GR half of the bf16 TLU=1 LDS bank-conflict swizzle.
+
+  Mirror of SubtileLREmit._emitTLU1LRSwizzle; the two MUST stay in step.  XOR is
+  an involution, so GR permuting which global rows a lane fetches and LR applying
+  the same flip on read compose to the identity and A round-trips bit-exactly.
+
+  DirectToLds writes LDS at `M0 + lane*16` with M0 scalar, so there is no
+  per-lane LDS *write* address to swizzle.  The permutation is instead applied to
+  which global rows lane Q fetches, which produces exactly the permuted LDS image
+  the LR read expects.  It moves whole m-blocks: a chunk is elemsPerChunk rows
+  and an m-block is instM rows, so the XOR lands on chunk bit
+  log2(instM/elemsPerChunk) and no load is ever split.
+
+  The swizzle needs k ABSOLUTE within the subtile column, because that is what
+  the LR read reconstructs (its k comes from lane16Group/colInGroup, which do not
+  know about cooperative fetching).  When waves cooperate, this lane's chunk ramp
+  covers only a slice: absolute k = fetchGroupId*localKSpan + kLocal, with
+  kLocal < localKSpan and localKSpan a power of two, so the two never carry into
+  each other and each k bit has exactly one source.  From
+  P = loadIdx*wavesize + laneId and kLocal = P // chunksPerK:
+
+    kbit < laneKBits                  laneId bit chunksPerK+kbit -- lane-varying.
+    laneKBits <= kbit < log2(span)    loadIdx bit kbit-laneKBits.  loadIdx is a
+                                      Python loop constant, so this folds into an
+                                      immediate and costs no instruction.
+    kbit >= log2(localKSpan)          fetchGroupId bit kbit-log2(span) -- the
+                                      wave term.  Omitting it is what forced the
+                                      old _sharedStrip gate: with one fetching
+                                      wave the bit is 0 and dropping it is
+                                      invisible, but with four it is k bit 3.
+  """
+  chunkBits = chunksPerK.bit_length() - 1        # P bits holding the M block
+  mBlockShift = (instM // elemsPerChunk).bit_length() - 1  # chunks per m-block
+  kbits = _SWZ_K_BITS_MSB_FIRST[:swzBits]
+  assert len(kbits) == swzBits, (
+      "TLU=1 GR bf16 swizzle: need %d k bits but only %d are defined"
+      % (swzBits, len(_SWZ_K_BITS_MSB_FIRST)))
+
+  laneKBits = wavesize.bit_length() - 1 - chunkBits   # k bits carried by laneId
+  if localKSpan is None:
+    localKSpan = 1 << laneKBits
+  assert localKSpan and not (localKSpan & (localKSpan - 1)), (
+      "TLU=1 GR bf16 swizzle: localKSpan=%s must be a power of two for the "
+      "group/local k split to be carry-free" % (localKSpan,))
+  spanBits = localKSpan.bit_length() - 1
+
+  constTerm = 0
+  laneSrcBit = laneOutPos = None
+  groupSrcBit = groupOutPos = None
+  for idx, kbit in enumerate(kbits):
+    outPos = swzBits - 1 - idx
+    if kbit < laneKBits:
+      assert laneSrcBit is None, \
+          "TLU=1 GR bf16 swizzle: more than one lane-sourced k bit is not wired"
+      laneSrcBit, laneOutPos = chunkBits + kbit, outPos
+    elif kbit < spanBits:
+      constTerm |= (((loadIdx >> (kbit - laneKBits)) & 1) << outPos)
+    else:
+      assert groupSrcBit is None, \
+          "TLU=1 GR bf16 swizzle: more than one group-sourced k bit is not wired"
+      assert groupVgpr is not None, (
+          "TLU=1 GR bf16 swizzle: k bit %u comes from the fetch-group index "
+          "(localKSpan=%u), but no group register was supplied -- the swizzle "
+          "would silently use 0 and disagree with the LR read"
+          % (kbit, localKSpan))
+      groupSrcBit, groupOutPos = kbit - spanBits, outPos
+
+  if laneSrcBit is not None:
+    module.add(VBfeU32(dst=vgpr(swzTmp), src0=vgpr(laneId), src1=laneSrcBit, src2=1,
+               comment="%s: swizzle k bit = laneId[%u]" % (tc, laneSrcBit)))
+    if laneOutPos:
+      module.add(VLShiftLeftB32(dst=vgpr(swzTmp), shiftHex=hex(laneOutPos),
+                 src=vgpr(swzTmp), comment="%s: -> m-block bit %u" % (tc, laneOutPos)))
+    if constTerm:
+      module.add(VOrB32(dst=vgpr(swzTmp), src0=vgpr(swzTmp), src1=hex(constTerm),
+                 comment="%s: + load-index term (load %u)" % (tc, loadIdx)))
+  else:
+    module.add(VMovB32(dst=vgpr(swzTmp), src=hex(constTerm),
+               comment="%s: swizzle term (load %u)" % (tc, loadIdx)))
+
+  if groupSrcBit is not None:
+    # Wave-uniform, but the fetch-group id is derived from Serial and so lives in
+    # a VGPR: a VALU extract, not an immediate.  swzTmp already holds the
+    # lane/load terms, so the extract needs its own register to OR in from.
+    assert swzTmp2 is not None, \
+        "TLU=1 GR bf16 swizzle: a group-sourced k bit needs a second scratch vgpr"
+    module.add(VBfeU32(dst=vgpr(swzTmp2), src0=vgpr(groupVgpr), src1=groupSrcBit,
+               src2=1, comment="%s: swizzle k bit = fetchGroup[%u]" % (tc, groupSrcBit)))
+    if groupOutPos:
+      module.add(VLShiftLeftB32(dst=vgpr(swzTmp2), shiftHex=hex(groupOutPos),
+                 src=vgpr(swzTmp2), comment="%s: -> m-block bit %u" % (tc, groupOutPos)))
+    module.add(VOrB32(dst=vgpr(swzTmp), src0=vgpr(swzTmp), src1=vgpr(swzTmp2),
+               comment="%s: + fetch-group term" % tc))
+
+  mask = ldsSwizzleMask(swzBits)
+  module.add(VAndB32(dst=vgpr(swzTmp), src0=vgpr(swzTmp), src1=hex(mask),
+             comment="%s: swizzle mask %u (0 = disabled)" % (tc, mask)))
+  if mBlockShift:
+    module.add(VLShiftLeftB32(dst=vgpr(swzTmp), shiftHex=hex(mBlockShift),
+               src=vgpr(swzTmp), comment="%s: -> chunk m-block field" % tc))
+  module.add(VXorB32(dst=vgpr(chunkVgpr), src0=vgpr(chunkVgpr), src1=vgpr(swzTmp),
+             comment="%s: chunk m-block ^= swizzle (LDS bank de-conflict)" % tc))
 
 
 def _graTileAssignment_tlu(writer, kernel, tileInfo):
@@ -931,8 +1085,17 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
     return module
 
   swz = selectTLUSwizzle(tileInfo)
+  # bf16 has its own swizzle (two m-block bits at a 128 B column, where the fp4
+  # single-bit XOR reaches only half way -- 16/64 conflicts against a floor of
+  # 0/48).  selectTLUSwizzle is fp4-gated and returns None here; b16Swz carries
+  # the bf16 width instead.  It carries no _sharedStrip gate: the XOR acts on the
+  # physical chunk index, and a cooperating wave's k is made absolute by the
+  # fetch-group term below rather than by declining to swizzle.  See
+  # selectTLU1B16SwizzleBits.
+  b16Swz = selectTLU1B16SwizzleBits(tileInfo)
   tmpVgpr = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_tmpVgpr")
-  swzTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_swzTmp") if swz else None
+  swzTmp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_swzTmp") \
+           if (swz or b16Swz) else None
 
   instM = int(tileInfo.mmaTileShape[0])
   mStripBytes = int(tileInfo.subtileShape[0] * instM * tileInfo.bpe)
@@ -944,6 +1107,21 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
   # global read starts subtileM*localSub0 free-dim elements later.  The free dim
   # is unit-stride, so this is a flat byte offset added to every GR load.
   waveAxisOffVgpr = _tluWaveAxisGlobalOffset(writer, kernel, module, tileInfo)
+
+  # The bf16 swizzle needs k absolute within the subtile column.  This lane's
+  # ramp covers localKSpan of it; the rest is the fetch-group index, which is
+  # wave-uniform and so is built once here rather than per load.
+  b16GroupVgpr = None
+  b16SwzTmp2 = None
+  b16LocalKSpan = None
+  if b16Swz:
+    b16LocalKSpan = int(tileInfo.numGRPerSubtile) * wavesize // chunksPerK
+    grp = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_b16Group")
+    if _tluFetchGroupId(writer, kernel, module, tileInfo, grp):
+      b16GroupVgpr = grp
+      b16SwzTmp2 = writer.vgprPool.checkOut(1, tag="_graTileAssignment_tlu_b16SwzTmp2")
+    else:
+      writer.vgprPool.checkIn(grp)
 
   for i in range(tileInfo.numGRPerSubtile):
     out = tile.sharedVgprGROffset[i]
@@ -963,6 +1141,11 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
                  src=vgpr(swzTmp), comment="%s: -> bit %u" % (tc, swz.xorToBit)))
       module.add(VXorB32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=vgpr(swzTmp),
                  comment="%s: chunk[%u] ^= chunk[%u]" % (tc, swz.xorToBit, swz.xorFromBit)))
+    if b16Swz:
+      _emitTLU1GRSwizzleB16(module, tc, tmpVgpr, swzTmp, laneId, i, wavesize,
+                            b16Swz, chunksPerK, elemsPerChunk, instM,
+                            localKSpan=b16LocalKSpan, groupVgpr=b16GroupVgpr,
+                            swzTmp2=b16SwzTmp2)
     if chunksPerK > 1:
       # Split chunk P into K row (P // chunksPerK) and intra-row M block
       # (P % chunksPerK) of elemsPerChunk elements.  chunksPerK is a power of 2.
@@ -993,6 +1176,10 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
                  comment="%s: + per-wave free-dim (M/N) global offset" % tc))
   if swzTmp is not None:
     writer.vgprPool.checkIn(swzTmp)
+  if b16GroupVgpr is not None:
+    writer.vgprPool.checkIn(b16GroupVgpr)
+  if b16SwzTmp2 is not None:
+    writer.vgprPool.checkIn(b16SwzTmp2)
   if mTileTmp is not None:
     writer.vgprPool.checkIn(mTileTmp)
   if waveAxisOffVgpr is not None:
@@ -1460,13 +1647,24 @@ def globalReadDoSubtile(tc, writer, kernel):
 
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
 
+  # emitSingleBufferLoad takes sId0 in MMA-TILE units on the TLU=1 path (it
+  # converts with `sId0 // subtileShape[0]`), matching InstructionEmitter.emit_gr
+  # which steps the scheduler's MMA-tile index.  This loop counts SUB-TILE rows,
+  # so on TLU=1 it must scale by the stack or every row floors to 0: at MT256
+  # WG[1,4] all four strips emitted `m0 = LocalWriteBaseAddrA + 0`, so strip 0
+  # was written four times and strips 1-3 never at all -- same instruction count,
+  # silently wrong A.  Only bites when localSubtileGrid[0] > 1; the shapes with a
+  # single strip agree either way, which is why it stayed hidden.
+  isTLU1 = _isGRTLU1(tileInfo)
+  mStep = int(tileInfo.subtileShape[0]) if isTLU1 else 1
+
   # A K-window split hands each wave every grKWindowSplit'th run of windows, so
   # the loop issues one window per run and the runtime base picks the run.
   winSplit = int(tileInfo.grKWindowSplit)
   for j in range(0, int(tileInfo.localSubtileGrid[1]), winSplit):
     for i in range(tileInfo.localSubtileGrid[0]):
       module.addComment0("Emit load for %s subtile: [%u, %u]"%(tc, i, j))
-      module.add(emitSubtileBufferLoad(tc, writer, kernel, [i, j]))
+      module.add(emitSubtileBufferLoad(tc, writer, kernel, [i * mStep, j]))
 
   return module
 

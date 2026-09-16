@@ -7,12 +7,96 @@ Contains layout classes, abstract geometry base classes, and pre-defined instanc
 No emit logic lives here — concrete shape classes with emit implementations are in
 Kernel.py.
 """
+import math
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple, Optional, Tuple
 
 from rocisa.container import vgpr, sgpr, accvgpr
 from rocisa.enum import RegisterType
+
+
+################################################################################
+# TLU=1 bf16 LDS bank-conflict swizzle — shared constants
+#
+# The GR half (SubtileGREmit._emitTLU1GRSwizzleB16) permutes which
+# global rows each lane fetches; the LR half (SubtileLREmit._emitTLU1LRSwizzle)
+# un-permutes on read.  They live here rather than in either emitter so both can
+# import them without a cycle, and so the two cannot drift apart.
+#
+# This is separate from SubtileTLUSwizzle, which owns the fp4 single-bit XOR and
+# column-scatter layouts.  Those are derived from fp4 chunk algebra (16 B b128
+# chunks) and do not describe a bf16 tile, whose LR unit is an 8 B tr_b16 read.
+################################################################################
+
+def swizzleBitsForSubtile(subtileShape0):
+  """Number of m-block bits the TLU=1 LDS XOR swizzle must permute.
+
+  The swizzle exists to spread `ds_read_b64_tr_b16` across LDS banks.  That read
+  transposes within each 16-lane group, and a group's addresses cover a
+  16(m) x 4(k) patch whose four k-rows are `colStride` bytes apart.  The natural
+  bank spread that stride already provides is
+
+      clamp(log2(256 / mExtentBytes), 0, 2)  bits
+
+  and 3 bits total are needed to reach the 64-bank floor, so the swizzle must
+  supply the rest.  Since `mExtentBytes = subtileShape[0] * instM * bpe`,
+  doubling the M-extent costs exactly one natural bit and hands back exactly one
+  m-block bit -- so the swizzle always consumes the WHOLE m-block field:
+
+      swizzleBits == log2(mExtentRows / instM) == log2(subtileShape[0])
+
+  Measured on gfx950, SQ_LDS_BANK_CONFLICT / SQ_LDS_IDX_ACTIVE over 8 tr reads +
+  4 ds_write_b128, IDX_ACTIVE floor 48:
+
+      64 B column (subtileShape[0]=2): naive 16/64 -> 1 bit  0/48
+     128 B column (subtileShape[0]=4): naive 48/96 -> 1 bit 16/64 -> 2 bits 0/48
+
+  A one-bit swizzle at a 128 B column stops at 4 cycles/read instead of 2: the
+  residual is an INTRA-group k-row alias, and a gate that is constant within a
+  16-lane group cannot touch it.  Hence the width must track the geometry rather
+  than being hardcoded.
+  """
+  bits = int(math.log2(subtileShape0))
+  assert (1 << bits) == subtileShape0, \
+      "TLU=1 swizzle: subtileShape[0]=%s is not a power of two" % (subtileShape0,)
+  return bits
+
+
+def ldsSwizzleMask(swizzleBits=1):
+  """AND mask isolating the m-block bits of the TLU=1 LDS bank-conflict XOR.
+
+  Returns `(1 << swizzleBits) - 1` when enabled and 0 when disabled; a mask of 0
+  forces every XOR to a no-op while leaving the surrounding geometry, register
+  allocation and instruction count untouched, which makes SUBTILE_LDS_SWIZZLE=0
+  a clean A/B for numerics debugging.
+
+  DEFAULT ON.  The swizzle is a matched pair, and XOR is an involution, so the
+  two halves compose to the identity and the result is bit-exact either way.
+  They must always be enabled together: a one-sided swizzle permutes A in LDS
+  without undoing it and silently corrupts the result.
+  """
+  if os.environ.get("SUBTILE_LDS_SWIZZLE") == "0":
+    return 0
+  return (1 << swizzleBits) - 1
+
+
+# k bits that feed the TLU=1 LDS XOR swizzle, MOST-SIGNIFICANT m-block bit
+# first.  Derived in swizzleBitsForSubtile() and confirmed on gfx950:
+#
+#   k bit 3  -- inter-group spread.  k = 8*SIMDId + ..., so (k>>3)&1 is SIMDId
+#               bit 0, which separates the two 16-lane groups that LDS services
+#               together in one 32-lane pass.  (SIMDId bit 1 selects the
+#               half-wave itself, so it needs no spread.)
+#   k bit 1  -- intra-group.  Within a 16-lane group the four k-rows sit
+#               colStride bytes apart; once colStride reaches 128 B they alias
+#               mod 64 banks (wi_k 0 with 2, 1 with 3) and only a bit that
+#               VARIES INSIDE the group can break it.  (k>>1)&1 is wi_k bit 1.
+#
+# Both are invariant under the paired read (+4 flips only k bit 2), so the
+# second read of a `ds_read_b64_tr_b16` pair keeps its plain constant offset.
+_SWZ_K_BITS_MSB_FIRST = (3, 1)
 
 
 ################################################################################

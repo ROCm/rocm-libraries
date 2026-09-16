@@ -114,14 +114,22 @@ def _subtileStripSharingReason(state, tc, mtTiles, stack):
 
 
 def subtileTLU1StackReason(state, tc, mtTiles, stack):
-  """Why `stack` cannot lay out the TLU=1 fp4 operand tc, or None when it can."""
+  """Why `stack` cannot lay out the TLU=1 operand tc, or None when it can.
+
+  Dtype-general: every rule here is about how many bytes a strip spans and how
+  many waves want a slot in it, so bpe comes from the operand's own dtype rather
+  than the fp4 literal this started as.  DataType("float4").numBytes() is 0.5,
+  so the substitution is arithmetically identical for fp4 and cannot move an
+  fp4 answer; bf16 is 4x wider and needs the real width to lay out at all.
+  """
   mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+  bpe    = state["ProblemType"][f"DataType{tc}"].numBytes()
   strips = -(-mtTiles // stack)
   # A partial tail strip has no register list of its own, so the GR emit indexes
   # past the end of localSubtilesRegister.  Padding is only emittable while the
   # operand is a single strip.
   if mtTiles % stack != 0 and strips > 1:
-    return ("UseSubtileImpl=1 TLU=1 fp4 pads tensor %s across more than one "
+    return ("UseSubtileImpl=1 TLU=1 pads tensor %s across more than one "
             "LDS strip: %d MMA tiles on a stack of %d is %d strips with a "
             "partial tail, which the GR emit cannot address (MacroTile=%d)"
             % (tc, mtTiles, stack, strips, mtFree))
@@ -142,11 +150,11 @@ def subtileTLU1StackReason(state, tc, mtTiles, stack):
   otherWaves = max(1, numWaves // wgSize)
   perWave    = _subtilePerWaveMTiles(mtTiles, stack, wgSize)
   fetchGroup = max(1, stack // perWave) * otherWaves
-  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * 0.5
+  stripBytes = stack * state["MatrixInstM"] * state["MatrixInstK"] * bpe
   slots      = int(stripBytes // (state["WavefrontSize"] * 16)) \
                * (state["DepthU"] // state["MatrixInstK"])
   if slots < fetchGroup:
-    return ("UseSubtileImpl=1 TLU=1 fp4 leaves the LDS strip on tensor %s with "
+    return ("UseSubtileImpl=1 TLU=1 leaves the LDS strip on tensor %s with "
             "%d (block x K window) slots for a fetch group of %d, so the surplus "
             "waves refetch it (MacroTile=%d, DepthU=%d, stack=%d)"
             % (tc, slots, fetchGroup, mtFree, state["DepthU"], stack))
@@ -165,6 +173,30 @@ def subtileStackForTLU1(state, tc, mtTiles):
     if subtileTLU1StackReason(state, tc, mtTiles, stack) is None:
       return stack
   return preferred
+
+
+# bf16 is 4x wider than fp4, so its strip reaches a 128 B cache line at a stack
+# of 4 (4 * MatrixInstM 16 * 2 B), where fp4 needs 16.  Taller is therefore not
+# better here: a stack of 8 or 16 spans 256/512 B and buys no extra line
+# coverage while doubling or quadrupling the LDS footprint and the padding.
+#
+# So bf16 has exactly one stack, and there is no ladder to walk.  This is also
+# what the LDS swizzle supports: swizzleBitsForSubtile(4) is 2 bits, and
+# SubtileGeometry._SWZ_K_BITS_MSB_FIRST defines exactly the two k bits those
+# consume.  A stack of 8 would need a third, which is not derived anywhere, so
+# admitting 8 or 16 here would trade a clean rejection for an assertion during
+# emit.
+_SUBTILE_STACK_B16 = 4
+
+
+def subtileStackForTLU1B16(state, tc, mtTiles):
+  """Stack height for a TLU=1 bf16/fp16 operand.  See _SUBTILE_STACK_B16.
+
+  Unlike the fp4 chooser this cannot fall back: the caller checks
+  subtileTLU1StackReason on what comes back and rejects the solution when the
+  geometry refuses it.
+  """
+  return _SUBTILE_STACK_B16
 
 
 def validateSubtileGRKPartition(state, printRejectionReason):

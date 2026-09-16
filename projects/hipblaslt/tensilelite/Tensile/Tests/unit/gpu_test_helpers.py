@@ -215,7 +215,8 @@ def compute_lds_start_offset_b(tileInfoA):
     return int(((numASubtiles * tileInfoA.subtileSize + readSize - 1) // readSize) * readSize)
 
 
-def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2):
+def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2,
+                  geometry_b=None):
     """Create a minimal mock writer with register pools, kernel dict, and TileInfo.
 
     Sets up the base writer that all tests need:
@@ -255,8 +256,12 @@ def create_writer(cfg, mi_wave_group=None, geometry=None, inst_k=32, bpe=2):
     # Build kernel and TileInfo
     kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group, inst_k=inst_k, bpe=bpe)
 
+    # A and B need not share a geometry: NN pairs a TLU=1 operand with a TLU=0
+    # one, and a TLU=1 subtile spanning several MMA-M tiles often fits only one
+    # of the two per-wave extents.
     tileInfoA = TileInfo(geometry, 'A', writer, kernel)
-    tileInfoB = TileInfo(geometry, 'B', writer, kernel)
+    tileInfoB = TileInfo(geometry_b if geometry_b is not None else geometry,
+                         'B', writer, kernel)
 
     writer.agprPool = RegisterPool(0, RegisterType.Accvgpr,
                                     defaultPreventOverflow=False, printRP=False)
@@ -773,17 +778,24 @@ def generate_srd_setup():
     return module
 
 
-def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2):
+def setup_roundtrip_writer(cfg, geometry=None, inst_k=32, bpe=2, mi_wave_group=None):
     """Create and configure a writer for roundtrip kernel tests.
 
     Calls create_writer, reserves sgprs for HW regs + strides + SRD + DTL + swap,
     computes LDS size, and allocates vgprTile registers.
 
+    mi_wave_group overrides the MIWaveGroup that create_writer would infer from
+    the macro-tile ratios.  Needed by geometries whose subtile spans more than
+    one MMA tile in M: whether a subtile fits is a property of the per-wave
+    extent (MacroTile / MIWaveGroup), not of the macro tile alone, so the
+    inferred grouping is not always a legal one to test under.
+
     Returns:
         (writer, kernel, tileInfoA, tileInfoB, lds_size)
     """
     init_rocisa()
-    writer, kernel, tileInfoA, tileInfoB = create_writer(cfg, geometry=geometry, inst_k=inst_k, bpe=bpe)
+    writer, kernel, tileInfoA, tileInfoB = create_writer(
+        cfg, geometry=geometry, inst_k=inst_k, bpe=bpe, mi_wave_group=mi_wave_group)
 
     # Reserve s0-s11: s[0:1]=kernarg ptr (HW), s[2:3]=workgroup IDs (HW),
     # s[4:5]=input_A_ptr, s[6:7]=input_B_ptr, s[8:9]=output_ptr,
