@@ -2891,7 +2891,7 @@ class DirectDepthwiseSpatialSpec:
         return self.block_waves * self.wave_size
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(self.name, p.short(), f"bwv{self.block_waves}")
@@ -2918,7 +2918,7 @@ def is_valid_depthwise_spatial_spec(
     spec: "DirectDepthwiseSpatialSpec", arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a :class:`DirectDepthwiseSpatialSpec`."""
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         ArchTarget.from_gfx(arch)
