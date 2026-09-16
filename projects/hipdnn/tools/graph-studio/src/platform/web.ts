@@ -1,4 +1,5 @@
 import type {
+  DirectoryRef,
   FileHandleRef,
   KeyValueStore,
   OpenResult,
@@ -23,6 +24,19 @@ interface FSFileHandle {
   getFile(): Promise<File>;
   createWritable(): Promise<FSWritable>;
 }
+
+// A granted folder (via `showDirectoryPicker`). Kept separate from
+// `FSFileHandle` above: its leaf files never need `createWritable`, and
+// keeping the shape minimal is what makes it easy to fake in tests.
+export interface FSLeafFileHandle {
+  getFile(): Promise<{ arrayBuffer(): Promise<ArrayBuffer> }>;
+}
+export interface FSDirectoryHandle {
+  readonly name: string;
+  getDirectoryHandle(name: string): Promise<FSDirectoryHandle>;
+  getFileHandle(name: string): Promise<FSLeafFileHandle>;
+  entries?: () => AsyncIterableIterator<[string, { kind: string }]>;
+}
 interface FSWindow {
   showOpenFilePicker?: (opts?: {
     types?: { description: string; accept: Record<string, string[]> }[];
@@ -31,6 +45,7 @@ interface FSWindow {
     suggestedName?: string;
     types?: { description: string; accept: Record<string, string[]> }[];
   }) => Promise<FSFileHandle>;
+  showDirectoryPicker?: () => Promise<FSDirectoryHandle>;
 }
 
 const fsWindow = window as unknown as FSWindow;
@@ -144,6 +159,48 @@ function saveViaDownload(
   return { name, token: null };
 }
 
+function isDirectoryHandle(token: unknown): token is FSDirectoryHandle {
+  return (
+    typeof token === "object" &&
+    token !== null &&
+    typeof (token as FSDirectoryHandle).getDirectoryHandle === "function" &&
+    typeof (token as FSDirectoryHandle).getFileHandle === "function"
+  );
+}
+
+/**
+ * Walks `relativePath` down from `dir` one segment at a time. A report is
+ * untrusted input: refusing `..` and a leading `/` here, before any handle
+ * lookup, is what stops it from naming a file outside the granted folder.
+ */
+export async function readRelatedFromDirectory(
+  dir: FSDirectoryHandle,
+  relativePath: string,
+): Promise<Uint8Array> {
+  if (relativePath.startsWith("/")) {
+    throw new Error(`Absolute path not allowed: ${relativePath}`);
+  }
+  const segments = relativePath.split("/");
+  if (segments.some((segment) => segment === "" || segment === "..")) {
+    throw new Error(`Invalid relative path: ${relativePath}`);
+  }
+  let cursor = dir;
+  try {
+    for (const segment of segments.slice(0, -1)) {
+      cursor = await cursor.getDirectoryHandle(segment);
+    }
+    const fileHandle = await cursor.getFileHandle(segments[segments.length - 1]);
+    const file = await fileHandle.getFile();
+    return new Uint8Array(await file.arrayBuffer());
+  } catch {
+    // The browser's own NotFoundError names neither path nor folder, which
+    // hides the usual cause: a folder granted below the one the run wrote from.
+    throw new Error(
+      `${relativePath} not found under ${dir.name}/ — the report's artifacts must sit beside it`,
+    );
+  }
+}
+
 export const webPlatform: PlatformBridge = {
   kind: "web",
   store: localStore,
@@ -154,5 +211,35 @@ export const webPlatform: PlatformBridge = {
     return hasFileSystemAccess
       ? saveViaFsApi(contents, options)
       : saveViaDownload(contents, options);
+  },
+  canReadRelated(base) {
+    return isDirectoryHandle(base?.token);
+  },
+  async readRelated(base, relativePath) {
+    if (!isDirectoryHandle(base.token)) return null;
+    return readRelatedFromDirectory(base.token, relativePath);
+  },
+  async listFiles(base) {
+    const dir = base.token;
+    if (!isDirectoryHandle(dir) || !dir.entries) return [];
+    const names: string[] = [];
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === "file") names.push(name);
+    }
+    return names;
+  },
+  canGrantDirectory(): boolean {
+    return typeof fsWindow.showDirectoryPicker === "function";
+  },
+
+  async openDirectory(): Promise<DirectoryRef | null> {
+    if (typeof fsWindow.showDirectoryPicker !== "function") return null;
+    try {
+      const handle = await fsWindow.showDirectoryPicker();
+      return { name: handle.name, token: handle };
+    } catch {
+      // AbortError when the user dismisses the picker.
+      return null;
+    }
   },
 };

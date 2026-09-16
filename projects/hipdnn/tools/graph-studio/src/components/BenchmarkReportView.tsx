@@ -8,6 +8,7 @@ import {
   validationState,
 } from "../benchmark/metrics";
 import type { BenchmarkReport, EngineResult, GraphResults } from "../benchmark/types";
+import type { ReadBase } from "../platform/types";
 import { EngineDetail } from "./EngineDetail";
 
 /**
@@ -30,12 +31,18 @@ interface BenchmarkReportViewProps {
   sourceLabel: string;
   /** Opens the tensor inspector for one row. Omitted hides the row action. */
   onOpenTensors?: (graph: GraphResults, row: EngineResult) => void;
+  /** Where a row's report-declared relative paths (e.g. a trace) resolve from. */
+  base: ReadBase | null;
+  /** Prompts for a folder grant, used once resolution fails without one. */
+  onGrantDirectory: () => Promise<void>;
 }
 
 export function BenchmarkReportView({
   report,
   sourceLabel,
   onOpenTensors,
+  base,
+  onGrantDirectory,
 }: BenchmarkReportViewProps) {
   const { metadata, graphs } = report;
   const [graphName, setGraphName] = useState(graphs[0]?.graph_name ?? "");
@@ -61,7 +68,14 @@ export function BenchmarkReportView({
 
   if (detail) {
     return (
-      <EngineDetail report={report} graph={detail.graph} row={detail.row} onClose={() => setDetail(null)} />
+      <EngineDetail
+        report={report}
+        graph={detail.graph}
+        row={detail.row}
+        onClose={() => setDetail(null)}
+        base={base}
+        onGrantDirectory={onGrantDirectory}
+      />
     );
   }
 
@@ -302,7 +316,7 @@ export function BenchmarkReportView({
                             className="report__rowaction"
                             onClick={() => graph && onOpenTensors(graph, r)}
                           >
-                            Inspect
+                            Tensors
                           </button>
                         ) : (
                           <span className="report__engine-ver">not captured</span>
@@ -315,7 +329,7 @@ export function BenchmarkReportView({
                         className="report__rowaction"
                         onClick={() => graph && setDetail({ graph, row: r })}
                       >
-                        Inspect
+                        Details
                       </button>
                     </td>
                   </tr>

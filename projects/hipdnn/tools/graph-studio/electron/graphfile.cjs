@@ -57,11 +57,6 @@ function tensorsDirFor(graphPath) {
   return runArtifactBase(graphPath) + TENSORS_SUFFIX;
 }
 
-/** Root every path the renderer may ask the main process to read must sit under. */
-function artifactRoot() {
-  return path.join(app.getPath("temp"), ROOT_DIR_NAME);
-}
-
 /**
  * Drop the per-launch directories of a scope that nothing can still be reading.
  * Best effort: a directory in use by another instance, or already gone, is
@@ -97,6 +92,5 @@ module.exports = {
   writeGraphFile,
   resultsFileFor,
   tensorsDirFor,
-  artifactRoot,
   sweepLaunchDirs,
 };

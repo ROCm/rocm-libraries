@@ -2,7 +2,7 @@
 
 Run from the dnn-benchmarking checkout so its package is importable:
 
-    .venv/bin/python <this file> ../graph-studio/tests/fixtures/tensors
+    .venv/bin/python <this file> ../graph-studio/tests/fixtures/run/tensors
 
 The set covers every supported encoding and includes one strided tensor, so the
 reader is exercised against real element-space bytes instead of a hand-written

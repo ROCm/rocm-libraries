@@ -1,9 +1,10 @@
 import type {
+  DirectoryRef,
   FileHandleRef,
   OpenResult,
   PlatformBridge,
+  ReadBase,
   SaveOptions,
-  TensorArtifact,
 } from "./types";
 
 /**
@@ -14,6 +15,13 @@ import type {
  * additive rather than a rewrite.
  */
 
+// The main process needs to know which directory a relative path resolves
+// against: the report file's own directory, or a folder granted outright.
+// `ReadBase`'s two variants are structurally identical (`{ name, token }`), so
+// that discriminator has to be attached here, in the renderer, rather than
+// guessed from the token's shape in main.
+type IpcReadBase = { kind: "file" | "directory"; path: string };
+
 // Shape the preload must expose over contextBridge. Mirrors PlatformBridge but
 // with plain serializable payloads suitable for IPC.
 export interface ElectronApi {
@@ -22,13 +30,9 @@ export interface ElectronApi {
     contents: string,
     options?: { suggestedName?: string; path?: string },
   ): Promise<{ path: string; name: string } | null>;
-  readTensorArtifact(
-    manifestPath: string,
-    reportPath: string,
-  ): Promise<
-    | { ok: true; manifest: string; files: Record<string, Uint8Array> }
-    | { ok: false; error: string }
-  >;
+  readRelated(base: IpcReadBase, relativePath: string): Promise<Uint8Array>;
+  openDirectory(): Promise<{ path: string; name: string } | null>;
+  listFiles(dirPath: string): Promise<string[]>;
   store: {
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
@@ -38,6 +42,23 @@ export interface ElectronApi {
 
 interface ElectronWindow {
   hipdnn?: ElectronApi;
+}
+
+// `openTextFile`'s handle carries a bare file path string as its token (see
+// `saveTextFile` below, which already relies on that). `openDirectory` below
+// wraps its path in an object so the two remain distinguishable at runtime.
+function toIpcBase(base: ReadBase | null | undefined): IpcReadBase | null {
+  if (!base) return null;
+  if (typeof base.token === "string") return { kind: "file", path: base.token };
+  if (
+    base.token !== null &&
+    typeof base.token === "object" &&
+    "path" in base.token &&
+    typeof base.token.path === "string"
+  ) {
+    return { kind: "directory", path: base.token.path };
+  }
+  return null;
 }
 
 export function detectElectronPlatform(): PlatformBridge | null {
@@ -67,10 +88,25 @@ export function detectElectronPlatform(): PlatformBridge | null {
       if (!result) return null;
       return { name: result.name, token: result.path };
     },
-    async readTensorArtifact(manifestPath: string, reportPath: string): Promise<TensorArtifact> {
-      const result = await api.readTensorArtifact(manifestPath, reportPath);
-      if (!result.ok) throw new Error(result.error);
-      return { manifest: result.manifest, files: result.files };
+    canReadRelated(base) {
+      return toIpcBase(base) !== null;
+    },
+    async readRelated(base: ReadBase, relativePath: string): Promise<Uint8Array | null> {
+      const ipcBase = toIpcBase(base);
+      if (!ipcBase) return null;
+      return api.readRelated(ipcBase, relativePath);
+    },
+    canGrantDirectory: () => true,
+
+    async openDirectory(): Promise<DirectoryRef | null> {
+      const result = await api.openDirectory();
+      if (!result) return null;
+      return { name: result.name, token: { path: result.path } };
+    },
+
+    async listFiles(base: DirectoryRef): Promise<readonly string[]> {
+      const ipcBase = toIpcBase(base);
+      return ipcBase ? api.listFiles(ipcBase.path) : [];
     },
   };
 }

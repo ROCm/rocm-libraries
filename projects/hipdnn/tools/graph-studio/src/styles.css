@@ -606,14 +606,31 @@ body,
   color: var(--text-dim);
   font-size: 11px;
 }
+/* Every button inside a report wears this: the verify bar, both back buttons, the
+   folder grants, the trace pickers, and the per-row actions. One rule, so a button
+   added to any of those surfaces cannot come out looking like a different app. */
+.verify__bar button,
+.report__button,
+.grant-button,
+.perfetto-frame__drop button,
+.perfetto-frame__viewer > button,
 .report__rowaction {
   background: var(--bg-elev);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+/* Row actions sit inside table cells, so they take the tighter of the two sizes. */
+.report__rowaction {
   padding: 3px 10px;
   font-size: 11px;
-  cursor: pointer;
+}
+.report__button {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 /* ── Engine detail drill-down ────────────────────────── */
@@ -878,6 +895,10 @@ body,
 .perfetto-frame__drop button {
   margin-right: 6px;
 }
+/* One-time folder grant offered when a report-declared path cannot autoload. */
+.grant-button {
+  align-self: flex-start;
+}
 .perfetto-frame__error {
   color: #fca5a5;
 }
@@ -909,16 +930,8 @@ body,
   gap: 10px;
   padding: 8px 18px 0;
 }
-.verify__bar button {
-  background: var(--bg-elev);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.verify__bar button[data-primary="true"] {
+.verify__bar button[data-primary="true"],
+.grant-button {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -948,65 +961,7 @@ body,
 }
 
 /* ── Tensor artifacts ────────────────────────────────── */
-.tensors__back {
-  margin-left: auto;
-  flex: 0 0 auto;
-  background: var(--bg-elev);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.tensors__captures {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.tensors__capture {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.tensors__capture-ident {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.tensors__capture-path {
-  color: var(--text-dim);
-  font-family: ui-monospace, "Cascadia Mono", monospace;
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-.tensors__capture-actions {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 6px;
-}
-.tensors__capture-actions button {
-  background: var(--bg-elev);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.tensors__capture-actions button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
+
 .tensors__slots {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));

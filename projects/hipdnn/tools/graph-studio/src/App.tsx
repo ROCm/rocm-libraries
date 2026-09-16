@@ -39,7 +39,7 @@ import {
 import { emptyGraph } from "./graph/model";
 import { parseGraph, serializeGraph } from "./graph/serialize";
 import type { ParamValue } from "./graph/model";
-import type { FileHandleRef } from "./platform";
+import type { DirectoryRef, FileHandleRef, ReadBase } from "./platform/types";
 import { platform } from "./platform";
 import { fromNativeExecution, type NativeExecutionSnapshot } from "./benchmark/native";
 import { parseReport } from "./benchmark/report";
@@ -76,11 +76,15 @@ function Studio() {
   // native Execute or the Verify tab's benchmark run. Both read in Verify.
   const [currentReport, setCurrentReport] = useState<ShownReport | null>(null);
   const [currentError, setCurrentError] = useState<string | null>(null);
+  // A folder granted this session. It outlives whichever report is on screen,
+  // and both the Verify and Tensors tabs resolve artifacts against it.
+  const [granted, setGranted] = useState<DirectoryRef | null>(null);
   const nextNativeId = useRef(0);
   const onExecutionResult = useCallback((snapshot: NativeExecutionSnapshot) => {
     setCurrentReport({
       report: fromNativeExecution(snapshot, `native-${++nextNativeId.current}`),
       label: "execution",
+      handle: null,
     });
     setCurrentError(null);
   }, []);
@@ -88,8 +92,6 @@ function Studio() {
     setCurrentReport(null);
     setCurrentError(null);
   }, []);
-  // An execution is read in the Verify tab, beside opened reports.
-  const onShowResults = useCallback(() => setActiveTab("verify"), []);
 
   const onVerifyResults = useCallback((json: string | null, reportPath: string) => {
     if (json === null) {
@@ -98,7 +100,13 @@ function Studio() {
       return;
     }
     try {
-      setCurrentReport({ report: parseReport(json), label: "benchmark run", source: reportPath });
+      setCurrentReport({
+        report: parseReport(json),
+        label: "benchmark run",
+        // The report is a real file on this machine, so it is its own base:
+        // every artifact path it carries is anchored to its directory.
+        handle: { name: reportPath.split(/[\\/]/).pop() ?? "results.json", token: reportPath },
+      });
       setCurrentError(null);
     } catch (failure) {
       setCurrentReport(null);
@@ -106,11 +114,17 @@ function Studio() {
     }
   }, []);
 
+  const requestDirectory = useCallback(async () => {
+    const dir = await platform.openDirectory();
+    if (dir) setGranted(dir);
+  }, []);
+
   // The Tensors tab inspects whatever the freshest report captured.
   const runTensorHints = useMemo(
     () => (currentReport ? reportTensorHints(currentReport.report) : undefined),
     [currentReport],
   );
+  const runBase: ReadBase | null = granted ?? currentReport?.handle ?? null;
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -398,7 +412,6 @@ function Studio() {
           resetKey={engineResetKey}
           onExecutionResult={onExecutionResult}
           onResultsReset={onResultsReset}
-          onShowResults={onShowResults}
         />
       </TabPanel>
       <TabPanel id="implement" active={activeTab}>
@@ -417,11 +430,17 @@ function Studio() {
             current={currentReport}
             currentError={currentError}
             onDismissCurrent={onResultsReset}
+            granted={granted}
+            onGranted={setGranted}
           />
         </CommandPanel>
       </TabPanel>
       <TabPanel id="tensors" active={activeTab}>
-        <TensorView hints={runTensorHints} reportPath={currentReport?.source} />
+        <TensorView
+          hints={runTensorHints}
+          base={runBase}
+          onGrantDirectory={requestDirectory}
+        />
       </TabPanel>
     </div>
   );

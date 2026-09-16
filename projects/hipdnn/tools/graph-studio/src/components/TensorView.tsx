@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   coordinates,
   compareTensors,
   histogram,
   loadTensorSet,
+  parseManifest,
   MANIFEST_FILENAME,
   TensorArtifactError,
   type Comparison,
@@ -13,78 +14,165 @@ import {
 } from "../benchmark/tensors";
 import type { BenchmarkReport } from "../benchmark/types";
 import { platform } from "../platform";
+import type { ReadBase } from "../platform/types";
+import { resolveRelated } from "./PerfettoFrame";
 
 /**
  * Tensor artifact inspector: value distribution for one captured tensor, and an
  * element-wise comparison against a second capture (typically an engine's
  * output against the reference provider's).
  *
- * Captures this host wrote are read back by manifest path and loaded directly.
- * Anything else — a report carried over from the machine that ran it, or a plain
- * browser with no filesystem — is picked as files instead: `manifest.json` plus
- * its `.bin` siblings, selected together.
+ * When opened from a report row whose manifest paths the host can resolve
+ * (the report's own directory, or a folder the user granted), both slots load
+ * themselves. Otherwise — or for a standalone capture the report never named —
+ * the manual picker below is the way in: select the whole artifact directory
+ * contents, `manifest.json` plus its `.bin` files, in one go.
  */
 
 const BUCKET_CHOICES = [16, 32, 64, 128] as const;
 
-/** One capture a report recorded, and what it holds. */
+/** Where a capture came from, shown so the right directory is easy to find. */
 export interface TensorHint {
   readonly label: string;
-  /** Path of the capture's `manifest.json`, as the producing host recorded it. */
   readonly path: string;
-  readonly role: "input" | "output" | "reference";
 }
 
-/** Every capture a report recorded: graph inputs, then each row's outputs. */
+/**
+ * Every capture a whole report recorded, for the standalone Tensors tab. The
+ * order is what autoloads: an engine output first, then the reference to
+ * compare it against, then the inputs both ran on.
+ */
 export function reportTensorHints(report: BenchmarkReport): TensorHint[] {
-  const hints: TensorHint[] = [];
+  const outputs: TensorHint[] = [];
+  const references: TensorHint[] = [];
+  const inputs: TensorHint[] = [];
   for (const graph of report.graphs) {
-    if (graph.input_tensor_manifest) {
-      hints.push({
-        label: `${graph.graph_name} inputs`,
-        path: graph.input_tensor_manifest,
-        role: "input",
-      });
-    }
     for (const row of graph.results) {
       if (!row.tensor_manifest) continue;
-      hints.push({
-        label: `${row.provider} ${row.role === "reference" ? "reference" : "output"}`,
+      const reference = row.role === "reference";
+      (reference ? references : outputs).push({
+        label: `${row.provider} ${reference ? "reference" : "output"}`,
         path: row.tensor_manifest,
-        role: row.role === "reference" ? "reference" : "output",
       });
     }
+    if (graph.input_tensor_manifest) {
+      inputs.push({ label: `${graph.graph_name} inputs`, path: graph.input_tensor_manifest });
+    }
   }
-  return hints;
+  return [...outputs, ...references, ...inputs];
 }
 
 interface TensorViewProps {
-  /** Captures the loaded report recorded, if there is one. */
+  /** Manifest paths recorded by the report, if a report is loaded. */
   hints?: readonly TensorHint[];
-  /**
-   * Where the report itself lives. Hint paths are anchored to it, so loading a
-   * capture from the host needs it; without it only file picking works.
-   */
-  reportPath?: string;
   /** Returns to the report view. Omitted when the view stands alone. */
   onBack?: () => void;
+  /** Where a hint's manifest path resolves from. Null outside a report. */
+  base?: ReadBase | null;
+  /** Prompts for a folder grant when a hint's manifest cannot autoload. */
+  onGrantDirectory?: () => Promise<void>;
 }
 
 interface Slot {
   readonly set: TensorSet | null;
   readonly error: string | null;
   readonly busy: boolean;
+  /** True when a folder grant would let this slot resolve its hint itself. */
+  readonly grant: boolean;
+  readonly source: "auto" | "manual" | null;
 }
 
-const EMPTY_SLOT: Slot = { set: null, error: null, busy: false };
+const EMPTY_SLOT: Slot = { set: null, error: null, busy: false, grant: false, source: null };
 
-export function TensorView({ hints, reportPath, onBack }: TensorViewProps) {
+/**
+ * Loads one hint's manifest and its `.bin` files through `readRelated`,
+ * resolving the `.bin` files against the manifest's own directory rather
+ * than the base directly, since a manifest can live in a subdirectory of it.
+ */
+async function autoloadHint(
+  hint: TensorHint,
+  base: ReadBase | null | undefined,
+  setSlot: (slot: Slot) => void,
+): Promise<void> {
+  setSlot({ set: null, error: null, busy: true, grant: false, source: null });
+  const manifestPlan = await resolveRelated(platform, base, hint.path);
+  if (manifestPlan.kind === "grant") {
+    setSlot({ set: null, error: null, busy: false, grant: true, source: null });
+    return;
+  }
+  if (manifestPlan.kind === "manual") {
+    setSlot({
+      set: null,
+      error: `Automatic load failed: ${manifestPlan.reason}`,
+      busy: false,
+      grant: false,
+      source: null,
+    });
+    return;
+  }
+  try {
+    const manifestText = new TextDecoder().decode(manifestPlan.bytes);
+    const manifest = parseManifest(manifestText, hint.path);
+    const slash = hint.path.lastIndexOf("/");
+    const dir = slash === -1 ? "" : hint.path.slice(0, slash);
+    const files = new Map<string, Uint8Array>();
+    for (const entry of manifest.tensors) {
+      const relPath = dir ? `${dir}/${entry.file}` : entry.file;
+      const filePlan = await resolveRelated(platform, base, relPath);
+      if (filePlan.kind !== "autoload") {
+        const reason = filePlan.kind === "manual" ? filePlan.reason : "the host stopped allowing path reads";
+        throw new Error(reason);
+      }
+      files.set(entry.file, filePlan.bytes);
+    }
+    const set = await loadTensorSet(manifestText, files, hint.label);
+    setSlot({ set, error: null, busy: false, grant: false, source: "auto" });
+  } catch (error) {
+    setSlot({
+      set: null,
+      error: `Automatic load failed: ${(error as Error).message}`,
+      busy: false,
+      grant: false,
+      source: null,
+    });
+  }
+}
+
+export function TensorView({ hints, onBack, base = null, onGrantDirectory = async () => {} }: TensorViewProps) {
   const [primary, setPrimary] = useState<Slot>(EMPTY_SLOT);
   const [secondary, setSecondary] = useState<Slot>(EMPTY_SLOT);
   const [selectedUid, setSelectedUid] = useState("");
   const [buckets, setBuckets] = useState<number>(32);
   const [rtol, setRtol] = useState("1e-5");
   const [atol, setAtol] = useState("1e-8");
+
+  // Autoloads a hint's slot unless the user has already picked a file for it
+  // by hand — a manual pick is an explicit override that a later base change
+  // (e.g. a folder grant arriving) must not clobber.
+  useEffect(() => {
+    let cancelled = false;
+    const maybeAutoload = (
+      hint: TensorHint | undefined,
+      current: Slot,
+      setSlot: (slot: Slot) => void,
+      onLoaded?: (set: TensorSet) => void,
+    ) => {
+      if (!hint || current.source === "manual") return;
+      void autoloadHint(hint, base, (slot) => {
+        if (cancelled) return;
+        setSlot(slot);
+        if (slot.set) onLoaded?.(slot.set);
+      });
+    };
+    maybeAutoload(hints?.[0], primary, setPrimary, (set) =>
+      setSelectedUid(set.tensors[0]?.entry.uid ?? ""),
+    );
+    maybeAutoload(hints?.[1], secondary, setSecondary);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- primary/secondary read for their .source only, at the moment this effect starts
+  }, [hints, base]);
 
   const tensors = primary.set?.tensors ?? [];
   const selected = tensors.find((t) => t.entry.uid === selectedUid) ?? tensors[0] ?? null;
@@ -113,7 +201,7 @@ export function TensorView({ hints, reportPath, onBack }: TensorViewProps) {
 
   const load = async (files: FileList | null, into: (slot: Slot) => void) => {
     if (!files || files.length === 0) return;
-    into({ set: null, error: null, busy: true });
+    into({ set: null, error: null, busy: true, grant: false, source: null });
     try {
       const bytes = new Map<string, Uint8Array>();
       let manifestText: string | null = null;
@@ -128,42 +216,12 @@ export function TensorView({ hints, reportPath, onBack }: TensorViewProps) {
       }
       const label = files[0].webkitRelativePath?.split("/")[0] || MANIFEST_FILENAME;
       const set = await loadTensorSet(manifestText, bytes, label);
-      into({ set, error: null, busy: false });
+      into({ set, error: null, busy: false, grant: false, source: "manual" });
       setSelectedUid(set.tensors[0]?.entry.uid ?? "");
     } catch (error) {
-      into({ set: null, error: (error as Error).message, busy: false });
+      into({ set: null, error: (error as Error).message, busy: false, grant: false, source: null });
     }
   };
-
-  const loadFromHost = useCallback(
-    async (hint: TensorHint, into: (slot: Slot) => void) => {
-      const read = platform.readTensorArtifact;
-      if (!read || !reportPath) return;
-      into({ set: null, error: null, busy: true });
-      try {
-        const artifact = await read(hint.path, reportPath);
-        const bytes = new Map(Object.entries(artifact.files));
-        const set = await loadTensorSet(artifact.manifest, bytes, hint.label);
-        into({ set, error: null, busy: false });
-        setSelectedUid((uid) => uid || (set.tensors[0]?.entry.uid ?? ""));
-      } catch (error) {
-        into({ set: null, error: (error as Error).message, busy: false });
-      }
-    },
-    [reportPath],
-  );
-
-  const loadable = platform.readTensorArtifact != null && reportPath != null;
-
-  // A run's captures are on this machine, so load the pair worth comparing
-  // without making the user hunt for the directory.
-  useEffect(() => {
-    if (!loadable || !hints || hints.length === 0) return;
-    const output = hints.find((h) => h.role === "output") ?? hints[0];
-    const reference = hints.find((h) => h.role === "reference");
-    void loadFromHost(output, setPrimary);
-    if (reference && reference !== output) void loadFromHost(reference, setSecondary);
-  }, [hints, loadable, loadFromHost]);
 
   return (
     <div className="report tensors">
@@ -174,42 +232,39 @@ export function TensorView({ hints, reportPath, onBack }: TensorViewProps) {
           <div className="report__sub">
             {primary.set
               ? describeSet(primary.set)
-              : loadable
-                ? "Pick a capture below, or select a manifest.json and its .bin files."
-                : "Select a manifest.json and its .bin files from one artifact directory."}
+              : "Select a manifest.json and its .bin files from one artifact directory."}
           </div>
         </div>
         {onBack && (
-          <button type="button" className="tensors__back" onClick={onBack}>
+          <button type="button" className="report__button" onClick={onBack}>
             Back to report
           </button>
         )}
       </header>
 
       {hints && hints.length > 0 && (
-        <details className="report__env" open={loadable}>
-          <summary>{loadable ? "Captures from the run" : "Manifest paths from the report"}</summary>
-          <ul className="tensors__captures">
+        <details className="report__env">
+          <summary>Manifest paths from the report</summary>
+          <dl className="report__env-grid">
             {hints.map((hint) => (
-              <li className="tensors__capture" key={`${hint.label}:${hint.path}`}>
-                <div className="tensors__capture-ident">
-                  <strong>{hint.label}</strong>
-                  <span className="tensors__capture-path">{hint.path}</span>
-                </div>
-                {loadable && (
-                  <div className="tensors__capture-actions">
-                    <button type="button" onClick={() => void loadFromHost(hint, setPrimary)}>
-                      Load as capture
-                    </button>
-                    <button type="button" onClick={() => void loadFromHost(hint, setSecondary)}>
-                      Load as comparison
-                    </button>
-                  </div>
-                )}
-              </li>
+              <div key={`${hint.label}:${hint.path}`} style={{ display: "contents" }}>
+                <dt>{hint.label}</dt>
+                <dd>{hint.path}</dd>
+              </div>
             ))}
-          </ul>
+          </dl>
         </details>
+      )}
+
+      {(primary.grant || secondary.grant) && (
+        <button
+          type="button"
+          className="grant-button"
+          title="Pick the folder that holds results.json, so its artifacts resolve."
+          onClick={() => void onGrantDirectory()}
+        >
+          Use results folder…
+        </button>
       )}
 
       <div className="tensors__slots">
@@ -471,10 +526,16 @@ function SlotPicker({ title, hint, slot, onFiles }: SlotPickerProps) {
     >
       <div className="tensors__slot-head">
         <strong>{title}</strong>
-        <span className="tensors__slot-cta">Choose files…</span>
+        <span className="tensors__slot-cta">
+          {slot.set ? "Use a different capture…" : "Choose files…"}
+        </span>
       </div>
       <p className="tensors__slot-hint">
-        {slot.busy ? "Reading…" : `${hint} Click anywhere here, or drop in manifest.json and its .bin files.`}
+        {slot.busy
+          ? "Reading…"
+          : slot.set
+            ? "Loaded from the results folder. Pick files only to override it."
+            : `${hint} Click anywhere here, or drop in manifest.json and its .bin files.`}
       </p>
       {slot.set && <p className="tensors__slot-state">{describeSet(slot.set)}</p>}
       {slot.error && (

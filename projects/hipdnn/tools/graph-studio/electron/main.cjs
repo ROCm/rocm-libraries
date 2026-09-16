@@ -11,6 +11,7 @@ const path = require("node:path");
 const studioPaths = require("./paths.cjs");
 const flowBridge = require("./flow.cjs");
 const graphfile = require("./graphfile.cjs");
+const relativeRead = require("./relative-read.cjs");
 
 // Dev mode = a Vite dev server URL was provided (set by the electron:dev
 // script). electron:start builds first and loads the bundled files instead.
@@ -100,6 +101,25 @@ ipcMain.handle("platform:saveTextFile", async (_event, contents, options) => {
   }
   await fs.writeFile(filePath, contents, "utf8");
   return { path: filePath, name: path.basename(filePath) };
+});
+
+// Artifacts a report points at: traces and tensor manifests, read relative to
+// the report itself or to a folder the user granted. `relative-read.cjs` owns
+// containment; the renderer only says which kind of base it has.
+ipcMain.handle("platform:readRelated", async (_event, base, relativePath) =>
+  relativeRead.readRelated(base, relativePath),
+);
+
+ipcMain.handle("platform:openDirectory", async () => {
+  const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const dirPath = result.filePaths[0];
+  return { path: dirPath, name: path.basename(dirPath) };
+});
+
+ipcMain.handle("platform:listFiles", async (_event, dirPath) => {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
 });
 
 // ── Key/value store, persisted as JSON in userData ─────────────────────
@@ -317,60 +337,6 @@ function killCommand(child) {
 ipcMain.handle("command:cancel", async (_event, id) => {
   const child = runningCommands.get(id);
   if (child) killCommand(child);
-});
-
-// ── Tensor artifacts ───────────────────────────────────────────────────
-// The renderer has no filesystem, so captures a run wrote are read here and
-// handed over as bytes.
-//
-// A report anchors its artifact paths to its own directory and leaves anything
-// outside that directory absolute, so a relative path resolves under the report
-// and an escaping one is refused. On top of that contract, only paths under the
-// studio's own temp root are served: a report opened from another machine must
-// not turn into an arbitrary file read.
-
-const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
-
-function within(root, target) {
-  const relative = path.relative(path.resolve(root), target);
-  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
-}
-
-ipcMain.handle("tensors:read", async (_event, manifestPath, reportPath) => {
-  if (typeof manifestPath !== "string" || manifestPath === "") {
-    return { ok: false, error: "No manifest path was given." };
-  }
-  if (typeof reportPath !== "string" || reportPath === "") {
-    return { ok: false, error: "The report this capture belongs to has no path." };
-  }
-  const reportDir = path.dirname(path.resolve(reportPath));
-  const resolved = path.resolve(reportDir, manifestPath);
-  if (!within(reportDir, resolved)) {
-    return { ok: false, error: "That capture sits outside its own report's directory." };
-  }
-  if (!within(graphfile.artifactRoot(), resolved)) {
-    return { ok: false, error: "That capture was not written by this session." };
-  }
-
-  try {
-    const dir = path.dirname(resolved);
-    const manifest = await fs.readFile(resolved, "utf8");
-    const files = {};
-    let total = Buffer.byteLength(manifest);
-    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith(".bin")) continue;
-      const bytes = await fs.readFile(path.join(dir, entry.name));
-      total += bytes.byteLength;
-      if (total > MAX_ARTIFACT_BYTES) {
-        return { ok: false, error: "That capture is too large to inspect." };
-      }
-      files[entry.name] = bytes;
-    }
-    return { ok: true, manifest, files };
-  } catch (err) {
-    if (err?.code === "ENOENT") return { ok: false, error: "That capture is no longer on disk." };
-    return { ok: false, error: errorText(err) };
-  }
 });
 
 // ── Agent flows (flow bridge) ──────────────────────────────────────────
