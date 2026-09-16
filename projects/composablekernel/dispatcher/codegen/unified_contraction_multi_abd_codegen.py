@@ -40,7 +40,11 @@ _CODEGEN_DIR = Path(__file__).parent
 if str(_CODEGEN_DIR) not in sys.path:
     sys.path.insert(0, str(_CODEGEN_DIR))
 
-from codegen_common import TileConfig, parallel_generate  # noqa: E402
+from codegen_common import (  # noqa: E402
+    TileConfig,
+    arch_config_supported,
+    parallel_generate,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -687,6 +691,10 @@ def build_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
         {"num_dim_g": 1, "num_dim_m": 2, "num_dim_n": 2, "num_dim_k": 1}
     ])
 
+    # Target arch for the central arch-validity gate. None/absent => no arch
+    # gating, so callers that never passed one keep their current behaviour.
+    arch = config.get("arch") or None
+
     a_elementwise  = config.get("a_elementwise",  "PassThrough")
     b_elementwise  = config.get("b_elementwise",  "PassThrough")
     cde_elementwise = config.get("cde_elementwise", "MultiDAdd")
@@ -710,6 +718,22 @@ def build_specs(config: dict) -> List[ContractionMultiABDKernelSpec]:
             warp_tile_k=tile_cfg["warp_tile_k"],
         )
         if not tc.is_valid():
+            continue
+
+        # Central arch gate (codegen_common.arch_config_supported) -- the single
+        # place that knows which warp maps / warp tiles / pipelines exist on the
+        # target. This expansion previously had no arch input at all, so it could
+        # emit e.g. a wave64 MFMA warp tile on a wave32 WMMA arch.
+        if not arch_config_supported(
+            arch,
+            dtype=dtype,
+            warp_m=tc.warp_m, warp_n=tc.warp_n, warp_k=tc.warp_k,
+            warp_tile_m=tc.warp_tile_m,
+            warp_tile_n=tc.warp_tile_n,
+            warp_tile_k=tc.warp_tile_k,
+            pipeline=pipeline,
+            scheduler=scheduler,
+        ):
             continue
 
         specs.append(ContractionMultiABDKernelSpec(

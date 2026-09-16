@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from codegen_common import (
+    arch_config_supported,
     ROWCOL_TENSOR_QUANT_BASE_PIPELINE_MAP,
     ROWCOL_TENSOR_QUANT_DEFAULT_TILE,
     ROWCOL_TENSOR_QUANT_DEFAULT_TRAITS,
@@ -452,6 +453,8 @@ def _build_specs(config: dict) -> List[TensorQuantKernelSpec]:
     persistent = config.get("persistent", defaults["persistent"])
     block_size     = config.get("block_size", defaults["block_size"])
     k_block_per_cu = config.get("k_block_per_cu", defaults["k_block_per_cu"])
+    # Target arch for the arch-validity gate below. None/absent => gate disabled.
+    arch           = config.get("arch") or None
 
     # Reject unsupported pipeline/epilogue/scheduler up front rather than emitting a
     # header whose name advertises something the generated code does not implement.
@@ -505,7 +508,26 @@ def _build_specs(config: dict) -> List[TensorQuantKernelSpec]:
             warp_tile_k=tile_dict["warp_tile_k"],
         )
         if not tile.is_valid():
-            log.debug("Invalid tile config %s — skipping", tile)
+            log.debug("Invalid tile config %s -- skipping", tile)
+            continue
+
+        # Central arch-validity gate. Divisibility above is arch-independent; this
+        # is the only place that knows whether the warp map / warp tile / pipeline
+        # actually exist on the target. Without it the sweep emits, for example,
+        # a 32x32x32 (wave64 MFMA) warp tile on a wave32 WMMA arch: it compiles
+        # cleanly and then returns garbage. ``arch`` absent => no arch gating, so
+        # existing callers that never supplied one are unaffected.
+        if not arch_config_supported(
+            arch,
+            dtype=dtype,
+            warp_m=tile.warp_m, warp_n=tile.warp_n, warp_k=tile.warp_k,
+            warp_tile_m=tile.warp_tile_m,
+            warp_tile_n=tile.warp_tile_n,
+            warp_tile_k=tile.warp_tile_k,
+            pipeline=pipeline,
+            scheduler=scheduler,
+        ):
+            log.debug("Config %s invalid for arch %s -- skipping", tile, arch)
             continue
 
         specs.append(TensorQuantKernelSpec(
@@ -594,6 +616,9 @@ def main() -> int:
                         help="Inline JSON config string")
     parser.add_argument("--no-parallel", action="store_true",
                         help="Disable parallel generation")
+    parser.add_argument("--arch", type=str, default=None,
+                        help="Target gfx arch (e.g. gfx942, gfx1250). When given, "
+                             "configurations invalid on that arch are not generated.")
     parser.add_argument("--list-names", action="store_true",
                         help="Print kernel names that would be generated and exit")
     args = parser.parse_args()
@@ -608,6 +633,10 @@ def main() -> int:
     elif args.config:
         with open(args.config) as f:
             cfg = json.load(f)
+
+    if args.arch:
+        cfg = dict(cfg or _default_config())
+        cfg["arch"] = args.arch
 
     if args.list_names:
         specs = _build_specs(cfg or _default_config())

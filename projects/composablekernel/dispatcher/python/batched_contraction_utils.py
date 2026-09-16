@@ -47,6 +47,7 @@ if _codegen_dir not in sys.path:
 from unified_batched_contraction_codegen import (  # noqa: E402
     make_batched_contraction_kernel_name,
 )
+from codegen_common import arch_config_supported  # noqa: E402
 
 _CODEGEN_SCRIPT = Path(__file__).parent.parent / "codegen" / "unified_batched_contraction_codegen.py"
 _CTYPES_LIB_SRC = (
@@ -652,8 +653,20 @@ def _range_values(spec: dict) -> List[int]:
     return out
 
 
-def expand_sweep(config: dict, dtype: str = "fp16", layout: str = "rcr") -> List[BatchedContractionKernelConfig]:
-    """Expand a tile_config x trait_config sweep into valid kernel configs (deduped)."""
+def expand_sweep(
+    config: dict,
+    dtype: str = "fp16",
+    layout: str = "rcr",
+    arch: Optional[str] = None,
+) -> List[BatchedContractionKernelConfig]:
+    """Expand a tile_config x trait_config sweep into valid kernel configs (deduped).
+
+    ``arch`` routes every candidate through the one central arch-validity filter,
+    :func:`codegen_common.arch_config_supported` -- the same gate the GEMM and
+    quant expansions use. This function previously applied none of it, so a sweep
+    could emit warp maps / warp tiles that do not exist on the target. ``None``
+    (the default) leaves the gate disabled, preserving existing callers.
+    """
     tc = config["tile_config"]
     trc = config.get("trait_config", {})
     axes = {k: _range_values(tc[k]) for k in
@@ -685,6 +698,17 @@ def expand_sweep(config: dict, dtype: str = "fp16", layout: str = "rcr") -> List
                 k_block_per_cu=config.get("k_block_per_cu", 1),
             )
             if not cfg.is_valid():
+                continue
+            if not arch_config_supported(
+                arch,
+                dtype=dtype,
+                warp_m=cfg.warp_m, warp_n=cfg.warp_n, warp_k=cfg.warp_k,
+                warp_tile_m=cfg.warp_tile_m,
+                warp_tile_n=cfg.warp_tile_n,
+                warp_tile_k=cfg.warp_tile_k,
+                pipeline=cfg.pipeline,
+                scheduler=cfg.scheduler,
+            ):
                 continue
             if cfg.name in seen:
                 continue
