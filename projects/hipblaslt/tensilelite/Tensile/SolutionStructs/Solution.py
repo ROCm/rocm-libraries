@@ -1306,7 +1306,13 @@ class Solution(collections.abc.Mapping):
         tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
-            state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
+            # AB_B16_TLU1 exists but nothing gives the free dim the element
+            # multiple its 16B chunk needs, the way the fp4 branch below does.
+            # Without a reject here these solutions clear validation and then
+            # assert in kernelBodySubtile instead of failing cleanly.
+            reject(state, printRejectionReason,
+                   f"UseSubtileImpl=1 TLU=1 is not implemented for dtype {dtype}")
+            return
           elif dtype.isFloat4():
             # Two fp4 share a byte, so an odd free-dim extent leaves the K
             # stride on a half byte and the elements-to-bytes shift truncates
