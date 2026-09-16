@@ -577,18 +577,22 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
             b.sync_lds_only()
             b.scf_yield()
         # n_reads LIVE wave reads, each to its OWN output slice, separated by barriers.
+        # (There is deliberately NO "store_only" mode to subtract: an LDS store with no consumer
+        # is dead code and the compiler deletes it -- measured, 0 LDS instructions. The slope
+        # below cancels the store term instead of trying to measure it separately.)
         # WHY: the read cost cannot be isolated by subtracting a "store only" probe -- an LDS store with
         # no consumer is dead code and the compiler deletes it (measured: 0 LDS instructions). Instead
         # vary the number of LIVE reads and take the SLOPE: (n=2) - (n=1) is exactly one wave read, and
         # the single coop store cancels identically. Distinct output slices stop DCE; the barriers stop
         # the identical loads being CSE'd into one. Verify the design held by checking SQ_INSTS_LDS
         # actually scales with n_reads -- if it does not, the reads were merged and the slope is invalid.
+        rd = _read_wave()
         # GUARDRAIL: the output window must EXACTLY hold the fragment the read produces. A window that is
-        # too small is a device-side buffer OVERRUN (the kernel writes past the allocation), and the
+        # too small is a device-side buffer OVERRUN (the kernel writes past the allocation) and the
         # compiler responds by bounds-guarding and scalarizing the store -- so the probe silently stops
         # measuring the descriptor's access and prices a branchy, mixed-width program instead. That is not
         # a bad data point, it is a different experiment, and a partial-window golden will still pass on
-        # the corner it does cover. Concretely this fires when tile_k != the read descriptor's K extent.
+        # the corner it does cover. Concretely this fires when tile_k != k_sub*16 for the read descriptor.
         need = descs.wave_read.register_count * wave_size
         have = tile_k * warp_free
         if need != have:
@@ -599,7 +603,6 @@ def build_probe(descs: ProbeDescs, mode: str, *, tile_free, tile_k, n_waves, war
                 f"{'OVERRUN -- the kernel would write past the buffer. ' if need > have else ''}"
                 f"Size the probe to the READ descriptor: tile_k must equal the descriptor's K extent "
                 f"(k_sub*16) and warp_free its free extent (m_sub*16).")
-        rd = _read_wave()
         out2 = make_tensor_desc((tile_k * n_reads, warp_free), (warp_free, 1), dt)
         store_fragment(b, out_ptr, make_window(out2, (zero, zero)),
                        make_fragment(descs.wave_read, dt, rd.value), tid)
@@ -684,7 +687,7 @@ def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_wave
             # so only the first coop_free columns correspond to LDS this probe actually wrote -- beyond
             # them is stale LDS and comparing it would false-flag. LDS holds (K, free) and the final
             # store writes the read back in that same order, so the golden is the band TRANSPOSED.
-            # Established empirically on gfx90a before this check was added; without it a read probe's
+            # Verified bit-exact on gfx90a before this check was added; without it a read probe's
             # counters would be unverified, which the cardinal rule forbids.
             ov = out_h[:tile_k, :coop_free].astype(np.float32)
             diff = float(np.abs(ov - in_h.T.astype(np.float32)).max())
@@ -741,9 +744,13 @@ def parse_counter_csv(outdir):
 # 3-panel register->LDS dataflow renderer
 # ==================================================================================================
 def store_datum(store_desc, tile_free, arch, strides, dtype_name, *, origin, lds_swizzle):
-    """The single source of the per-slot store picture, shared by the simulator driver, the renderer,
-    and the orchestrator so they can never diverge. Returns (acc, vw, datum) where
-    `datum[(lane, phase)] = (K, free, dword, bank)` for each dword-phase the lane writes."""
+    """The single source of the per-slot access picture, shared by the simulator driver, the renderer,
+    and the orchestrators so they can never diverge. Returns (acc, vw, datum) where
+    `datum[(lane, phase)] = (K, free, dword, bank)` for each dword-phase the lane touches.
+
+    NOTE: despite the name this is DIRECTION-AGNOSTIC -- it is a pure address map, and a read's map is
+    built the same way (see `read_datum`). Only the SERIALIZATION rule differs between store and read,
+    and that rule lives in `simulate`/`served_phase`, not here."""
     a = arch_lds(arch)
     per_dword = 4 // dtype_bytes_of(dtype_name)
     acc, vw = addr_map(store_desc, strides, origin=origin, n_lanes=a.WAVE, dtype_name=dtype_name,
@@ -901,6 +908,247 @@ def render_conflict_3panel(out_path, *, store_desc, tile_free, wtag, fix_pad, fi
                                     nreg=vw // per_dword, nbanks=a.NB, fix_bank_fn=fix_bank,
                                     wtag=wtag, suptitle=suptitle, subject_bank=subject_bank,
                                     cpa=cpa, watermark=watermark)
+
+
+# ==================================================================================================
+# READ-side analysis
+# ==================================================================================================
+# WHY THIS IS NOT `analyze_store` WITH A DIFFERENT DESCRIPTOR
+# ----------------------------------------------------------
+# `PORT_BANKS` and `COMBINE` are WRITE-port constants and every `hists`/`pad_sweep` row is a
+# store-mirror measurement. Running `simulate()` over a read's address map would apply write constants
+# to a read and emit a confidently wrong conflicts/access -- the exact class of result this module
+# exists to prevent. The read port obeys its own rule, measured separately (below).
+#
+# Two tiers of answer, and the report always says which one you are holding:
+#   COST     -- the arch has a registered read model whose `selftest` passes AND the access is inside
+#               that model's validated envelope. `conflicts_per_access` is available.
+#   GEOMETRY -- otherwise. "Which lanes of a served group address DIFFERENT dwords in the SAME bank"
+#               is a property of the address map alone and is always sound; turning that N-way into a
+#               replay count is NOT, so `conflicts_per_access` RAISES rather than guessing.
+#
+# TO SUPPORT A NEW ARCH: measure its own read corpus (`run_probe(descs, mode="read", ...)` + the
+# n_reads slope), derive that port's rule, and `register_read_model` it -- which refuses unless
+# `selftest` passes. Never carry one target's read constants to another.
+# ==================================================================================================
+# THE READ-PORT RULE (gfx90a, VALIDATED -- structurally different from the write port)
+# --------------------------------------------------------------------------------------------------
+#     served_read(half_wave, phase) = max_bank_depth(half_wave, phase)    # NO port cap, NO combine
+#     IDX_read   = SUM over half_waves SUM over phases  served_read       # read phases SERIALIZE
+#     productive = ceil(distinct_dwords_in_instruction / NB)              # same as writes
+#     BC         = IDX - productive        =>  conflicts/access = max_depth - 1
+#
+# ZERO free constants: a general min(banks,P)*depth/min(banks,C) must satisfy min(b,P)==min(b,C) at
+# b = 4,8,16,32, so the terms cancel identically -- PORT_BANKS/COMBINE are NOT features of the read
+# path. The two ports differ in BOTH the per-group cost function AND the phase rule: writes cap at an
+# 8-bank stripe and PIPELINE their phases (MAX); reads serve all banks in parallel and SERIALIZE
+# theirs (SUM). At depth 2 the two rules are numerically identical, which is why a single histogram
+# point could not separate them -- the m_sub=16 (depth 8) row is what decided it.
+#
+# `max_depth` is MEASURED to be the sole cost determinant, not assumed: across gfx90a pads 0/2/4/6 the
+# banks_used sweeps 16 -> 20 -> 24 -> 28 and the depth distribution goes {2:16} -> {1:24, 2:4} (mean
+# depth 2.00 -> 1.14) while the measured cost stays CONSTANT. That refutes every rule reading
+# banks_used or the depth distribution -- accesses-per-bank, mean depth, and bandwidth terms alike.
+#
+# ENVELOPE (gated, not assumed): 2 dwords/lane (ds_read2_b32) and no broadcast. Outside it the model
+# is not validated and `analyze_read` falls back to geometry only. Group size: 8 and 16 are RULED OUT
+# by the ladder; 32 vs 64 are not separable by this descriptor family -- CDNA half-wave 32 retained.
+def simulate_read_hist(hists, footprint_dwords, arch):
+    """AUTHORITATIVE read predictor. `hists` = {(half_wave, phase): {bank: depth}} for ONE instruction;
+    `footprint_dwords` = distinct dwords THAT instruction reads. Returns {IDX, BC, productive}."""
+    a = arch_lds(arch)
+    served = sum(max(h.values()) for h in hists.values() if h)      # max per group, SUMMED
+    productive = -(-footprint_dwords // a.NB)
+    return {"IDX": served, "BC": served - productive, "productive": productive}
+
+
+_READ_MODELS: dict[str, object] = {}       # arch name -> validated read-port model
+
+
+def register_read_model(arch_name, model=True):
+    """Register a VALIDATED read-port model for `arch_name`, measured on that arch. REFUSES unless the
+    arch has a read corpus and `selftest` passes on it -- a registered read model with no corpus is
+    strictly worse than no read model, because it silently licenses numbers."""
+    _READ_MODELS[arch_name] = model
+    try:
+        if not selftest(arch_name, verbose=False):
+            raise ConflictModelError(
+                f"refusing to register a read model for {arch_name}: selftest FAILED.")
+    except Exception:
+        _READ_MODELS.pop(arch_name, None)
+        raise
+
+
+def read_datum(read_desc, tile_free, arch, strides, dtype_name, *, origin, lds_swizzle):
+    """The read's (acc, vw, datum) from the same bit-exact address map, built from the READ descriptor
+    at the READ's origin. `origin` is load-bearing and per-wave: each wave reads a different slice of
+    the LDS tile, so a wrong origin analyzes a different wave's access.
+
+    NOT a call to `store_datum`: that one assumes a lane touches a WHOLE number of dwords
+    (`vw // per_dword`), which is true of the wide cooperative store but FALSE of an MMA-operand read.
+    An f16 read with vw=1 touches HALF a dword, floors to zero phases, and silently yields an EMPTY
+    map. Here the dwords a lane touches are derived per access and de-duplicated, so sub-dword
+    (vw < per_dword) and multi-dword (vw > per_dword) reads are both handled. Two lanes landing on the
+    SAME dword is a broadcast, not a conflict -- which is why the caller counts DISTINCT dwords."""
+    a = arch_lds(arch)
+    per_dword = 4 // dtype_bytes_of(dtype_name)
+    acc, vw = addr_map(read_desc, strides, origin=origin, n_lanes=a.WAVE, dtype_name=dtype_name,
+                       lds_swizzle=lds_swizzle)
+    per_lane = defaultdict(list)
+    for ac in acc:
+        per_lane[ac["lane"]].append(ac)
+    datum = {}
+    for lane, runs in per_lane.items():
+        runs.sort(key=lambda r: r["reg0"])        # issue order == phase order
+        ph, seen = 0, set()
+        for r in runs:
+            for i in range(r["vw"]):
+                elem = r["base"] + i
+                d = elem // per_dword
+                if d in seen:
+                    continue    # one BANK TOUCH per distinct dword, deduped across the WHOLE lane --
+                                # not just within a run. The emit declares vw=1 (one element per
+                                # access), but the backend MERGES adjacent elements into ds_read2_b32;
+                                # counting per-element runs would report 2x the phases the hardware
+                                # issues and halve the per-instruction footprint. The ISA is the truth.
+                seen.add(d)
+                datum[(lane, ph)] = (elem // tile_free, elem % tile_free, d, d % a.NB)
+                ph += 1
+    return acc, vw, datum
+
+
+@dataclass
+class ReadCollisionReport:
+    """The read access's cost when the arch has a VALIDATED read model and the access is IN ENVELOPE;
+    otherwise its collision GEOMETRY only. `.verdict` always says which of the two you are holding."""
+
+    operand_label: str
+    arch: str
+    vw: int
+    wave_origin: tuple
+    located: dict                  # {half_wave, phase, bank, cells:[T{l}R{r}...], nway}
+    detail: dict                   # {(half_wave, phase): {bank: distinct-dword depth}} -- the MODEL'S
+                                   # OWN INPUTS, returned so a reviewer can recompute the number
+    n_piled_banks: int
+    max_nway: int                  # max_depth: the sole cost determinant for gfx90a reads
+    n_instr: int                   # read instructions this access issues
+    footprint_dwords: int
+    model_validated: bool          # a validated READ-port model exists AND selftest passes
+    in_envelope: bool              # 2 dwords/lane, no broadcast -- where the model was validated
+    out_of_envelope_reason: str | None
+    sim: dict | None               # {IDX, BC, productive, conflicts_per_access} per instruction
+
+    @property
+    def collides(self):
+        return self.max_nway > 1
+
+    @property
+    def conflicts_per_access(self):
+        """Only exists when a validated model priced it. Geometry-only reports RAISE rather than
+        return a plausible number -- see the verdict."""
+        if self.sim is None:
+            raise ConflictModelError(
+                f"no conflicts/access for this read: {self.verdict}. Use the geometry "
+                f"(max_nway/detail) or measure it with /bank-conflict --mode investigate.")
+        return self.sim["conflicts_per_access"]
+
+    @property
+    def verdict(self):
+        if self.sim is not None:
+            return (f"SIMULATED ({self.arch} read model, selftest PASS; in envelope) "
+                    f"conflicts/access = {self.sim['conflicts_per_access']:.4f} "
+                    f"(max_depth {self.max_nway} - 1)")
+        if not self.model_validated:
+            return (f"GEOMETRY ONLY: no validated read-port model for {self.arch}. "
+                    f"{self.max_nway}-way on {self.n_piled_banks} bank(s) is the ADDRESS MAP, not a "
+                    f"cost -- how many cycles it costs is UNKNOWN until measured.")
+        return (f"GEOMETRY ONLY: out of the {self.arch} read model's validated envelope "
+                f"({self.out_of_envelope_reason}). {self.max_nway}-way on {self.n_piled_banks} "
+                f"bank(s); cost UNKNOWN -- measure it rather than extrapolating the model.")
+
+    def facts_table(self):
+        if self.sim is None:
+            return (f"| {self.operand_label} read | {self.max_nway}-way x {self.n_piled_banks} bank(s) "
+                    f"| n/a (geometry only) | bank {self.located['bank']}, "
+                    f"phase {self.located['phase']} |")
+        return (f"| {self.operand_label} read | {self.max_nway}-way x {self.n_piled_banks} bank(s) "
+                f"| {self.sim['conflicts_per_access']:.4f} (SIMULATED) | bank "
+                f"{self.located['bank']}, phase {self.located['phase']} |")
+
+
+def analyze_read(descs: ProbeDescs, *, tile_free, arch, operand_label, strides, dtype_name, origin,
+                 lds_swizzle, dwords_per_lane) -> ReadCollisionReport:
+    """The MMA-operand LDS read -- the access `analyze_store` does not cover.
+
+    Returns a `ReadCollisionReport`. It prices the read (`conflicts/access = max_depth - 1`) when the
+    arch has a validated read model AND the access is inside that model's envelope; otherwise it
+    reports collision GEOMETRY and refuses a cost. `origin` is the READ's per-wave origin and has no
+    default -- a wrong one analyzes a different wave's access.
+
+    `dwords_per_lane` is the width of ONE read instruction, REQUIRED, taken from the DISASSEMBLY --
+    never inferred here. The emit declares vw=1 and the backend merges (ds_read2_b32 = 2 dwords), so
+    the emit cannot tell you. Do NOT derive it from the phase count (e.g. `n_phases_total // 2`): that
+    does not DETECT the instruction width, it IMPOSES it, so the envelope check can never fire and a
+    4-dword read gets silently priced with the 2-dword model. A gate that cannot fire is not a gate.
+    """
+    a = arch_lds(arch)
+    _acc, vw, datum = read_datum(descs.wave_read, tile_free, a, strides, dtype_name, origin=origin,
+                                 lds_swizzle=lds_swizzle)
+    n_phases_total = 1 + max(ph for (_l, ph) in datum)
+
+    # Per (half-wave, phase) histograms over the WHOLE wave -- not half-wave 0 only, which would miss
+    # any access whose halves differ. Depth counts DISTINCT dwords: two lanes on the same dword is a
+    # broadcast, not a conflict, and that distinction is also how the envelope check spots broadcasts.
+    detail, broadcast = {}, False
+    for hw in range(0, a.WAVE, a.HALF):
+        for ph in range(n_phases_total):
+            occ, cnt = defaultdict(set), defaultdict(int)
+            for lane in range(hw, hw + a.HALF):
+                if (lane, ph) in datum:
+                    _k, _f, dword, bank = datum[(lane, ph)]
+                    occ[bank].add(dword)
+                    cnt[bank] += 1
+            if occ:
+                detail[(hw, ph)] = {b: len(v) for b, v in occ.items()}
+                if any(cnt[b] > len(occ[b]) for b in occ):
+                    broadcast = True
+
+    max_nway = max((max(h.values()) for h in detail.values() if h), default=1)
+    n_piled = max((sum(1 for d in h.values() if d > 1) for h in detail.values()), default=0)
+    located = _locate_collision(datum, a)
+
+    # The model is validated PER INSTRUCTION. In envelope an instruction is 2 dwords/lane, so phases
+    # pair up: (0,1) is instruction 0, (2,3) instruction 1, ...
+    VALIDATED_DWORDS_PER_LANE = 2          # the envelope the corpus was measured in
+    if not isinstance(dwords_per_lane, int) or isinstance(dwords_per_lane, bool) or dwords_per_lane < 1:
+        raise ValueError(f"dwords_per_lane must be a positive int, got {dwords_per_lane!r}")
+    if n_phases_total % dwords_per_lane:
+        raise ValueError(
+            f"this access maps to {n_phases_total} dword-phases per lane, not a whole number of "
+            f"{dwords_per_lane}-dword instructions. Either dwords_per_lane is wrong (check the "
+            f"disassembly) or the address map is not what you think it is.")
+    n_instr = max(1, n_phases_total // dwords_per_lane)
+    footprint = len({d for (_k, _f, d, _b) in datum.values()}) // n_instr
+
+    reason = None
+    if dwords_per_lane != VALIDATED_DWORDS_PER_LANE:
+        reason = (f"{dwords_per_lane} dwords/lane; the read model is validated only at "
+                  f"{VALIDATED_DWORDS_PER_LANE} (ds_read2_b32)")
+    elif broadcast:
+        reason = "broadcast present (two lanes on one dword); untested by the corpus"
+    model_ok = a.name in _READ_MODELS and selftest(a, verbose=False)
+
+    sim = None
+    if model_ok and reason is None:
+        instr = {k: v for k, v in detail.items() if k[1] < dwords_per_lane}
+        sim = simulate_read_hist(instr, footprint, a)
+        sim["conflicts_per_access"] = (sim["BC"] / sim["productive"]) if sim["productive"] else 0.0
+
+    return ReadCollisionReport(
+        operand_label=operand_label, arch=a.name, vw=vw, wave_origin=tuple(origin), located=located,
+        detail=detail, n_piled_banks=n_piled, max_nway=max_nway, n_instr=n_instr,
+        footprint_dwords=footprint, model_validated=model_ok, in_envelope=(reason is None),
+        out_of_envelope_reason=reason, sim=sim)
 
 
 # ==================================================================================================
@@ -1151,6 +1399,40 @@ _VALIDATION_CORPUS = {
             ("b128", 256, 8, 1.0, 16), ("b128", 256, 16, 0.0, 16), ("b128", 256, 24, 1.0, 16),
             ("b128", 256, 32, 1.0, 16), ("b128", 256, 48, 0.0, 16),
         ],
+        # READ corpus. Per-INSTRUCTION, physical descriptors only -- never an operand. HW values are
+        # the (n_reads=2)-(n_reads=1) SLOPE divided by instructions-per-read, so the coop store cancels
+        # identically and NO store model is appealed to. `dist` is the FULL depth distribution
+        # {depth: n_banks} of one served group, not just (banks, max_depth) -- the non-uniform rows are
+        # the whole point and a summary would throw away what they prove.
+        #   (name, dist, n_phases, footprint_dwords, HW_IDX, HW_BC)
+        "read_hists": [
+            # depth ladder (uniform): pins the depth axis 1/2/4/8. tf256 tk16 nw16 k_sub=1 pad8.
+            ("read2_b32 m2  d1 tf256 pad8", {1: 32}, 2, 128,  4,  0),
+            ("read2_b32 m4  d2 tf256 pad8", {2: 16}, 2, 128,  8,  4),
+            ("read2_b32 m8  d4 tf256 pad8", {4:  8}, 2, 128, 16, 12),
+            ("read2_b32 m16 d8 tf256 pad8", {8:  4}, 2, 128, 32, 28),
+            # SAME max_depth 2, banks_used 16->28, mean depth 2.00->1.14, cost INVARIANT. These are
+            # what make MAX a measurement instead of an assumption.
+            ("read2_b32 m2 d2 b16 tf256 pad0", {2: 16},         2, 128, 8, 4),
+            ("read2_b32 m2 d2 b24 tf256 pad4", {1: 16, 2: 8},   2, 128, 8, 4),   # store aligned
+            ("read2_b32 m2 d2 b20 tf256 pad2", {1:  8, 2: 12},  2, 128, 8, 4),   # store MISALIGNED
+            ("read2_b32 m2 d2 b28 tf256 pad6", {1: 24, 2:  4},  2, 128, 8, 4),   # store MISALIGNED
+        ],
+        # Audit trail: every slope re-checkable. A row with store_row_8B_aligned=False may contribute a
+        # READ row only -- never a store row, never an intercept claim (its ds_write_b64 is split by
+        # hardware because the LDS row stride is 4 mod 8 bytes).
+        #   (label, waves, pad, instrs_per_read, IDX_n1, IDX_n2, BC_n1, BC_n2, INSTS_n1, INSTS_n2,
+        #    ADDR, store_row_8B_aligned)
+        "read_provenance": [
+            ("tf256 tk16 nw16 m2  k1 pad8", 512, 8,  2,  16,  24,   4,   4,  3,  5, 0, True),
+            ("tf256 tk16 nw16 m4  k1 pad8", 512, 8,  4,  40,  72,  20,  36,  5,  9, 0, True),
+            ("tf256 tk16 nw16 m8  k1 pad8", 512, 8,  8, 136, 264, 100, 196,  9, 17, 0, True),
+            ("tf256 tk16 nw16 m16 k1 pad8", 512, 8, 16, 520,1032, 452, 900, 17, 33, 0, True),
+            ("tf256 tk16 nw16 m2  k1 pad0", 512, 0,  2,  32,  48,  20,  28,  3,  5, 0, True),
+            ("tf256 tk16 nw16 m2  k1 pad4", 512, 4,  2,  32,  48,  20,  28,  3,  5, 0, True),
+            ("tf256 tk16 nw16 m2  k1 pad2", 512, 2,  2,  80,  96,   8,  16,  3,  5, 0, False),
+            ("tf256 tk16 nw16 m2  k1 pad6", 512, 6,  2,  80,  96,   8,  16,  3,  5, 0, False),
+        ],
     },
 }
 
@@ -1201,9 +1483,68 @@ def selftest(arch, verbose=True):
         if verbose:
             print(f"{wtag + ' tf' + str(tf) + ' d' + str(pad0_depth) + ' pad' + str(pad):22s} | "
                   f"{stride:8d} {stride % a.NB:2d} | {sim:7.2f} {hw:7.2f} | {'OK' if row_ok else 'FAIL'}")
+    # --- READ model: only gated when one is registered for this arch ---
+    if a.name in _READ_MODELS:
+        rows = corpus.get("read_hists") or []
+        if not rows:
+            raise ConflictModelError(
+                f"{a.name} has a registered READ model but NO read corpus. A registered read model "
+                f"with nothing validating it is worse than no read model -- it licenses numbers "
+                f"silently. Measure a read corpus or unregister the model.")
+        if verbose:
+            print(f"\n== read-port model vs measured per-instruction slopes ({a.name}) ==")
+            print(f"{'config':34s} | {'banks':>5} {'maxd':>4} | {'IDX':>3} {'hw':>3} | {'BC':>3} {'hw':>3} | ok")
+        for name, dist, nph, fp, hidx, hbc in rows:
+            hists = {}
+            for hw in range(0, a.WAVE, a.HALF):
+                for ph in range(nph):
+                    bank, h = 0, {}
+                    for depth, nbanks in sorted(dist.items()):
+                        for _ in range(nbanks):
+                            h[bank] = depth
+                            bank += 1
+                    hists[(hw, ph)] = h
+            r = simulate_read_hist(hists, fp, a)
+            row_ok = (r["IDX"] == hidx and r["BC"] == hbc)
+            ok &= row_ok
+            if verbose:
+                banks = sum(dist.values())
+                print(f"{name:34s} | {banks:>5} {max(dist):>4} | {r['IDX']:>3} {hidx:>3} | "
+                      f"{r['BC']:>3} {hbc:>3} | {'OK' if row_ok else 'FAIL'}")
+        # STRUCTURAL minima -- the gate checks the CORPUS can constrain the rule, instead of trusting
+        # whoever wrote it. Without these a corpus of look-alike rows reproduces any cost function.
+        depths = {max(d) for _n, d, *_ in rows}
+        by_depth = defaultdict(set)
+        for _n, d, *_ in rows:
+            by_depth[max(d)].add(sum(d.values()))
+        discriminating = any(len(b) >= 2 for b in by_depth.values())
+        problems = []
+        if len(depths) < 4:
+            problems.append(f"only {len(depths)} distinct max_depth values (need >=4: the ladder)")
+        if 1 not in depths:
+            problems.append("no max_depth==1 row (the conflict-free floor is unpinned)")
+        if not discriminating:
+            problems.append("no two rows share a max_depth while differing in banks_used -- MAX is "
+                            "then an ASSUMPTION, not a measurement (uniform rows cannot separate "
+                            "max from mean/accesses-per-bank)")
+        if len({r[2] for r in rows}) != 1:
+            problems.append("rows mix n_phases; register one phase count per model")
+        if problems:
+            ok = False
+            if verbose:
+                for p_ in problems:
+                    print(f"  STRUCTURAL FAIL: {p_}")
+
     if verbose:
         print("\nGATE:", "PASS" if ok else "FAIL - model wrong, do not trust any number it produces")
     return ok
+
+
+# gfx90a's read model is VALIDATED (see the read corpus above) so it ships REGISTERED -- a validated
+# model that a caller must remember to switch on is a model that silently reports geometry instead of
+# cost. `register_read_model` re-runs selftest here, so an import fails loudly if the corpus ever
+# stops reproducing. Other arches remain unregistered until measured on their own hardware.
+register_read_model("gfx90a")
 
 
 if __name__ == "__main__":

@@ -79,6 +79,41 @@ number being read as measured; guessing `investigate` silently commits the user 
   **offer to repair it** (see "When the model does not match the hardware"). Repair on their go-ahead,
   never silently mid-analysis.
 
+## Store vs read coverage — simulate does NOT cover both, and the asymmetry is physical
+
+The validated write-port model (`PORT_BANKS=8`, `COMBINE=4`) is exactly that — **write-side**. Every row of
+the write corpus is a store-mirror measurement. The read port obeys its **own measured rule**, so the two
+accesses get different treatment and you must say which one you analyzed:
+
+| access | entry point | simulate gives you |
+|---|---|---|
+| **cooperative store** | `analyze_store` | full `conflicts/access` + the conflict-free pad (the write-port model) |
+| **MMA-operand wave read** | `analyze_read` | `conflicts/access` = **max_depth − 1** (the read-port rule: no port cap, no combine, phases SUM). **gfx90a only, and only inside its envelope** — 2 dwords/lane (`ds_read2_b32`), no broadcast. Outside it: geometry only, and asking for a cost RAISES |
+
+Why the read cannot simply reuse `simulate()`: applying write constants to a read emits a confidently wrong
+number, the exact failure this skill exists to prevent. What IS sound without a read-port model is the
+address map — "these lanes of a served group address DIFFERENT dwords in the SAME bank" is a property of the
+map, independent of how the hardware serializes the pile. So `analyze_read` reports the pile and refuses the
+cost.
+
+**This matters for design work:** on an interleaved layout the conflict often lives in the *read*, not the
+store. A simulate run that reports only the store has NOT cleared the design — say so. Use the read geometry
+to FLAG an access for `--mode investigate`, never to price it.
+
+**Arch scope.** gfx90a's read model ships registered (its corpus is in `read_hists`, gated by `selftest`).
+Any OTHER target has no measured read port: `analyze_read` there reports geometry and REFUSES a cost — never
+carry gfx90a's read constants across. To add a target, measure its own read corpus (`run_probe(descs,
+mode="read", ...)` + the `n_reads` slope), derive that port's rule, and `register_read_model` it, which
+refuses unless `selftest` passes.
+
+**The envelope is gated, not advisory.** `dwords_per_lane` is a REQUIRED argument taken from the
+disassembly — the emit declares `vw=1` and the backend merges, so the emit cannot tell you. Deriving it from
+the phase count would impose the width rather than detect it, and the gate could never fire.
+
+Note `read_datum` is NOT `store_datum` with another descriptor: the store path assumes a lane touches a
+whole number of dwords, which is false for a sub-dword read (an f16 `vw=1` read touches HALF a dword and
+floors to an EMPTY map). `read_datum` derives and de-duplicates the dwords per access instead.
+
 Detect the host arch with `rocminfo | grep -m1 gfx` (or `get_device_arch(0)`) and **state it up front**,
 before doing any work, so a wrong target is caught in the first line and not after a 20-minute run.
 
@@ -86,7 +121,8 @@ before doing any work, so a wrong target is caught in the first line and not aft
 
 | You want to… | Ask / trigger | You get |
 |---|---|---|
-| **Find if an access conflicts** (and how much) | "does <A/B store/read> cause a bank conflict?" | `conflicts/access`, measured (investigate) or modelled (simulate) — never ungated |
+| **Find if the STORE conflicts** (and how much) | "does the <A/B> store cause a bank conflict?" | `conflicts/access`, measured (investigate) or modelled (simulate) — never ungated |
+| **Find if the READ collides** (geometry only) | "does the wave read conflict?" | `analyze_read` — WHETHER and WHERE lanes collide. **No cost number**: `PORT_BANKS`/`COMBINE` are write-side, so a read's replay count needs hardware (see "Store vs read coverage") |
 | **Locate the collision** | (part of the analysis) | the served group (half-wave × phase) + bank + colliding `T{l}R{r}` + the N-way |
 | **Visualize it** | (part of the analysis) | the committed 3-panel register→LDS dataflow, **conflicted vs fixed** side-by-side |
 | **Understand WHY** in plain language | "why is it conflicting?" | the mechanism (e.g. K-stride aliasing) + a concrete thread walk-through + the fix |
@@ -142,41 +178,7 @@ pad fixes it" guesswork). It takes an explicit `mode` and hard-fails rather than
 
 **No dangerous defaults.** `analyze_store` requires every load-bearing parameter — arch, dtype, strides,
 origin, swizzle, and all four labels. That is deliberate: a defaulted value does not error, it silently
-analyzes a *different* kernel than yours and prints your kernel's name on the answer. Fill each from the
-kernel under analysis; never carry one over from a sibling kernel or an example.
-
-```python
-from rocke.helpers.tiling import lds_conflict as lc
-
-ARCH = "<gfx target>"        # REQUIRED: from the user (simulate) or the host GPU (investigate)
-CFG = dict(                  # the subject, stated once, explicitly
-    tile_free=TF, wtag="b64", arch=ARCH, kernel_label="<kernel>", operand_label="A",
-    dims_label="M", macro_label="<macro MxN, waves WxW, tile_k=K>", strides=(TF, 1),
-    dtype_name="<f16|f32|...>", origin=(0, 0), lds_swizzle=False,
-)
-descs = lc.ProbeDescs.from_coop(coop_native, wave_native, transpose=_transpose_desc)  # both transposes
-
-# ---- SIMULATE: no GPU. Gated on selftest(ARCH); raises if ARCH has no validated model. ----
-rep = lc.analyze_store(descs, mode="simulate", render_to=out_png, **CFG)
-# rep.verdict -> "SIMULATED (<arch> model validated by selftest; no per-case hardware ...)"
-# figure is watermarked SIMULATED. rep.measured is None. Binding stage is NOT answerable.
-
-# ---- INVESTIGATE: host GPU must BE ARCH (run_probe enforces it). ----
-def measure(pad, mode="store"):
-    """Run ONE probe under rocprof in the container; return its counters. This is the only host/
-    container-specific glue — everything else is in the module."""
-    r = lc.run_probe(descs, mode, arch=ARCH, dtype=DTYPE, tile_free=TF, tile_k=TK, n_waves=NW,
-                     warp_free=WF, lds_pad=pad, lds_swizzle=False, block_lanes=WAVE)
-    assert r["max_abs_diff"] == 0.0                   # bit-exact or the counters are meaningless
-    # ... docker exec rocprofv3 (lc.COUNTER_PMC / lc.ROCPROF_RECIPE) on a runner that calls run_probe ...
-    hw = lc.parse_counter_csv(outdir)                 # {BC, IDX, conflicts_per_access, ADDR, ...}
-    hw["max_abs_diff"] = r["max_abs_diff"]
-    return hw
-
-rep = lc.analyze_store(descs, mode="investigate", measure=measure, verify_fix=True,
-                       render_to=out_png, **CFG)
-# rep.verdict / rep.conflicts_per_access / rep.fix_pad / rep.located / rep.png / rep.facts_table()
-```
+analyzes a *different* kernel than yours and prints your kernel's name on the answer.
 
 `analyze_store` does: **`selftest(arch)`** → address-map → `simulate` → *(investigate)* **`measure` on GPU +
 HARD `gate(sim==HW)`** → `recommend_pad` (closed-form conflict-free pad) → *(optional)* verify the fix on

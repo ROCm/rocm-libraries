@@ -44,8 +44,10 @@ LDS bank conflicts are an **empirically verifiable statistic**. Do NOT state a c
   target the **same bank at different addresses**, the bank can serve only one/cycle → the instruction
   **replays** the extra ones. Each replay is one extra cycle. `SQ_LDS_BANK_CONFLICT` counts replay cycles.
   - *N-way conflict* = N distinct addresses stacked on one bank in one served group/phase = N cycles (N−1
-    replays). **This naive per-address replay rule is the READ-side model. For WRITES it OVER-COUNTS
-    (~8–9× on K-aliased coop stores) — the write port has a different serialization; see §1.4.**
+    replays). **This naive per-address replay rule is the READ-side model — now confirmed on gfx90a,
+    with one addition §1 alone does not give you: the dword-phases of a read instruction SERIALIZE
+    (SUM), where a write instruction's phases PIPELINE (MAX). See §1.5. For WRITES the rule also
+    OVER-COUNTS (~8–9× on K-aliased coop stores) — the write port has a different serialization; §1.4.**
   - **Same-address** in a group is a **broadcast** (free) — a *separate* pathology counted by
     `SQ_LDS_ADDR_CONFLICT`, not bank conflict. Report it separately (it should be ~0 in a pure bank study).
 
@@ -67,7 +69,7 @@ configs **and** by independently reproducing the measured `productive` (= footpr
   for `ds_write_b64`/`b128` and for the two dwords of `ds_write2_b32`). The counter is **per instruction**;
   a store forced to a narrow width issues several instructions, each measured with only its own footprint.
   Validated bit-exact (IDX and BC) on A/B × {b64, b128, b32} × {pad0, pad8} and the masked active-lane sweep.
-  **This is a WRITE rule** — reads use the §1 per-address replay model; confirm the read port separately.
+  **This is a WRITE rule** — reads use the §1 per-address replay model, now characterised in §1.5.
 
 **Conflict-free CONDITION — the stripe-alignment rule (validated over a full 17-point pad sweep, both operands).**
 The naive `bank = dword mod 32` map is not just imprecise for these padded K-aliased f16 stores — it is
@@ -78,6 +80,44 @@ Worked: A (b64, W=2, unit 8) → pad+16 f16 gives stride 72 dwords, `s=8=1×8` �
 pad+32 f16 gives stride 144 dwords, `s=16=1×16` → BC=0. `s=0` (any bank-multiple stride) is the fully-aliased
 worst case. **A `b32` narrowing swizzle does NOT fix a b128 store** — measured `conflicts/access = 3.00`
 (worse, 4× the LDS instructions): HW is the arbiter, and padding to the odd-half-stripe is the cheap fix.
+
+### 1.5 The CDNA2 LDS **read-port** rule (validated gfx90a MI210, `lds_conflict.read_hists`)
+
+```
+served_read(half_wave, phase) = max_bank_depth(half_wave, phase)   # NO port cap, NO combine
+IDX_read   = SUM over half_waves SUM over phases  served_read      # read phases SERIALIZE
+productive = ceil(distinct_dwords_in_instruction / NB)             # same as writes
+BC         = IDX − productive        =>   conflicts/access = max_depth − 1
+```
+
+**ZERO free constants.** A general `min(banks,P)·depth/min(banks,C)` must satisfy `min(b,P) = min(b,C)`
+at b = 4, 8, 16, 32, so the terms cancel identically: `PORT_BANKS`/`COMBINE` are **not features of the
+read path**. The two ports differ in BOTH the per-group cost function AND the phase rule — writes cap
+at an 8-bank stripe and pipeline their phases; reads serve all banks in parallel and serialize theirs.
+At depth 2 the two rules are numerically identical, which is why a single histogram point cannot
+separate them; the depth-8 row is what decides it.
+
+**`max_depth` is the sole cost determinant — measured, not assumed.** Across pads 0/2/4/6 at m_sub=2,
+`banks_used` sweeps 16 → 20 → 24 → 28 and the depth distribution goes `{2:16}` → `{1:24, 2:4}` (mean
+depth 2.00 → 1.14) while the measured cost stays CONSTANT at 8 IDX / 4 BC per instruction. That
+refutes every rule reading `banks_used` or the depth *distribution* — accesses-per-bank, mean depth,
+and bandwidth terms alike. Only `max_depth` holds still, and the cost holds still with it.
+
+**Conflict-free CONDITION for reads:** BC = 0 iff every served group is a full NB-bank permutation —
+`max_depth = 1` **and** all NB banks used (§2). `max_depth = 1` on fewer than NB banks is not free: it
+still costs one cycle per group while the productive floor is smaller.
+
+**ENVELOPE (gated in code, not assumed):** 2 dwords/lane (`ds_read2_b32`) and no broadcast. Outside it
+the model is unvalidated and `analyze_read` falls back to geometry only. Served-group size: 8 and 16
+are RULED OUT by the ladder; 32 vs 64 are not separable by this descriptor family — CDNA half-wave 32
+retained per §1.2.
+
+**Measured corpus:** depth ladder 1/2/4/8 (m_sub 2/4/8/16) plus four depth-2 rows at banks_used
+16/20/24/28. Isolated by the **n_reads slope** design (N live barrier-separated reads to distinct
+outputs; `(n=2)−(n=1)` cancels the coop store), so no store model is appealed to — and the n=0
+intercept independently reproduces the §1.4 write model. `selftest` enforces the structural minima
+that make MAX a measurement: ≥4 distinct depths, a depth-1 floor row, and ≥2 rows sharing a depth
+while differing in `banks_used`.
 
 ### 1.1 The classic modeling trap
 Summing a lane's whole `b128` (all 4 dwords) into ONE bank histogram makes conflicts *vanish* (looks like an
