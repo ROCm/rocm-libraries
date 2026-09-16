@@ -178,13 +178,13 @@ ROCSOLVER_KERNEL void latrd_upper_updateA_kernel(const rocblas_int mm,
     int m = c + 1;
     int cw = c - mm + k;
     T* y = A + idx2D(0, c, lda);
-    T* A1 = A + idx2D(0, c + 1, lda);
+    const T* A1 = A + idx2D(0, c + 1, lda);
     int lda1 = lda;
-    T* A2 = W + idx2D(0, cw + 1, ldw);
+    const T* A2 = W + idx2D(0, cw + 1, ldw);
     int lda2 = ldw;
-    T* x1 = W + idx2D(c, cw + 1, ldw);
+    const T* x1 = W + idx2D(c, cw + 1, ldw);
     int incx1 = ldw;
-    T* x2 = A + idx2D(c, c + 1, lda);
+    const T* x2 = A + idx2D(c, c + 1, lda);
     int incx2 = lda;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -287,13 +287,13 @@ ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
     int m = mm - c;
     int n = c;
     T* y = A + idx2D(c, c, lda);
-    T* A1 = A + idx2D(c, 0, lda);
+    const T* A1 = A + idx2D(c, 0, lda);
     int lda1 = lda;
-    T* A2 = W + idx2D(c, 0, ldw);
+    const T* A2 = W + idx2D(c, 0, ldw);
     int lda2 = ldw;
-    T* x1 = W + idx2D(c, 0, ldw);
+    const T* x1 = W + idx2D(c, 0, ldw);
     int incx1 = ldw;
-    T* x2 = A + idx2D(c, 0, lda);
+    const T* x2 = A + idx2D(c, 0, lda);
     int incx2 = lda;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -353,23 +353,24 @@ ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
 /***** Kernels to compute column of W *****/
 /******************************************/
 template <int NB_X, typename T, typename U>
-ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
-                                                        const rocblas_int k,
-                                                        const rocblas_int c,
-                                                        U AA,
-                                                        const rocblas_int shiftA,
-                                                        const rocblas_int lda,
-                                                        const rocblas_stride strideA,
-                                                        T* WA,
-                                                        const rocblas_int shiftW,
-                                                        const rocblas_int ldw,
-                                                        const rocblas_stride strideW,
-                                                        T* yA,
-                                                        const rocblas_int shiftY,
-                                                        const rocblas_int ldy,
-                                                        const rocblas_stride strideY,
-                                                        T* workA,
-                                                        const rocblas_stride strideblk)
+ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
+    latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
+                                      const rocblas_int k,
+                                      const rocblas_int c,
+                                      U AA,
+                                      const rocblas_int shiftA,
+                                      const rocblas_int lda,
+                                      const rocblas_stride strideA,
+                                      T* WA,
+                                      const rocblas_int shiftW,
+                                      const rocblas_int ldw,
+                                      const rocblas_stride strideW,
+                                      T* yA,
+                                      const rocblas_int shiftY,
+                                      const rocblas_int ldy,
+                                      const rocblas_stride strideY,
+                                      T* workA,
+                                      const rocblas_stride strideblk)
 {
     rocblas_int bid = blockIdx.z;
     rocblas_int tx = threadIdx.x;
@@ -388,10 +389,10 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
     T* A2 = W + idx2D(0, cw + 1, ldw);
     int lda1 = lda;
     int lda2 = ldw;
-    T* x = A + idx2D(0, c, lda);
+    const T* x = A + idx2D(0, c, lda);
 
     int it = (i < mm) ? i : i - mm;
-    T* a = (i < mm) ? A1 : A2;
+    const T* a = (i < mm) ? A1 : A2;
     int ld = (i < mm) ? lda1 : lda2;
     T* y = (i < mm) ? y1 : y2;
 
@@ -402,7 +403,8 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
 
     T res = 0;
 
-    __shared__ T sdata[NB_X];
+    size_t constexpr sdata_size = MaxWarpCount<NB_X>;
+    __shared__ T sdata[sdata_size];
 
     // partial sums
     rocblas_int n_full = (n / NB_X) * NB_X;
@@ -434,22 +436,23 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
 }
 
 template <int NB_X, typename T, typename U>
-ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
-                                                        const rocblas_int c,
-                                                        U AA,
-                                                        const rocblas_int shiftA,
-                                                        const rocblas_int lda,
-                                                        const rocblas_stride strideA,
-                                                        T* WA,
-                                                        const rocblas_int shiftW,
-                                                        const rocblas_int ldw,
-                                                        const rocblas_stride strideW,
-                                                        T* yA,
-                                                        const rocblas_int shiftY,
-                                                        const rocblas_int ldy,
-                                                        const rocblas_stride strideY,
-                                                        T* workA,
-                                                        const rocblas_stride strideblk)
+ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
+    latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
+                                      const rocblas_int c,
+                                      U AA,
+                                      const rocblas_int shiftA,
+                                      const rocblas_int lda,
+                                      const rocblas_stride strideA,
+                                      T* WA,
+                                      const rocblas_int shiftW,
+                                      const rocblas_int ldw,
+                                      const rocblas_stride strideW,
+                                      T* yA,
+                                      const rocblas_int shiftY,
+                                      const rocblas_int ldy,
+                                      const rocblas_stride strideY,
+                                      T* workA,
+                                      const rocblas_stride strideblk)
 {
     rocblas_int bid = blockIdx.z;
     rocblas_int tx = threadIdx.x;
@@ -466,10 +469,10 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
     T* A2 = A + idx2D(c + 1, 0, lda);
     int lda1 = ldw;
     int lda2 = lda;
-    T* x = A + idx2D(c + 1, c, lda);
+    const T* x = A + idx2D(c + 1, c, lda);
 
     int it = (i < c) ? i : i - c;
-    T* a = (i < c) ? A1 : A2;
+    const T* a = (i < c) ? A1 : A2;
     int ld = (i < c) ? lda1 : lda2;
     int it2 = it - c - 1;
     T* y = (i < c) ? y1 : y2;
@@ -481,7 +484,8 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
 
     T res = 0;
 
-    __shared__ T sdata[NB_X];
+    size_t constexpr sdata_size = MaxWarpCount<NB_X>;
+    __shared__ T sdata[sdata_size];
 
     // partial sums
     rocblas_int n_full = (n / NB_X) * NB_X;
@@ -924,14 +928,12 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                 dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, j, A, shiftA, lda,
                 strideA, W, shiftW, ldw, strideW, work, strideblk, tau, strideP);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
-                                    dim3(1024, 1, 1), 0, stream, n - 1 - j, A,
-                                    shiftA + idx2D(j + 1, j, lda), strideA, W,
-                                    shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
+            latrd_dot_scale_axpy(handle, n - 1 - j, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
+                                 shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP,
+                                 batch_count);
             //--------------------------------------------------------------
         }
     }
-
     else
     {
         // reduce the last k columns of A
@@ -974,10 +976,9 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                 dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, k, j, A, shiftA,
                 lda, strideA, W, shiftW, ldw, strideW, work, strideblk, tau, strideP);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
-                                    dim3(1024, 1, 1), 0, stream, j, A, shiftA + idx2D(0, j, lda),
-                                    strideA, W, shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1,
-                                    strideP);
+            latrd_dot_scale_axpy(handle, j, A, shiftA + idx2D(0, j, lda), strideA, W,
+                                 shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1, strideP,
+                                 batch_count);
         }
     }
 
