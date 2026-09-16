@@ -4,7 +4,7 @@
 
 The default path preserves the existing K=64 FP8/BF8 WMMA plus software
 post-scaling contract. ``matrix_path="wmma_scale"`` and ``"wmma_scale16"``
-select the native gfx1250 K=128 instructions and consume packed E8M0 scale
+select the native gfx1250 K=128 instructions and consume packed encoded scale
 bytes directly.
 """
 
@@ -26,6 +26,7 @@ from ...core.ir import (
     Type,
     VectorType,
 )
+from ...core.scaled_wmma import MATRIX_FORMATS, scale_formats
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
@@ -106,6 +107,14 @@ class BlockScaledGemmSpec:
     tile_m: int = 16
     tile_n: int = 16
     tile_k: int = 128
+    scale_dtype_a: str | None = None
+    scale_dtype_b: str | None = None
+
+    def resolved_scale_dtypes(self) -> tuple[str, str]:
+        return (
+            self.scale_dtype if self.scale_dtype_a is None else self.scale_dtype_a,
+            self.scale_dtype if self.scale_dtype_b is None else self.scale_dtype_b,
+        )
 
     @property
     def block_size(self) -> int:
@@ -119,7 +128,15 @@ class BlockScaledGemmSpec:
             f"M{self.M}N{self.N}K{self.K}",
             f"bk{self.block_k}",
             f"t{self.tile_m}x{self.tile_n}x{self.tile_k}",
-            flags={self.resolved_matrix_path(): True},
+            flags={
+                self.resolved_matrix_path(): True,
+                **{
+                    f"s{operand}_{dtype}": True
+                    for operand, dtype in zip("ab", self.resolved_scale_dtypes())
+                    if self.resolved_matrix_path() in ("wmma_scale", "wmma_scale16")
+                    and dtype not in ("e8m0", "i8")
+                },
+            },
         )
 
     def resolved_matrix_path(self) -> str:
@@ -186,11 +203,14 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     if spec.layout != "RCR":
         return False, f"block_scaled_gemm supports RCR only (got {spec.layout!r})"
     if native_scale:
-        if spec.scale_dtype not in ("e8m0", "i8"):
-            return False, (
-                "native gfx1250 SCALE/SCALE16 requires packed E8M0 scale bytes "
-                f"(got {spec.scale_dtype!r})"
+        try:
+            scale_formats(
+                MATRIX_FORMATS[_canon_lowbit(spec.dtype_a)],
+                MATRIX_FORMATS[_canon_lowbit(spec.dtype_b)],
+                *spec.resolved_scale_dtypes(),
             )
+        except ValueError as e:
+            return False, str(e)
         required_block_k = 16 if matrix_path == "wmma_scale16" else 32
         if spec.block_k != required_block_k:
             return False, (
@@ -198,6 +218,8 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
                 f"(got {spec.block_k})"
             )
     else:
+        if spec.scale_dtype_a is not None or spec.scale_dtype_b is not None:
+            return False, "per-operand scale types require native scaled WMMA"
         try:
             _wire_scale_dtype(spec.scale_dtype)
         except ValueError as e:
@@ -286,7 +308,7 @@ def build_block_scaled_gemm(
     One wave (32 lanes) computes one 16x16 output tile without LDS. The legacy
     ``wmma`` path uses K=64 FP8/BF8 atoms, accumulates each ``block_k`` group,
     and applies FP16/FP32 A/B scales in software. The native ``wmma_scale`` and
-    ``wmma_scale16`` paths use K=128 FP8/FP6/FP4 atoms and pass packed E8M0 scale bytes
+    ``wmma_scale16`` paths use K=128 FP8/FP6/FP4 atoms and pass packed scale bytes
     directly to the instruction, with K=32 and K=16 scale groups respectively.
 
     Lane ``l`` owns output column ``l % 16`` and rows
@@ -466,7 +488,17 @@ def build_block_scaled_gemm(
             b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b)
             a_scale = _pack_strided_scales(AScale, a_row, step, for_b=False)
             b_scale = _pack_strided_scales(BScale, b_row, step, for_b=True)
-            acc = ir.mma(op_id, a_frag, b_frag, acc, a_scale, b_scale)
+            da, db = spec.resolved_scale_dtypes()
+            acc = ir.mma(
+                op_id,
+                a_frag,
+                b_frag,
+                acc,
+                a_scale,
+                b_scale,
+                scale_dtype_a=da,
+                scale_dtype_b=db,
+            )
 
         out_col = ir.add(n0, frag)
         row_base = ir.add(m0, ir.mul(half, ir.const_i32(_ACC)))

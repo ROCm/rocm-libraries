@@ -193,7 +193,12 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, const char*
     char name[160];
     snprintf(name, sizeof(name), "tile.%s", op_id);
     op_name = name;
-
+    int sa = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_a"));
+    int sb = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_b"));
+    if(const char* error = rocke_wmma_scale_error(fmt_a, fmt_b, sa, sb))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+    }
     if(!L->backend || strcmp(L->backend->gfx, "gfx1250") != 0)
     {
         rocke_ll_fail(L,
@@ -243,8 +248,8 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, const char*
     rocke_ll_emitf(L,
                    "  %s = call <8 x float> @%s("
                    "i32 %d, <16 x i32> %s, i32 %d, <16 x i32> %s, "
-                   "i16 0, <8 x float> %s, i32 0, i32 0, %s %s, "
-                   "i32 0, i32 0, %s %s, i1 false, i1 false)",
+                   "i16 0, <8 x float> %s, i32 0, i32 %d, %s %s, "
+                   "i32 0, i32 %d, %s %s, i1 false, i1 false)",
                    mma_result_name(L, op),
                    intrinsic,
                    fmt_a,
@@ -252,8 +257,10 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, const char*
                    fmt_b,
                    rocke_ll_operand(L, op->operands[1]),
                    rocke_ll_operand(L, op->operands[2]),
+                   sa,
                    scale_ty,
                    rocke_ll_operand(L, op->operands[3]),
+                   sb,
                    scale_ty,
                    rocke_ll_operand(L, op->operands[4]));
 }

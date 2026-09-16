@@ -18,6 +18,7 @@
 
 #include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
+#include "rocke/scaled_wmma_internal.h"
 
 /* ===================================================================== */
 /*  target-neutral MMA metadata                                          */
@@ -655,6 +656,46 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
+}
+
+rocke_value_t* rocke_b_mma_scaled(rocke_ir_builder_t* b,
+                                  const char* op_id,
+                                  rocke_value_t* a,
+                                  rocke_value_t* bb,
+                                  rocke_value_t* c,
+                                  rocke_value_t* a_scale,
+                                  rocke_value_t* b_scale,
+                                  const char* scale_dtype_a,
+                                  const char* scale_dtype_b)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    bool scale16;
+    int fa, fb;
+    if(!op_id || !rocke_wmma_scaled_formats(op_id, &scale16, &fa, &fb))
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "scale dtype selectors require a gfx1250 scaled WMMA atom");
+    }
+    int sa = rocke_wmma_scale_format(scale_dtype_a);
+    int sb = rocke_wmma_scale_format(scale_dtype_b);
+    if(const char* error = rocke_wmma_scale_error(fa, fb, sa, sb))
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", error);
+    }
+    rocke_value_t* scales[] = {a_scale, b_scale};
+    rocke_value_t* result = rocke_b_mma(b, op_id, a, bb, c, scales, 2);
+    if(result && sa)
+    {
+        rocke_attr_set_str(b, &result->op->attrs, "scale_dtype_a", scale_dtype_a);
+    }
+    if(result && sb)
+    {
+        rocke_attr_set_str(b, &result->op->attrs, "scale_dtype_b", scale_dtype_b);
+    }
+    return result;
 }
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma) ----- */

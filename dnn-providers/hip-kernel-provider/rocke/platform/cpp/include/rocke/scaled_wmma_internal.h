@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Internal mirror of core/scaled_wmma.py: matrix selectors. */
+/* Internal mirror of core/scaled_wmma.py: matrix and scale selectors. */
 #ifndef ROCKE_SCALED_WMMA_INTERNAL_H
 #define ROCKE_SCALED_WMMA_INTERNAL_H
 
@@ -42,6 +42,36 @@ static inline bool rocke_wmma_scaled_formats(const char* op_id, bool* scale16, i
     *a = rocke_wmma_matrix_format(da);
     *b = rocke_wmma_matrix_format(db);
     return *a >= 0 && *b >= 0;
+}
+
+static inline int rocke_wmma_scale_format(const char* dtype)
+{
+    if(!dtype || strcmp(dtype, "e8m0") == 0 || strcmp(dtype, "i8") == 0)
+    {
+        return 0;
+    }
+    if(strcmp(dtype, "e5m3") == 0)
+    {
+        return 1;
+    }
+    return strcmp(dtype, "e4m3") == 0 ? 2 : -1;
+}
+
+static inline const char* rocke_wmma_scale_error(int a, int b, int sa, int sb)
+{
+    if(sa < 0 || sb < 0)
+    {
+        return "scaled WMMA scale types must be e8m0, e5m3, or e4m3";
+    }
+    if((a != 4 && sa != 0) || (b != 4 && sb != 0))
+    {
+        return "scaled WMMA e5m3/e4m3 scales require an FP4 operand";
+    }
+    if(a == 4 && b == 4 && sa != sb)
+    {
+        return "scaled WMMA FP4 x FP4 requires matching scale formats";
+    }
+    return NULL;
 }
 
 #endif
