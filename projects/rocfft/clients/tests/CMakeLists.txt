@@ -408,11 +408,13 @@ set_target_properties(rocfft-test
 # On Linux, always include amdgcnspirv target so the clients work
 # on an architecture that the runtime supports but was not
 # specified a build time
-# TODO: amdgcnspirv is not compatible with ASAN.
-get_target_property(test_opts rocfft-test COMPILE_OPTIONS)
-if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
-  target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
-  target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+if( NOT WIN32 AND HIP_COMPILER_SUPPORTS_SPIRV )
+  # TODO: amdgcnspirv is not compatible with ASAN.
+  get_target_property(test_opts rocfft-test COMPILE_OPTIONS)
+  if( NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+    target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+    target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+  endif()
 endif()
 
 rocm_install(TARGETS rocfft-test COMPONENT tests)
