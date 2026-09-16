@@ -68,18 +68,22 @@ from rocke.helpers import (
     make_gemm_manifest,
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
-from rocke.instances import (
-    ConvProblem,
+from kernels.common.conv_direct_grouped import (
     DirectConv4cSpec,
     DirectConv16cSpec,
     DirectConvProblem,
+    build_direct_conv_4c,
+    build_direct_conv_16c,
+)
+from kernels.common.conv_implicit_gemm import (
+    ConvProblem,
     ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+)
+from rocke.instances import (
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
-    build_direct_conv_4c,
-    build_direct_conv_16c,
-    build_implicit_gemm_conv,
     build_universal_gemm,
 )
 
@@ -676,9 +680,9 @@ class TestHelpers(unittest.TestCase):
         specs build and only fail deep inside the emitter, which the sweep
         drivers turn into a silent skip. Mirrors the conv/dgrad behaviour.
         """
-        from rocke.instances.common._conv_implicit_gemm_common import ConvProblem
-        from rocke.instances.common.conv_implicit_gemm import ConvDataSpec
-        from rocke.instances.common.conv_implicit_gemm_wgrad import (
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import (
             WgradConvSpec,
             is_valid_wgrad_spec,
         )
@@ -2902,7 +2906,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
 
     def test_implicit_gemm_conv_chiplet_swizzle_compiles(self):
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
         )
@@ -2950,7 +2954,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         """The async-DMA conv must hoist the per-wave LDS base into
         an SGPR via ``to_sgpr_u32`` (``readfirstlane`` + SGPR-pin asm).
         """
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
         )
@@ -5016,7 +5020,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
 
     def test_16c_kernel_lowers_to_llvm(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv16cSpec,
             DirectConvProblem,
             build_direct_conv_16c,
@@ -5034,7 +5038,7 @@ class TestConvDirectGroupedTransforms(unittest.TestCase):
 
     def test_4c_kernel_lowers_to_llvm(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances import (
+        from kernels.common.conv_direct_grouped import (
             DirectConv4cSpec,
             DirectConvProblem,
             build_direct_conv_4c,
@@ -5265,11 +5269,11 @@ class TestCkTileLowering(unittest.TestCase):
             self.assertIn(line, src)
 
     def test_conv_source_references_grouped_convolution_kernel(self):
-        from rocke.core import lower_spec_to_cktile
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
         )
+        from rocke.core import lower_spec_to_cktile
 
         spec = ImplicitGemmConvSpec(
             problem=ConvProblem(
@@ -5382,13 +5386,12 @@ class TestCkTileLowering(unittest.TestCase):
         """``lower_spec_to_cktile`` must dispatch to gemm vs conv emitters
         based on the spec type without the caller knowing about them.
         """
-        from rocke.core import lower_spec_to_cktile
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
-            TileSpec,
-            UniversalGemmSpec,
         )
+        from rocke.core import lower_spec_to_cktile
+        from rocke.instances import TileSpec, UniversalGemmSpec
 
         gemm = UniversalGemmSpec(
             name="d_gemm",
@@ -5522,7 +5525,7 @@ class TestHipLoweringCoverage(unittest.TestCase):
         )
 
     def test_implicit_gemm_conv_lowers(self):
-        from rocke.instances import (
+        from kernels.common.conv_implicit_gemm import (
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
@@ -6494,6 +6497,100 @@ class TestLibDiscoveryOrder(unittest.TestCase):
             result = _torch_bundled_lib("amdhip64")
             self.assertIsNone(result)
             self.assertNotIn("torch", sys.modules)
+
+    def test_rocm_version_parsed_from_versioned_libdir(self):
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        self.assertEqual(_rocm_version_from_libdir("/opt/rocm-7.2.3/lib"), (7, 2))
+        # core-7.13 is a *component* version living under release 7.2.0. The
+        # result is compared against torch.version.hip, which reports the
+        # release, so the component number must not win: reading (7, 13) here
+        # would make a torch on ROCm 7.10 look older than a 7.2 install.
+        self.assertEqual(
+            _rocm_version_from_libdir("/opt/rocm-7.2.0/core-7.13/lib"), (7, 2)
+        )
+
+    def test_rocm_version_resolves_unversioned_symlink(self):
+        import os
+        import tempfile
+
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        # The distro default is ROCM_PATH=/opt/rocm, an unversioned symlink to
+        # /opt/rocm-X.Y.Z. Parsing only the literal path finds no digits in
+        # "rocm" and reports the version unknown, which silently disables the
+        # stale-comgr demotion on the exact layout it exists for.
+        with tempfile.TemporaryDirectory() as tmp:
+            real_root = os.path.join(tmp, "rocm-7.2.3")
+            os.makedirs(os.path.join(real_root, "lib"))
+            link_root = os.path.join(tmp, "rocm")
+            os.symlink(real_root, link_root)
+
+            self.assertEqual(
+                os.path.basename(link_root),
+                "rocm",
+                "the link name must be unversioned for this test to mean anything",
+            )
+            self.assertEqual(
+                _rocm_version_from_libdir(os.path.join(link_root, "lib")), (7, 2)
+            )
+
+    def test_rocm_version_unknown_when_nothing_is_versioned(self):
+        import os
+        import tempfile
+
+        from rocke.runtime.runtime_coexistence import _rocm_version_from_libdir
+
+        # Unknown must stay unknown: _torch_comgr_is_stale keeps the historical
+        # resolution order rather than guessing when either side is unreadable.
+        # Built under a tmpdir because a literal /opt/rocm is a symlink to a
+        # versioned root on a real ROCm box -- which would make this pass for
+        # the wrong reason there and fail everywhere else.
+        with tempfile.TemporaryDirectory() as tmp:
+            libdir = os.path.join(tmp, "rocm", "lib")
+            os.makedirs(libdir)
+            self.assertIsNone(_rocm_version_from_libdir(libdir))
+
+    def test_component_version_never_outranks_the_release(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        # torch on ROCm 7.10 beside a packaged release 7.2.0 whose runtime
+        # lives in core-7.13. torch is NEWER, so nothing may be demoted --
+        # comparing against the component version would invert that.
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.10.0-abc123")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            with mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=["/opt/rocm-7.2.0/core-7.13/lib"]
+            ):
+                self.assertEqual(rc._torch_rocm_version(), (7, 10))
+                self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
+                self.assertFalse(rc._torch_comgr_is_stale())
+
+    def test_stale_comgr_demotion_fires_through_a_symlinked_root(self):
+        import sys
+        import types
+        from unittest import mock
+
+        from rocke.runtime import runtime_coexistence as rc
+
+        torch_stub = types.ModuleType("torch")
+        torch_stub.version = types.SimpleNamespace(hip="7.0.51831-a1b2c3")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_stub}):
+            with mock.patch.object(
+                rc, "_rocm_root_libdirs", return_value=["/opt/rocm/lib"]
+            ):
+                with mock.patch.object(
+                    rc.os.path, "realpath", return_value="/opt/rocm-7.2.3/lib"
+                ):
+                    self.assertEqual(rc._newest_rocm_root_version(), (7, 2))
+                    self.assertTrue(rc._torch_comgr_is_stale())
 
 
 # ---------------------------------------------------------------------

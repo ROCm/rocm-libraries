@@ -484,6 +484,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
+    // Synthetic throttle cycles charged to DS placement in the current WMMA.
+    // Kept separate from coIssueCyclePos_, the real hardware/hazard timeline.
+    int dsSchedulingBudgetUsed_ = 0;
     // Per-window override for maxDsPerWmmaWindow_; empty => use the flat value.
     std::vector<int> dsTargetPerWindow_;
 
@@ -1060,6 +1063,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     activeWmmaBlockedScale_ = node->inst->getHwInstDesc()->blockedScaleMask;
     activeWmmaNode_ = node;
     nonWmmaFillsSinceActiveWmma_ = 0;  // new window: restart WMMA->WMMA fill count
+    dsSchedulingBudgetUsed_ = 0;
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA
     // issue.
@@ -1105,17 +1109,21 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
     int bestWait = 0;
-    std::tuple<bool, int, int> bestKey{};
+    std::tuple<int, int, int> bestKey{};
+    const bool hideBudgetPending = nonWmmaIssuedThisRegion_ < cumulativeWmmaHideBudget_;
 
-    // Ordering, highest key first: (1) free work beats a hidden-stall candidate;
-    // (2) global_read beats other non-WMMA kinds; (3) smallest id.
+    // Ordering, lowest key first: (1) genuinely free work; (2) a throttled DS
+    // whose pacing debt fits the active WMMA's scheduling budget; (3) work that
+    // still needs a real RAW/hazard stall. Within a tier, global_read beats
+    // other non-WMMA kinds, then smallest id wins.
     // Producer-side hazard hoisting is handled separately by
     // decidePromote(), not here — a flagged producer competes on equal terms with
     // everything else unless/until decidePromote() forces it.
     auto consider = [&](DAGNode* cand, int candKind, int candWait) {
         if (!cand) return;
+        const int availabilityRank = candWait == 0 ? 0 : (candKind == kLocalRead ? 1 : 2);
         const int kindRank = (candKind == kGlobalRead) ? 0 : 1;
-        if (considerBest(cand, std::make_tuple(candWait > 0, kindRank, (int)cand->id), best,
+        if (considerBest(cand, std::make_tuple(availabilityRank, kindRank, (int)cand->id), best,
                          bestKey)) {
             kind = candKind;
             bestWait = candWait;
@@ -1137,7 +1145,19 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     int dsThrottleWait = 0;
     if (dsBaseOk) {
         dsThrottleWait = dsReadThrottleWait();
-        consider(pickedDS, kLocalRead, dsThrottleWait);
+        const int schedulingPos = coIssueCyclePos_ + dsSchedulingBudgetUsed_;
+        int schedulingSpace = activeWmmaLatency_ - schedulingPos;
+        for (int pos = schedulingPos; pos < activeWmmaLatency_; ++pos) {
+            if (isBlockedCycle(pos)) {
+                schedulingSpace = pos - schedulingPos;
+                break;
+            }
+        }
+        const bool fitsSchedulingBudget =
+            hideBudgetPending || dsThrottleWait == 0 ||
+            (schedulingPos < activeWmmaLatency_ &&
+             dsThrottleWait + pickedDS->inst->issueCycles <= schedulingSpace);
+        if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
     }
     const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
 
@@ -1337,8 +1357,9 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS
 //            per-WMMA cap. latency = dsReadDrainLatency when it is configured
-//            (> 0), else computeDynamicDrainLatency(hw, matchingDsLoadCount,
-//            targetDSLoadLatency, numWaves).
+//            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
+//            numWaves) over every matching ds_read (last-load latency,
+//            count-weighted average throughput, max maxDrain over the burst).
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1365,22 +1386,25 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         // anchor.
         StinkyInstruction* groupBarrier = group.barriers.front();
 
-        // Step 1b: scan [regionStart, groupBarrier) — find the latest ds_read whose
-        //          dest PSEUDO token matches a src token of this barrier group.
+        // Step 1b: scan [regionStart, groupBarrier) — collect every matching
+        //          ds_read's drain entry (latency + HwInstDesc throughput /
+        //          maxDrain) in order; the latest also anchors the VGPR / WMMA
+        //          overlap scan below.
         StinkyInstruction* targetDSLoad = nullptr;
         IRList::iterator targetDSLoadIt = regionEnd;
-        uint32_t targetDSLoadLatency = 0;
-        int matchingDsLoadCount = 0;
+        std::vector<DsLoadDrainEntry> matchingDsLoads;
         for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
             StinkyInstruction& inst = getStinkyInst(it);
             if (&inst == groupBarrier) break;
             if (!isDSRead(inst)) continue;
             for (const StinkyRegister& src : inst.getSrcRegs()) {
                 if (isPseudoReg(src) && group.tokens.count(src.reg.idx)) {
+                    const HwInstDesc* desc = inst.getHwInstDesc();
+                    matchingDsLoads.push_back(makeDsLoadDrainEntry(
+                        hw_, static_cast<int>(inst.latencyCycles), desc ? desc->dsThroughput : 0,
+                        desc ? desc->dsMaxDrain : 0));
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
-                    targetDSLoadLatency = inst.latencyCycles;
-                    matchingDsLoadCount++;
                     break;
                 }
             }
@@ -1403,16 +1427,17 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
 
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency)
         // + 1. A positive dsReadDrainLatency pins the latency. A non-positive value
-        // (default 0) means "use dynamic drain latency," derived from the matching
-        // ds_load count and the latest matching ds_read latency by the HWModel
-        // helper, keyed by this pass context's NumWaves.
+        // (default 0) means "use dynamic drain latency," derived from all matching
+        // ds_loads via computeDynamicDrainLatencyForLoads (last-load latency,
+        // count-weighted average throughput, max maxDrain over the burst), keyed
+        // by this pass context's NumWaves.
         const int configuredDrainLatency = dsReadDrainLatency();
         const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
+        const int matchingDsLoadCount = static_cast<int>(matchingDsLoads.size());
         const int latencyForAfterThreshold =
             configuredDrainLatency > 0
                 ? configuredDrainLatency
-                : computeDynamicDrainLatency(hw_, matchingDsLoadCount, (int)targetDSLoadLatency,
-                                             numWaves);
+                : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
@@ -1848,8 +1873,16 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
                 PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase C picked non-WMMA dagId="
                                      << smallestPickable->id << " kind=" << pickKind
                                      << " wait=" << pickWait << "\n");
-                // Pay any hidden stall (hidden under the WMMA latency) before issuing.
-                if (pickWait > 0) advanceTime(pickWait);
+                // DS throttle wait consumes only its independent scheduling
+                // budget. RAW/hazard waits remain genuine elapsed stalls.
+                if (pickWait > 0) {
+                    if (pickKind == kLocalRead) {
+                        dsSchedulingBudgetUsed_ += pickWait;
+                        dsReadInflight_.advanceThrottle(pickWait);
+                    } else {
+                        advanceTime(pickWait);
+                    }
+                }
                 return rememberPick(popNonWmma(smallestPickable, pickKind));
             }
 
@@ -1861,8 +1894,17 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         int pickKind = -1;
         int pickWait = 0;
         if (findSmallestPickableNonWmma(pickedDS, &smallestPickable, &pickKind, &pickWait)) {
-            // No latency shadow here, so pickWait is 0; advance kept for safety.
-            if (pickWait > 0) advanceTime(pickWait);
+            // Same split as Phase C: DS throttle wait is pacing-only; RAW/hazard
+            // waits are genuine elapsed stalls. pickWait can be non-zero here
+            // (e.g. throttled DS while hideBudgetPending, or a hazard stall).
+            if (pickWait > 0) {
+                if (pickKind == kLocalRead) {
+                    dsSchedulingBudgetUsed_ += pickWait;
+                    dsReadInflight_.advanceThrottle(pickWait);
+                } else {
+                    advanceTime(pickWait);
+                }
+            }
             return rememberPick(popNonWmma(smallestPickable, pickKind));
         }
     }
@@ -1913,16 +1955,25 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
     int fallbackKind = -1;
     int fallbackWait = 0;
     if (findOldestFallbackNonWmma(pickedDS, &fallback, &fallbackKind, &fallbackWait)) {
-        // Throttle (queue depth) is skipped for progress, but the hazard gate is
-        // unconditional (see config_.hazardRules) and still has to be paid here
-        // too.
-        int waitCycles = fallbackWait;
+        // RAW/hazard and credit-drain waits are real elapsed time. A DS throttle
+        // wait is only pacing debt: real waits satisfy as much of it as they
+        // cover, and any remainder advances only the independent throttle clock.
+        int realWait = fallbackWait;
         if (fallbackKind == kGlobalRead && globalReadQueueFull())
-            waitCycles = std::max(waitCycles, globalReadInflight_.minResidual());
-        if (fallbackKind == kLocalRead) waitCycles = std::max(waitCycles, dsReadThrottleWait());
-        if (waitCycles > 0) advanceTime(waitCycles);
+            realWait = std::max(realWait, globalReadInflight_.minResidual());
+        if (realWait > 0) advanceTime(realWait);
+
+        int throttleWait = 0;
+        if (fallbackKind == kLocalRead) {
+            throttleWait = dsReadThrottleWait();
+            if (throttleWait > 0) {
+                dsSchedulingBudgetUsed_ += throttleWait;
+                dsReadInflight_.advanceThrottle(throttleWait);
+            }
+        }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
-                             << " kind=" << fallbackKind << " wait=" << waitCycles << "\n");
+                             << " kind=" << fallbackKind << " wait=" << realWait
+                             << " throttleWait=" << throttleWait << "\n");
         return rememberPick(popNonWmma(fallback, fallbackKind));
     }
 
@@ -1989,6 +2040,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeWmmaBlockedScale_ = 0;
     activeWmmaNode_ = nullptr;
     nonWmmaFillsSinceActiveWmma_ = 0;
+    dsSchedulingBudgetUsed_ = 0;
     nonWmmaIssuedThisRegion_ = 0;
     cumulativeWmmaHideBudget_ = 0;
     hideBudget_ = {};
