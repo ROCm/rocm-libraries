@@ -60,6 +60,8 @@ class LocalReadVALU(LocalRead):
         blockWidth        = instruction.blockWidth
         offsetMultiplier  = 1 # instruction.offsetMultiplier
         valuIdx           = 0
+        # f64c+TDM (non-dot2 VALU): K-major LDS -> tile elements stride by _DepthU+LdsPad.
+        umldsVALU         = kernel["UnrollMajorLDS%s" % tc] and not kernel["UseDotInstruction"]
         # dot2: currently only support unroll major LDS
         if kernel["UseDotInstruction"]:
             numVectorsPerTile = kernel["ThreadTile%u"%tile01]
@@ -69,6 +71,9 @@ class LocalReadVALU(LocalRead):
         else:
             numVectorsPerTile = (kernel["ThreadTile%u"%tile01]//kernel["VectorWidthA"])
             numReadsPerVector = ceil((kernel["VectorWidthA"] * tP["bpe"]) / (blockWidth*4)) # bytes/register
+            if umldsVALU:
+                LdsPad     = kernel["LdsPad%s"%tc] if kernel["LdsBlockSizePerPad%s"%tc] == 0 else 0
+                tileStride = kernel["_DepthU%s"%tc] + LdsPad
 
         for vIdx in range(0, numVectorsPerTile):
             for rIdx in range(0, int(numReadsPerVector)):
@@ -81,7 +86,7 @@ class LocalReadVALU(LocalRead):
 
                 for oIdx in range(0, numOffsets):
                     # dot2
-                    if kernel["UseDotInstruction"]:
+                    if kernel["UseDotInstruction"] or umldsVALU:
                         paramList.append(int(((rIdx*blockWidth + kernel["SubGroup%u"%tile01] * (vIdx*numOffsets+oIdx) * tileStride \
                             + tP["localReadOffset"]) * tP["bpe"] + tP["localReadSwapByteOffset"]) // offsetMultiplier))
                     else:
