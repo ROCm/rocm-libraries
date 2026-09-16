@@ -80,7 +80,7 @@ protected:
 
     static flatbuffers::FlatBufferBuilder validGraph()
     {
-        return createUnaryPointwiseGraph(GetParam().mode);
+        return createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode));
     }
 };
 
@@ -106,22 +106,23 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsTrueForVali
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes,
        IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             false,
-                                             false,
-                                             /*overrideShapeEnabled=*/true);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         false,
+                                                         false,
+                                                         /*overrideShapeEnabled=*/true));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -129,13 +130,14 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes,
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForNonFloatComputeType)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::HALF);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::HALF));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -143,20 +145,21 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForNon
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForVirtualInputTensor)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             /*virtualInput=*/true);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         /*virtualInput=*/true));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -164,21 +167,22 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForVir
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForVirtualOutputTensor)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             false,
-                                             true);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         false,
+                                                         true));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -186,12 +190,13 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForVir
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsTrueForHalfIoDtype)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::HALF);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::HALF));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -199,12 +204,13 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsTrueForHalf
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForBfloat16IoDtype)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::BFLOAT16);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::BFLOAT16));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -212,8 +218,8 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForBfl
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsTrueForRank1Tensor)
 {
-    auto builder = createUnaryPointwiseGraph(
-        GetParam().mode, {16}, std::vector<int64_t>{1}, {16}, std::vector<int64_t>{1});
+    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(
+        GetParam().mode, {16}, std::vector<int64_t>{1}, {16}, std::vector<int64_t>{1}));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -221,11 +227,12 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsTrueForRank
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForRank5Tensor)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 2, 3, 4, 5},
-                                             std::vector<int64_t>{120, 60, 20, 5, 1},
-                                             {1, 2, 3, 4, 5},
-                                             std::vector<int64_t>{120, 60, 20, 5, 1});
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 2, 3, 4, 5},
+                                                         std::vector<int64_t>{120, 60, 20, 5, 1},
+                                                         {1, 2, 3, 4, 5},
+                                                         std::vector<int64_t>{120, 60, 20, 5, 1}));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -233,11 +240,12 @@ TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForRan
 
 TEST_P(TestMiopenUnaryActivationPlanBuilderModes, IsApplicableReturnsFalseForMismatchedElementCount)
 {
-    auto builder = createUnaryPointwiseGraph(GetParam().mode,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 8},
-                                             std::vector<int64_t>{96, 32, 8, 1});
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(GetParam().mode,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 8},
+                                                         std::vector<int64_t>{96, 32, 8, 1}));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -295,7 +303,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForUnsuppor
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForUnsupportedMode)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::ADD);
+    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::ADD));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -309,7 +317,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForBackward
     for(const auto mode :
         {PointwiseMode::RELU_BWD, PointwiseMode::SIGMOID_BWD, PointwiseMode::TANH_BWD})
     {
-        auto builder = createUnaryPointwiseGraph(mode);
+        auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(mode));
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph))
@@ -327,8 +335,8 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForNullStri
         std::optional<std::vector<int64_t>> outputStrides = std::vector<int64_t>{48, 16, 4, 1};
         (nullInput ? inputStrides : outputStrides) = std::nullopt;
 
-        auto builder = createUnaryPointwiseGraph(
-            PointwiseMode::RELU_FWD, {1, 3, 4, 4}, inputStrides, {1, 3, 4, 4}, outputStrides);
+        auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(
+            PointwiseMode::RELU_FWD, {1, 3, 4, 4}, inputStrides, {1, 3, 4, 4}, outputStrides));
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph))
@@ -340,8 +348,8 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForDimsStri
 {
     // Dims and strides are indexed in lockstep when the descriptor is built; a rank-4 dims array
     // paired with a rank-3 strides array would read past the end of the shorter one.
-    auto builder = createUnaryPointwiseGraph(
-        PointwiseMode::RELU_FWD, {1, 3, 4, 4}, std::vector<int64_t>{16, 4, 1}, {1, 3, 4, 4});
+    auto builder = createPointwiseGraph(PointwiseGraphSpec::unary(
+        PointwiseMode::RELU_FWD, {1, 3, 4, 4}, std::vector<int64_t>{16, 4, 1}, {1, 3, 4, 4}));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -355,15 +363,16 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForDimsStri
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithUpperClip)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             std::nullopt,
-                                             /*reluUpperClip=*/1.0f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         std::nullopt,
+                                                         /*reluUpperClip=*/1.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -371,16 +380,17 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithU
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithLowerClipSlope)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             std::nullopt,
-                                             std::nullopt,
-                                             /*reluLowerClipSlope=*/0.1f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         std::nullopt,
+                                                         std::nullopt,
+                                                         /*reluLowerClipSlope=*/0.1f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -391,16 +401,17 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 {
     // MIOpen's LEAKYRELU is slope-only (knee fixed at 0) and cannot represent a non-zero
     // lower_clip; accepting this would silently drop the lower_clip and miscompute the op.
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/0.3f,
-                                             std::nullopt,
-                                             /*reluLowerClipSlope=*/0.01f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/0.3f,
+                                                         std::nullopt,
+                                                         /*reluLowerClipSlope=*/0.01f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -410,16 +421,17 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
        IsApplicableReturnsTrueForReluWithZeroLowerClipAndSlope)
 {
     // A zero lower_clip is a no-op knee, so slope-only leaky ReLU is faithfully representable.
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/0.0f,
-                                             std::nullopt,
-                                             /*reluLowerClipSlope=*/0.01f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/0.0f,
+                                                         std::nullopt,
+                                                         /*reluLowerClipSlope=*/0.01f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -427,15 +439,16 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithLowerAndUpperClip)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/-1.0f,
-                                             /*reluUpperClip=*/1.0f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/-1.0f,
+                                                         /*reluUpperClip=*/1.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -444,14 +457,15 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithL
 TEST_F(TestMiopenUnaryActivationPlanBuilder,
        IsApplicableReturnsFalseForReluWithNonZeroLowerClipOnly)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/0.5f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/0.5f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -460,15 +474,16 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 TEST_F(TestMiopenUnaryActivationPlanBuilder,
        IsApplicableReturnsTrueForReluWithZeroLowerAndUpperClip)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/0.0f,
-                                             /*reluUpperClip=*/1.0f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/0.0f,
+                                                         /*reluUpperClip=*/1.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -477,14 +492,15 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 TEST_F(TestMiopenUnaryActivationPlanBuilder,
        IsApplicableReturnsFalseForReluWithNegativeLowerClipAndNoUpperClipOrSlope)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/-1.0f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/-1.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -492,14 +508,15 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithZeroLowerClipOnly)
 {
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/0.0f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/0.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -510,16 +527,17 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsFalseForReluWith
     // The reference computes a leaky ramp below the knee and clips above it. MIOpen's
     // CLIPPEDRELU is flat below the knee and has no slope parameter, and the mapping reaches it
     // before its leaky branch, so accepting this would silently drop the slope.
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             std::nullopt,
-                                             /*reluUpperClip=*/6.0f,
-                                             /*reluLowerClipSlope=*/0.01f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         std::nullopt,
+                                                         /*reluUpperClip=*/6.0f,
+                                                         /*reluLowerClipSlope=*/0.01f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -529,16 +547,17 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
        IsApplicableReturnsFalseForReluWithLowerAndUpperClipAndSlope)
 {
     // Same reasoning for CLAMP, which floors at lower_clip instead of following the slope.
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/-1.0f,
-                                             /*reluUpperClip=*/1.0f,
-                                             /*reluLowerClipSlope=*/0.01f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/-1.0f,
+                                                         /*reluUpperClip=*/1.0f,
+                                                         /*reluLowerClipSlope=*/0.01f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -549,16 +568,17 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 {
     // A zero slope is a no-op ramp: CLIPPEDRELU already computes zero below the knee, so the
     // combination is representable exactly and must not be declined.
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             std::nullopt,
-                                             /*reluUpperClip=*/6.0f,
-                                             /*reluLowerClipSlope=*/0.0f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         std::nullopt,
+                                                         /*reluUpperClip=*/6.0f,
+                                                         /*reluLowerClipSlope=*/0.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -568,16 +588,17 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
        IsApplicableReturnsTrueForReluWithLowerAndUpperClipAndZeroSlope)
 {
     // Likewise CLAMP floors at lower_clip, which is what a zero slope asks for.
-    auto builder = createUnaryPointwiseGraph(PointwiseMode::RELU_FWD,
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             {1, 3, 4, 4},
-                                             std::vector<int64_t>{48, 16, 4, 1},
-                                             DataType::FLOAT,
-                                             DataType::FLOAT,
-                                             /*reluLowerClip=*/-1.0f,
-                                             /*reluUpperClip=*/1.0f,
-                                             /*reluLowerClipSlope=*/0.0f);
+    auto builder
+        = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         {1, 3, 4, 4},
+                                                         std::vector<int64_t>{48, 16, 4, 1},
+                                                         DataType::FLOAT,
+                                                         DataType::FLOAT,
+                                                         /*reluLowerClip=*/-1.0f,
+                                                         /*reluUpperClip=*/1.0f,
+                                                         /*reluLowerClipSlope=*/0.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -591,12 +612,9 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, UnaryBuilderDeclinesNodeWithSecondI
 {
     // A node carrying in_1_tensor_uid is a binary node; the unary builder must not treat it as
     // a unary RELU/SIGMOID/TANH node purely because in_2 is absent.
-    auto builder = createPointwiseGraph(PointwiseMode::RELU_FWD,
-                                        {1, 3, 4, 4},
-                                        std::vector<int64_t>{48, 16, 4, 1},
-                                        {1, 3, 4, 4},
-                                        std::vector<int64_t>{48, 16, 4, 1},
-                                        std::vector<int64_t>{1, 3, 4, 4});
+    auto spec = PointwiseGraphSpec::unary();
+    spec.secondInputDims = std::vector<int64_t>{1, 3, 4, 4};
+    auto builder = createPointwiseGraph(spec);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -606,14 +624,9 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, UnaryBuilderDeclinesNodeWithThirdIn
 {
     // A node carrying in_2_tensor_uid is a ternary node (e.g. BINARY_SELECT); it must be
     // declined regardless of whether in_1 is also present.
-    auto builder = createPointwiseGraph(PointwiseMode::RELU_FWD,
-                                        {1, 3, 4, 4},
-                                        std::vector<int64_t>{48, 16, 4, 1},
-                                        {1, 3, 4, 4},
-                                        std::vector<int64_t>{48, 16, 4, 1},
-                                        std::nullopt,
-                                        std::vector<int64_t>{48, 16, 4, 1},
-                                        std::vector<int64_t>{1, 3, 4, 4});
+    auto spec = PointwiseGraphSpec::unary();
+    spec.thirdInputDims = std::vector<int64_t>{1, 3, 4, 4};
+    auto builder = createPointwiseGraph(spec);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
@@ -629,13 +642,14 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, BinaryModesAreDeclinedByUnaryBuilde
                            PointwiseMode::MAX_OP,
                            PointwiseMode::MIN_OP})
     {
-        auto builder = createBinaryPointwiseGraph(mode,
-                                                  {1, 3, 4, 4},
-                                                  std::vector<int64_t>{48, 16, 4, 1},
-                                                  {1, 3, 4, 4},
-                                                  std::vector<int64_t>{48, 16, 4, 1},
-                                                  std::vector<int64_t>{1, 3, 4, 4},
-                                                  std::vector<int64_t>{48, 16, 4, 1});
+        auto builder
+            = createPointwiseGraph(PointwiseGraphSpec::binary(mode,
+                                                              {1, 3, 4, 4},
+                                                              std::vector<int64_t>{48, 16, 4, 1},
+                                                              {1, 3, 4, 4},
+                                                              std::vector<int64_t>{48, 16, 4, 1},
+                                                              std::vector<int64_t>{1, 3, 4, 4},
+                                                              std::vector<int64_t>{48, 16, 4, 1}));
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph))

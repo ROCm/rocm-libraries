@@ -1283,39 +1283,128 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
-// Builds a single-node pointwise graph. Defaults describe the canonical valid unary graph: a
-// non-virtual fp32 NCHW RELU_FWD node with no second or third input (in_0 uid 1, out_0 uid 2).
-// secondInputDims/thirdInputDims being std::nullopt omits that input (uid 3 / uid 4 when
-// present); an unset strides optional emits a null strides pointer rather than an empty vector.
-inline flatbuffers::FlatBufferBuilder createPointwiseGraph(
+// Configuration for a single-node pointwise graph.
+struct PointwiseGraphSpec
+{
+    // Unary pointwise graph: a single input/output, no second or third operand.
+    static PointwiseGraphSpec unary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode
+                                    = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+                                    const std::vector<int64_t>& inputDims = {1, 3, 4, 4},
+                                    std::optional<std::vector<int64_t>> inputStrides
+                                    = std::vector<int64_t>{48, 16, 4, 1},
+                                    const std::vector<int64_t>& outputDims = {1, 3, 4, 4},
+                                    std::optional<std::vector<int64_t>> outputStrides
+                                    = std::vector<int64_t>{48, 16, 4, 1},
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType
+                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                    std::optional<float> reluLowerClip = std::nullopt,
+                                    std::optional<float> reluUpperClip = std::nullopt,
+                                    std::optional<float> reluLowerClipSlope = std::nullopt,
+                                    std::optional<float> swishBeta = std::nullopt,
+                                    std::optional<float> eluAlpha = std::nullopt,
+                                    std::optional<float> softplusBeta = std::nullopt,
+                                    bool virtualInput = false,
+                                    bool virtualOutput = false,
+                                    bool overrideShapeEnabled = false)
+    {
+        PointwiseGraphSpec spec;
+        spec.mode = mode;
+        spec.inputDims = inputDims;
+        spec.inputStrides = std::move(inputStrides);
+        spec.outputDims = outputDims;
+        spec.outputStrides = std::move(outputStrides);
+        spec.ioDataType = ioDataType;
+        spec.computeDataType = computeDataType;
+        spec.reluLowerClip = reluLowerClip;
+        spec.reluUpperClip = reluUpperClip;
+        spec.reluLowerClipSlope = reluLowerClipSlope;
+        spec.swishBeta = swishBeta;
+        spec.eluAlpha = eluAlpha;
+        spec.softplusBeta = softplusBeta;
+        spec.virtualInput = virtualInput;
+        spec.virtualOutput = virtualOutput;
+        spec.overrideShapeEnabled = overrideShapeEnabled;
+        return spec;
+    }
+
+    // Binary pointwise graph: a second input is always present (in_1 uid 3), no third operand.
+    static PointwiseGraphSpec binary(
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode
+        = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
+        const std::vector<int64_t>& inputDims = {1, 3, 4, 4},
+        std::optional<std::vector<int64_t>> inputStrides = std::vector<int64_t>{48, 16, 4, 1},
+        const std::vector<int64_t>& outputDims = {1, 3, 4, 4},
+        std::optional<std::vector<int64_t>> outputStrides = std::vector<int64_t>{48, 16, 4, 1},
+        const std::vector<int64_t>& secondInputDims = {1, 3, 1, 1},
+        std::optional<std::vector<int64_t>> secondInputStrides = std::vector<int64_t>{3, 1, 1, 1},
+        hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> secondInputDataType
+        = std::nullopt,
+        bool virtualInput = false,
+        bool virtualOutput = false,
+        bool virtualSecondInput = false,
+        bool overrideShapeEnabled = false)
+    {
+        PointwiseGraphSpec spec;
+        spec.mode = mode;
+        spec.inputDims = inputDims;
+        spec.inputStrides = std::move(inputStrides);
+        spec.outputDims = outputDims;
+        spec.outputStrides = std::move(outputStrides);
+        spec.secondInputDims = secondInputDims;
+        spec.secondInputStrides = std::move(secondInputStrides);
+        spec.ioDataType = ioDataType;
+        spec.computeDataType = computeDataType;
+        spec.secondInputDataType = secondInputDataType;
+        spec.virtualInput = virtualInput;
+        spec.virtualOutput = virtualOutput;
+        spec.virtualSecondInput = virtualSecondInput;
+        spec.overrideShapeEnabled = overrideShapeEnabled;
+        return spec;
+    }
+
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode
-    = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
-    const std::vector<int64_t>& inputDims = {1, 3, 4, 4},
-    std::optional<std::vector<int64_t>> inputStrides = std::vector<int64_t>{48, 16, 4, 1},
-    const std::vector<int64_t>& outputDims = {1, 3, 4, 4},
-    std::optional<std::vector<int64_t>> outputStrides = std::vector<int64_t>{48, 16, 4, 1},
-    std::optional<std::vector<int64_t>> secondInputDims = std::nullopt,
-    std::optional<std::vector<int64_t>> secondInputStrides = std::vector<int64_t>{48, 16, 4, 1},
-    std::optional<std::vector<int64_t>> thirdInputDims = std::nullopt,
-    std::optional<std::vector<int64_t>> thirdInputStrides = std::vector<int64_t>{48, 16, 4, 1},
+        = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD;
+
+    std::vector<int64_t> inputDims{1, 3, 4, 4};
+    std::optional<std::vector<int64_t>> inputStrides{std::vector<int64_t>{48, 16, 4, 1}};
+    std::vector<int64_t> outputDims{1, 3, 4, 4};
+    std::optional<std::vector<int64_t>> outputStrides{std::vector<int64_t>{48, 16, 4, 1}};
+
+    std::optional<std::vector<int64_t>> secondInputDims;
+    std::optional<std::vector<int64_t>> secondInputStrides{std::vector<int64_t>{48, 16, 4, 1}};
+    std::optional<std::vector<int64_t>> thirdInputDims;
+    std::optional<std::vector<int64_t>> thirdInputStrides{std::vector<int64_t>{48, 16, 4, 1}};
+
     hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> secondInputDataType
-    = std::nullopt,
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> thirdInputDataType = std::nullopt,
-    std::optional<float> reluLowerClip = std::nullopt,
-    std::optional<float> reluUpperClip = std::nullopt,
-    std::optional<float> reluLowerClipSlope = std::nullopt,
-    std::optional<float> swishBeta = std::nullopt,
-    std::optional<float> eluAlpha = std::nullopt,
-    std::optional<float> softplusBeta = std::nullopt,
-    bool virtualInput = false,
-    bool virtualOutput = false,
-    bool virtualSecondInput = false,
-    bool virtualThirdInput = false,
-    bool overrideShapeEnabled = false)
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    // Both default to ioDataType when unset.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> secondInputDataType;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> thirdInputDataType;
+
+    std::optional<float> reluLowerClip;
+    std::optional<float> reluUpperClip;
+    std::optional<float> reluLowerClipSlope;
+    std::optional<float> swishBeta;
+    std::optional<float> eluAlpha;
+    std::optional<float> softplusBeta;
+
+    bool virtualInput = false;
+    bool virtualOutput = false;
+    bool virtualSecondInput = false;
+    bool virtualThirdInput = false;
+    bool overrideShapeEnabled = false;
+};
+
+// Builds a single-node pointwise graph from `spec`.
+inline flatbuffers::FlatBufferBuilder createPointwiseGraph(const PointwiseGraphSpec& spec)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -1323,66 +1412,73 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph(
 
     std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
-    const std::vector<int64_t>* inputStridesPtr = inputStrides ? &inputStrides.value() : nullptr;
-    const std::vector<int64_t>* outputStridesPtr = outputStrides ? &outputStrides.value() : nullptr;
+    const std::vector<int64_t>* inputStridesPtr
+        = spec.inputStrides ? &spec.inputStrides.value() : nullptr;
+    const std::vector<int64_t>* outputStridesPtr
+        = spec.outputStrides ? &spec.outputStrides.value() : nullptr;
 
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 1, "input", ioDataType, inputStridesPtr, &inputDims, virtualInput));
+        builder, 1, "input", spec.ioDataType, inputStridesPtr, &spec.inputDims, spec.virtualInput));
 
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 2, "output", ioDataType, outputStridesPtr, &outputDims, virtualOutput));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
+                                                                          2,
+                                                                          "output",
+                                                                          spec.ioDataType,
+                                                                          outputStridesPtr,
+                                                                          &spec.outputDims,
+                                                                          spec.virtualOutput));
 
     flatbuffers::Optional<int64_t> in1Uid = flatbuffers::nullopt;
-    if(secondInputDims.has_value())
+    if(spec.secondInputDims.has_value())
     {
         const std::vector<int64_t>* secondInputStridesPtr
-            = secondInputStrides ? &secondInputStrides.value() : nullptr;
-        tensorAttributes.push_back(
-            data_objects::CreateTensorAttributesDirect(builder,
-                                                       3,
-                                                       "second_input",
-                                                       secondInputDataType.value_or(ioDataType),
-                                                       secondInputStridesPtr,
-                                                       &secondInputDims.value(),
-                                                       virtualSecondInput));
+            = spec.secondInputStrides ? &spec.secondInputStrides.value() : nullptr;
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+            builder,
+            3,
+            "second_input",
+            spec.secondInputDataType.value_or(spec.ioDataType),
+            secondInputStridesPtr,
+            &spec.secondInputDims.value(),
+            spec.virtualSecondInput));
         in1Uid = 3;
     }
 
     flatbuffers::Optional<int64_t> in2Uid = flatbuffers::nullopt;
-    if(thirdInputDims.has_value())
+    if(spec.thirdInputDims.has_value())
     {
         const std::vector<int64_t>* thirdInputStridesPtr
-            = thirdInputStrides ? &thirdInputStrides.value() : nullptr;
-        tensorAttributes.push_back(
-            data_objects::CreateTensorAttributesDirect(builder,
-                                                       4,
-                                                       "third_input",
-                                                       thirdInputDataType.value_or(ioDataType),
-                                                       thirdInputStridesPtr,
-                                                       &thirdInputDims.value(),
-                                                       virtualThirdInput));
+            = spec.thirdInputStrides ? &spec.thirdInputStrides.value() : nullptr;
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+            builder,
+            4,
+            "third_input",
+            spec.thirdInputDataType.value_or(spec.ioDataType),
+            thirdInputStridesPtr,
+            &spec.thirdInputDims.value(),
+            spec.virtualThirdInput));
         in2Uid = 4;
     }
 
     auto pwAttr = data_objects::CreatePointwiseAttributes(builder,
-                                                          mode,
-                                                          reluLowerClip,
-                                                          reluUpperClip,
-                                                          reluLowerClipSlope,
+                                                          spec.mode,
+                                                          spec.reluLowerClip,
+                                                          spec.reluUpperClip,
+                                                          spec.reluLowerClipSlope,
                                                           flatbuffers::nullopt,
                                                           1,
                                                           in1Uid,
                                                           in2Uid,
                                                           2,
-                                                          swishBeta,
-                                                          eluAlpha,
-                                                          softplusBeta);
+                                                          spec.swishBeta,
+                                                          spec.eluAlpha,
+                                                          spec.softplusBeta);
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(
         data_objects::CreateNodeDirect(builder,
                                        "pointwise",
-                                       computeDataType,
+                                       spec.computeDataType,
                                        data_objects::NodeAttributes::PointwiseAttributes,
                                        pwAttr.Union()));
 
@@ -1394,108 +1490,10 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph(
                                                        &tensorAttributes,
                                                        &nodes,
                                                        flatbuffers::nullopt,
-                                                       overrideShapeEnabled);
+                                                       spec.overrideShapeEnabled);
     builder.Finish(graphOffset);
 
     return builder;
-}
-
-// Unary pointwise graph: a single input/output, no second or third operand. Wires only the
-// activation-relevant params of createPointwiseGraph (relu clip family, swish/elu/softplus).
-inline flatbuffers::FlatBufferBuilder createUnaryPointwiseGraph(
-    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode
-    = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
-    const std::vector<int64_t>& inputDims = {1, 3, 4, 4},
-    std::optional<std::vector<int64_t>> inputStrides = std::vector<int64_t>{48, 16, 4, 1},
-    const std::vector<int64_t>& outputDims = {1, 3, 4, 4},
-    std::optional<std::vector<int64_t>> outputStrides = std::vector<int64_t>{48, 16, 4, 1},
-    hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-    std::optional<float> reluLowerClip = std::nullopt,
-    std::optional<float> reluUpperClip = std::nullopt,
-    std::optional<float> reluLowerClipSlope = std::nullopt,
-    std::optional<float> swishBeta = std::nullopt,
-    std::optional<float> eluAlpha = std::nullopt,
-    std::optional<float> softplusBeta = std::nullopt,
-    bool virtualInput = false,
-    bool virtualOutput = false,
-    bool overrideShapeEnabled = false)
-{
-    return createPointwiseGraph(mode,
-                                inputDims,
-                                std::move(inputStrides),
-                                outputDims,
-                                std::move(outputStrides),
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                ioDataType,
-                                computeDataType,
-                                std::nullopt,
-                                std::nullopt,
-                                reluLowerClip,
-                                reluUpperClip,
-                                reluLowerClipSlope,
-                                swishBeta,
-                                eluAlpha,
-                                softplusBeta,
-                                virtualInput,
-                                virtualOutput,
-                                false,
-                                false,
-                                overrideShapeEnabled);
-}
-
-// Binary pointwise graph: a second input is always present (in_1 uid 3), no third operand. Wires
-// only the params relevant to a two-operand pointwise op; secondInputStrides retains the
-// null-vs-empty-strides distinction from createPointwiseGraph.
-inline flatbuffers::FlatBufferBuilder createBinaryPointwiseGraph(
-    hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode
-    = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
-    const std::vector<int64_t>& inputDims = {1, 3, 4, 4},
-    std::optional<std::vector<int64_t>> inputStrides = std::vector<int64_t>{48, 16, 4, 1},
-    const std::vector<int64_t>& outputDims = {1, 3, 4, 4},
-    std::optional<std::vector<int64_t>> outputStrides = std::vector<int64_t>{48, 16, 4, 1},
-    const std::vector<int64_t>& secondInputDims = {1, 3, 1, 1},
-    std::optional<std::vector<int64_t>> secondInputStrides = std::vector<int64_t>{3, 1, 1, 1},
-    hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
-    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> secondInputDataType
-    = std::nullopt,
-    bool virtualInput = false,
-    bool virtualOutput = false,
-    bool virtualSecondInput = false,
-    bool overrideShapeEnabled = false)
-{
-    return createPointwiseGraph(mode,
-                                inputDims,
-                                std::move(inputStrides),
-                                outputDims,
-                                std::move(outputStrides),
-                                secondInputDims,
-                                std::move(secondInputStrides),
-                                std::nullopt,
-                                std::nullopt,
-                                ioDataType,
-                                computeDataType,
-                                secondInputDataType,
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                std::nullopt,
-                                virtualInput,
-                                virtualOutput,
-                                virtualSecondInput,
-                                false,
-                                overrideShapeEnabled);
 }
 
 inline flatbuffers::FlatBufferBuilder
