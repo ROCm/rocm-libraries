@@ -1,0 +1,130 @@
+{
+  "byte_order": "little",
+  "format": "dnn-benchmarking-tensors",
+  "graph": {
+    "name": "fixture",
+    "path": "fixture.hipdnn.json",
+    "sha256": "c26ac0c369c68642df7810c6fc86aed2f38fa84624589e4db7d7911f80ff64a8"
+  },
+  "layout": "element-space",
+  "phase": "input",
+  "tensors": [
+    {
+      "byte_length": 24,
+      "data_type": "float",
+      "encoding": "f32",
+      "file": "fixture.hipdnn.tensor1.bin",
+      "graph_strides": [
+        3,
+        1
+      ],
+      "name": "x_f32",
+      "sha256": "24ae2dfe8df57c1b80e54cef3d90ac3b417fd98973345a5f616bbc9a75dcc202",
+      "shape": [
+        2,
+        3
+      ],
+      "storage_elements": 6,
+      "uid": "1"
+    },
+    {
+      "byte_length": 8,
+      "data_type": "half",
+      "encoding": "f16",
+      "file": "fixture.hipdnn.tensor2.bin",
+      "graph_strides": [
+        1
+      ],
+      "name": "x_f16",
+      "sha256": "544ead9114d04ceb58feeb580077ebed66fcd24a7d90e65caa43e0038425dc29",
+      "shape": [
+        4
+      ],
+      "storage_elements": 4,
+      "uid": "2"
+    },
+    {
+      "byte_length": 10,
+      "data_type": "bfloat16",
+      "encoding": "bf16",
+      "file": "fixture.hipdnn.tensor3.bin",
+      "graph_strides": [
+        3,
+        1
+      ],
+      "name": "x_bf16",
+      "sha256": "9f96da9ee0dbe354332e4906237ed4173e2cfe70fd0f361a2f8cf0df6e2a9f42",
+      "shape": [
+        2,
+        2
+      ],
+      "storage_elements": 5,
+      "uid": "3"
+    },
+    {
+      "byte_length": 16,
+      "data_type": "double",
+      "encoding": "f64",
+      "file": "fixture.hipdnn.tensor4.bin",
+      "graph_strides": [
+        1
+      ],
+      "name": "x_f64",
+      "sha256": "87d6f5ac35db2688edd48ed2994a1245e3b2d0c38562399a4ac08ddd6a88b5b6",
+      "shape": [
+        2
+      ],
+      "storage_elements": 2,
+      "uid": "4"
+    },
+    {
+      "byte_length": 12,
+      "data_type": "int32",
+      "encoding": "int32",
+      "file": "fixture.hipdnn.tensor5.bin",
+      "graph_strides": [
+        1
+      ],
+      "name": "x_i32",
+      "sha256": "a6246b2f72bd458c10e71b86872387eab89ca1fe7b54ba2e111d0b9eeb9ab8c5",
+      "shape": [
+        3
+      ],
+      "storage_elements": 3,
+      "uid": "5"
+    },
+    {
+      "byte_length": 2,
+      "data_type": "int8",
+      "encoding": "int8",
+      "file": "fixture.hipdnn.tensor6.bin",
+      "graph_strides": [
+        1
+      ],
+      "name": "x_i8",
+      "sha256": "e65aceb89baab6ddba7f8ff28bdaf5da68026060445be6ac268c138d9a959b3f",
+      "shape": [
+        2
+      ],
+      "storage_elements": 2,
+      "uid": "6"
+    },
+    {
+      "byte_length": 2,
+      "data_type": "uint8",
+      "encoding": "uint8",
+      "file": "fixture.hipdnn.tensor7.bin",
+      "graph_strides": [
+        1
+      ],
+      "name": "x_u8",
+      "sha256": "06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8",
+      "shape": [
+        2
+      ],
+      "storage_elements": 2,
+      "uid": "7"
+    }
+  ],
+  "version": 1
+}

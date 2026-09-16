@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "timestamp": "2026-09-14T22:00:54.400618+00:00",
+    "hostname": "benchmark-workers-9b2605f4-0f82-4f55-b506-798a6d0fdf04-hn9gm",
+    "total_graphs": 1,
+    "total_combinations": 2,
+    "pass_combinations": 2,
+    "fail_combinations": 0,
+    "skip_combinations": 0,
+    "error_combinations": 0,
+    "pytorch_sdpa_backend_requested": null,
+    "pytorch_rocm_fa_library_requested": null,
+    "rocm_version": "7.16.26332",
+    "cuda_version": null,
+    "cudnn_version": null,
+    "gpu_model": "AMD Instinct MI300X",
+    "gpu_arch": "gfx942",
+    "python_version": "3.12.3",
+    "hipdnn_version": "0.2.0",
+    "cpu_model": "Intel(R) Xeon(R) Platinum 8480C",
+    "cpu_count": 224,
+    "numa_nodes": 2,
+    "total_ram_gb": 2015.49,
+    "kernel_version": "6.8.0-31-generic",
+    "gpu_compute_units": null,
+    "gpu_hbm_gb": null,
+    "gpu_pcie_link": null,
+    "amdgpu_driver_version": null,
+    "host_rss_mb": 3223.61328125,
+    "host_ram_available_mb": 1959289.08984375,
+    "vram_used_mb": null,
+    "vram_total_mb": null
+  },
+  "graphs": [
+    {
+      "graph_name": "CLIP-ViT-B_16__bf16_nhwc_patchify16_bf16",
+      "graph_path": "/tmp/benchmark-result-tqa430fv/249e90db9872c2314e5e709f138b1e126e97302d6eb5ac0d877512a05e5cd95c.json",
+      "results": [
+        {
+          "provider": "MIOPEN_ENGINE",
+          "engine_id": 1563989756945604900,
+          "engine_name": "MIOPEN_ENGINE",
+          "engine_version": "0.2.0.5e5597d",
+          "started_at": "2026-09-14T22:00:49.376700+00:00",
+          "status": "success",
+          "plugin_path": "/opt/dnn-benchmark/.venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/hipdnn_plugins/engines",
+          "cpu_build_time_ms": 1.825900049880147,
+          "gpu_kernel_stats": {
+            "mean_ms": 0.03432969972491264,
+            "median_ms": 0.034138498827815056,
+            "std_ms": 0.0006430813745650898,
+            "min_ms": 0.03359699994325638,
+            "max_ms": 0.03660399839282036,
+            "p95_ms": 0.035925000347197054,
+            "p99_ms": 0.03620799906551838,
+            "total_ms": 3.4329699724912643
+          },
+          "host_stats": {
+            "mean_ms": 0.01781604834832251,
+            "median_ms": 0.01689151395112276,
+            "std_ms": 0.00419402487797334,
+            "min_ms": 0.01616694498807192,
+            "max_ms": 0.05127093754708767,
+            "p95_ms": 0.020554638467729085,
+            "p99_ms": 0.038394039729610155,
+            "total_ms": 1.781604834832251
+          },
+          "elapsed_time_ms": 4001.0396040743217,
+          "workspace_bytes": 602112,
+          "analytical_flops": 231211008,
+          "analytical_io_bytes": 1781760,
+          "derived_tflops_per_s": 6.735013992336583,
+          "derived_gbytes_per_s": 51.90141522580806,
+          "cpu_user_time_per_iter_us": 199.99999999999574,
+          "cpu_kernel_time_per_iter_us": 799.9999999999984,
+          "correctness": {
+            "passed": false,
+            "execution_success": true,
+            "tolerance_match": null,
+            "rtol": 0.00001,
+            "atol": 0.000001,
+            "error_message": "No reference provider requested"
+          },
+          "tensor_manifest": "tests/fixtures/tensors/output/manifest.json"
+        },
+        {
+          "provider": "pytorch",
+          "engine_id": -6748551569128941000,
+          "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+          "engine_version": "0.2.0.5e5597d",
+          "started_at": "2026-09-14T22:00:53.377714+00:00",
+          "status": "success",
+          "plugin_path": "/opt/dnn-benchmark/.venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/hipdnn_plugins/engines",
+          "cpu_build_time_ms": 1.2457299744710326,
+          "gpu_kernel_stats": {
+            "mean_ms": 8.199853534698486,
+            "median_ms": 8.220602989196777,
+            "std_ms": 0.08076351516545266,
+            "min_ms": 7.8387451171875,
+            "max_ms": 8.333481788635254,
+            "p95_ms": 8.328022670745849,
+            "p99_ms": 8.333205156326294,
+            "total_ms": 819.9853534698486
+          },
+          "host_stats": {
+            "mean_ms": 0.009719408117234707,
+            "median_ms": 0.009393959771841764,
+            "std_ms": 0.0018111866097395375,
+            "min_ms": 0.008856062777340412,
+            "max_ms": 0.025536050088703632,
+            "p95_ms": 0.010639464017003775,
+            "p99_ms": 0.01645863754674797,
+            "total_ms": 0.9719408117234707
+          },
+          "elapsed_time_ms": 1022.017665905878,
+          "workspace_bytes": 0,
+          "analytical_flops": 231211008,
+          "analytical_io_bytes": 1781760,
+          "derived_tflops_per_s": 0.0281969680338323,
+          "derived_gbytes_per_s": 0.21729168606003849,
+          "cpu_user_time_per_iter_us": 8699.999999999993,
+          "cpu_kernel_time_per_iter_us": 499.99999999999824,
+          "correctness": {
+            "passed": false,
+            "execution_success": true,
+            "tolerance_match": null,
+            "rtol": 0.00001,
+            "atol": 0.000001,
+            "error_message": "No reference provider requested"
+          },
+          "role": "reference",
+          "tensor_manifest": "tests/fixtures/tensors/reference/manifest.json"
+        }
+      ],
+      "input_tensor_manifest": "tests/fixtures/tensors/input/manifest.json"
+    }
+  ]
+}
