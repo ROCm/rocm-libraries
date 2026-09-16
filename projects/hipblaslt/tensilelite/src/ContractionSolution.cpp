@@ -5761,13 +5761,12 @@ namespace TensileLite
             if(outSelectedGrid)
                 *outSelectedGrid = skGrid;
 
-            // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
-            // If we exceed those bounds, fall back to DP.
+            // Tree-fixup: scalarUInt24DivideAndRemainder requires dividend < 2^24
+            // and divisor < 2^16.  If we exceed those bounds, fall back to DP.
             if(reductionStrat == origami::reduction_t::tree)
             {
                 size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
-                size_t itersPerWG   = tiles * itersPerTile / skGrid;
-
+                size_t itersPerWG   = (skGrid > 0) ? tiles * itersPerTile / skGrid : 0;
                 if(itersPerTile >= 65536 || itersPerWG >= 65536
                    || (tiles * itersPerTile) >= 16777216)
                 {

@@ -709,6 +709,19 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     return flops / memory_traffic;
   };
 
+  // Occupancy the workload can use: grid waves/CU, clamped.  Small grids favor
+  // low occupancy (fatter waves); saturated grids favor high occupancy (latency
+  // hiding).  Used only as a final tie-break among bit-identical macrotiles.
+  const size_t occ_n_cu = std::max<size_t>(hardware.N_CU, 1);
+  auto occ_need = [&](const config_t& c) -> double {
+    constexpr double CAP = 4.0;
+    const size_t tiles = math::safe_ceil_div(problem.size.m, std::max<size_t>(c.mt.m, 1)) *
+                         math::safe_ceil_div(problem.size.n, std::max<size_t>(c.mt.n, 1)) *
+                         std::max<size_t>(problem.batch, 1);
+    const double waves_per_cu = std::ceil(static_cast<double>(tiles) / static_cast<double>(occ_n_cu));
+    return std::clamp(waves_per_cu, 1.0, CAP);
+  };
+
   // Apply tie-breaking logic for configs with similar latency
   double best_latency = results.front().latency;
   size_t num_the_same = 0;
@@ -796,13 +809,18 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
       // This ensures deterministic selection regardless of input order
       std::stable_sort(results.begin(),
                        results.begin() + num_same_ai,
-                       [](const prediction_result_t& a, const prediction_result_t& b) {
+                       [&occ_need](const prediction_result_t& a, const prediction_result_t& b) {
                          // Prefer larger MT_M first
                          if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
                          // If MT_M is same, prefer larger MT_N
                          if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
-                         // If both MT_M and MT_N are same, prefer larger MT_K
-                         return a.config.mt.k > b.config.mt.k;
+                         // If MT_M and MT_N are same, prefer larger MT_K
+                         if (a.config.mt.k != b.config.mt.k) return a.config.mt.k > b.config.mt.k;
+                         // Bit-identical macrotile: prefer the occupancy variant that
+                         // best matches the workload (never changes which tile wins).
+                         const double need = occ_need(a.config);  // == occ_need(b): same MT
+                         return std::abs(static_cast<double>(a.config.occupancy) - need) <
+                                std::abs(static_cast<double>(b.config.occupancy) - need);
                        });
     }
   }
