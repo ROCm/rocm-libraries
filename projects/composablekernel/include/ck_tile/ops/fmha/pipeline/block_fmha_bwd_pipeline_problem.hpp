@@ -64,6 +64,7 @@ struct BlockFmhaBwdPipelineProblem
     // attributes from traits
     static constexpr index_t kPadHeadDimQ = Traits::kPadHeadDimQ;
     static constexpr index_t kPadHeadDimV = Traits::kPadHeadDimV;
+    static constexpr index_t kQDOSlots    = Traits::kQDOSlots;
     static constexpr auto BiasEnum        = Traits::BiasEnum;
     static constexpr bool kHasBiasGrad    = Traits::kHasBiasGrad;
     static constexpr index_t kBlockPerCu  = Traits::kBlockPerCu;

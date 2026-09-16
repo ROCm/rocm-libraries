@@ -1014,6 +1014,16 @@ struct BlockFmhaBwdPipelineLdsAccPolicy : BlockFmhaBwdPipelineDefaultPolicy
             {
                 return CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED;
             }
+            else if constexpr(Problem::kQDOSlots != 0)
+            {
+                // Per-instance override carried by the tile. The deep ring only
+                // pays once the Q loop is long enough to amortise the unroll:
+                // gfx1250 nomask d128, depth 3 vs 2, is +19.4% at seqlen_q 1024
+                // and +9.5% at 2048, but -15.3% at 8192 and -23.2% at 32768.
+                // seqlen_q is a runtime value, so the choice is made by
+                // dispatching to a separate instance rather than here.
+                return Problem::kQDOSlots;
+            }
             else
             {
                 return CK_TILE_FMHA_BWD_QDO_SLOTS;
