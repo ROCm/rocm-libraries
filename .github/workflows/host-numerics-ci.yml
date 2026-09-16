@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: shared/host-numerics
 
       - uses: actions/setup-python@v5
         with:
@@ -44,7 +46,7 @@ jobs:
             -DHOST_NUMERICS_BUILD_TESTING=ON \
             -DHOST_NUMERICS_BUILD_PYTHON=ON \
             -DCMAKE_BUILD_TYPE=Release
-          cmake --build "${RUNNER_TEMP}/host-numerics-build" --parallel 2
+          cmake --build "${RUNNER_TEMP}/host-numerics-build" --parallel "$(nproc)"
           ctest --test-dir "${RUNNER_TEMP}/host-numerics-build" --output-on-failure
 
       - name: Test installed package
@@ -55,7 +57,7 @@ jobs:
             -B "${RUNNER_TEMP}/host-numerics-package-test" \
             -G Ninja \
             -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-numerics-install"
-          cmake --build "${RUNNER_TEMP}/host-numerics-package-test" --parallel 2
+          cmake --build "${RUNNER_TEMP}/host-numerics-package-test" --parallel "$(nproc)"
           ctest --test-dir "${RUNNER_TEMP}/host-numerics-package-test" --output-on-failure
           PYTHONPATH="$(find "${RUNNER_TEMP}/host-numerics-install" \
             -type d -path '*/site-packages' -print -quit)" \
