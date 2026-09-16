@@ -42,7 +42,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
     explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs&    specs,
                                          const StockhamPartialPassParams& params,
                                          bool largeTwdBatchIsTransformCount)
-        : StockhamPartialPassKernel(specs, params)
+        : StockhamPartialPassKernel(specs, params, LDSColumnPattern::OFF_DIM_INTERLEAVED)
         , largeTwdBatchIsTransformCount(largeTwdBatchIsTransformCount)
 
     {
@@ -87,7 +87,6 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     Variable tid_hor_lds{"tid_hor_lds", "unsigned int"};
     Variable tid_hor_pp{"tid_hor_pp", "unsigned int"};
-    Variable offset_tid_hor{"offset_tid_hor", "unsigned int"};
 
     Variable block_idx_pp{"block_idx_pp", "unsigned int"};
 
@@ -257,7 +256,6 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
             offset_pp,
             offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_prod - lengths[1])
                 + batch * stride[dim]);
-        stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
         stmts += Assign{transform,
                         tile_index * transforms_per_block_unscaled
@@ -329,8 +327,10 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
             };
 
             for(unsigned int i = 0; i < length / stripmine_h; ++i)
-                tmp_stmts += Assign{lds_complex[offset_tile_wlds(i)],
-                                    LoadGlobal{buf, offset_tid_hor + offset_tile_rbuf(i)}};
+                tmp_stmts += Assign{
+                    lds_complex[offset_tile_wlds(i)],
+                    LoadGlobal{buf,
+                               Parens{offset_pp + tid_hor_pp * stride[1]} + offset_tile_rbuf(i)}};
 
             stmts += CommentLines{
                 "no intrinsic when load to lds. FIXME- check why use nested branch is better"};
@@ -389,7 +389,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         auto stripmine_h = workgroup_size / stripmine_w;
 
         auto offset_tile_wbuf = [&](unsigned int i) {
-            return offset_tid_hor + (thread_pp + i * stripmine_h) * stride0;
+            return Parens{offset_pp + tid_hor_pp * stride[1]}
+                   + (thread_pp + i * stripmine_h) * stride0;
         };
         auto offset_tile_rlds = [&](unsigned int i) {
             return tid_hor_lds * stride_lds + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
@@ -398,8 +399,10 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         for(unsigned int i = 0; i < length / stripmine_h; ++i)
             tmp_stmts += StoreGlobal{
                 buf,
-                CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                         {offset_tile_wbuf(i)}},
+                (transform_type_pp == rocfft_transform_type_real_inverse)
+                    ? Expression{offset_tile_wbuf(i)}
+                    : CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
+                               {offset_tile_wbuf(i)}},
                 lds_complex[offset_tile_rlds(i)]};
 
         stmts += CommentLines{
@@ -698,10 +701,25 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     ArgumentList global_arguments() override
     {
-        // insert large twiddles
-        ArgumentList arglist = StockhamKernel::global_arguments();
-        arglist.arguments.insert(arglist.arguments.begin() + 1, large_twiddles);
-        return arglist;
+        if(transform_type_pp != rocfft_transform_type_real_inverse)
+        {
+            // insert large twiddles
+            ArgumentList arglist = StockhamKernel::global_arguments();
+            arglist.arguments.insert(arglist.arguments.begin() + 1, large_twiddles);
+            return arglist;
+        }
+        else
+        {
+            auto arglist = ArgumentList{twiddles_pp, twiddles_off_dim};
+
+            auto arguments_base = StockhamKernel::global_arguments();
+            for(const auto& arg : arguments_base.arguments)
+                arglist.append(arg);
+
+            arglist.arguments.insert(arglist.arguments.begin() + 3, large_twiddles);
+
+            return arglist;
+        }
     }
 
     Function generate_global_function() override
@@ -750,7 +768,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         body += loadlds;
 
-        body += generate_partial_pass_steps_3_4();
+        if(transform_type_pp != rocfft_transform_type_real_inverse)
+            body += generate_partial_pass_steps_3_4();
 
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
@@ -802,6 +821,9 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                           pre_post_lds_args};
 
         body += postStore;
+
+        if(transform_type_pp == rocfft_transform_type_real_inverse)
+            body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};
         StatementList storelds;

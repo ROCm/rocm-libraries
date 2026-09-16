@@ -19,16 +19,25 @@
 // THE SOFTWARE.
 
 #pragma once
+#include "rocfft/rocfft.h"
 #include "stockham_gen_base.h"
+
+enum class LDSColumnPattern
+{
+    NON_INTERLEAVED,
+    OFF_DIM_INTERLEAVED
+};
 
 // Base class for stockham partial pass kernels.
 // Subclasses are responsible for different tiling types.
 struct StockhamPartialPassKernel : public StockhamKernel
 {
     explicit StockhamPartialPassKernel(const StockhamGeneratorSpecs&    specs,
-                                       const StockhamPartialPassParams& params)
+                                       const StockhamPartialPassParams& params,
+                                       const LDSColumnPattern&          lds_column_pattern)
         : StockhamKernel(specs)
         , params(params)
+        , lds_column_pattern(lds_column_pattern)
     {
         length_pp                = params.parent_length[params.off_dim];
         factors_pp               = params.pp_factors_curr;
@@ -38,6 +47,10 @@ struct StockhamPartialPassKernel : public StockhamKernel
         pp_factors_other_prod    = product(factors_pp_other.begin(), factors_pp_other.end());
         threads_per_transform_pp = params.pp_threads_per_transform;
         transforms_per_block_pp  = workgroup_size / threads_per_transform_pp;
+
+        if(!transform_type.has_value())
+            throw std::runtime_error("transform_type is not set");
+        transform_type_pp = static_cast<rocfft_transform_type>(transform_type.value());
     }
     virtual ~StockhamPartialPassKernel(){};
 
@@ -47,6 +60,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
     unsigned int              pp_factors_prod;
     unsigned int              pp_factors_other_prod;
     std::vector<unsigned int> factors_pp_other;
+    rocfft_transform_type     transform_type_pp;
 
     Variable tile_index{"tile_index", "size_t"};
     Variable num_of_tiles{"num_of_tiles", "size_t"};
@@ -72,110 +86,111 @@ struct StockhamPartialPassKernel : public StockhamKernel
     Variable global_idx{"global_idx", "unsigned int"};
     Variable transpose_idx{"transpose_idx", "unsigned int"};
 
-    ArgumentList device_lds_reg_inout_pp_steps_1_2_arguments()
+    LDSColumnPattern lds_column_pattern = LDSColumnPattern::NON_INTERLEAVED;
+
+    ArgumentList device_lds_reg_inout_non_interleaved_arguments()
     {
         ArgumentList args{R, lds_complex, stride_lds, offset_lds, thread};
         return args;
     }
 
-    ArgumentList device_lds_reg_inout_pp_steps_3_4_arguments()
+    ArgumentList device_lds_reg_inout_off_dim_interleaved_arguments()
     {
         ArgumentList args{R, lds_complex, stride_lds, offset_lds};
         return args;
     }
 
-    TemplateList device_lds_reg_inout_pp_steps_1_2_templates()
+    TemplateList device_lds_reg_pp_inout_templates()
     {
         TemplateList tpls;
         tpls.append(scalar_type);
         return tpls;
     }
 
-    TemplateList device_lds_reg_inout_pp_steps_3_4_templates()
-    {
-        return device_lds_reg_inout_templates();
-    }
-
-    std::vector<Expression> device_lds_reg_inout_pp_steps_1_2_device_call_arguments()
+    std::vector<Expression> device_lds_reg_inout_non_interleaved_device_call_arguments()
     {
         return {R, lds_complex, stride_lds_pp, offset_lds_pp, thread_in_device_pp};
     }
 
-    std::vector<Expression> device_lds_reg_inout_pp_steps_3_4_device_call_arguments()
+    std::vector<Expression> device_lds_reg_inout_off_dim_interleaved_device_call_arguments()
     {
         return {R, lds_complex, stride_lds_pp, offset_lds_pp};
     }
 
-    TemplateList device_pp_call_templates()
+    TemplateList device_pp_steps_call_templates()
     {
         return {scalar_type, lds_is_real, lds_linear, direct_load_to_reg};
     }
 
-    TemplateList device_pp_steps_1_2_call_templates()
+    StatementList load_non_interleaved_lds_generator(
+        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
-        return device_pp_call_templates();
+        if(hr == 0)
+            hr = h;
+        StatementList work;
+
+        for(unsigned int w = 0; w < width; ++w)
+        {
+            const auto tid = Parens{thread + dt + h * threads_per_transform_pp};
+            work += Assign(
+                R[hr * width + w],
+                lds_complex[offset_lds + (tid + w * pp_factors_prod / width) * stride_lds]);
+        }
+
+        return work;
     }
 
-    TemplateList device_pp_steps_3_4_call_templates()
+    StatementList load_off_dim_interleaved_lds_generator(
+        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
-        return device_pp_call_templates();
+        if(hr == 0)
+            hr = h;
+        StatementList work;
+
+        for(unsigned int w = 0; w < width; ++w)
+            work += Assign(R[hr * width + w],
+                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
+
+        return work;
     }
 
-    TemplateList device_pp_templates()
+    StatementList store_non_interleaved_lds_generator(unsigned int h,
+                                                      unsigned int hr,
+                                                      unsigned int width,
+                                                      unsigned int dt,
+                                                      Expression   guard,
+                                                      unsigned int cumheight)
     {
-        TemplateList tpls;
-        tpls.append(scalar_type);
-        tpls.append(lds_is_real);
-        tpls.append(lds_linear);
-        tpls.append(direct_load_to_reg);
-        return tpls;
+        if(hr == 0)
+            hr = h;
+        StatementList work;
+
+        for(unsigned int w = 0; w < width; ++w)
+        {
+            const auto tid = thread + dt + h * threads_per_transform_pp;
+            const auto idx = offset_lds
+                             + (Parens{tid / cumheight} * (width * cumheight) + tid % cumheight
+                                + w * cumheight)
+                                   * stride_lds;
+
+            work += Assign(lds_complex[idx], R[hr * width + w]);
+        }
+
+        return work;
     }
 
-    TemplateList device_pp_steps_1_2_templates()
+    StatementList store_off_dim_interleaved_lds_generator(
+        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
-        return device_pp_templates();
-    }
+        if(hr == 0)
+            hr = h;
+        StatementList work;
 
-    TemplateList device_pp_steps_3_4_templates()
-    {
-        return device_pp_templates();
-    }
+        for(unsigned int w = 0; w < width; ++w)
+            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
+                           R[hr * width + w]);
 
-    ArgumentList device_pp_steps_1_2_arguments()
-    {
-        ArgumentList args{R,
-                          lds_real,
-                          lds_complex,
-                          twiddles_pp,
-                          twiddles,
-                          stride_lds,
-                          offset_lds,
-                          thread,
-                          thread_pp,
-                          write};
-        return args;
-    }
-
-    ArgumentList device_pp_steps_3_4_arguments()
-    {
-        ArgumentList args{R, lds_real, lds_complex, stride_lds, offset_lds, write};
-        return args;
-    }
-
-    std::vector<Expression> device_pp_steps_1_2_call_arguments(unsigned int call_iter)
-    {
-        return {R,
-                lds_real,
-                lds_complex,
-                twiddles_pp,
-                twiddles_off_dim,
-                stride_lds_pp,
-                call_iter ? Expression{offset_lds_pp
-                                       + call_iter * stride_lds_pp * transforms_per_block_pp}
-                          : Expression{offset_lds_pp},
-                thread_in_device_pp,
-                thread_in_device_pp_twiddles,
-                Literal{"true"}};
+        return work;
     }
 
     // Call generator as many times as needed.
@@ -255,102 +270,16 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return stmts;
     }
 
-    StatementList load_pp_steps_1_2_lds_generator(
-        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
+    Function generate_non_interleaved_lds_to_reg_input_function(const std::string& function_name)
     {
-        if(hr == 0)
-            hr = h;
-        StatementList work;
-
-        for(unsigned int w = 0; w < width; ++w)
-        {
-            const auto tid = Parens{thread + dt + h * threads_per_transform_pp};
-            work += Assign(
-                R[hr * width + w],
-                lds_complex[offset_lds + (tid + w * pp_factors_prod / width) * stride_lds]);
-        }
-
-        return work;
-    }
-
-    StatementList load_pp_steps_3_4_lds_generator(
-        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
-    {
-        if(hr == 0)
-            hr = h;
-        StatementList work;
-
-        for(unsigned int w = 0; w < width; ++w)
-            work += Assign(R[hr * width + w],
-                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
-
-        return work;
-    }
-
-    StatementList store_pp_steps_1_2_lds_generator(unsigned int h,
-                                                   unsigned int hr,
-                                                   unsigned int width,
-                                                   unsigned int dt,
-                                                   Expression   guard,
-                                                   unsigned int cumheight)
-    {
-        if(hr == 0)
-            hr = h;
-        StatementList work;
-
-        for(unsigned int w = 0; w < width; ++w)
-        {
-            const auto tid = thread + dt + h * threads_per_transform_pp;
-            const auto idx = offset_lds
-                             + (Parens{tid / cumheight} * (width * cumheight) + tid % cumheight
-                                + w * cumheight)
-                                   * stride_lds;
-
-            work += Assign(lds_complex[idx], R[hr * width + w]);
-        }
-
-        return work;
-    }
-
-    StatementList store_pp_steps_3_4_lds_generator(
-        unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
-    {
-        if(hr == 0)
-            hr = h;
-        StatementList work;
-
-        for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
-                           R[hr * width + w]);
-
-        return work;
-    }
-
-    std::vector<Expression> device_pp_steps_3_4_call_arguments(unsigned int call_iter)
-    {
-        return {R,
-                lds_real,
-                lds_complex,
-                stride_lds_pp,
-                call_iter ? Expression{offset_lds_pp
-                                       + call_iter * stride_lds_pp * transforms_per_block_pp}
-                          : Expression{offset_lds_pp},
-                Literal{"true"}};
-    }
-
-    Function generate_lds_to_reg_partial_pass_steps_1_2_input_function()
-    {
-        std::string function_name = "lds_to_reg_steps_1_2_input_partial_pass_length"
-                                    + std::to_string(pp_factors_prod) + "_device";
-
         Function f{function_name};
-        f.templates = device_lds_reg_inout_pp_steps_1_2_templates();
-        f.arguments = device_lds_reg_inout_pp_steps_1_2_arguments();
+        f.templates = device_lds_reg_pp_inout_templates();
+        f.arguments = device_lds_reg_inout_non_interleaved_arguments();
         f.qualifier = "__device__";
 
         StatementList& body = f.body;
 
-        auto load_lds = std::mem_fn(&StockhamPartialPassKernel::load_pp_steps_1_2_lds_generator);
+        auto load_lds = std::mem_fn(&StockhamPartialPassKernel::load_non_interleaved_lds_generator);
         // first pass of load (full)
         unsigned int width = factors_pp[0];
         float height       = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
@@ -364,19 +293,18 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return f;
     }
 
-    Function generate_lds_to_reg_partial_pass_steps_3_4_input_function()
+    Function
+        generate_off_dim_interleaved_lds_to_reg_input_function(const std::string& function_name)
     {
-        std::string function_name
-            = "lds_to_reg_steps_3_4_input_partial_pass_length" + std::to_string(length) + "_device";
-
         Function f{function_name};
-        f.templates = device_lds_reg_inout_pp_steps_3_4_templates();
-        f.arguments = device_lds_reg_inout_pp_steps_3_4_arguments();
+        f.templates = device_lds_reg_pp_inout_templates();
+        f.arguments = device_lds_reg_inout_off_dim_interleaved_arguments();
         f.qualifier = "__device__";
 
         StatementList& body = f.body;
 
-        auto load_lds = std::mem_fn(&StockhamPartialPassKernel::load_pp_steps_3_4_lds_generator);
+        auto load_lds
+            = std::mem_fn(&StockhamPartialPassKernel::load_off_dim_interleaved_lds_generator);
         // first pass of load (partial-pass)
         unsigned int width  = factors_pp[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
@@ -389,19 +317,37 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return f;
     }
 
-    Function generate_lds_from_reg_partial_pass_steps_1_2_output_function()
+    Function generate_lds_to_reg_partial_pass_steps_1_2_input_function()
     {
-        std::string function_name = "lds_from_reg_steps_1_2_output_partial_pass_length"
+        std::string function_name = "lds_to_reg_steps_1_2_input_partial_pass_length"
                                     + std::to_string(pp_factors_prod) + "_device";
 
+        return lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                   ? generate_non_interleaved_lds_to_reg_input_function(function_name)
+                   : generate_off_dim_interleaved_lds_to_reg_input_function(function_name);
+    }
+
+    Function generate_lds_to_reg_partial_pass_steps_3_4_input_function()
+    {
+        std::string function_name = "lds_to_reg_steps_3_4_input_partial_pass_length"
+                                    + std::to_string(pp_factors_prod) + "_device";
+
+        return lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                   ? generate_non_interleaved_lds_to_reg_input_function(function_name)
+                   : generate_off_dim_interleaved_lds_to_reg_input_function(function_name);
+    }
+
+    Function generate_non_interleaved_lds_from_reg_output_function(const std::string& function_name)
+    {
         Function f{function_name};
-        f.templates = device_lds_reg_inout_pp_steps_1_2_templates();
-        f.arguments = device_lds_reg_inout_pp_steps_1_2_arguments();
+        f.templates = device_lds_reg_pp_inout_templates();
+        f.arguments = device_lds_reg_inout_non_interleaved_arguments();
         f.qualifier = "__device__";
 
         StatementList& body = f.body;
 
-        auto store_lds = std::mem_fn(&StockhamPartialPassKernel::store_pp_steps_1_2_lds_generator);
+        auto store_lds
+            = std::mem_fn(&StockhamPartialPassKernel::store_non_interleaved_lds_generator);
         // last pass of store (full)
         unsigned int width = factors_pp.back();
         float height       = static_cast<float>(pp_factors_prod) / width / threads_per_transform_pp;
@@ -415,21 +361,18 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return f;
     }
 
-    Function generate_lds_from_reg_partial_pass_steps_3_4_output_function()
+    Function
+        generate_off_dim_interleaved_lds_from_reg_output_function(const std::string& function_name)
     {
-        std::string function_name = "lds_from_reg_steps_3_4_output_partial_pass_length"
-                                    + std::to_string(length) + "_device";
-
         Function f{function_name};
-        f.templates = device_lds_reg_inout_pp_steps_3_4_templates();
-        f.arguments = device_lds_reg_inout_pp_steps_3_4_arguments();
+        f.templates = device_lds_reg_pp_inout_templates();
+        f.arguments = device_lds_reg_inout_off_dim_interleaved_arguments();
         f.qualifier = "__device__";
 
         StatementList& body = f.body;
-        body += Declaration{
-            lstride, Ternary{Parens{stride_type == "SB_UNIT"}, Parens{1}, Parens{stride_lds}}};
 
-        auto store_lds = std::mem_fn(&StockhamPartialPassKernel::store_pp_steps_3_4_lds_generator);
+        auto store_lds
+            = std::mem_fn(&StockhamPartialPassKernel::store_off_dim_interleaved_lds_generator);
         // last pass of store (partial-pass)
         unsigned int width  = factors_pp.back();
         float        height = static_cast<float>(length) / width / threads_per_transform;
@@ -439,6 +382,26 @@ struct StockhamPartialPassKernel : public StockhamKernel
                          height,
                          ThreadGuardMode::NO_GUARD);
         return f;
+    }
+
+    Function generate_lds_from_reg_partial_pass_steps_1_2_output_function()
+    {
+        std::string function_name = "lds_from_reg_steps_1_2_output_partial_pass_length"
+                                    + std::to_string(pp_factors_prod) + "_device";
+
+        return lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                   ? generate_non_interleaved_lds_from_reg_output_function(function_name)
+                   : generate_off_dim_interleaved_lds_from_reg_output_function(function_name);
+    }
+
+    Function generate_lds_from_reg_partial_pass_steps_3_4_output_function()
+    {
+        std::string function_name = "lds_from_reg_steps_3_4_output_partial_pass_length"
+                                    + std::to_string(pp_factors_prod) + "_device";
+
+        return lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                   ? generate_non_interleaved_lds_from_reg_output_function(function_name)
+                   : generate_off_dim_interleaved_lds_from_reg_output_function(function_name);
     }
 
     // The "stacked" twiddle table starts at the second factor, since
@@ -498,6 +461,31 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return work;
     }
 
+    TemplateList device_pp_templates()
+    {
+        TemplateList tpls;
+        tpls.append(scalar_type);
+        tpls.append(lds_is_real);
+        tpls.append(lds_linear);
+        tpls.append(direct_load_to_reg);
+        return tpls;
+    }
+
+    ArgumentList device_pp_steps_1_2_arguments()
+    {
+        ArgumentList args{R,
+                          lds_real,
+                          lds_complex,
+                          twiddles_pp,
+                          twiddles,
+                          stride_lds,
+                          offset_lds,
+                          thread,
+                          thread_pp,
+                          write};
+        return args;
+    }
+
     Function generate_pp_steps_1_2_device_function()
     {
         std::string function_name = "forward_partial_pass_steps_1_2_length"
@@ -506,7 +494,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
 
         Function f{function_name};
         f.arguments = device_pp_steps_1_2_arguments();
-        f.templates = device_pp_steps_1_2_templates();
+        f.templates = device_pp_templates();
         f.qualifier = "__device__";
         if(pp_factors_prod == 1)
             return f;
@@ -540,9 +528,9 @@ struct StockhamPartialPassKernel : public StockhamKernel
                 "therefore each thread will do " + std::to_string(height) + " butterflies"};
 
             auto load_lds
-                = std::mem_fn(&StockhamPartialPassKernel::load_pp_steps_1_2_lds_generator);
+                = std::mem_fn(&StockhamPartialPassKernel::load_non_interleaved_lds_generator);
             auto store_lds
-                = std::mem_fn(&StockhamPartialPassKernel::store_pp_steps_1_2_lds_generator);
+                = std::mem_fn(&StockhamPartialPassKernel::store_non_interleaved_lds_generator);
 
             if(npass > 0)
             {
@@ -607,6 +595,12 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return f;
     }
 
+    ArgumentList device_pp_steps_3_4_arguments()
+    {
+        ArgumentList args{R, lds_real, lds_complex, stride_lds, offset_lds, write};
+        return args;
+    }
+
     Function generate_pp_steps_3_4_device_function()
     {
         std::string function_name = "forward_partial_pass_steps_3_4_length"
@@ -615,7 +609,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
 
         Function f{function_name};
         f.arguments = device_pp_steps_3_4_arguments();
-        f.templates = device_pp_steps_3_4_templates();
+        f.templates = device_pp_templates();
         f.qualifier = "__device__";
         if(pp_factors_prod == 1)
             return f;
@@ -637,15 +631,51 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return f;
     }
 
-    TemplateList device_lds_reg_inout_pp_steps_1_2_device_call_templates()
+    TemplateList device_lds_reg_inout_pp_device_call_templates()
     {
         return {scalar_type};
     }
 
-    TemplateList device_lds_reg_inout_pp_steps_3_4_device_call_templates(bool syncthreads = true)
+    StatementList generate_partial_pass_offsets()
     {
-        Variable sync_var{syncthreads ? "true" : "false", "bool"};
-        return {scalar_type, stride_type, sync_var};
+        StatementList stmts;
+
+        stmts += LineBreak{};
+        stmts += CommentLines{"partial-pass offsets"};
+        switch(lds_column_pattern)
+        {
+        case LDSColumnPattern::NON_INTERLEAVED:
+            stmts += Declaration{stride_lds_pp, (length + get_lds_padding())};
+            stmts += Declaration{offset_lds_pp,
+                                 Parens(block_id * transforms_per_block + thread_id)
+                                     % (length + get_lds_padding())};
+            break;
+        case LDSColumnPattern::OFF_DIM_INTERLEAVED:
+            unsigned int width  = factors_pp[0];
+            unsigned int height = length / width / threads_per_transform;
+
+            stmts += Declaration{stride_lds_pp, Literal{1}};
+            stmts += Declaration{offset_lds_pp, thread_id * Literal{width * height}};
+            break;
+        }
+
+        return stmts;
+    }
+
+    std::vector<Expression> device_pp_steps_1_2_call_arguments(unsigned int call_iter)
+    {
+        return {R,
+                lds_real,
+                lds_complex,
+                twiddles_pp,
+                twiddles_off_dim,
+                stride_lds_pp,
+                call_iter ? Expression{offset_lds_pp
+                                       + call_iter * stride_lds_pp * transforms_per_block_pp}
+                          : Expression{offset_lds_pp},
+                thread_in_device_pp,
+                thread_in_device_pp_twiddles,
+                Literal{"true"}};
     }
 
     StatementList generate_partial_pass_steps_1_2()
@@ -659,15 +689,13 @@ struct StockhamPartialPassKernel : public StockhamKernel
         stmts
             += Declaration{thread_in_device_pp_twiddles, block_id % (length_pp / pp_factors_prod)};
 
-        stmts += LineBreak{};
-        stmts += CommentLines{"partial-pass offsets"};
-        stmts += Declaration{stride_lds_pp, (length + get_lds_padding())};
-        stmts += Declaration{offset_lds_pp,
-                             Parens(block_id * transforms_per_block + thread_id)
-                                 % (length + get_lds_padding())};
+        stmts += generate_partial_pass_offsets();
 
-        auto pre_post_lds_tmpl = device_lds_reg_inout_pp_steps_1_2_device_call_templates();
-        auto pre_post_lds_args = device_lds_reg_inout_pp_steps_1_2_device_call_arguments();
+        auto pre_post_lds_tmpl = device_lds_reg_inout_pp_device_call_templates();
+        auto pre_post_lds_args
+            = lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                  ? device_lds_reg_inout_non_interleaved_device_call_arguments()
+                  : device_lds_reg_inout_off_dim_interleaved_device_call_arguments();
 
         StatementList preLoad;
         stmts += LineBreak{};
@@ -678,9 +706,8 @@ struct StockhamPartialPassKernel : public StockhamKernel
                         pre_post_lds_args};
         stmts += preLoad;
 
-        auto device_tmpl = device_pp_steps_1_2_call_templates();
-        auto device_args = device_pp_steps_1_2_call_arguments(0);
-
+        auto          device_tmpl = device_pp_steps_call_templates();
+        auto          device_args = device_pp_steps_1_2_call_arguments(0);
         StatementList device;
         stmts += LineBreak{};
         stmts += CommentLines{"partial transform in off-dimension"};
@@ -703,6 +730,18 @@ struct StockhamPartialPassKernel : public StockhamKernel
         return stmts;
     }
 
+    std::vector<Expression> device_pp_steps_3_4_call_arguments(unsigned int call_iter)
+    {
+        return {R,
+                lds_real,
+                lds_complex,
+                stride_lds_pp,
+                call_iter ? Expression{offset_lds_pp
+                                       + call_iter * stride_lds_pp * transforms_per_block_pp}
+                          : Expression{offset_lds_pp},
+                Literal{"true"}};
+    }
+
     StatementList generate_partial_pass_steps_3_4()
     {
         StatementList stmts;
@@ -710,25 +749,31 @@ struct StockhamPartialPassKernel : public StockhamKernel
         unsigned int width  = factors_pp[0];
         unsigned int height = length / width / threads_per_transform;
 
-        stmts += LineBreak{};
-        stmts += CommentLines{"partial-pass offsets"};
-        stmts += Declaration{stride_lds_pp, Literal{1}};
-        stmts += Declaration{offset_lds_pp, thread_id * Literal{width * height}};
+        if(lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED)
+        {
+            stmts += CommentLines{
+                "calc the thread_in_device value once and for all partial-pass device funcs"};
+            stmts += Declaration{thread_in_device_pp, thread_id % threads_per_transform_pp};
+        }
 
-        auto pre_post_lds_tmpl = device_lds_reg_inout_pp_steps_3_4_device_call_templates();
-        auto pre_post_lds_args = device_lds_reg_inout_pp_steps_3_4_device_call_arguments();
-        pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
+        stmts += generate_partial_pass_offsets();
+
+        auto pre_post_lds_tmpl = device_lds_reg_inout_pp_device_call_templates();
+        auto pre_post_lds_args
+            = lds_column_pattern == LDSColumnPattern::NON_INTERLEAVED
+                  ? device_lds_reg_inout_non_interleaved_device_call_arguments()
+                  : device_lds_reg_inout_off_dim_interleaved_device_call_arguments();
 
         StatementList preLoad;
         stmts += LineBreak{};
         stmts += CommentLines{"call a pre-load from lds to registers"};
-        preLoad += Call{"lds_to_reg_steps_3_4_input_partial_pass_length" + std::to_string(length)
-                            + "_device",
+        preLoad += Call{"lds_to_reg_steps_3_4_input_partial_pass_length"
+                            + std::to_string(pp_factors_prod) + "_device",
                         pre_post_lds_tmpl,
                         pre_post_lds_args};
         stmts += preLoad;
 
-        auto device_tmpl = device_pp_steps_3_4_call_templates();
+        auto device_tmpl = device_pp_steps_call_templates();
         auto device_args = device_pp_steps_3_4_call_arguments(0);
 
         StatementList device;
@@ -749,7 +794,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
         stmts += LineBreak{};
         stmts += CommentLines{"call a post-store from registers to lds"};
         postStore += Call{"lds_from_reg_steps_3_4_output_partial_pass_length"
-                              + std::to_string(length) + "_device",
+                              + std::to_string(pp_factors_prod) + "_device",
                           pre_post_lds_tmpl,
                           pre_post_lds_args};
         stmts += postStore;

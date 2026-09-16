@@ -30,6 +30,31 @@
 
 #include "device/kernel-generator-embed.h"
 
+static rocfft_transform_type get_root_transform_type(const TreeNode* node)
+{
+    std::function<const TreeNode*(const TreeNode*)> get_root_node;
+    get_root_node = [&get_root_node](const TreeNode* node) -> const TreeNode* {
+        if(node->parent == nullptr)
+            return node;
+        return get_root_node(node->parent);
+    };
+
+    auto root_node = get_root_node(node);
+
+    if((root_node->inArrayType != rocfft_array_type_real)
+       && (root_node->outArrayType != rocfft_array_type_real))
+        return (root_node->direction == -1) ? rocfft_transform_type_complex_forward
+                                            : rocfft_transform_type_complex_inverse;
+    else if((root_node->inArrayType == rocfft_array_type_real)
+            && (root_node->outArrayType != rocfft_array_type_real))
+        return rocfft_transform_type_real_forward;
+    else if((root_node->inArrayType != rocfft_array_type_real)
+            && (root_node->outArrayType == rocfft_array_type_real))
+        return rocfft_transform_type_real_inverse;
+    else
+        throw std::runtime_error("Invalid transform type");
+};
+
 RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&    node,
                                                               const std::string& gpu_arch,
                                                               CallbackType       cbtype)
@@ -168,6 +193,9 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
     bool unit_stride = node.inStride.front() == 1 && node.outStride.front() == 1;
 
+    // get the root node and transform type for that node
+    specs->transform_type = get_root_transform_type(&node);
+
     auto ppType = PartialPassType::PPT_NONE;
     if(node.isPartialPassEnabled())
     {
@@ -244,7 +272,10 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs;
 
     // twiddles
-    if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
+    if((data.node->scheme == CS_KERNEL_STOCKHAM_PP
+        && get_root_transform_type(data.node) != rocfft_transform_type_real_inverse)
+       || (data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC
+           && get_root_transform_type(data.node) == rocfft_transform_type_real_inverse))
     {
         kargs.append_ptr(data.node->twiddles_pp);
         kargs.append_ptr(data.node->twiddles_off_dim);
