@@ -19,21 +19,7 @@
 # each with its gfx950 counterpart pins both sides of the choice.
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
-from rocke.core.ir import (
-    BF16,
-    BF8E5M2,
-    F16,
-    F32,
-    FP8E4M3,
-    I1,
-    I8,
-    I16,
-    I32,
-    I64,
-    IRBuilder,
-    KernelDef,
-    PtrType,
-)
+from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
 
@@ -284,19 +270,6 @@ CONFIGS.extend(
     for mode in ("scale", "scale16")
     for dtype in ("e4m3", "e5m3")
 )
-
-
-def build_optimization_barriers(b: IRBuilder) -> None:
-    tid = b.thread_id_x()
-    for dtype in (I1, I8, I16, I32, I64, BF16, F16, F32, FP8E4M3, BF8E5M2):
-        ptr = b.param(f"p_{dtype.name}", PtrType(dtype, "global"))
-        value = b.global_load(ptr, tid, dtype, align=1)
-        value = b.optimization_barrier(value)
-        b.global_store(ptr, tid, value, align=1)
-    b.ret()
-
-
-CONFIGS.extend((build_optimization_barriers, arch) for arch in ("gfx1250", "gfx950"))
 
 
 def _spec(idx: int):

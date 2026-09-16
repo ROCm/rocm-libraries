@@ -127,3 +127,28 @@ def test_barrier_preserves_lane_predicates(arch, route):
         _run(b.kernel, values.tobytes(), arch, route), dtype=np.int32
     )
     np.testing.assert_array_equal(result, (values < 0).astype(np.int32))
+
+
+@pytest.mark.parametrize("route", ["comgr", "hip"])
+def test_barrier_rounds_product_before_fp16(arch, route):
+    b = IRBuilder("barrier_fp16")
+    p = b.param("p", PtrType(F32, "global"))
+    tid = b.thread_id_x()
+    a = b.global_load(p, tid, F32)
+    scale = b.global_load(p, b.add(tid, b.const_i32(64)), F32)
+    product = b.optimization_barrier(b.fmul(a, scale))
+    rounded = b.cast_f32_to(product, F16)
+    b.global_store(p, tid, b.cast_to_f32(rounded))
+    b.ret()
+    # The FP32 product is exactly a half-precision midpoint. Directly rounding
+    # the unrounded product to FP16 instead selects the adjacent value.
+    a = np.full(64, -412.5, dtype=np.float32)
+    scale = np.full(64, np.float32(1.3) * np.float32(0.7), dtype=np.float32)
+    expected = (a * scale).astype(np.float16).astype(np.float32)
+    assert np.all(expected == -375.5)
+    assert np.all((a.astype(np.float64) * scale).astype(np.float16) == -375.25)
+    result = np.frombuffer(
+        _run(b.kernel, np.concatenate((a, scale)).tobytes(), arch, route),
+        dtype=np.float32,
+    )
+    np.testing.assert_array_equal(result[:64], expected)
