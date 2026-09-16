@@ -186,17 +186,12 @@ def subtileStackForTLU1(state, tc, mtTiles):
 # consume.  A stack of 8 would need a third, which is not derived anywhere, so
 # admitting 8 or 16 here would trade a clean rejection for an assertion during
 # emit.
-_SUBTILE_STACK_B16 = 4
-
-
-def subtileStackForTLU1B16(state, tc, mtTiles):
-  """Stack height for a TLU=1 bf16/fp16 operand.  See _SUBTILE_STACK_B16.
-
-  Unlike the fp4 chooser this cannot fall back: the caller checks
-  subtileTLU1StackReason on what comes back and rejects the solution when the
-  geometry refuses it.
-  """
-  return _SUBTILE_STACK_B16
+#
+# Being a constant rather than a chooser is why the bf16 call site does not look
+# like the fp4 one: there is nothing to fall back to, so it checks
+# subtileTLU1StackReason on this height and rejects the solution outright when
+# the geometry refuses it.
+SUBTILE_STACK_B16 = 4
 
 
 def validateSubtileGRKPartition(state, printRejectionReason):

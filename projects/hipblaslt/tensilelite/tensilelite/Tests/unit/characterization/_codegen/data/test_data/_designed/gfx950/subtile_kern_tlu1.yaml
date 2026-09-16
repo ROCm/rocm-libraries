@@ -43,7 +43,7 @@ BenchmarkProblems:
   ########################################
   # BF16 NN — UseSubtileImpl=1 / TLU1 sweep
   # NN layout (TransposeA=0, TransposeB=0) sets TLUA=True, TLUB=False.
-  # AB_B16_TLU1 geometry selected for A (TLUA=True + BF16).
+  # AB_B16_TLU1_4x1 geometry selected for A (TLUA=True + BF16).
   # Exercises TLU1 arms in Kernel.py lines 151-253.
   ########################################
   -
