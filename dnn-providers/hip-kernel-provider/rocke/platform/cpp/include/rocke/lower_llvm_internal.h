@@ -555,10 +555,6 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
                           int count,
                           const char** out_ptr_ty);
 
-/* Map an IR type-NAME string (from op.attrs, e.g. iter_args metadata) back to
- * LLVM text (Python _llvm_type_from_name). Handles scalars + "vec<exN>". */
-const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name);
-
 /* LLVM aggregate storage type for a SmemType: nested arrays of the element
  * (Python _smem_storage_type). Arena-owned. */
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem);
