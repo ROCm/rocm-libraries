@@ -530,6 +530,8 @@ class MasterSolutionLibrary:
                     placeholderName += '_SCD'
                 if problemType.useScaleAlphaVec:
                     placeholderName += '_SAV'
+                if problemType.useRMSEpilogue:
+                    placeholderName += '_RMSE'
                 if problemType.sparse:
                     placeholderName += '_SPB' if problemType.sparse == 2 else '_SPA'
                     placeholderName += "ML" + str(problemType.metadataLayout)
