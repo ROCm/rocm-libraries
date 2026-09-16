@@ -632,6 +632,9 @@ class LocalReadMFMA(LocalRead):
         numVgpr           = int(ceil(instruction.blockWidth))
 
         valufIdx = 0
+        # MXBlock=MI_K: ds_load packed e8s into Valu+0, then v_perm high dests
+        # first so the packed source can be splat in-place last (no extra tmp).
+        splatInPlace = mxUnit == 1
         for vIdx in range(0, numVectorsPerTile):
             tileSpanBaseValuiIdx = valufIdx
             if mxsTileSpan:
@@ -643,7 +646,16 @@ class LocalReadMFMA(LocalRead):
                 else:
                     valuiIdx = int(valufIdx)
                     readModule = imod.add(Module("LocalRead%s Valu%u"%(tc, valuiIdx)))
-                destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx), numVgpr)
+                bytesThisLoad = int(instruction.blockWidth * bpr)
+                valuStart = vIdx * vectorWidth + eIdx * bytesThisLoad
+                # mxUnit==1: load packed e8s at valuStart, then splat each byte
+                # in-place to SSSS. TileSpan still uses this layout: each group
+                # occupies VW registers (partner WaveTile is the other half-wave
+                # of the same VGPRs, selected later by matrix_*_scale:1).
+                if splatInPlace:
+                    destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuStart), numVgpr)
+                else:
+                    destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx), numVgpr)
 
                 # load read instruction
                 paramList = []
@@ -670,19 +682,34 @@ class LocalReadMFMA(LocalRead):
                 ds = DSModifiers(na=1, offset=paramList[0])
                 LocalReadX = instruction.getInst()
                 self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=readModule, comment=comment)
+                if splatInPlace:
+                    # High dests first so byte b lives until Valu+valuStart is overwritten last.
+                    # TileSpan: splat the loaded half-wave only; WMMA reads the partner
+                    # WaveTile from those same SSSS dwords via matrix_{a,b}_scale:1.
+                    for b in range(bytesThisLoad - 1, -1, -1):
+                        srcVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuStart + b // bpr))
+                        pack.add(VPermB32(
+                            dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuStart + b)),
+                            src0=srcVgpr,
+                            src1=srcVgpr,
+                            src2="0x%08x"%(0x01010101 * (b % 4)),
+                            comment="splat MX byte %u -> SSSS"%b))
                 if not mxsTileSpan:
                     valufIdx += numVgpr
             if mxsTileSpan:
-                # No permute: the partner block (upper half-wave of this single wave-split
-                # ds_load) is consumed directly by the WMMA via matrix_{a,b}_scale:1 (see
+                # The partner block (upper half-wave of this single wave-split
+                # ds_load) is consumed by the WMMA via matrix_{a,b}_scale:1 (see
                 # mxsTileSpanScaleSel). Each group owns 2*vectorWidth scale *blocks*, but only
-                # the lower half (vectorWidth blocks) is actually loaded, spanning
-                # numReadsPerVector*numVgpr registers; the partner half is never loaded.
-                # We therefore pack the loaded groups contiguously (per-group stride ==
-                # lowerHalfSpan, not 2*lowerHalfSpan) and drop the upper-half vgprs entirely.
-                # mxsTileSpanScaleSel maps each logical block to this compacted register, and
-                # the MXS scale valu allocation is halved to match (see KernelWriter).
-                lowerHalfSpan = numReadsPerVector * numVgpr
+                # the lower half (vectorWidth blocks) is actually loaded; the partner half
+                # is never loaded. Pack the loaded groups contiguously and drop the
+                # upper-half vgprs. mxUnit==1 splat expands those loaded bytes in-place
+                # to SSSS; mxsTileSpanScaleSel still maps each logical block to this
+                # compacted register. MXS scale valu allocation is halved to match
+                # (see KernelWriter).
+                if splatInPlace:
+                    lowerHalfSpan = vectorWidth
+                else:
+                    lowerHalfSpan = numReadsPerVector * numVgpr
                 valufIdx = tileSpanBaseValuiIdx + lowerHalfSpan
 
         return imod, pack, packPre
