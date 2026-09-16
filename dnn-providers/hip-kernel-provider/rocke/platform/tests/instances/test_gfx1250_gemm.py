@@ -390,10 +390,12 @@ class TestGfx1250Gemm(unittest.TestCase):
         """The WMMA path accepts both epilogues, and the LDS gate models the
         A/B <-> C aliasing the emitter actually performs.
 
-        The winner tile's C staging tile is 128 KiB and its double-buffered
-        TDM A/B is 144 KiB. Counted additively that is 272 KiB against a 160
-        KiB cap, so an additive gate rejects every cshuffle spec at this tile;
-        the packer aliases C onto A/B, so the real peak is max(A/B, C).
+        Against gfx1250's 320 KiB per-WG LDS, the aliasing is what decides the
+        outcome one tile_k up from the winner: at 256x256x128 the C staging
+        tile is 128 KiB and the double-buffered TDM A/B is 272 KiB, so the real
+        peak max(A/B, C) = 272 KiB fits while an additive gate would compute
+        400 KiB and reject. ``cshuffle_no_alias`` opts out of the aliasing and
+        must therefore be the one that fails.
         """
         from rocke.instances.common.gemm_universal import is_valid_spec
 
@@ -409,9 +411,17 @@ class TestGfx1250Gemm(unittest.TestCase):
                         )
                         self.assertTrue(ok, why)
 
+        # One tile_k up, the aliased peak still fits but the additive sum does
+        # not, so the two gates disagree and the aliasing is observable.
+        spec = replace(
+            self._cshuffle_spec(),
+            tile=replace(self._cshuffle_spec().tile, tile_k=128),
+        )
+        ok, why = is_valid_spec(spec, arch="gfx1250")
+        self.assertTrue(ok, why)
+
         # cshuffle_no_alias opts out of the aliasing, so the budget really is
         # additive there and this tile no longer fits.
-        spec = self._cshuffle_spec()
         no_alias = replace(
             spec, trait=replace(spec.trait, cshuffle_no_alias=True)
         )

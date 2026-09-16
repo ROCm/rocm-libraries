@@ -639,8 +639,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             f"block_size {spec.block_size} != warp_m*warp_n*wave_size = {expected_bs}"
         )
 
-    # LDS budget. The cap is the target's per-WG LDS capacity (160 KiB on
-    # gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3).
+    # LDS budget. The cap is the target's per-WG LDS capacity (320 KiB on
+    # gfx1250, 160 KiB on gfx950 / CDNA4, 64 KiB on gfx942 / CDNA3).
     #   compv4 single AB:   tile_m*tile_k*2 + tile_n*tile_k*2
     #   compv4 double AB:   2 * single AB
     #   cshuffle staging:   tile_m*tile_n*2   (f16)
