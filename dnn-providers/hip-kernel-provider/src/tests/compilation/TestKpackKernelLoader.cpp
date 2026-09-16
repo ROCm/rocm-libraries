@@ -39,18 +39,17 @@ using hip_kernel_provider::testing::unitKpackRoot;
 
 constexpr const char* SCRATCH_LABEL = "kpackloader";
 
-/// rocm-kpack's own test archive, staged in the same test descriptor tree as the packed
-/// sets and resolved from this binary's location. It holds gfx1100 and gfx1101 binaries
-/// under the toc keys "lib/libhip.so#0" and "bin/hiptest#0". Used rather than a
-/// hand-forged file so the reader under test is the pinned reader meeting an archive it
-/// actually accepts. The parse-level cases need a real *container*, not a matching
-/// *device*; the device cases read this build's own packed archive -- see unitKpackRoot().
+/// One arch and one toc key of rocm-kpack's own test archive, which testKpackArchive()
+/// resolves from this binary's location. It holds gfx1100 and gfx1101 binaries under the
+/// toc keys "lib/libhip.so#0" and "bin/hiptest#0". Used rather than a hand-forged file so
+/// the reader under test is the pinned reader meeting an archive it actually accepts. The
+/// parse-level cases need a real *container*, not a matching *device*; the device cases
+/// read this build's own packed archive -- see unitKpackRoot().
 ///
 /// Its entries are placeholder payloads rather than HSA code objects, so KpackArchive
 /// turns them away at DECOMPRESS on the code-object magic check. Nothing past that stage
 /// -- the digest comparison, the device bind, the module load -- is reachable from here;
 /// those cases need a packed archive and therefore a device.
-const std::filesystem::path& realArchive = testKpackArchive();
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
@@ -160,12 +159,13 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 
 TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 {
-    ASSERT_TRUE(std::filesystem::exists(realArchive))
-        << "the test kpack archive, resolved relative to this binary, is missing: " << realArchive;
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
 
     try
     {
-        _loader.load(realArchive,
+        _loader.load(testKpackArchive(),
                      ARCHIVE_TOC_KEY,
                      "gfx942",
                      0,
@@ -190,12 +190,13 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 
 TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
 {
-    ASSERT_TRUE(std::filesystem::exists(realArchive))
-        << "the test kpack archive, resolved relative to this binary, is missing: " << realArchive;
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
 
     try
     {
-        _loader.load(realArchive,
+        _loader.load(testKpackArchive(),
                      "no/such/entry#7",
                      ARCHIVE_ARCH,
                      0,

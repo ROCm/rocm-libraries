@@ -389,7 +389,7 @@ function(install_hipdnn_ctest_files)
     # below, which discovers test names by scanning this file's add_test() lines; staged
     # entries added after it would ship unlabelled and be invisible to every ctest -L tier.
     get_property(staged_tests GLOBAL PROPERTY HIPDNN_INSTALLED_CTEST_STAGING)
-    if(staged_tests)
+    if(NOT "${staged_tests}" STREQUAL "")
         file(APPEND "${INSTALLED_CTEST_FILE}" "${staged_tests}")
     endif()
 
