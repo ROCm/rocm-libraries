@@ -36,12 +36,9 @@ getrsBatch        -> linear system solver with LU batch version
 getrsNpvt         -> linear system solver with no pivoting LU
 getrsNpvtBatch    -> linear system solver with no pivoting LU batch version
 getriBatch        -> matrix inversion with LU batch version
-getriOOPBatch     -> Out-of-place matrix inversion with LU batch version
 trtri             -> triangular matrix inversion
 geqrf             -> QR factorization
 geqrfBatch        -> QR factorization batch version
-cholqr            -> Cholesky QR factorization
-cholqrBatch       -> Cholesky QR factorization batch version
 gels              -> Overdetermined linear system solver (least squares)
 gelsBatch         -> Overdetermined linear system solver batch version
 xxgqr             -> QR factorization Orthonormal/Unitary matrix construction
@@ -55,15 +52,13 @@ xxgbr             -> to test LQ factorization Orthonormal/Unitary matrix constru
 stedc             -> Tridiagonal eigenvalue problem (Divide and Conquer)
 xxevd             -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer)
 xxgvd             -> Symmetric/Hermitian generalized eigenvalue problem (Divide and Conquer)
-xxevdBatch        -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer) batch version
-xxevBatch         -> Symmetric/Hermitian eigenvalue problem (classic QR algorithm) batch version
+xxevBatch         -> Symmetric/Hermitian eigenvalue problem batch version
 xxevdx            -> Symmetric/Hermitian partial eigenvalue decomposition
 xxgvdx            -> Symmetric/Hermitian partial generalized eigenvalue decomposition
 xxevj             -> Symmetric/Hermitian eigenvalue problem (Jacobi iteration)
 xxgvj             -> Symmetric/Hermitian generalized eigenvalue problem (Jacobi iteration)
 xxevjBatch        -> Symmetric/Hermitian eigenvalue problem (Jacobi iteration) batch version
 gesvd             -> Singular Value Decomposition (classic QR algorithm)
-gesdd             -> Singular Value Decomposition (Divide & Conquer)
 gesvdj            -> Singular Value Decomposition (Jacobi iteration)
 gesvdjBatch       -> Singular Value Decomposition (Jacobi iteration) batch version
 (note: several can be selected)

@@ -16,42 +16,37 @@ potri             -> matrix inversion with Cholesky
 sytrf             -> Bunch-Kaufman factorization (symmetric indefinite)
 sytrs             -> linear system solver with Bunch-Kaufman
 getrf             -> LU factorization
-getrfBatch        -> LU factorization batch version
+getrfBatch        -> LU factorization batch version ##### TODO: needs to be added to hipsolver ##### 
 getrfNpvt         -> LU factorization without pivoting
-getrfNpvtBatch    -> LU factorization without pivoting batch version
+getrfNpvtBatch    -> LU factorization without pivoting batch version ##### TODO: needs to be added to hipsolver #####
 getrs             -> linear system solver with LU
-getrsBatch        -> linear system solver with LU batch version
-getrsNpvt         -> linear system solver with no pivoting LU 
-getrsNpvtBatch    -> linear system solver with no pivoting LU batch version
-getriBatch        -> matrix inversion with LU batch version
-getriOOPBatch     -> Out-of-place matrix inversion with LU batch version
-trtri             -> triangular matrix inversion
+getrsBatch        -> linear system solver with LU batch version ##### TODO: needs to be added to hipsolver #####
+getrsNpvt         -> linear system solver with no pivoting LU ##### TODO: needs to be added to hipsolver #####
+getrsNpvtBatch    -> linear system solver with no pivoting LU batch version ##### TODO: needs to be added to hipsolver #####
+getriBatch        -> matrix inversion with LU batch version ##### TODO: needs to be added to hipsolver #####
+trtri             -> triangular matrix inversion ##### TODO: needs to be added to hipsolver #####
 geqrf             -> QR factorization
-geqrfBatch        -> QR factorization batch version
-cholqr            -> Cholesky QR factorization 
-cholqrBatch       -> Cholesky QR factorization batch version
+geqrfBatch        -> QR factorization batch version ##### TODO: needs to be added to hipsolver #####
 gels              -> Overdetermined linear system solver (least squares)
-gelsBatch         -> Overdetermined linear system solver batch version
+gelsBatch         -> Overdetermined linear system solver batch version ##### TODO: needs to be added to hipsolver #####
 xxgqr             -> QR factorization Orthonormal/Unitary matrix construction
 xxmqr             -> QR factorization Orthonormal/Unitary matrix multiply
-larft             -> Triangular block reflector construction
+larft             -> Triangular block reflector construction ##### TODO: needs to be added to hipsolver #####
 xxtrd             -> Symmetric/Hermitian matrix tridiagonalization
 xxgtr             -> to test QL factorization Orthonormal/Unitary matrix construction
 xxmtr             -> to test QL factorization Orthonormal/Unitary matrix multiply
 gebrd             -> General matrix bidiagonalization
 xxgbr             -> to test LQ factorization Orthonormal/Unitary matrix construction
-stedc             -> Tridiagonal eigenvalue problem (Divide and Conquer)
+stedc             -> Tridiagonal eigenvalue problem (Divide and Conquer) ##### TODO: needs to be added to hipsolver #####
 xxevd             -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer)
 xxgvd             -> Symmetric/Hermitian generalized eigenvalue problem (Divide and Conquer)
-xxevdBatch        -> Symmetric/Hermitian eigenvalue problem (Divide and Conquer) batch version
-xxevBatch         -> Symmetric/Hermitian eigenvalue problem (classic QR algorithm) batch version
+xxevBatch         -> Symmetric/Hermitian eigenvalue problem batch version
 xxevdx            -> Symmetric/Hermitian partial eigenvalue decomposition
 xxgvdx            -> Symmetric/Hermitian partial generalized eigenvalue decomposition
 xxevj             -> Symmetric/Hermitian eigenvalue problem (Jacobi iteration)
 xxgvj             -> Symmetric/Hermitian generalized eigenvalue problem (Jacobi iteration)
 xxevjBatch        -> Symmetric/Hermitian eigenvalue problem (Jacobi iteration) batch version
 gesvd             -> Singular Value Decomposition (classic QR algorithm)
-gesdd             -> Singular Value Decomposition (Divide & Conquer)
 gesvdj            -> Singular Value Decomposition (Jacobi iteration)
 gesvdjBatch       -> Singular Value Decomposition (Jacobi iteration) batch version
 (note: several can be selected)
@@ -90,10 +85,10 @@ fi
 # --------------------------------- #
 Plist="s d c z"
 Clist="small medium large huge"
-Slist="potrf potrfBatch potrs potrsBatch potri sytrf sytrs getrf getrfBatch getrfNpvt getrfNpvtBatch
-        getrs getrsBatch getrsNpvt getrsNpvtBatch getriBatch getriOOPBatch trtri geqrf geqrfBatch
-        cholqr cholqrBatch gels gelsBatch xxgqr xxmqr larft xxtrd xxgtr xxmtr gebrd xxgbr stedc xxevd
-        xxgvd xxevdBatch xxevBatch xxevdx xxgvdx xxevj xxgvj xxevjBatch gesvd gesdd gesvdj gesvdjBatch"
+##### TODO: include missing functions once they are added to hipsolver #####
+Slist="potrf potrfBatch potrs potrsBatch potri sytrf sytrs getrf getrfNpvt 
+        getrs geqrf gels xxgqr xxmqr xxtrd xxgtr xxmtr gebrd xxgbr xxevd
+        xxgvd xxevBatch xxevdx xxgvdx xxevj xxgvj xxevjBatch gesvd gesvdj gesvdjBatch"
 
 
 # --------------------------------- #
