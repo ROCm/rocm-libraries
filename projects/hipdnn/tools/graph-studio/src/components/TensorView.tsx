@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   coordinates,
   compareTensors,
@@ -377,11 +377,12 @@ interface SlotPickerProps {
 }
 
 function SlotPicker({ title, hint, slot, onFiles }: SlotPickerProps) {
-  const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
 
+  // The whole card is the control: a label opens the hidden input from a click
+  // anywhere, and the same card takes a drop.
   return (
-    <div
+    <label
       className="tensors__slot"
       data-over={over}
       onDragOver={(e) => {
@@ -397,11 +398,11 @@ function SlotPicker({ title, hint, slot, onFiles }: SlotPickerProps) {
     >
       <div className="tensors__slot-head">
         <strong>{title}</strong>
-        <button type="button" onClick={() => input.current?.click()}>
-          Choose files…
-        </button>
+        <span className="tensors__slot-cta">Choose files…</span>
       </div>
-      <p className="tensors__slot-hint">{slot.busy ? "Reading…" : hint}</p>
+      <p className="tensors__slot-hint">
+        {slot.busy ? "Reading…" : `${hint} Click anywhere here, or drop in manifest.json and its .bin files.`}
+      </p>
       {slot.set && <p className="tensors__slot-state">{describeSet(slot.set)}</p>}
       {slot.error && (
         <p className="tensors__slot-state" data-tone="error">
@@ -409,14 +410,13 @@ function SlotPicker({ title, hint, slot, onFiles }: SlotPickerProps) {
         </p>
       )}
       <input
-        ref={input}
         type="file"
         multiple
         accept=".json,.bin,application/json"
         hidden
         onChange={(e) => onFiles(e.target.files)}
       />
-    </div>
+    </label>
   );
 }
 

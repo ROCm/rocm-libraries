@@ -46,8 +46,8 @@ export function VerifyReport() {
         <button type="button" onClick={() => void openReport()}>
           Open report…
         </button>
-        <button type="button" onClick={() => setHints([])}>
-          Tensor artifacts…
+        <button type="button" data-primary="true" onClick={() => setHints([])}>
+          Inspect tensors…
         </button>
         {loaded.sample && <span className="verify__note">showing bundled sample data</span>}
         {error && (

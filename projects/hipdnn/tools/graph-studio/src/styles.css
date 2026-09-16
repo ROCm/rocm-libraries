@@ -577,6 +577,10 @@ body,
   font-size: 12px;
   cursor: pointer;
 }
+.verify__bar button[data-primary="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .verify__note {
   color: var(--text-dim);
   font-size: 12px;
@@ -604,11 +608,14 @@ body,
   margin-top: 12px;
 }
 .tensors__slot {
+  display: block;
   padding: 12px 14px;
   background: var(--bg-panel);
   border: 1px dashed var(--border);
   border-radius: 8px;
+  cursor: pointer;
 }
+.tensors__slot:hover,
 .tensors__slot[data-over="true"] {
   border-color: var(--accent);
 }
@@ -618,15 +625,14 @@ body,
   gap: 12px;
   font-size: 13px;
 }
-.tensors__slot-head button {
+.tensors__slot-cta {
   margin-left: auto;
-  background: var(--bg-elev);
-  color: var(--text);
-  border: 1px solid var(--border);
+  background: var(--accent);
+  color: #0b1020;
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 12px;
-  cursor: pointer;
+  font-weight: 600;
 }
 .tensors__slot-hint {
   margin: 6px 0 0;
