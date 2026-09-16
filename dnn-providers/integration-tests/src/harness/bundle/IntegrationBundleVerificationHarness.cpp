@@ -638,7 +638,16 @@ VerificationOutcome
                                                                  << " rtol=" << tomlOverride->rtol);
     }
 
-    const auto toleranceFor = [&](hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+    const auto toleranceFor = [&](int64_t /*uid*/,
+                                  const std::string& label,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        // allclose unless this engine's TOML names the tensor. Nothing else selects a
+        // validator — see ALMIOPEN-2561.
+        if(const auto rmsThreshold = findTomlRmsThreshold(currentTestName(), label))
+        {
+            return ComparisonTolerance::rms(*rmsThreshold);
+        }
+
         ComparisonTolerance tolerance;
         tolerance::resolveTolerance(
             wrapper, dataType, currentTestName(), tolerance.atol, tolerance.rtol);
