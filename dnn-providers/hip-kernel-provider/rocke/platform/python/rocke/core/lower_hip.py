@@ -1971,6 +1971,22 @@ class _Lowerer:
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
         )
 
+    def _op_tile_quad_perm(self, op: Op) -> None:
+        """Lower an eight-bit DPP quad-permute control word.
+
+        See :meth:`_op_tile_quad_perm` in ``lower_llvm.py``: ``ctrl``
+        packs four two-bit lane selectors, so ``0..255`` is the whole
+        legal range and out-of-range values are malformed IR.
+        """
+        (data,) = op.operands
+        ctrl = int(op.attrs["ctrl"])
+        if not 0 <= ctrl <= 255:
+            raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
+            f"{_name(data)}, {_name(data)}, {ctrl}, 15, 15, 1);"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` XOR butterfly via SWAP-mode encoding.
 
