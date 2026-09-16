@@ -1,0 +1,45 @@
+name: Upload Origami artifacts to S3
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_path:
+        description: Local path in the repo to upload (file or directory)
+        required: true
+        type: string
+      s3_prefix:
+        description: Destination prefix inside the bucket (no leading slash)
+        required: true
+        type: string
+        default: data/nn/
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5.1.1
+        with:
+          role-to-assume: ${{ secrets.ORIGAMI_S3_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Upload to S3
+        env:
+          SOURCE_PATH: ${{ inputs.source_path }}
+          S3_PREFIX: ${{ inputs.s3_prefix }}
+          S3_BUCKET: rocm-libraries-shared-origami
+        run: |
+          set -euo pipefail
+          prefix="${S3_PREFIX#/}"
+          dest="s3://${S3_BUCKET}/${prefix}"
+          if [[ -d "${SOURCE_PATH}" ]]; then
+            aws s3 sync "${SOURCE_PATH}" "${dest}" --region us-east-1 --no-progress
+          else
+            aws s3 cp "${SOURCE_PATH}" "${dest}" --region us-east-1 --no-progress
+          fi
