@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <hip/hip_runtime_api.h>
 #include <shared_mutex>
 #include <unordered_map>
@@ -17,7 +18,8 @@ namespace rocblaslt
  * The first topK() * repeats() times a problem is seen, each of the top-K
  * ranked candidates is dispatched in turn and timed on the GPU; once every
  * candidate has been sampled the measured winner is pinned for every later
- * call with that problem.
+ * call with that problem. statistic() decides how a candidate's repeats are
+ * reduced to the one score the winner is chosen on.
  *
  * Timing is deferred-read. beginMeasurement() hands back an event pair for the
  * caller to wrap the launch with, and the elapsed time is only read on a later
@@ -34,6 +36,19 @@ namespace rocblaslt
     class OnlineTuner
     {
     public:
+        /**
+     * @brief How a candidate's repeated samples are reduced to one score.
+     *
+     * Median reports the typical time under whatever interference the run
+     * carries; Min reports the best time the candidate was seen to achieve.
+     * Selected by HIPBLASLT_ORIGAMI_ONLINE_TUNE_STAT.
+     */
+        enum class Statistic : uint8_t
+        {
+            Median = 0,
+            Min    = 1
+        };
+
         static OnlineTuner& getInstance()
         {
             static OnlineTuner gInstance;
@@ -58,6 +73,11 @@ namespace rocblaslt
         int repeats() const
         {
             return m_repeats;
+        }
+
+        Statistic statistic() const
+        {
+            return m_statistic;
         }
 
         /**
@@ -91,9 +111,10 @@ namespace rocblaslt
      * @brief Claim an event pair for the imminent launch of solutionIndex.
      *
      * On true, start and stop must both be recorded around that launch,
-     * otherwise the sample is dropped on the next harvest. On false neither
-     * argument is touched and nothing is owed. Problems that selectCandidate()
-     * has not registered are never measured.
+     * otherwise the sample is dropped on the next harvest and the pair is
+     * retired rather than pooled again. On false neither argument is touched
+     * and nothing is owed. Problems that selectCandidate() has not registered
+     * are never measured.
      */
         bool beginMeasurement(size_t      problemKey,
                               int         solutionIndex,
@@ -107,6 +128,18 @@ namespace rocblaslt
         }
 
     private:
+        // A pooled pair, kept whole so two handles from different measurements
+        // can never be paired up with each other. Pairs in the pool obey one
+        // invariant, which is what makes an unrecorded reuse detectable:
+        // a pair is only ever returned to the pool after a launch recorded it
+        // and the sample was accepted, and it is returned inverted, so reusing
+        // it without recording it reads a negative elapsed time.
+        struct EventPair
+        {
+            hipEvent_t m_start = nullptr;
+            hipEvent_t m_stop  = nullptr;
+        };
+
         // One launch the GPU has not been observed to finish yet.
         struct PendingMeasurement
         {
@@ -152,17 +185,20 @@ namespace rocblaslt
         int  measurableCandidate(const ProblemState& state, int solutionIndex) const;
         int  inFlightCap(const ProblemState& state) const;
         int  visitBudget(const ProblemState& state) const;
-        void resolve(size_t problemKey, ProblemState& state);
-        bool acquireEvents(hipEvent_t& start, hipEvent_t& stop);
-        void releaseEvents(hipEvent_t start, hipEvent_t stop);
+        float score(const std::vector<float>& samples) const;
+        void  resolve(size_t problemKey, ProblemState& state);
+        bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop);
+        void  recycleEvents(hipEvent_t start, hipEvent_t stop);
+        void  retireEvents(hipEvent_t start, hipEvent_t stop);
 
-        bool m_enabled = false;
-        int  m_topK    = 0;
-        int  m_repeats = 0;
-        bool m_verbose = false;
+        bool      m_enabled   = false;
+        int       m_topK      = 0;
+        int       m_repeats   = 0;
+        bool      m_verbose   = false;
+        Statistic m_statistic = Statistic::Median;
 
         std::unordered_map<size_t, ProblemState> m_problems;
-        std::vector<hipEvent_t>                  m_events;
+        std::vector<EventPair>                   m_pairs;
         std::shared_timed_mutex                  m_mutex;
     };
 } // namespace rocblaslt

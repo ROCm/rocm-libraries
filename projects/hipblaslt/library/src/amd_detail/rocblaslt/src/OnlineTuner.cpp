@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
@@ -34,6 +35,31 @@ namespace rocblaslt
             return static_cast<int>(std::strtol(env, nullptr, 0));
         }
 
+        // An unrecognised value keeps the default rather than failing the
+        // process, which is why the winner line reports the statistic it
+        // actually scored with: that trace field, not the environment, is what
+        // an A/B arm should be identified by.
+        OnlineTuner::Statistic envStatistic(const char*            name,
+                                            OnlineTuner::Statistic defaultValue)
+        {
+            const char* env = std::getenv(name);
+            if(!env)
+                return defaultValue;
+
+            if(!std::strcmp(env, "min"))
+                return OnlineTuner::Statistic::Min;
+
+            if(!std::strcmp(env, "median"))
+                return OnlineTuner::Statistic::Median;
+
+            return defaultValue;
+        }
+
+        const char* statisticName(OnlineTuner::Statistic statistic)
+        {
+            return statistic == OnlineTuner::Statistic::Min ? "min" : "median";
+        }
+
         int positionOf(const std::vector<int>& rankedSolutionIndices, int solutionIndex)
         {
             if(solutionIndex < 0)
@@ -57,6 +83,11 @@ namespace rocblaslt
             return 0.5f * (samples[count / 2 - 1] + samples[count / 2]);
         }
 
+        float minimum(const std::vector<float>& samples)
+        {
+            return *std::min_element(samples.begin(), samples.end());
+        }
+
         std::ostringstream traceLine(const char* event, size_t problemKey)
         {
             std::ostringstream msg;
@@ -70,10 +101,12 @@ namespace rocblaslt
     {
         const int topK = envInt("HIPBLASLT_ORIGAMI_ONLINE_TUNE_TOP_K", 0);
 
-        m_topK    = topK > 0 ? topK : 0;
-        m_repeats = std::max(envInt("HIPBLASLT_ORIGAMI_ONLINE_TUNE_REPEATS", c_defaultRepeats), 1);
-        m_verbose = std::getenv("HIPBLASLT_ORIGAMI_ONLINE_TUNE_VERBOSE") != nullptr;
-        m_enabled = m_topK >= 2;
+        m_topK = topK > 0 ? topK : 0;
+        m_repeats
+            = std::max(envInt("HIPBLASLT_ORIGAMI_ONLINE_TUNE_REPEATS", c_defaultRepeats), 1);
+        m_verbose   = std::getenv("HIPBLASLT_ORIGAMI_ONLINE_TUNE_VERBOSE") != nullptr;
+        m_statistic = envStatistic("HIPBLASLT_ORIGAMI_ONLINE_TUNE_STAT", Statistic::Median);
+        m_enabled   = m_topK >= 2;
     }
 
     // The pooled events are deliberately not destroyed. This is a function-local
@@ -167,19 +200,27 @@ namespace rocblaslt
                 continue;
             }
 
-            // A pair the caller never recorded still queries as complete, and the
-            // pool hands recycled pairs back swapped, so it reads a negative
-            // elapsed time. The sign test is what keeps a missed measurement from
-            // looking like an impossibly fast kernel and winning every median.
+            // A pair the caller never recorded still queries as complete, so
+            // the elapsed time is the only evidence that the launch happened.
+            // Every way of missing one reads as non-positive, which is why the
+            // sign test is load-bearing and not defensive: a fresh pair fails
+            // with hipErrorInvalidHandle, a pooled pair is inverted so it reads
+            // the negative of its last duration, and a launch that recorded
+            // start and then failed reads an older stop against a newer start.
             float      milliseconds = 0.0f;
             const bool timed
                 = hipEventElapsedTime(&milliseconds, pending.m_start, pending.m_stop) == hipSuccess
                   && std::isfinite(milliseconds) && milliseconds > 0.0f;
 
-            releaseEvents(pending.m_start, pending.m_stop);
-
+            // Only a pair that produced a sample is known to have been
+            // recorded, so only that pair is safe to hand out again.
             if(timed)
+            {
+                recycleEvents(pending.m_start, pending.m_stop);
                 state.m_samples[pending.m_candidate].push_back(milliseconds * 1000.0f);
+            }
+            else
+                retireEvents(pending.m_start, pending.m_stop);
 
             if(m_verbose)
             {
@@ -330,6 +371,18 @@ namespace rocblaslt
         return static_cast<int>(state.m_candidates.size()) * m_repeats * c_visitBudgetFactor;
     }
 
+    // GPU timing noise is one-sided: contention, clock excursions and cache
+    // state make a launch slower than the kernel's floor, never faster. Min
+    // therefore estimates what the candidate can achieve and median estimates
+    // what it typically achieves under whatever else the machine is doing.
+    float OnlineTuner::score(const std::vector<float>& samples) const
+    {
+        if(m_statistic == Statistic::Min)
+            return minimum(samples);
+
+        return median(samples);
+    }
+
     void OnlineTuner::resolve(size_t problemKey, ProblemState& state)
     {
         int   winner      = -1;
@@ -341,11 +394,11 @@ namespace rocblaslt
             if(state.m_samples[i].empty())
                 continue;
 
-            const float score = median(state.m_samples[i]);
-            if(winnerIndex < 0 || score < winnerScore)
+            const float candidateScore = score(state.m_samples[i]);
+            if(winnerIndex < 0 || candidateScore < winnerScore)
             {
                 winnerIndex = static_cast<int>(i);
-                winnerScore = score;
+                winnerScore = candidateScore;
                 winner      = state.m_candidates[i];
             }
         }
@@ -361,43 +414,67 @@ namespace rocblaslt
             msg << " cand=" << winnerIndex << " sol=" << winner << " us=" << winnerScore
                 << " samples=" << samples << " calls=" << state.m_calls
                 << " declined=" << state.m_declined
-                << " gaveup=" << (state.m_gaveUp ? 1 : 0) << "\n";
+                << " gaveup=" << (state.m_gaveUp ? 1 : 0)
+                << " stat=" << statisticName(m_statistic) << "\n";
             std::cerr << msg.str();
         }
     }
 
     bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop)
     {
-        hipEvent_t events[2] = {nullptr, nullptr};
-
-        for(int i = 0; i < 2; ++i)
+        if(!m_pairs.empty())
         {
-            if(!m_events.empty())
-            {
-                events[i] = m_events.back();
-                m_events.pop_back();
-                continue;
-            }
+            const EventPair pair = m_pairs.back();
+            m_pairs.pop_back();
 
-            if(hipEventCreateWithFlags(&events[i], hipEventDefault) != hipSuccess)
-            {
-                releaseEvents(events[0], nullptr);
-                return false;
-            }
+            start = pair.m_start;
+            stop  = pair.m_stop;
+
+            return true;
         }
 
-        start = events[0];
-        stop  = events[1];
+        EventPair pair;
+        if(hipEventCreateWithFlags(&pair.m_start, hipEventDefault) != hipSuccess)
+            return false;
+
+        if(hipEventCreateWithFlags(&pair.m_stop, hipEventDefault) != hipSuccess)
+        {
+            // Pooling a lone handle would let it be paired with one from an
+            // unrelated measurement, whose timestamps say nothing about either.
+            retireEvents(pair.m_start, nullptr);
+            return false;
+        }
+
+        start = pair.m_start;
+        stop  = pair.m_stop;
 
         return true;
     }
 
-    void OnlineTuner::releaseEvents(hipEvent_t start, hipEvent_t stop)
+    // Inverted on purpose, and only ever reached for a pair a launch really did
+    // record: reusing it without recording it then reads the negative of the
+    // duration it last measured, which harvestPendingImpl()'s sign test drops.
+    void OnlineTuner::recycleEvents(hipEvent_t start, hipEvent_t stop)
+    {
+        if(start && stop)
+            m_pairs.push_back({stop, start});
+    }
+
+    // Retiring instead of pooling is what closes the window a rejected sample
+    // used to leave open: a pair that came back to the pool after a rejection
+    // would be inverted twice, and a pair in its original orientation that no
+    // launch has re-recorded reads its old duration back as a positive time
+    // that no guard here can distinguish from a real one.
+    //
+    // hipEventDestroy() does not block on a recorded-but-unretired event, it
+    // defers the release, so this stays off the critical path. Its own failure
+    // is not actionable and must not reach the caller's matmul.
+    void OnlineTuner::retireEvents(hipEvent_t start, hipEvent_t stop)
     {
         if(start)
-            m_events.push_back(start);
+            static_cast<void>(hipEventDestroy(start));
 
         if(stop)
-            m_events.push_back(stop);
+            static_cast<void>(hipEventDestroy(stop));
     }
 } // namespace rocblaslt
