@@ -107,6 +107,20 @@ _SHAPES: List[_Shape] = [
     _Shape("dw_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
     # 1×1 pointwise for cpg=16 (PAD=0, KH=KW=1)
     _Shape("16c_1x1_N2H16W16_g8", N=2, H=16, W=16, groups=8, cpg=16, KH=1, KW=1, PAD=0),
+    # stride=2 cases — output H=6, W=6 for H=W=14, PAD=1, KH=KW=3
+    # groups=8 satisfies DirectConv16cSpec/DirectConvSpec default block_groups=8
+    _Shape("4c_N2H14W14_g8_s2", N=2, H=14, W=14, groups=8, cpg=4, stride=2),
+    _Shape("16c_N2H14W14_g8_s2", N=2, H=14, W=14, groups=8, cpg=16, stride=2),
+]
+
+
+# Shapes for DirectDepthwiseSpatialSpec (groups <= wave_size=64, cpg=kpg=1).
+# groups=3 is intentionally not a power-of-two to cover the non-divisor path;
+# groups=64 exercises full-wave utilisation; stride=2 validates Ho/Wo output.
+_SPATIAL_SHAPES: List[_Shape] = [
+    _Shape("sp_dw_N2H14W14_g3", N=2, H=14, W=14, groups=3, cpg=1),
+    _Shape("sp_dw_N2H14W14_g64", N=2, H=14, W=14, groups=64, cpg=1),
+    _Shape("sp_dw_N2H14W14_g3_s2", N=2, H=14, W=14, groups=3, cpg=1, stride=2),
 ]
 
 
@@ -176,12 +190,12 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
 
     ok, reason = is_valid_spec(spec, arch=arch)
     if not ok:
-        return False, f"invalid spec (shapes should be pre-validated): {reason}"
+        return False, f"skip {reason}"
 
     try:
         kernel = build_direct_conv(spec, arch=arch)
     except ValueError as e:
-        return False, f"build failed (shapes should be pre-validated): {e}"
+        return False, f"skip build failed: {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
@@ -195,7 +209,7 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     B_t = torch.empty(total_k, p.KH, p.KW, shape.cpg, dtype=torch.float16).uniform_(
         -1.0, 1.0
     )
-    D_t = torch.empty(p.N, p.H, p.W, total_k, dtype=torch.float16)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=torch.float16)
 
     ref = _conv_ref_grouped(A_t, B_t, p)
 
@@ -220,7 +234,7 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         rt.free(D_dev)
         return False, f"kernel load failed: {e}"
 
-    q_tiles = (p.W + spec.block_q - 1) // spec.block_q
+    q_tiles = (p.Wo + spec.block_q - 1) // spec.block_q
     g_tiles = p.groups // spec.block_groups
     grid = (q_tiles, g_tiles, p.N)
     block = (spec.threads_per_block, 1, 1)
@@ -379,6 +393,128 @@ def _run_depthwise_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     return True, ""
 
 
+def _run_depthwise_spatial_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
+    """Build, compile, launch, and verify one depthwise-spatial kernel.
+
+    Uses ``DirectDepthwiseSpatialSpec`` (cpg = kpg = 1, groups <= wave_size).
+
+    Returns ``(passed, reason)``.  ``reason`` starts with ``"skip "`` when
+    the combination is architecturally unsupported.
+    """
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_direct_grouped import (
+        DirectConvProblem,
+        DirectDepthwiseSpatialSpec,
+        build_direct_depthwise_spatial,
+        is_valid_depthwise_spatial_spec,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    assert shape.cpg == 1, "spatial depthwise path requires cpg=1"
+
+    p = DirectConvProblem(
+        N=shape.N,
+        H=shape.H,
+        W=shape.W,
+        groups=shape.groups,
+        cpg=1,
+        kpg=1,
+        KH=shape.KH,
+        KW=shape.KW,
+        PAD=shape.PAD,
+        stride=shape.stride,
+    )
+
+    spec = DirectDepthwiseSpatialSpec(
+        problem=p,
+        name=f"test_direct_sp_dw_{shape.id}",
+    )
+
+    ok, reason = is_valid_depthwise_spatial_spec(spec, arch=arch)
+    if not ok:
+        return False, f"skip {reason}"
+
+    try:
+        kernel = build_direct_depthwise_spatial(spec, arch=arch)
+    except ValueError as e:
+        return False, f"build failed: {e}"
+
+    try:
+        artifact = compile_kernel(kernel, arch=arch)
+    except Exception as e:
+        return False, f"compile failed: {e}"
+
+    torch.manual_seed(0)
+    total_c = shape.groups
+    total_k = shape.groups
+    A_t = torch.empty(p.N, p.H, p.W, total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
+    B_t = torch.empty(total_k, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-1.0, 1.0)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=torch.float16)
+
+    ref = _conv_ref_grouped(A_t, B_t, p)
+
+    rt = Runtime()
+    A_dev = rt.alloc(A_t.nbytes)
+    B_dev = rt.alloc(B_t.nbytes)
+    D_dev = rt.alloc(D_t.nbytes)
+    rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
+    rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
+    rt.memset(D_dev, 0, D_t.nbytes)
+
+    sig = conv_args_signature("fp16")
+    try:
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=sig,
+        )
+    except HipError as e:
+        rt.free(A_dev)
+        rt.free(B_dev)
+        rt.free(D_dev)
+        return False, f"kernel load failed: {e}"
+
+    q_tiles = math.ceil(p.Wo / spec.block_w)
+    grid = (q_tiles, 1, p.N)
+    block = (spec.threads_per_block, 1, 1)
+
+    values = {
+        "A": A_dev,
+        "B": B_dev,
+        "D": D_dev,
+        "A_bytes": A_t.nbytes,
+        "B_bytes": B_t.nbytes,
+        "D_bytes": D_t.nbytes,
+    }
+    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+
+    D_cpu = torch.empty_like(D_t)
+    rt.memcpy_d2h(_u8(D_cpu), D_dev, D_t.nbytes)
+    rt.free(A_dev)
+    rt.free(B_dev)
+    rt.free(D_dev)
+    synchronize_and_release(0)
+
+    out_f32 = D_cpu.float()
+    ref_f32 = ref.float().cpu()
+    abs_diff = (out_f32 - ref_f32).abs()
+    ref_scale = ref_f32.abs().max().clamp(min=1.0)
+    rel_err = float(abs_diff.max() / ref_scale)
+    passed = rel_err < _TOL
+    if not passed:
+        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
+    print(
+        f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}",
+        flush=True,
+    )
+    return True, ""
+
+
 # ---------------------------------------------------------------------------
 # Test class
 # ---------------------------------------------------------------------------
@@ -435,6 +571,20 @@ class TestDirectConvCorrectness(unittest.TestCase):
             if s.cpg == 1:
                 with self.subTest(shape=s.id):
                     self._run_depthwise(s)
+
+    def _run_depthwise_spatial(self, shape: _Shape) -> None:
+        passed, reason = _run_depthwise_spatial_one(GPU_ARCH, shape)
+        if reason.startswith("skip"):
+            self.skipTest(reason)
+        self.assertTrue(
+            passed,
+            f"FAIL {shape.id} on {GPU_ARCH}: {reason}",
+        )
+
+    def test_depthwise_spatial(self):
+        for s in _SPATIAL_SHAPES:
+            with self.subTest(shape=s.id):
+                self._run_depthwise_spatial(s)
 
 
 if __name__ == "__main__":

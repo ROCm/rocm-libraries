@@ -45,3 +45,20 @@ TEST(InFlightQueue, DefaultConfigurationHasNoTransitionRange) {
     queue.pushWithThrottle(/*drainLatency=*/100);
     EXPECT_EQ(queue.throttleWait(), 4);
 }
+
+TEST(InFlightQueue, AdvancingThrottleDoesNotDrainEntries) {
+    InFlightQueue queue(/*depth=*/1);
+    queue.setThrottleInterval(/*issueInterval=*/4.0);
+
+    queue.pushWithThrottle(/*drainLatency=*/10);
+    ASSERT_EQ(queue.throttleWait(), 4);
+    ASSERT_EQ(queue.minResidual(), 10);
+
+    queue.advanceThrottle(/*cycles=*/4);
+    EXPECT_EQ(queue.throttleWait(), 0);
+    EXPECT_EQ(queue.minResidual(), 10);
+    EXPECT_EQ(queue.size(), 1);
+
+    queue.advance(/*cycles=*/10);
+    EXPECT_TRUE(queue.empty());
+}
