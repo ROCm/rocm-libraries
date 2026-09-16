@@ -38,8 +38,12 @@ in isolation: `HipCompiledProgram.cpp:8-9` includes `kernel_includes.hpp` and
 build time by the sibling `kernels/` directory. And its `IKernelCompiler`
 (`samples/example_engine_plugin/src/hip/IKernelCompiler.hpp:16-25`) takes an **embedded-table
 kernel file name**, not a source string — `compile(const std::string& kernelFileName, ...)` —
-so a kernel living in `$WORK` cannot be handed to it unmodified. Expect to adapt the
-copied compiler to accept your source text.
+so a kernel living in `$WORK` cannot be handed to it unmodified. Adapt the copied
+compiler to take your source text, and take the shape from the provider's own interface
+rather than inventing one: `compileSource(const std::string& sourceText, ...)`
+(`dnn-providers/hip-kernel-provider/src/compilation/IKernelCompiler.hpp:45`) is the
+production spelling of exactly this call, and the ingestor's `hiprtc_file` branch calls
+it that way. Matching it costs nothing now and is what the integration side will expect.
 
 **Compile with the production envelope, not this compiler's defaults.** `HipKernelCompiler`
 strips the arch suffixes and resolves headers through the build-time embedded table
