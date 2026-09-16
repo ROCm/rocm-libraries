@@ -351,6 +351,11 @@ if(ROWCOLQUANT_GEMM_KERNEL_HEADERS)
         else()
             set(_rowcolquant_gfx_arch "gfx942")
         endif()
+        # Strip feature suffixes ("gfx942:sramecc+:xnack-"). CMAKE_HIP_ARCHITECTURES
+        # carries them for ASAN configures, and GFX_ARCH is compared against
+        # kSupportedArchs and the compile-time tile guards in the .cpp, which want the
+        # bare target. Mirrors normalize_gfx_arch() on the Python side.
+        string(REGEX REPLACE ":.*$" "" _rowcolquant_gfx_arch "${_rowcolquant_gfx_arch}")
         set(CK_TILE_ROWCOLQUANT_GFX_ARCH "${_rowcolquant_gfx_arch}" CACHE STRING
             "GFX arch for the CMake-built RowColQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
     endif()
@@ -365,7 +370,10 @@ else()
         "No RowColQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
         "dispatcher_grouped_gemm_rowcolquant_lib will NOT be built. "
         "Run unified_grouped_gemm_rowcolquant_codegen.py --output-dir "
-        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to enable this target.")
+        "${CMAKE_BINARY_DIR}/generated_kernels/ --gfx-arch <target> before configuring "
+        "to enable this target. --gfx-arch matters: the built-in default is the gfx9 "
+        "MFMA tile, and on gfx1250 the ctypes source static_asserts that tile away "
+        "rather than let it compile into a library that returns wrong results.")
     # Do not define the target: the source requires force-included symbols (SelectedKernel,
     # ADataType, KERNEL_NAME, etc.) that only exist in the generated header. Without it
     # the build fails at compile time, not load time, breaking any all-target build.
@@ -397,6 +405,11 @@ if(TENSORQUANT_GEMM_KERNEL_HEADERS)
         else()
             set(_tensorquant_gfx_arch "gfx942")
         endif()
+        # Strip feature suffixes ("gfx942:sramecc+:xnack-"). CMAKE_HIP_ARCHITECTURES
+        # carries them for ASAN configures, and GFX_ARCH is compared against
+        # kSupportedArchs and the compile-time tile guards in the .cpp, which want the
+        # bare target. Mirrors normalize_gfx_arch() on the Python side.
+        string(REGEX REPLACE ":.*$" "" _tensorquant_gfx_arch "${_tensorquant_gfx_arch}")
         set(CK_TILE_TENSORQUANT_GFX_ARCH "${_tensorquant_gfx_arch}" CACHE STRING
             "GFX arch for the CMake-built TensorQuant ctypes .so (default: first CMAKE_HIP_ARCHITECTURES or gfx942)")
     endif()
@@ -411,7 +424,10 @@ else()
         "No TensorQuant GEMM kernel header found in ${CMAKE_BINARY_DIR}/generated_kernels/. "
         "dispatcher_grouped_gemm_tensorquant_lib will NOT be built. "
         "Run unified_grouped_gemm_tensorquant_codegen.py --output-dir "
-        "${CMAKE_BINARY_DIR}/generated_kernels/ before configuring to enable this target.")
+        "${CMAKE_BINARY_DIR}/generated_kernels/ --gfx-arch <target> before configuring "
+        "to enable this target. --gfx-arch matters: the built-in default is the gfx9 "
+        "MFMA tile, and on gfx1250 the ctypes source static_asserts that tile away "
+        "rather than let it compile into a library that returns wrong results.")
     # Do not define the target: the source requires force-included symbols (SelectedKernel,
     # ADataType, KERNEL_NAME, etc.) that only exist in the generated header. Without it
     # the build fails at compile time, not load time, breaking any all-target build.
