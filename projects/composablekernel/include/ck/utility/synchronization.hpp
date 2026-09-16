@@ -22,6 +22,16 @@ __device__ void block_sync_lds()
     __builtin_amdgcn_s_barrier_wait(-1);
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #else
+// Please note that these are a workaround for bugs in ROCm 7.2 to 10.1 where release fences at the
+// top of loops wouldn't properly flush writes across a loop boundary. They are strictly worse for
+// performance that the fences alone, since the compiler cannot drop them if they are redundant /
+// there are no LDS operations outstanding. They should be removed once these compilers are no
+// longer supported.
+#if defined(__gfx11__)
+    __builtin_amdgcn_s_waitcnt(0xfc07);
+#else
+    __builtin_amdgcn_s_waitcnt(0xc07f);
+#endif
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
