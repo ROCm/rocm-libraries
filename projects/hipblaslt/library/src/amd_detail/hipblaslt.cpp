@@ -727,7 +727,7 @@ struct RmsNormHandoff
     void*   partialBuf = nullptr; // f32 partial sums, row-major [M_padded, nTilesN]
     int32_t M          = 0;       // logical rows; padded rows in partialBuf are ignored
     int32_t N          = 0;       // feature dimension reduced by RMSNorm
-    int32_t nTilesN    = 0;       // columns of partialBuf, ceil(N / MacroTile1)
+    int32_t nTilesN    = 0;       // columns of partialBuf, ceil(N / MacroTile0)
     float   invD       = 0.f;     // 1 / N
     float   eps        = 0.f;     // RMSNorm epsilon
 };
@@ -737,8 +737,7 @@ struct RmsNormHandoff
 // creates this handle because its reduction applies rstd to D in the same matmul call.
 struct hipblasLtFusedEpilogueRMSNormDescriptor
 {
-    // FP32 rstd, tightly packed [M * batch]. M and batch are implicit in the consumer GEMM2
-    // problem, which must match the producer for the decomposed flow.
+    // FP32 rstd, tightly packed [D.N * batch]. The producer and consumer D.N must match.
     void* per_row_scale = nullptr;
     size_t per_row_scale_size = 0;
     // Set when a caller supplies per_row_scale. The producer and consumer run on the same stream,
@@ -1654,18 +1653,17 @@ try
                     return HIPBLAS_STATUS_NOT_SUPPORTED;
                 }
             }
-            // Decomposed flow: validate the caller-owned FP32 [rows*batch] handoff buffer on both
-            // sides. The producer's row_rstd reduction writes exactly one float per row, and the
-            // consumer reads it through a ScaleAlphaVec SRD bounded to the same row count, so both
-            // calls must supply a buffer covering their own D row count. The two stages are
-            // mutually exclusive within a chain.
+            // Decomposed flow: validate the caller-owned FP32 [D.N*batch] handoff buffer on both
+            // sides. The producer's row_rstd reduction writes one float per D.N index, and the
+            // consumer reads it through a free1 ScaleAlphaVec bounded to the same D.N count. The
+            // two stages are mutually exclusive within a chain.
             if(partialStats || scaleApply)
             {
-                auto*          dlay  = (rocblaslt_matrix_layout)matD;
-                const uint64_t rows  = dlay ? dlay->m : 0;
-                const int32_t  batch = dlay ? dlay->batch_count : 1;
-                if(dlay == nullptr || rows == 0 || batch <= 0 || fused->rmsnorm_stats == nullptr
-                   || !fused->rmsnorm_stats->populated
+                auto*          dlay       = (rocblaslt_matrix_layout)matD;
+                const uint64_t scaleCount = dlay ? dlay->n : 0;
+                const int32_t  batch      = dlay ? dlay->batch_count : 1;
+                if(dlay == nullptr || scaleCount == 0 || batch <= 0
+                   || fused->rmsnorm_stats == nullptr || !fused->rmsnorm_stats->populated
                    || fused->rmsnorm_stats->per_row_scale == nullptr)
                 {
                     rocblaslt::Debug::Instance().markerStop();
@@ -1673,11 +1671,11 @@ try
                 }
                 const size_t batchCount = static_cast<size_t>(batch);
                 const size_t requiredSize
-                    = static_cast<size_t>(rows) * batchCount * sizeof(float);
+                    = static_cast<size_t>(scaleCount) * batchCount * sizeof(float);
                 if(fused->rmsnorm_stats->per_row_scale_size < requiredSize)
                 {
                     log_error(__func__,
-                              "decomposed RMSNorm handoff buffer is smaller than M * batchCount "
+                              "decomposed RMSNorm handoff buffer is smaller than D.N * batchCount "
                               "* sizeof(float)");
                     rocblaslt::Debug::Instance().markerStop();
                     return HIPBLAS_STATUS_INVALID_VALUE;

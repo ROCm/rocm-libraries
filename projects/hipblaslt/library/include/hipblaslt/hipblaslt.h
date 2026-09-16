@@ -126,11 +126,11 @@ typedef enum {
  */
 typedef enum {
   HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD          = 0, /**<Add a residual tensor to the GEMM result. Requires a residual pointer attribute.*/
-  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM               = 1, /**<Full per-row RMSNorm (``x * rsqrt(mean(x^2) + eps) * gamma``), realized internally as a producer plus a reduce-and-apply kernel. Requires gamma and eps attributes.*/
-  HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS = 2, /**<Decomposed flow (GEMM1 producer): emits the tile-local ``h1 * gamma`` value plus per-row RMSNorm statistics into an RMSNorm handoff descriptor. Requires gamma, eps, and stats attributes.*/
-  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY   = 3, /**<Decomposed flow (GEMM2 consumer): applies the deferred per-row RMSNorm scale carried in the handoff descriptor. Requires the stats attribute.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM               = 1, /**<Apply full RMSNorm (``x * rsqrt(mean(x^2) + eps) * gamma``) over ``D.M``, independently for each ``D.N`` index. Realized internally as a producer plus a reduce-and-apply kernel. Requires gamma and eps attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS = 2, /**<Decomposed flow (GEMM1 producer): emits the tile-local ``h1 * gamma`` value and writes the finalized ``rstd``, computed over ``D.M`` for each ``D.N`` index, to an RMSNorm handoff descriptor. Requires gamma, eps, and stats attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY   = 3, /**<Decomposed flow (GEMM2 consumer): multiplies the GEMM result by the deferred ``rstd`` for each ``D.N`` index. Requires the stats attribute.*/
   HIPBLASLT_FUSEABLE_EPILOGUE_AMAX                  = 4, /**<Capture the result AMax (maximum absolute value) as a side output.*/
-  HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT               = 5, /**<Requantize the result to a narrow output type (chosen by D's data type, e.g. FP8). In a decomposed producer chain after partial RMSNorm stats, this writes the dynamic-quantized producer output while the RMSNorm handoff carries the composed consumer scale. Configured by the requant scale, amax, compute-mode, and granularity attributes.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_REQUANT               = 5, /**<Requantize the result to a narrow output type (chosen by D's data type, e.g. FP8). In a decomposed producer chain after partial RMSNorm stats, this writes the requantized producer output while the RMSNorm handoff carries ``rstd``. Configured by the requant scale, amax, compute-mode, and granularity attributes.*/
   HIPBLASLT_FUSEABLE_EPILOGUE_SWIGLU                = 6, /**<Reserved epilogue family: SwiGLU gated linear unit.*/
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
   HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX            = 7, /**<Collective family: redistribute a leading run of D's free-0 (feature) positions across the ranks of the registered device communicator, from the GEMM's own store path. Single stage; not chainable. The ``PREFIX`` suffix names the dispatch criterion - the exported region is the positional run ``[0, AM)`` given by ``HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT``.*/
@@ -152,17 +152,17 @@ typedef enum {
 } hipblasLtRequantScaleComputeMode_t;
 
 /*! \ingroup types_module
- *  \brief Granularity (shape) of the requant scale, and of any amax side output.
+ *  \brief Granularity (shape) of the requant scale.
  *
  *  \details
- *  Determines how many scale/amax values are shared across the ``[M,N]`` result. Per-tensor uses a
- *  single value; per-row uses one value per output row (``[M]``). Block granularities can be added
- *  later when there is a concrete model and kernel requirement.
+ *  Determines how many scale values are shared across the ``[M,N]`` result. Per-tensor uses a
+ *  single value; per-row uses one value per output row (``[M]``); and MX uses one value per block.
+ *  For ordinary requant, any amax side output uses the same granularity as the scale.
  */
 typedef enum {
   HIPBLASLT_REQUANT_SCALE_PER_TENSOR    = 0, /**<One scalar scale for the whole result tensor. Scale/amax shape ``[1]``.*/
-  HIPBLASLT_REQUANT_SCALE_PER_ROW       = 1, /**<One scale per output row/token. Scale/amax shape ``[M]``.*/
-  HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX  = 2, /**<MX microscaling — one UE8M0 exponent scale per 1x32 block along the N (inner) dimension; output is fp8 e4m3, scale tensor is UE8M0 bytes.*/
+  HIPBLASLT_REQUANT_SCALE_PER_ROW       = 1, /**<One scale per output row. Scale/amax shape ``[M]``.*/
+  HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX  = 2, /**<MX microscaling — one UE8M0 exponent scale per block; for a partial-RMSNorm producer, blocks span ``D.M``. Output is fp8 e4m3 and the scale tensor contains UE8M0 bytes.*/
 } hipblasLtRequantScaleGranularity_t;
 
 /*! \ingroup types_module
@@ -173,19 +173,19 @@ typedef enum {
  *  belong to the all-to-all collective family.
  */
 typedef enum {
-  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA = 0, /**<Non-null device pointer to the RMSNorm gamma (per-channel scale) vector of length N. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``void*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_GAMMA = 0, /**<Non-null device pointer to the RMSNorm gamma vector of length ``D.M``. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``void*``.*/
   HIPBLASLT_FUSED_EPILOGUE_RMSNORM_EPS   = 1, /**<Epsilon added inside the RMSNorm reciprocal square root. Used by the RMSNorm and partial-RMSNorm-stats stages. Data type: ``float``.*/
   HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_POINTER = 2, /**<Non-null device pointer to the residual input tensor. The tensor has the same logical shape, layout, and data type as D. Data type: ``void*``.*/
   HIPBLASLT_FUSED_EPILOGUE_RESIDUAL_OUTPUT_POINTER = 3, /**<Optional device pointer that receives the updated residual stream after the residual add. If NULL or unset, the residual input tensor is updated in place. Data type: ``void*``.*/
-  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS = 4, /**<Opaque RMSNorm handoff descriptor linking the decomposed producer (partial RMSNorm stats) and consumer (RMSNorm scale-apply) matmul calls. The same object must be set on both handles. The carried consumer scale is rstd for the ordinary decomposed flow, or the composed RMSNorm-output dequant scale for the dynamic-quantized decomposed producer. Data type: ``hipblasLtFusedEpilogueRMSNormDescriptor_t``.*/
-  HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_POINTER = 5, /**<Device pointer to the requant dequant scale. In static mode it is read-only input; in dynamic mode it receives the derived scale. For the dynamic-quantized decomposed producer, this receives the logical RMSNorm-output dequant scale consumed by GEMM2. Its element count follows the scale granularity. Data type: ``void*`` (f32 elements).*/
+  HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS = 4, /**<Opaque RMSNorm handoff descriptor linking the decomposed producer (partial RMSNorm stats) and consumer (RMSNorm scale-apply) matmul calls. The same object must be set on both handles. It carries the finalized ``rstd``. Data type: ``hipblasLtFusedEpilogueRMSNormDescriptor_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_POINTER = 5, /**<Device pointer to the requant dequant scale. In static mode it is read-only input; in dynamic mode it receives the derived scale. Its element count follows the scale granularity. Data type: ``void*`` (f32 elements).*/
   HIPBLASLT_FUSED_EPILOGUE_REQUANT_AMAX_POINTER = 6, /**<Optional device pointer that receives the result amax side output, with the same granularity as the scale. If unset in dynamic mode, amax is computed internally only to derive the scale. Data type: ``void*`` (f32 elements).*/
   HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_COMPUTE_MODE = 7, /**<How the output scale is obtained (static vs dynamic-from-amax). Defaults to static. Data type: ``hipblasLtRequantScaleComputeMode_t``.*/
-  HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY = 8, /**<Shape shared by the scale and amax outputs (per-tensor or per-row). Defaults to per-tensor. Data type: ``hipblasLtRequantScaleGranularity_t``.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_SCALE_GRANULARITY = 8, /**<Scale granularity (per-tensor, per-row, or MX block). For ordinary requant, the amax output uses the same granularity. Defaults to per-tensor. Data type: ``hipblasLtRequantScaleGranularity_t``.*/
   HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_SCALE_POINTER = 9,  /**<Device pointer to the UE8M0 MX block-scale OUTPUT tensor; required when granularity is PER_BLOCK_MX; Data type: void* (UE8M0 bytes).*/
-  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE    = 10, /**<Elements per MX block along N; default 32; Data type: int32_t.*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_BLOCK_SIZE    = 10, /**<Elements per MX block; for a partial-RMSNorm producer, blocks span ``D.M``. Default 32; Data type: int32_t.*/
   HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_OUTPUT_TYPE   = 11, /**<Narrow output element type for MX quant; only HIP_R_8F_E4M3 supported; default HIP_R_8F_E4M3; Data type: hipDataType.*/
-  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER = 17, /**<Optional device pointer to a bf16 output buffer that receives the pre-quantization residual value (H + residual) with the same [M,N] shape/layout as D but bf16 elements. When set with PER_BLOCK_MX granularity, the PartialRMS MXFP8 epilogue additionally stores this bf16 tensor. Data type: void* (bf16 elements).*/
+  HIPBLASLT_FUSED_EPILOGUE_REQUANT_MX_RESIDUAL_OUT_POINTER = 17, /**<Optional device pointer to a bf16 output buffer that receives the pre-quantization residual-add result with the same [M,N] shape/layout as D but bf16 elements. When set with PER_BLOCK_MX granularity, the PartialRMS MXFP8 epilogue additionally stores this bf16 tensor. Data type: void* (bf16 elements).*/
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS = 13, /**<Required. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
@@ -217,10 +217,10 @@ typedef struct hipblasLtFusedEpilogueDescriptor* hipblasLtFusedEpilogueDescripto
  *
  *  \details
  *  Used only by the decomposed flow: the producer stage
- *  (``HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS``) writes the finalized consumer scale,
- *  and the consumer stage (``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY``) reads it in the
- *  GEMM2 epilogue. The caller creates one descriptor, supplies its device buffer with
- *  ``hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer``, sets the same handle on both
+ *  (``HIPBLASLT_FUSEABLE_EPILOGUE_PARTIAL_RMSNORM_STATS``) writes the finalized ``rstd``, and the
+ *  consumer stage (``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM_SCALE_APPLY``) reads one value for each
+ *  ``D.N`` index in the GEMM2 epilogue. The caller creates one descriptor, supplies its device
+ *  buffer with ``hipblasLtFusedEpilogueRMSNormDescriptorSetBuffer``, sets the same handle on both
  *  fused-epilogue chains through ``HIPBLASLT_FUSED_EPILOGUE_RMSNORM_STATS``, and destroys the
  *  descriptor after both calls. The caller owns the device buffer. The full
  *  ``HIPBLASLT_FUSEABLE_EPILOGUE_RMSNORM`` flow does not use this descriptor.
@@ -1134,12 +1134,12 @@ hipblasStatus_t
  *  \brief Set the caller-owned device buffer used by an RMSNorm handoff descriptor.
  *
  *  \details
- *  The decomposed producer writes one FP32 value per output row and batch. Therefore, the
- *  required buffer size is ``M * batchCount * sizeof(float)``, where ``M`` and ``batchCount``
- *  come from the producer D matrix layout. The consumer reads the same layout, so its D matrix
- *  must have a matching row and batch count. The buffer must remain valid and unmodified from
- *  the producer call until all work submitted by the consumer call has completed. The descriptor
- *  does not take ownership of the buffer.
+ *  The producer writes one FP32 ``rstd`` for each ``D.N`` index and batch, and the consumer applies
+ *  the corresponding value. The required size is therefore ``D.N * batchCount * sizeof(float)``
+ *  bytes for either stage, and both calls must use the same ``D.N`` and batch count. The buffer
+ *  must remain valid and unmodified from the producer call until all work submitted by the
+ *  consumer call has completed.
+ *  The descriptor does not take ownership of the buffer.
  *
  *  @param[in]
  *  desc  An RMSNorm handoff descriptor.

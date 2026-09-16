@@ -411,24 +411,24 @@ namespace
     // Solution kernel arguments: RMSNormGamma, PartialBuf, ResidualBuf):
     //
     //   const bool residualAdd = fused_epilogue_has_stage(fused, HIPBLASLT_FUSEABLE_EPILOGUE_RESIDUAL_ADD);
-    //   const int64_t N  = problem.freeSizeB();                 // feature (N) dim reduced over
-    //   const int64_t M  = problem.freeSizeA();
-    //   const int64_t mPadded = roundUp(M, solution.macroTile0); // ceil(M / MT0) * MT0 (alloc only)
+    //   const int64_t features = problem.freeSizeA();
+    //   const int64_t rows = problem.freeSizeB();
+    //   const int64_t rowsPadded = roundUp(rows, solution.macroTile1);
     //
     //   // Build K2's explicit argument bundle once (both flows fill it the same way).
     //   RmsNormHandoff h;
-    //   h.M       = M;
-    //   h.N       = N;
-    //   h.nTilesN = ceilDiv(N, solution.macroTile1);            // ceil(N / MacroTile1) -> kernarg "nD"
-    //   h.invD    = 1.0f / static_cast<float>(N);
+    //   h.M       = rows;
+    //   h.N       = features;
+    //   h.nTilesN = ceilDiv(features, solution.macroTile0); // -> kernarg "nD"
+    //   h.invD    = 1.0f / static_cast<float>(features);
     //   h.eps     = fused->rmsnorm_eps;
-    //   h.partialBuf = carveWorkspace(ws, mPadded * h.nTilesN * sizeof(float)); // transient
+    //   h.partialBuf = carveWorkspace(ws, rowsPadded * h.nTilesN * sizeof(float)); // transient
     //
     //   // Kernel 1 (Tensile GEMM): inputs flow through the Tensile problem, not through h.
     //   problem.setRMSEpilogue(true);
-    //   problem.setRMSGamma(bf16, N);
-    //   problem.setPartialBuf(mPadded, h.nTilesN);
-    //   problem.setResidual(bf16, M, N);               // always set under RMSEpilogue
+    //   problem.setRMSGamma(bf16, features);
+    //   problem.setPartialBuf(rowsPadded, h.nTilesN);
+    //   problem.setResidual(bf16, rows, features);      // always set under RMSEpilogue
     //   inputs.rmsGamma   = fused->rmsnorm_gamma;   // -> kernel arg "RMSNormGamma"
     //   inputs.partialBuf = h.partialBuf;           // -> kernel arg "PartialBuf"
     //   inputs.residual   = fused->residual;        // -> kernel arg "ResidualBuf" (if residualAdd)
@@ -438,12 +438,11 @@ namespace
     //       launchRmsNormReduceApply(inputs.D, h);
     //   } else {                             // decomposed follow-up: reduce and return the scale
     //       auto* stats = fused->rmsnorm_stats;
-    //       launchRmsNormReduceReturn(stats->per_row_scale, h); // caller-owned FP32[M * batch]
+    //       launchRmsNormReduceReturn(stats->per_row_scale, h); // caller-owned FP32[D.N * batch]
     //   }
     //
     // The consumer (RMSNORM_SCALE_APPLY / GEMM2) reads fused->rmsnorm_stats->per_row_scale and
-    // applies it in its epilogue, using its own M/batch (which the decomposed flow requires to
-    // match the producer's).
+    // applies it along D.N, which must match the producer's token count.
     inline TensileLite::ActivationType getTensileActivationType(rocblaslt_epilogue epilogue)
     {
         switch(epilogue)
@@ -1901,37 +1900,6 @@ namespace
     /****************************************************************
  * Construct a Tensile Problem from a RocblasltContractionProblem *
  ****************************************************************/
-    // ---- Fused-RMSNorm (PartialRMS) row-major transpose -----------------------
-    // The current PartialRMS K1 emitter reduces the sum-of-squares over free0, so the
-    // GEMM must be arranged with free0 = N_hidden (the RMSNorm reduction axis). We
-    // achieve this by computing the transposed GEMM  D^T = op(B)^T * op(A)^T:
-    //   - swap m<->n and the A/B operands, flip both transposes (TN stays TN),
-    //   - make C/D contiguous with N_hidden as the leading (free0) dimension, which
-    //     lands the output as row-major [M, N_hidden] -- the layout Kernel 2 (row_div)
-    //     consumes and that hipBLASLt returns for the fused-RMSNorm epilogue.
-    static bool partialRMSNeedsTranspose(const RocblasltContractionProblem& p)
-    {
-        RocblasltFusedEpilogueInfo fInfo;
-        // Both the full RMSNorm flow and the decomposed producer (partial stats) run the K1
-        // PartialRMS GEMM, which reduces over free0 -> the problem must be transposed so
-        // free0 = N_hidden. The decomposed consumer (scale-apply / K3) does not reduce, so it is
-        // excluded here; its own operand swap is handled by transposeForScaleApply.
-        return rocblaslt_resolve_fused_epilogue(p.fused_epilogue, fInfo)
-               && (fInfo.hasRMSNorm || fInfo.hasPartialRMSStats);
-    }
-
-    // The decomposed consumer (K3, RMSNorm scale-apply) is issued by the caller as a normal TN
-    // GEMM whose per-token rstd is indexed by the M rows. To scale through the N-direction
-    // ScaleAlphaVec (UseScaleAlphaVec=2), the token axis must land on free1 (N), so K3 computes
-    // the transposed GEMM via transposeForScaleApply (swap A/B, flip transposes, swap m<->n, and
-    // take the transposed view of the same C/D buffer). Mutually exclusive with the K1 path above.
-    static bool scaleApplyNeedsTranspose(const RocblasltContractionProblem& p)
-    {
-        RocblasltFusedEpilogueInfo fInfo;
-        return rocblaslt_resolve_fused_epilogue(p.fused_epilogue, fInfo)
-               && fInfo.hasRMSNormScaleApply;
-    }
-
     static bool partialRMSFullRequant(const RocblasltContractionProblem& p)
     {
         RocblasltFusedEpilogueInfo fInfo;
@@ -1939,33 +1907,10 @@ namespace
                && fInfo.hasRequant;
     }
 
-    static hipblasOperation_t flipTransOp(hipblasOperation_t op)
-    {
-        return op == HIPBLAS_OP_N ? HIPBLAS_OP_T : HIPBLAS_OP_N;
-    }
-
-    static RocblasltContractionProblem transposeForPartialRMS(const RocblasltContractionProblem& p)
+    static RocblasltContractionProblem
+        prepareFullRMSRequantProblem(const RocblasltContractionProblem& p)
     {
         RocblasltContractionProblem t = p; // copy scalars, epilogue, workspace, gamma/eps ptr, etc.
-        t.trans_a = flipTransOp(p.trans_b);
-        t.trans_b = flipTransOp(p.trans_a);
-        t.m       = p.n; // free0 <- N_hidden
-        t.n       = p.m; // free1 <- M (tokens)
-
-        // A <- original B
-        t.a_type = p.b_type;   t.A = p.B;   t.batch_A = p.batch_B;
-        t.row_stride_a = p.row_stride_b; t.col_stride_a = p.col_stride_b;
-        t.batch_stride_a = p.batch_stride_b;
-        t.scaleA = p.scaleB; t.scaleAType = p.scaleBType; t.swizzleA = p.swizzleB;
-        // B <- original A
-        t.b_type = p.a_type;   t.B = p.A;   t.batch_B = p.batch_A;
-        t.row_stride_b = p.row_stride_a; t.col_stride_b = p.col_stride_a;
-        t.batch_stride_b = p.batch_stride_a;
-        t.scaleB = p.scaleA; t.scaleBType = p.scaleAType; t.swizzleB = p.swizzleA;
-
-        // C/D become [N_hidden, M] contiguous col-major (ld = N_hidden) == row-major [M, N_hidden].
-        t.row_stride_c = 1; t.col_stride_c = p.n;
-        t.row_stride_d = 1; t.col_stride_d = p.n;
         if(partialRMSFullRequant(p))
         {
             RocblasltFusedEpilogueInfo fInfo;
@@ -1983,50 +1928,10 @@ namespace
         return t;
     }
 
-    // K3 (RMSNorm scale-apply) transpose: compute D^T = op(B)^T * op(A)^T so the token axis lands
-    // on free1 (N). Swap A/B operands and flip both transposes (TN stays TN); swap m<->n; and use
-    // natural col-major strides for the swapped [N_out, M_tokens] shape (free0 contiguous, ld =
-    // N_out). The output is row-major [M, N_out]; the consumer path reads it in that transposed
-    // layout.
-    static RocblasltContractionProblem transposeForScaleApply(const RocblasltContractionProblem& p)
-    {
-        RocblasltContractionProblem t = p; // copy scalars, epilogue, workspace, scale ptr, etc.
-        t.trans_a = flipTransOp(p.trans_b);
-        t.trans_b = flipTransOp(p.trans_a);
-        t.m       = p.n; // free0 <- N_out
-        t.n       = p.m; // free1 <- M (tokens); the N-direction rstd now scales per token.
-
-        // A <- original B
-        t.a_type = p.b_type;   t.A = p.B;   t.batch_A = p.batch_B;
-        t.row_stride_a = p.row_stride_b; t.col_stride_a = p.col_stride_b;
-        t.batch_stride_a = p.batch_stride_b;
-        t.scaleA = p.scaleB; t.scaleAType = p.scaleBType; t.swizzleA = p.swizzleB;
-        // B <- original A
-        t.b_type = p.a_type;   t.B = p.A;   t.batch_B = p.batch_A;
-        t.row_stride_b = p.row_stride_a; t.col_stride_b = p.col_stride_a;
-        t.batch_stride_b = p.batch_stride_a;
-        t.scaleB = p.scaleA; t.scaleBType = p.scaleAType; t.swizzleB = p.swizzleA;
-
-        // Natural col-major output for the swapped [N_out, M_tokens] shape: free0 (N_out) is
-        // contiguous (stride 1), free1 (M tokens) has ld = N_out (= p.n). Tensile stores col-major
-        // with a unit free0 stride, so a non-unit free0 stride garbles the output. The result is
-        // the transpose of the caller's [M, N] buffer (row-major [M, N_out]); the fused-RMSNorm
-        // consumer path and its reference consume it in that transposed layout.
-        t.row_stride_c = 1; t.col_stride_c = p.n;
-        t.row_stride_d = 1; t.col_stride_d = p.n;
-        return t;
-    }
-
     auto ConstructTensileProblem(const RocblasltContractionProblem& probIn)
     {
-        // Fused RMSNorm: K1 transposes so free0 = N_hidden (transposeForPartialRMS); K3 swaps its
-        // A/B operands so the token axis lands on free1 (transposeForScaleApply).
-        const bool _prmsSwap       = partialRMSNeedsTranspose(probIn);
-        const bool scaleApplySwap = scaleApplyNeedsTranspose(probIn);
-        RocblasltContractionProblem probStorage
-            = _prmsSwap       ? transposeForPartialRMS(probIn)
-              : scaleApplySwap ? transposeForScaleApply(probIn)
-                                : probIn;
+        // Only the full-RMSNorm requant path needs a library-internal BF16 scratch type override.
+        RocblasltContractionProblem        probStorage = prepareFullRMSRequantProblem(probIn);
         const RocblasltContractionProblem& prob = probStorage;
 
         auto a_type       = hipDataType_to_tensile_type(prob.a_type);
@@ -2330,14 +2235,14 @@ namespace
         RocblasltFusedEpilogueInfo fusedInfo;
         if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo))
         {
+            const bool partialRMS = fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats;
             // Full RMSNorm flow and the decomposed producer (partial stats) both run K1.
             // rmsEpilogue=true unconditionally implies residual-add and bf16 residual-out store.
-            tensileProblem.setRMSEpilogue(fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats);
+            tensileProblem.setRMSEpilogue(partialRMS);
             // Decomposed consumer (Kernel 3 RstdScale): apply the per-token rstd to GEMM2's
-            // output via ScaleAlphaVec. transposeForScaleApply has swapped A/B and m<->n so the
-            // token axis is now free1 (N); the per-token rstd therefore runs along the N-direction.
-            // Use UseScaleAlphaVec=2 with the column-vector length d.sizes()[1] (= M tokens =
-            // rstd length). Re-issue setScaleAlphaVec after enabling the flag because the earlier
+            // output through the N-direction ScaleAlphaVec.
+            // Use UseScaleAlphaVec=2 with the column-vector length d.sizes()[1] (= tokens = rstd
+            // length). Re-issue setScaleAlphaVec after enabling the flag because the earlier
             // setScaleAlphaVec call ran while useScaleAlphaVec was still false.
             if(fusedInfo.hasRMSNormScaleApply)
             {
@@ -2350,8 +2255,8 @@ namespace
             if(fusedInfo.hasRequant
                && fusedInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
             {
-                const int32_t q0          = _prmsSwap ? fusedInfo.requantMxBlockSize : 1;
-                const int32_t q1          = _prmsSwap ? 1 : fusedInfo.requantMxBlockSize;
+                const int32_t q0          = partialRMS ? fusedInfo.requantMxBlockSize : 1;
+                const int32_t q1          = partialRMS ? 1 : fusedInfo.requantMxBlockSize;
                 const int64_t kBlockTiles = (static_cast<int64_t>(prob.m) + q0 - 1) / q0;
                 const int64_t freeTiles   = (static_cast<int64_t>(prob.n) + q1 - 1) / q1;
                 tensileProblem.setMxScale(freeTiles, kBlockTiles);
@@ -2381,14 +2286,7 @@ namespace
     void updateTensileProblem(const RocblasltContractionProblem&   probIn,
                               TensileLite::ContractionProblemGemm& tensileProblem)
     {
-        // Fused RMSNorm: K1 transposes so free0 = N_hidden (transposeForPartialRMS); K3 swaps its
-        // A/B operands so the token axis lands on free1 (transposeForScaleApply).
-        const bool _prmsSwap       = partialRMSNeedsTranspose(probIn);
-        const bool scaleApplySwap = scaleApplyNeedsTranspose(probIn);
-        RocblasltContractionProblem probStorage
-            = _prmsSwap       ? transposeForPartialRMS(probIn)
-              : scaleApplySwap ? transposeForScaleApply(probIn)
-                                : probIn;
+        RocblasltContractionProblem        probStorage = prepareFullRMSRequantProblem(probIn);
         const RocblasltContractionProblem& prob = probStorage;
 
         auto a_type       = hipDataType_to_tensile_type(prob.a_type);
@@ -2649,14 +2547,13 @@ namespace
             RocblasltFusedEpilogueInfo fusedInfo;
             if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo))
             {
+                const bool partialRMS = fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats;
                 // Full RMSNorm flow and the decomposed producer (partial stats) both run K1.
                 // rmsEpilogue=true unconditionally implies residual-add and bf16 residual-out store.
-                tensileProblem.setRMSEpilogue(fusedInfo.hasRMSNorm || fusedInfo.hasPartialRMSStats);
-                // Decomposed consumer (Kernel 3 RstdScale): enable ScaleAlphaVec so selection
-                // routes to an N-direction (per-column) scaling solution. transposeForScaleApply
-                // has moved the token axis to free1 (N), so the per-token rstd runs along N. Use
-                // UseScaleAlphaVec=2 with the column-vector length d.sizes()[1] (= M tokens = rstd
-                // length). Re-issue setScaleAlphaVec after enabling (see ConstructTensileProblem).
+                tensileProblem.setRMSEpilogue(partialRMS);
+                // Decomposed consumer (Kernel 3 RstdScale): enable the N-direction
+                // ScaleAlphaVec. Re-issue setScaleAlphaVec after enabling (see
+                // ConstructTensileProblem).
                 if(fusedInfo.hasRMSNormScaleApply)
                 {
                     tensileProblem.setUseScaleAlphaVec(2);
@@ -2667,8 +2564,8 @@ namespace
                 if(fusedInfo.hasRequant
                    && fusedInfo.requantGranularity == HIPBLASLT_REQUANT_SCALE_PER_BLOCK_MX)
                 {
-                    const int32_t q0          = _prmsSwap ? fusedInfo.requantMxBlockSize : 1;
-                    const int32_t q1          = _prmsSwap ? 1 : fusedInfo.requantMxBlockSize;
+                    const int32_t q0          = partialRMS ? fusedInfo.requantMxBlockSize : 1;
+                    const int32_t q1          = partialRMS ? 1 : fusedInfo.requantMxBlockSize;
                     const int64_t kBlockTiles = (static_cast<int64_t>(prob.m) + q0 - 1) / q0;
                     const int64_t freeTiles   = (static_cast<int64_t>(prob.n) + q1 - 1) / q1;
                     tensileProblem.setMxScale(freeTiles, kBlockTiles);
@@ -2753,14 +2650,7 @@ namespace
  ***************************************************************/
     auto GetTensileInputs(const RocblasltContractionProblem& probIn)
     {
-        // Fused RMSNorm: swap A/B pointers to match the transposed problem. K1 (transposeForPartialRMS)
-        // arranges free0 = N_hidden; K3 (transposeForScaleApply) moves the token axis to free1.
-        const bool _prmsSwap       = partialRMSNeedsTranspose(probIn);
-        const bool scaleApplySwap = scaleApplyNeedsTranspose(probIn);
-        RocblasltContractionProblem probStorage
-            = _prmsSwap       ? transposeForPartialRMS(probIn)
-              : scaleApplySwap ? transposeForScaleApply(probIn)
-                                : probIn;
+        RocblasltContractionProblem        probStorage = prepareFullRMSRequantProblem(probIn);
         const RocblasltContractionProblem& prob = probStorage;
 
         auto compute_type = roc2TensileType(prob.compute_type, false);
@@ -3854,12 +3744,12 @@ namespace
     }
 
     // Launch row_div (Kernel 2) on `stream` after K1 has completed (same stream => ordered).
-    // Row-major convention: D is row-major [tokens M, N_hidden] (N_hidden contiguous),
-    // partialBuf is [mPad, nD] with one fp32 partial Sum-of-squares per (token, N_hidden tile).
-    // row_div reduces partialBuf across the nD tiles per token and divides D in place by
+    // D is column-major [D.M features, D.N tokens], whose bytes are also a row-major
+    // [tokens, features] tensor. partialBuf contains one fp32 sum-of-squares partial per
+    // (token, feature tile). row_div reduces partialBuf across the feature tiles and divides D by
     // sqrt(inv_d * Sigma + eps). Kernarg layout matches buildRowDivArgs:
-    //   0 D, 8 partialBuf, 16 pad(i32=0), 20 n(=N_hidden), 24 n_c(=RD_BLOCK), 28 n_d(=nD),
-    //   32 inv_d(=1/N_hidden), 36 eps. grid=(M, N_hidden/RD_BLOCK, 1), block=(64,1,1).
+    //   0 D, 8 partialBuf, 16 pad(i32=0), 20 n(=features), 24 n_c(=RD_BLOCK), 28 n_d(=nD),
+    //   32 inv_d(=1/features), 36 eps. grid=(tokens, features/RD_BLOCK, 1), block=(64,1,1).
     hipError_t launchRowDiv(void*       D,
                             void*       partialBuf,
                             uint32_t    tokensM,
@@ -3868,7 +3758,7 @@ namespace
                             float       eps,
                             hipStream_t stream)
     {
-        constexpr uint32_t RD_BLOCK = 128; // N_hidden columns processed per row_div block
+        constexpr uint32_t RD_BLOCK = 128; // features processed per row_div block
         constexpr uint32_t block    = 64;
         const float        invD     = nHidden ? (1.0f / static_cast<float>(nHidden)) : 0.0f;
         const uint32_t     nSplit   = (nHidden + RD_BLOCK - 1) / RD_BLOCK;
@@ -4176,11 +4066,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             float    partialRmsQuantScale = 1.0f;
             if(solution->sizeMapping.rmsEpilogue)
             {
-                // row_div (Kernel 2) processes N_hidden in RD_BLOCK(=128)-column strips.
-                if(prob.n % 128 != 0)
+                // row_div (Kernel 2) processes D.M in RD_BLOCK(=128)-feature strips.
+                if(prob.m % 128 != 0)
                 {
                     log_error(__func__,
-                              "fused RMSNorm row_div requires N_hidden to be a multiple of 128");
+                              "fused RMSNorm row_div requires D.M to be a multiple of 128");
                     return rocblaslt_status_not_implemented;
                 }
                 const size_t pbBytes = solution->partialRMSPartialBufBytes(data->problem);
@@ -4188,10 +4078,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 if(pbBytes && prob.workspace && total >= pbBytes)
                     partialRmsBuf = static_cast<uint8_t*>(prob.workspace) + (total - pbBytes);
 
-                // partialBuf has nD = ceil(N_hidden / MT0) tiles per token (K1 reduces free0 =
-                // N_hidden, tiled by MacroTile0). prob.n is N_hidden in the caller-facing problem.
+                // partialBuf has nD = ceil(D.M / MT0) feature tiles per D.N token.
                 const size_t mt0  = solution->sizeMapping.macroTile.x;
-                partialRmsNTilesN = mt0 ? static_cast<uint32_t>((prob.n + mt0 - 1) / mt0) : 0;
+                partialRmsNTilesN = mt0 ? static_cast<uint32_t>((prob.m + mt0 - 1) / mt0) : 0;
 
                 RocblasltFusedEpilogueInfo fInfo;
                 if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fInfo))
@@ -4312,9 +4201,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                     }
                     status = hip2RocStatus(launchRowRstd(partialRmsRstdOut,
                                                          partialRmsBuf,
-                                                         static_cast<uint32_t>(prob.m), // tokens
-                                                         static_cast<uint32_t>(prob.n), // N_hidden
-                                                         partialRmsNTilesN,             // nD
+                                                         static_cast<uint32_t>(prob.n), // tokens
+                                                         static_cast<uint32_t>(prob.m), // features
+                                                         partialRmsNTilesN, // nD
                                                          partialRmsEps,
                                                          prob.stream));
                 }
@@ -4328,22 +4217,22 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                               reinterpret_cast<void*>(prob.D),
                                               partialRmsQuantBf16,
                                               partialRmsQuantScale,
-                                              static_cast<uint32_t>(prob.m), // tokens
-                                              static_cast<uint32_t>(prob.n), // N_hidden
-                                              partialRmsNTilesN,             // nD
+                                              static_cast<uint32_t>(prob.n), // tokens
+                                              static_cast<uint32_t>(prob.m), // features
+                                              partialRmsNTilesN, // nD
                                               partialRmsEps,
                                               prob.stream));
                     }
                     else
                     {
-                        status = hip2RocStatus(
-                            launchRowDiv(reinterpret_cast<void*>(prob.D),
-                                         partialRmsBuf,
-                                         static_cast<uint32_t>(prob.m), // tokens
-                                         static_cast<uint32_t>(prob.n), // N_hidden
-                                         partialRmsNTilesN,             // nD
-                                         partialRmsEps,
-                                         prob.stream));
+                        status
+                            = hip2RocStatus(launchRowDiv(reinterpret_cast<void*>(prob.D),
+                                                         partialRmsBuf,
+                                                         static_cast<uint32_t>(prob.n), // tokens
+                                                         static_cast<uint32_t>(prob.m), // features
+                                                         partialRmsNTilesN, // nD
+                                                         partialRmsEps,
+                                                         prob.stream));
                     }
                 }
             }
