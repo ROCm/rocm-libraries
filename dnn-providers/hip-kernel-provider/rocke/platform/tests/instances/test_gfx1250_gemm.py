@@ -307,12 +307,17 @@ class TestGfx1250Gemm(unittest.TestCase):
             load_config,
         )
 
-        config = load_config()
-        finalists = enumerate_tile_configs(config)[:8]
-        without = enumerate_trait_configs(config, finalists)
+        base = load_config()
+        finalists = enumerate_tile_configs(base)[:8]
+
+        # The shipped config enables the knob, so take the baseline from an
+        # explicitly tdm-off copy rather than assuming its value.
+        off = copy.deepcopy(base)
+        off["trait_config"]["tdm"] = [False]
+        without = enumerate_trait_configs(off, finalists)
         self.assertFalse([s for s in without if s.trait.tdm])
 
-        config = copy.deepcopy(config)
+        config = copy.deepcopy(base)
         config["trait_config"]["tdm"] = [False, True]
         config["trait_config"]["tdm_depth"] = [1, 2]
         traits = enumerate_trait_configs(config, finalists)

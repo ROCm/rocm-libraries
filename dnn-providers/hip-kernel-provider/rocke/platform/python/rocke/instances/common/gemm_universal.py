@@ -478,6 +478,13 @@ def _tdm_pipelined(trait: "TraitSpec") -> bool:
 
 _ELEM_BYTES = {"f16": 2, "fp16": 2, "bf16": 2, "fp8": 1, "bf8": 1, "f32": 4, "fp32": 4}
 
+# Direct-to-LDS copies a fixed 16 B (4 dwords) per lane per pass, i.e. 8 halves
+# at the 2-byte operand width the path supports. ``is_valid_spec`` and the
+# chunk/pass arithmetic in :func:`build_universal_gemm` must agree on this or
+# the gate admits tiles the emitter addresses out of bounds.
+_DTL_DWORDS_PER_LANE = 4
+_DTL_ELEMS_PER_LANE = _DTL_DWORDS_PER_LANE * 2
+
 
 def _dtype_bytes(dtype: str) -> int:
     """Storage width of an operand dtype, in bytes."""
@@ -678,6 +685,31 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     b_total = t.tile_n * t.tile_k
     if a_total < threads or b_total < threads:
         return False, "block too small for one element/thread/phase"
+
+    # Direct-to-LDS is coarser than one element per lane: every lane issues a
+    # fixed ``_DTL_ELEMS_PER_LANE``-element copy, and the pass loop in
+    # ``build_universal_gemm`` is unpredicated -- it walks
+    # ``chunk_idx = tid + p * block_size`` for ``ceil(chunks / block_size)``
+    # passes with no bound check. A tile that does not cover a whole number of
+    # passes therefore leaves lanes with ``chunk_idx >= chunks``, which address
+    # past both the global tile and the LDS buffer (hipError 700, which poisons
+    # the context and aborts a sweep). The one-element/thread rule above is
+    # ``_DTL_ELEMS_PER_LANE``x too weak to catch it.
+    if spec.trait.direct_to_lds:
+        if t.tile_k % _DTL_ELEMS_PER_LANE:
+            return False, (
+                f"direct_to_lds needs tile_k % {_DTL_ELEMS_PER_LANE} == 0 "
+                f"(got {t.tile_k})"
+            )
+        for total, label in ((a_total, "A"), (b_total, "B")):
+            chunks = total // _DTL_ELEMS_PER_LANE
+            if chunks < threads or chunks % threads:
+                return False, (
+                    f"direct_to_lds needs the {label} tile to fill whole "
+                    f"{threads}-lane passes: {total} elements / "
+                    f"{_DTL_ELEMS_PER_LANE} per lane = {chunks} chunks, which "
+                    f"is not a positive multiple of block_size {threads}"
+                )
 
     # Split-K (over the production body): the K-slice each CTA processes
     # is ``ks = K // split_k`` and must itself be a whole number of
@@ -1335,8 +1367,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     if spec.trait.direct_to_lds:
         from ...core.ir import I64 as _I64
 
-        _DTL_DWORDS = 4  # 16 bytes/lane
-        _DTL_HALVES = _DTL_DWORDS * 2  # 8 elements (bf16 halves) per lane chunk
+        # Shared with the ``is_valid_spec`` gate that rejects tiles which do
+        # not fill whole passes; the loops below are unpredicated.
+        _DTL_DWORDS = _DTL_DWORDS_PER_LANE  # 16 bytes/lane
+        _DTL_HALVES = _DTL_ELEMS_PER_LANE  # 8 elements (bf16 halves) per chunk
         _DTL_BYTES_PER_LANE = _DTL_DWORDS * 4
         if (block_k % _DTL_HALVES) != 0:
             raise ValueError(
