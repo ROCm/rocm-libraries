@@ -70,9 +70,9 @@ STINKYTOFU_EXPORT void runLogicalLoweringPipeline(Function& func, const GemmTile
  *
  * Steps performed internally:
  *  1. Construct a fresh StinkyAsmModule (which already owns an "entry" block).
- *  2. Append the externally-owned LogicalInstruction* nodes from
- *     @p module into that entry block.
- *  3. Run @c runLogicalLoweringPipeline() on the underlying Function.
+ *  2. Append entry instructions to the entry block and callable ranges to
+ *     separate callable Functions, leaving placement markers in the entry.
+ *  3. Run @c runLogicalLoweringPipeline() on every Function.
  *  4. Detach any LogicalInstruction nodes whose lifetime is owned by Python
  *     (so the C++ IRList does not delete them when the StinkyAsmModule dies).
  *
