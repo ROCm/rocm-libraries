@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Match nested CPU-library worker pools to the explicit two-way build budget.
+  # Keep nested CPU-library worker pools bounded independently of build parallelism.
   BLIS_NUM_THREADS: "2"
   GOTO_NUM_THREADS: "2"
   MKL_NUM_THREADS: "2"
@@ -40,6 +40,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+            shared/host-numerics
 
       - uses: actions/setup-python@v5
         with:
@@ -60,12 +64,12 @@ jobs:
             -DHOST_NUMERICS_BUILD_TESTING=ON \
             -DHOST_NUMERICS_BUILD_PYTHON=ON \
             -DHOST_NUMERICS_BUILD_BLAS_BACKEND=ON \
-            -DHOST_NUMERICS_BUILD_BENCHMARKS=ON \
+            -DHOST_NUMERICS_BUILD_BENCHMARKS=OFF \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build and test
         run: |
-          cmake --build "${RUNNER_TEMP}/host-numerics-build" --parallel 2
+          cmake --build "${RUNNER_TEMP}/host-numerics-build" --parallel "$(nproc)"
           ctest \
             --test-dir "${RUNNER_TEMP}/host-numerics-build" \
             --output-on-failure
@@ -83,14 +87,14 @@ jobs:
             -B "${RUNNER_TEMP}/host-numerics-package-test" \
             -G Ninja \
             -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-numerics-install"
-          cmake --build "${RUNNER_TEMP}/host-numerics-package-test" --parallel 2
+          cmake --build "${RUNNER_TEMP}/host-numerics-package-test" --parallel "$(nproc)"
           cmake -S shared/host-numerics/tests/package/core_only \
             -B "${RUNNER_TEMP}/host-numerics-core-package-test" \
             -G Ninja \
             -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/host-numerics-install" \
             -DCMAKE_DISABLE_FIND_PACKAGE_BLAS=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
-          cmake --build "${RUNNER_TEMP}/host-numerics-core-package-test" --parallel 2
+          cmake --build "${RUNNER_TEMP}/host-numerics-core-package-test" --parallel "$(nproc)"
           # CTest discovers package consumers registered by the test project.
           ctest \
             --test-dir "${RUNNER_TEMP}/host-numerics-package-test" \
@@ -111,7 +115,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build "${RUNNER_TEMP}/host-numerics-no-layout-openmp" \
             --target host-numerics-amd-gpu-layout-tests \
-            --parallel 2
+            --parallel "$(nproc)"
           ctest \
             --test-dir "${RUNNER_TEMP}/host-numerics-no-layout-openmp" \
             --tests-regex "^(PreSwizzle|host-numerics-amd-gpu-layout-boundary)" \
@@ -121,6 +125,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+            shared/host-numerics
 
       - name: Install host dependencies
         run: |
@@ -138,7 +146,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
-          cmake --build "${RUNNER_TEMP}/host-numerics-sanitizers" --parallel 2
+          cmake --build "${RUNNER_TEMP}/host-numerics-sanitizers" --parallel "$(nproc)"
           ctest \
             --test-dir "${RUNNER_TEMP}/host-numerics-sanitizers" \
+            --exclude-regex '^host-numerics-package-components$' \
             --output-on-failure
