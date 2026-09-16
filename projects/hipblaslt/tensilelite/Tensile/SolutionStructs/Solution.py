@@ -67,6 +67,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+from .Validators.BlockDequant import validateBlockDequantCombination
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -6237,6 +6238,11 @@ class Solution(collections.abc.Mapping):
               state["_VectorStore"] = 0
             else:
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
+
+    # w4a16 in-kernel dequantization (UseScaleAB="Block"). Runs here because it
+    # reads DepthU / GlobalReadVectorWidthA / UnrollMajorLDSA, all derived above.
+    if not validateBlockDequantCombination(state, printRejectionReason):
+      return
 
     state["AssignedDerivedParameters"] = True
 

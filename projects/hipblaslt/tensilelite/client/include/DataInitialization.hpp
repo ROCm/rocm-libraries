@@ -494,6 +494,9 @@ namespace TensileLite
                     break;
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
+                case rocisa::DataType::Int4:
+                    initArray<Int4x2>(initMode, static_cast<Int4x2*>(array), descriptor);
+                    break;
                 case rocisa::DataType::E8:
                     initArray<E8>(initMode, static_cast<E8*>(array), descriptor);
                     break;
@@ -2615,6 +2618,72 @@ namespace TensileLite
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
+        // w4a16 weights. Values are signed 4-bit two's complement, two per byte
+        // with element 0 in the low nibble; the byte patterns below are the same
+        // value repeated in both nibbles.
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::Zero>()
+        {
+            return Int4x2(0, 0);
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::One>()
+        {
+            return Int4x2(1, 1);
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::Two>()
+        {
+            return Int4x2(2, 2);
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::NegOne>()
+        {
+            return Int4x2(-1, -1);
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::Max>()
+        {
+            return Int4x2(7, 7);
+        }
+        // No subnormals in an integer type; the smallest non-zero magnitude is 1.
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::DenormMin>()
+        {
+            return Int4x2(1, 1);
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::DenormMax>()
+        {
+            return Int4x2(1, 1);
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::NaN>()
+        {
+            throw std::runtime_error("NaN not available for int4.");
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for int4.");
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::Random>()
+        {
+            // Full signed range [-8, 7].
+            return Int4x2((rand() % 16) - 8, (rand() % 16) - 8);
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::BadInput>()
+        {
+            throw std::runtime_error("BadInput not available for int4.");
+        }
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::BadOutput>()
+        {
+            throw std::runtime_error("BadOutput not available for int4.");
+        }
+
         template <>
         inline E8 DataInitialization::getValue<E8, InitMode::Zero>()
         {
@@ -2846,6 +2915,13 @@ namespace TensileLite
         }
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
+        // int4 has no reserved bit patterns, so nothing can be "bad". Defined
+        // outside the !_WIN32 guard: Int4x2 is plain storage, not a HIP type.
+        template <>
+        inline bool DataInitialization::isBadInput<Int4x2>(Int4x2 value)
+        {
+            return false;
+        }
 
         template <>
         inline bool DataInitialization::isBadInput<E8>(E8 value)
@@ -2963,6 +3039,11 @@ namespace TensileLite
         }
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
+        template <>
+        inline bool DataInitialization::isBadOutput<Int4x2>(Int4x2 value)
+        {
+            return false;
+        }
 
         template <>
         inline bool DataInitialization::isBadOutput<E8>(E8 value)
@@ -3150,6 +3231,15 @@ namespace TensileLite
         }
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
+        template <>
+        inline Int4x2 DataInitialization::getTrigValue<Int4x2>(int idx, bool useCos, bool useAbs)
+        {
+            // Trig values live in [-1, 1]; scale into the int4 range so the
+            // pattern is not almost entirely zeros after truncation.
+            float val0 = getTrigValue<float>(idx, useCos, useAbs) * 7.0f;
+            float val1 = getTrigValue<float>(idx + 1, useCos, useAbs) * 7.0f;
+            return Int4x2(static_cast<int>(val0), static_cast<int>(val1));
+        }
 
         template <>
         inline E8 DataInitialization::getTrigValue<E8>(int idx, bool useCos, bool useAbs)
@@ -3554,6 +3644,13 @@ namespace TensileLite
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
 
+        // int4's whole range is already narrow; nothing to restrict.
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::RandomNarrow>()
+        {
+            return getValue<Int4x2, InitMode::Random>();
+        }
+
         template <>
         inline E8 DataInitialization::getValue<E8, InitMode::RandomNarrow>()
         {
@@ -3772,6 +3869,13 @@ namespace TensileLite
 #endif // !_WIN32
 
         template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::RandomNegPosLimited>()
+        {
+            return Int4x2(getValueWithUpperLowerBoundInteger<int>(),
+                          getValueWithUpperLowerBoundInteger<int>());
+        }
+
+        template <>
         inline E8 DataInitialization::getValue<E8, InitMode::RandomNegPosLimited>()
         {
             return getValueWithUpperLowerBoundInteger<E8>();
@@ -3870,6 +3974,13 @@ namespace TensileLite
         }
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
+
+        template <>
+        inline Int4x2 DataInitialization::getValue<Int4x2, InitMode::UniformLowPrecision>()
+        {
+            // int4 is already the lowest precision available here.
+            return getValue<Int4x2, InitMode::Random>();
+        }
 
         template <>
         inline E8 DataInitialization::getValue<E8, InitMode::UniformLowPrecision>()
@@ -4065,6 +4176,12 @@ namespace TensileLite
         }
 #endif // #ifdef TENSILE_USE_FP4
 #endif // !_WIN32
+
+        template <>
+        inline Int4x2 DataInitialization::ConvertTo<Int4x2>(size_t i)
+        {
+            return Int4x2(static_cast<int>(i), static_cast<int>(i));
+        }
 
         template <>
         inline E8 DataInitialization::ConvertTo<E8>(size_t i)

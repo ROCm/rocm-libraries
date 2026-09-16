@@ -432,6 +432,10 @@ class StateValues:
   lockLdsReadTokenSwap: bool             = False
   useCommonSgprSwap: bool                = False
 
+  # w4a16 block dequantization: number of A global-load instructions, i.e. the
+  # number of per-load scale offset / scale value VGPRs. 0 when the mode is off.
+  numGlobalReadScaleA: int               = 0
+
   # Epilogue states
   preloadScaleA = False
   preloadScaleB = False
@@ -8408,6 +8412,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numGlobalReadInstructionsA = int(numGlobalReadsA * tensorParametersA["bpeGR"])//\
           int(tensorParametersA["globalReadInstruction"].blockWidth * 4)
 
+      # w4a16: one scale offset VGPR and one loaded scale VGPR per A global-load
+      # instruction. BlockDequant.py pins one dword per load, so this equals
+      # NumLoadsCoalescedA * NumLoadsPerpendicularA.
+      self.states.numGlobalReadScaleA = numGlobalReadInstructionsA \
+          if kernel["ProblemType"]["UseScaleAB"] == "Block" else 0
+
       if kernel["enableTDMA"]:
         self.states.a.numVgprGlobalReadOffsets = 0
       elif kernel["BufferLoad"]:
@@ -8717,6 +8727,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
             vgprIdx += miWaveTile
           else:
             vgprIdx += 1 if kernel["_UseSgprForGRO"] else self.states.m.numVgprGlobalReadOffsets
+        if kernel["ProblemType"]["UseScaleAB"] == "Block":
+          # One byte offset and one loaded scale per A global-load instruction.
+          # BlockDequant.py forces _UseSgprForGRO=0, so there is one A offset
+          # VGPR per load to derive these from.
+          self.startVgprGlobalReadOffsetScaleA = vgprIdx
+          vgprIdx += self.states.numGlobalReadScaleA
+          self.startVgprG2LScaleA = vgprIdx
+          vgprIdx += self.states.numGlobalReadScaleA
+          if kernel["ProblemType"]["ScaleZeroPointA"]:
+            self.startVgprG2LScaleZeroA = vgprIdx
+            vgprIdx += self.states.numGlobalReadScaleA
+            # The zero-point tensor is K-group major while the scale tensor is
+            # M major, so its offset cannot be derived from the scale offset and
+            # needs its own register: e = g*roundUp(M,2) + m, i.e. the byte
+            # offset doubled with the nibble parity in bit 0.
+            self.startVgprGlobalReadOffsetScaleZeroA = vgprIdx
+            vgprIdx += self.states.numGlobalReadScaleA
       else:
         # TODO: alignment hack, figure out a better solution
         vgprIdx = ((vgprIdx+1)//2)*2
@@ -9970,6 +9997,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if preloadScale:
           self.defineSgpr("AddressScale%s"%name, 2, 2)
           self.defineSgpr("Scale%s"%name, numSgprAlpha, numSgprAlpha if numSgprAlpha > 1 else 2)
+    elif kernel["ProblemType"]["UseScaleAB"] == "Block":
+      # w4a16: the scale is a per-K-group tensor consumed in the main loop
+      # (localWriteDo), not a scalar consumed in the epilogue, so both scale
+      # pointers must live in SGPRs from kernel entry. B has no block scale yet,
+      # but its pointer argument is still emitted by ContractionSolution, so
+      # preload it too and leave the epilogue out of the picture entirely.
+      self.states.preloadScaleA = True
+      self.states.preloadScaleB = True
+      self.defineSgpr("AddressScaleA", 2, 2)
+      self.defineSgpr("AddressScaleB", 2, 2)
+      # Row stride of the dense [M][ceil(K/ScaleBlockSizeA)] scale tensor, in
+      # scale *elements*, computed from SizeL at kernel entry (the tensor is
+      # dense, so it needs no stride kernel argument), plus its buffer SRD.
+      self.defineSgpr("StrideScaleA", 1)
+      self.defineSgpr("SrdScaleA", 4, 4)
+      if kernel["ProblemType"]["ScaleZeroPointA"]:
+        # Asymmetric: a second kernel-argument pointer to the packed int4
+        # zero-points. The library derives it from scaleA + the scale-region
+        # size, so the public API is still a single pointer.
+        self.defineSgpr("AddressScaleZeroA", 2, 2)
+        self.defineSgpr("SrdScaleZeroA", 4, 4)
 
 
     self.states.numSgprToLoad = self.states.numSgprSizesFree + self.states.numSgprSizesSum + \

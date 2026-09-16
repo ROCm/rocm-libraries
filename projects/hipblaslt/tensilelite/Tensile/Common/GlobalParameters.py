@@ -191,6 +191,10 @@ globalParameters["DataInitTypeBeta"] = 2
 globalParameters["DataInitTypeBias"] = 3
 globalParameters["DataInitTypeGate"] = 3
 globalParameters["DataInitTypeScaleA"] = 2
+# w4a16 asymmetric zero-points. Random by default: this tensor only exists
+# when zero-points are enabled, and an all-zero default would silently
+# degrade the problem back to symmetric.
+globalParameters["DataInitTypeScaleZeroA"] = 3
 globalParameters["DataInitTypeScaleB"] = 2
 globalParameters["DataInitTypeScaleC"] = 2
 globalParameters["DataInitTypeScaleD"] = 2
