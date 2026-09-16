@@ -270,9 +270,12 @@ cmake --build build/release --target coverage
 Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with AddressSanitizer instrumentation.
 
 > [!IMPORTANT]
-> ASAN is a manual process; there is no ASAN coverage in CI yet (planned). The ROCm build requirement differs by platform:
-> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
-> - **Windows** does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+> Standalone ASAN tests are run manually. CI automation differs:
+> - Pull-request ASAN jobs build host-ASAN binaries but do not run their tests.
+> - Manual workflow runs can run full ASAN tests when matching GPU runners are available.
+> - The nightly ASAN workflow runs automatically and executes tests where external runner settings provide a test node.
+> - **Linux** standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
+> - **Windows** standalone ASAN instruments code built in this project, not installed ROCm libraries.
 
 Configure with ASAN enabled, build, then run the tests. `standard` is the recommended tier to run as the ASAN check:
 
@@ -283,7 +286,7 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is simply the default check. See [Testing § Test Categories](./Testing.md#test-categories) for what each tier covers.
+> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is the default check. See [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
 
 **Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
@@ -421,8 +424,8 @@ The `hipdnn-`prefixed target names below work in both the standalone and superbu
 | Target | Description |
 |--------|-------------|
 | \<no target\> | Build all components |
-| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./Testing.md)) |
-| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, `full`, `unit`, `integration` |
+| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./TESTING.md)) |
+| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, and `full` |
 | `hipdnn-format` | Auto-format all C++ source files |
 | `hipdnn-check-format` | Check code formatting compliance |
 | `hipdnn-tidy` | Run clang-tidy on hipDNN sources |
@@ -444,10 +447,6 @@ To build a target, for example `hipdnn-check` to build and run all tests:
 cmake --build build/release --target hipdnn-check
 ```
 
-Or run it through Ninja directly from the build directory:
-```bash
-projects/hipdnn/build/release> ninja hipdnn-check
-```
 
 ## Superbuild
 
@@ -468,10 +467,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. The per-component `ninja` check targets do not require it. For test category targets and other details, see [Testing](./Testing.md#superbuild-root-cmakepresetsjson).
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. See [Build Targets](#build-targets) for target names and [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
 
 > [!NOTE]
-> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [ctest vs. check targets](./Testing.md#ctest-vs-check-targets) for the available test targets.
+> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./TESTING.md#development-workflow) for the available test paths.
 
 To build only hipDNN core from the superbuild (the same components as the [standalone build](#2-build-hipdnn), without the providers), use the `hipdnn` preset:
 
@@ -583,12 +582,12 @@ Test targets (each `<component>-check` has per-category variants, and each targe
 |--------|-------------|
 | `miopen-provider-check` | Run all miopen-provider tests |
 | `miopen-provider-<category>-check` | Run miopen-provider tests for a category: `quick`, `standard`, `comprehensive`, `full` |
-| `miopen-provider-external-integration-check` | Run the cross-provider integration tests for miopen-provider |
+| `miopen-provider-external-integration-check` | Run the provider-agnostic integration suite independently against miopen-provider |
 | `hipblaslt-provider-check` | Run all hipblaslt-provider tests |
 | `hipblaslt-provider-<category>-check` | Run hipblaslt-provider tests for a category: `quick`, `standard`, `comprehensive`, `full` |
-| `hipblaslt-provider-external-integration-check` | Run the cross-provider integration tests for hipblaslt-provider |
-| `hipdnn-integration-tests-check` | Run all cross-provider integration tests |
-| `hipdnn-integration-tests-<category>-check` | Run integration tests for a category: `unit`, `integration` |
+| `hipblaslt-provider-external-integration-check` | Run the provider-agnostic integration suite independently against hipblaslt-provider |
+| `hipdnn-integration-tests-check` | Run the provider-agnostic integration test executable |
+| `hipdnn-integration-tests-<category>-check` | Run integration tests for a configured category |
 
 hip-kernel-provider does not register `-check` targets; its tests are staged through its install bucket rather than the shared test-target machinery.
 
