@@ -2,6 +2,38 @@
 
 This page documents the DSL primitives that map closely to GPU hardware behavior. Everything below is verified against `helpers/atoms.py`, `helpers/loads.py`, `helpers/layouts.py`, `helpers/schedule.py`, `helpers/pipeline.py`, `helpers/epilogues.py`, `helpers/reduction.py`, `core/ir.py`, and `core/lower_llvm.py`.
 
+## Arithmetic optimization barrier
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar type and value
+while hiding its defining expression from downstream compiler optimizations.
+Use the returned value to preserve an intermediate rounding boundary:
+
+```python
+product = ir.optimization_barrier(ir.fmul(a, b))
+result = ir.fadd(product, c)
+```
+
+The C builder counterpart is `rocke_b_optimization_barrier(builder, value)`.
+Both builders emit the existing `tile.inline_asm` operation with an empty
+template and a tied vector-register constraint. LLVM and HIP therefore keep
+the multiplication result separate from the addition. NVFP4 also uses it
+between FP32 multiplication and FP16 conversion to preserve two rounding steps.
+
+Supported scalar types are `i8`, `i16`, `i32`, `i64`, `f16`, `bf16`, `f32`,
+`fp8e4m3`, and `bf8e5m2`; low-bit float types retain their encoded storage bits.
+Boolean `i1` predicates bridge through an `i32` value containing zero or one,
+then convert back to `i1`; this avoids tying a lane-mask representation to a VGPR.
+Byte-sized values also bridge through `i32`, preserving their storage bits;
+the compiler cannot allocate an 8-bit value directly for the VGPR constraint.
+Pointer and vector values are rejected. For vectors, apply the barrier to
+extracted elements.
+
+The barrier controls only its value dependency. It does not order memory,
+synchronize threads, pin instruction scheduling, or disable optimizations
+inside either neighboring expression. It is side-effect free, so an unused
+result can be removed. The empty assembly emits no instruction itself, but
+register moves and inhibited arithmetic combines can still have a cost.
+
 ## MFMA Atoms
 
 `helpers/atoms.py::MfmaAtom` packages one MFMA intrinsic's shape, per-lane widths, accumulator width, dispatch to `IRBuilder`, and lane-to-output mapping.

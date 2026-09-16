@@ -468,9 +468,8 @@ def build_block_scaled_gemm(
             if spec.tensor_scale:
                 value = ir.fmul(value, tensor_scale)
                 if c_ty == F16:
-                    # Materialize FP32 rounding before FP16 conversion. Otherwise
-                    # fmul + fptrunc can become a single-rounding v_fma_mix_f16.
-                    value = ir.inline_asm("", "=v,0", [value], F32, sideeffect=False)
+                    # Preserve FP32 rounding before the final FP16 conversion.
+                    value = ir.optimization_barrier(value)
             ir.global_store(C, idx, ir.cast_f32_to(value, c_ty), align=2)
         return ir.kernel
 

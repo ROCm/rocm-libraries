@@ -358,6 +358,31 @@ static void build_tensor_transfers(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_optimization_barriers(rocke_ir_builder_t* b)
+{
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    const rocke_type_t* types[] = {rocke_i1(),
+                                   rocke_i8(),
+                                   rocke_i16(),
+                                   rocke_i32(),
+                                   rocke_i64(),
+                                   rocke_bf16(),
+                                   rocke_f16(),
+                                   rocke_f32(),
+                                   rocke_fp8e4m3(),
+                                   rocke_bf8e5m2()};
+    for(const rocke_type_t* type : types)
+    {
+        char name[32];
+        snprintf(name, sizeof(name), "p_%s", type->name);
+        rocke_value_t* ptr = rocke_b_param(b, name, rocke_ptr_type(b, type, "global"), NULL);
+        rocke_value_t* value = rocke_b_global_load(b, ptr, tid, type, 1);
+        value = rocke_b_optimization_barrier(b, value);
+        rocke_b_global_store(b, ptr, tid, value, 1);
+    }
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -398,6 +423,8 @@ static const config_t CONFIGS[] = {
     {build_wmma_scale_e5m3, "gfx1250"},
     {build_wmma_scale16_e4m3, "gfx1250"},
     {build_wmma_scale16_e5m3, "gfx1250"},
+    {build_optimization_barriers, "gfx1250"},
+    {build_optimization_barriers, "gfx950"},
 
 };
 
