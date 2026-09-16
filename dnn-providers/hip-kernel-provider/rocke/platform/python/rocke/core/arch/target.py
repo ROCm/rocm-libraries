@@ -131,9 +131,27 @@ class LayoutMap:
 
 @dataclass(frozen=True)
 class MmaScaleOperand:
-    """Optional machine operand that scales one matrix source."""
+    """Scale value format and granularity for one matrix source.
+
+    ``dtype`` is one of ``e8m0``, ``e4m3``, or ``e5m3``; ``fp8e4m3`` is an
+    alias for ``e4m3``. It describes the scale values independently of the
+    source dtype and the backend's packed register carrier. ``block_size``
+    is the number of source elements along K sharing one scale value. Only
+    16 and 32 are valid: SCALE and SCALE16 use 32 and 16, respectively.
+    """
 
     dtype: str
+    block_size: int
+
+    def __post_init__(self) -> None:
+        if self.dtype == "fp8e4m3":
+            object.__setattr__(self, "dtype", "e4m3")
+        if self.dtype not in ("e8m0", "e4m3", "e5m3"):
+            raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3")
+        if type(self.block_size) is not int or self.block_size not in (16, 32):
+            raise ValueError(
+                "MMA scale block_size must be an integer equal to 16 or 32"
+            )
 
 
 @dataclass(frozen=True)
@@ -156,7 +174,7 @@ class MmaDst:
 
 @dataclass(frozen=True)
 class MmaSrc:
-    """Metadata for one matrix ``src``, with an optional MX scale operand."""
+    """Metadata for one matrix ``src``, with an optional scale operand."""
 
     dtype: str
     frag_len: int = 0
@@ -1158,7 +1176,10 @@ def _build_mma_op(o: dict) -> MmaOp:
     def _source(row: dict, role: str, frag_len: int, fn: _LaneCoordFn) -> MmaSrc:
         scale_row = row.get("scale")
         scale = (
-            MmaScaleOperand(dtype=normalize_dtype(scale_row["dtype"]))
+            MmaScaleOperand(
+                dtype=normalize_dtype(scale_row["dtype"]),
+                block_size=scale_row["block_size"],
+            )
             if scale_row is not None
             else None
         )

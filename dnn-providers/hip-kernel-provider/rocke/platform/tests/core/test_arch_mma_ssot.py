@@ -161,26 +161,78 @@ class TestIndexedMmaOperands(unittest.TestCase):
         self.assertEqual(result.type.count, op.dst.frag_len)
         self.assertEqual(result.type.elem.name, "i32")
 
-    def test_scale_is_optional_and_attached_to_its_source(self):
-        op = _build_mma_op(
-            {
-                "family": "mma",
-                "srcs": [
-                    {"dtype": "fp4", "scale": {"dtype": "i32"}},
-                    {"dtype": "fp4", "scale": {"dtype": "i32"}},
-                    {"dtype": "fp32"},
-                ],
-                "dst": {"dtype": "fp32"},
-                "m": 16,
-                "n": 16,
-                "k": 128,
-                "op_id": "mfma_scale_f32_16x16x128_f8f6f4",
-            }
+    def test_scale_format_and_block_size_are_independent_per_source(self):
+        # Synthetic rows exercise the descriptor without admitting new hardware
+        # operations into the shipped catalog.
+        for dtype, block_size in (
+            ("e8m0", 32),
+            ("e8m0", 16),
+            ("e4m3", 16),
+            ("fp8e4m3", 16),
+            ("e5m3", 16),
+        ):
+            with self.subTest(dtype=dtype, block_size=block_size):
+                op = _build_mma_op(
+                    {
+                        "family": "mma",
+                        "srcs": [
+                            {
+                                "dtype": "fp4",
+                                "scale": {"dtype": dtype, "block_size": block_size},
+                            },
+                            {
+                                "dtype": "fp4",
+                                "scale": {"dtype": "e8m0", "block_size": 32},
+                            },
+                            {"dtype": "fp32"},
+                        ],
+                        "dst": {"dtype": "fp32"},
+                        "m": 16,
+                        "n": 16,
+                        "k": 128,
+                        "op_id": "synthetic_scaled_mma",
+                    }
+                )
+                expected_dtype = "e4m3" if dtype == "fp8e4m3" else dtype
+                self.assertEqual(
+                    op.srcs[0].scale, MmaScaleOperand(expected_dtype, block_size)
+                )
+                self.assertEqual(op.srcs[1].scale, MmaScaleOperand("e8m0", 32))
+                self.assertIsNone(op.srcs[2].scale)
+                self.assertFalse(hasattr(op.dst, "scale"))
+
+    def test_scale_dtype_must_be_a_supported_value_format(self):
+        for dtype in ("i32", "fp4", "e5m2", "", None):
+            with self.subTest(dtype=dtype):
+                with self.assertRaisesRegex(ValueError, "e8m0, e4m3, or e5m3"):
+                    MmaScaleOperand(dtype, 16)
+
+    def test_scale_dtype_alias_is_canonicalized(self):
+        for block_size in (16, 32):
+            with self.subTest(block_size=block_size):
+                alias = MmaScaleOperand("fp8e4m3", block_size)
+                canonical = MmaScaleOperand("e4m3", block_size)
+                self.assertEqual(alias.dtype, "e4m3")
+                self.assertEqual(alias, canonical)
+                self.assertEqual(hash(alias), hash(canonical))
+
+    def test_scale_block_size_must_be_16_or_32(self):
+        for block_size in (0, -16, 1, 8, 64, 16.0, 32.0, 16.5, "16", True, None):
+            with self.subTest(block_size=block_size):
+                with self.assertRaisesRegex(ValueError, "integer equal to 16 or 32"):
+                    MmaScaleOperand("e8m0", block_size)
+
+    def test_scale_identity_includes_format_and_block_size(self):
+        self.assertEqual(
+            len(
+                {
+                    MmaScaleOperand("e8m0", 32),
+                    MmaScaleOperand("e8m0", 16),
+                    MmaScaleOperand("e4m3", 16),
+                }
+            ),
+            3,
         )
-        self.assertEqual(op.srcs[0].scale, MmaScaleOperand("i32"))
-        self.assertEqual(op.srcs[1].scale, MmaScaleOperand("i32"))
-        self.assertIsNone(op.srcs[2].scale)
-        self.assertFalse(hasattr(op.dst, "scale"))
 
 
 if __name__ == "__main__":  # pragma: no cover

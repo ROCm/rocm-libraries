@@ -128,7 +128,8 @@ typedef struct rocke_mma_src
     const char* dtype;
     int frag_len;
     const rocke_layout_map_t* layout; /* may be NULL */
-    const char* scale_dtype; /* may be NULL */
+    const char* scale_dtype; /* scale value format: e8m0/e4m3/e5m3; NULL if unscaled */
+    int scale_block_size; /* source elements along K per scale: 16 or 32; 0 if unscaled */
 } rocke_mma_src_t;
 
 typedef struct rocke_mma_op

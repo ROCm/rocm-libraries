@@ -15,6 +15,7 @@
  * into the provider test artifact and run under ctest by TheRock CI.
  */
 #include <cstdio>
+#include <cstring>
 
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
@@ -88,6 +89,10 @@ int main(void)
         distinct.family = "mma";
         distinct.srcs[0].dtype = "xf32";
         distinct.srcs[1].dtype = "xf32";
+        distinct.srcs[0].scale_dtype = "e8m0";
+        distinct.srcs[0].scale_block_size = 32;
+        distinct.srcs[1].scale_dtype = "e4m3";
+        distinct.srcs[1].scale_block_size = 16;
         distinct.srcs[2].dtype = "fp32";
         distinct.srcs[2].frag_len = 3;
         distinct.srcs[2].layout = &src2_layout;
@@ -112,6 +117,20 @@ int main(void)
               "dst layout remains independent");
         CHECK(rocke_mma_op_c_layout(&distinct, NULL) == &dst_layout,
               "historical C layout projects dst");
+        const rocke_mma_op_t* selected
+            = rocke_mma_catalog_by_op_id(&catalog, "synthetic_distinct_dst");
+        CHECK(selected != NULL, "catalog preserves scaled operand metadata");
+        if(selected)
+        {
+            CHECK(strcmp(selected->srcs[0].scale_dtype, "e8m0") == 0
+                      && selected->srcs[0].scale_block_size == 32,
+                  "src0 scale retains its value format and block size");
+            CHECK(strcmp(selected->srcs[1].scale_dtype, "e4m3") == 0
+                      && selected->srcs[1].scale_block_size == 16,
+                  "src1 scale is independent of src0");
+            CHECK(selected->srcs[2].scale_dtype == NULL && selected->srcs[2].scale_block_size == 0,
+                  "src2 remains unscaled");
+        }
     }
 
     rocke_ir_builder_t b;

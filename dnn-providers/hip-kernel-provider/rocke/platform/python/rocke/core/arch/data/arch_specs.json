@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "_comment": "ROCKE-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on real hardware (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row has three matrix srcs and one dst; a src may optionally carry a scale descriptor. op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
+  "_comment": "ROCKE-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on real hardware (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row has three matrix srcs and one dst; a src may optionally carry a scale descriptor with dtype (scale value format: e8m0/e4m3/e5m3; fp8e4m3 aliases e4m3) and block_size (16 or 32 source elements along K per scale). op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
   "arches": {
     "gfx90a": {
       "_comment": "CDNA2 (gfx90a). Wave64, 64 KB LDS. No fp8/bf8 native MFMA (those arrived with gfx940/gfx942). No async_lds. bf16 32x32x8 is hardware-verified on gfx90a series. Hardware-verified MMA set matches AMD ISA manual v3 (GFX9 MFMA section).",

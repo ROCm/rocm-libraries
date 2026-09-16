@@ -1086,8 +1086,9 @@ int rocke_arch_mma_dst_frag_len(const char* op_id)
  *
  * Field order of rocke_mma_op_t:
  *   family, srcs[0], srcs[1], srcs[2], dst, m, n, k, op_id, wave_size.
- * Each source stores dtype, frag_len, layout, and optional scale dtype; dst
- * stores dtype, frag_len, and layout.
+ * Each source stores dtype, frag_len, layout, optional scale value dtype, and
+ * scale block size along K (zero when unscaled); dst stores dtype, frag_len,
+ * and layout. Scale value dtype is independent of the packed register carrier.
  *
  * NOTE: fp4/fp6 dtypes are not in _DTYPE_ALIASES, so normalize_dtype passes them
  * through as the lowercased spelling "fp4"/"fp6" (Python identity fallthrough).
