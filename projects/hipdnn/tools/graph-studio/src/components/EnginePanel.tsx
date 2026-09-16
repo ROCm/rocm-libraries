@@ -11,7 +11,7 @@ import {
 import { serializeGraph } from "../graph/serialize";
 import { platform } from "../platform";
 import type { Graph } from "../graph/model";
-import type { NativeExecutionSnapshot } from "../results/model";
+import type { NativeExecutionSnapshot } from "../benchmark/native";
 
 /**
  * Engine control panel: build and execute the current graph through the hipDNN

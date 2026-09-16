@@ -7,7 +7,8 @@ import {
   summarize,
   validationState,
 } from "../benchmark/metrics";
-import type { BenchmarkReport } from "../benchmark/types";
+import type { BenchmarkReport, EngineResult, GraphResults } from "../benchmark/types";
+import { EngineDetail } from "./EngineDetail";
 
 /**
  * Benchmark report view: suite totals, a per-graph engine comparison chart for
@@ -17,19 +18,33 @@ import type { BenchmarkReport } from "../benchmark/types";
 
 const ALL_ENGINES = "";
 
+const KIND_LABEL: Record<BenchmarkReport["kind"], string> = {
+  suite: "Suite report",
+  raw: "Raw timing export",
+  native: "Studio execution",
+};
+
 interface BenchmarkReportViewProps {
   report: BenchmarkReport;
   /** Where the report came from, shown as the heading. */
   sourceLabel: string;
   /** Marks the view as showing bundled sample data rather than a real run. */
   sample?: boolean;
+  /** Opens the tensor inspector for one row. Omitted hides the row action. */
+  onOpenTensors?: (graph: GraphResults, row: EngineResult) => void;
 }
 
-export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkReportViewProps) {
+export function BenchmarkReportView({
+  report,
+  sourceLabel,
+  sample,
+  onOpenTensors,
+}: BenchmarkReportViewProps) {
   const { metadata, graphs } = report;
   const [graphName, setGraphName] = useState(graphs[0]?.graph_name ?? "");
   const [metricId, setMetricId] = useState(METRICS[0].id);
   const [engineFilter, setEngineFilter] = useState(ALL_ENGINES);
+  const [detail, setDetail] = useState<{ graph: GraphResults; row: EngineResult } | null>(null);
 
   const summary = useMemo(() => summarize(report), [report]);
   const metric = METRICS.find((m) => m.id === metricId) ?? METRICS[0];
@@ -47,12 +62,18 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
       : Math.min(...values)
     : 0;
 
+  if (detail) {
+    return (
+      <EngineDetail report={report} graph={detail.graph} row={detail.row} onClose={() => setDetail(null)} />
+    );
+  }
+
   return (
     <div className="report">
       <header className="report__head">
         <div className="report__ident">
           <div className="report__eyebrow">
-            Suite report
+            {KIND_LABEL[report.kind]}
             {sample && <span className="report__sample">sample data</span>}
           </div>
           <h2 className="report__title">{sourceLabel}</h2>
@@ -74,6 +95,14 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
           </span>
         </div>
       </header>
+
+      {report.warnings.length > 0 && (
+        <ul className="report__warnings">
+          {report.warnings.map((warning, index) => (
+            <li key={index}>{warning}</li>
+          ))}
+        </ul>
+      )}
 
       <div className="report__cards">
         <Card label="Graphs" value={summary.graphs} />
@@ -149,9 +178,9 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
             <span>Engine filter</span>
             <select value={engineFilter} onChange={(e) => setEngineFilter(e.target.value)}>
               <option value={ALL_ENGINES}>All engines</option>
-              {results.map((r) => (
-                <option key={r.provider} value={r.provider}>
-                  {r.provider}
+              {Array.from(new Set(results.map((r) => r.provider))).map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
                 </option>
               ))}
             </select>
@@ -167,14 +196,17 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
           {shown.length === 0 ? (
             <div className="report__empty">No results for this selection.</div>
           ) : (
-            shown.map((result) => {
+            shown.map((result, i) => {
               const value = metric.value(result);
               const state = validationState(result.correctness);
+              const isReference = result.role === "reference";
               return (
-                <div className="bar" key={result.provider}>
+                <div className="bar" data-role={result.role} key={rowKey(result, i)}>
                   <div className="bar__name">
                     <span className="bar__engine">{result.provider}</span>
-                    <span className="bar__kind">{pluginKind(result.plugin_path)}</span>
+                    <span className="bar__kind">
+                      {isReference ? "Reference" : pluginKind(result.plugin_path)}
+                    </span>
                   </div>
                   <div className="bar__track">
                     <div
@@ -183,9 +215,15 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
                       style={{ width: `${scale > 0 ? (value / scale) * 100 : 0}%` }}
                     />
                   </div>
-                  <div className="bar__value">{metric.format(value)}</div>
-                  <span className="badge" data-state={state}>
-                    {VALIDATION_LABEL[state]}
+                  <div className="bar__value">
+                    {metric.id === "tflops" && result.analytical_flops_partial ? "≥ " : ""}
+                    {metric.format(value)}
+                    {metric.id === "tflops" && result.analytical_flops_partial && (
+                      <small>Partial coverage</small>
+                    )}
+                  </div>
+                  <span className="badge" data-state={isReference ? "reference" : state}>
+                    {isReference ? "Reference" : VALIDATION_LABEL[state]}
                   </span>
                 </div>
               );
@@ -214,17 +252,25 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
                 <th className="num">Build (ms)</th>
                 <th className="num">Workspace</th>
                 <th>Validation</th>
+                {onOpenTensors && <th>Tensors</th>}
+                <th>Details</th>
               </tr>
             </thead>
             <tbody>
-              {results.map((r) => {
+              {results.map((r, i) => {
                 const state = validationState(r.correctness);
                 const mean = r.gpu_kernel_stats.mean_ms;
                 return (
-                  <tr key={r.provider}>
+                  <tr key={rowKey(r, i)}>
                     <td>
                       <div className="report__engine">{r.provider}</div>
-                      <div className="report__engine-ver">{r.engine_version}</div>
+                      <div className="report__engine-ver">
+                        {r.engine_name && r.engine_name !== r.provider ? `${r.engine_name} · ` : ""}
+                        {r.engine_version}
+                      </div>
+                      {r.role === "reference" && (
+                        <div className="report__engine-ver">Reference row</div>
+                      )}
                     </td>
                     <td>
                       <span className="badge" data-status={r.status}>
@@ -235,18 +281,46 @@ export function BenchmarkReportView({ report, sourceLabel, sample }: BenchmarkRe
                     <td className="num">{mean.toFixed(4)}</td>
                     <td className="num">{r.gpu_kernel_stats.p95_ms.toFixed(4)}</td>
                     <td className="num">{r.host_stats.mean_ms.toFixed(4)}</td>
-                    <td className="num">{r.derived_tflops_per_s.toFixed(3)}</td>
+                    <td className="num">
+                      {r.analytical_flops_partial ? "≥ " : ""}
+                      {r.derived_tflops_per_s.toFixed(3)}
+                      {r.analytical_flops_partial && <small>Partial coverage</small>}
+                    </td>
                     <td className="num">{r.derived_gbytes_per_s.toFixed(3)}</td>
                     <td className="num">{r.cpu_build_time_ms.toFixed(3)}</td>
                     <td className="num">{formatBytes(r.workspace_bytes)}</td>
                     <td>
                       <span
                         className="badge"
-                        data-state={state}
+                        data-state={r.role === "reference" ? "reference" : state}
                         title={r.correctness.error_message ?? undefined}
                       >
-                        {VALIDATION_LABEL[state]}
+                        {r.role === "reference" ? "Reference" : VALIDATION_LABEL[state]}
                       </span>
+                    </td>
+                    {onOpenTensors && (
+                      <td>
+                        {r.tensor_manifest || graph?.input_tensor_manifest ? (
+                          <button
+                            type="button"
+                            className="report__rowaction"
+                            onClick={() => graph && onOpenTensors(graph, r)}
+                          >
+                            Inspect
+                          </button>
+                        ) : (
+                          <span className="report__engine-ver">not captured</span>
+                        )}
+                      </td>
+                    )}
+                    <td>
+                      <button
+                        type="button"
+                        className="report__rowaction"
+                        onClick={() => graph && setDetail({ graph, row: r })}
+                      >
+                        Inspect
+                      </button>
                     </td>
                   </tr>
                 );
@@ -268,6 +342,14 @@ function Card({ label, value, tone }: { label: string; value: number; tone?: "ok
       </span>
     </div>
   );
+}
+
+/**
+ * One provider can appear several times in a graph, once per engine, so the
+ * provider alone is not a row identity.
+ */
+function rowKey(result: EngineResult, index: number): string {
+  return `${result.provider}#${result.engine_id}#${index}`;
 }
 
 function Fact({ label, value }: { label: string; value: string | null }) {

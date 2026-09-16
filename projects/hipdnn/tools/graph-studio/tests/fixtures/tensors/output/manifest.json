@@ -1,0 +1,36 @@
+{
+  "byte_order": "little",
+  "format": "dnn-benchmarking-tensors",
+  "graph": {
+    "name": "fixture",
+    "path": "fixture.hipdnn.json",
+    "sha256": "c26ac0c369c68642df7810c6fc86aed2f38fa84624589e4db7d7911f80ff64a8"
+  },
+  "layout": "element-space",
+  "phase": "output",
+  "producer": {
+    "engine_id": "7",
+    "provider": "hipdnn"
+  },
+  "tensors": [
+    {
+      "byte_length": 16,
+      "data_type": "float",
+      "encoding": "f32",
+      "file": "fixture.hipdnn.tensor9.bin",
+      "graph_strides": [
+        2,
+        1
+      ],
+      "name": "y",
+      "sha256": "ad73b9acd6e4a74b2f5bb5386658ce3bb146cd040a1867646ab3b973fb6632b1",
+      "shape": [
+        2,
+        2
+      ],
+      "storage_elements": 4,
+      "uid": "9"
+    }
+  ],
+  "version": 1
+}
