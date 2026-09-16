@@ -663,8 +663,18 @@ def run_probe(descs: ProbeDescs, mode, *, arch, dtype, tile_free, tile_k, n_wave
     rt.memcpy_d2h(as_u8_buffer(out_h), out_d.ptr(), out_h.nbytes)
 
     diff = None
-    if verify and mode == "store" and block_lanes == a.WAVE:
-        diff = float(np.abs(out_h.astype(np.float32) - in_h.astype(np.float32)).max())
+    if verify and block_lanes == a.WAVE:
+        if mode == "store":
+            diff = float(np.abs(out_h.astype(np.float32) - in_h.astype(np.float32)).max())
+        elif mode == "read":
+            # The read probe stores ONE coop band (coop_free wide) while the wave reads warp_free wide,
+            # so only the first coop_free columns correspond to LDS this probe actually wrote -- beyond
+            # them is stale LDS and comparing it would false-flag. LDS holds (K, free) and the final
+            # store writes the read back in that same order, so the golden is the band TRANSPOSED.
+            # Established empirically on gfx90a before this check was added; without it a read probe's
+            # counters would be unverified, which the cardinal rule forbids.
+            ov = out_h[:, :coop_free].astype(np.float32)
+            diff = float(np.abs(ov - in_h.T.astype(np.float32)).max())
     return {"mode": mode, "pad": lds_pad, "force_vw": force_vw, "lds_swizzle": bool(lds_swizzle),
             "block_lanes": block_lanes, "kernel": kernel.name, "max_abs_diff": diff}
 
