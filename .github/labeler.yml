@@ -33,7 +33,7 @@
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*sdpa*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/attention/**/*'
 
-"rocke-lib: conv":
+"rocke-lib: convolution":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*conv*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*wgrad*'
