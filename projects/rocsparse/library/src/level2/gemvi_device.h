@@ -29,28 +29,29 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t UNROLL, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void gemvi_device_part1(I                    m,
-                                                 I                    n,
-                                                 T                    alpha,
-                                                 const T*             A,
-                                                 int64_t              lda,
-                                                 I                    nnz,
-                                                 const T*             x_val,
-                                                 const I*             x_ind,
-                                                 T                    beta,
-                                                 T*                   y,
-                                                 T*                   workspace,
+    ROCSPARSE_DEVICE_ILF void gemvi_device_part1(I m,
+                                                 I n,
+                                                 T alpha,
+                                                 const T* __restrict__ A,
+                                                 int64_t lda,
+                                                 I       nnz,
+                                                 const T* __restrict__ x_val,
+                                                 const I* __restrict__ x_ind,
+                                                 T beta,
+                                                 T* __restrict__ y,
+                                                 T* __restrict__ workspace,
                                                  rocsparse_index_base idx_base)
     {
-        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
-        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
-        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
-        static_assert(((BLOCKSIZE / WFSIZE) & ((BLOCKSIZE / WFSIZE) - 1)) == 0,
-                      "The number of wavefronts per block must be a power of two.");
-        static_assert(UNROLL > 0, "UNROLL must be positive.");
+        rocsparse_device_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0,
+                                "WFSIZE must be a power of two.");
+        rocsparse_device_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        rocsparse_device_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        rocsparse_device_assert(((BLOCKSIZE / WFSIZE) & ((BLOCKSIZE / WFSIZE) - 1)) == 0,
+                                "The number of wavefronts per block must be a power of two.");
+        rocsparse_device_assert(UNROLL > 0, "UNROLL must be positive.");
 
-        const int lid = hipThreadIdx_x & (WFSIZE - 1);
-        const int wid = hipThreadIdx_x / WFSIZE;
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+        const uint32_t wid = hipThreadIdx_x / WFSIZE;
 
         // Each threadblock processes WFSIZE rows, where
         // each wavefront processes a column of these rows, e.g.
@@ -59,21 +60,17 @@ namespace rocsparse
         // etc.
         const I row = hipBlockIdx_x * WFSIZE + lid;
 
-        const I nworkers = (BLOCKSIZE / WFSIZE) * hipGridDim_y; // ncol
-        const I worker   = (BLOCKSIZE / WFSIZE) * hipBlockIdx_y + wid; // col
+        const uint32_t nworkers = (BLOCKSIZE / WFSIZE) * hipGridDim_y; // ncol
+        const uint32_t worker   = (BLOCKSIZE / WFSIZE) * hipBlockIdx_y + wid; // col
 
-        const I tail = static_cast<I>(UNROLL - 1) * nworkers;
+        const I tail = static_cast<I>((UNROLL - 1) * nworkers);
 
         // Sub-row sum accumulators
-        T sum[UNROLL];
-        for(uint32_t u = 0; u < UNROLL; u++)
-        {
-            sum[u] = static_cast<T>(0);
-        }
+        T sum[UNROLL]{};
 
         if(row < m)
         {
-            const I step = UNROLL * nworkers;
+            const uint32_t step = UNROLL * nworkers;
 
             I i = worker;
             for(; (nnz - i) > tail; i += step)
@@ -150,7 +147,7 @@ namespace rocsparse
 
         if(hipGridDim_y == 1)
         {
-            // Frist wavefront writes (accumulated) 64 row sums back to y
+            // First wavefront writes (accumulated) row sums back to y
             if(wid == 0 && row < m)
             {
                 if(beta != static_cast<T>(0))
@@ -175,16 +172,17 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename T>
     ROCSPARSE_DEVICE_ILF void
-        gemvi_device_part2(I m, int grid_y, T alpha, T beta, const T* workspace, T* y)
+        gemvi_device_part2(I m, int grid_y, T alpha, T beta, const T* __restrict__ workspace, T* y)
     {
-        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
-        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
-        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
-        static_assert(((BLOCKSIZE / WFSIZE) & ((BLOCKSIZE / WFSIZE) - 1)) == 0,
-                      "The number of wavefronts per block must be a power of two.");
+        rocsparse_device_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0,
+                                "WFSIZE must be a power of two.");
+        rocsparse_device_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        rocsparse_device_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        rocsparse_device_assert(((BLOCKSIZE / WFSIZE) & ((BLOCKSIZE / WFSIZE) - 1)) == 0,
+                                "The number of wavefronts per block must be a power of two.");
 
-        const int lid = hipThreadIdx_x & (WFSIZE - 1);
-        const int wid = hipThreadIdx_x / WFSIZE;
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+        const uint32_t wid = hipThreadIdx_x / WFSIZE;
 
         const I row = hipBlockIdx_x * WFSIZE + lid;
 

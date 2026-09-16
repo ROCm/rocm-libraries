@@ -81,8 +81,8 @@ namespace rocsparse
     // workspace from the same values that gemvi_dispatch launches with.
     constexpr uint32_t gemvi_part1_blocksize = 256;
     constexpr uint32_t gemvi_part1_unroll    = 8;
-    constexpr int      gemvi_max_grid_y      = 256;
-    constexpr int      gemvi_min_split_steps = 16;
+    constexpr uint32_t gemvi_max_grid_y      = 256;
+    constexpr uint32_t gemvi_min_split_steps = 16;
 
     template <uint32_t WFSIZE>
     inline int gemvi_part1_grid_x(int m)
@@ -93,14 +93,16 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t UNROLL, typename I>
     inline int gemvi_part1_work_grid_y(I nnz)
     {
-        constexpr int step = (BLOCKSIZE / WFSIZE) * UNROLL;
+        constexpr uint32_t step = (BLOCKSIZE / WFSIZE) * UNROLL;
 
-        if(nnz < gemvi_min_split_steps * step)
+        if(nnz < static_cast<I>(gemvi_min_split_steps) * static_cast<I>(step))
         {
             return 1;
         }
 
-        return rocsparse::min(rocsparse::max(nnz / step, 1), gemvi_max_grid_y);
+        return static_cast<int>(
+            rocsparse::min(rocsparse::max(static_cast<I>(nnz / step), static_cast<I>(1)),
+                           static_cast<I>(gemvi_max_grid_y)));
     }
 
     template <uint32_t WFSIZE, typename I>
@@ -110,25 +112,45 @@ namespace rocsparse
     }
 
     // Number of part1 blocks the device can hold concurrently, taken from the
-    // real occupancy of the kernel.
+    // real occupancy of the kernel. Occupancy depends only on the kernel
+    // instantiation (this template) and the device, so blocks-per-CU is cached.
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t UNROLL, typename T, typename I>
-    inline int gemvi_part1_resident_blocks(const hipDeviceProp_t& prop)
+    inline int gemvi_part1_resident_blocks(rocsparse_handle handle)
     {
-        int blocks_per_cu = 0;
-        if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-               &blocks_per_cu, gemvi_kernel_part1<BLOCKSIZE, WFSIZE, UNROLL, I, T>, BLOCKSIZE, 0)
-               != hipSuccess
-           || blocks_per_cu < 1)
+        const hipDeviceProp_t& prop = handle->properties;
+
+        struct occupancy_cache
         {
-            // LCOV_EXCL_START
-            // Fall back to the device's resident thread capacity.
-            blocks_per_cu = 1;
-            if(prop.maxThreadsPerMultiProcessor > 0)
+            int device        = -1;
+            int blocks_per_cu = 0;
+        };
+        static occupancy_cache cache;
+
+        int blocks_per_cu = cache.blocks_per_cu;
+        if(cache.device != handle->device)
+        {
+            blocks_per_cu = 0;
+            if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                   &blocks_per_cu,
+                   gemvi_kernel_part1<BLOCKSIZE, WFSIZE, UNROLL, I, T>,
+                   BLOCKSIZE,
+                   0)
+                   != hipSuccess
+               || blocks_per_cu < 1)
             {
-                blocks_per_cu = rocsparse::max(
-                    prop.maxThreadsPerMultiProcessor / static_cast<int>(BLOCKSIZE), 1);
+                // LCOV_EXCL_START
+                // Fall back to the device's resident thread capacity.
+                blocks_per_cu = 1;
+                if(prop.maxThreadsPerMultiProcessor > 0)
+                {
+                    blocks_per_cu = rocsparse::max(
+                        prop.maxThreadsPerMultiProcessor / static_cast<int>(BLOCKSIZE), 1);
+                }
+                // LCOV_EXCL_STOP
             }
-            // LCOV_EXCL_STOP
+
+            cache.device        = handle->device;
+            cache.blocks_per_cu = blocks_per_cu;
         }
 
         return rocsparse::max(prop.multiProcessorCount * blocks_per_cu, 1);
@@ -138,14 +160,14 @@ namespace rocsparse
     inline int gemvi_part1_grid_y(rocsparse_handle handle, I m, I nnz)
     {
         const int work_grid_y = gemvi_part1_work_grid_y<BLOCKSIZE, WFSIZE, UNROLL>(nnz);
+
         if(work_grid_y == 1)
         {
             return 1;
         }
 
-        const int grid_x = gemvi_part1_grid_x<WFSIZE>(m);
-        const int resident
-            = gemvi_part1_resident_blocks<BLOCKSIZE, WFSIZE, UNROLL, T, I>(handle->properties);
+        const int grid_x   = gemvi_part1_grid_x<WFSIZE>(m);
+        const int resident = gemvi_part1_resident_blocks<BLOCKSIZE, WFSIZE, UNROLL, T, I>(handle);
 
         if(grid_x >= resident)
         {
@@ -160,12 +182,13 @@ namespace rocsparse
     }
 
     template <uint32_t WFSIZE, typename I, typename T>
-    inline size_t gemvi_workspace_size_for_wavefront(I m, I nnz)
+    inline size_t gemvi_workspace_size_for_wavefront(rocsparse_handle handle, I m, I nnz)
     {
         const int grid_y
             = gemvi_use_single_wavefront<WFSIZE>(nnz)
-                  ? gemvi_part1_work_grid_y<WFSIZE, WFSIZE, gemvi_part1_unroll>(nnz)
-                  : gemvi_part1_work_grid_y<gemvi_part1_blocksize, WFSIZE, gemvi_part1_unroll>(nnz);
+                  ? gemvi_part1_grid_y<WFSIZE, WFSIZE, gemvi_part1_unroll, T>(handle, m, nnz)
+                  : gemvi_part1_grid_y<gemvi_part1_blocksize, WFSIZE, gemvi_part1_unroll, T>(
+                        handle, m, nnz);
 
         return grid_y > 1 ? sizeof(T) * static_cast<size_t>(WFSIZE)
                                 * static_cast<size_t>(gemvi_part1_grid_x<WFSIZE>(m))
@@ -174,17 +197,18 @@ namespace rocsparse
     }
 
     template <typename I, typename T>
-    inline size_t gemvi_workspace_size(I m, I nnz)
+    inline size_t gemvi_workspace_size(rocsparse_handle handle, I m, I nnz)
     {
         if(m == 0)
         {
             return 0;
         }
 
-        // Return an architecture-independent upper bound. Runtime occupancy may
-        // reduce grid_y, but it can never increase it beyond the work limit.
-        return rocsparse::max(gemvi_workspace_size_for_wavefront<32, I, T>(m, nnz),
-                              gemvi_workspace_size_for_wavefront<64, I, T>(m, nnz));
+        // Size from the same grid_y that gemvi_dispatch launches with, so that
+        // the occupancy driven early-outs are modelled here as well.
+        return (handle->wavefront_size == 32)
+                   ? gemvi_workspace_size_for_wavefront<32, I, T>(handle, m, nnz)
+                   : gemvi_workspace_size_for_wavefront<64, I, T>(handle, m, nnz);
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t UNROLL, typename I, typename T>
@@ -400,7 +424,7 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(4, nnz, (nnz > n), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG_POINTER(5, buffer_size);
 
-        *buffer_size = gemvi_workspace_size<I, T>(m, nnz);
+        *buffer_size = gemvi_workspace_size<I, T>(handle, m, nnz);
 
         return rocsparse_status_success;
     }
@@ -504,7 +528,7 @@ namespace rocsparse
             }
         }
 
-        if(gemvi_workspace_size<I, T>(m, nnz) > 0)
+        if(gemvi_workspace_size<I, T>(handle, m, nnz) > 0)
         {
             ROCSPARSE_CHECKARG_POINTER(13, temp_buffer);
         }

@@ -65,14 +65,18 @@ void testing_gemvi_bad_arg(const Arguments& arg)
 
     // temp_buffer is required when the corresponding buffer-size query reports
     // nonzero workspace.
+    rocsparse_int m_requires_workspace   = 1;
+    rocsparse_int n_requires_workspace   = 1024;
+    rocsparse_int lda_requires_workspace = 1;
+    rocsparse_int nnz_requires_workspace = 1024;
     EXPECT_ROCSPARSE_STATUS(rocsparse_gemvi<T>(handle,
                                                trans,
-                                               1,
-                                               1024,
+                                               m_requires_workspace,
+                                               n_requires_workspace,
                                                alpha_device_host,
                                                A,
-                                               1,
-                                               1024,
+                                               lda_requires_workspace,
+                                               nnz_requires_workspace,
                                                x_val,
                                                x_ind,
                                                beta_device_host,
