@@ -1628,7 +1628,7 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_async_inplace>
                 RETURN_IF_ROCSPARSE_ERROR(
                     (compute_iter<BLOCKSIZE, T, I, J>::light_run)(handle_,
                                                                   options_,
-                                                                  nmaxiter_[0] 
+                                                                  nmaxiter_[0]
                                                                       + nmaxiter_[0] * nfreeiter_,
                                                                   m_,
                                                                   nnz_,
