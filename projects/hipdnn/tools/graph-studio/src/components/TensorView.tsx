@@ -210,7 +210,7 @@ export function TensorView({ hints, onBack, base = null, onGrantDirectory = asyn
           </div>
         </div>
         {onBack && (
-          <button type="button" className="tensors__back" onClick={onBack}>
+          <button type="button" className="report__button" onClick={onBack}>
             Back to report
           </button>
         )}

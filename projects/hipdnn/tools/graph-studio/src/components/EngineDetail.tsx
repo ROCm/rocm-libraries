@@ -333,7 +333,7 @@ export function EngineDetail({ report, graph, row, onClose, base, onGrantDirecto
             <h2>{row.engine_name}</h2>
             <p>{graph.graph_name}</p>
           </div>
-          <button type="button" onClick={onClose}>
+          <button type="button" className="report__button" onClick={onClose}>
             Back to report
           </button>
         </div>

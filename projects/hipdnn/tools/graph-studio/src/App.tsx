@@ -66,8 +66,6 @@ function Studio() {
     setNativeReport(fromNativeExecution(snapshot, `native-${++nextNativeId.current}`));
   }, []);
   const onResultsReset = useCallback(() => setNativeReport(null), []);
-  // An execution is read in the Verify tab, beside opened reports.
-  const onShowResults = useCallback(() => setActiveTab("verify"), []);
 
   const markDirty = useCallback(() => setDirty(true), []);
 
@@ -355,7 +353,6 @@ function Studio() {
           resetKey={engineResetKey}
           onExecutionResult={onExecutionResult}
           onResultsReset={onResultsReset}
-          onShowResults={onShowResults}
         />
       </TabPanel>
       <TabPanel id="implement" active={activeTab}>

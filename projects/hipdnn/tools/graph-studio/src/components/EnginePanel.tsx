@@ -35,10 +35,9 @@ interface EnginePanelProps {
   resetKey: number;
   onExecutionResult(snapshot: NativeExecutionSnapshot): void;
   onResultsReset(): void;
-  onShowResults(): void;
 }
 
-export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsReset, onShowResults }: EnginePanelProps) {
+export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsReset }: EnginePanelProps) {
   const [info, setInfo] = useState<EngineInfo | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState<string>("");
@@ -388,7 +387,6 @@ export function EnginePanel({ getGraph, resetKey, onExecutionResult, onResultsRe
         </div>
 
         <div className="engine__io">
-          <button type="button" onClick={onShowResults}>Results…</button>
           <button
             type="button"
             onClick={() => void doExportHipdnnJson()}
