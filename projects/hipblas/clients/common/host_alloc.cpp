@@ -28,14 +28,52 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #endif
 
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <stdlib.h>
 
 #include "hipblas_test.hpp"
 #include "host_alloc.hpp"
+
+// Under HSA_XNACK=1 on a discrete GPU (gfx942/MI300X), a host buffer whose pages
+// were migrated to VRAM by an H2D copy stays device-resident after free(): plain
+// free() recycles the chunk on glibc's heap without munmap, so the amdgpu SVM
+// residency remains attached to those virtual pages. The next test's calloc
+// reuses the same addresses, and its OpenMP-parallel init faults them back
+// RAM<-VRAM from 40+ threads at once, serializing on the SVM migration mutex
+// (perf: ~98% osq_lock) -- an hours-long stall that leaks across logically
+// independent tests.
+//
+// Evict the residency at free time with MADV_DONTNEED, which fires the kernel
+// mmu_notifier invalidate that drops the device mapping; the next access then
+// faults fresh zero RAM pages with no migration. MADV_DONTNEED discards whole
+// pages, so we only advise pages FULLY contained in this allocation (round start
+// up, end down) to avoid touching neighbouring allocations that share boundary
+// pages. Small buffers with no interior page are left untouched -- they don't
+// migrate enough to matter. No-op on APU/non-XNACK (nothing device-resident).
+static void host_evict_on_free(void* ptr, size_t size)
+{
+#ifndef WIN32
+    if(!ptr || !size)
+        return;
+    const long ps = sysconf(_SC_PAGESIZE);
+    if(ps <= 0)
+        return;
+    const size_t   page  = static_cast<size_t>(ps);
+    const uintptr_t start = (reinterpret_cast<uintptr_t>(ptr) + (page - 1)) & ~(page - 1);
+    const uintptr_t end   = (reinterpret_cast<uintptr_t>(ptr) + size) & ~(page - 1);
+    if(end > start)
+        (void)madvise(reinterpret_cast<void*>(start), size_t(end - start), MADV_DONTNEED);
+#else
+    (void)ptr;
+    (void)size;
+#endif
+}
 
 // light weight memory tracking for threshold limit on total use
 static size_t                  mem_used{0};
@@ -54,23 +92,32 @@ void alloc_ptr_use(void* ptr, size_t size)
 
 void free_ptr_use(void* ptr, bool call_free)
 {
-    std::lock_guard<std::mutex> lock(mem_mutex);
-    auto                        it = mem_allocated.find(ptr);
+    size_t size = 0;
+    {
+        std::lock_guard<std::mutex> lock(mem_mutex);
+        auto                        it = mem_allocated.find(ptr);
 
-    if(ptr && it != mem_allocated.end())
-    {
-        mem_used -= it->second;
-        mem_allocated.erase(it);
-    }
-    else if(ptr && call_free)
-    {
-        std::cerr << "Warning: Freeing untracked pointer " << ptr
-                  << " - untracked memory released (potential double-free or memory corruption)"
-                  << std::endl;
+        if(ptr && it != mem_allocated.end())
+        {
+            size = it->second;
+            mem_used -= it->second;
+            mem_allocated.erase(it);
+        }
+        else if(ptr && call_free)
+        {
+            std::cerr << "Warning: Freeing untracked pointer " << ptr
+                      << " - untracked memory released (potential double-free or memory corruption)"
+                      << std::endl;
+        }
     }
 
     if(call_free)
+    {
+        // Drop any SVM device residency before returning the chunk to the heap,
+        // so a later reuse of these addresses doesn't fault back from VRAM.
+        host_evict_on_free(ptr, size);
         free(ptr);
+    }
 }
 
 size_t host_bytes_allocated()
