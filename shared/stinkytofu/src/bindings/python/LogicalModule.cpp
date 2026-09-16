@@ -34,6 +34,7 @@ struct PyLogicalModule::Impl {
     std::vector<LabelEntry> labels;
     std::vector<TextBlockEntry> textBlocks;
     std::vector<GroupMarkerEntry> groupMarkers;
+    std::vector<CallableMarkerEntry> callableMarkers;
     size_t globalOrder = 0;
 
     Impl(const std::string& name) : name(name) {}
@@ -123,6 +124,20 @@ void PyLogicalModule::endGroup(const std::string& name) {
 
 const std::vector<GroupMarkerEntry>& PyLogicalModule::getGroupMarkers() const {
     return pImpl->groupMarkers;
+}
+
+void PyLogicalModule::beginCallable(const std::string& name) {
+    pImpl->callableMarkers.push_back(
+        CallableMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, true});
+}
+
+void PyLogicalModule::endCallable(const std::string& name) {
+    pImpl->callableMarkers.push_back(
+        CallableMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, false});
+}
+
+const std::vector<CallableMarkerEntry>& PyLogicalModule::getCallableMarkers() const {
+    return pImpl->callableMarkers;
 }
 
 void PyLogicalModule::dump(std::ostream& out) const {
