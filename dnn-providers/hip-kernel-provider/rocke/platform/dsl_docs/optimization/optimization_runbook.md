@@ -352,6 +352,44 @@ top-level constraint applies verbatim here.
 - Pin GPU clocks if you suspect throttling:
   `sudo rocm-smi --setperflevel high && sudo rocm-smi --setsclk 7`.
 
+#### Repeatable before/after verification
+
+Use `rocke.benchmark.perf.tool` for every operation to decide whether a change
+helped. It accepts any launch command; `--op` and `--shape` only identify the
+workload whose runs should be compared and do not select a GEMM-specific path.
+
+```bash
+export ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke
+export PYTHONPATH=$ROCKE/platform/python:$ROCKE/library
+export ARCH=gfx950
+export OP=your_operation
+export KERNEL_NAME=your_kernel
+export SHAPE_JSON='{"dimension":1}'
+export HSACO=path/to/kernel.hsaco
+
+# Run once for the baseline, make one change, then run the identical command again.
+python -m rocke.benchmark.perf.tool profile \
+    --arch "$ARCH" --op "$OP" --shape "$SHAPE_JSON" \
+    --kernel-name "$KERNEL_NAME" --repeats 3 -- python run_kernel.py
+
+# Static register/LDS usage and occupancy; no GPU or profiler required.
+python -m rocke.benchmark.perf.tool occupancy "$HSACO" --arch "$ARCH"
+
+# Review all stored identities.
+python -m rocke.benchmark.perf.tool compare --all
+```
+
+The first profile prints `[no baseline]`; subsequent runs print `[improved]`,
+`[REGRESSED]`, or `[within noise]`. The comparison prefers clock-invariant
+`busy_cycles` and accounts for run-to-run spread. A launch command may optionally
+emit `PerfJSON:` to add unprofiled wall time and throughput to the record.
+
+This is the verification step, not bottleneck discovery. Use
+[WaveScope](../architecture/wavescope_integration.md#using-it-for-optimization) to
+diagnose per-wave stalls and attribute instructions to source. WaveScope's ATT
+trace and the perf tool accept the same operator-independent launch-command shape:
+the perf tool establishes whether the change helped; WaveScope explains why.
+
 ### 2.4 Metadata To Record
 
 The manifest writer (`helpers/manifest.py::make_*_manifest` →
