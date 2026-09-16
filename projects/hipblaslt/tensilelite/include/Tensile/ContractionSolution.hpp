@@ -190,6 +190,10 @@ namespace TensileLite
 
         std::string customKernelName;
 
+        // Mirror of the WGMBitSwizzle kernel parameter. Host-side diagnostics only --
+        // the swizzle itself is decided in the kernel, which compares the launch grid
+        // against the shapes it was derived for and falls back to DefaultWGM otherwise.
+        bool wgmBitSwizzle                          = false;
         int  workGroupMappingXCC                    = 0;
         int  workGroupMappingXCCGroup               = 0;
         bool globalSplitUCoalesced                  = false;
