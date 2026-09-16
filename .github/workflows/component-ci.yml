@@ -25,6 +25,7 @@ jobs:
       geko: ${{ steps.configure.outputs.geko }}
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
+      library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -88,6 +89,15 @@ jobs:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
+  library-uniqueness:
+    name: "hipBLASLt library uniqueness"
+    needs: changes
+    if: needs.changes.outputs.library-uniqueness == 'true'
+    uses: ./.github/workflows/component-ci-library-uniqueness.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -97,6 +107,7 @@ jobs:
       - geko
       - miopen
       - tensilelite-coverage
+      - library-uniqueness
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

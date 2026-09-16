@@ -39,8 +39,32 @@ def _collect_yaml_files(logic_root: Path) -> List[Path]:
     """
     asm_full = logic_root / "asm_full"
     if asm_full.is_dir():
-        return sorted(asm_full.rglob("*_UserArgs.yaml"))
-    return sorted(logic_root.rglob("*_UserArgs.yaml"))
+        return sorted(asm_full.rglob("*.yaml"))
+    return sorted(logic_root.rglob("*.yaml"))
+
+
+def test_collect_yaml_files_includes_all_yaml_names(tmp_path: Path) -> None:
+    """Verify discovery does not require the ``_UserArgs.yaml`` suffix.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If any YAML file under ``asm_full`` is omitted.
+    """
+    asm_full = tmp_path / "asm_full"
+    asm_full.mkdir()
+    user_args = asm_full / "logic_UserArgs.yaml"
+    conventional = asm_full / "logic.yaml"
+    ignored = asm_full / "README.txt"
+    user_args.touch()
+    conventional.touch()
+    ignored.touch()
+
+    assert _collect_yaml_files(tmp_path) == [conventional, user_args]
 
 
 def _scan_yaml_file(yaml_path: Path) -> Tuple[List[Tuple[int, str, int]], int]:
@@ -160,6 +184,9 @@ def test_solution_uid_unique_across_logic_files(logic_root: Path) -> None:
     """All present SolutionUID values must be unique repo-wide."""
     process_count = int(os.environ.get("HIPBLASLT_UID_TEST_PROCESSES", "8"))
     entries, missing = collect_solution_uids(logic_root, process_count=process_count)
+    if not entries and missing == 0:
+        pytest.fail(f"No solution definitions found under {logic_root}")
+
     duplicates = find_duplicate_uids(entries)
     if duplicates:
         lines = ["Duplicate SolutionUID values detected:"]
