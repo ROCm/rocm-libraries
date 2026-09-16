@@ -114,6 +114,7 @@ def _cases():
             arch=_ARCH,
             mask_type=1 if over.get("causal", base["causal"]) else 0,
             dtype=over.get("dtype", base["dtype"]),
+            sliding_window=over.get("sliding_window", 0),
             algorithm="attention_dense",
         )
         return lambda: build_attention_dense(_dense_spec(req), arch=_ARCH)
@@ -175,6 +176,23 @@ def _cases():
             persistent=True,
             num_persistent=304,
             persist_decode="hkv_major",
+        ),
+        # --- sliding-window (SWA): start_tile KV-loop prune + in-tile lower mask.
+        #     W % block_n == 0 (128, 256 = 2, 4 tiles at block_n=64). Default and
+        #     persistent grids both pruned per work item; dispatch case guards the
+        #     _dense_spec sliding_window threading end to end. ---
+        "attention_dense_gfx942/swa_d128_bf16_w128": mk(sliding_window=128),
+        "attention_dense_gfx942/swa_d128_fp16_w256": mk(
+            dtype="fp16", sliding_window=256
+        ),
+        "attention_dense_gfx942/persist_swa_d128_bf16_w128": mk(
+            sliding_window=128,
+            persistent=True,
+            num_persistent=304,
+            persist_decode="qb_major",
+        ),
+        "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": mk_dispatch(
+            sliding_window=128
         ),
     }
 
