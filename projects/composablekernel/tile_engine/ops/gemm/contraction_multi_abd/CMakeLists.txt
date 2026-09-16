@@ -42,12 +42,18 @@ set(_CMA_CTYPES_SRC
     "${CMAKE_CURRENT_LIST_DIR}/../../../../dispatcher/bindings/ctypes/batched_contraction_multi_abd_ctypes_lib.cpp")
 
 # ---------------------------------------------------------------------------
-# GPU target filter. gfx1250 (MI400) is wave32/WMMA and needs a warp tile the
-# default config does not sweep -- build it with
-# -DCONTRACTION_MULTI_ABD_CONFIG_FILE=smoke_ci_config_gfx1250.json.
+# GPU target filter.
+#
+# gfx9 (CDNA, wave64/MFMA) and gfx1250 (MI400, wave32/WMMA) need different warp
+# tiles -- 32x32x16 and 16x16x32 respectively -- and a single config file can
+# only carry one of them. The tile is therefore chosen from the target set
+# below, not left to the caller: a gfx9 tile on gfx1250 builds and launches
+# cleanly and returns zeros, so an unnoticed default is a wrong-answer default.
 # ---------------------------------------------------------------------------
 set(CONTRACTION_MULTI_ABD_GPU_TARGETS "")
-set(_CMA_DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1250")
+set(_CMA_GFX9_TARGETS "gfx90a;gfx942;gfx950")
+set(_CMA_GFX12_TARGETS "gfx1250")
+set(_CMA_DESIRED_TARGETS "${_CMA_GFX9_TARGETS};${_CMA_GFX12_TARGETS}")
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST _CMA_DESIRED_TARGETS)
         list(APPEND CONTRACTION_MULTI_ABD_GPU_TARGETS ${target})
@@ -61,7 +67,34 @@ if(NOT CONTRACTION_MULTI_ABD_GPU_TARGETS)
     return()
 endif()
 
+# Which tile family do the selected targets need?
+set(_CMA_HAS_GFX9 FALSE)
+set(_CMA_HAS_GFX12 FALSE)
+foreach(target IN LISTS CONTRACTION_MULTI_ABD_GPU_TARGETS)
+    if(target IN_LIST _CMA_GFX9_TARGETS)
+        set(_CMA_HAS_GFX9 TRUE)
+    elseif(target IN_LIST _CMA_GFX12_TARGETS)
+        set(_CMA_HAS_GFX12 TRUE)
+    endif()
+endforeach()
+
+# Pick the default config from the target family. An explicit
+# CONTRACTION_MULTI_ABD_CONFIG_FILE always wins -- see the config selection below.
+if(_CMA_HAS_GFX9 AND _CMA_HAS_GFX12)
+    message(FATAL_ERROR
+        "contraction_multi_abd: cannot build gfx9 and gfx1250 in one pass. "
+        "They require different warp tiles (32x32x16 vs 16x16x32) and one config "
+        "file carries only one. Requested: ${CONTRACTION_MULTI_ABD_GPU_TARGETS}. "
+        "Configure separate builds, or pass "
+        "-DCONTRACTION_MULTI_ABD_CONFIG_FILE=<file> to choose deliberately.")
+elseif(_CMA_HAS_GFX12)
+    set(_CMA_DEFAULT_CONFIG "default_config_gfx1250.json")
+else()
+    set(_CMA_DEFAULT_CONFIG "default_config.json")
+endif()
+
 message(STATUS "contraction_multi_abd: building for GPU targets: ${CONTRACTION_MULTI_ABD_GPU_TARGETS}")
+message(STATUS "contraction_multi_abd: default config for these targets: ${_CMA_DEFAULT_CONFIG}")
 
 # ---------------------------------------------------------------------------
 # Compiler cache
@@ -147,7 +180,7 @@ foreach(datatype IN LISTS CONTRACTION_MULTI_ABD_DATATYPE)
         elseif(NOT "${CONTRACTION_MULTI_ABD_CONFIG_FILE}" STREQUAL "")
             set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${CONTRACTION_MULTI_ABD_CONFIG_FILE}")
         else()
-            set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
+            set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${_CMA_DEFAULT_CONFIG}")
         endif()
 
         if(NOT EXISTS ${json_blob})

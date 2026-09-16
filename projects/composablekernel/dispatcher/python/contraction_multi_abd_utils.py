@@ -83,6 +83,16 @@ _DEFAULT_WARP_TILE_BY_ARCH = {
     "gfx1250": (16, 16, 32),
 }
 
+# Warp tiles an arch can actually execute for 16-bit inputs.
+#
+# Opt-in by design: an arch with no entry here is left unconstrained, so gfx9
+# keeps every tile it has always accepted. Only gfx1250 is restricted, because
+# it is the one target whose hardware has a single legal 16-bit shape, and a
+# gfx9 MFMA tile there does not fail loudly -- it returns zeros.
+_SUPPORTED_WARP_TILES_BY_ARCH = {
+    "gfx1250": {(16, 16, 32)},
+}
+
 _HIPCC_BASE_FLAGS = [
     "-std=c++17",
     "-O3",
@@ -662,6 +672,50 @@ def default_warp_tile_for_arch(arch: str) -> Tuple[int, int, int]:
     return _DEFAULT_WARP_TILE_BY_ARCH[_validate_arch(arch)]
 
 
+def warp_tile_supported_on_arch(
+    warp_tile: Tuple[int, int, int], arch: str
+) -> bool:
+    """Whether `arch` can execute this 16-bit warp tile.
+
+    Archs absent from _SUPPORTED_WARP_TILES_BY_ARCH are unconstrained, so this
+    returns True for them -- gfx9 keeps every tile it has always accepted.
+    """
+    allowed = _SUPPORTED_WARP_TILES_BY_ARCH.get(_validate_arch(arch))
+    return allowed is None or tuple(warp_tile) in allowed
+
+
+def _validate_warp_tiles_for_arch(
+    configs: List["ContractionMultiABDKernelConfig"], arch: str
+) -> None:
+    """Reject configs carrying a warp tile the target arch cannot execute.
+
+    Rejecting rather than silently substituting the arch default: the caller
+    asked for a specific tile, and quietly building a different kernel than the
+    one requested is its own bug. On gfx1250 the failure this guards against is
+    an all-zero result, which no downstream check would catch.
+    """
+    bad = [
+        cfg for cfg in configs
+        if not warp_tile_supported_on_arch(
+            (cfg.warp_tile_m, cfg.warp_tile_n, cfg.warp_tile_k), arch
+        )
+    ]
+    if not bad:
+        return
+
+    allowed = sorted(_SUPPORTED_WARP_TILES_BY_ARCH[arch])
+    sample = ", ".join(
+        f"{cfg.name} ({cfg.warp_tile_m}x{cfg.warp_tile_n}x{cfg.warp_tile_k})"
+        for cfg in bad[:3]
+    )
+    raise ValueError(
+        f"{len(bad)} of {len(configs)} config(s) use a warp tile {arch} cannot "
+        f"execute: {sample}{' ...' if len(bad) > 3 else ''}. "
+        f"Supported on {arch}: {[f'{m}x{n}x{k}' for m, n, k in allowed]}. "
+        f"Use default_warp_tile_for_arch({arch!r}) to pick the right tile."
+    )
+
+
 def _detect_gpu_arch() -> str:
     """Detect the current GPU arch via rocm_agent_enumerator; raise on failure.
 
@@ -829,6 +883,7 @@ def setup_multiple_contraction_multi_abd_dispatchers(
         return []
 
     arch     = _validate_arch(gfx_arch) if gfx_arch else _detect_gpu_arch()
+    _validate_warp_tiles_for_arch(configs, arch)
     base_dir = output_dir or Path(tempfile.mkdtemp(prefix="contraction_multi_abd_"))
     base_dir.mkdir(parents=True, exist_ok=True)
 
