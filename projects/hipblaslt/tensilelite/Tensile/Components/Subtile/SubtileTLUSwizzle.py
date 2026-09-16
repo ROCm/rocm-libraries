@@ -180,15 +180,6 @@ def selectTLU1B16SwizzleBits(tileInfo) -> int:
     would cost the swizzle at every shape except MacroTile >= 256 with
     MIWaveGroup [4, 1] -- one configuration out of nine -- and would leave
     MT 64x64, where the LDS pressure is highest, unswizzled.
-
-    Both halves of that are measured, not argued.  Correctness: eight of the nine
-    shapes (every gated one) run bit-exact against an absolute MFMA reference in
-    test_gr_lr_roundtrip_b16_tlu1.py, swizzle on and off; the ninth, MT 256
-    WG[1,4], exceeds the harness VGPR budget and is covered off-device instead.
-    Value: on gfx950, SQ_LDS_BANK_CONFLICT over a 2048^3 bf16 NN run falls from
-    12,648,448 to 65,536 at MT 64x64 WG[1,4] (whole strip) and from 6,356,992 to
-    65,536 at WG[2,2] (shared strip) -- so a gated shape reaches the same
-    conflict floor as an ungated one, which is exactly what the gate would deny.
     """
     if float(tileInfo.bpe) != 2:
         return 0

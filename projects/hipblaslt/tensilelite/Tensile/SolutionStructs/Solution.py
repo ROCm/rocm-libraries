@@ -82,7 +82,7 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from .Validators.Subtile import (subtileStackForTLU1, subtileStackForTLU1B16,
+from .Validators.Subtile import (SUBTILE_STACK_B16, subtileStackForTLU1,
                                  subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 
@@ -1218,7 +1218,7 @@ class Solution(collections.abc.Mapping):
           if dtype.isBFloat16() or dtype.isHalf():
             mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
             mtTiles = mtFree // state["MatrixInstM"]
-            stack = subtileStackForTLU1B16(state, tc, mtTiles)
+            stack = SUBTILE_STACK_B16
             stackReason = subtileTLU1StackReason(state, tc, mtTiles, stack)
             if stackReason:
               reject(state, printRejectionReason, stackReason)
