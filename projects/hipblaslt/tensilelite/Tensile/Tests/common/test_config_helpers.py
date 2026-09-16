@@ -61,3 +61,37 @@ def test_unmarked_config_never_xfails_under_ffm(monkeypatch):
     monkeypatch.setenv("HSA_MODEL_MEMFILE", _FFM_MEMFILE)
     marks = configMarks(_PLAIN_GFX1250_CONFIG, _TESTS_ROOT, ["gfx1250"])
     assert pytest.mark.xfail not in marks
+
+
+# A config tagged ``gfx1250_hw_xfail`` — known-fail on the gfx1250 HW runner,
+# turned into a strict xfail only when the pipeline sets GFX1250_HW_XFAIL (so the
+# nightly, which does not set it, still runs and reports the failure).
+_HW_XFAIL_CONFIG = os.path.join(
+    _COMMON_DIR, "streamk", "gfx1250", "sk_mxf4gemm_tdm_pap_ext.yaml"
+)
+
+
+def _xfail_marks(marks):
+    return [m for m in marks if getattr(m, "name", None) == "xfail"]
+
+
+def test_gfx1250_hw_xfail_when_env_set(monkeypatch):
+    """GFX1250_HW_XFAIL set + gfx1250 + gfx1250_hw_xfail marked -> strict xfail."""
+    monkeypatch.setenv("GFX1250_HW_XFAIL", "1")
+    marks = configMarks(_HW_XFAIL_CONFIG, _TESTS_ROOT, ["gfx1250"])
+    xf = _xfail_marks(marks)
+    assert xf and xf[0].kwargs.get("strict") is True
+
+
+def test_gfx1250_hw_xfail_inert_without_env(monkeypatch):
+    """No GFX1250_HW_XFAIL (e.g. the nightly) -> the config still runs."""
+    monkeypatch.delenv("GFX1250_HW_XFAIL", raising=False)
+    marks = configMarks(_HW_XFAIL_CONFIG, _TESTS_ROOT, ["gfx1250"])
+    assert not _xfail_marks(marks)
+
+
+def test_gfx1250_hw_xfail_inert_on_other_arch(monkeypatch):
+    """Env set but not gfx1250 -> the config still runs (not this runner)."""
+    monkeypatch.setenv("GFX1250_HW_XFAIL", "1")
+    marks = configMarks(_HW_XFAIL_CONFIG, _TESTS_ROOT, ["gfx942"])
+    assert not _xfail_marks(marks)
