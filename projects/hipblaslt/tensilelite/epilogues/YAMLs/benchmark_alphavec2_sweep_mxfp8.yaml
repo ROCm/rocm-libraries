@@ -85,14 +85,16 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-            - Exact: [64, 256, 1, 64]
-            - Exact: [64, 1024, 1, 1024]
+            - Exact: [256, 64, 1, 64]
+            - Exact: [1024, 64, 1, 1024]
             - Exact: [256, 256, 1, 256]
             - Exact: [512, 512, 1, 512]
             - Exact: [4096, 4096, 1, 4096]
             - Exact: [8192, 8192, 1, 8192]
-            - Exact: [16384, 2048, 1, 2048]
-            - Exact: [16384, 11264, 1, 2048]
+            - Exact: [2048, 16384, 1, 2048]
+            - Exact: [11264, 16384, 1, 2048]
+            - Exact: [22016, 16384, 1, 4096]
+            - Exact: [44032, 16384, 1, 8192]
 
 LibraryLogic:
   ScheduleName: "alphavec2_sweep_mxfp8_k1"
