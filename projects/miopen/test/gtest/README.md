@@ -21,7 +21,28 @@ Select the surface with `--gtest_filter='*HipdnnShim*'`. That filter is what the
 `=enabled`; a test outside the surface is never replayed, and a test inside it that is not
 reachable through public entry points makes the comparison meaningless.
 
-Two consequences of that being the only entry path, both easy to "fix" in the wrong
+### Configuring a build that runs the parity entries
+
+The parity entries exist in any build configured with `-DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON` on a
+GPU node. `MIOPEN_TEST_DISCRETE` does not matter: CMake scans the test sources for the
+`HipdnnShim` token and registers a parity entry for each executable that holds one, so a
+discrete build replays `test_hipdnn_shim_conv` and a single-binary build replays
+`miopen_gtest`. Configure prints which binaries it registered.
+
+The two things that do suppress the entries are no GPU (`MIOPEN_NO_GPU`, since the shim
+surface is all `*GPU*` tests) and no source carrying the token. Both are reported at configure
+time, because the failure is otherwise silent: with nothing registered, `ctest -L
+forwarding_parity` selects nothing and reports success. A CI job that is supposed to enforce
+parity should still assert that `ctest -N -L forwarding_parity` lists a non-zero number of
+tests, rather than trusting a green run that selected none.
+
+One asymmetry remains in packaged artifacts. The mirrored entry written into the installed
+`CTestTestfile.cmake` is single-binary only, because packaging installs one test executable and
+it is `miopen_gtest`. That costs nothing in practice — the builds that produce artifacts
+already configure with `-DMIOPEN_TEST_DISCRETE=OFF`, which packaged dbsync and the categorized
+test list need anyway — but a discrete build tests parity in its build tree only.
+
+Two consequences of the parity entries being the intended path, both easy to "fix" in the wrong
 direction:
 
 - **Shim-surface tests stay out of `test_categories.yaml` on purpose.** The categorized

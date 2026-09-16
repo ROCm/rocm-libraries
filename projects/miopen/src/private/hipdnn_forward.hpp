@@ -23,12 +23,33 @@ namespace miopen {
 namespace wrapper {
 namespace hipdnn {
 
-// True when a hipDNN backend can be loaded and reports a version this build can
-// talk to. The first call does the work and the answer is cached for the
-// process; the first false also prints one line to stderr saying so.
-//
-// Calling this is what loads the backend, so a process that forwards nothing
-// should never reach it.
+// What the probe found. Missing covers both "no backend library" and "the
+// frontend refused the one it found", because a refused backend reports itself
+// exactly the way an absent one does.
+enum class BackendState
+{
+    Usable,
+    Missing,
+    MajorVersionMismatch,
+    HandleCreationFailed,
+};
+
+// The decision behind IsAvailable(), taking its inputs as arguments so it can be
+// exercised without a hipDNN install. `reportedMajor` is negative when no
+// backend loaded; `expectedMajor` is the one this MIOpen was built against.
+BackendState ClassifyBackend(int reportedMajor, int expectedMajor);
+
+// One clause of English for a state, as it appears after "hipDNN forwarding is
+// unavailable: " on stderr.
+const char* DescribeBackendState(BackendState state);
+
+// Loads the backend and classifies it. The first call does the work and the
+// answer is cached for the process; anything other than Usable also prints one
+// line to stderr saying so.
+BackendState ProbeBackendState();
+
+// True when hipDNN can serve a forwarded call. Probes on first use, so a process
+// that forwards nothing should never reach it.
 bool IsAvailable();
 
 // Drops whatever hipDNN state was created for this MIOpen handle. Called from
