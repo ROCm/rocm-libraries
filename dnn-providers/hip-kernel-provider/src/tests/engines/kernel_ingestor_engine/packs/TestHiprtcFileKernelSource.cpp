@@ -207,7 +207,7 @@ void expectOneCompile(MockKernelCompiler& compiler,
 compilation::KernelCompileOptions makeOptions(const GraphFixture& fixture)
 {
     const auto& tensors = fixture.context().graph.getTensorMap();
-    return compilation::KernelCompileOptions(tensors.at(INPUT_A_UID), std::string("gfx942"));
+    return {tensors.at(INPUT_A_UID), std::string("gfx942")};
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +255,7 @@ TEST(TestHiprtcFileKernelSource, BindsEachVariantsMetadataIntoItsDefines)
     CapturedCompile first;
     CapturedCompile second;
     {
-        ::testing::InSequence order;
+        const ::testing::InSequence order;
         expectOneCompile(compiler, first);
         expectOneCompile(compiler, second);
     }
@@ -290,7 +290,7 @@ TEST(TestHiprtcFileKernelSource, RefusesABundleThatResolvesOutsideTheDescriptorT
     const GraphFixture fixture(buildPointwiseGraph());
     auto options = makeOptions(fixture);
 
-    MockKernelCompiler compiler;
+    const MockKernelCompiler compiler;
     // Nothing is compiled: the refusal happens before the file is even opened.
     EXPECT_CALL(compiler, compileSource(_, _, _, _)).Times(0);
 
@@ -410,7 +410,7 @@ TEST(TestHiprtcFileKernelSource, KeysTwoBundlesSharingASourceFileNameApart)
     CapturedCompile first;
     CapturedCompile second;
     {
-        ::testing::InSequence order;
+        const ::testing::InSequence order;
         expectOneCompile(compiler, first);
         expectOneCompile(compiler, second);
     }
@@ -462,7 +462,7 @@ TEST(TestHiprtcFileKernelSource, RefusesABundleHeaderThatResolvesOutsideTheDescr
     const GraphFixture fixture(buildPointwiseGraph());
     auto options = makeOptions(fixture);
 
-    MockKernelCompiler compiler;
+    const MockKernelCompiler compiler;
     EXPECT_CALL(compiler, compileSource(_, _, _, _)).Times(0);
 
     const auto kernel = makeHiprtcKernel(tree.root(), BUNDLE_NAME, "bfloat16", {}, 0x70);
@@ -583,7 +583,7 @@ TEST(TestHiprtcFileKernelSource, RefusesASourceFileThatEscapesFromInsideAContain
     const GraphFixture fixture(buildPointwiseGraph());
     auto options = makeOptions(fixture);
 
-    MockKernelCompiler compiler;
+    const MockKernelCompiler compiler;
     EXPECT_CALL(compiler, compileSource(_, _, _, _)).Times(0);
 
     auto kernel = makeHiprtcKernel(tree.root(), BUNDLE_NAME, "bfloat16", {}, 0xA0);

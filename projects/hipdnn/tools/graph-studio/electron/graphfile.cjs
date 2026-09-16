@@ -22,8 +22,7 @@ const ROOT_DIR_NAME = "hipdnn-graph-studio";
 const GRAPH_SUFFIX = ".hipdnn.json";
 //: Launch graphs live here, under the orchestrator's run root rather than in temp.
 const LAUNCH_GRAPH_DIR = "_launch-graphs";
-const RESULTS_SUFFIX = ".results.json";
-const TENSORS_SUFFIX = ".tensors";
+const RUN_SUFFIX = ".run";
 
 /** One path segment, safe on every platform; never empty, never a separator. */
 const sanitizeName = (name) =>
@@ -61,19 +60,16 @@ async function writeLaunchGraphFile(runRoot, graphName, graphJson, subdir) {
   return file;
 }
 
-// The command bridge hands the child somewhere to write its report and its
-// tensor captures. Keeping both beside the graph means one directory per scope
-// holds a run's whole input and output, and the next run replaces them together.
-function runArtifactBase(graphPath) {
-  return graphPath.endsWith(GRAPH_SUFFIX) ? graphPath.slice(0, -GRAPH_SUFFIX.length) : graphPath;
-}
-
-function resultsFileFor(graphPath) {
-  return runArtifactBase(graphPath) + RESULTS_SUFFIX;
-}
-
-function tensorsDirFor(graphPath) {
-  return runArtifactBase(graphPath) + TENSORS_SUFFIX;
+// The command bridge hands the child one directory to write its whole run into:
+// report, tensor captures, and profiling artifacts together. Keeping it beside
+// the graph means one scope directory holds a run's input and output, the next
+// run replaces them together, and every path the report records stays inside a
+// tree the reader is allowed to follow.
+function runDirFor(graphPath) {
+  const base = graphPath.endsWith(GRAPH_SUFFIX)
+    ? graphPath.slice(0, -GRAPH_SUFFIX.length)
+    : graphPath;
+  return base + RUN_SUFFIX;
 }
 
 /**
@@ -110,7 +106,6 @@ module.exports = {
   sanitizeName,
   writeGraphFile,
   writeLaunchGraphFile,
-  resultsFileFor,
-  tensorsDirFor,
+  runDirFor,
   sweepLaunchDirs,
 };

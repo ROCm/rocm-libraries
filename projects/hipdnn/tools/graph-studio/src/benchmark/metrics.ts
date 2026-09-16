@@ -1,4 +1,10 @@
-import type { BenchmarkReport, Correctness, EngineResult, TraceInfo } from "./types";
+import type {
+  BenchmarkReport,
+  Correctness,
+  EngineResult,
+  GraphResults,
+  TraceInfo,
+} from "./types";
 
 /** Comparable quantities derived from a single engine result. */
 export interface MetricDef {
@@ -9,6 +15,12 @@ export interface MetricDef {
   readonly higherIsBetter: boolean;
   readonly value: (result: EngineResult) => number;
   readonly format: (value: number) => string;
+  /**
+   * Measured range behind the value, drawn as a whisker so a fast mean built on
+   * a wide spread is not mistaken for a stable one. Only the timing metrics
+   * have one: the derived rates and the one-off build time do not.
+   */
+  readonly spread?: (result: EngineResult) => { readonly lo: number; readonly hi: number };
 }
 
 // Intl.NumberFormat#format is spec-bound, so it can be handed round as-is.
@@ -47,6 +59,7 @@ export const METRICS: readonly MetricDef[] = [
     higherIsBetter: false,
     value: (r) => r.gpu_kernel_stats.mean_ms,
     format: fine,
+    spread: (r) => ({ lo: r.gpu_kernel_stats.min_ms, hi: r.gpu_kernel_stats.p99_ms }),
   },
   {
     id: "gpu_median_ms",
@@ -55,6 +68,7 @@ export const METRICS: readonly MetricDef[] = [
     higherIsBetter: false,
     value: (r) => r.gpu_kernel_stats.median_ms,
     format: fine,
+    spread: (r) => ({ lo: r.gpu_kernel_stats.min_ms, hi: r.gpu_kernel_stats.p99_ms }),
   },
   {
     id: "gpu_p95_ms",
@@ -63,6 +77,7 @@ export const METRICS: readonly MetricDef[] = [
     higherIsBetter: false,
     value: (r) => r.gpu_kernel_stats.p95_ms,
     format: fine,
+    spread: (r) => ({ lo: r.gpu_kernel_stats.min_ms, hi: r.gpu_kernel_stats.max_ms }),
   },
   {
     id: "host_mean_ms",
@@ -71,6 +86,7 @@ export const METRICS: readonly MetricDef[] = [
     higherIsBetter: false,
     value: (r) => r.host_stats.mean_ms,
     format: fine,
+    spread: (r) => ({ lo: r.host_stats.min_ms, hi: r.host_stats.p99_ms }),
   },
   {
     id: "tflops",
@@ -126,23 +142,115 @@ export const VALIDATION_LABEL: Record<ValidationState, string> = {
 export interface ReportSummary {
   readonly graphs: number;
   readonly rows: number;
+  /** Rows that produced timings, and the two ways a row can fail to. */
+  readonly measured: number;
+  readonly skipped: number;
+  readonly errored: number;
   readonly validationPassed: number;
   readonly validationFailed: number;
 }
 
 export function summarize(report: BenchmarkReport): ReportSummary {
   let rows = 0;
+  let measured = 0;
+  let skipped = 0;
+  let errored = 0;
   let validationPassed = 0;
   let validationFailed = 0;
   for (const graph of report.graphs) {
     for (const result of graph.results) {
       rows += 1;
+      if (measurable(result)) measured += 1;
+      else if (result.status === "skipped") skipped += 1;
+      else errored += 1;
       const state = validationState(result.correctness);
       if (state === "passed") validationPassed += 1;
       else if (state === "failed") validationFailed += 1;
     }
   }
-  return { graphs: report.graphs.length, rows, validationPassed, validationFailed };
+  return {
+    graphs: report.graphs.length,
+    rows,
+    measured,
+    skipped,
+    errored,
+    validationPassed,
+    validationFailed,
+  };
+}
+
+/**
+ * A stable hue per provider, so one engine keeps its colour across the suite
+ * overview and every graph's chart. Golden-angle steps off a string hash keep
+ * neighbouring providers far apart on the wheel instead of merely distinct.
+ */
+export function providerHue(provider: string): number {
+  let hash = 0;
+  for (let i = 0; i < provider.length; i++) {
+    hash = (hash * 31 + provider.charCodeAt(i)) >>> 0;
+  }
+  return (hash * 137.508) % 360;
+}
+
+/**
+ * How a value compares with the best in the same chart. A skipped or errored
+ * row measured nothing, so it has no standing to compare — hence the null
+ * rather than a "0.00×" that looks like a terrible result.
+ *
+ * Near misses read as a percentage: two engines a fraction apart are the common
+ * case, and "1.00× off" hides exactly the difference being looked for.
+ */
+export function relativeToBest(value: number, best: number, higherIsBetter: boolean): string | null {
+  if (!(value > 0) || !(best > 0)) return null;
+  const ratio = higherIsBetter ? best / value : value / best;
+  if (!Number.isFinite(ratio)) return null;
+  if (ratio <= 1) return "best";
+  return ratio < 1.1 ? `${((ratio - 1) * 100).toFixed(1)}% off` : `${ratio.toFixed(2)}× off`;
+}
+
+/** The row a graph's chart would crown, for the cross-graph overview. */
+export interface GraphBest {
+  readonly graph: GraphResults;
+  readonly row: EngineResult;
+  readonly value: number;
+  /** Rows that measured nothing and so are absent from the comparison. */
+  readonly unmeasured: number;
+}
+
+/**
+ * The winner of every graph under one metric. A suite runs many graphs, and the
+ * per-graph chart shows one at a time: this is the view that says which graphs
+ * are worth opening.
+ */
+export function bestPerGraph(report: BenchmarkReport, metric: MetricDef): GraphBest[] {
+  const out: GraphBest[] = [];
+  for (const graph of report.graphs) {
+    const measured = graph.results.filter((r) => measurable(r));
+    let winner: EngineResult | null = null;
+    let best = 0;
+    for (const row of measured) {
+      const value = metric.value(row);
+      if (!(value > 0)) continue;
+      if (!winner || (metric.higherIsBetter ? value > best : value < best)) {
+        winner = row;
+        best = value;
+      }
+    }
+    if (winner) {
+      out.push({
+        graph,
+        row: winner,
+        value: best,
+        unmeasured: graph.results.length - measured.length,
+      });
+    }
+  }
+  return out;
+}
+
+/** Whether a row produced timings at all: a skipped or errored row did not. */
+export function measurable(row: EngineResult): boolean {
+  return row.status === "success";
 }
 
 /** Last segment of the plugin directory, e.g. ".../hipdnn_plugins/engines" -> "engines". */

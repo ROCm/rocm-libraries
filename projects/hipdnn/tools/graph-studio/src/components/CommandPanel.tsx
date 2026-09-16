@@ -10,8 +10,9 @@ import type { Graph } from "../graph/model";
  * path replaces `${current_graph}` in the command line. Output streams into the
  * collapsible log at the bottom as the process produces it.
  *
- * A command that also names `${results_json}` is handed a path to write a
- * report to; whatever it wrote is passed to `onResults` once the run ends.
+ * A command that also names `${run_dir}` is handed a directory to write its
+ * whole run into; the report it left there is passed to `onResults` once the
+ * run ends.
  */
 
 /** A checkbox beside the run button that appends arguments when ticked. */
@@ -20,9 +21,23 @@ export interface CommandOption {
   readonly label: string;
   /** Appended to the command line verbatim, space-separated. */
   readonly args: string;
+  /** Hover text: what the argument costs, in time or in accuracy. */
+  readonly hint?: string;
+}
+
+/** A number beside the run button, appended as `flag value` when it has one. */
+export interface CommandField {
+  readonly id: string;
+  readonly label: string;
+  /** Flag the value follows, e.g. `--iters`. */
+  readonly flag: string;
+  /** Shown as the placeholder: what the tool does when the field is blank. */
+  readonly placeholder: string;
+  readonly hint?: string;
 }
 
 const NO_OPTIONS: readonly CommandOption[] = [];
+const NO_FIELDS: readonly CommandField[] = [];
 
 /** Output is rendered as one flowing stream; `note` lines are ours, not the child's. */
 type Stream = "stdout" | "stderr" | "note";
@@ -36,17 +51,18 @@ interface CommandPanelProps {
   /** Distinct per tab: separates the output and the temp files. */
   scope: string;
   getGraph(): Graph;
-  /** Command line to run, with `${current_graph}` and `${results_json}` unresolved. */
+  /** Command line to run, with `${current_graph}` and `${run_dir}` unresolved. */
   command: string;
   /** Verb on the run button, replaced by "Stop" while the command is running. */
   runLabel: string;
   /** Opt-in arguments, offered as checkboxes beside the run button. */
   options?: readonly CommandOption[];
+  /** Opt-in values, offered as small number boxes beside the run button. */
+  fields?: readonly CommandField[];
   /**
-   * Called with the contents of the `${results_json}` file the run produced and
-   * the path it was read from. `null` contents mean the command asked for a
-   * report and did not leave a readable one, which clears whatever the previous
-   * run published.
+   * Called with the contents of the report the run produced and the path it was
+   * read from. `null` contents mean the command asked for a report and did not
+   * leave a readable one, which clears whatever the previous run published.
    */
   onResults?(json: string | null, reportPath: string): void;
   /**
@@ -62,6 +78,7 @@ export function CommandPanel({
   command,
   runLabel,
   options = NO_OPTIONS,
+  fields = NO_FIELDS,
   onResults,
   children,
 }: CommandPanelProps) {
@@ -69,6 +86,8 @@ export function CommandPanel({
   const [running, setRunning] = useState(false);
   // Keyed by option id; absent and false both mean "not appended".
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  // Keyed by field id; an empty string means "leave the flag off".
+  const [values, setValues] = useState<Record<string, string>>({});
   // The log is a diagnostic, not the point of the tab: it stays shut until asked
   // for, including while a run is producing output.
   const [logOpen, setLogOpen] = useState(false);
@@ -116,8 +135,17 @@ export function CommandPanel({
   }, [segments, logOpen]);
 
   const resolved = useMemo(
-    () => [command, ...options.filter((o) => chosen[o.id]).map((o) => o.args)].join(" "),
-    [chosen, command, options],
+    () =>
+      [
+        command,
+        ...options.filter((o) => chosen[o.id]).map((o) => o.args),
+        // A blank box leaves the flag off entirely, so the tool's own default
+        // applies rather than a number this panel invented.
+        ...fields
+          .filter((f) => values[f.id]?.trim())
+          .map((f) => `${f.flag} ${values[f.id].trim()}`),
+      ].join(" "),
+    [chosen, command, fields, options, values],
   );
 
   const doExecute = useCallback(async () => {
@@ -150,7 +178,7 @@ export function CommandPanel({
     else if (result.signal) note(`[terminated by ${result.signal}]`);
     else note(`[exit ${result.exitCode ?? 0}]`);
     if (result.graphPath) note(`graph: ${result.graphPath}`);
-    if (result.tensorsPath) note(`tensors: ${result.tensorsPath}`);
+    if (result.runDir) note(`run: ${result.runDir}`);
     if (result.resultsPath) {
       if (result.resultsJson !== undefined) note(`results: ${result.resultsPath}`);
       else note(`[results] ${result.resultsError ?? "not produced"}`);
@@ -176,7 +204,7 @@ export function CommandPanel({
           {running ? "Stop" : runLabel}
         </button>
         {options.map((option) => (
-          <label className="command__option" key={option.id}>
+          <label className="command__option" key={option.id} title={option.hint}>
             <input
               type="checkbox"
               checked={chosen[option.id] ?? false}
@@ -186,6 +214,22 @@ export function CommandPanel({
               }
             />
             {option.label}
+          </label>
+        ))}
+        {fields.map((field) => (
+          <label className="command__field" key={field.id} title={field.hint}>
+            {field.label}
+            <input
+              type="number"
+              min="1"
+              inputMode="numeric"
+              placeholder={field.placeholder}
+              value={values[field.id] ?? ""}
+              disabled={running || !commandRunner.available}
+              onChange={(event) =>
+                setValues((prev) => ({ ...prev, [field.id]: event.target.value }))
+              }
+            />
           </label>
         ))}
         {!commandRunner.available && (

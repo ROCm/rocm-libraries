@@ -17,9 +17,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ImplementPanel } from "./components/ImplementPanel";
-import { TensorView, reportTensorHints } from "./components/TensorView";
+import { TensorView, reportTensorHints, type TensorHint } from "./components/TensorView";
 import { VerifyReport, type ShownReport } from "./components/VerifyReport";
-import { CommandPanel, type CommandOption } from "./components/CommandPanel";
+import { CommandPanel, type CommandField, type CommandOption } from "./components/CommandPanel";
 import { Inspector } from "./components/Inspector";
 import { EnginePanel } from "./components/EnginePanel";
 import { MainTabs, TabPanel, type TabId } from "./components/MainTabs";
@@ -44,19 +44,62 @@ import type { DirectoryRef, FileHandleRef, ReadBase } from "./platform/types";
 import { platform } from "./platform";
 import { fromNativeExecution, type NativeExecutionSnapshot } from "./benchmark/native";
 import { parseReport } from "./benchmark/report";
-import { GRAPH_PLACEHOLDER, RESULTS_PLACEHOLDER, TENSORS_PLACEHOLDER } from "./command";
+import { GRAPH_PLACEHOLDER, RUN_DIR_PLACEHOLDER } from "./command";
 
 const AUTOSAVE_KEY = "hipdnn.graph.autosave";
 
 // The Verify tab benchmarks the canvas graph. `dnn-benchmark` is installed
 // beside Studio and is on the PATH the launcher establishes for child
 // processes, so the bare name resolves on both platforms.
+//
+// `--run-dir` puts the report, the tensor captures, and any profiling output in
+// one directory, which is what lets a trace and its tensors load with the
+// report instead of needing a second pick.
 const VERIFY_COMMAND =
-  `dnn-benchmark --graph ${GRAPH_PLACEHOLDER} -o ${RESULTS_PLACEHOLDER}` +
-  ` --tensor-output-dir ${TENSORS_PLACEHOLDER}`;
+  `dnn-benchmark --graph ${GRAPH_PLACEHOLDER} --run-dir ${RUN_DIR_PLACEHOLDER}`;
 
 const VERIFY_OPTIONS: readonly CommandOption[] = [
-  { id: "validate", label: "Validate against pytorch", args: "--validate pytorch" },
+  {
+    id: "validate",
+    label: "Validate against PyTorch",
+    args: "--validate pytorch",
+    hint: "Compare every engine's outputs against PyTorch, and time PyTorch as a reference row.",
+  },
+  {
+    id: "trace",
+    label: "Capture kernel trace",
+    args: "--emit-trace pftrace",
+    hint: "Re-run under rocprofv3 and record a Perfetto trace, openable from a row's Details. Adds about one extra run.",
+  },
+  {
+    id: "autotune",
+    label: "Autotune kernels",
+    args: "--autotune",
+    hint: "Benchmark every candidate kernel instead of trusting the cold heuristic. Required for a best-vs-best comparison; much slower.",
+  },
+  {
+    id: "perf",
+    label: "CPU counters",
+    args: "--perf",
+    hint: "Re-run under 'perf stat' for cycles, instructions and IPC, shown under a row's Details. Adds about one extra run.",
+  },
+];
+
+const VERIFY_FIELDS: readonly CommandField[] = [
+  {
+    id: "iters",
+    label: "Iterations",
+    flag: "--iters",
+    placeholder: "100",
+    hint: "Timed iterations per engine. Fewer is faster and noisier.",
+  },
+  {
+    id: "warmup",
+    label: "Warmup",
+    flag: "--warmup",
+    placeholder: "10",
+    hint: "Untimed iterations run first, so compilation and clocks settle before measurement.",
+  },
 ];
 
 function Studio() {
@@ -73,58 +116,76 @@ function Studio() {
   // any built plan and resets its Build/Execute state.
   const [engineResetKey, setEngineResetKey] = useState(0);
   const [activeTab, setActiveTab] = useState<TabId>("create");
-  // The freshest result this session produced, from either the Create tab's
-  // native Execute or the Verify tab's benchmark run. Both read in Verify.
+  // The report on screen: the freshest run this session produced — the Create
+  // tab's native Execute or the Verify tab's benchmark run — or one opened from
+  // disk. Held here so the Tensors tab inspects the same run Verify is showing.
   const [currentReport, setCurrentReport] = useState<ShownReport | null>(null);
   const [currentError, setCurrentError] = useState<string | null>(null);
+  // Set when a report row asks for its own captures, which is narrower than the
+  // whole report's. Cleared whenever the report changes.
+  const [rowHints, setRowHints] = useState<readonly TensorHint[] | null>(null);
   // A folder granted this session. It outlives whichever report is on screen,
   // and both the Verify and Tensors tabs resolve artifacts against it.
   const [granted, setGranted] = useState<DirectoryRef | null>(null);
   const nextNativeId = useRef(0);
-  const onExecutionResult = useCallback((snapshot: NativeExecutionSnapshot) => {
-    setCurrentReport({
-      report: fromNativeExecution(snapshot, `native-${++nextNativeId.current}`),
-      label: "execution",
-      handle: null,
-    });
-    setCurrentError(null);
+  const showReport = useCallback((next: ShownReport | null, error: string | null) => {
+    setCurrentReport(next);
+    setCurrentError(error);
+    setRowHints(null);
   }, []);
-  const onResultsReset = useCallback(() => {
-    setCurrentReport(null);
-    setCurrentError(null);
-  }, []);
+  const onExecutionResult = useCallback(
+    (snapshot: NativeExecutionSnapshot) =>
+      showReport(
+        {
+          report: fromNativeExecution(snapshot, `native-${++nextNativeId.current}`),
+          label: "execution",
+          handle: null,
+        },
+        null,
+      ),
+    [showReport],
+  );
+  const onResultsReset = useCallback(() => showReport(null, null), [showReport]);
 
-  const onVerifyResults = useCallback((json: string | null, reportPath: string) => {
-    if (json === null) {
-      setCurrentReport(null);
-      setCurrentError("The run produced no report.");
-      return;
-    }
-    try {
-      setCurrentReport({
-        report: parseReport(json),
-        label: "benchmark run",
-        // The report is a real file on this machine, so it is its own base:
-        // every artifact path it carries is anchored to its directory.
-        handle: { name: reportPath.split(/[\\/]/).pop() ?? "results.json", token: reportPath },
-      });
-      setCurrentError(null);
-    } catch (failure) {
-      setCurrentReport(null);
-      setCurrentError(`Could not read the run's results: ${(failure as Error).message}`);
-    }
-  }, []);
+  const onVerifyResults = useCallback(
+    (json: string | null, reportPath: string) => {
+      if (json === null) {
+        showReport(null, "The run produced no report.");
+        return;
+      }
+      try {
+        showReport(
+          {
+            report: parseReport(json),
+            label: "benchmark run",
+            // The report is a real file on this machine, so it is its own base:
+            // every artifact path it carries is anchored to its directory.
+            handle: { name: reportPath.split(/[\\/]/).pop() ?? "results.json", token: reportPath },
+          },
+          null,
+        );
+      } catch (failure) {
+        showReport(null, `Could not read the run's results: ${(failure as Error).message}`);
+      }
+    },
+    [showReport],
+  );
 
   const requestDirectory = useCallback(async () => {
     const dir = await platform.openDirectory();
     if (dir) setGranted(dir);
   }, []);
 
-  // The Tensors tab inspects whatever the freshest report captured.
-  const runTensorHints = useMemo(
-    () => (currentReport ? reportTensorHints(currentReport.report) : undefined),
-    [currentReport],
+  // The Tensors tab follows the report on screen: a row's captures when one was
+  // asked for, otherwise everything the report recorded.
+  const tensorHints = useMemo(
+    () => rowHints ?? (currentReport ? reportTensorHints(currentReport.report) : undefined),
+    [currentReport, rowHints],
   );
+  const openRowTensors = useCallback((hints: readonly TensorHint[]) => {
+    setRowHints(hints);
+    setActiveTab("tensors");
+  }, []);
   const runBase: ReadBase | null = granted ?? currentReport?.handle ?? null;
 
   const markDirty = useCallback(() => setDirty(true), []);
@@ -465,23 +526,21 @@ function Studio() {
           command={VERIFY_COMMAND}
           runLabel="Start Benchmarking"
           options={VERIFY_OPTIONS}
+          fields={VERIFY_FIELDS}
           onResults={onVerifyResults}
         >
           <VerifyReport
-            current={currentReport}
-            currentError={currentError}
-            onDismissCurrent={onResultsReset}
+            shown={currentReport}
+            shownError={currentError}
+            onShow={showReport}
+            onOpenTensors={openRowTensors}
             granted={granted}
             onGranted={setGranted}
           />
         </CommandPanel>
       </TabPanel>
       <TabPanel id="tensors" active={activeTab}>
-        <TensorView
-          hints={runTensorHints}
-          base={runBase}
-          onGrantDirectory={requestDirectory}
-        />
+        <TensorView hints={tensorHints} base={runBase} onGrantDirectory={requestDirectory} />
       </TabPanel>
     </div>
   );

@@ -208,13 +208,13 @@ ipcMain.handle("engine:setLogLevel", async (_event, level) => {
 // ── External commands (command bridge) ─────────────────────────────────
 // Each run writes the graph out as hipDNN JSON under the OS temp directory,
 // substitutes that path for ${current_graph}, and streams the child's output
-// back to the renderer as it arrives. A command that also names
-// ${results_json} or ${tensor_dir} is given somewhere to write those to; both
-// are cleared before the run, and the report is read back after it.
+// back to the renderer as it arrives. A command that also names ${run_dir} is
+// given one directory for its whole run — report, tensors, profiling output —
+// which is cleared before the run and read back from after it.
 
 const GRAPH_PLACEHOLDER = "${current_graph}";
-const RESULTS_PLACEHOLDER = "${results_json}";
-const TENSORS_PLACEHOLDER = "${tensor_dir}";
+const RUN_DIR_PLACEHOLDER = "${run_dir}";
+const REPORT_NAME = "results.json";
 
 /** Running children by request id, so the renderer can cancel them. */
 const runningCommands = new Map();
@@ -262,27 +262,22 @@ ipcMain.handle("command:execute", async (event, request) => {
     return { ok: false, error: `Failed to write the graph: ${errorText(err)}` };
   }
 
-  const resultsPath = command.includes(RESULTS_PLACEHOLDER)
-    ? graphfile.resultsFileFor(graphPath)
-    : undefined;
-  const tensorsPath = command.includes(TENSORS_PLACEHOLDER)
-    ? graphfile.tensorsDirFor(graphPath)
-    : undefined;
+  const runDir = command.includes(RUN_DIR_PLACEHOLDER) ? graphfile.runDirFor(graphPath) : undefined;
+  const resultsPath = runDir ? path.join(runDir, REPORT_NAME) : undefined;
 
   // Anything the previous run left must never be mistaken for this one's.
   try {
-    if (resultsPath) await fs.rm(resultsPath, { force: true });
-    if (tensorsPath) await fs.rm(tensorsPath, { recursive: true, force: true });
+    if (runDir) {
+      await fs.rm(runDir, { recursive: true, force: true });
+      await fs.mkdir(runDir, { recursive: true });
+    }
   } catch (err) {
     return { ok: false, error: `Failed to clear the previous run's output: ${errorText(err)}` };
   }
 
   let resolvedCommand = substitutePath(command, GRAPH_PLACEHOLDER, graphPath);
-  if (resultsPath) {
-    resolvedCommand = substitutePath(resolvedCommand, RESULTS_PLACEHOLDER, resultsPath);
-  }
-  if (tensorsPath) {
-    resolvedCommand = substitutePath(resolvedCommand, TENSORS_PLACEHOLDER, tensorsPath);
+  if (runDir) {
+    resolvedCommand = substitutePath(resolvedCommand, RUN_DIR_PLACEHOLDER, runDir);
   }
   const send = (stream, text) => {
     if (!event.sender.isDestroyed()) event.sender.send("command:output", { id, stream, text });
@@ -294,7 +289,7 @@ ipcMain.handle("command:execute", async (event, request) => {
       if (settled) return;
       settled = true;
       runningCommands.delete(id);
-      const base = { ...result, resolvedCommand, graphPath, tensorsPath };
+      const base = { ...result, resolvedCommand, graphPath, runDir };
       if (!resultsPath) {
         resolve(base);
         return;
