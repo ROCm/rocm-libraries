@@ -1,14 +1,15 @@
 // Regression suite for the Implement tab's projection (src/flow/timeline.ts).
 // Bun's built-in test runner; no framework dependency.
 //
-// The point of this suite is genericity. Every assertion reads the names it
-// needs out of the fixture it was handed — no flow, step, loop group or output
-// name is ever written down as an expectation, because the flows shipping today
-// are scaffolding and the projection has to survive their replacement. The two
-// fixtures are deliberately dissimilar: one captured from a two-step,
-// single-loop run, one synthetic with a step outside every loop, two loop
-// groups of different sizes and budgets, a skipped step, and a non-agent step
-// that exited non-zero.
+// The suite is generic about a run's contents: every assertion about steps,
+// outputs, groups and artifacts reads the names it needs out of the fixture it
+// was handed. Node ordering is the deliberate exception. It is pinned to
+// sequences read off each fixture by hand, because a helper that derives the
+// expectation from the same rule the projection applies agrees with a wrong
+// rule as readily as a right one. The two fixtures are deliberately
+// dissimilar: one captured from a two-step, single-loop run, one synthetic
+// with a step outside every loop, two loop groups of different sizes and
+// budgets, a skipped step, and a non-agent step that exited non-zero.
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,14 +43,11 @@ const RENDER_BY_TYPE: Readonly<Record<string, OutputRender>> = {
 /** Words the UI is not allowed to produce; a flow's own output may still say them. */
 const VERDICT_WORDS = ["pass", "passed", "verified", "correct", "clean", "validated"];
 
-/** The node sequence the run itself dictates: a group appears where its first step does. */
-function expectedOrder(status: RunStatus): string[] {
-  const order: string[] = [];
-  for (const step of status.steps) {
-    const key = step.group === null ? `step:${step.id}` : `group:${step.group}`;
-    if (step.group === null || !order.includes(key)) order.push(key);
-  }
-  return order;
+/** How the projection names a node, so a sequence can be compared to a literal. */
+function nodeOrder(status: RunStatus): string[] {
+  return buildTimeline(status).nodes.map((node) =>
+    node.kind === "group" ? `group:${node.id}` : `step:${node.id}`,
+  );
 }
 
 /** Every step node in the tree, ungrouped and grouped alike. */
@@ -66,16 +64,38 @@ function withStatus(status: RunStatus, state: RunState): RunStatus {
   return { ...status, status: state };
 }
 
+function withSteps(status: RunStatus, steps: readonly RunStep[]): RunStatus {
+  return { ...status, steps };
+}
+
 test("the same projection renders both run shapes, in the run's own order", () => {
+  // Read off tests/fixtures/run-scaffolding.json by hand: all four step records
+  // belong to the one loop group, so the run projects to a single group node.
+  expect(nodeOrder(scaffolding)).toEqual(["group:review_cycle"]);
+  // Read off tests/fixtures/run-multigroup.json by hand: an ungrouped step
+  // first, then four records of the first loop group, then three of the second.
+  expect(nodeOrder(multigroup)).toEqual([
+    "step:seed_descriptor",
+    "group:descriptor_pass",
+    "group:integration_pass",
+  ]);
   for (const [name, status] of fixtures) {
-    const timeline = buildTimeline(status);
-    const actual = timeline.nodes.map((node) =>
-      node.kind === "group" ? `group:${node.id}` : `step:${node.id}`,
-    );
-    // Compared against the run's own ordering rule, not against a literal list.
-    expect(actual, name).toEqual(expectedOrder(status));
     expect(allSteps(status).length, name).toBe(status.steps.length);
   }
+});
+
+test("a group appears where its first step does, not at a fixed place", () => {
+  const ungrouped = multigroup.steps.filter((step) => step.group === null);
+  const grouped = multigroup.steps.filter((step) => step.group !== null);
+  expect(ungrouped.length).toBe(1);
+  // The same run with its one ungrouped step moved from the front to the back:
+  // its node has to follow both groups instead of leading them.
+  const moved = withSteps(multigroup, [...grouped, ...ungrouped]);
+  expect(nodeOrder(moved)).toEqual([
+    "group:descriptor_pass",
+    "group:integration_pass",
+    "step:seed_descriptor",
+  ]);
 });
 
 test("each loop group carries its own budget, iteration count and rows", () => {
