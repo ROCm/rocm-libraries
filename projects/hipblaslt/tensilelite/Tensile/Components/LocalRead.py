@@ -1794,7 +1794,7 @@ class LocalReadMFMA(LocalRead):
                             # would tag every read half0 and leave the half1 tensor_load un-waited.
                             # Such reads' combined region depends on BOTH half loads -> carry both
                             # half tokens.
-                            tdmBothHalves = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+                            tdmBothHalves = (kernel["TDMSplit"]
                                              and not tP.get("isM", False) and numVectorsPerTile == 1)
                             self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, ldsByteOffset=tdmFullLdsOffset, bothHalves=tdmBothHalves, comment=comment)
                             # TODO - handle vector-load
