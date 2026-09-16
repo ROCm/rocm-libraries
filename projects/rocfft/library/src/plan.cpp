@@ -1610,11 +1610,12 @@ rocfft_status
         //}
     }
 
-    // JIT callbacks cannot currently be combined with field
-    // decompositions, as we can't guarantee that a callback-running
-    // kernel will be first/last to load/store the data in the FFT.
-    if((!inFields.empty() || !outFields.empty()) && (loadOps.has_spirv() || storeOps.has_spirv()))
-        return rocfft_status_invalid_arg_value;
+    // JIT callbacks with field decompositions are supported by the general
+    // multi-device plan (BuildMultiDevicePlan) and by single-device plans that
+    // access user data directly.  The only case that can't guarantee the
+    // callback-running kernel is first/last to load/store user data is the
+    // single-device fallback that gathers/scatters distributed data, which is
+    // rejected at plan-construction time instead.
 
     return rocfft_status_success;
 }
@@ -3924,6 +3925,12 @@ try
        && transformType != rocfft_transform_type_complex_inverse)
         return false;
 
+    // defer JIT (SPIR-V) callback plans to the general BuildMultiDevicePlan,
+    // which places the load/store callbacks on the embarrassingly-parallel FFTs
+    // that first/last touch user data
+    if(desc.loadOps.has_spirv() || desc.storeOps.has_spirv())
+        return false;
+
     // must be out-of-place so that we don't have to worry about
     // overwriting an input before everything's done reading
     if(placement == rocfft_placement_inplace)
@@ -4946,6 +4953,15 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
         if(plan->desc.has_undistributed_io_on_current_location()
            || !(plan->BuildOptMultiDevicePlan() || plan->BuildMultiDevicePlan()))
         {
+            // Reaching here without undistributed single-device I/O means the
+            // multi-device build failed and a single-device plan with
+            // gather/scatter steps is used instead.  JIT (SPIR-V) callbacks can't
+            // be guaranteed to run on the first/last kernel touching user data in
+            // that case, so reject them.
+            if(!plan->desc.has_undistributed_io_on_current_location()
+               && (plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv()))
+                return rocfft_status_invalid_arg_value;
+
             // Plan is configured for single-device operations or the multi-device plan
             // creation failed. Either way, a single-device execution is used, possibly
             // with gather/scatter steps.
