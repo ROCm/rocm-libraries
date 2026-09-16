@@ -236,13 +236,14 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
 #define LAUNCH_TEST_ON_STREAMS(test, streams, devices) \
     launch_test_on_streams([&] { test; }, streams, devices)
 
-// Macro to run test across threads
+// Macro to run test across threads or streams
+// threads and streams are defaulted to 0 if not specified in the YAML file
 #define RUN_TEST_ON_THREADS_STREAMS(test)                                              \
     do                                                                                 \
     {                                                                                  \
         const auto& arg          = GetParam();                                         \
-        size_t      threads      = arg.threads > 0 ? arg.threads : 1;                  \
-        size_t      streams      = arg.streams > 0 ? arg.streams : 1;                  \
+        size_t      threads      = arg.threads;                                        \
+        size_t      streams      = arg.streams;                                        \
         size_t      devices      = arg.devices > 0 ? arg.devices : 1;                  \
         int         availDevices = 0;                                                  \
         bool        HMM          = arg.HMM;                                            \
