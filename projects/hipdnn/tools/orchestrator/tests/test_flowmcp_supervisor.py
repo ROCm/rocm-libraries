@@ -675,3 +675,74 @@ def test_a_launched_runs_artifacts_are_addressable_and_confined(supervisors):
     assert schema.manifest_uri(result["runId"]) in listed
     with pytest.raises(resources.PathRefused):
         supervisor.read_resource(f"run://{result['runId']}/../../../secrets.txt")
+
+
+def test_a_broken_spec_handover_is_reported_not_left_running(
+    supervisors, run_root, monkeypatch
+):
+    """The spec handover can break: a worker whose interpreter or imports are
+    wrong exits before reading stdin, and the write to its pipe fails. Escaping
+    there would commit a record saying `running`, with no `_Run` to reap the
+    child and `cancel` reporting the run was never here.
+
+    The break is injected rather than provoked. A worker that merely exits does
+    not reliably fail the write -- the spec fits the pipe buffer, so the parent
+    succeeds and the failure is a race on POSIX and absent on Windows. Injecting
+    it tests the handling, which is the part that was wrong.
+    """
+    import flowmcp.supervisor as supervisor_module
+
+    real_popen = supervisor_module.subprocess.Popen
+
+    class _DeafStdin:
+        def write(self, _payload):
+            raise BrokenPipeError(32, "broken pipe")
+
+        def close(self):
+            pass
+
+    class _DeafProcess:
+        def __init__(self, process):
+            self._process = process
+
+        def __getattr__(self, name):
+            return getattr(self._process, name)
+
+        @property
+        def stdin(self):
+            return _DeafStdin()
+
+    monkeypatch.setattr(
+        supervisor_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: _DeafProcess(real_popen(*args, **kwargs)),
+    )
+
+    supervisor = supervisors()
+    supervisor.start()
+
+    with pytest.raises(SupervisorError) as failure:
+        supervisor.launch(flow="slow", inputs={"target": "x"})
+    assert "before it could be given its run" in str(failure.value)
+
+    records = list((run_root / ".supervisor").glob("*.json"))
+    assert len(records) == 1
+    record = json.loads(records[0].read_text())
+    assert record["state"] != "running"
+    assert record["endedAt"]
+
+
+def test_closing_the_server_takes_its_workers_with_it(supervisors):
+    """A worker that outlives the server keeps an agent session running, with
+    nothing left that can report or stop it. Cancelling covers the exit the user
+    chose; this covers the ones they did not -- transport EOF, a crashed client,
+    a killed server."""
+    supervisor = supervisors()
+    supervisor.start()
+    result = supervisor.launch(flow="slow", inputs={"target": "x"})
+    run = supervisor._runs[result["runId"]]
+    assert run.process.poll() is None
+
+    supervisor.close()
+
+    assert run.process.poll() is not None

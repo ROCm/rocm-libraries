@@ -45,11 +45,15 @@ from .supervisor import ROOT, Supervisor, SupervisorError
 SERVER_NAME = "hipdnn-flow-orchestrator"
 SERVER_VERSION = "0.1.0"
 
+#: What a flow does is the flow's business, so this says nothing about it. An
+#: earlier version asserted that flows never compile or execute anything, which
+#: was true of the two that shipped that week and false by the next: a caller
+#: reads what a run actually did from the tools its step records name.
 INSTRUCTIONS = (
     "Launch and monitor hipDNN agent flows. flow_launch returns immediately; "
     "poll flow_status or subscribe to run://<runId>/run.json, which is the "
-    "authoritative state. These flows never compile or execute a kernel — a "
-    "clean review is not a correctness claim."
+    "authoritative state. A flow's steps report the tool each one invoked, so "
+    "what a run did is read from the run rather than assumed."
 )
 
 TEMPLATE = types.ResourceTemplate(

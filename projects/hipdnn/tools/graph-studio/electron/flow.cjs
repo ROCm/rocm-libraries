@@ -62,8 +62,22 @@ const RECONNECT_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 /** Enough of the server's diagnostics to explain why it would not start. */
 const STDERR_KEEP = 4_000;
 
-/** Run states that will not change again. */
-const TERMINAL_STATES = new Set(["ok", "failed", "cancelled", "crashed"]);
+/** Run states that will not change again, for us.
+ *
+ * `unknown` belongs here even though the run itself may still be going. It is
+ * the server's answer for a run no supervisor is waiting on -- one launched by
+ * a session that has since died -- whose manifest can therefore stay `running`
+ * for good. Treating it as live kept the poll re-reading a dead run forever,
+ * held its subscription open, and made quitting warn about a run that was
+ * provably gone.
+ */
+const TERMINAL_STATES = new Set([
+  "ok",
+  "failed",
+  "cancelled",
+  "crashed",
+  "unknown",
+]);
 
 const RUN_URI = /^run:\/\/([^/]+)\/(.*)$/;
 
