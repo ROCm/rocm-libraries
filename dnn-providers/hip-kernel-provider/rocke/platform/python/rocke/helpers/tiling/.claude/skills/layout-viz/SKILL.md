@@ -87,8 +87,19 @@ block + ask scope/drivers + interpret**. One committed call per step, identical 
 5. **Offer deeper diagnostics, never blind:** coalescing (this skill) and LDS bank-conflict (`/bank-conflict`).
    If you lack driving context, ASK.
 
-Correctness is CODE: `verify_lds_roundtrip` (per LDS buffer-half) + `verify_mma_soundness` run before any
-pipeline render.
+Correctness is CODE — but **YOU must call it**: `render_sweep` / `render_flow` / `view` do NOT invoke the
+gates. Call them explicitly on the fresh recording before any pipeline render, and show both results:
+
+```python
+halves = auto_pipeline.verify_lds_roundtrip(pipe, space_id, tile_k=<K>)   # per LDS space
+n_mma  = auto_pipeline.verify_mma_soundness(pipe)
+```
+
+**A gate is only evidence when it is NON-VACUOUS.** `verify_lds_roundtrip` returns `[]` when the recording
+has no store or no read for that space, and `verify_mma_soundness` returns `0` when no MMA was emitted —
+both are PASS BY OMISSION, which is exactly what an incomplete/skeleton recording produces. Require a
+non-empty half list for EVERY LDS space and a count matching the MMA issues the design calls for. An empty
+or zero return is **NOT RUN**, not PASS — report it as such and never render over it.
 
 **Full sweep** (`render_sweep(pipe, out_dir, scope="both")`) — four levels:
 - **L0 = end-to-end overview:** `0_0_block_diagram`, `0_1_localization`.
