@@ -181,6 +181,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Run hipBLASLt tests
+        timeout-minutes: 120
         if: ${{ steps.fetch.outputs.artifact_ready == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_hipblaslt) }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
@@ -205,6 +206,7 @@ jobs:
             | tee test_results/hipblaslt_test.log
 
       - name: Run TensileLite common tests
+        timeout-minutes: 120
         if: ${{ steps.fetch.outputs.artifact_ready == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
         env:
           TL_MARKERS: ${{ inputs.tensilelite_markers || 'common' }}
@@ -226,9 +228,10 @@ jobs:
           echo "::endgroup::"
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
-          # Common GEMM tests run against the prebuilt client
+          # Common GEMM tests run against the prebuilt client.
+          # Per-test cap 2700s (45 min)
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "$TL_MARKERS" "${K_ARG[@]}" --timeout=600 -n "${TL_WORKERS:-4}" \
+            -m "$TL_MARKERS" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-4}" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
             --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,gfx1250 \
