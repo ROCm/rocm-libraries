@@ -14449,15 +14449,15 @@ class KernelWriterAssembly(KernelWriter):
     """4d-3a (Option B): emit the beta0/NonEdge D store INSIDE the FUSED NLL.
 
     Mirrors the restricted OptNLL store (see the NLL prefetch path ~L9860):
-    globalWriteElements is called with noGSUBranch=True, applyAlpha=True,
+    globalWriteElements is called with noGSUBranch=True, applyAlpha=False,
     betas=[False], edge=False so ONLY the beta0/NonEdge paired dwordx4 stores are
-    emitted — no C load (SrdC), no beta/edge/StreamK/GSU/activation branches. The
-    applyAlpha multiply carries the effective alpha (with scaleA*scaleB folded in for
-    scalar UseScaleAB); the fold + StreamK Alpha save/restore happen inside
-    globalWriteElements so the later PLAIN post-loop store is unaffected. That
+    emitted — no C load (SrdC), no beta/edge/StreamK/GSU/activation branches, and
+    no scalar-alpha or ScaleAlphaVec multiply. PostLoopFusedStore already requires
+    Alpha==1.0 and a null ScaleAlphaVec pointer, so ValuC is stored as-is. That
     is exactly the store the front guard already guarantees at runtime
-    (PostLoopHasTail==0 && beta==0 && NonEdge), so SrdC is never referenced (only
-    SrdD is hoisted, 4b-2) and no undefined-symbol / SGPR-overflow problem arises.
+    (PostLoopHasTail==0 && beta==0 && NonEdge && alpha==1 && SAV==null), so SrdC
+    is never referenced (only SrdD is hoisted, 4b-2) and no undefined-symbol /
+    SGPR-overflow problem arises.
 
     endSummation has NOT run at the NLL emit point, so this re-establishes the
     store prerequisites it normally provides — serializedStore, codes.accVgprRead
@@ -14691,13 +14691,11 @@ class KernelWriterAssembly(KernelWriter):
     # (drove .sgpr_count to 105 -> overflow on MT>=256). Doing it first packs the block
     # into the low holes and keeps .sgpr_count within budget.
     fusedEpilogueArgs = []
-    # Scalar UseScaleAB also needs the epilogue kernargs loaded here: the scaleA*scaleB
-    # factor is folded into Alpha *inside* globalWriteElements (see the scale-read at
-    # ~L15655 and the Alpha fold at ~L15927), which SLoadB32s from AddressScaleA/B.
-    # Those Address* pointers are part of numStoreSgprNames that endSummation only
-    # loads AFTER the NLL, so without this the fold would read garbage. Include the
-    # scalar case so the fused store's applyAlpha=True path (below) scales correctly
-    # even for scalar-ScaleAB kernels that have no SAV/vector-ScaleAB/bias epilogue.
+    # Scalar UseScaleAB is not folded into Alpha on the fused arm (no alpha
+    # multiply). AddressScaleA/B still live in numStoreSgprNames that
+    # endSummation only loads AFTER the NLL; they are unused by the fused store
+    # itself. Bias / activation kernargs may still be referenced by the compiled
+    # epilogue shape, so load the block whenever any of those features is on.
     fusedNeedsEpilogue = (kernel["ProblemType"]["UseScaleAlphaVec"]
                           or (kernel["ProblemType"]["UseScaleAB"] != 0)
                           or self.states.useBias != DataDirection.NONE)
@@ -14763,7 +14761,7 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["UseScaleAB"] == "Vector":
       _fusedDefineEpilogueSrd("SrdScaleA")
       _fusedDefineEpilogueSrd("SrdScaleB")
-    if kernel["ProblemType"]["UseScaleAlphaVec"]:
+    if kernel["ProblemType"]["UseScaleAlphaVec"] and not self._plsinFusedSkipEpilogueMul():
       _fusedDefineEpilogueSrd("SrdScaleAlphaVec")
     if self.states.useBias != DataDirection.NONE:
       _fusedDefineEpilogueSrd("SrdBias")
@@ -14841,20 +14839,15 @@ class KernelWriterAssembly(KernelWriter):
     savedWeave = self.states.subtileFusedWeave
     self.states.subtileFusedWeave = True
     # (subtileFusedFullTileStore was set above, before the guard-SGPR decision.)
-    # applyAlpha: normally True -- apply the effective alpha (= user Alpha, with
-    # scaleA*scaleB folded in for scalar UseScaleAB) to the accumulators before the
-    # paired D store. globalWriteElements does the scalar-ScaleAB->Alpha fold internally
-    # and, for StreamK, saves/restores the original Alpha around this call, so the later
-    # PLAIN post-loop store re-folds from the correct original Alpha (no double scaling).
-    # Arbitrary-alpha fused path (default): retain the normal per-element alpha
-    # multiply. TENSILE_PLSIN_APPLY_ALPHA=0 drops it (alpha==1 skip).
+    # applyAlpha is False: PostLoopFusedStore requires Alpha==1.0 and a null
+    # ScaleAlphaVec pointer, so the fused arm does not multiply ValuC. Scalar
+    # UseScaleAB is likewise not folded into Alpha here (no multiply to apply).
     # beta==0 and full-tile are still guaranteed by the front guard, so no C-read or
     # edge path is added.
-    skipAlpha = self._plsinFusedFlagEligible(kernel) and not self._plsinApplyAlphaInFused(kernel)
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
-      noGSUBranch=True, applyAlpha=(not skipAlpha), betas=[False], edge=False)
+      noGSUBranch=True, applyAlpha=False, betas=[False], edge=False)
     self.states.subtileFusedWeave = savedWeave
     module.add(storeModule)
     self.cleanupGlobalWrite(kernel)
@@ -15072,7 +15065,7 @@ class KernelWriterAssembly(KernelWriter):
             dst=vgpr(self.vgprs.addrScaleBVec+1), \
             src=sgpr("AddressScaleB+1"), \
             comment="sgpr -> vgpr"))
-      if kernel["ProblemType"]["UseScaleAlphaVec"]:
+      if kernel["ProblemType"]["UseScaleAlphaVec"] and not self._plsinFusedSkipEpilogueMul():
         self.vgprs.addrScaleAlphaVec = self.vgprPool.checkOut(2, 'addrScaleAlphaVec')
         module.add(VMovB32( \
             dst=vgpr(self.vgprs.addrScaleAlphaVec+0), \
@@ -15258,7 +15251,7 @@ class KernelWriterAssembly(KernelWriter):
             dst=vgpr(self.vgprs.addrScaleBVec+1), \
             src=sgpr("AddressScaleB+1"), \
             comment="sgpr -> vgpr"))
-      if kernel["ProblemType"]["UseScaleAlphaVec"]:
+      if kernel["ProblemType"]["UseScaleAlphaVec"] and not self._plsinFusedSkipEpilogueMul():
         self.vgprs.addrScaleAlphaVec = self.vgprPool.checkOut(2, 'addrScaleAlphaVec')
         module.add(VMovB32( \
             dst=vgpr(self.vgprs.addrScaleAlphaVec+0), \
@@ -16033,15 +16026,55 @@ class KernelWriterAssembly(KernelWriter):
     """Whether this kernel uses the hoisted PostLoopFusedStore runtime flag."""
     return bool(self.states.postLoopStoreInNll) and kernel["ProblemType"]["ComputeDataType"].isSingle()
 
-  def _plsinApplyAlphaInFused(self, kernel):
-    """Apply the GEMM alpha scalar inside the fused NLL store.
+  def _plsinFusedSkipEpilogueMul(self):
+    """True while emitting the fused NLL store: skip scalar alpha and ScaleAlphaVec."""
+    return bool(self.states.subtileFusedFullTileStore)
 
-    ``1e63b8a518`` made this the production default so alpha!=1 can stay on the
-    fused path instead of falling back to PLAIN. ``TENSILE_PLSIN_APPLY_ALPHA=0``
-    restores the older skip-multiply fast path (correct only when alpha==1).
+  def _plsinApplyAlphaInFused(self, kernel):
+    """Fused NLL store never applies GEMM alpha.
+
+    ``PostLoopFusedStore`` requires ``Alpha == 1.0`` (and a null ScaleAlphaVec
+    pointer when that epilogue is compiled in), so the fused arm writes ValuC
+    as-is. Alpha != 1 and vector-scale fall through to PLAIN.
     """
-    return self._plsinFusedFlagEligible(kernel) and \
-           plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "1") != "0"
+    return False
+
+  def _plsinFoldDeferredPtrNull(self, kernel, module, fieldName, badSgpr, flagSgpr, offSgpr, extOffset):
+    """OR a deferred 64-bit kernarg pointer into *badSgpr* if it is non-null.
+
+    *flagSgpr* / *offSgpr* are scratch; they are overwritten. *extOffset* is the
+    SupportUserArgs external-struct byte offset of the pointer (ArgType==2).
+    """
+    names = self.states.numStoreSgprNames
+    sizes = self.states.numStoreSgprNameSizes
+    assert fieldName in names, "PLSIN fused guard: %s not in numStoreSgprNames" % fieldName
+    idx = names.index(fieldName)
+    normalOffset = self.argLoader.getOffset() + sum(sizes[:idx]) * 4
+
+    def _loadAt(offset, tag):
+      load = Module(tag)
+      load.add(self.argLoader.loadKernArg(flagSgpr, "KernArgAddress", sgprOffset=hex(offset), dword=1))
+      load.add(self.argLoader.loadKernArg(offSgpr, "KernArgAddress", sgprOffset=hex(offset + 4), dword=1))
+      return load
+
+    module.addComment1("PLSIN guard-hoist: runtime %s -> PLAIN NLL" % fieldName)
+    if kernel["ProblemType"]["SupportUserArgs"]:
+      loadExternal = Label(self.labels.getNameInc("LoadExternal%s" % fieldName), "")
+      loadDone = Label(self.labels.getNameInc("Load%sDone" % fieldName), "")
+      self.cmpNamedArgTypeEq(module, 2, "ArgType == 2 uses external epilogue struct")
+      module.add(SCBranchSCC1(labelName=loadExternal.getLabelName(), comment=""))
+      module.add(_loadAt(normalOffset, "LoadNormal%s" % fieldName))
+      module.add(SBranch(labelName=loadDone.getLabelName()))
+      module.add(loadExternal)
+      module.add(_loadAt(extOffset, "LoadExternal%s" % fieldName))
+      module.add(loadDone)
+    else:
+      module.add(_loadAt(normalOffset, "LoadNormal%s" % fieldName))
+    module.add(SWaitCnt(kmcnt=0, comment="wait for runtime %s" % fieldName))
+    module.add(SOrB32(dst=sgpr(badSgpr), src0=sgpr(flagSgpr), src1=sgpr(badSgpr),
+                      comment="bad |= %s[0]" % fieldName))
+    module.add(SOrB32(dst=sgpr(badSgpr), src0=sgpr(offSgpr), src1=sgpr(badSgpr),
+                      comment="bad |= %s[1] (non-null -> plain)" % fieldName))
 
   def _plsinCanBypassEndSummation(self, kernel):
     """PostLoopStoreInNll Phase 3: may a fused full-tile owner branch its NLL exit
@@ -16108,10 +16141,12 @@ class KernelWriterAssembly(KernelWriter):
     prefetch/MFMA shadow instead of the NLL prologue critical path):
         flag = (no tail) && (beta==0)
                && (AddressBias==nullptr)
+               && (AddressScaleAlphaVec==nullptr)
+               && (Alpha==1.0)
                && (full-tile in M) && (full-tile in N)
                && (StreamK full-tile owner)
-    Alpha and scalar-scale pointers are intentionally not guard terms: the fused store
-    keeps applyAlpha=True and performs the normal epilogue multiply. Any failing
+    Scalar-scale pointers are intentionally not guard terms: fused store skips
+    the alpha multiply entirely (Alpha==1.0 is required above). Any failing
     structural sub-guard forces flag=0 => PLAIN NLL. The flag is only defined/computed
     for fp32-compute PLSIN kernels (_plsinFusedFlagEligible); non-fp32 PLSIN keeps the
     inline emitFusedStoreGuard chain.
@@ -16174,53 +16209,28 @@ class KernelWriterAssembly(KernelWriter):
           for i in range(max(1, self.states.bpeCinternal // self.states.bpr)):
             m.add(SOrB32(dst=sgpr(bad), src0=sgpr("Beta+%u" % i), src1=sgpr(bad),
                          comment="bad |= Beta[%u] (beta != 0 -> not fused)" % i))
-        # Bias-capable hipBLASLt solutions are also selected for runtime calls
-        # whose optional bias pointer is null. AddressBias is part of the deferred
-        # post-loop kernarg block, so load only its two dwords here and fold them
-        # into the uniform predicate. Reuse `flag` and `off` as load destinations:
-        # flag has not been materialised yet and off is not needed until the
-        # full-tile divides below, avoiding any extra persistent or temporary SGPR.
+        # Bias / ScaleAlphaVec: hipBLASLt solutions compiled with those epilogues
+        # are also selected when the runtime pointer is null. Both pointers live in
+        # the deferred post-loop kernarg block, so load only those two dwords here
+        # and fold a non-null pointer into the uniform predicate. Reuse `flag` and
+        # `off` as load destinations: flag has not been materialised yet and off is
+        # not needed until the full-tile divides below.
+        extSav = 0
+        extBias = 0
+        if kernel["ProblemType"]["SupportUserArgs"]:
+          extSav = (
+            self.externalArgLoader.getOffset()
+            + self.states.userArgsInfo.scaleASize
+            + self.states.userArgsInfo.scaleBSize
+            + self.states.userArgsInfo.scaleCSize
+            + self.states.userArgsInfo.scaleDSize)
+          extBias = extSav + self.states.userArgsInfo.scaleAlphaVecSize
+        if kernel["ProblemType"]["UseScaleAlphaVec"]:
+          self._plsinFoldDeferredPtrNull(
+            kernel, m, "AddressScaleAlphaVec", bad, flag, off, extSav)
         if kernel["ProblemType"]["UseBias"]:
-          names = self.states.numStoreSgprNames
-          sizes = self.states.numStoreSgprNameSizes
-          assert "AddressBias" in names
-          biasIdx = names.index("AddressBias")
-          normalBiasOffset = self.argLoader.getOffset() + sum(sizes[:biasIdx]) * 4
-
-          def _loadBiasPointer(offset):
-            load = Module("PLSINLoadBiasPointer")
-            load.add(self.argLoader.loadKernArg(
-              flag, "KernArgAddress", sgprOffset=hex(offset), dword=1))
-            load.add(self.argLoader.loadKernArg(
-              off, "KernArgAddress", sgprOffset=hex(offset + 4), dword=1))
-            return load
-
-          m.addComment1("PLSIN guard-hoist: runtime bias pointer -> PLAIN NLL")
-          if kernel["ProblemType"]["SupportUserArgs"]:
-            extBiasOffset = (
-              self.externalArgLoader.getOffset()
-              + self.states.userArgsInfo.scaleASize
-              + self.states.userArgsInfo.scaleBSize
-              + self.states.userArgsInfo.scaleCSize
-              + self.states.userArgsInfo.scaleDSize
-              + self.states.userArgsInfo.scaleAlphaVecSize)
-            loadExternal = Label(self.labels.getNameInc("PLSIN_LoadExternalBiasPtr"), "")
-            loadDone = Label(self.labels.getNameInc("PLSIN_LoadBiasPtrDone"), "")
-            self.cmpNamedArgTypeEq(m, 2, "ArgType == 2 uses external epilogue struct")
-            m.add(SCBranchSCC1(labelName=loadExternal.getLabelName(),
-                               comment="load AddressBias from external args"))
-            m.add(_loadBiasPointer(normalBiasOffset))
-            m.add(SBranch(labelName=loadDone.getLabelName()))
-            m.add(loadExternal)
-            m.add(_loadBiasPointer(extBiasOffset))
-            m.add(loadDone)
-          else:
-            m.add(_loadBiasPointer(normalBiasOffset))
-          m.add(SWaitCnt(kmcnt=0, comment="wait for runtime AddressBias"))
-          m.add(SOrB32(dst=sgpr(bad), src0=sgpr(flag), src1=sgpr(bad),
-                       comment="bad |= AddressBias[0]"))
-          m.add(SOrB32(dst=sgpr(bad), src0=sgpr(off), src1=sgpr(bad),
-                       comment="bad |= AddressBias[1] (non-null -> plain)"))
+          self._plsinFoldDeferredPtrNull(
+            kernel, m, "AddressBias", bad, flag, off, extBias)
         # StreamK: this WG started the tile (LocalStart == 0).
         if useStreamK:
           m.add(SOrB32(dst=sgpr(bad), src0=sgpr("StreamKLocalStart"), src1=sgpr(bad),
@@ -16248,9 +16258,15 @@ class KernelWriterAssembly(KernelWriter):
         self.releaseStreamKConstSgpr(sIpt)
 
       # ---- materialise the flag from the accumulator ------------------------------
-      # flag stays "==1 => fully fuse-eligible"; alpha is applied in the fused epilogue.
+      # flag stays "==1 => fully fuse-eligible"; Alpha==1.0 is folded next.
       module.add(SCmpEQU32(src0=sgpr(bad), src1=0, comment="every folded sub-guard passed ?"))
       module.add(SCSelectB32(dst=sgpr(flag), src0=1, src1=0, comment="tentatively fuse-eligible"))
+
+      # Alpha == 1.0. Cannot OR the IEEE 1.0 bit pattern (0x3f800000) into `bad`.
+      module.addComment1("PLSIN guard-hoist: fold alpha==1 into %s" % flag)
+      module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
+      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0,
+                             comment="alpha != 1 -> not fused"))
 
       # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
       # real iteration to drain.
@@ -16336,11 +16352,11 @@ class KernelWriterAssembly(KernelWriter):
     # Collapse the hoisted guards to one flag compare+branch.
     if self._plsinFusedFlagEligible(kernel):
       # FULL fold: PostLoopFusedStore now encodes EVERY sub-guard (no-tail &&
-      # beta==0 && full-tile(M,N) && StreamK-owner) -- see
+      # beta==0 && full-tile(M,N) && StreamK-owner && alpha==1 && SAV==null) -- see
       # computePostLoopFusedStore. So this site collapses to a single flag compare+branch
       # and emits NOTHING else (the inline beta/edge/owner blocks below are for the
       # non-fp32 fallback path only).
-      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && beta==0 && full-tile(M,N) && SK-owner) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
+      module.addComment1("Fused-store guard: FULL eligibility hoisted (no-tail && beta==0 && full-tile(M,N) && SK-owner && alpha==1 && SAV==null) -> PostLoopFusedStore, else -> %s" % targetLabel.getLabelName())
       module.add(SCmpEQU32(src0=sgpr("PostLoopFusedStore"), src1=1,
                            comment="fused guard: hoisted full eligibility == 1?"))
       if longBranch:
@@ -16990,6 +17006,7 @@ class KernelWriterAssembly(KernelWriter):
       # Issue read scale A/B value for later use
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and \
         isSingleKernel and \
+        (not self._plsinFusedSkipEpilogueMul()) and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["MacDataTypeA"].numRegisters()) or \
         (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["MacDataTypeB"].numRegisters())):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
@@ -17029,7 +17046,8 @@ class KernelWriterAssembly(KernelWriter):
         factorDims = [1]
 
       vectorDataTypes = VectorDataTypes()
-      if (kernel["ProblemType"]["UseScaleAlphaVec"]) and isSingleKernel:
+      if (kernel["ProblemType"]["UseScaleAlphaVec"]) and isSingleKernel \
+          and not self._plsinFusedSkipEpilogueMul():
         labelStr = self.labels.getNameInc("ScaleAlphaVec")
         # Init ScaleAlphaVec Srd (buffer load only; flat load uses pre-computed 64-bit address)
         if kernel["BufferLoad"]:
@@ -17260,7 +17278,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.undefineSgpr("AddressScaleAlphaVec"))
           module.add(self.undefineSgpr("SrdScaleAlphaVec"))
 
-      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') and \
+      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (not self._plsinFusedSkipEpilogueMul()) and (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["MacDataTypeA"].numRegisters()) or \
         (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["MacDataTypeB"].numRegisters())):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
@@ -17680,6 +17698,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(endLabel)
 
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["StreamK"] > 0 and \
+        (not self._plsinFusedSkipEpilogueMul()) and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["MacDataTypeA"].numRegisters()) or \
         (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["MacDataTypeB"].numRegisters())):
         assert(kernel["ProblemType"]["ComputeDataType"].isSingle())

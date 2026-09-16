@@ -596,7 +596,7 @@ class GRIncOp(BaseOp):
     tensor: str = ""
     unrollId: int = 0
     # Set on the PGR=2 pre-loop advance between the two prefetch clusters, where
-    # the SRD must stay put when LoopCounterL <= 1. See emitSrdAdvance.
+    # the SRD must stay put when the summation fits in one DepthU. See emitSrdAdvance.
     holdOnLastIter: bool = False
 
     def __post_init__(self):
@@ -4549,11 +4549,19 @@ class LogicalScheduler:
             else:
                 tailJump = SCBranchSCC1(labelName=endLabel.getLabelName(),
                                         comment="K < DepthU: jump to tail loop")
-            em_list.insert(init_idx + 1, EmittedModule(
+            # The jump goes after everything spliced in ahead of the wait_gr drain,
+            # not straight after initC. The tail loop reads LDS through the deferred
+            # LR address VGPRs, and the post-loop store's dedup guard reads
+            # PostLoopFusedStore; both are produced by those splices, so a jump placed
+            # before them leaves the tail-only route running on undefined state.
+            jump_idx = next((i for i, em in enumerate(em_list)
+                             if em.opType == 'wait_gr'), len(em_list))
+            jump_idx = max(jump_idx, init_idx + 1)
+            em_list.insert(jump_idx, EmittedModule(
                 moduleId=next_id,
                 instructions=[
                     SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                comment="K < DepthU? initC done, run tail only"),
+                                comment="K < DepthU? setup done, run tail only"),
                     tailJump,
                 ]))
             next_id += 1

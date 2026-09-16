@@ -206,7 +206,7 @@ def emitScaleGRPtrUpdate(ti, writer, kernel, holdOnLastIter=False):
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
-  emitSrdAdvance(module, tc, inc, writer, holdOnLastIter)
+  emitSrdAdvance(module, tc, inc, writer, kernel, holdOnLastIter)
   return module
 
 

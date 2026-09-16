@@ -5618,8 +5618,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # emits the full C+D SRD compute.
 
     # PostLoopStoreInNll: precompute the structural fused-store predicate into the
-    # persistent PostLoopFusedStore SGPR BEFORE the main loop. Alpha is deliberately
-    # excluded: the fused epilogue applies its normal scalar multiply for every value.
+    # persistent PostLoopFusedStore SGPR BEFORE the main loop. Alpha==1.0 and a null
+    # ScaleAlphaVec pointer are part of that predicate; the fused epilogue stores
+    # ValuC without a scalar or vector multiply.
     #
     # PLSIN guard-hoist (subtile fused-store path ONLY): when this kernel prefetches
     # global reads (PGR>=1), DEFER the fold into the preloop global-read shadow
@@ -10158,8 +10159,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # PostLoopStoreInNll: persistent "this tile fuses the store" predicate, precomputed
     # per-tile before the main loop (see computePostLoopFusedStore). It ANDs every
     # fused-store structural sub-guard (no-tail, beta==0, full-tile M/N, StreamK
-    # owner) into one bit so all three guard sites collapse to a single flag compare.
-    # Alpha is applied by the fused epilogue and is not part of this predicate.
+    # owner, Alpha==1.0, null ScaleAlphaVec) into one bit so all three guard sites
+    # collapse to a single flag compare. The fused epilogue does not apply alpha.
     # Defined here (before the nonPostLoopSgpr snapshot below) so it survives
     # endSummation and is live at all guard sites. Only defined when the optimization is
     # eligible so non-PLSIN / non-fp32-compute kernels are unaffected.
