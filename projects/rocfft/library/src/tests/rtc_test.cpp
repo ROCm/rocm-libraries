@@ -82,7 +82,7 @@ struct RTCKernelModuleLoadFailure : public RTCKernel
     static constexpr auto KERNEL_NAME = "rtc_module_load_failure_kernel";
 
     RTCKernelModuleLoadFailure(std::shared_future<hipModule_wrapper_t>& module)
-        : RTCKernel(KERNEL_NAME, module, {}, {})
+        : RTCKernel(KERNEL_NAME, KIntType::U32, module, {}, {})
     {
     }
 
@@ -123,7 +123,7 @@ struct RTCKernelCompileFailure : public RTCKernel
     static constexpr auto KERNEL_NAME = "rtc_compile_failure_kernel";
 
     RTCKernelCompileFailure(std::shared_future<hipModule_wrapper_t>& module)
-        : RTCKernel(KERNEL_NAME, module, {}, {})
+        : RTCKernel(KERNEL_NAME, KIntType::U32, module, {}, {})
     {
     }
 
