@@ -127,6 +127,7 @@ def configure(
     arch: str = "gfx950",
     backend: str = "ductile",
     search_space: str | None = None,
+    mx: bool = False,
 ) -> dict:
     """Generate tuning YAML configs for one or more GEMM types.
 
@@ -175,6 +176,8 @@ def configure(
         "backend": backend.lower(),
         "search_space": search_space,
     }
+    if mx:
+        config["MX"] = True
     config["GemmProblems"] = gcs
 
     output_dir = Path(output_dir)
@@ -369,7 +372,7 @@ def analyze(
     error_thr: float = 0.03,
     up_thr: float = 1.03,
     duration: float = 1.0,
-    beta: bool = True,
+    beta: bool = False,
     log_summary: str | Path = None,
     verify: bool = True,
     bench_freq: bool = False,
@@ -403,7 +406,7 @@ def analyze(
         duration (float, optional): Benchmark duration in seconds.
             Defaults to 1.0.
         beta (bool, optional): Whether to use non-zero beta values.
-            Defaults to True.
+            Defaults to False.
         log_summary (str | Path, optional): CSV file with GEMM contribution to
             calculate weighted uplift. Defaults to None.
         bench_freq (bool, optional): Forwarded to bench.compare (controls

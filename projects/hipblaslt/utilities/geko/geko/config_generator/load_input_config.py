@@ -279,6 +279,18 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
 
     _apply_arch_hardware_defaults(config)
 
+    _MX_ONLY_DATA_TYPES = {"F4"}
+    gemm_problems = config.get("GemmProblems", [])
+    mx_types = [gp.gemm_type.data_type for gp in gemm_problems
+                if gp.gemm_type.data_type in _MX_ONLY_DATA_TYPES]
+    if mx_types and not config.get("MX", False):
+        config["MX"] = True
+        logger.warning(
+            "Auto-enabled MX mode: GemmProblems contain MX-only data type(s) %s. "
+            "Set MX: True explicitly to suppress this warning.",
+            sorted(set(mx_types)),
+        )
+
     if not config["MACROTILE_OPT"]:
         config["MT_DU"] = None
 
