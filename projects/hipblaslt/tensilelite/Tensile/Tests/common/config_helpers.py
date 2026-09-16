@@ -168,6 +168,18 @@ def configMarks(filepath, rootDir, availableArchs):
     ):
         marks.append(pytest.mark.xfail)
 
+    # Hardware-gated xfail: some configs fail on certain gfx1250 runners but pass
+    # on others (same gfx target, so an arch mark cannot distinguish them). Turn
+    # ``gfx1250_hw_xfail`` into an xfail only when the pipeline opts in via
+    # GFX1250_HW_XFAIL and we are on gfx1250 — so it stays inert on other hardware
+    # and on pipelines (e.g. the nightly) that do not set it.
+    if (
+        os.environ.get("GFX1250_HW_XFAIL")
+        and "gfx1250" in availableArchs
+        and markNamed("gfx1250_hw_xfail") in marks
+    ):
+        marks.append(pytest.mark.xfail(reason="known failure on this gfx1250 runner", strict=True))
+
     validate = True
     validateAll = False
     try:
