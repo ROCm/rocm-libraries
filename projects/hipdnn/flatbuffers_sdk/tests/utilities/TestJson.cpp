@@ -142,7 +142,7 @@ TEST(TestJson, GraphToJsonAndBack)
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createPointwiseGraph(
-                hipdnn_test_sdk::utilities::PointwiseGraphSpec::unary());
+                hipdnn_test_sdk::utilities::PointwiseGraphSpec::fullyPopulated());
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid pointwise graph)";
             break;

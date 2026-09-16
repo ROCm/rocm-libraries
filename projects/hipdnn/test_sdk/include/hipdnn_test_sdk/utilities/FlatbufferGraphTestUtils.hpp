@@ -1368,6 +1368,31 @@ struct PointwiseGraphSpec
         return spec;
     }
 
+    // Every pointwise field distinct and non-null, for serialization round-trip tests: a field
+    // holding its default on both sides of the trip cannot catch a writer/reader bug in it.
+    static PointwiseGraphSpec fullyPopulated()
+    {
+        PointwiseGraphSpec spec;
+        spec.mode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV;
+        spec.inputDims = {1, 2, 3, 4};
+        spec.inputStrides = std::vector<int64_t>{5, 6, 7, 8};
+        spec.outputDims = spec.inputDims;
+        spec.outputStrides = spec.inputStrides;
+        spec.secondInputDims = spec.inputDims;
+        spec.secondInputStrides = spec.inputStrides;
+        spec.thirdInputDims = spec.inputDims;
+        spec.thirdInputStrides = spec.inputStrides;
+        spec.axisTensorUid = 0;
+        spec.ioDataType = hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8;
+        spec.reluLowerClip = 1.f;
+        spec.reluUpperClip = 2.f;
+        spec.reluLowerClipSlope = 3.f;
+        spec.swishBeta = 4.f;
+        spec.eluAlpha = 5.f;
+        spec.softplusBeta = 6.f;
+        return spec;
+    }
+
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode
         = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD;
 
@@ -1380,6 +1405,8 @@ struct PointwiseGraphSpec
     std::optional<std::vector<int64_t>> secondInputStrides{std::vector<int64_t>{48, 16, 4, 1}};
     std::optional<std::vector<int64_t>> thirdInputDims;
     std::optional<std::vector<int64_t>> thirdInputStrides{std::vector<int64_t>{48, 16, 4, 1}};
+    // Emitted as the node's axis_tensor_uid; no tensor is created for it.
+    std::optional<int64_t> axisTensorUid;
 
     hipdnn_flatbuffers_sdk::data_objects::DataType ioDataType
         = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
@@ -1465,7 +1492,7 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph(const PointwiseGraphS
                                                           spec.reluLowerClip,
                                                           spec.reluUpperClip,
                                                           spec.reluLowerClipSlope,
-                                                          flatbuffers::nullopt,
+                                                          spec.axisTensorUid,
                                                           1,
                                                           in1Uid,
                                                           in2Uid,
