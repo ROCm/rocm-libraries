@@ -184,25 +184,37 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # Half (HALF::half carries INTERFACE include dirs for transitive use via rpp::rpp)
 find_package(HALF REQUIRED)
 
-# Check for FFTS and enable audio support if found
+# Audio support and FFT backend selection.
+# The spectrogram FFT uses the FFTS library when available (RPP_USE_FFTS_LIB=1); if FFTS is not
+# found it falls back to the in-house FFT (RPP_USE_FFTS_LIB=0). Audio support is enabled
+# automatically when FFTS is found, and can also be requested explicitly with -DRPP_AUDIO_SUPPORT=ON
+# (which then uses the in-house FFT if FFTS is unavailable).
 find_package(FFTS QUIET)
 if(FFTS_FOUND)
+    set(RPP_USE_FFTS_LIB 1)
     set(RPP_AUDIO_SUPPORT ON)
-    add_definitions(-DAUDIO_SUPPORT)        # For compile flags in RPP
-    set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)  # For cmakedefine01 in rpp_audio_augmentations_support.h.in
-    message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
 else()
-    if(RPP_AUDIO_SUPPORT)
-        message(FATAL_ERROR "${Red}RPP_AUDIO_SUPPORT=ON but FFTS was not found. Please ensure FFTS is available or set -DRPP_AUDIO_SUPPORT=OFF${ColourReset}")
+    set(RPP_USE_FFTS_LIB 0)  # fall back to the in-house FFT
+endif()
+
+if(RPP_AUDIO_SUPPORT)
+    add_definitions(-DAUDIO_SUPPORT)                          # For compile flags in RPP
+    add_definitions(-DRPP_USE_FFTS_LIB=${RPP_USE_FFTS_LIB})   # 1 = FFTS, 0 = in-house FFT
+    set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)                    # For cmakedefine01 in rpp_audio_augmentations_support.h.in
+    if(RPP_USE_FFTS_LIB)
+        message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT (FFTS)${ColourReset}")
     else()
-        message("-- ${Yellow}FFTS not found. ${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
+        message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT (in-house FFT)${ColourReset}")
     endif()
+else()
+    message("-- ${Yellow}FFTS not found. ${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT (set -DRPP_AUDIO_SUPPORT=ON to build audio support using the in-house FFT)${ColourReset}")
 endif()
 
 message("-- ${Cyan}RPP Developer Options${ColourReset}")
 message("-- ${Cyan}     -D BACKEND=${BACKEND} [Select RPP Backend [options:CPU/HIP](default:HIP)]${ColourReset}")
 message("-- ${Cyan}     -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} [Select RPP build type [options:Debug/Release](default:Release)]${ColourReset}")
 message("-- ${Cyan}     -D RPP_AUDIO_SUPPORT=${RPP_AUDIO_SUPPORT} [Select RPP audio support [options:ON/OFF](default:ON)]${ColourReset}")
+message("-- ${Cyan}     RPP_USE_FFTS_LIB=${RPP_USE_FFTS_LIB} [Audio FFT backend: 1 = FFTS library, 0 = in-house FFT (auto-set from FFTS availability)]${ColourReset}")
 message("-- ${Cyan}     -D CODE_COVERAGE=${CODE_COVERAGE} [Select RPP code coverage instrumentation [options:ON/OFF](default:OFF)]${ColourReset}")
 
 # OpenMP
@@ -377,7 +389,9 @@ if(USING_THE_ROCK)
 endif()
 
 if(RPP_AUDIO_SUPPORT)
-    target_link_libraries(${PROJECT_NAME} PRIVATE FFTS::FFTS)
+    if(RPP_USE_FFTS_LIB)
+        target_link_libraries(${PROJECT_NAME} PRIVATE FFTS::FFTS)
+    endif()
     message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
 else()
     message("-- ${Yellow}${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
@@ -453,7 +467,7 @@ endif()
 set(CPACK_RESOURCE_FILE_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
-if(RPP_AUDIO_SUPPORT AND FFTS_FOUND)
+if(RPP_AUDIO_SUPPORT AND RPP_USE_FFTS_LIB)
     set(CPACK_RESOURCE_FILE_FFTS_LICENSE  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffts/COPYRIGHT")
     if(EXISTS ${CPACK_RESOURCE_FILE_FFTS_LICENSE})
         install(FILES ${CPACK_RESOURCE_FILE_FFTS_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
