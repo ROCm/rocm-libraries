@@ -178,6 +178,17 @@ public:
     }
 
     template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(T input, T& exclusive_output, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
     HIPCUB_DEVICE inline
     void ExclusiveScan(T input, T& exclusive_output, T initial_value, ScanOp scan_op)
     {
@@ -188,10 +199,36 @@ public:
     }
 
     template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(
+        T input, T& exclusive_output, T initial_value, ScanOp scan_op, int valid_items)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          initial_value,
+                                          temp_storage_,
+                                          scan_op);
+    }
+
+    template<typename ScanOp>
     HIPCUB_DEVICE inline
     void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op, T& warp_aggregate)
     {
         base_type::exclusive_scan(input, exclusive_output, temp_storage_, warp_aggregate, scan_op);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(
+        T input, T& exclusive_output, ScanOp scan_op, int valid_items, T& warp_aggregate)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          temp_storage_,
+                                          warp_aggregate,
+                                          scan_op);
     }
 
     template<typename ScanOp>
@@ -202,6 +239,24 @@ public:
             input, exclusive_output, initial_value, warp_aggregate,
             temp_storage_, scan_op
         );
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE
+    inline void ExclusiveScanPartial(T      input,
+                                     T&     exclusive_output,
+                                     T      initial_value,
+                                     ScanOp scan_op,
+                                     int    valid_items,
+                                     T&     warp_aggregate)
+    {
+        base_type::partial_exclusive_scan(input,
+                                          exclusive_output,
+                                          valid_items,
+                                          initial_value,
+                                          warp_aggregate,
+                                          temp_storage_,
+                                          scan_op);
     }
 
     template<typename ScanOp>

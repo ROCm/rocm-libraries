@@ -35,7 +35,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added new `hipcub::DeviceTopK::{Max,Min}Keys` and `hipcub::DeviceTopK::{Max,Min}Pairs`.
 * Added `hipcub::DeviceFor::ForEachInLayout`.
 * Added `hipcub::DeviceCopy::Copy`.
-* Added `hipcub::WarpScan::InclusiveScanPartial`.
+* Added `hipcub::WarpScan::InclusiveScanPartial` and `hipcub::WarpScan::ExclusiveScanPartial`.
 * Feature parity with CCCL/CUB 3.2.0.
 
 ### Changed
