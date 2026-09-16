@@ -74,6 +74,16 @@ struct GroupMarkerEntry {
     bool isBegin;
 };
 
+/// Entry delimiting a callable function body in the logical instruction stream.
+/// The begin marker also records the position where the callable must be restored
+/// to the final linear ASM stream after per-function optimization.
+struct CallableMarkerEntry {
+    size_t position;
+    size_t order;
+    std::string name;
+    bool isBegin;
+};
+
 // ========================================================================
 // PYTHON-SPECIFIC MODULE - Can be removed when Python bindings are deprecated
 // ========================================================================
@@ -224,6 +234,16 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @brief Get all recorded group marker entries (position-tagged).
      */
     const std::vector<GroupMarkerEntry>& getGroupMarkers() const;
+
+    /**
+     * @brief Mark the beginning/end of a callable function body.
+     *
+     * Lowering creates a separate callable Function and leaves an ASM placement
+     * marker in the entry Function, matching native rocisa conversion.
+     */
+    void beginCallable(const std::string& name);
+    void endCallable(const std::string& name);
+    const std::vector<CallableMarkerEntry>& getCallableMarkers() const;
 
     /**
      * @brief Get all IR instructions in this module (const version)
