@@ -1,0 +1,67 @@
+# serializer version: 1
+# name: test_setcover_reject[sk_atomic_maxviol]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 3,
+    'StreamKAtomic': 1,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+  })
+# ---
+# name: test_setcover_reject[sk_cluster_maxviol]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 4,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+  })
+# ---
+# name: test_setcover_reject[sk_debugloop]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 4,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+  })
+# ---
+# name: test_setcover_reject[sk_pap_maxviol]
+  dict({
+    'BufferStore': False,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 3,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+  })
+# ---
+# name: test_setcover_reject[sk_schedule_maxviol]
+  dict({
+    'BufferStore': False,
+    'EnableMatrixInstruction': False,
+    'GlobalSplitU': 0,
+    'StreamK': 1,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+  })
+# ---
+# name: test_setcover_reject[sk_ws_maxviol]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 3,
+    'StreamKAtomic': 1,
+    'StreamKWorkStealing': True,
+    'Valid': False,
+  })
+# ---
