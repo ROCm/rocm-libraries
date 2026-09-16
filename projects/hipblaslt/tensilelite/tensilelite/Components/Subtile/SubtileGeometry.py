@@ -7,7 +7,6 @@ Contains layout classes, abstract geometry base classes, and pre-defined instanc
 No emit logic lives here — concrete shape classes with emit implementations are in
 Kernel.py.
 """
-import math
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
@@ -47,18 +46,12 @@ def swizzleBitsForSubtile(subtileShape0):
 
       swizzleBits == log2(mExtentRows / instM) == log2(subtileShape[0])
 
-  Measured on gfx950, SQ_LDS_BANK_CONFLICT / SQ_LDS_IDX_ACTIVE over 8 tr reads +
-  4 ds_write_b128, IDX_ACTIVE floor 48:
-
-      64 B column (subtileShape[0]=2): naive 16/64 -> 1 bit  0/48
-     128 B column (subtileShape[0]=4): naive 48/96 -> 1 bit 16/64 -> 2 bits 0/48
-
   A one-bit swizzle at a 128 B column stops at 4 cycles/read instead of 2: the
   residual is an INTRA-group k-row alias, and a gate that is constant within a
   16-lane group cannot touch it.  Hence the width must track the geometry rather
   than being hardcoded.
   """
-  bits = int(math.log2(subtileShape0))
+  bits = subtileShape0.bit_length() - 1
   assert (1 << bits) == subtileShape0, \
       "TLU=1 swizzle: subtileShape[0]=%s is not a power of two" % (subtileShape0,)
   return bits
