@@ -76,7 +76,8 @@ using fmha_bwd_trait_{F_idx} = ck_tile::TileFmhaBwdTraits<{F_dpad},
                                                        {F_dvpad},
                                                        {F_bias},
                                                        {F_dbias},
-                                                       {F_occupancy}>;
+                                                       {F_occupancy},
+                                                       {F_qdo_slots}>;
 using fmha_mask_{F_idx}      = {F_mask};
 using fmha_dropout_{F_idx}   = {F_dropout};
 
@@ -339,6 +340,10 @@ class FmhaBwdDQDKDVTileSize:
     # kN0*headdim/kBlockSize VGPRs per accumulator, which is what gets gfx1250
     # back to 2 waves/SIMD at headdim >= 128.
     lds_acc: bool = False
+    # Q/dO ring depth for this instance; 0 defers to CK_TILE_FMHA_BWD_QDO_SLOTS.
+    # Only meaningful on unmasked instances -- masked ones resolve to
+    # CK_TILE_FMHA_BWD_QDO_SLOTS_MASKED first.
+    qdo_slots: int = 0
 
     @property
     def name(self) -> str:
@@ -347,6 +352,7 @@ class FmhaBwdDQDKDVTileSize:
             + f"_r{self.F_rm0}x{self.F_rn0}x{self.F_rk0}_r{self.F_rm1}x{self.F_rn1}x{self.F_rk1}_r{self.F_rm2}x{self.F_rn2}x{self.F_rk2}"
             + f"_w{self.F_wm0}x{self.F_wn0}x{self.F_wk0}_w{self.F_wm1}x{self.F_wn1}x{self.F_wk1}_o{self.F_occupancy}_maxq{self.max_seq_q}"
             + (f"_dmaxq{self.dispatch_max_seq_q}" if self.dispatch_max_seq_q else "")
+            + (f"_qdo{self.qdo_slots}" if self.qdo_slots else "")
             + (f"_dmaxk{self.dispatch_max_seq_k}" if self.dispatch_max_seq_k else "")
             + (f"_dmingrid{self.dispatch_min_grid}" if self.dispatch_min_grid else "")
             + ("_ldsacc" if self.lds_acc else "")
@@ -413,6 +419,7 @@ class FmhaBwdDQDKDVKernel:
             F_dbias=BOOL_MAP[self.F_dbias],
             F_dropout=DROPOUT_MAP[self.F_dropout],
             F_occupancy=self.F_tile.F_occupancy,
+            F_qdo_slots=self.F_tile.qdo_slots,
             F_mask=get_mask_map(self.mask_impl)[self.F_mask],
             F_mode=MODE_MAP[self.F_mode],
             F_deterministic=BOOL_MAP[self.F_deterministic],
@@ -604,6 +611,12 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 # idle -- gives back 420 VGPRs / occ 2 / zero spill for +1.3%
                 # instructions. hdim 32/64 already reach occupancy 2, so they
                 # keep the register accumulators and pay no LDS traffic.
+                # The Q/dO ring depth is a compile-time unroll factor, so the
+                # short- and long-q cases need separate instances. Depth 3
+                # costs +19.4% at seqlen_q 1024 and +9.5% at 2048, breaks even
+                # near 4096, then pays -15.3% at 8192 and -23.2% at 32768:
+                # the unroll only amortises once the Q loop is long.
+                FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True, qdo_slots=2, dispatch_max_seq_q=4096),
                 FmhaBwdDQDKDVTileSize( 64, 128, 128,  64, 128,  64, 32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 32,  16, 16, 32, -1, lds_acc=True),
                 # A short q sequence leaves most of the 64-row M tile idle:
                 # halving M is worth 8-10% at seqlen_q <= 32, and narrowing N

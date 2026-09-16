@@ -205,6 +205,9 @@ struct BlockFmhaBwdDQDKDVPipelineLdsAccKRKTRVR
     static constexpr index_t kBlockSize  = Problem::kBlockSize;
 
     static constexpr index_t kM0        = BlockFmhaShape::kM0;
+    // Resolved Q/dO ring depth, exposed so the kernel can keep the dQ static
+    // stride paired with it -- the fold only pays alongside the deep ring.
+    static constexpr index_t kQDOSlotsResolved = Policy::template GetQDOSlots<Problem>();
 
     // Holding dV in registers, and evicting V to pay for it, only wins at
     // kM0 = 64. The dV accumulator is kN0 x headdim and does not shrink with

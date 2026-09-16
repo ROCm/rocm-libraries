@@ -59,6 +59,22 @@
 #endif
 namespace ck_tile {
 
+// The dQ static stride is only profitable next to a deep Q/dO ring (see the
+// macro comment above): measured alone it is +0.8..+4.1% at every seqlen, but
+// it adds -3.0..-3.4% on top of ring depth 3. Pipelines that expose their
+// resolved depth therefore opt out of the fold when they run the shallow ring;
+// those that do not expose it never reach the fold (QrQtrDor returns first).
+template <typename P, typename = void>
+struct fmha_bwd_qdo_depth
+{
+    static constexpr index_t value = 3;
+};
+template <typename P>
+struct fmha_bwd_qdo_depth<P, std::void_t<decltype(P::kQDOSlotsResolved)>>
+{
+    static constexpr index_t value = P::kQDOSlotsResolved;
+};
+
 // Per-CU state for group-mode deterministic persistent scheduling.
 // alignas(16): enables aligned 128-bit loads; sizeof == 32 (6x4 + 8 pad).
 struct alignas(16) FmhaBwdGroupPersistentCuState
@@ -1755,7 +1771,8 @@ struct FmhaBwdDQDKDVKernel
                 // (QDO_SLOTS=3). Masked instances keep QDO_SLOTS_MASKED=2 --
                 // deepening their ring is +34% -- so there the fold is a pure
                 // loss of TDM cover: +4.9% causal measured 2026-09-15.
-                else if constexpr(!kPadHeadDimQ && !kHasMask)
+                else if constexpr(!kPadHeadDimQ && !kHasMask &&
+                                  fmha_bwd_qdo_depth<FmhaPipeline>::value > 2)
                     return number<FmhaPipeline::kQKHeaddim>{};
 #endif
                 else
