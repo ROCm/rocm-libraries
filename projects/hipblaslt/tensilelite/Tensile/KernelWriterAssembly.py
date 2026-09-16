@@ -82,7 +82,7 @@ from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
-from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKMulticast
+from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, streamKCluster
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
@@ -2421,7 +2421,7 @@ class KernelWriterAssembly(KernelWriter):
     cx = kernel["ClusterDim"][0]
     cy = kernel["ClusterDim"][1]
     if not ((cx > 1 or cy > 1)
-            and (kernel["StreamK"] == 0 or streamKMulticast(kernel))):
+            and (kernel["StreamK"] == 0 or streamKCluster(kernel))):
       return False
 
     module.addComment0("reduce multicast mask to real WGs in cluster")
@@ -2582,10 +2582,10 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["ProblemType"]["SupportUserArgs"]:
             moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=2, comment="ArgType == 2 ?"))
             moduleArgs.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-          moduleArgs.addComment1("Grouped Gemm: Load address of external kernel arguments")
-          moduleArgs.add(self.argLoader.loadKernArg("AddressTD", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+16), dword=2))
-          moduleArgs.add(self.argLoader.loadKernArg("Synchronizer", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+8), dword=2))
-          moduleArgs.add(extReadEpilogueLabeltmp)
+            moduleArgs.addComment1("Grouped Gemm: Load address of external kernel arguments")
+            moduleArgs.add(self.argLoader.loadKernArg("AddressTD", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+16), dword=2))
+            moduleArgs.add(self.argLoader.loadKernArg("Synchronizer", "KernArgAddress", hex(self.states.userArgsInfo.commonArgsSize+8), dword=2))
+            moduleArgs.add(extReadEpilogueLabeltmp)
 
         #moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=(0), comment="Is kernel args"))
         labelHBM = Label("HBMArgs", comment="")
@@ -2638,11 +2638,11 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["ProblemType"]["SupportUserArgs"]:
             moduleArgs.add(SCmpEQU32(src0=sgpr(sgprArgType), src1=2, comment="ArgType == 2 ?"))
             moduleArgs.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-          moduleArgs.add(SMovB32(dst=sgpr("Synchronizer+1"), src=sgpr(preloadSgprStartIdx+7), comment="Load Synchronizer data"))
-          moduleArgs.add(SMovB32(dst=sgpr("Synchronizer"), src=sgpr(preloadSgprStartIdx+6), comment="Load Synchronizer data"))
-          moduleArgs.add(SMovB32(dst=sgpr("AddressTD+1"), src=sgpr(preloadSgprStartIdx+9), comment="Load AddressTD data"))
-          moduleArgs.add(SMovB32(dst=sgpr("AddressTD"), src=sgpr(preloadSgprStartIdx+8), comment="Load AddressTD data"))
-          moduleArgs.add(extReadEpilogueLabeltmp)
+            moduleArgs.add(SMovB32(dst=sgpr("Synchronizer+1"), src=sgpr(preloadSgprStartIdx+7), comment="Load Synchronizer data"))
+            moduleArgs.add(SMovB32(dst=sgpr("Synchronizer"), src=sgpr(preloadSgprStartIdx+6), comment="Load Synchronizer data"))
+            moduleArgs.add(SMovB32(dst=sgpr("AddressTD+1"), src=sgpr(preloadSgprStartIdx+9), comment="Load AddressTD data"))
+            moduleArgs.add(SMovB32(dst=sgpr("AddressTD"), src=sgpr(preloadSgprStartIdx+8), comment="Load AddressTD data"))
+            moduleArgs.add(extReadEpilogueLabeltmp)
 
         moduleArgs.add(SMovB32(dst=sgpr(sgprPackedArgs), src=sgpr(preloadSgprStartIdx+1), comment="Preload internal args"))
         # Routing the General Batched GEMM to Strided Batched GEMM path
@@ -2853,12 +2853,27 @@ class KernelWriterAssembly(KernelWriter):
         moduleWg.add(self.localWriteAddresses(kernel, tPA, tPB, tPM))
 
       def waitForArgsToLoad():
+        # numSgprPreload spans the common args header, argLoader offsets start past it.
+        preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
+        pendingBytes = self.argLoader.getOffset() - preloadedArgs * self.states.bpr        
         if kernel["ProblemType"]["SupportUserArgs"]:
-          moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args" % \
-                        (self.argLoader.getOffset() - (self.states.numSgprPreload*4), self.externalArgLoader.getOffset())))
+          if preloadedArgs <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+            moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args over preload" % \
+                          (pendingBytes, self.externalArgLoader.getOffset())))
+          else:
+            # Only ArgType == 2 loads the external user args at runtime, so the wait
+            # for kern args is only required in that case; skip it otherwise.
+            skipWaitLabel = Label(label=self.labels.getNameInc("SkipWaitForUserArgs"), comment="skip kern args wait if ArgType != 2")
+            self.cmpNamedArgTypeEq(moduleWg, 2, "ArgType == 2 ?")
+            moduleWg.add(SCBranchSCC0(labelName=skipWaitLabel.getLabelName(), comment="skip wait if ArgType != 2"))
+            moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u/%u bytes of kern args" % \
+                          (pendingBytes, self.externalArgLoader.getOffset())))
+            moduleWg.add(skipWaitLabel)
         else:
-          moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args" % \
-                              (self.argLoader.getOffset() - (self.states.numSgprPreload*4))))
+          if preloadedArgs <= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+            moduleWg.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args" % pendingBytes))
+          else:
+            moduleWg.add(SNop(1, comment="alpha <= numSgprPreload, wait for kern args after"))
 
         if kernel["ExpertSchedulingMode"] > 0 and kernel["ESMRuntimeGate"]:
           moduleWg.add(VMovB32(dst=vgpr(self.states.esmRuntimeFlagVgpr), src=sgpr(self.states.esmRuntimeFlagSgpr), comment="move ESM runtime flag sgpr -> vgpr"))
@@ -2999,7 +3014,10 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
           module.add(extValidLabelEnd)
         else:
-          module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4))))
+          if ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1)):
+            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4) + (self.states.numSgprAddressGSUSync)*4), comment="KernArgAddressOffset"))
+          else:
+            module.add(SMovB32(dst=sgpr(tmpSgprArgOffsett), src=(self.argLoader.getOffset() + (numStoreSgprToLoad * 4)), comment="KernArgAddressOffset"))
           module.add(SMulI32(dst=sgpr(tmpSgprAddrM), src0=sgpr(sgprNumsOfGemm), src1=4)) # offset wgTable
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
 
@@ -3105,7 +3123,40 @@ class KernelWriterAssembly(KernelWriter):
           moduleExternalArgs = Module("Load external Arguments")
         # Here alpha and beta in user args are fixed sizes, so we need to exclude beta and read it with a different offset
           load = load - self.states.numSgprBeta
-          moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(sgprStart, "KernArgAddress", load, 4))
+          if not kernel["ProblemType"]["UseInitialStridesCD"]:
+            if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
+              # Legacy layout: DeviceUserArguments field order matches the kernel
+              # arg (defineSgpr) order, so a single sequential load is correct.
+              moduleExternalArgs.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(sgprStart, "KernArgAddress", load, 4))
+            else:
+              # KernArgsVersion >= 3: the kernel arg order was reordered, but
+              # DeviceUserArguments (ContractionSolution.hpp) is still the fixed
+              # legacy layout. Read each field from its fixed struct byte offset
+              # into the correctly-named sgpr (same approach as the Beta
+              # special-case below), so struct order and sgpr order no longer need
+              # to match. Each sgpr is loaded exactly once (no double-load race).
+              # Offsets are measured from the per-gemm struct start:
+              #   d@16 c@24 a@32 b@40 |
+              #   strideD@48 strideC@56 strideA@64 strideB@72 |
+              #   alpha@80 (beta@96 is handled below).
+              base = self.externalArgLoader.getOffset()
+              numSgprAddress = self.states.rpga
+              def _loadUserArg(name, structOffset, dword):
+                if dword > 0:
+                  moduleExternalArgs.add(self.externalArgLoader.loadKernArg(
+                      name, "KernArgAddress", sgprOffset=hex(base + structOffset), dword=dword))
+              _loadUserArg("AddressD", 16, numSgprAddress)
+              _loadUserArg("AddressC", 24, numSgprAddress)
+              _loadUserArg("AddressA", 32, numSgprAddress)
+              _loadUserArg("AddressB", 40, numSgprAddress)
+              _loadUserArg("StridesD", 48, self.states.d.numSgprStrides)
+              _loadUserArg("StridesC", 56, self.states.c.numSgprStrides)
+              _loadUserArg("StridesA", 64, self.states.a.numSgprStrides)
+              _loadUserArg("StridesB", 72, self.states.b.numSgprStrides)
+              _loadUserArg("Alpha",    80, self.states.numSgprAlpha)
+              # Restore the running offset to where a sequential load would have
+              # left it, so the Beta / scale bookkeeping below stays unchanged.
+              self.externalArgLoader.setOffset(base + load * 4)
           offset = self.externalArgLoader.getOffset() + self.states.bpr * (self.states.userArgsInfo.alphaMaxRegisterSize - self.states.numSgprAlpha)
           self.externalArgLoader.setOffset(offset)
           if kernel["ProblemType"]["UseBeta"]:
@@ -5488,6 +5539,24 @@ class KernelWriterAssembly(KernelWriter):
     return Module("graIncrements (Empty)") if self.dontAppendCode else module
 
   ##############################################################################
+  # Is a kernel argument live-in from the SGPR preload window?
+  ##############################################################################
+  def isKernArgPreloaded(self, name):
+    """Return True if ``name`` arrives in an SGPR at kernel entry.
+
+    The prologue defers its ``s_waitcnt lgkmcnt(0)`` for the kern-arg
+    ``s_load`` burst until just before ``calculateWG`` (see
+    ``waitForArgsToLoad`` in ``defineAndResources``). Anything emitted earlier
+    that reads a kern-arg SGPR is only safe when preloading put that argument
+    in a register instead of loading it. Indices are measured from
+    ``SizesFree``, matching ``waitForArgsToLoad``'s own preload accounting.
+    """
+    if self.states.numSgprPreload <= 0:
+      return False
+    preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
+    return (self.sgprs[name] - self.sgprs["SizesFree"]) < preloadedArgs
+
+  ##############################################################################
   # Local Write Addresses: Tile Assignment A/B
   ##############################################################################
   def lwaTileAssignment(self, kernel, tP):
@@ -5552,6 +5621,8 @@ class KernelWriterAssembly(KernelWriter):
         numKr = sgpr(tmp)
         swzStride = tP["swizzleK"]
         module.addComment(f"Align to {swzStride}")
+        if not self.isKernArgPreloaded("SizesSum"):
+          module.add(SWaitCnt(kmcnt=0, comment="wait for SizesSum kern arg"))
         module.add(SAddU32(numKr, sgpr("SizesSum"), swzStride-1))
         module.add(SLShiftRightB32(dst=numKr, shiftHex=hex(log2(swzStride)), src=numKr,  comment="%s: numKr = DimK / %s"%(swizzledOrTrName, swzStride)))
       elif isTr:
@@ -9902,8 +9973,8 @@ class KernelWriterAssembly(KernelWriter):
             # cluster-scope wait on that skip edge so the prologue cluster arrive
             # is consumed on every control-flow path (whole-cluster barrier
             # symmetry). scc (from checkLastIter) is preserved for the branch
-            # below. No-op unless StreamKMulticast.
-            if streamKMulticast(kernel):
+            # below. No-op unless streamKCluster.
+            if streamKCluster(kernel):
               skComponent = Component.StreamK.find(self)
               module.add(skComponent.streamKMulticastZeroIterClusterWait(self, kernel))
             # use positive offset only long jump
@@ -11440,7 +11511,17 @@ class KernelWriterAssembly(KernelWriter):
     if tc == "Metadata" and kernel["enableTDMMetadata"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
-      imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
+      if self.isTdmWaveSeparated(kernel):
+        skipMetadataLabel = Label(self.labels.getNameInc("TdmMetadataSkipOddWave"), "")
+        guardedLoad = Module("tdmMetadataWSGuardedLoad")
+        self._emitTdmWaveParitySCCAuto(guardedLoad, kernel, comment="metadata WaveSeparated: check wave parity (odd -> skip load)",
+                                      tmpTag="tdmMetadataIssueParity")
+        guardedLoad.add(SCBranchSCC1(labelName=skipMetadataLabel.getLabelName(), comment="odd wave: skip metadata load"))
+        guardedLoad.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
+        guardedLoad.add(skipMetadataLabel)
+        imod.add(guardedLoad)
+      else:
+        imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
       return imod 
 
     if tc == "B" and kernel["enableTDMB"]:
@@ -13739,6 +13820,17 @@ class KernelWriterAssembly(KernelWriter):
 
   def globalWriteWorkGroupInit(self, kernel):
     module = Module("globalWriteWorkGroupInit")
+    # The SrdC/SrdD setup below is the first consumer of the kern arg tail
+    # (AddressC/D, StridesC/D), and is reached on both the ShadowInit and the
+    # endSummation path, so waiting here dominates every use.
+    if self.states.numSgprPreload > 0:
+      # numSgprPreload spans the common args header, argLoader offsets start past it.
+      preloadedArgs = max(0, self.states.numSgprPreload - self.states.userArgsInfo.commonArgsNum)
+      if preloadedArgs >= (self.sgprs["Alpha"] - self.sgprs["SizesFree"]):
+        module.add(SWaitCnt(kmcnt=0, comment="wait for %u bytes of kern args over preload" % \
+                            (self.argLoader.getOffset() - preloadedArgs * self.states.bpr)))
+      else:
+        module.add(SNop(1, comment="alpha >= numSgprPreload, wait for kern args before"))
     if kernel["BufferStore"]:
       module.add(self.allocPostLoopSrd("D", kernel))
       module.add(self.allocPostLoopSrd("C", kernel))
@@ -16344,6 +16436,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["CompactLoopStore"]:
       edgeModule.add(self.defineSgpr("CLSm0Base", 1))
       edgeModule.add(self.defineSgpr("CLSLoopCounter", 1))
+      if self.states.useGateResidual:
+        edgeModule.add(self.defineSgpr("CLSGateRowInc", 1))
 
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
@@ -16624,6 +16718,8 @@ class KernelWriterAssembly(KernelWriter):
 
     # Free dedicated CLS SGPRs after all batches / activation branches.
     if kernel["CompactLoopStore"]:
+      if self.states.useGateResidual:
+        edgeModule.add(self.undefineSgpr("CLSGateRowInc"))
       edgeModule.add(self.undefineSgpr("CLSLoopCounter"))
       edgeModule.add(self.undefineSgpr("CLSm0Base"))
 
@@ -17212,6 +17308,9 @@ class KernelWriterAssembly(KernelWriter):
     # CLS: seed the SRD chain on elt0/batch0. C uses tmpS01+1 so D's primer is kept.
     if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))) and not isWorkspace:
       _stmp = (tmpS01 + 1) if (tc == 'C' and kernel["CompactLoopStore"]) else tmpS01
+      # Gate has its own stride and must preserve C/D's delayed increments.
+      if tc == 'Gate' and kernel["CompactLoopStore"]:
+        _stmp = "CLSGateRowInc"
       module.add(addrCalc.incrementToNextRow(kernel, tc, ss, _stmp, forceinitrow0=1, bpeType=bpeType,
                                              overrideAfterPrimerRows=overrideAfterPrimerRows))
 
@@ -18643,7 +18742,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(loopLabelBegin[l])
       module.add(MacroInstruction(name="MAINLOOP%s%s"%(strNta, strNtb), args=[l]))
       module.add(SCBranchSCC0(labelName=loopLabelBegin[l].getLabelName(), comment="" ))
-      tmpSgpr1 = self.sgprPool.checkOutAligned(2, 2, tag="simdSpecDispatch_tmpSgpr1_2")
+      tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2, tag="simdSpecDispatch_tmpSgpr1_2")
       sgprPC = ContinuousRegister(tmpSgpr1, 3)
       #module.add(SBranch(labelName=loopLabelEnd.getLabelName(), comment="" ))
       module.add(SLongBranchPositive(loopLabelEnd, sgprPC))
@@ -19532,6 +19631,8 @@ class KernelWriterAssembly(KernelWriter):
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])
     isMetadata: bool = tP["isM"]
     isMetadataML1: bool = isMetadata and kernel["ProblemType"]["Sparse"] and kernel["ProblemType"]["MetadataLayout"]
+    waveSepMetadata: bool = isMetadata and self.isTdmWaveSeparated(kernel)
+    numComp: int = numWaves // 2 if waveSepMetadata else numWaves
 
     isTdmIter = (not isMetadata
                  and kernel.get("_TDMIterateMode%s" % tc, False))
@@ -19549,8 +19650,12 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(self._setTDMGlobalAddr(kernel, tc, descSgprName(0), tmpSgprRes))
-      dataBytes = mt // numWaves * du * int(bpe * 4) // (4 * dim1Divisor)
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
+      dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      if waveSepMetadata:
+        mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), "wCompId = WaveIdx // 2"))
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wCompId * (mt // numComp * du * bpe // dim1Divisor)"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
         mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
                 f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
@@ -19576,7 +19681,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(ti), self, sizeShifter))
       mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(3), self, sizeShifter, False, isSparseTrack=isSparseTrack, isMetadata=isMetadata))
       mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
-      mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, self))
+      mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp, self))
     else:
       # isSparseTrack/isMetadata apply to the K dimension (index 3).
       # For unrolledMajor (TN): K is dim0. For tlu (NN): K is dim1.
@@ -19611,7 +19716,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(comp.setTensorTile1(descSgprName(1),
                                     self._tdmIterTileDim1(kernel, tc, du, dtype), self))
       else:
-        mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves // dim1Divisor, self))
+        mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp // dim1Divisor, self))
 
     # --- Tensor stride ---
     if isMetadata and not kernel["ProblemType"]["MetadataLayout"]:
