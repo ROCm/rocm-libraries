@@ -16538,13 +16538,14 @@ class KernelWriterAssembly(KernelWriter):
     # Not used for atomic / StoreRemap / subtile.
     if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"] and kernel["EnableMatrixInstruction"] \
         and not atomic and not kernel["StoreRemapVectorWidth"] and not kernel.get("UseSubtileImpl") \
-        and ss.numVgprsPerElement > 0:
+        and ss.numVgprsPerElement > 0 \
+        and not GlobalWriteBatchWriter.clsEpilogVectorLoopUnsafe(kernel, ss.factorDim):
       maxNIter = GlobalWriteBatchWriter.clsMaxNIter(kernel)
       nElem = len(element)
       if maxNIter > 1 and nElem % maxNIter == 0:
         # TODO: `if _naturalIter` is always true; use `<= 1` to skip already-looping kernels.
         naturalNumBatches = max(1, ceilDivide(nElem, numElementsPerBatch))
-        _, _naturalIter, _ = GlobalWriteBatchWriter.computeCLSLayout(kernel, naturalNumBatches, numElementsPerBatch, gwvw)
+        _, _naturalIter, _ = GlobalWriteBatchWriter.computeCLSLayout(kernel, naturalNumBatches, numElementsPerBatch, gwvw, factorDim=ss.factorDim)
         # if _naturalIter <= 1:
         if _naturalIter:
           elemsPerNGroup = nElem // maxNIter
@@ -16757,7 +16758,7 @@ class KernelWriterAssembly(KernelWriter):
         # Emit one CLS body; the runtime loop re-runs it. Non-CLS: all batches.
         if kernel["CompactLoopStore"]:
           # Same divisibility as iterCount, or trailing batches are never stored.
-          numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches, numElementsPerBatch, gwvw)
+          numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches, numElementsPerBatch, gwvw, factorDim=factorDim)
         else:
           numBatchesCLS = numBatches
 
