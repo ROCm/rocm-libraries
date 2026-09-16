@@ -351,10 +351,10 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
             return legalizeVNop(inst, irBuilder, archId);
 
         case GFX::ds_load_b192:
-            return legalizeDSLoadB192(inst, irBuilder, archId, hasVgprMsb);
+            return legalizeDSLoadB192(inst, irBuilder, archId);
 
         case GFX::ds_store_b192:
-            return legalizeDSStoreB192(inst, irBuilder, archId, hasVgprMsb);
+            return legalizeDSStoreB192(inst, irBuilder, archId);
 
         case GFX::s_waitcnt:
             return legalizeWaitCnt(inst, irBuilder, archId);
@@ -795,17 +795,6 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     }
 }
 
-/// Get MSB value from StinkyRegister if it's a VGPR. Returns -1 for non-VGPR.
-int getMsbFromStinkyVgpr(const StinkyRegister& reg) {
-    if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return -1;
-    return static_cast<int>(reg.reg.idx) / 256;
-}
-
-int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
-    if (reg.dataType != StinkyRegister::Type::Register || reg.reg.type != RegType::V) return 0;
-    return getMsbFromStinkyVgpr(reg) * (-256);
-}
-
 /// Convert a rocisa::Container to StinkyRegister
 ///
 /// This function takes a rocisa::Container pointer and converts it to a
@@ -839,9 +828,8 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
         reg.reg.isMinus = regCont->isMinus ? 1 : 0;
         reg.reg.isAbs = regCont->isAbs ? 1 : 0;
 
-        // TODO: This is a hack to set the offset of the register for use case such as msb, etc.
-        // Set offset for VGPR MSB when supported (use case: vgpr > 255)
-        if (hasVgprMsb) reg.reg.offset = static_cast<int16_t>(getMsbOffsetFromStinkyVgpr(reg));
+        // No bank bias in reg.offset here: it is derived from the index, which
+        // allocation rewrites. InsertVgprMsbPass derives it from the final index.
 
         // Capture symbolic register name if available
         // In rocisa, the symbolic name includes the type prefix and all offsets
@@ -1483,6 +1471,7 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
                 int64_t totalBytes = module_->getTotalInstructionBytes();
                 if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
                 refreshSgprCount();
+                refreshVgprCount();
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
@@ -1504,6 +1493,55 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             }
             if (required == 0 || static_cast<int>(required) >= kd.totalSgprs) return;
             signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
+        }
+
+        /// The same for VGPRs: allocation rewrites operands, so the producer's
+        /// pool stops describing the code, and the hardware reserves what the
+        /// descriptor declares. Both directions, since a colouring may need
+        /// more than was reserved. A requirement past the addressable limit
+        /// throws rather than being clamped, since no descriptor expresses it.
+        void refreshVgprCount() const {
+            const stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required =
+                    std::max(required, stinkytofu::requiredVgprCount(*function, kd.vgprWorkItem));
+            }
+            if (required == 0) return;
+
+            const uint32_t addressable = addressableVgprs();
+            if (addressable != 0 && required > addressable) {
+                throw std::runtime_error(
+                    "kernel needs " + std::to_string(required) +
+                    " VGPRs after register allocation but the architecture addresses only " +
+                    std::to_string(addressable));
+            }
+            signature_->setDeclaredVgprs(static_cast<int>(required));
+        }
+
+        /// Addressable VGPRs for the architecture this module was lifted for, or
+        /// 0 when it is not one this build knows. Looked up by triple so an
+        /// unknown target returns null instead of asserting.
+        uint32_t addressableVgprs() const {
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                const std::array<int, 3>& isa = function->getGemmTileConfig().arch;
+                const auto* info = stinkytofu::ArchHelper::getInstance().getArchInfo(
+                    static_cast<uint32_t>(isa[0]), static_cast<uint32_t>(isa[1]),
+                    static_cast<uint32_t>(isa[2]));
+                if (info != nullptr) return info->maxVGPR;
+            }
+            return 0;
+        }
+
+        /// SGPRs the descriptor declares, as `.amdhsa_next_free_sgpr`.
+        ///
+        /// The producer's estimate before emitAssembly(), which lowers it to what
+        /// the emitted code actually uses. Ask afterwards to find out whether a
+        /// re-allocated kernel fits its budget.
+        int getDeclaredSgprCount() const {
+            return signature_ ? signature_->kernelDescriptor.getNextFreeSgpr() : 0;
         }
 
         // Plugin data forwarding
@@ -1546,6 +1584,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)
         .def("emitAssembly", &StinkyAsmModuleWithSignature::emitAssembly)
+        .def("getDeclaredSgprCount", &StinkyAsmModuleWithSignature::getDeclaredSgprCount,
+             "SGPRs the descriptor declares (.amdhsa_next_free_sgpr). Ask after emitAssembly() "
+             "for the count the emitted code uses rather than the producer's estimate")
         .def("getName", &StinkyAsmModuleWithSignature::getName)
         .def("setOutputName", &StinkyAsmModuleWithSignature::setOutputName,
              "Set full kernel name for output files (e.g. cost file); should match .o basename")
@@ -1623,6 +1664,18 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             stinkyModule->getFunction().setMetaData(
                 kSigTotalVgprsMetaKey,
                 static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
+
+            // And where the dispatch stops filling scalars, which tells a live-in
+            // the hardware wrote from one merely read early. Absent when the
+            // descriptor does not settle the line, which keeps every live-in
+            // pinned.
+            if (const std::optional<uint32_t> dispatchFilled =
+                    stinkytofu::settledDispatchFilledSgprCount(
+                        stinkySig->kernelDescriptor.numSgprPreload,
+                        stinkySig->kernelDescriptor.sgprWorkGroup)) {
+                stinkyModule->getFunction().setMetaData(kSigDispatchFilledSgprsMetaKey,
+                                                        static_cast<uint64_t>(*dispatchFilled));
+            }
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};
