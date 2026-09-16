@@ -639,3 +639,14 @@ TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForOutputElementCountExcee
 
     EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
 }
+
+TEST(TestMiopenBinaryPointwiseChecks, IsSupportedFalseForElementCountOverflowingInt64)
+{
+    const std::vector<int64_t> dims{8192, 8192, 8192, 8192, 8192};
+    const std::vector<int64_t> strides{4503599627370496, 549755813888, 67108864, 8192, 1};
+    auto builder = createBinaryPointwiseGraph(
+        PointwiseMode::ADD, dims, strides, dims, strides, dims, strides);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(binary_pointwise_applicability::isSupported(graph));
+}

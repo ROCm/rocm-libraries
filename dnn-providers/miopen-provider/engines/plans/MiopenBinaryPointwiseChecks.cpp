@@ -39,6 +39,16 @@ struct TensorInfo
     uint32_t rank;
 };
 
+int64_t checkedMultiply(int64_t product, int64_t dim, const std::string& what)
+{
+    if(product > std::numeric_limits<int32_t>::max() / dim)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       what + " element count exceeds INT32_MAX");
+    }
+    return product * dim;
+}
+
 // Packed, channels-first strides. For every axis with dims[i] > 1, strides[i] must equal the
 // product of the dims to its right; axes with dims[i] == 1 are unconstrained (never
 // dereferenced). This single pass also covers the "last axis" special case in the spec: the
@@ -59,7 +69,10 @@ void checkPacked(const TensorInfo& tensor, const std::string& label)
                 label + " tensor (uid " + std::to_string(tensor.uid)
                     + ") is not packed / channels-first at axis " + std::to_string(i));
         }
-        expectedStride *= (*dims)[idx];
+        expectedStride
+            = checkedMultiply(expectedStride,
+                              (*dims)[idx],
+                              label + " tensor (uid " + std::to_string(tensor.uid) + ")");
     }
 }
 
@@ -211,13 +224,7 @@ void validateBinaryPointwise(const IGraph& opGraph)
     int64_t numel = 1;
     for(flatbuffers::uoffset_t i = 0; i < out.rank; ++i)
     {
-        numel *= (*outDims)[i];
-    }
-    if(numel > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "output element count " + std::to_string(numel) + " exceeds INT32_MAX");
+        numel = checkedMultiply(numel, (*outDims)[i], "output");
     }
 
     checkPacked(in0, "in_0");
