@@ -130,6 +130,44 @@ function(TensileCreateLibraryFiles
     message(WARNING "Malformed arguments: ${Tensile_KEYWORDS_MISSING_VALUES}")
   endif()
 
+  # Each generator process owns one variant of an ISA-keyed capability map.
+  set(_strict_target "")
+  if("gfx1250-strict" IN_LIST Tensile_ARCHITECTURE AND NOT _tensile_strict_child)
+    set(_strict_args)
+    foreach(_option IN LISTS options)
+      if(Tensile_${_option})
+        list(APPEND _strict_args ${_option})
+      endif()
+    endforeach()
+    foreach(_option IN LISTS oneValueArgs)
+      if(DEFINED Tensile_${_option} AND NOT _option STREQUAL "VAR_PREFIX")
+        list(APPEND _strict_args ${_option} "${Tensile_${_option}}")
+      endif()
+    endforeach()
+    if(NOT Tensile_VAR_PREFIX)
+      set(Tensile_VAR_PREFIX TENSILE)
+    endif()
+    set(_strict_prefix "${Tensile_VAR_PREFIX}_STRICT")
+    set(_strict_target "${_strict_prefix}_LIBRARY_TARGET")
+    # The child flag prevents recursion; compiler selection remains the target
+    # name, not a workflow option or a second logical GPU family.
+    set(_tensile_strict_child ON)
+    list(REMOVE_ITEM Tensile_ARCHITECTURE gfx1250-strict)
+    TensileCreateLibraryFiles(
+      "${Tensile_LOGIC_PATH}" "${Tensile_OUTPUT_PATH}-strict"
+      ${_strict_args} ARCHITECTURE gfx1250-strict VAR_PREFIX "${_strict_prefix}")
+    unset(_tensile_strict_child)
+    add_custom_command(TARGET ${_strict_target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${Tensile_OUTPUT_PATH}-strict/library/gfx1250-strict"
+        "${Tensile_OUTPUT_PATH}/library/gfx1250-strict"
+      VERBATIM)
+    if(NOT Tensile_ARCHITECTURE)
+      add_custom_target(${Tensile_VAR_PREFIX}_LIBRARY_TARGET DEPENDS ${_strict_target})
+      return()
+    endif()
+  endif()
+
   # Parse incoming options
   if(Tensile_TENSILE_ROOT)
     set(Script "${Tensile_TENSILE_ROOT}/bin/TensileCreateLibrary")
@@ -307,6 +345,10 @@ function(TensileCreateLibraryFiles
          COMMAND ${CommandLine} "--verify-manifest"
          COMMENT "Verifying files in ${Tensile_MANIFEST_FILE_PATH} were generated"
          VERBATIM)
+  endif()
+
+  if(_strict_target)
+    add_dependencies(${Tensile_VAR_PREFIX}_LIBRARY_TARGET ${_strict_target})
   endif()
 
   if(Tensile_EMBED_LIBRARY)
