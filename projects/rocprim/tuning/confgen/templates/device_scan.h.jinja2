@@ -1,0 +1,19 @@
+{% extends "common/base.h.jinja2" %}
+{% block config_constructor -%}
+scan_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} },
+                    {{ config.block_load_method }},
+                    {{ config.block_store_method }},
+                    {{ config.block_scan_algo }} }
+{%- endblock %}
+
+{% block target_tparams -%}
+template<class Target, class value_type>
+{%- endblock %}
+
+{% block config_guard scoped %}
+    ({% if not type.value_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<value_type>::value)
+    && (sizeof(value_type) <= {{ type.value_type.size }})
+    {% if type.value_type.size_min > 0 %}&& (sizeof(value_type) > {{ type.value_type.size_min }}){% endif %})
+{%- endblock %}
+
+{% block config_base_type -%}scan_config_params_base<value_type>{%- endblock -%}

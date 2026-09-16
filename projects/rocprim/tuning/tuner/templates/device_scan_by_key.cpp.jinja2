@@ -1,0 +1,11 @@
+{% extends "common/base.cpp.jinja2" %}
+{% block config_constructor -%}
+rocprim::scan_by_key_config<{{ config.block_size_x }},
+                            {{ config.ipt }},
+                            {{ config.block_load_method }},
+                            {{ config.block_store_method }},
+                            {{ config.block_scan_algo }}>
+{%- endblock %}
+{% block benchmark_type %}
+using benchmark_type = device_scan_by_key_benchmark<false, key_type, value_type, rocprim::plus<value_type>, rocprim::equal_to<key_type>, 1024, false, config>;
+{% endblock %}
