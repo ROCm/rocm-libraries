@@ -171,6 +171,39 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
+# AISPARSE-661: exercise the non-transpose large-slice path (sell_slice_size > 128)
+# with enough slices that the launch uses a 2D grid (blocks_y > 1). This guards the
+# 2D slice-id recovery (blockIdx.x + blockIdx.y * gridDim.x) in the large-slice kernel.
+- name: v2_spmv_sell_large_slice_2d_grid
+  category: pre_checkin
+  function: v2_spmv_sell
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [2000]
+  N: [2000]
+  sell_slice_size: [256]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+# AISPARSE-661: larger-m nightly variant that drives a wide 2D grid through the
+# large-slice path. Gated by memory so it auto-skips on small-memory GPUs.
+- name: v2_spmv_sell_large_slice_2d_grid
+  category: nightly
+  function: v2_spmv_sell
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [1000000]
+  N: [1000]
+  sell_slice_size: [256]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  host_memory_gb: 16
+  device_memory_gb: 16
+
 - name: v2_spmv_sell_graph_test
   category: pre_checkin
   function: v2_spmv_sell
