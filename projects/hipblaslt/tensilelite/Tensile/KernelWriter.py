@@ -5106,40 +5106,42 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
-    # Should check for is swizzled instead of usesubtileimpl
+    # Swizzled layouts only; Solution.py rejects NoSwizzle under UseSubtileImpl.
     # TODO: Move this calculation to host-side?
     if (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and kernel["UseSubtileImpl"]:
       # The scale GR steps one group per 32 rows of the free dim, so Strides<tc>
-      # must hold that group's byte span: paddedKBlocks * 32.  Strides<tc>+0 is
-      # the first non-unit stride, which with the free dim slow (TLU=0) already
-      # is paddedKBlocks -- a shift by 5 finishes it.  With the free dim fastest
-      # it is the free size instead, and shifting that scales the span by M or N
-      # rather than K, so every group past the first reads off the end.
+      # must hold that group's byte span, roundUp(ceil(K/mxBlock), 8) * 32.  Both
+      # numbers are properties of the swizzled layout: preSwizzleScalesGFX950 pads
+      # the K blocks to a multiple of 8 and groups 32 rows of the free dim.  The
+      # span is therefore derived from K on every layout rather than read back out
+      # of Strides<tc>+0, which only equals paddedKBlocks when the free dim is the
+      # slow one and the host did pad -- an assumption this code cannot check and
+      # which NoSwizzle breaks.  Costs four SALU in the prologue, once.
+      SWIZZLE_GROUP_ROWS = 32   # free-dim rows per scale group
+      K_BLOCK_PAD        = 8    # K blocks the host pads up to
       for tc in ("MXSA", "MXSB"):
         mxBlock = kernel["ProblemType"]["MXBlock%s" % tc[-1]]
         if not mxBlock:
           # No scales on this operand, so Strides<tc> is not a scale stride --
           # and may not be allocated at all.
           continue
-        if kernel["ProblemType"]["TLU%s" % tc]:
-          # The ceil-divide below is a shift, so the block size has to be a
-          # power of two.  Every MX format defines it as 32.
-          assert mxBlock & (mxBlock - 1) == 0, \
-                 "MXBlock%s must be a power of two, got %u" % (tc[-1], mxBlock)
-          module.addComment("%s group span = roundUp(ceil(K/%u), 8) * 32" % (tc, mxBlock))
-          module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
-                             comment="K + %u - 1"%mxBlock))
-          module.add(SLShiftRightB32(sgpr("Strides%s"%tc), mxBlock.bit_length() - 1, sgpr("Strides%s"%tc),
-                                     comment="ceil(K/%u) = K blocks"%mxBlock))
-          module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("Strides%s"%tc), src1=7,
-                             comment="+ 8 - 1"))
-          module.add(SLShiftRightB32(sgpr("Strides%s"%tc), 3, sgpr("Strides%s"%tc),
-                                     comment="roundUp(K blocks, 8) / 8"))
-          module.add(SLShiftLeftB32(sgpr("Strides%s"%tc), 8, sgpr("Strides%s"%tc),
-                                    comment="* 8 blocks * 32 bytes"))
-        else:
-          module.addComment("Scale Strides%s by 32" % tc)
-          module.add(SLShiftLeftB32(sgpr("Strides%s"%tc), 5, sgpr("Strides%s"%tc)))
+        # The ceil-divides below are shifts, so both have to be powers of two.
+        assert mxBlock & (mxBlock - 1) == 0, \
+               "MXBlock%s must be a power of two, got %u" % (tc[-1], mxBlock)
+        module.addComment("%s group span = roundUp(ceil(K/%u), %u) * %u"
+                          % (tc, mxBlock, K_BLOCK_PAD, SWIZZLE_GROUP_ROWS))
+        module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("SizesSum"), src1=(mxBlock - 1),
+                           comment="K + %u - 1"%mxBlock))
+        module.add(SLShiftRightB32(sgpr("Strides%s"%tc), mxBlock.bit_length() - 1, sgpr("Strides%s"%tc),
+                                   comment="ceil(K/%u) = K blocks"%mxBlock))
+        module.add(SAddU32(dst=sgpr("Strides%s"%tc), src0=sgpr("Strides%s"%tc), src1=(K_BLOCK_PAD - 1),
+                           comment="+ %u - 1"%K_BLOCK_PAD))
+        module.add(SLShiftRightB32(sgpr("Strides%s"%tc), K_BLOCK_PAD.bit_length() - 1, sgpr("Strides%s"%tc),
+                                   comment="roundUp(K blocks, %u) / %u"%(K_BLOCK_PAD, K_BLOCK_PAD)))
+        module.add(SLShiftLeftB32(sgpr("Strides%s"%tc),
+                                  (K_BLOCK_PAD * SWIZZLE_GROUP_ROWS).bit_length() - 1,
+                                  sgpr("Strides%s"%tc),
+                                  comment="* %u blocks * %u bytes"%(K_BLOCK_PAD, SWIZZLE_GROUP_ROWS)))
 
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
