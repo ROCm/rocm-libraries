@@ -1,5 +1,5 @@
 # End-to-end config for the GPU-less --cpu-only switch (T9). Trimmed from
-# Tensile/Tests/common/gemm/fp16_tn.yaml: a single Assembly kernel and a single
+# tensilelite/Tests/common/gemm/fp16_tn.yaml: a single Assembly kernel and a single
 # problem size. Deliberately NO `ISA` pinned here -- the target arch is supplied
 # at the command line via `--gpu-targets <arch>` (the primary --cpu-only path),
 # so the same config drives gfx942/gfx950/gfx90a. `UseEffLike` is left at its

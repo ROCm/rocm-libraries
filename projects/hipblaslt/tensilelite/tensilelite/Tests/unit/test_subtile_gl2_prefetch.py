@@ -16,7 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
     SchedulerConfig,
     ReadGranularity,

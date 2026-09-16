@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Unit tests for Tensile.ParallelExecution.detectAvailableGpus.
+Unit tests for tensilelite.ParallelExecution.detectAvailableGpus.
 
 These verify the amd-smi based GPU detection logic (and its hipInfo
 fallback) without requiring real GPUs, by mocking subprocess.run.
@@ -15,11 +15,11 @@ from unittest.mock import patch
 
 import pytest
 
-# Importing Tensile.ParallelExecution pulls in Tensile.Common (and thus the
+# Importing tensilelite.ParallelExecution pulls in tensilelite.Common (and thus the
 # rocisa bindings). If that chain is unavailable in the current environment,
 # skip rather than error at collection time.
 try:
-    from Tensile.ParallelExecution import detectAvailableGpus
+    from tensilelite.ParallelExecution import detectAvailableGpus
     _IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - environment dependent
     detectAvailableGpus = None
@@ -29,7 +29,7 @@ pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(
         detectAvailableGpus is None,
-        reason=f"Tensile.ParallelExecution import unavailable: {_IMPORT_ERROR}",
+        reason=f"tensilelite.ParallelExecution import unavailable: {_IMPORT_ERROR}",
     ),
 ]
 

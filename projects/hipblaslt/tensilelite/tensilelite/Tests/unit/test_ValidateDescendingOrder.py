@@ -21,7 +21,7 @@
 ################################################################################
 
 
-from Tensile.Components.CMSValidator import verify_ascending_order
+from tensilelite.Components.CMSValidator import verify_ascending_order
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateDescendingOrder(CMSValidationTestBase):
