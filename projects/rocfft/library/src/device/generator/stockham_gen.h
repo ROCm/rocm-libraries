@@ -22,6 +22,7 @@
 
 #pragma once
 #include "../../../../shared/arithmetic.h"
+#include "../../include/rtc_kernel.h"
 #include "../kernels/device_enum.h"
 #include "rocfft/rocfft.h"
 #include <optional>
@@ -31,14 +32,16 @@
 
 struct StockhamGeneratorSpecs
 {
-    StockhamGeneratorSpecs(const std::vector<unsigned int>&   factors,
+    StockhamGeneratorSpecs(const KIntType&                    itype,
+                           const std::vector<unsigned int>&   factors,
                            const std::vector<unsigned int>&   factors2d,
                            unsigned int                       precision,
                            const std::string&                 gcn_arch_name,
                            unsigned int                       workgroup_size,
                            const std::string&                 scheme,
                            const std::optional<unsigned int>& transform_type = std::nullopt)
-        : factors(factors)
+        : itype(itype)
+        , factors(factors)
         , factors2d(factors2d)
         , precision(precision)
         , gcn_arch_name(gcn_arch_name)
@@ -50,6 +53,7 @@ struct StockhamGeneratorSpecs
     {
     }
 
+    KIntType                  itype;
     std::vector<unsigned int> factors;
     std::vector<unsigned int> factors2d;
     std::vector<unsigned int> factors_pp;
