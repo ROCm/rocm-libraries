@@ -23,7 +23,6 @@
 import numpy as np
 import pytest
 
-import gpu_test_helpers as _helpers
 from gpu_test_helpers import (
     TileConfig,
     WAVESIZE,
@@ -39,10 +38,6 @@ from test_gr_lr_roundtrip import generate_export_asm
 
 DEPTH_U = 128
 NUM_WAVES = 4
-
-# Captured before any monkeypatching so the geometry_b shim below always wraps
-# the real helper rather than a previously installed shim.
-_ORIG_CREATE_WRITER = _helpers.create_writer
 
 # (macro tile A, macro tile B, MIWaveGroup).
 #
@@ -132,16 +127,9 @@ def build_kernel(mt_a, mt_b, wave_id, swizzle, mi_wave_group, monkeypatch):
     cfg = TileConfig(mt_a=mt_a, mt_b=mt_b, depth_u=DEPTH_U,
                      stride_a=mt_a, stride_b=mt_b)
 
-    # setup_roundtrip_writer gives both operands one geometry; shim create_writer
-    # to hand B its own rather than widen the shared helper's signature.  Bind
-    # the unshimmed original (captured at import), not whatever is installed now
-    # -- a test calls this twice and the shim would otherwise wrap itself.
-    import gpu_test_helpers as helpers
-    monkeypatch.setattr(
-        helpers, "create_writer",
-        lambda c, **kw: _ORIG_CREATE_WRITER(c, geometry_b=geometryB, **kw))
+    # A is TLU=1 and B is TLU=0, so the two operands need separate geometries.
     writer, kernel, tileInfoA, tileInfoB, lds_size = setup_roundtrip_writer(
-        cfg, geometry=geometryA, mi_wave_group=mi_wave_group)
+        cfg, geometry=geometryA, geometry_b=geometryB, mi_wave_group=mi_wave_group)
 
     # TLU=1 wiring the mock kernel/writer lack: K is the leading dim, and
     # strideRef/isConstUnitStride are KernelWriterAssembly methods.
