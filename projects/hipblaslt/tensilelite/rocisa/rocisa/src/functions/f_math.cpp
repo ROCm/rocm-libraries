@@ -311,6 +311,48 @@ namespace rocisa
         }
         return module;
     }
+
+    std::shared_ptr<Module>
+        vectorAddMultiply64Bpe(int dst,
+                                 int src0,
+                                 int src1,
+                                 float bpe,
+                                 int tmp,
+                                 const std::string& comment)
+    {
+        auto module = std::make_shared<Module>("vectorAddMultiply64Bpe");
+        std::string mcomment = comment + " (add and multiply bpe, 64-bit)";
+        auto dstVgpr  = vgpr(dst, 2);
+        auto src0Vgpr = vgpr(src0);
+        auto src1Vgpr = vgpr(src1);
+        auto tmpVgpr  = vgpr(tmp);
+        if(bpe == 0.5)
+        {
+            module->addT<VAddU32>(vgpr(dst), src0Vgpr, src1Vgpr, mcomment);
+            module->addT<VMovB32>(getVgpr(dst, 1), 0, mcomment);
+            module->addT<VLShiftRightB64>(dstVgpr, 1, dstVgpr, mcomment);
+        }
+        else if(bpe == 0.75)
+        {
+            module->addT<VAddU32>(vgpr(dst), src0Vgpr, src1Vgpr, mcomment);
+            module->addT<VMovB32>(getVgpr(dst, 1), 0, mcomment);
+            module->addT<VMulLOU32>(vgpr(dst), 6, vgpr(dst), mcomment);
+            module->addT<VLShiftRightB64>(dstVgpr, 3, dstVgpr, mcomment);
+        }
+        else
+        {
+            int bpe_log2 = static_cast<int>(std::log2(bpe));
+            module->addT<VMovB32>(vgpr(dst), src0Vgpr, mcomment);
+            module->addT<VMovB32>(getVgpr(dst, 1), 0, mcomment);
+            module->addT<VAddCOU32>(vgpr(dst), VCC(), vgpr(dst), src1Vgpr, mcomment);
+            module->addT<VAddCCOU32>(getVgpr(dst, 1), VCC(), getVgpr(dst, 1), 0, VCC(), mcomment);
+            if(bpe_log2 != 0)
+            {
+                module->addT<VLShiftLeftB64>(dstVgpr, bpe_log2, dstVgpr, mcomment);
+            }
+        }
+        return module;
+    }
     template std::shared_ptr<Module>
         vectorMultiplyBpe<std::string, std::string>(std::string, std::string, float, const std::string&);
     template std::shared_ptr<Module>
@@ -711,6 +753,14 @@ void math_func(nb::module_ m)
           nb::arg("src0"),
           nb::arg("src1"),
           nb::arg("bpe"),
+          nb::arg("comment")    = "");
+    m.def("vectorAddMultiply64Bpe",
+          &rocisa::vectorAddMultiply64Bpe,
+          nb::arg("dst"),
+          nb::arg("src0"),
+          nb::arg("src1"),
+          nb::arg("bpe"),
+          nb::arg("tmp"),
           nb::arg("comment")    = "");
     m.def("vectorMultiplyBpe",
         nb::overload_cast<int, int, float, const std::string&>(

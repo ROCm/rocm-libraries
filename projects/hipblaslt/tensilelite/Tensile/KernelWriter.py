@@ -270,6 +270,7 @@ class StateValues:
   groOffsetInMacroTile: int              = 0
   use64bShadowLimit: bool                = True
   use64bShadowLimitMX: bool              = False
+  use64bShadowLimitStore: bool           = False
   preventVgprOverflowDuringNewTile: int  = -1
   interleaveStoreVmcnt: bool             = False
   srdShiftLeft:dict                      = field(init=False)
@@ -7619,6 +7620,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # use 64-bit buffer limit shadow register
     # but not implemented or tested
     self.states.use64bShadowLimit = kernel["Use64bShadowLimit"] and kernel["BufferLoad"]
+    self.states.use64bShadowLimitStore = kernel["Use64bShadowLimit"] and kernel["BufferStore"]
     # Keep gfx950's dedicated MX shadow-limit switch, but match legacy gfx1250
     # behavior where MX tensors share the same shadow-limit mode as A/B.
     if isgfx950:
@@ -8411,7 +8413,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["enableTDMA"]:
         self.states.a.numVgprGlobalReadOffsets = 0
       elif kernel["BufferLoad"]:
-        self.states.a.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsA * self.states.rpgo)
+        groVgprMul = 2 if self.states.use64bShadowLimit else 1
+        self.states.a.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsA * self.states.rpgo) * groVgprMul
       else:
         numVgprGlobalReadAddressesA = numGlobalReadInstructionsA * self.states.rpga
 
@@ -8431,7 +8434,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["enableTDMA"]:
           self.states.mxsa.numVgprGlobalReadOffsets = 0
         elif kernel["BufferLoad"]:
-          self.states.mxsa.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSA * self.states.rpgo)
+          groVgprMulMX = 2 if self.states.use64bShadowLimitMX else 1
+          self.states.mxsa.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSA * self.states.rpgo) * groVgprMulMX
         else:
           numVgprGlobalReadAddressesMXSA = numGlobalReadInstructionsMXSA * self.states.rpga
 
@@ -8450,7 +8454,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["enableTDMB"]:
         self.states.b.numVgprGlobalReadOffsets = 0
       elif kernel["BufferLoad"]:
-        self.states.b.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsB * self.states.rpgo)
+        groVgprMul = 2 if self.states.use64bShadowLimit else 1
+        self.states.b.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsB * self.states.rpgo) * groVgprMul
       else:
         numVgprGlobalReadAddressesB = numGlobalReadInstructionsB * self.states.rpga
 
@@ -8469,7 +8474,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["enableTDMB"]:
           self.states.mxsb.numVgprGlobalReadOffsets = 0
         elif kernel["BufferLoad"]:
-          self.states.mxsb.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSB * self.states.rpgo)
+          groVgprMulMX = 2 if self.states.use64bShadowLimitMX else 1
+          self.states.mxsb.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSB * self.states.rpgo) * groVgprMulMX
         else:
           numVgprGlobalReadAddressesMXSB = numGlobalReadInstructionsMXSB * self.states.rpga
 

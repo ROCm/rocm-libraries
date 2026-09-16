@@ -27,7 +27,7 @@ from rocisa.instruction import MacroInstruction, SAddCU32, SAddU32, SAndB32, \
     VAddCCOU32, VAddCOU32, VAddI32, VAddU32, VAndB32, VBfiB32, \
     VCmpEQU32, VCmpGtU32, VCmpLtU32, VCmpXNeU32, VCndMaskB32, VLShiftLeftB32, \
     VMadI32I24, VMovB32, VMulLOU32, VSubI32, VSubU32
-from rocisa.functions import vectorAddMultiplyBpe, vectorMultiply64Bpe
+from rocisa.functions import vectorAddMultiplyBpe, vectorAddMultiply64Bpe, vectorMultiply64Bpe
 from .Common import INDEX_CHARS, DataDirection, log2
 
 ##############################################################################
@@ -333,10 +333,16 @@ class AddrCalculation:
             module.add(VAddU32(dst=vgpr(addrVgpr), src0=vgpr(addrVgpr), \
                       src1=vgpr(tmpVgpr+2), comment="addrCalc += scaled extracted dim "))
 
-            module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, addrVgpr, bpe, \
-                        comment="packed: add rowPtr and scaleToBpe"))
+            self.vectorAddMultiplyStoreBpe(module, kw, addrVgpr, rowPtr, addrVgpr, bpe, tmpVgpr, \
+                        comment="packed: add rowPtr and scaleToBpe")
 
         return module
+
+    def vectorAddMultiplyStoreBpe(self, module, kw, addrVgpr, rowPtr, elementVgpr, bpe, tmpVgpr, comment):
+        if kw.states.use64bShadowLimitStore:
+            module.add(vectorAddMultiply64Bpe(addrVgpr, rowPtr, elementVgpr, bpe, tmpVgpr + 2, comment=comment))
+        else:
+            module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe, comment=comment))
 
     def emitScaleToBpe(self, kernel, ss, tmpVgpr, tmpSgpr, singleUpdate, tc, dim):
         """
@@ -473,8 +479,8 @@ class AddrCalculation:
                         ss.singleColGateAddrUpdated = True
                     else:
                         ss.singleColDAddrUpdated    = True
-                    module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe, \
-                        comment="optSingleColVgpr scaleToBpe: sharedAddrVgpr <- cinRowPtr + coord0, scaled by BPE. BSHERE:coord0=%d, coord0Vgpr=%d"%(kw.vgprs.coord0, self.coord0Vgpr)))
+                    self.vectorAddMultiplyStoreBpe(module, kw, addrVgpr, rowPtr, elementVgpr, bpe, tmpVgpr, \
+                        comment="optSingleColVgpr scaleToBpe: sharedAddrVgpr <- cinRowPtr + coord0, scaled by BPE. BSHERE:coord0=%d, coord0Vgpr=%d"%(kw.vgprs.coord0, self.coord0Vgpr))
         elif ss.optSharedColVgpr:
             # Need an address calculation for the first address in each row:
             if d1==0 and vc1==0:
@@ -541,8 +547,8 @@ class AddrCalculation:
                     module.add(self.emitExtractAndScalePackedDims(kernel, ss, tmpVgpr, tc))
                 else:
                     updatedAddr = True
-                    module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe,
-                                comment="optSharedColVgpr scaleToBpe for first row: col addr <- cinRowPtr + coord0, scaled by BPE"))
+                    self.vectorAddMultiplyStoreBpe(module, kw, addrVgpr, rowPtr, elementVgpr, bpe, tmpVgpr,
+                                comment="optSharedColVgpr scaleToBpe for first row: col addr <- cinRowPtr + coord0, scaled by BPE")
         else:
             # Generate final address calculation (to bytes) for each element
             # The unpacking takes 8-10 instructions so could be worth optimizing someday :
@@ -611,15 +617,15 @@ class AddrCalculation:
                 module.add(self.emitExtractAndScalePackedDims(kernel, ss, tmpVgpr, tc))
             else:
                 updatedAddr = True
-                module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe, \
-                            comment="scaleToBpe: accumulate d0 lower and *= bpe into Cin addr"))
+                self.vectorAddMultiplyStoreBpe(module, kw, addrVgpr, rowPtr, elementVgpr, bpe, tmpVgpr, \
+                            comment="scaleToBpe: accumulate d0 lower and *= bpe into Cin addr")
 
         # if not optSrdIncForRow then we may have moved the row pointer
         # and depending on paths above may not have refreshed addrVgpr already.
         # if so - do it here:
         if self.rowIncDirtyRowPtr and not updatedAddr:
-            module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, kw.vgprs.coord0, bpe, \
-                        comment="scaleToBpe: Update address with new rowPtr"))
+            self.vectorAddMultiplyStoreBpe(module, kw, addrVgpr, rowPtr, kw.vgprs.coord0, bpe, tmpVgpr, \
+                        comment="scaleToBpe: Update address with new rowPtr")
 
         return module
 
