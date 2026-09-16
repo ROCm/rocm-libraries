@@ -1,0 +1,94 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# DESIGNED config — gfx1250 F32X TN SIA0 (ScheduleIterAlg=0) PGR2 non-TDM GEMM.
+#
+# Characterizes the SIA0 PrefetchGlobalRead=2 global-read / local-write placement
+# and tail local-read reset that the rest of the char matrix never reaches (every
+# other designed config pins ScheduleIterAlg: [3]; the subtile configs use the
+# LogicalScheduler and bypass the legacy SIA emission entirely).
+#
+# This is the exact knob #8417 ("Fix SIA0 PGR2 global-read placement") modifies,
+# in the legacy (non-subtile) emission path:
+#
+#   Components/SIA.py:noSchedGlobalRead
+#     PGR2 global-read-inc placement: iter 0 (pre-fix) vs the local-write
+#     iteration (post-fix), gated on _ScheduleIterAlg == 0 and non-TDM.
+#
+#   KernelWriter.py tail local-read reset
+#     "Tail: local read reset offsets a/b" emitted for SIA0 non-TDM via the new
+#     `not (enableTDMA and enableTDMB)` clause. With ScheduleIterAlg=0, StreamK=0
+#     and TDMInst=0, the pre-fix condition (`_ScheduleIterAlg != 0 or StreamK`)
+#     is False, so the reset appears ONLY after #8417 — a clean binary flip.
+#
+# Derived from the F32X TN problem in
+# Tests/common/gemm/gfx12/xfp32_gfx1250.yaml, which the #8417 author lists among
+# the configs whose codegen changed. Reduced to a single MI shape / size so emit
+# stays cheap; ScheduleIterAlg pinned to [0] (the xfp32 source forks [0, 1]).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  Device: 0
+  PrintSolutionRejectionReason: False
+
+BenchmarkProblems:
+  ########################################
+  # F32X TN, SIA0 PGR2 non-TDM
+  # Bias + Activation(hipblaslt_all) + ScaleAB + ScaleAlphaVec
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 1
+      Activation: True
+      UseScaleAB: Scalar
+      UseScaleAlphaVec: 1
+      BiasDataTypeList: ['s']
+      ActivationType: hipblaslt_all
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - ScheduleIterAlg: [0]
+        - TDMInst: [0]
+        - StreamK: [0]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [true]
+        - DirectToVgprA: [False]
+        - StoreVectorWidth: [-1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127, 127, 1, 127]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
