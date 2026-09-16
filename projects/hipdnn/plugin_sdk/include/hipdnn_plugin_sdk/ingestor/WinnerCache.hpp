@@ -12,9 +12,9 @@
 #include <optional>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceKey.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 
 namespace hipdnn_plugin_sdk::ingestor
@@ -42,7 +42,7 @@ using WinnerRecord = std::vector<RankedEntry>;
 /// a record, which is why the coverage gate exists.
 struct WinnerKey
 {
-    GraphContentKey graph;
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
     DeviceKey device;
 
     bool operator==(const WinnerKey& other) const
@@ -60,11 +60,23 @@ struct WinnerKeyHash
 {
     size_t operator()(const WinnerKey& key) const noexcept
     {
-        const size_t graphHash = std::hash<GraphContentKey>{}(key.graph);
+        const size_t graphHash
+            = std::hash<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey>{}(key.graph);
         const size_t deviceHash = std::hash<DeviceKey>{}(key.device);
         return graphHash
                ^ (deviceHash + 0x9e3779b97f4a7c15ULL + (graphHash << 6) + (graphHash >> 2));
     }
+};
+
+/// Why a benchmarked ranking is being written back, which is what separates the two rules
+/// below: a fresh miss adopts an existing entry for the key, and a re-benchmark triggered
+/// by a record that did not cover the current candidates appends a superseding line.
+enum class WinnerWriteCause
+{
+    /// No record existed for this key when the plan was built.
+    FRESH_MISS,
+    /// A record existed but was not usable for the current candidate set, so it was re-measured.
+    COVERAGE_REBENCHMARK,
 };
 
 /// Does @p record carry a measurement for every kernel in @p kernels? One-directional:

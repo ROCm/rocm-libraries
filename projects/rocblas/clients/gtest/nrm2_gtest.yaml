@@ -129,6 +129,9 @@ Tests:
       - { N: 2147483649, incx: 1, batch_count: 1 }
       - { N: 2, incx: 2147483649, batch_count: 1 }
       - { N: 2, incx: -2147483649, batch_count: 1 } # quick return
+      # The _64 dispatcher chunks the batch at c_i64_grid_YZ_chunk, which is under the
+      # grid z cap, so every launcher call it makes sweeps exactly once. Coverage of
+      # the kernel's own batch sweep is int32 and lives in blas1_large_batch below.
       - { N: 3, incx: 1, stride_x: 3, batch_count: *c_grid_yz_require_passes }
     api: [ C_64 ]
     os_flags: [ LINUX ]
@@ -211,10 +214,19 @@ Tests:
       - nrm2_strided_batched: *single_double_precisions_complex_real
       - nrm2_strided_batched_ex: *nrm2_ex_precisions
 
+# int32 with a batch_count past the grid z cap, so the kernel takes its own batch sweep
+# more than once. N of 2 alone cannot tell an element index that restarts on each pass
+# from one that carries over; the larger sizes give it real trip counts either side of
+# the single-block edge. nrm2 already restates that index, so this is defence and not a
+# fix, but the same defect in dot survived because every case here sat at N of 2 or 3.
+# N of 4097 is the widest, at about 1.1 GB of device operand.
   - name: blas1_large_batch
     category: stress
     arguments:
       - { N: 2, incx: 1, stride_x: 2, batch_count: *c_grid_yz_require_passes }
+      - { N: 1025, incx: 1, stride_x: 1025, batch_count: *c_grid_yz_require_passes }
+      - { N: 4097, incx: 1, stride_x: 4097, batch_count: *c_grid_yz_require_passes }
+      - { N: 1025, incx: 2, stride_x: 2050, batch_count: *c_grid_yz_require_passes }
     function:
       - nrm2_batched: *single_precision
       - nrm2_strided_batched: *single_precision

@@ -110,12 +110,21 @@ rocke_dgrad_conv_spec_t rocke_dgrad_conv_spec_default(void)
     s.chiplet_chunk_size = 64;
     s.acc_epilogue = rocke_conv_acc_epilogue_default();
     s.split_k = 1;
+    s.num_load_waves = 4;
     return s;
 }
 
 int rocke_dgrad_conv_spec_block_size(const rocke_dgrad_conv_spec_t* s)
 {
     return s->warp_m * s->warp_n * s->wave_size;
+}
+
+int rocke_dgrad_conv_spec_launch_block_size(const rocke_dgrad_conv_spec_t* s)
+{
+    int bs = rocke_dgrad_conv_spec_block_size(s);
+    if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0)
+        return bs + s->num_load_waves * s->wave_size;
+    return bs;
 }
 
 int rocke_dgrad_conv_spec_k_atoms_per_tile_k(const rocke_dgrad_conv_spec_t* s)
@@ -193,15 +202,24 @@ rocke_status_t
                      s->warp_tile_k,
                      s->pipeline ? s->pipeline : "mem",
                      s->epilogue ? s->epilogue : "default");
-    if(s->split_k > 1)
-    {
-        int pos = n;
-        n += snprintf(out + pos, out_cap - pos, "_spk%d", s->split_k);
-    }
+    /* Flag order must match Python's kernel_name_join flags dict:
+     * async, kouter, spk. C previously emitted spk before async, which only
+     * diverged for a spec setting both -- none exists -- but the K-outer flag
+     * sits between them, so the order is now load-bearing. */
     if(s->async_dma)
     {
         int pos = n;
         n += snprintf(out + pos, out_cap - pos, "_async");
+    }
+    if(s->lds_k_outer)
+    {
+        int pos = n;
+        n += snprintf(out + pos, out_cap - pos, "_kouter");
+    }
+    if(s->split_k > 1)
+    {
+        int pos = n;
+        n += snprintf(out + pos, out_cap - pos, "_spk%d", s->split_k);
     }
     if(n >= (int)out_cap)
         return ROCKE_ERR_VALUE;
@@ -368,25 +386,89 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
         return false;
     }
 
-    /* WMMA-specific restrictions (Python: family == "wmma" block). */
-    if(strcmp(family, "wmma") == 0)
+    /* wavelet-specific checks (Python: spec.pipeline == "wavelet" block). */
+    bool is_wavelet = (s->pipeline && strcmp(s->pipeline, "wavelet") == 0);
+    if(is_wavelet)
     {
-        if(s->warp_tile_m != 16 || s->warp_tile_n != 16 || s->warp_tile_k != 16)
+        if(s->num_load_waves < 1)
+        {
+            snprintf(reason, reason_cap, "pipeline='wavelet' requires num_load_waves >= 1");
+            return false;
+        }
+        if(strcmp(family, "wmma") != 0)
         {
             snprintf(reason,
                      reason_cap,
-                     "WMMA dgrad supports only 16x16x16 (got %dx%dx%d) on %s",
+                     "pipeline='wavelet' is WMMA/gfx1250 only: on MFMA targets "
+                     "the single-buffer LDS is overwritten each K iteration and load/math "
+                     "waves execute sequentially rather than truly concurrently.");
+            return false;
+        }
+        if(s->async_dma)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "pipeline='wavelet' is incompatible with async_dma=True: "
+                     "the wavelet loaders are only constructed in the non-async branch "
+                     "and a_wavelet_loader/b_wavelet_loader would be None at fetch time.");
+            return false;
+        }
+        int mfmas_m = s->tile_m / (_max(s->warp_m * s->warp_tile_m, 1));
+        int mfmas_n = s->tile_n / (_max(s->warp_n * s->warp_tile_n, 1));
+        int dg_K = rocke_dgrad_conv_spec_dg_K(s);
+        int k_iters = _ceil_div(dg_K, _max(s->tile_k, 1));
+        int wmma_cost = k_iters * mfmas_m * mfmas_n;
+        const int WMMA_COST_LIMIT = 4096;
+        if(wmma_cost > WMMA_COST_LIMIT)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "pipeline='wavelet' unrolled WMMA count %d "
+                     "(K_iters=%d x mfmas=%dx%d) exceeds compile-time limit %d; "
+                     "reduce tile_k, tile_m, or tile_n",
+                     wmma_cost,
+                     k_iters,
+                     mfmas_m,
+                     mfmas_n,
+                     WMMA_COST_LIMIT);
+            return false;
+        }
+        int launch_bs = rocke_dgrad_conv_spec_launch_block_size(s);
+        if(launch_bs > max_tpb)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "launch_block_size %d > %d (hardware cap) on %s",
+                     launch_bs,
+                     max_tpb,
+                     arch);
+            return false;
+        }
+    }
+
+    /* WMMA-specific restrictions (Python: family == "wmma" block). */
+    if(strcmp(family, "wmma") == 0)
+    {
+        /* gfx1250 supports 16x16x16 and 16x16x32; other WMMA supports only 16x16x16.
+         * Both atoms are valid for both "mem" and "wavelet" pipelines. */
+        bool atom_ok = (s->warp_tile_m == 16 && s->warp_tile_n == 16
+                        && (s->warp_tile_k == 16 || s->warp_tile_k == 32));
+        if(!atom_ok)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "WMMA dgrad supports 16x16x16 or 16x16x32 (got %dx%dx%d) on %s",
                      s->warp_tile_m,
                      s->warp_tile_n,
                      s->warp_tile_k,
                      arch);
             return false;
         }
-        if(strcmp(s->pipeline, "mem") != 0)
+        if(strcmp(s->pipeline, "mem") != 0 && strcmp(s->pipeline, "wavelet") != 0)
         {
             snprintf(reason,
                      reason_cap,
-                     "WMMA dgrad supports only the 'mem' pipeline (got %s) on %s",
+                     "WMMA dgrad supports only 'mem' or 'wavelet' pipeline (got %s) on %s",
                      s->pipeline,
                      arch);
             return false;
@@ -400,13 +482,103 @@ bool rocke_dgrad_conv_is_valid_spec(const rocke_dgrad_conv_spec_t* s,
                      arch);
             return false;
         }
-        if(s->async_dma || s->unroll_k || s->chiplet_swizzle || s->split_k > 1)
+        bool split_k_bad = (s->split_k > 1 && !is_wavelet);
+        if(s->async_dma || s->unroll_k || s->chiplet_swizzle || split_k_bad)
         {
-            snprintf(
-                reason,
-                reason_cap,
-                "WMMA dgrad does not support async_dma/unroll_k/chiplet_swizzle/split_k>1 on %s",
-                arch);
+            snprintf(reason,
+                     reason_cap,
+                     "WMMA dgrad does not support async_dma/unroll_k/chiplet_swizzle"
+                     "/split_k>1 (non-wavelet) on %s",
+                     arch);
+            return false;
+        }
+    }
+
+    /* K-outer transpose-read gates. Mirrors the DgradConvSpec.validate() and
+     * is_valid_dgrad_spec blocks; asymmetric on purpose (dtype_b/warp_tile_n
+     * only) because just the B tile flips. */
+    if(s->lds_k_outer)
+    {
+        /* Two regimes: gfx950 wave64 MFMA (ds_read_b64_tr_b16) and gfx1250
+         * wave32 WMMA (ds_load_tr16_b128). The arch and the wave must agree or
+         * the lane formula addresses a layout the hardware does not implement. */
+        const bool k_outer_950 = (strcmp(arch, "gfx950") == 0);
+        const bool k_outer_1250 = (strcmp(arch, "gfx1250") == 0);
+        if(!k_outer_950 && !k_outer_1250)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer requires gfx950 or gfx1250 (the LDS transpose "
+                     "read); got %s",
+                     arch);
+            return false;
+        }
+        const int want_wave = k_outer_950 ? 64 : 32;
+        if(s->wave_size != want_wave)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer on %s requires wave_size=%d; got %d",
+                     arch,
+                     want_wave,
+                     s->wave_size);
+            return false;
+        }
+        if(!(s->dtype_b && (strcmp(s->dtype_b, "bf16") == 0 || strcmp(s->dtype_b, "fp16") == 0)))
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer requires a 16-bit B dtype (ds_read_tr16_b64 is a "
+                     "16-bit transpose read); got dtype_b=%s",
+                     s->dtype_b ? s->dtype_b : "(null)");
+            return false;
+        }
+        if(s->wave_size == 32)
+        {
+            /* One atom in the wave32 regime: gfx1250 WMMA 16x16x32. */
+            if(s->warp_tile_n != 16 || s->warp_tile_k != 32)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on wave32 supports only the 16x16x32 atom "
+                         "(got %dx%dx%d)",
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
+                return false;
+            }
+        }
+        else if(s->warp_tile_n != 16 && s->warp_tile_n != 32)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer requires warp_tile_n in (16, 32); got %d",
+                     s->warp_tile_n);
+            return false;
+        }
+        if(s->lds_layout != NULL)
+        {
+            snprintf(reason, reason_cap, "lds_k_outer does not honour an explicit lds_layout");
+            return false;
+        }
+        if(s->async_dma)
+        {
+            snprintf(reason, reason_cap, "lds_k_outer is not supported with async_dma on dgrad");
+            return false;
+        }
+        /* Same shape of problem as async_dma: the alternate load path does not
+         * implement the K-outer tile. build_wavelet_loaders pins the B tile to
+         * (block_n, block_k) and takes the unswapped descriptor, so it writes
+         * M-outer into a K-outer allocation -- wrong row stride for every
+         * element, and out of bounds past B_smem when tile_n > tile_k.
+         * Matches Python is_valid_dgrad_spec and validate(). */
+        if(is_wavelet)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "lds_k_outer is not supported with pipeline='wavelet' on dgrad "
+                     "(the wavelet loader writes the B tile M-outer into a K-outer "
+                     "allocation)");
             return false;
         }
     }
@@ -1119,6 +1291,11 @@ struct tilde_dy_ctx_t
     rocke_value_t* c_Wo;
     rocke_value_t* c_K; // K_conv — innermost divisor in k_dg decomposition
     rocke_value_t* c0;
+    /* Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path -- mirrors the
+     * Python dy_descriptor. dg_M is N*Ho*Wo, materialised inside the descriptor
+     * at the same point Python creates it so the IR order matches. */
+    bool is_pointwise;
+    int dg_M;
 };
 
 static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
@@ -1130,6 +1307,21 @@ static rocke_value_t* _tilde_dy_descriptor(rocke_ir_builder_t* b_,
     tilde_dy_ctx_t* ctx = (tilde_dy_ctx_t*)user;
     rocke_value_t* m_sub = rocke_b_add(b_, ctx->block_m_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
+
+    // Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path. The tilde
+    // decomposition is the identity here, so the offset reduces exactly to
+    // m_sub*K + k_sub. Mirrors Python dy_descriptor.
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* pw_off = rocke_b_add(b_, rocke_b_mul(b_, m_sub, ctx->c_K), k_sub);
+        if(out_valid)
+        {
+            rocke_value_t* m_ok = rocke_b_cmp_lt(b_, m_sub, rocke_b_const_i32(b_, ctx->dg_M));
+            rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_sub, ctx->c_K);
+            *out_valid = rocke_b_land(b_, m_ok, k_ok);
+        }
+        return pw_off;
+    }
 
     // k_out innermost (CK-compatible): k_sub = ydot*xdot_slice*K + xdot*K + k_out
     // Consecutive k_sub → consecutive k_out → contiguous in dY (NHWK, last dim K).
@@ -1185,6 +1377,8 @@ struct tilde_w_ctx_t
     rocke_value_t* c_K;
     rocke_value_t* c_C;
     rocke_value_t* c0;
+    /* Pointwise fast path -- mirrors the Python w_descriptor. */
+    bool is_pointwise;
 };
 
 static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
@@ -1196,6 +1390,20 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     tilde_w_ctx_t* ctx = (tilde_w_ctx_t*)user;
     rocke_value_t* c_val = rocke_b_add(b_, ctx->block_n_off, row);
     rocke_value_t* k_sub = rocke_b_add(b_, ctx->k_off, col);
+
+    // Pointwise fast path: Y == X == 1 means KYXC is just [K, cpg], so the
+    // offset is k_sub*C + c_val. Must stay in lockstep with the dy fast path.
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* pw_off = rocke_b_add(b_, rocke_b_mul(b_, k_sub, ctx->c_C), c_val);
+        if(out_valid)
+        {
+            rocke_value_t* k_ok = rocke_b_cmp_lt(b_, k_sub, ctx->c_K);
+            rocke_value_t* c_ok = rocke_b_cmp_lt(b_, c_val, ctx->c_C);
+            *out_valid = rocke_b_land(b_, k_ok, c_ok);
+        }
+        return pw_off;
+    }
 
     // Same k_out-innermost decomposition as _tilde_dy_descriptor (must match).
     // c (row axis) is stride-1 in KYXC; vectorised loads along c use vector_axis_row=true.
@@ -1223,6 +1431,19 @@ static rocke_value_t* _tilde_w_descriptor(rocke_ir_builder_t* b_,
     if(out_valid)
         *out_valid = valid;
     return safe_offset;
+}
+
+/* K-outer coordinate swap: the K-outer tile is indexed (k, free) while
+ * _tilde_w_descriptor takes (free, k). The descriptor itself is untouched, so
+ * the global addressing and its OOB select stay byte-identical -- this is a
+ * swap, not a redesign. Mirrors _b_desc_fn in conv_implicit_gemm_dgrad.py. */
+static rocke_value_t* _tilde_w_descriptor_kouter(rocke_ir_builder_t* b_,
+                                                 rocke_value_t* row,
+                                                 rocke_value_t* col,
+                                                 rocke_value_t** out_valid,
+                                                 void* user)
+{
+    return _tilde_w_descriptor(b_, col, row, out_valid, user);
 }
 
 // ===========================================================================
@@ -1640,8 +1861,10 @@ static rocke_kernel_def_t*
     grid.wave_size = spec->wave_size;
 
     int block_size = rocke_dgrad_conv_spec_block_size(spec);
+    bool is_wavelet = (spec->pipeline && strcmp(spec->pipeline, "wavelet") == 0);
+    int launch_block_size = rocke_dgrad_conv_spec_launch_block_size(spec);
     if(b->kernel)
-        rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", block_size);
+        rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", launch_block_size);
 
     rocke_value_t* wave = rocke_b_const_i32(b, spec->wave_size);
     rocke_value_t* c_warps_n = rocke_b_const_i32(b, spec->warp_n);
@@ -1715,7 +1938,13 @@ static rocke_kernel_def_t*
     // ---- LDS ----
     rocke_conv_lds_layout_t lds_layout = _dgrad_effective_lds_layout(spec);
     int a_shape[2] = {block_m, lds_layout.row_stride};
+    /* A stays M-outer; only B flips. Mirrors the Python branch. */
     int b_shape_arr[2] = {block_n, lds_layout.row_stride};
+    if(spec->lds_k_outer)
+    {
+        b_shape_arr[0] = block_k;
+        b_shape_arr[1] = block_n + ROCKE_DGRAD_KOUTER_PAD;
+    }
     rocke_value_t* A_smem = rocke_b_smem_alloc(b, ab_ir, a_shape, 2, "A_smem");
     rocke_value_t* B_smem = rocke_b_smem_alloc(b, ab_ir, b_shape_arr, 2, "B_smem");
 
@@ -1795,9 +2024,49 @@ static rocke_kernel_def_t*
                             "dgrad tilde: no usable free-axis load_vec for B tile geometry");
             return NULL;
         }
-        if(spec->has_vector_size_b)
+        if(spec->lds_k_outer)
         {
-            load_vec_b = spec->vector_size_b;
+            /* Recompute in col mode over the swapped tile. choose_vec tests
+             * tile_rows in row mode and tile_cols in col mode, so both calls
+             * test the same extent against the same product: load_vec_b is
+             * invariant under the swap and only the LDS store changes. */
+            int cap = spec->has_vector_size_b
+                          ? (spec->vector_size_b < max_from_C ? spec->vector_size_b : max_from_C)
+                          : max_from_C;
+            int chosen_ko = 1;
+            rocke_status_t st_ko = rocke_coalesced_tile_loader_choose_vec_axis(
+                block_k, block_n, threads, cap, false, &chosen_ko);
+            if(st_ko != ROCKE_OK)
+            {
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "dgrad tilde: no usable K-outer load_vec for B tile geometry");
+                return NULL;
+            }
+            load_vec_b = chosen_ko;
+            axis_b_row = false;
+        }
+        else if(spec->has_vector_size_b)
+        {
+            /* Clamp, exactly as the K-outer branch above does. vector_size_* is
+             * a CAP, not a demand, so an explicit width wider than the tile
+             * geometry supports must be narrowed rather than obeyed. Taking it
+             * verbatim let a spec pass validation and then fail inside the
+             * coalesced tile loader. Emission-neutral: choose_vec's accepted
+             * set is a strict subset of vecs_per_thread's, so this yields
+             * exactly spec->vector_size_b wherever the verbatim path built. */
+            int cap_mo = spec->vector_size_b < max_from_C ? spec->vector_size_b : max_from_C;
+            int chosen_mo = 1;
+            rocke_status_t st_mo = rocke_coalesced_tile_loader_choose_vec_axis(
+                block_n, block_k, threads, cap_mo, true, &chosen_mo);
+            if(st_mo != ROCKE_OK)
+            {
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "dgrad tilde: no usable free-axis load_vec for B tile geometry");
+                return NULL;
+            }
+            load_vec_b = chosen_mo;
             axis_b_row = (load_vec_b > 1);
         }
         else if(chosen > 1)
@@ -1819,8 +2088,8 @@ static rocke_kernel_def_t*
     a_sync_loader.inner_dim = 0;
 
     rocke_coalesced_tile_loader_t b_sync_loader;
-    b_sync_loader.tile_rows = block_n;
-    b_sync_loader.tile_cols = block_k;
+    b_sync_loader.tile_rows = spec->lds_k_outer ? block_k : block_n;
+    b_sync_loader.tile_cols = spec->lds_k_outer ? block_n : block_k;
     b_sync_loader.block_size = threads;
     b_sync_loader.load_vec = load_vec_b;
     b_sync_loader.use_buffer_rsrc = true;
@@ -1828,6 +2097,45 @@ static rocke_kernel_def_t*
     b_sync_loader.vector_axis_row = axis_b_row;
     b_sync_loader.has_inner_dim = false;
     b_sync_loader.inner_dim = 0;
+
+    // ---- wavelet loaders (pipeline="wavelet" only) ----
+    rocke_coalesced_tile_loader_t a_wavelet_loader;
+    rocke_coalesced_tile_loader_t b_wavelet_loader;
+    rocke_value_t* wavelet_is_math = NULL;
+    rocke_value_t* wavelet_load_tid = NULL;
+    int wavelet_epi_barriers = 0;
+    int wavelet_K_iters = 0;
+    if(is_wavelet)
+    {
+        int load_threads = spec->num_load_waves * spec->wave_size;
+        rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
+            block_m, block_k, load_threads, load_vec_a, true, &a_wavelet_loader);
+        rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
+            block_n, block_k, load_threads, load_vec_b, true, &b_wavelet_loader);
+        if(sa != ROCKE_OK || sb != ROCKE_OK)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "dgrad: wavelet tile loader from_tile failed");
+            return NULL;
+        }
+        int n_math_warps = spec->warp_m * spec->warp_n;
+        rocke_value_t* c_nmath = rocke_b_const_i32(b, n_math_warps);
+        rocke_value_t* warp_id_s = rocke_b_readfirstlane(b, warp_id);
+        wavelet_is_math = rocke_b_cmp_lt(b, warp_id_s, c_nmath);
+        wavelet_load_tid = rocke_b_sub(b, tid, rocke_b_const_i32(b, block_size));
+
+        /* epi_barriers mirrors compute_wavelet_epi_barriers(spec.epilogue, no_alias).
+         * no_alias=true for wavelet (A/B live across both branches). */
+        bool no_alias = true;
+        const int war_barriers = 2;
+        bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+        wavelet_epi_barriers = use_cshuffle ? (no_alias ? 0 : war_barriers) + 1 : 0;
+
+        /* K_iters uses dg_K_padded (worst-case across sub-GEMMs) so it is a
+         * compile-time constant that wavelet can unroll. */
+        int dg_K_padded = rocke_dgrad_conv_spec_dg_K_padded(spec);
+        int slice_k = (spec->split_k <= 1) ? dg_K_padded : (dg_K_padded / spec->split_k);
+        wavelet_K_iters = _ceil_div(slice_k, block_k);
+    }
 
     tilde_dy_ctx_t dy_tctx;
     dy_tctx.block_m_off = block_m_off_v;
@@ -1843,6 +2151,8 @@ static rocke_kernel_def_t*
     dy_tctx.c_Wo = c_Wo;
     dy_tctx.c_K = c_K;
     dy_tctx.c0 = c0;
+    dy_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
+    dy_tctx.dg_M = p->N * rocke_conv_problem_ho(p) * rocke_conv_problem_wo(p);
 
     tilde_w_ctx_t w_tctx;
     w_tctx.block_n_off = block_n_off_v;
@@ -1857,10 +2167,343 @@ static rocke_kernel_def_t*
     w_tctx.c_K = c_K;
     w_tctx.c_C = c_C;
     w_tctx.c0 = c0;
+    w_tctx.is_pointwise = rocke_conv_problem_is_pointwise(p) && p->groups <= 1;
 
     // ---- schedule ----
     rocke_schedule_policy_t schedule = rocke_schedule_policy_for_pipeline(b, spec->pipeline);
     rocke_schedule_policy_emit_prologue(&schedule, b);
+
+    /* Hoisted lane constants for the K-outer transpose read. Guarded because
+     * unconditional emission would add ops to every existing dgrad config and
+     * move every dgrad golden. Emitted here to match Python's position in the
+     * instruction stream (immediately after the schedule prologue). */
+    rocke_value_t* tr_lane_mod4 = NULL;
+    rocke_value_t* tr_grp16 = NULL;
+    /* Element type for the transpose read -- see rocke_conv_tr_elem_dtype.
+     * Type selection only, emits no IR, so it is computed unconditionally. */
+    const rocke_type_t* tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
+    if(spec->lds_k_outer && spec->wave_size == 64)
+    {
+        /* Python: b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) -- evaluated
+         * strictly left-to-right. C argument order is unspecified, so sequence
+         * every operand into a temporary or the SSA numbering drifts. */
+        rocke_value_t* c4a = rocke_b_const_i32(b, 4);
+        rocke_value_t* m4 = rocke_b_mod(b, lane, c4a);
+        rocke_value_t* c4b = rocke_b_const_i32(b, 4);
+        tr_lane_mod4 = rocke_b_mul(b, m4, c4b);
+
+        /* Python: b.div(b.mod(lane, b.const_i32(16)), b.const_i32(4)) */
+        rocke_value_t* c16 = rocke_b_const_i32(b, 16);
+        rocke_value_t* m16 = rocke_b_mod(b, lane, c16);
+        rocke_value_t* c4c = rocke_b_const_i32(b, 4);
+        tr_grp16 = rocke_b_div(b, m16, c4c);
+    }
+
+    // ---- helper lambda-equivalent: emit WMMA phase from LDS into accs ----
+    // Used by both the wavelet and standard K-loop paths.
+    auto emit_wmma_phase = [&](rocke_value_t* A_src,
+                               rocke_value_t* B_src,
+                               rocke_value_t* const* in_accs,
+                               rocke_value_t** out_accs) {
+        const rocke_arch_layout_map_t* a_map = rocke_mmaop_a_layout(op, b);
+        const rocke_arch_layout_map_t* b_map = rocke_mmaop_b_layout(op, b);
+        rocke_value_t* a_row_in_atom = NULL;
+        rocke_value_t* a_k_in_atom = NULL;
+        rocke_value_t* b_k_in_atom = NULL;
+        rocke_value_t* b_col_in_atom = NULL;
+        rocke_arch_layout_map_coord(a_map, b, lane, 0, &a_row_in_atom, &a_k_in_atom);
+        rocke_arch_layout_map_coord(b_map, b, lane, 0, &b_k_in_atom, &b_col_in_atom);
+        rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, &grid);
+        rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, &grid);
+        rocke_value_t* a_rows[ROCKE_CONV_MAX_ACCS];
+        rocke_value_t* b_wma_cols[ROCKE_CONV_MAX_ACCS];
+        for(int i = 0; i < num_accs; i++)
+            out_accs[i] = in_accs[i];
+        for(int kk = 0; kk < k_atoms; kk++)
+        {
+            rocke_value_t* k_tile_base = rocke_b_const_i32(b, kk * spec->warp_tile_k);
+            for(int mi = 0; mi < mfmas_m; mi++)
+            {
+                rocke_value_t* atom_row
+                    = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
+                a_rows[mi] = rocke_conv_emit_frag_smem_load(
+                    b, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, a_per_lane);
+            }
+            for(int ni = 0; ni < mfmas_n; ni++)
+            {
+                rocke_value_t* atom_row
+                    = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
+                if(spec->lds_k_outer)
+                {
+                    /* B only: dgrad's A tile is genuinely still M-outer. This
+                     * branch existed in the MFMA phase but not here, so a
+                     * wave32 K-outer dgrad silently fell back to ordinary
+                     * M-outer smem loads in the C engine while Python emitted
+                     * the transpose read -- there was no gfx1250 dgrad parity
+                     * config to catch the divergence. */
+                    b_wma_cols[ni] = rocke_conv_tr_frag(b,
+                                                        lane,
+                                                        tr_lane_mod4,
+                                                        tr_grp16,
+                                                        B_src,
+                                                        atom_row,
+                                                        k_tile_base,
+                                                        spec->warp_tile_n,
+                                                        b_per_lane,
+                                                        spec->wave_size,
+                                                        tr_dtype);
+                    continue;
+                }
+                b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(
+                    b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane);
+            }
+            int flat2 = 0;
+            for(int mi = 0; mi < mfmas_m; mi++)
+                for(int ni = 0; ni < mfmas_n; ni++)
+                {
+                    out_accs[flat2] = rocke_b_mma(
+                        b, op->op_id, a_rows[mi], b_wma_cols[ni], out_accs[flat2], NULL, 0);
+                    flat2++;
+                }
+        }
+    };
+
+    // ---- helper: dispatch dgrad epilogue ----
+    auto dispatch_dgrad_epilogue = [&](rocke_value_t* const* epi_accs_, int n_epi) {
+        bool is_split_k_atomic_ = (spec->split_k > 1);
+        bool is_strided_ = rocke_dgrad_conv_spec_is_strided(spec);
+        if(!is_split_k_atomic_ && !is_strided_)
+        {
+            if(is_wmma)
+            {
+                bool use_cshuffle_ = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+                if(use_cshuffle_)
+                    _emit_dgrad_direct_epilogue(b, spec, epi_accs_, n_epi, &grid, dx_rsrc);
+                else
+                    _emit_dgrad_direct_epilogue_wmma(b,
+                                                     spec,
+                                                     op,
+                                                     epi_accs_,
+                                                     n_epi,
+                                                     warp_m_idx,
+                                                     warp_n_idx,
+                                                     lane,
+                                                     block_m_off_v,
+                                                     block_n_off_v,
+                                                     dx_rsrc,
+                                                     c0);
+            }
+            else
+            {
+                bool use_cshuffle_ = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+                if(use_cshuffle_)
+                    _emit_dgrad_cshuffle_epilogue(b, spec, epi_accs_, n_epi, &grid, dx_rsrc);
+                else
+                    _emit_dgrad_direct_epilogue(b, spec, epi_accs_, n_epi, &grid, dx_rsrc);
+            }
+        }
+        else if(!is_split_k_atomic_ && is_wmma)
+        {
+            _emit_dgrad_tilde_direct_epilogue_wmma(b,
+                                                   spec,
+                                                   op,
+                                                   epi_accs_,
+                                                   n_epi,
+                                                   warp_m_idx,
+                                                   warp_n_idx,
+                                                   lane,
+                                                   block_m_off_v,
+                                                   block_n_off_v,
+                                                   dx_rsrc,
+                                                   c0,
+                                                   rec_gemm_m,
+                                                   c_dg_N,
+                                                   hw_tilde,
+                                                   rec_w_tilde_slice,
+                                                   rec_d_h_stride,
+                                                   rec_d_h_offset,
+                                                   rec_d_w_stride,
+                                                   rec_d_w_offset,
+                                                   c_Hi,
+                                                   c_Wi,
+                                                   c_C);
+        }
+        else if(!is_split_k_atomic_ && !is_wmma && atom)
+        {
+            bool use_cshuffle_ = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
+            if(use_cshuffle_)
+                _emit_dgrad_tilde_cshuffle_epilogue(b,
+                                                    spec,
+                                                    atom,
+                                                    &grid,
+                                                    epi_accs_,
+                                                    n_epi,
+                                                    dx_rsrc,
+                                                    rec_gemm_m,
+                                                    c_dg_N,
+                                                    hw_tilde,
+                                                    rec_w_tilde_slice,
+                                                    rec_d_h_stride,
+                                                    rec_d_h_offset,
+                                                    rec_d_w_stride,
+                                                    rec_d_w_offset,
+                                                    c_Hi,
+                                                    c_Wi,
+                                                    c_C);
+            else
+                _emit_dgrad_tilde_direct_epilogue(b,
+                                                  spec,
+                                                  atom,
+                                                  &grid,
+                                                  epi_accs_,
+                                                  n_epi,
+                                                  dx_rsrc,
+                                                  rec_gemm_m,
+                                                  c_dg_N,
+                                                  hw_tilde,
+                                                  rec_w_tilde_slice,
+                                                  rec_d_h_stride,
+                                                  rec_d_h_offset,
+                                                  rec_d_w_stride,
+                                                  rec_d_w_offset,
+                                                  c_Hi,
+                                                  c_Wi,
+                                                  c_C);
+        }
+        else
+        {
+            _emit_dgrad_tilde_atomic_epilogue(b,
+                                              spec,
+                                              atom,
+                                              epi_accs_,
+                                              n_epi,
+                                              warp_m_idx,
+                                              warp_n_idx,
+                                              lane,
+                                              block_m_off_v,
+                                              block_n_off_v,
+                                              dX,
+                                              c_per_lane,
+                                              rec_gemm_m,
+                                              c_dg_N,
+                                              rec_h_tilde_slice,
+                                              rec_w_tilde_slice,
+                                              rec_d_h_stride,
+                                              rec_d_h_offset,
+                                              rec_d_w_stride,
+                                              rec_d_w_offset,
+                                              c_Hi,
+                                              c_Wi,
+                                              c_C);
+        }
+    };
+
+    // ---- wavelet K-loop (pipeline="wavelet", WMMA/gfx1250 only) ----
+    if(is_wavelet)
+    {
+        /* WMMA path: scf_if_else with a shared join block (gfx1250).
+         * Barrier protocol mirrors rocke_conv_emit_kloop_wavelet WMMA branch. */
+        rocke_ctl_staged_t a_staged;
+        rocke_ctl_staged_t b_staged;
+        rocke_if_else_t ife = rocke_b_scf_if_else(b, wavelet_is_math);
+
+        // ---- MATH WAVE branch ----
+        rocke_value_t* current_accs[ROCKE_CONV_MAX_ACCS];
+        rocke_value_t* new_accs_wv[ROCKE_CONV_MAX_ACCS];
+        for(int i = 0; i < num_accs; i++)
+            current_accs[i] = iter_args[i].init;
+
+        rocke_b_region_enter(b, ife.then_region);
+        {
+            rocke_b_sync(b); /* barrier_0 */
+            for(int it = 0; it < wavelet_K_iters - 1; it++)
+            {
+                dy_tctx.k_off = rocke_b_const_i32(b, it * block_k);
+                w_tctx.k_off = rocke_b_const_i32(b, it * block_k);
+                emit_wmma_phase(A_smem, B_smem, current_accs, new_accs_wv);
+                for(int i = 0; i < num_accs; i++)
+                    current_accs[i] = new_accs_wv[i];
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_sync(b); /* barrier_B */
+            }
+            /* tail MFMA -- no barriers */
+            dy_tctx.k_off = rocke_b_const_i32(b, (wavelet_K_iters - 1) * block_k);
+            w_tctx.k_off = rocke_b_const_i32(b, (wavelet_K_iters - 1) * block_k);
+            emit_wmma_phase(A_smem, B_smem, current_accs, new_accs_wv);
+            for(int i = 0; i < num_accs; i++)
+                current_accs[i] = new_accs_wv[i];
+
+            /* epilogue (inside math branch, no iter-var yield) */
+            rocke_value_t* epi_accs[ROCKE_CONV_MAX_ACCS];
+            rocke_conv_apply_accumulator_epilogue(
+                b, &spec->acc_epilogue, current_accs, num_accs, epi_accs);
+            dispatch_dgrad_epilogue(epi_accs, num_accs);
+        }
+        rocke_b_region_leave(b);
+
+        // ---- LOAD WAVE branch ----
+        rocke_b_region_enter(b, ife.else_region);
+        {
+            /* fetch tile 0 -> regs, store -> LDS, barrier_0 */
+            dy_tctx.k_off = c0;
+            w_tctx.k_off = c0;
+            rocke_coalesced_tile_loader_load_global(b,
+                                                    &a_wavelet_loader,
+                                                    wavelet_load_tid,
+                                                    _tilde_dy_descriptor,
+                                                    &dy_tctx,
+                                                    dy_rsrc,
+                                                    NULL,
+                                                    &a_staged);
+            rocke_coalesced_tile_loader_load_global(b,
+                                                    &b_wavelet_loader,
+                                                    wavelet_load_tid,
+                                                    _tilde_w_descriptor,
+                                                    &w_tctx,
+                                                    w_rsrc,
+                                                    NULL,
+                                                    &b_staged);
+            rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+            rocke_coalesced_tile_loader_store_lds(b, &a_wavelet_loader, A_smem, &a_staged);
+            rocke_coalesced_tile_loader_store_lds(b, &b_wavelet_loader, B_smem, &b_staged);
+            rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+            rocke_b_sync(b); /* barrier_0 */
+
+            for(int it = 0; it < wavelet_K_iters - 1; it++)
+            {
+                dy_tctx.k_off = rocke_b_const_i32(b, (it + 1) * block_k);
+                w_tctx.k_off = rocke_b_const_i32(b, (it + 1) * block_k);
+                rocke_coalesced_tile_loader_load_global(b,
+                                                        &a_wavelet_loader,
+                                                        wavelet_load_tid,
+                                                        _tilde_dy_descriptor,
+                                                        &dy_tctx,
+                                                        dy_rsrc,
+                                                        NULL,
+                                                        &a_staged);
+                rocke_coalesced_tile_loader_load_global(b,
+                                                        &b_wavelet_loader,
+                                                        wavelet_load_tid,
+                                                        _tilde_w_descriptor,
+                                                        &w_tctx,
+                                                        w_rsrc,
+                                                        NULL,
+                                                        &b_staged);
+                rocke_b_sync(b); /* barrier_A */
+                rocke_b_s_waitcnt(b, 0, -1, -1); /* vmcnt=0 */
+                rocke_coalesced_tile_loader_store_lds(b, &a_wavelet_loader, A_smem, &a_staged);
+                rocke_coalesced_tile_loader_store_lds(b, &b_wavelet_loader, B_smem, &b_staged);
+                rocke_b_s_waitcnt(b, -1, 0, -1); /* lgkmcnt=0 */
+                rocke_b_sync(b); /* barrier_B */
+            }
+            /* epilogue stub: epi_barriers bare barriers matching math branch */
+            for(int i = 0; i < wavelet_epi_barriers; i++)
+                rocke_b_sync(b);
+        }
+        rocke_b_region_leave(b);
+
+        return b->kernel;
+    }
 
     // ---- K loop (simple scf.for_iter) ----
     rocke_for_t for_op
@@ -1879,8 +2522,15 @@ static rocke_kernel_def_t*
 
         rocke_coalesced_tile_loader_load(
             b, &a_sync_loader, tid, A_smem, _tilde_dy_descriptor, &dy_tctx, dy_rsrc, NULL);
-        rocke_coalesced_tile_loader_load(
-            b, &b_sync_loader, tid, B_smem, _tilde_w_descriptor, &w_tctx, w_rsrc, NULL);
+        rocke_coalesced_tile_loader_load(b,
+                                         &b_sync_loader,
+                                         tid,
+                                         B_smem,
+                                         spec->lds_k_outer ? _tilde_w_descriptor_kouter
+                                                           : _tilde_w_descriptor,
+                                         &w_tctx,
+                                         w_rsrc,
+                                         NULL);
         rocke_b_sync(b);
 
         // MFMA phase
@@ -1916,6 +2566,28 @@ static rocke_kernel_def_t*
                 rocke_value_t* b_cols[ROCKE_CONV_MAX_ACCS];
                 for(int ni = 0; ni < mfmas_n; ni++)
                 {
+                    if(spec->lds_k_outer)
+                    {
+                        /* Python skips the b_row computation entirely on this
+                         * path, so emitting it here would add ops the Python
+                         * engine never emits. Operands sequenced into
+                         * temporaries to preserve left-to-right evaluation. */
+                        rocke_value_t* mn_c = rocke_b_const_i32(b, ni * spec->warp_tile_n);
+                        rocke_value_t* mn_base = rocke_b_add(b, warp_n_off, mn_c);
+                        rocke_value_t* k_c = rocke_b_const_i32(b, kk * spec->warp_tile_k);
+                        b_cols[ni] = rocke_conv_tr_frag(b,
+                                                        lane,
+                                                        tr_lane_mod4,
+                                                        tr_grp16,
+                                                        B_smem,
+                                                        mn_base,
+                                                        k_c,
+                                                        spec->warp_tile_n,
+                                                        b_per_lane,
+                                                        spec->wave_size,
+                                                        tr_dtype);
+                        continue;
+                    }
                     rocke_value_t* b_row = rocke_b_add(
                         b,
                         warp_n_off,
@@ -1940,46 +2612,7 @@ static rocke_kernel_def_t*
         }
         else if(is_wmma)
         {
-            const rocke_arch_layout_map_t* a_map = rocke_mmaop_a_layout(op, b);
-            const rocke_arch_layout_map_t* b_map = rocke_mmaop_b_layout(op, b);
-            rocke_value_t* a_row_in_atom = NULL;
-            rocke_value_t* a_k_in_atom = NULL;
-            rocke_value_t* b_k_in_atom = NULL;
-            rocke_value_t* b_col_in_atom = NULL;
-            rocke_arch_layout_map_coord(a_map, b, lane, 0, &a_row_in_atom, &a_k_in_atom);
-            rocke_arch_layout_map_coord(b_map, b, lane, 0, &b_k_in_atom, &b_col_in_atom);
-            rocke_value_t* warp_m_off = rocke_warp_grid_warp_m_off(b, &grid);
-            rocke_value_t* warp_n_off = rocke_warp_grid_warp_n_off(b, &grid);
-            rocke_value_t* a_rows[ROCKE_CONV_MAX_ACCS];
-            rocke_value_t* b_wma_cols[ROCKE_CONV_MAX_ACCS];
-            for(int i = 0; i < num_accs; i++)
-                new_accs[i] = iter_vars[i];
-            for(int kk = 0; kk < k_atoms; kk++)
-            {
-                rocke_value_t* k_tile_base = rocke_b_const_i32(b, kk * spec->warp_tile_k);
-                for(int mi = 0; mi < mfmas_m; mi++)
-                {
-                    rocke_value_t* atom_row
-                        = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, mi * spec->warp_tile_m));
-                    a_rows[mi] = rocke_conv_emit_frag_smem_load(
-                        b, A_smem, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, a_per_lane);
-                }
-                for(int ni = 0; ni < mfmas_n; ni++)
-                {
-                    rocke_value_t* atom_row
-                        = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
-                    b_wma_cols[ni] = rocke_conv_emit_frag_smem_load(
-                        b, B_smem, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, b_per_lane);
-                }
-                int flat2 = 0;
-                for(int mi = 0; mi < mfmas_m; mi++)
-                    for(int ni = 0; ni < mfmas_n; ni++)
-                    {
-                        new_accs[flat2] = rocke_b_mma(
-                            b, op->op_id, a_rows[mi], b_wma_cols[ni], new_accs[flat2], NULL, 0);
-                        flat2++;
-                    }
-            }
+            emit_wmma_phase(A_smem, B_smem, iter_vars, new_accs);
         }
         else
         {
@@ -2003,153 +2636,7 @@ static rocke_kernel_def_t*
     rocke_conv_apply_accumulator_epilogue(b, &spec->acc_epilogue, final_accs, num_final, epi_accs);
 
     // ---- epilogue dispatch ----
-    bool is_split_k_atomic = (spec->split_k > 1);
-    bool is_strided = rocke_dgrad_conv_spec_is_strided(spec);
-    if(!is_split_k_atomic && !is_strided)
-    {
-        // stride=1, single sub-GEMM, split_k=1: direct store, no atomics.
-        if(is_wmma)
-        {
-            bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
-            if(use_cshuffle)
-            {
-                // WMMA cshuffle for stride=1: use the stride=1 dx descriptor.
-                // _emit_dgrad_direct_epilogue uses DirectEpilogue via stride=1
-                // descriptor — for cshuffle we need CShuffleEpilogue.from_grid_op.
-                // Reuse the existing tilde cshuffle helper with hw_tilde=1 (stride=1
-                // degenerates: htl=m_sub, wtl=0 → hi=m_sub*1+0, wi=0 which is wrong).
-                // Instead emit a proper stride=1 cshuffle via the wmma-aware helper.
-                _emit_dgrad_direct_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
-            }
-            else
-            {
-                _emit_dgrad_direct_epilogue_wmma(b,
-                                                 spec,
-                                                 op,
-                                                 epi_accs,
-                                                 num_final,
-                                                 warp_m_idx,
-                                                 warp_n_idx,
-                                                 lane,
-                                                 block_m_off_v,
-                                                 block_n_off_v,
-                                                 dx_rsrc,
-                                                 c0);
-            }
-        }
-        else
-        {
-            // MFMA, stride=1
-            bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
-            if(use_cshuffle)
-                _emit_dgrad_cshuffle_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
-            else
-                _emit_dgrad_direct_epilogue(b, spec, epi_accs, num_final, &grid, dx_rsrc);
-        }
-    }
-    else if(!is_split_k_atomic && is_wmma)
-    {
-        // WMMA + tilde (stride>1, split_k=1): disjoint writes — direct store safe.
-        // Both default and cshuffle use per-element stores (no LDS staging for WMMA tilde).
-        _emit_dgrad_tilde_direct_epilogue_wmma(b,
-                                               spec,
-                                               op,
-                                               epi_accs,
-                                               num_final,
-                                               warp_m_idx,
-                                               warp_n_idx,
-                                               lane,
-                                               block_m_off_v,
-                                               block_n_off_v,
-                                               dx_rsrc,
-                                               c0,
-                                               rec_gemm_m,
-                                               c_dg_N,
-                                               hw_tilde,
-                                               rec_w_tilde_slice,
-                                               rec_d_h_stride,
-                                               rec_d_h_offset,
-                                               rec_d_w_stride,
-                                               rec_d_w_offset,
-                                               c_Hi,
-                                               c_Wi,
-                                               c_C);
-    }
-    else if(!is_split_k_atomic && !is_wmma && atom)
-    {
-        // stride>1, split_k=1, MFMA: tilde decomposition guarantees disjoint writes
-        // (like CK with k_batch=1 → direct store regardless of stride).
-        bool use_cshuffle = (spec->epilogue && strcmp(spec->epilogue, "cshuffle") == 0);
-        if(use_cshuffle)
-        {
-            _emit_dgrad_tilde_cshuffle_epilogue(b,
-                                                spec,
-                                                atom,
-                                                &grid,
-                                                epi_accs,
-                                                num_final,
-                                                dx_rsrc,
-                                                rec_gemm_m,
-                                                c_dg_N,
-                                                hw_tilde,
-                                                rec_w_tilde_slice,
-                                                rec_d_h_stride,
-                                                rec_d_h_offset,
-                                                rec_d_w_stride,
-                                                rec_d_w_offset,
-                                                c_Hi,
-                                                c_Wi,
-                                                c_C);
-        }
-        else
-        {
-            _emit_dgrad_tilde_direct_epilogue(b,
-                                              spec,
-                                              atom,
-                                              &grid,
-                                              epi_accs,
-                                              num_final,
-                                              dx_rsrc,
-                                              rec_gemm_m,
-                                              c_dg_N,
-                                              hw_tilde,
-                                              rec_w_tilde_slice,
-                                              rec_d_h_stride,
-                                              rec_d_h_offset,
-                                              rec_d_w_stride,
-                                              rec_d_w_offset,
-                                              c_Hi,
-                                              c_Wi,
-                                              c_C);
-        }
-    }
-    else
-    {
-        // split_k>1 or WMMA tilde: overlapping writes require atomics.
-        _emit_dgrad_tilde_atomic_epilogue(b,
-                                          spec,
-                                          atom,
-                                          epi_accs,
-                                          num_final,
-                                          warp_m_idx,
-                                          warp_n_idx,
-                                          lane,
-                                          block_m_off_v,
-                                          block_n_off_v,
-                                          dX,
-                                          c_per_lane,
-                                          rec_gemm_m,
-                                          c_dg_N,
-                                          rec_h_tilde_slice,
-                                          rec_w_tilde_slice,
-                                          rec_d_h_stride,
-                                          rec_d_h_offset,
-                                          rec_d_w_stride,
-                                          rec_d_w_offset,
-                                          c_Hi,
-                                          c_Wi,
-                                          c_C);
-    }
+    dispatch_dgrad_epilogue(epi_accs, num_final);
 
     return b->kernel;
 }

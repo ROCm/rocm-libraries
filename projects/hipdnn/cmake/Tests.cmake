@@ -383,6 +383,16 @@ function(install_hipdnn_ctest_files)
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
 
+    # Test groups that one add_hipdnn_test() call cannot express (one binary, several fixture-
+    # sequenced ctest entries) stage their add_test() text on this property, so the installed
+    # tree runs the same set as the build tree. It must be appended before the label pass
+    # below, which discovers test names by scanning this file's add_test() lines; staged
+    # entries added after it would ship unlabelled and be invisible to every ctest -L tier.
+    get_property(staged_tests GLOBAL PROPERTY HIPDNN_INSTALLED_CTEST_STAGING)
+    if(NOT "${staged_tests}" STREQUAL "")
+        file(APPEND "${INSTALLED_CTEST_FILE}" "${staged_tests}")
+    endif()
+
     # Bake the YAML-driven category labels into the installed
     # CTestTestfile.cmake so `ctest --test-dir $THEROCK_BIN_DIR/hipdnn -L
     # <tier>` works against the install tree.
@@ -393,7 +403,7 @@ function(install_hipdnn_ctest_files)
     # get_property(DIRECTORY ... PROPERTY TESTS)), so it emits explicit
     # per-test set_property() lines after auto-discovering the test
     # names from the add_test() lines we just wrote above.
-    if(COMMAND apply_ctest_category_labels AND all_tests)
+    if(COMMAND apply_ctest_category_labels AND (all_tests OR staged_tests))
         apply_ctest_category_labels(
             "${_HIPDNN_TEST_CATEGORIES_YAML}"
             "${INSTALLED_CTEST_FILE}"

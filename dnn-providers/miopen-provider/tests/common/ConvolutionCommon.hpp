@@ -111,6 +111,30 @@ struct ConvTestCase
     }
 };
 
+inline std::vector<ConvTestCase> getConvTestCases3D()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        // Filter 1
+        {{1, 16, 16}, {1, 16, 1}, {0}, {0}, {1}, {1}, seed},
+        // Filter 3, no padding
+        {{1, 16, 16}, {1, 16, 3}, {0}, {0}, {1}, {1}, seed},
+        // Padding = 1
+        {{1, 16, 16}, {1, 16, 3}, {1}, {1}, {1}, {1}, seed},
+        // Stride = 2
+        {{1, 16, 16}, {1, 16, 3}, {1}, {1}, {2}, {1}, seed},
+        // Dilation = 2
+        {{1, 16, 16}, {1, 16, 3}, {2}, {2}, {1}, {2}, seed},
+        // Batched convolution
+        {{8, 16, 16}, {1, 16, 1}, {0}, {0}, {1}, {1}, seed},
+        // Grouped convolution - 2 groups
+        {{1, 16, 16}, {2, 8, 3}, {1}, {1}, {1}, {1}, seed},
+        // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
+        {{2, 32, 16}, {4, 8, 3}, {1}, {1}, {2}, {2}, seed},
+    };
+}
+
 inline std::vector<ConvTestCase> getConvTestCases4D()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();

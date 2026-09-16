@@ -158,7 +158,9 @@ def _sk():
 
 # ---------------------------------------------------------------------------
 # 1. classic PAP: the AddressFlags "parallel reduction: skip PAP" compare is
-#    folded out under DP-only; the StreamKIter >= StreamKIterEnd check remains.
+#    folded out under DP-only. StreamKIter >= StreamKIterEnd lives in the
+#    papHasNextPersistentIteration seam (nested Module), not as a top-level
+#    instruction in prefetchAcrossPersistent.
 # ---------------------------------------------------------------------------
 def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
     _, dp_items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
@@ -166,12 +168,16 @@ def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
 
     # DP-only: no AddressFlags synchronizer compare ...
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
-    # ... but the last-tile StreamKIter/StreamKIterEnd check is still emitted.
-    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="StreamKIter")
-
     # non-DP-only: the AddressFlags compare is present (path unchanged).
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
-    assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="StreamKIter")
+
+    skip_label = Label("SK_SkipNllPAP_unit", "")
+    sk3_items = _module_items(
+        StreamKTwoTileDPFirst().papHasNextPersistentIteration(
+            writer=None, kernel={}, skipLabel=skip_label
+        )
+    )
+    assert _instruction_indices(sk3_items, SCmpGeU32, src_contains="StreamKIter")
 
 
 # ---------------------------------------------------------------------------
