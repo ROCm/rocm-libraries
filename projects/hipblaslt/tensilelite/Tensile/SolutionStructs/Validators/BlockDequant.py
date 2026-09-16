@@ -125,6 +125,19 @@ def validateBlockDequantCombination(state, printRejectionReason):
         reject(state, printRejectionReason, "UseScaleAB=Block requires StaggerU=0")
         return False
 
+    # ScheduleIterAlg=1 reorders the global reads and local writes of the
+    # unrolled iteration independently of each other. With PrefetchGlobalRead>=2
+    # the A data in flight belongs to iteration i+2 while the scale SRD has only
+    # advanced for i+1, and the scheduler is free to separate the two further, so
+    # the dequantize pairs a tile with the wrong group's scale. Either setting
+    # alone is fine -- measured correct on gfx1151 -- but the combination is
+    # silently wrong, so it is rejected rather than left to produce bad numbers.
+    if state["ScheduleIterAlg"] != 0 and state["PrefetchGlobalRead"] >= 2:
+        reject(state, printRejectionReason,
+               "UseScaleAB=Block requires ScheduleIterAlg=0 when PrefetchGlobalRead>=2 "
+               "(got SIA=%d, PGR=%d)" % (state["ScheduleIterAlg"], state["PrefetchGlobalRead"]))
+        return False
+
     # NOTE: there is deliberately no DepthU/ScaleBlockSizeA parity constraint.
     # Zero-points sit at byte (m/2)*kGroups + g -- [M][kGroups] order, but packed
     # two rows per byte -- so one K group is one byte: a K iteration advances the

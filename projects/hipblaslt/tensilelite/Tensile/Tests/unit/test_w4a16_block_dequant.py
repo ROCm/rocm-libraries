@@ -195,11 +195,22 @@ def test_block_dequant_solution_is_valid(toolchain):
         ({"ConvertAfterDS": True}, "ConvertAfterDS"),
         ({"GlobalSplitU": 2}, "GlobalSplitU"),
         ({"StaggerU": 32}, "StaggerU"),
+        # SIA=1 and PGR>=2 are each fine alone; only together do they
+        # desynchronise the scale from the A data it scales.
+        ({"PrefetchGlobalRead": 2, "ScheduleIterAlg": 1}, "ScheduleIterAlg"),
     ],
 )
 def test_block_dequant_rejects_unsupported_shapes(toolchain, kw, reason):
     sol = _solution(toolchain, **kw)
     assert sol.get("Valid") is not True, f"expected a reject mentioning {reason!r}"
+
+
+@pytest.mark.parametrize("kw", [{"PrefetchGlobalRead": 2}, {"ScheduleIterAlg": 1}])
+def test_prefetch_and_schedule_are_each_fine_alone(toolchain, kw):
+    """The reject above is on the *combination*, so pin that neither setting is
+    rejected by itself -- otherwise the gate would silently cost every solution
+    a scheduling knob it is entitled to."""
+    assert _solution(toolchain, **kw).get("Valid") is True
 
 
 def test_scale_block_size_without_block_mode_is_rejected(toolchain):
