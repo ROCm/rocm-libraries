@@ -3264,6 +3264,87 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         # does not exist, so the declare was silently omitted.
         self.assertIn("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)", ll)
 
+    # ---- quad_perm ----
+    def test_quad_perm_encodes_lane_selection(self):
+        # [1,0,3,2] -> 1 | (0 << 2) | (3 << 4) | (2 << 6) == 177.
+        ll = self._lower("qperm", lambda b: b.quad_perm(b.const_i32(1), [1, 0, 3, 2]))
+        self.assertIn("declare i32 @llvm.amdgcn.update.dpp.i32(", ll)
+        self.assertIn(
+            "call i32 @llvm.amdgcn.update.dpp.i32("
+            "i32 1, i32 1, i32 177, i32 15, i32 15, i1 true)",
+            ll,
+        )
+
+    def test_quad_perm_emits_hip_builtin(self):
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+
+        b = IRBuilder("qperm_hip")
+        b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+        hip = lower_kernel_to_hip(b.kernel)
+        self.assertIn(
+            "__builtin_amdgcn_update_dpp(c1, c1, 177, 15, 15, 1)",
+            hip,
+        )
+
+    def test_quad_perm_is_pure(self):
+        from rocke.core.ir import is_pure_op_name
+
+        b = self._builder("qperm_pure")
+        value = b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+        self.assertTrue(value.op.is_pure)
+        self.assertTrue(is_pure_op_name("tile.quad_perm"))
+
+    def test_quad_perm_rejects_bad_perm_and_type(self):
+        b = self._builder("qperm_bad")
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_i32(1), [0, 1, 2])
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_i32(1), [0, 1, 2, 4])
+        with self.assertRaises(ValueError):
+            b.quad_perm(b.const_f32(1.0), [0, 1, 2, 3])
+
+    def test_quad_perm_lowering_rejects_out_of_range_ctrl(self):
+        """Malformed IR must fail loudly, not truncate into a valid permute.
+
+        The builder validates selectors, but IR that reaches a lowerer by
+        another route (deserialized, rewritten by a pass, hand-built) does
+        not pass through it. Masking ``ctrl`` to eight bits turned 256 into
+        0 (``[0,0,0,0]``, a lane-0 broadcast) and -1 into 255
+        (``[3,3,3,3]``) -- a silently different shuffle, so a wrong
+        reduction computes wrong numbers instead of failing.
+        """
+        from rocke.core.ir import IRBuilder
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for bad_ctrl in (256, -1):
+            with self.subTest(ctrl=bad_ctrl):
+                b = self._builder(f"qperm_ctrl_{bad_ctrl}")
+                value = b.quad_perm(b.const_i32(1), [1, 0, 3, 2])
+                value.op.attrs["ctrl"] = bad_ctrl
+                for lower in (_lower_kernel_to_llvm_python, lower_kernel_to_hip):
+                    with self.assertRaisesRegex(
+                        ValueError, r"ctrl must be in 0\.\.255"
+                    ):
+                        lower(b.kernel)
+
+    def test_warp_shuffle_xor_quad_maps_masks(self):
+        ll = self._lower(
+            "qperm_xor",
+            lambda b: (
+                b.warp_shuffle_xor_quad(b.const_i32(1), 1),
+                b.warp_shuffle_xor_quad(b.const_i32(1), 2),
+            ),
+        )
+        self.assertIn("i32 177, i32 15, i32 15, i1 true)", ll)
+        self.assertIn("i32 78, i32 15, i32 15, i1 true)", ll)
+
+    def test_warp_shuffle_xor_quad_rejects_out_of_quad_mask(self):
+        b = self._builder("qperm_xor_bad")
+        with self.assertRaises(ValueError):
+            b.warp_shuffle_xor_quad(b.const_i32(1), 4)
+
     # ---- mov_dpp8 ----
     def test_mov_dpp8_i32_emits_typed_intrinsic(self):
         ll = self._lower("dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432))
@@ -6437,6 +6518,33 @@ class TestPackArgsKernargABI(unittest.TestCase):
             pack_args(
                 [{"name": "p", "type": "ptr<f16,global>"}], {"p": "not a pointer"}
             )
+
+    def test_compile_packer_matches_pack_args_byte_for_byte(self):
+        # KernelLauncher swaps in ``compile_packer`` for the per-launch
+        # pack, so it must be a byte-identical oracle for ``pack_args`` on
+        # the same signature -- any divergence silently corrupts kernargs.
+        from rocke.runtime.packing import compile_packer, pack_args
+
+        for sig, vals in (
+            (self._MIXED_SIG, self._MIXED_VALS),
+            (
+                [
+                    {"name": "p", "type": "ptr<f32,global>"},
+                    {"name": "i", "type": "i32"},
+                    {"name": "q", "type": "i64"},
+                    {"name": "f", "type": "f32"},
+                ],
+                {"p": 0x10, "i": 7, "q": 0x1122334455, "f": 1.5},
+            ),
+            ([{"name": "p", "type": "ptr<f16,global>"}], {"p": None}),
+        ):
+            self.assertEqual(compile_packer(sig)(vals), pack_args(sig, vals))
+        # Error parity: unknown type is rejected when the packer is built,
+        # a missing arg when the packer is called.
+        with self.assertRaises(ValueError):
+            compile_packer([{"name": "x", "type": "f16"}])
+        with self.assertRaises(KeyError):
+            compile_packer([{"name": "x", "type": "i32"}])({})
 
 
 class TestHostBufferReExportShim(unittest.TestCase):
