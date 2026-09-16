@@ -26,8 +26,6 @@
  *******************************************************************************/
 
 #pragma once
-#ifndef LOGGING_H
-#define LOGGING_H
 
 #include "tuple_helper.hpp"
 #include <cmath>
@@ -453,5 +451,3 @@ void log_argument(std::ostream& os, H head)
 {
     os << "\n" << head;
 }
-
-#endif // LOGGING_H

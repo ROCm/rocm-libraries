@@ -30,7 +30,7 @@
 
 #define TENSILE_USE_MX_SCALE
 
-#ifdef TENSILE_USE_MX_SCALE
+
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
@@ -163,6 +163,3 @@ namespace std
         return stream << static_cast<float>(a);
     }
 } // namespace std
-
-#endif // TENSILE_USE_MX_SCALE
-

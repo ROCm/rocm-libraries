@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_AUXILIARY_H_
-#define _ROCBLASLT_AUXILIARY_H_
 
 #include "rocblaslt-types.h"
 #include <filesystem>
@@ -490,5 +488,3 @@ std::optional<std::filesystem::path>
 
 void rocblaslt_log_error(const char* func, const char* var, const char* msg);
 #endif
-
-#endif /* _ROCBLASLT_AUXILIARY_H_ */
