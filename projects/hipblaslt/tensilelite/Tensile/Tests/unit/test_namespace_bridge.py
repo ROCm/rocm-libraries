@@ -15,6 +15,14 @@ _PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 _ALIAS = "_tensilelite_namespace_bridge_test"
 
 
+def _run_script(script):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(_PACKAGE_ROOT), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    subprocess.run([sys.executable, "-c", script], check=True, env=env)
+
+
 @pytest.mark.parametrize("alias_first", [False, True])
 def test_alias_and_canonical_names_share_module_identity(alias_first):
     script = f"""
@@ -44,11 +52,7 @@ assert importlib.resources.files(alias).name == "Tensile"
 assert importlib.reload(alias_module) is canonical_module
 assert sys.modules[f"{{alias}}.resources"] is canonical_module
 """
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(_PACKAGE_ROOT), env.get("PYTHONPATH", "")]
-    ).rstrip(os.pathsep)
-    subprocess.run([sys.executable, "-c", script], check=True, env=env)
+    _run_script(script)
 
 
 def test_missing_alias_descendant_reports_the_requested_name():
@@ -67,8 +71,4 @@ except ModuleNotFoundError as error:
 else:
     raise AssertionError("missing compatibility module unexpectedly imported")
 """
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(_PACKAGE_ROOT), env.get("PYTHONPATH", "")]
-    ).rstrip(os.pathsep)
-    subprocess.run([sys.executable, "-c", script], check=True, env=env)
+    _run_script(script)
