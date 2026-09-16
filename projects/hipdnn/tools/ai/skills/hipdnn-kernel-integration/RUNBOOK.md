@@ -365,8 +365,8 @@ The shared suite binary already takes `--test-engine` on the command line, so yo
 your engine by hand before this step exists — but **registration is what makes anyone
 else run it.** Add an `add_external_integration_test_target` entry for your engine
 alongside the provider's existing ones. The two long-standing examples are
-`HIP_MLOPS_ENGINE` and `ASM_SDPA_ENGINE` (`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:408`,
-`:472`); the four `hipkernel:*` entries at `:313`, `:322`, `:339` and `:376` are closer
+`HIP_MLOPS_ENGINE` and `ASM_SDPA_ENGINE` (`dnn-providers/hip-kernel-provider/src/CMakeLists.txt:408-413`,
+`:472-477`); the four `hipkernel:*` entries at `:313`, `:322`, `:339` and `:376` are closer
 models for a new ingestor engine, and `:376` is the one that also stages a descriptor tree.
 **Re-derive these line numbers before citing them** — this file gains entries regularly and
 the numbers drift; `grep -n add_external_integration_test_target` is the reliable form. Supply:
