@@ -385,21 +385,22 @@ class StreamK(Component):
 
     @staticmethod
     def _summationStride(writer, kernel, tc):
-        """K stride for the StreamK partial-tile offset.
+        """K stride, in tensor elements, for the StreamK partial-tile offset.
 
-        A swizzled scale is block-linear and walks blocks by Strides<tc>+0
-        whatever the layout, but on TLU=1 strideRef hands back a constStride
-        literal, which would scale the offset by 1 instead of the block stride.
-        computeLoadSrd applies the same correction to the tile stride; without
-        it here a workgroup starting mid-tile reads its scales from the wrong K.
+        A swizzled MX scale buffer is block-linear: preSwizzleScalesGFX950 lays
+        it out as [32-row group][8-K-block chunk][256 bytes], so one K element is
+        one scale byte whatever the layout, and the K stride is the constant 1.
+        The logical strides describe the unswizzled tensor instead, so neither
+        strideRef nor Strides<tc> answers this question -- strideRef returns the
+        canonical stride, and KernelWriter has overwritten Strides<tc> with the
+        MN group span (roundUp(kBlocks, 8) * 32), which is a step along MN, not K.
+        Using either sends a workgroup that starts mid-tile far outside the
+        buffer; the MN span overshoots by a factor of kBlocks * 32.
         """
-        strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
-        mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
-        isMxSwizzledScaleLayout = ("MXS" in tc) and mxScaleFormat in ("InMemorySwizzle",
-                                                                     "HostPreSwizzle")
-        if isMxSwizzledScaleLayout and writer.isConstUnitStride(strideL):
-            strideL = sgpr("Strides%s" % tc)
-        return strideL
+        if ("MXS" in tc) and kernel.get("MXScaleFormat", "NoSwizzle") in ("InMemorySwizzle",
+                                                                         "HostPreSwizzle"):
+            return 1
+        return writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
 
     @staticmethod
     def _depthUForTc(kernel, tc):
