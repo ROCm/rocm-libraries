@@ -35,7 +35,6 @@
 // rocsparse_handle_create / rocsparse_handle_destroy Tests
 // =============================================================================
 
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 TEST(auxiliary_pre_checkin, HandleCreateWithStreamCreateDestroy)
 {
     hipStream_t      stream;
@@ -86,7 +85,6 @@ TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
     ASSERT_EQ(hipStreamDestroy(stream_create), hipSuccess);
     ASSERT_EQ(hipStreamDestroy(stream_use), hipSuccess);
 }
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 TEST(auxiliary_pre_checkin, HandleCreateDestroy)
 {
