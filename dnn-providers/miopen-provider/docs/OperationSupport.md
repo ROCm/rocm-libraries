@@ -23,6 +23,7 @@ The following table lists all operations currently supported in hipDNN:
 | Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3,6</sup>, Deterministic<sup>5</sup> |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCL, NLC, NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2,6</sup>, Deterministic<sup>5</sup> |
 | Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
+| Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
@@ -31,6 +32,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁵ See Deterministic Engine Support section
 ⁶ 3D tensors are internally padded to 4D for MIOpen compatibility. For convolution, the padding also extends the padding, stride and dilation vectors with a trailing spatial dimension of length 1.
 ⁷ See Standalone Activation note below
+⁸ See Standalone Binary Elementwise note below
 
 ## Detailed Requirements
 
@@ -76,6 +78,13 @@ The following table lists all operations currently supported in hipDNN:
 
 > [!NOTE]
 > **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+
+> [!NOTE]
+> **Standalone Binary Elementwise:** A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN
+> across ranks 3-5, with packed channels-first strides and FP16/FP32 datatypes only. `in_0` must be
+> the full-shape operand; only `in_1` may broadcast per-axis at matching rank, and all three tensors
+> must share one datatype. SUB is executed internally as Add with `in_1` scaled by −1. In-place
+> execution is not supported.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
