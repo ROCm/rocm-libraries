@@ -191,8 +191,9 @@ def main() -> None:
         for rel, count in unfilled.items():
             print(f"  {count:4}  {rel}")
         print(
-            "  Re-run this command after implementing them; zero here is the "
-            "step-6 gate. Note the generated tests/ stubs count too."
+            "  Re-run this command after implementing them; zero here is "
+            "RUNBOOK §3's placeholder gate. Note the generated tests/ stubs "
+            "count too."
         )
 
     print(

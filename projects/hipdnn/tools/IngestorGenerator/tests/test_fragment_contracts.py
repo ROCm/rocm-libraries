@@ -351,8 +351,8 @@ class TestCensusCasePinIsDerivedFromTheSuite:
 class TestPlaceholderScanSeesEveryEmittedFile:
     """The scan must cover what the generator WROTE, not one hand-picked glob.
 
-    A packs/-only glob omits the generated matcher test, so the gate reports green
-    with placeholder bodies still shipping.
+    A packs/-only glob omits the generated matcher test, so RUNBOOK §3's placeholder
+    gate reports green with placeholder bodies still shipping.
     """
 
     def test_the_generated_matcher_test_is_included(

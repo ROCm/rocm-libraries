@@ -114,7 +114,7 @@ uniqueness and is not certification.
 `tests/Test<Name>Matchers.cpp` constructs its `DeviceProperties` fixture **by value**,
 never by querying the host (`hipGetDeviceProperties`/`getDeviceProperties()`), with a
 comment explaining why: a test that queries the host is vacuous on every arch except
-whatever happens to be running CI (`TestAsmSdpaForwardMatchers.cpp:27-33`).
+whatever happens to be running CI (`TestSdpaFwdPlanBuilder.cpp`).
 
 ### Pack-shape census test
 

@@ -1,4 +1,4 @@
-"""RUNBOOK.md step 5d's desk-check invariants, as a real, runnable CLI.
+"""The desk-check invariants of RUNBOOK §4's host boundary, as a real, runnable CLI.
 
     python3 tools/hkp_desk_check.py --mode structural <path/to/*.kdp.json>
     python3 tools/hkp_desk_check.py --mode full <path/to/shipped.kdp.json>

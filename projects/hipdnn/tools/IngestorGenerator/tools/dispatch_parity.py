@@ -535,7 +535,7 @@ def main(argv=None) -> int:
         "--knobs",
         help="JSON mapping of knob name to the list of values that SURVIVED the "
         "sweep, e.g. '{\"use_exp2_fast\": [0, 1]}'. The dispatcher-resolved set is "
-        "crossed with it to build the shipping package (stage 4a-3). Omit it and "
+        "crossed with it to build the shipping package (RUNBOOK §6). Omit it and "
         "you get the parity set: one kernel per servable shape.",
     )
     args = parser.parse_args(argv)

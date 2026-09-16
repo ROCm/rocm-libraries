@@ -1,11 +1,12 @@
-"""RUNBOOK.md Step 5d's four desk-check invariants, exercising the SHIPPED
-`hkp_pack.desk_check` module (not a private copy of its logic -- a copy is
-exactly how invariant 1 went dead in the first place: the RUNBOOK's prose
-snippet and reality drifted apart with nothing to notice).
+"""The four desk-check invariants of the packaging README's "Desk-check a
+variant set", exercising the SHIPPED `hkp_pack.desk_check` module (not a
+private copy of its logic -- a copy is exactly how invariant 1 went dead in
+the first place: the RUNBOOK's prose snippet and reality drifted apart with
+nothing to notice).
 
-RUNBOOK.md ("Desk-check the shipped set -- no GPU required") states four
-invariants over a shipped variant set. Before this module existed they lived
-only as a shell-embedded Python snippet in the markdown -- untestable prose --
+Those four invariants hold over a shipped variant set at RUNBOOK §4's host
+boundary. Before this module existed they lived only as a shell-embedded
+Python snippet in the markdown -- untestable prose --
 and that snippet was WRONG on the exact data it is documented to run against
 ("KDP=<the shipped .kdp.json under the packed tree>"): after packing,
 ``kernel_source`` is rewritten to kpack form (``{kind, library, toc_key,
@@ -50,8 +51,8 @@ from hkp_pack.desk_check import (
 from hkp_pack.pipeline import run_pipeline
 
 ARCH = "gfx950"
-# The KMD fields the desk-check compares -- mirrors RUNBOOK.md's F list,
-# narrowed to what this fixture's KMD actually declares.
+# The KMD fields the desk-check compares -- `DEFAULT_MATCHER_FIELDS`, narrowed
+# to what this fixture's KMD actually declares.
 _MATCHER_FIELDS = ("batch", "head_size")
 
 
@@ -283,9 +284,9 @@ class TestInvariant4SymbolNonUniquenessTolerated:
 
 # ---------------------------------------------------------------------------
 # The CLI itself, end to end: `tools/hkp_desk_check.py` is the shipped thing
-# RUNBOOK step 5d tells an agent to run. The invariant-function tests above
-# import the library directly and would stay green even if the CLI's argument
-# parsing, exit-code mapping, or output path were broken.
+# an agent runs at RUNBOOK §4's host boundary. The invariant-function tests
+# above import the library directly and would stay green even if the CLI's
+# argument parsing, exit-code mapping, or output path were broken.
 # ---------------------------------------------------------------------------
 _TOOL = Path(__file__).resolve().parent.parent / "tools" / "hkp_desk_check.py"
 
@@ -645,7 +646,7 @@ class TestHeterogeneousMetadataTupleIdentity:
 
 @pytest.mark.quick
 class TestCliOnRealShippedBundles:
-    """The CLI, run exactly as RUNBOOK step 5d tells an agent to run it,
+    """The CLI, run exactly as an agent runs it at RUNBOOK §4's host boundary,
     against the real bundles this repository ships."""
 
     @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)

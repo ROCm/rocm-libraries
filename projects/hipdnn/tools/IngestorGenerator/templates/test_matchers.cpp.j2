@@ -33,7 +33,7 @@ using hipdnn_plugin_sdk::ingestor::DeviceProperties;
 /// A fixed device, constructed BY VALUE rather than queried from the host. An
 /// arch-gated matcher test that instead calls hipGetDeviceProperties() is vacuous
 /// everywhere except whatever arch happens to be running CI
-/// (TestAsmSdpaForwardMatchers.cpp) -- it would silently stop testing the one thing an
+/// (TestSdpaFwdPlanBuilder.cpp) -- it would silently stop testing the one thing an
 /// arch-gated matcher exists to gate the moment CI's hardware changes.
 ///
 /// Both fields come from this bundle's own architecture: `warpSize` is that arch's
@@ -59,11 +59,12 @@ DeviceProperties fixedDeviceProperties()
 {% endif %}
 
 // Two directions, deliberately pre-wired and deliberately skipping until you fill them
-// in. A matcher has a DIRECTION, and no mechanical check tests which way it answers:
-// an engine that declines everything passes generation, packing, validation and
-// enumeration with every mechanical check green, and the first evidence arrives on a
-// device days later. These make that evidence local. Keep BOTH -- an accept-only test
-// passes for a matcher stuck on `true`, a decline-only test for one stuck on `false`.
+// in. A matcher has a DIRECTION, and no mechanical check before RUNBOOK §5's device
+// proof tests which way it answers: an engine that declines everything passes
+// generation, packing, validation and enumeration with every mechanical check green,
+// and the first evidence arrives on a device days later. These make that evidence
+// local. Keep BOTH -- an accept-only test passes for a matcher stuck on `true`, a
+// decline-only test for one stuck on `false`.
 
 TEST({{ config.engine.pascal_name }}Matchers, AcceptsAGraphThisEngineServes)
 {
@@ -75,7 +76,8 @@ TEST({{ config.engine.pascal_name }}Matchers, AcceptsAGraphThisEngineServes)
 
 TEST({{ config.engine.pascal_name }}Matchers, DeclinesAGraphOutsideItsApplicability)
 {
-    GTEST_SKIP() << "TODO - FILL THIS OUT: take one rule from your step-2b mining "
+    GTEST_SKIP() << "TODO - FILL THIS OUT: take one rule from your RUNBOOK section 2 "
+                    "mining "
                     "table, build a MatchContext that VIOLATES it, and "
                     "EXPECT_FALSE({{ config.graph_match_symbol }}). Delete this skip. "
                     "Over-acceptance corrupts results rather than reporting them.";
@@ -88,7 +90,7 @@ TEST({{ config.engine.pascal_name }}Matchers, ScoreReadsAtLeastOneDescriptorFiel
                     "the descriptor it is given -- score two kernels differing in a "
                     "field you rank on and EXPECT_NE the results. A constant score "
                     "makes selection order arbitrary, and nothing else catches it "
-                    "until the 8e.3 performance pass on real hardware.";
+                    "until RUNBOOK section 6's tuning sweep on real hardware.";
 }
 {% endif %}
 

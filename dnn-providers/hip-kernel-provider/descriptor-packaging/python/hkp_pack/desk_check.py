@@ -1,4 +1,5 @@
-"""RUNBOOK.md step 5d's four desk-check invariants, as real, importable code.
+"""The four desk-check invariants of the packaging README's "Desk-check a
+variant set", as real, importable code.
 
 Runs over a single loaded KDP document's ``kernelDescriptors`` list -- works
 on an authored (pre-pack) tree via ``kernel_source.spec`` or a shipped

@@ -135,7 +135,8 @@ def reference_serves(shapes: list[dict], profile: dict) -> dict:
         # Collect EVERY candidate's verdict, then choose the reason deliberately. On a
         # multi-member family the last decline is arbitrary: a sibling's capability gate
         # rejects on arch BEFORE the shared predicate runs, masking the kernel-specific
-        # reason that is the evidence worth collecting. See `_decline_reason`.
+        # reason that is the evidence RUNBOOK §7 exists to collect. See
+        # `_decline_reason`.
         reasons = []
         for candidate in candidates:
             # Every candidate is consulted, even after an acceptance: a later broken
@@ -178,8 +179,9 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--declines",
         help="JSON mapping of shape index (or graph name) -> the reason THIS "
-        "integration declined it at runtime. Omit to reconcile against the "
-        "dispatcher-resolved parity set instead, which is the offline form.",
+        "integration declined it at runtime, which is the form RUNBOOK §7 "
+        "requires. Omit to reconcile against the dispatcher-resolved parity set "
+        "instead, which is the offline form.",
     )
     parser.add_argument(
         "--allow-unreconciled",
@@ -389,7 +391,7 @@ def main(argv=None) -> int:
     if only_reference:
         print(
             f"RECONCILIATION ACCEPTED UNDER PROTEST: {len(only_reference)} unreconciled "
-            f"decline(s), each of which needs a written justification at step 10."
+            f"decline(s), each of which needs a written justification at RUNBOOK §7."
         )
         return 0
     print("RECONCILED: every decline is one the reference makes too.")

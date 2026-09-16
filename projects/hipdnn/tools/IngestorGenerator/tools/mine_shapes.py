@@ -1,4 +1,5 @@
-"""Build the shape corpus the dispatcher resolves, from the sources that actually decide.
+"""Build the shape corpus the dispatcher resolves (RUNBOOK §2's corpus), from the
+sources that actually decide.
 
 Three sources answer three different questions, and no one of them is sufficient:
 
@@ -23,8 +24,9 @@ manifest, never by its directory name.
     mine_shapes.py --published <csv> --arch gfx942 --out shapes.json
 
 Emits the request-field mappings `dispatch_parity.py --shapes` consumes. It does NOT
-filter by what the kernel can serve: that is the dispatcher's job, and it reports
-declines with reasons. Filtering here would hide the gap this corpus exists to measure.
+filter by what the kernel can serve: that is the dispatcher's job at RUNBOOK §2's
+baseline resolution, and it reports declines with reasons. Filtering here would hide
+the gap this corpus exists to measure.
 """
 
 from __future__ import annotations
@@ -413,8 +415,8 @@ def from_rocke_bench(root: Path, dtype_default: str) -> list[dict]:
                     # A recorded request attribute, not a tuning choice. Carried so the
                     # dispatcher resolves the shape the trace actually asked for;
                     # whether THIS integration ships a sink variant is a scope decision
-                    # made downstream, and filtering here would hide the shape from the
-                    # applicability reconciler entirely.
+                    # made downstream, and filtering here would hide the shape from
+                    # RUNBOOK §7's runtime reconciliation entirely.
                     "use_sinks": bool(record.get("has_sinks")),
                     "_provenance": {
                         "source": "rocke_bench",

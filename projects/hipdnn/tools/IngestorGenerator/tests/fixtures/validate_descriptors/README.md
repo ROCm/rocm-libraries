@@ -17,19 +17,18 @@ Expected: exit 0.
 
 The pack's `arch` list is `["GFX942"]` (uppercase) instead of `["gfx942"]`.
 
-Expected failure: `requireArchList` rejects it at load time — `isPlausibleArchBaseId`
-requires everything after the `gfx` prefix to be lowercase
-(`DescriptorLoader.hpp:634-643`), so `GFX942` is not a plausible base id and the whole
-KDP fails to parse.
+Expected failure: `requireArchList` rejects it at load time — `DescriptorLoader.hpp`'s
+`isPlausibleArchBaseId()` requires everything after the `gfx` prefix to be lowercase,
+so `GFX942` is not a plausible base id and the whole KDP fails to parse.
 
 **Deliberately not `gfx94`.** `isPlausibleArchBaseId` is a shape check, not an
 existence check: it accepts `gfx` followed by any run of `[a-z0-9_-]`, so `gfx94`
-parses as a well-formed (if fictional) base id and loads clean —
-`DescriptorLoader.hpp:634-643`. The comment at `DescriptorLoader.hpp:666` (`archSupports
-is a case-sensitive exact compare, so "", " gfx942", or "gfx94" would otherwise
-silently disable the pack...`) wrongly implies `gfx94` is among the values this check
-catches; the comment is stale and the code at `:634-643` is authoritative. Fixing that
-comment is a candidate follow-up, out of scope for this fixture set.
+parses as a well-formed (if fictional) base id and loads clean. The comment above
+`DescriptorLoader.hpp`'s `requireArchList()` (`archSupports is a case-sensitive exact
+compare, so "", " gfx942", or "gfx94" would otherwise silently disable the pack...`)
+wrongly implies `gfx94` is among the values this check catches; the comment is stale
+and `isPlausibleArchBaseId()` is authoritative. Fixing that comment is a candidate
+follow-up, out of scope for this fixture set.
 
 ## `dangling_uuid/`
 
@@ -37,8 +36,8 @@ The UED's `metadata` field names a UUID (`9341b3cb-3540-44f6-9066-f3695a3b6a2d`)
 KMD in the bundle defines (the real KMD keeps its original id,
 `46d64d06-18eb-483d-9bb4-94472d32b78d`).
 
-Expected failure: `resolveDescriptorSets` looks up the engine's metadata schema by id
-and drops the whole engine when it is not found (`DescriptorLoader.hpp:1660-1668`).
+Expected failure: `DescriptorLoader.hpp`'s `resolveDescriptorSets()` looks up the
+engine's metadata schema by id and drops the whole engine when it is not found.
 
 ## `duplicate_tuple/`
 
@@ -46,20 +45,21 @@ The pack's second inline kernel has been given the same completed metadata tuple
 first (`block_size: 64, dtype: FLOAT`), and neither kernel narrows its own `arch` (both
 inherit the pack's `["gfx942"]`), so the two occupy the same overlapping-arch group.
 
-Expected failure: `validateAndIndexPacks`, run inside `loadValidatedDescriptorSets`'s
-throwaway `makeStateManager` probe, throws on a metadata-tuple collision within one
-overlapping-arch group (`KernelIngestorStateManager.hpp:232` ff., using `archOverlaps`);
-the loader catches the exception and drops the whole engine.
+Expected failure: `KernelIngestorStateManager.hpp`'s `validateAndIndexPacks()`, run
+inside `loadValidatedDescriptorSets`'s throwaway `makeStateManager` probe, throws on a
+metadata-tuple collision within one overlapping-arch group (using `archOverlaps`); the
+loader catches the exception and drops the whole engine.
 
 ## `undeclared_knob/`
 
 The UED's `knobs` list names `tile_count`, a field the KMD's `fields` array does not
 declare (the KMD only declares `block_size` and `dtype`).
 
-Expected failure: `findUndeclaredKnob` rejects the engine during `resolveDescriptorSets`
-(`DescriptorLoader.hpp:1669-1678`).
+Expected failure: `findUndeclaredKnob` rejects the engine during
+`DescriptorLoader.hpp`'s `resolveDescriptorSets()`.
 
-Note: a *declared-but-non-int* knob is not usable as a fixture here — `findUndeclaredKnob`
-(`GenericEngine.hpp:36-51`) only checks name membership, never type. The non-int-knob
-drop happens later, in `GenericPlanBuilder::getCustomKnobs` at plan-build time against a
-real graph and device, which this standalone binary cannot reach.
+Note: a *declared-but-non-int* knob is not usable as a fixture here —
+`GenericEngine.hpp`'s `findUndeclaredKnob()` only checks name membership, never type.
+The non-int-knob drop happens later, in `GenericPlanBuilder::getCustomKnobs` at
+plan-build time against a real graph and device, which this standalone binary cannot
+reach.
