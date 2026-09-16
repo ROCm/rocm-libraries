@@ -53,6 +53,7 @@ namespace rocsparse
                                                               int64_t              batch_stride_C,
                                                               rocsparse_order      order_C,
                                                               rocsparse_index_base idx_base,
+                                                              J                    col_panel,
                                                               int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
@@ -64,7 +65,7 @@ namespace rocsparse
         const J        gid = hipBlockIdx_x * BLOCKSIZE + tid;
         const uint32_t lid = gid & (WF_SIZE - 1);
         const J        row = gid / WF_SIZE;
-        const J        col = lid + hipBlockIdx_y * WF_SIZE;
+        const J        col = lid + col_panel;
 
         if(row >= M)
         {
@@ -145,7 +146,7 @@ namespace rocsparse
                                                        T       beta,
                                                        bool    conj_A,
                                                        bool    conj_B,
-                                                       J       offset,
+                                                       J       col_panel,
                                                        J       M,
                                                        J       N,
                                                        int64_t offsets_batch_stride_A,
@@ -172,7 +173,7 @@ namespace rocsparse
         const J        gid  = hipBlockIdx_x * BLOCKSIZE + tid;
         const uint32_t lid  = gid & (WF_SIZE - 1);
         const J        row  = gid / WF_SIZE;
-        const J        colB = offset + LOOPS * hipBlockIdx_y;
+        const J        colB = col_panel;
 
         if(row >= M)
         {
@@ -838,6 +839,7 @@ namespace rocsparse
                                                        int64_t              batch_stride_C,
                                                        rocsparse_order      order_C,
                                                        rocsparse_index_base idx_base,
+                                                       J                    col_panel,
                                                        int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
@@ -860,7 +862,7 @@ namespace rocsparse
         // Compute size of dense_C for 4-argument atomic_add
         const int64_t dense_C_size = (order_C == rocsparse_order_column) ? (ldc * N) : (M * ldc);
 
-        const J       cid  = lid + hipBlockIdx_y * WF_SIZE;
+        const J       cid  = lid + col_panel;
         const int64_t colB = cid * ldb;
 
         __shared__ T shared_B[BLOCKSIZE / WF_SIZE][WF_SIZE];
@@ -881,22 +883,20 @@ namespace rocsparse
 
             if(order_C == rocsparse_order_column)
             {
-                for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
+                for(J i = 0; i < WF_SIZE && (i + col_panel) < N; ++i)
                 {
                     rocsparse::atomic_add(dense_C,
-                                          col + (i + hipBlockIdx_y * WF_SIZE) * ldc
-                                              + batch_stride_C * batch,
+                                          col + (i + col_panel) * ldc + batch_stride_C * batch,
                                           dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }
             }
             else
             {
-                for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
+                for(J i = 0; i < WF_SIZE && (i + col_panel) < N; ++i)
                 {
                     rocsparse::atomic_add(dense_C,
-                                          col * ldc + i + hipBlockIdx_y * WF_SIZE
-                                              + batch_stride_C * batch,
+                                          col * ldc + i + col_panel + batch_stride_C * batch,
                                           dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }
@@ -930,6 +930,7 @@ namespace rocsparse
                                                        int64_t              batch_stride_C,
                                                        rocsparse_order      order_C,
                                                        rocsparse_index_base idx_base,
+                                                       J                    col_panel,
                                                        int64_t              batch)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
@@ -943,7 +944,7 @@ namespace rocsparse
         const uint32_t wid = tid / WF_SIZE;
 
         const J row = gid / WF_SIZE;
-        const J cid = lid + hipBlockIdx_y * WF_SIZE;
+        const J cid = lid + col_panel;
 
         if(row >= M)
         {
@@ -973,22 +974,20 @@ namespace rocsparse
 
             if(order_C == rocsparse_order_column)
             {
-                for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
+                for(J i = 0; i < WF_SIZE && (i + col_panel) < N; ++i)
                 {
                     rocsparse::atomic_add(dense_C,
-                                          col + (i + hipBlockIdx_y * WF_SIZE) * ldc
-                                              + batch_stride_C * batch,
+                                          col + (i + col_panel) * ldc + batch_stride_C * batch,
                                           dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }
             }
             else
             {
-                for(J i = 0; i < WF_SIZE && (i + hipBlockIdx_y * WF_SIZE) < N; ++i)
+                for(J i = 0; i < WF_SIZE && (i + col_panel) < N; ++i)
                 {
                     rocsparse::atomic_add(dense_C,
-                                          col * ldc + i + hipBlockIdx_y * WF_SIZE
-                                              + batch_stride_C * batch,
+                                          col * ldc + i + col_panel + batch_stride_C * batch,
                                           dense_C_size,
                                           static_cast<C>(val * shared_B[wid][i]));
                 }

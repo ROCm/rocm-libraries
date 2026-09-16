@@ -61,24 +61,34 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))
         {
-            for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+            // grid.y carries the dense column panel index (COLS columns each) and
+            // is capped at 65535, so stride over the COLS-wide panels to cover all
+            // columns [nstart, nstart + panels * COLS) when the panel count
+            // exceeds the cap. Every launched panel is fully in-bounds by
+            // construction (COLS divides the covered range), so the exact panel
+            // set is reproduced by the col_offset + COLS <= n condition.
+            for(I col_offset = nstart + COLS * hipBlockIdx_y; col_offset + COLS <= n;
+                col_offset += COLS * hipGridDim_y)
             {
-                rocsparse::coommnn_segmented_atomic_device<WF_SIZE, LOOPS, COLS, NT>(
-                    trans_B,
-                    nnz,
-                    m,
-                    n,
-                    nstart,
-                    alpha,
-                    load_pointer(coo_row_ind, batch, batch_stride_A),
-                    load_pointer(coo_col_ind, batch, batch_stride_A),
-                    load_pointer(coo_val, batch, batch_stride_A),
-                    load_pointer(dense_B, batch, batch_stride_B),
-                    ldb,
-                    load_pointer(dense_C, batch, batch_stride_C),
-                    ldc,
-                    order_C,
-                    idx_base);
+                for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+                {
+                    rocsparse::coommnn_segmented_atomic_device<WF_SIZE, LOOPS, COLS, NT>(
+                        trans_B,
+                        nnz,
+                        m,
+                        n,
+                        col_offset,
+                        alpha,
+                        load_pointer(coo_row_ind, batch, batch_stride_A),
+                        load_pointer(coo_col_ind, batch, batch_stride_A),
+                        load_pointer(coo_val, batch, batch_stride_A),
+                        load_pointer(dense_B, batch, batch_stride_B),
+                        ldb,
+                        load_pointer(dense_C, batch, batch_stride_C),
+                        ldc,
+                        order_C,
+                        idx_base);
+                }
             }
         }
     }
