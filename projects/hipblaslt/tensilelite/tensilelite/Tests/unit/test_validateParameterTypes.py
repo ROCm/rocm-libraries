@@ -519,6 +519,8 @@ class TestValidateProblemTypeParameterTypes:
         assert _expectedProblemTypeParamTypes["UseBias"] == {int}
         assert "MXBlockA" in _expectedProblemTypeParamTypes
         assert _expectedProblemTypeParamTypes["MXBlockA"] == {int}
+        assert "MXBlockFreeA" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["MXBlockFreeA"] == {int}
 
 
 class TestValidateProblemTypeRaiseMode:
