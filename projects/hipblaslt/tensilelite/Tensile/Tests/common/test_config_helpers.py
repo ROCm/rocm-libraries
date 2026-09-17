@@ -74,9 +74,20 @@ def test_find_available_archs_strips_version_suffix():
     assert findAvailableArchs("gfx1250v0;gfx942") == ["gfx1250", "gfx942"]
 
 
-def test_xfail_gfx1250_fires_on_versioned_target():
+def test_xfail_gfx1250_fires_on_versioned_target(monkeypatch):
     """xfail-gfx1250 must trigger even when the runner reports a versioned target,
     since the mark keys on the base arch (regression guard for the vN suffix)."""
+    monkeypatch.delenv("HSA_MODEL_MEMFILE", raising=False)  # ensure HW mode, not FFM
     archs = findAvailableArchs("gfx1250v0")
     marks = configMarks(_XFAIL_GFX1250_CONFIG, _TESTS_ROOT, archs)
     assert pytest.mark.xfail in marks
+
+
+def test_xfail_gfx1250_suppressed_under_ffm(monkeypatch):
+    """An xfail-gfx1250 config passes under FFM (no CheckASMCodeSize / emulated exec),
+    so the strict xfail must be suppressed there — else it XPASS-fails. Regression for
+    the FFM XPASS(strict) problem; the HW xfail (test above) is unchanged."""
+    monkeypatch.setenv("HSA_MODEL_MEMFILE", _FFM_MEMFILE)
+    archs = findAvailableArchs("gfx1250v0")
+    marks = configMarks(_XFAIL_GFX1250_CONFIG, _TESTS_ROOT, archs)
+    assert pytest.mark.xfail not in marks
