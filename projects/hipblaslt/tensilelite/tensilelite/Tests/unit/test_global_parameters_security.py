@@ -17,7 +17,7 @@ import argparse
 
 import pytest
 
-import tensilelite.Tensile as T
+import tensilelite.tensilelite as T
 
 pytestmark = pytest.mark.unit
 

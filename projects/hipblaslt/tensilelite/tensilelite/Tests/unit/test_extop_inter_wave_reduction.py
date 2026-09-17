@@ -18,8 +18,7 @@ from gpu_test_helpers import init_rocisa  # noqa: E402
 from tensilelite.Common.Architectures import gfxToIsa  # noqa: E402
 from tensilelite.Common.DataType import DataType  # noqa: E402
 
-import AMaxGenerator  # noqa: E402
-import LayerNormGenerator  # noqa: E402
+from tensilelite._extops import AMaxGenerator, LayerNormGenerator  # noqa: E402
 
 
 def _amax_generator():

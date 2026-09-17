@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for tensilelite.TensileRetuneLibrary — working-path helpers.
+# Characterization tests for tensilelite.retune_library — working-path helpers.
 #
 # ADD-ONLY. parseCurrentLibrary / runBenchmarking / TensileRetuneLibrary / main
 # require derived ProblemType + benchmarking and are resistance. This pins the
@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("tensilelite.TensileRetuneLibrary")
+M = importlib.import_module("tensilelite.retune_library")
 
 
 @pytest.fixture

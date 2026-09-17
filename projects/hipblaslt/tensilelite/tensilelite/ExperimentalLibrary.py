@@ -25,7 +25,7 @@ silently half-built):
              yaml file(s)/dir(s) by parameter (e.g. ``--where StreamK=5``) to
              discover which indices to extract.
   extract    Reverse a shipped ``3_LibraryLogic`` yaml into a benchmark config
-             (wraps ``tensilelite.TensileLibLogicToYaml``).
+             (wraps ``tensilelite.lib_logic_to_yaml``).
   merge      Combine several per-solution ``extract`` configs into one
              multi-problem config so a whole family rebuilds into one library.
   augment    Validate ``--set NAME=v1[,v2]`` against the canonical
@@ -38,7 +38,7 @@ silently half-built):
              ``ProblemSizes`` left over from extracting a ``Prediction``-type
              source. Benchmarks on the target-arch GPU (fails fast if that
              arch is not present on the host).
-  build-lib  Run ``tensilelite.TensileCreateLibrary --experimental`` to turn the
+  build-lib  Run ``tensilelite.tensilelite_create_library --experimental`` to turn the
              staged logic into a loadable device library.
   patch-logic
              Override ``--set`` params on shipped ``3_LibraryLogic`` solutions
@@ -122,7 +122,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # The TensileLite package directory that contains this module. Used to locate the
-# bin/Tensile launcher (``python -m tensilelite.Tensile`` is intentionally disabled
+# bin/Tensile launcher (``python -m tensilelite.tensilelite`` is intentionally disabled
 # upstream).
 _TENSILE_PKG_DIR = Path(__file__).resolve().parent
 
@@ -665,7 +665,7 @@ def _indexed_out_path(out: str, idx: int, single: bool) -> str:
 def _extract_snippet() -> str:
     return (
         "import sys\n"
-        "from tensilelite.TensileLibLogicToYaml import TensileLibLogicToYaml\n"
+        "from tensilelite.lib_logic_to_yaml import TensileLibLogicToYaml\n"
         "from tensilelite.ExperimentalLibrary import _indexed_out_path\n"
         "inp, out, skip = sys.argv[1], sys.argv[2], sys.argv[3] == '1'\n"
         "ids = [int(x.strip()) for x in sys.argv[4].split(',')]\n"
@@ -1009,13 +1009,13 @@ def _tensile_create_library_cmd(
     experimental: bool = True,
     jobs: Optional[int] = None,
 ) -> List[str]:
-    """Build the ``python -m tensilelite.TensileCreateLibrary ...`` argv shared by
+    """Build the ``python -m tensilelite.tensilelite_create_library ...`` argv shared by
     build-lib and patch-logic's buildability probe.
     """
     cmd = [
         python,
         "-m",
-        "tensilelite.TensileCreateLibrary",
+        "tensilelite.tensilelite_create_library",
         logic_dir,
         out_dir,
         "HIP",
