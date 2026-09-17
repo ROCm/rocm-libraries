@@ -66,18 +66,45 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 16, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 16, 1, 1, 2, 5, 2, 2]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        # gfx11 buffers local reads for every LoopIter (= DepthU/16), so VGPR
-        # use scales as (MIWaveTile0+MIWaveTile1) * DepthU/2. Past ~256 the
-        # kernel will not assemble on a 256-VGPR gfx11 part.
+        # With ClusterLocalRead=0 (below) ValuA/ValuB are single-buffered, so
+        # VGPR use scales as (MIWaveTile0 + MIWaveTile1) * MIInputPerThread/2
+        # and is independent of DepthU. Past 256 the kernel will not assemble on
+        # a 256-VGPR gfx11 part.
         - DepthU: [64]
         - WavefrontSize: [32]
         - StaggerU: [0]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [0]
-        - PrefetchGlobalRead: [1]
+        # Scheduling knobs taken from the shipped fp16 hero kernel (solution 0 of
+        # gfx1151_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml). Two of its
+        # settings cannot carry over: StaggerU 32 -> 0 (the scale SRD is not
+        # staggered alongside A) and ScheduleIterAlg 1 -> 0 (SIA=1 with PGR=2
+        # desynchronises the scale from the A data it scales; see
+        # BlockDequant.py).
+        - PrefetchGlobalRead: [2]
+        - WorkGroupMapping: [8]
+        - SourceSwap: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - LdsBlockSizePerPadA: [128]
+        - LdsBlockSizePerPadB: [128]
+        - LocalReadVectorWidth: [16]
+        # The remaining three hero knobs. Left to auto-derive, VectorWidthA
+        # reaches 4 and ClusterLocalRead 1; the latter sets numVgprBuffer to
+        # LoopIters (DepthU/MatrixInstK = 4) rather than PrefetchLocalRead+1,
+        # holding ValuA and ValuB four times over. That alone costs 391 VGPRs at
+        # MT64x160 against 223 here, i.e. it decides whether any tile past
+        # MT64x64 assembles at all.
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreVectorWidth: [1]
+        - ClusterLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
         # gfx11 WMMA has MIInputPerThread == MatrixInstK == 16; with PLR>0 the
         # widest legal local read (8 bf16) is still narrower than one MI input
         # and is rejected, so this tile runs without local-read prefetch.
@@ -92,3 +119,6 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 128]
           - Exact: [128, 128, 1, 256]
           - Exact: [192, 64, 1, 128]
+          # Larger than MacroTile1 (160) in N, so the non-edge store path is
+          # covered too; the three above are all narrower than one tile.
+          - Exact: [128, 320, 1, 256]
