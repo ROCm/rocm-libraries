@@ -1569,8 +1569,19 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return multiplyElementSize(problem.d().strides()[1]
-                                                   * std::min(value, problem.d().sizes()[1]),
+                    // D's free dimension 1 is N: its full size, and its
+                    // per-element stride (elements, not bytes).
+                    size_t const nSize   = problem.d().sizes()[1];
+                    size_t const nStride = problem.d().strides()[1];
+
+                    // value is MacroTile1. Re-based per workgroup along N (see
+                    // the class comment above), so only one MacroTile1's
+                    // worth of columns needs to fit under num_records, not
+                    // the full N extent.
+                    size_t const macroTile1          = value;
+                    size_t const columnsPerWorkgroup = std::min(macroTile1, nSize);
+
+                    return multiplyElementSize(nStride * columnsPerWorkgroup,
                                                problem.d().elementBytes())
                            < BufferOOBBytes;
                 }
@@ -1583,10 +1594,13 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    bool rv = (*this)(problem);
+                    bool               rv                  = (*this)(problem);
+                    size_t const       nSize               = problem.d().sizes()[1];
+                    size_t const       nStride             = problem.d().strides()[1];
+                    size_t const       columnsPerWorkgroup = std::min(value, nSize);
                     std::ostringstream details;
-                    details << "D:" << problem.d().strides()[1] << "*"
-                            << problem.d().elementBytes() << "*" << value << "<0xfffff000";
+                    details << "D:" << nStride << "*" << problem.d().elementBytes() << "*"
+                            << columnsPerWorkgroup << "<0xfffff000";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
