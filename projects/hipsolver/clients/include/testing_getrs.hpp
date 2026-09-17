@@ -212,14 +212,13 @@ void testing_getrs_bad_arg()
     if constexpr(BATCHED)
     {
         // memory allocations
-        device_batch_vector<T>           dA(1, 1, 1);
-        device_batch_vector<T>           dB(1, 1, 1);
-        device_strided_batch_vector<I>   dIpiv(1, 1, 1, 1);
-        device_strided_batch_vector<int> dInfo(1, 1, 1, 1);
+        device_batch_vector<T>         dA(1, 1, 1);
+        device_batch_vector<T>         dB(1, 1, 1);
+        device_strided_batch_vector<I> dIpiv(1, 1, 1, 1);
+        host_strided_batch_vector<int> hInfo(1, 1, 1, 1);
         CHECK_HIP_ERROR(dA.memcheck());
         CHECK_HIP_ERROR(dB.memcheck());
         CHECK_HIP_ERROR(dIpiv.memcheck());
-        CHECK_HIP_ERROR(dInfo.memcheck());
 
         SIZE size_W;
         hipsolver_getrs_bufferSize(API,
@@ -257,7 +256,7 @@ void testing_getrs_bad_arg()
                                 stB,
                                 dWork.data(),
                                 size_W,
-                                dInfo.data(),
+                                hInfo.data(),
                                 bc);
     }
     else
@@ -382,6 +381,7 @@ void getrs_initData(const hipsolverHandle_t    handle,
 }
 
 template <testAPI_t API,
+          bool      BATCHED,
           typename T,
           typename I,
           typename SIZE,
@@ -456,10 +456,11 @@ void getrs_getError(const hipsolverHandle_t    handle,
                                         stB,
                                         dWork.data(),
                                         lwork,
-                                        dInfo.data(),
+                                        (!BATCHED ? dInfo.data() : hInfoRes.data()),
                                         bc));
     CHECK_HIP_ERROR(hBRes.transfer_from(dB));
-    CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
+    if(!BATCHED)
+        CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
 
     // CPU lapack
     for(int b = 0; b < bc; ++b)
@@ -480,17 +481,21 @@ void getrs_getError(const hipsolverHandle_t    handle,
     }
 
     // check info
-    err = 0;
-    for(int b = 0; b < bc; ++b)
+    if(!BATCHED)
     {
-        EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
-        if(hInfo[b][0] != hInfoRes[b][0])
-            err++;
+        err = 0;
+        for(int b = 0; b < bc; ++b)
+        {
+            EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
+            if(hInfo[b][0] != hInfoRes[b][0])
+                err++;
+        }
+        *max_err += err;
     }
-    *max_err += err;
 }
 
 template <testAPI_t API,
+          bool      BATCHED,
           typename T,
           typename I,
           typename SIZE,
@@ -615,7 +620,7 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
                                             stB,
                                             dWork.data(),
                                             lwork,
-                                            dInfo.data(),
+                                            (!BATCHED ? dInfo.data() : hInfo.data()),
                                             bc));
     }
 
@@ -662,7 +667,7 @@ void getrs_getPerfData(const hipsolverHandle_t    handle,
                         stB,
                         dWork.data(),
                         lwork,
-                        dInfo.data(),
+                        (!BATCHED ? dInfo.data() : hInfo.data()),
                         bc);
         *gpu_time_used += get_time_us_sync(stream) - start;
     }
@@ -707,6 +712,7 @@ void testing_getrs(Arguments& argus)
     {
         if constexpr(BATCHED)
         {
+            host_strided_batch_vector<int> hInfo(1, 1, 1, bc);
             EXPECT_ROCBLAS_STATUS(hipsolver_getrs(API,
                                                   handle,
                                                   params,
@@ -723,7 +729,7 @@ void testing_getrs(Arguments& argus)
                                                   stB,
                                                   (T*)nullptr,
                                                   0,
-                                                  (int*)nullptr,
+                                                  hInfo.data(),
                                                   bc),
                                   HIPSOLVER_STATUS_INVALID_VALUE);
         }
@@ -826,60 +832,60 @@ void testing_getrs(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            getrs_getError<API, T>(handle,
-                                   params,
-                                   trans,
-                                   m,
-                                   nrhs,
-                                   dA,
-                                   lda,
-                                   stA,
-                                   dIpiv,
-                                   stP,
-                                   dB,
-                                   ldb,
-                                   stB,
-                                   dWork,
-                                   size_W,
-                                   dInfo,
-                                   bc,
-                                   hA,
-                                   hIpiv,
-                                   hIpiv_cpu,
-                                   hB,
-                                   hBRes,
-                                   hInfo,
-                                   hInfoRes,
-                                   &max_error);
+            getrs_getError<API, BATCHED, T>(handle,
+                                            params,
+                                            trans,
+                                            m,
+                                            nrhs,
+                                            dA,
+                                            lda,
+                                            stA,
+                                            dIpiv,
+                                            stP,
+                                            dB,
+                                            ldb,
+                                            stB,
+                                            dWork,
+                                            size_W,
+                                            dInfo,
+                                            bc,
+                                            hA,
+                                            hIpiv,
+                                            hIpiv_cpu,
+                                            hB,
+                                            hBRes,
+                                            hInfo,
+                                            hInfoRes,
+                                            &max_error);
 
         // collect performance data
         if(argus.timing)
-            getrs_getPerfData<API, T>(handle,
-                                      params,
-                                      trans,
-                                      m,
-                                      nrhs,
-                                      dA,
-                                      lda,
-                                      stA,
-                                      dIpiv,
-                                      stP,
-                                      dB,
-                                      ldb,
-                                      stB,
-                                      dWork,
-                                      size_W,
-                                      dInfo,
-                                      bc,
-                                      hA,
-                                      hIpiv,
-                                      hIpiv_cpu,
-                                      hB,
-                                      hInfo,
-                                      &gpu_time_used,
-                                      &cpu_time_used,
-                                      hot_calls,
-                                      argus.perf);
+            getrs_getPerfData<API, BATCHED, T>(handle,
+                                               params,
+                                               trans,
+                                               m,
+                                               nrhs,
+                                               dA,
+                                               lda,
+                                               stA,
+                                               dIpiv,
+                                               stP,
+                                               dB,
+                                               ldb,
+                                               stB,
+                                               dWork,
+                                               size_W,
+                                               dInfo,
+                                               bc,
+                                               hA,
+                                               hIpiv,
+                                               hIpiv_cpu,
+                                               hB,
+                                               hInfo,
+                                               &gpu_time_used,
+                                               &cpu_time_used,
+                                               hot_calls,
+                                               argus.perf);
     }
 
     else
@@ -909,60 +915,60 @@ void testing_getrs(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            getrs_getError<API, T>(handle,
-                                   params,
-                                   trans,
-                                   m,
-                                   nrhs,
-                                   dA,
-                                   lda,
-                                   stA,
-                                   dIpiv,
-                                   stP,
-                                   dB,
-                                   ldb,
-                                   stB,
-                                   dWork,
-                                   size_W,
-                                   dInfo,
-                                   bc,
-                                   hA,
-                                   hIpiv,
-                                   hIpiv_cpu,
-                                   hB,
-                                   hBRes,
-                                   hInfo,
-                                   hInfoRes,
-                                   &max_error);
+            getrs_getError<API, BATCHED, T>(handle,
+                                            params,
+                                            trans,
+                                            m,
+                                            nrhs,
+                                            dA,
+                                            lda,
+                                            stA,
+                                            dIpiv,
+                                            stP,
+                                            dB,
+                                            ldb,
+                                            stB,
+                                            dWork,
+                                            size_W,
+                                            dInfo,
+                                            bc,
+                                            hA,
+                                            hIpiv,
+                                            hIpiv_cpu,
+                                            hB,
+                                            hBRes,
+                                            hInfo,
+                                            hInfoRes,
+                                            &max_error);
 
         // collect performance data
         if(argus.timing)
-            getrs_getPerfData<API, T>(handle,
-                                      params,
-                                      trans,
-                                      m,
-                                      nrhs,
-                                      dA,
-                                      lda,
-                                      stA,
-                                      dIpiv,
-                                      stP,
-                                      dB,
-                                      ldb,
-                                      stB,
-                                      dWork,
-                                      size_W,
-                                      dInfo,
-                                      bc,
-                                      hA,
-                                      hIpiv,
-                                      hIpiv_cpu,
-                                      hB,
-                                      hInfo,
-                                      &gpu_time_used,
-                                      &cpu_time_used,
-                                      hot_calls,
-                                      argus.perf);
+            getrs_getPerfData<API, BATCHED, T>(handle,
+                                               params,
+                                               trans,
+                                               m,
+                                               nrhs,
+                                               dA,
+                                               lda,
+                                               stA,
+                                               dIpiv,
+                                               stP,
+                                               dB,
+                                               ldb,
+                                               stB,
+                                               dWork,
+                                               size_W,
+                                               dInfo,
+                                               bc,
+                                               hA,
+                                               hIpiv,
+                                               hIpiv_cpu,
+                                               hB,
+                                               hInfo,
+                                               &gpu_time_used,
+                                               &cpu_time_used,
+                                               hot_calls,
+                                               argus.perf);
     }
 
     // validate results for rocsolver-test

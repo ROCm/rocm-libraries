@@ -4189,6 +4189,8 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
@@ -4215,6 +4217,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
@@ -4243,6 +4247,8 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
@@ -4270,6 +4276,8 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(n < 0 || nrhs < 0 || lda < n || ldb < n)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
@@ -4291,16 +4299,41 @@ hipsolverStatus_t hipsolverSgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          float*               work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(n < 0 || nrhs < 0 || lda < std::max(1, n) || ldb < std::max(1, n) || batch_count < 0)
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(strideP != n)
+    {
+        *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     cudaStream_t stream;
     cusolverDnGetStream((cusolverDnHandle_t)handle, &stream);
@@ -4324,13 +4357,6 @@ try
 
     cublasDestroy(cublas_handle);
 
-    if(devInfo)
-    {
-        hipMemset(devInfo, 0, batch_count * sizeof(int));
-        if(info != 0)
-            hipMemcpy(devInfo + ((-info) - 1), &info, sizeof(int), hipMemcpyHostToDevice);
-    }
-
     return hipsolver::cuda2hip_status(status);
 }
 catch(...)
@@ -4350,16 +4376,41 @@ hipsolverStatus_t hipsolverDgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          double*              work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(n < 0 || nrhs < 0 || lda < std::max(1, n) || ldb < std::max(1, n) || batch_count < 0)
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(strideP != n)
+    {
+        *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     cudaStream_t stream;
     cusolverDnGetStream((cusolverDnHandle_t)handle, &stream);
@@ -4383,13 +4434,6 @@ try
 
     cublasDestroy(cublas_handle);
 
-    if(devInfo)
-    {
-        hipMemset(devInfo, 0, batch_count * sizeof(int));
-        if(info != 0)
-            hipMemcpy(devInfo + ((-info) - 1), &info, sizeof(int), hipMemcpyHostToDevice);
-    }
-
     return hipsolver::cuda2hip_status(status);
 }
 catch(...)
@@ -4409,16 +4453,41 @@ hipsolverStatus_t hipsolverCgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          hipFloatComplex*     work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(n < 0 || nrhs < 0 || lda < std::max(1, n) || ldb < std::max(1, n) || batch_count < 0)
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(strideP != n)
+    {
+        *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     cudaStream_t stream;
     cusolverDnGetStream((cusolverDnHandle_t)handle, &stream);
@@ -4442,13 +4511,6 @@ try
 
     cublasDestroy(cublas_handle);
 
-    if(devInfo)
-    {
-        hipMemset(devInfo, 0, batch_count * sizeof(int));
-        if(info != 0)
-            hipMemcpy(devInfo + ((-info) - 1), &info, sizeof(int), hipMemcpyHostToDevice);
-    }
-
     return hipsolver::cuda2hip_status(status);
 }
 catch(...)
@@ -4468,16 +4530,41 @@ hipsolverStatus_t hipsolverZgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          hipDoubleComplex*    work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
-    if(n < 0 || nrhs < 0 || lda < std::max(1, n) || ldb < std::max(1, n) || batch_count < 0)
+
+    // override returned info to account for extra arguments
+    if(!hInfo)
         return HIPSOLVER_STATUS_INVALID_VALUE;
-    if(strideP != n)
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(strideP != n)
+    {
+        *hInfo = -7;
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    }
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     cudaStream_t stream;
     cusolverDnGetStream((cusolverDnHandle_t)handle, &stream);
@@ -4500,13 +4587,6 @@ try
                                                 batch_count);
 
     cublasDestroy(cublas_handle);
-
-    if(devInfo)
-    {
-        hipMemset(devInfo, 0, batch_count * sizeof(int));
-        if(info != 0)
-            hipMemcpy(devInfo + ((-info) - 1), &info, sizeof(int), hipMemcpyHostToDevice);
-    }
 
     return hipsolver::cuda2hip_status(status);
 }

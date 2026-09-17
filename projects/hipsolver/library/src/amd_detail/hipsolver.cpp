@@ -7579,12 +7579,35 @@ hipsolverStatus_t hipsolverSgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          float*               work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     if(work && lwork)
         CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
@@ -7604,8 +7627,6 @@ try
                                                                 batch_count));
         CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
     }
-
-    CHECK_ROCBLAS_ERROR(hipsolverZeroInfo((rocblas_handle)handle, devInfo, batch_count));
 
     return hipsolver::rocblas2hip_status(
         rocsolver_sgetrs_batched((rocblas_handle)handle,
@@ -7637,12 +7658,35 @@ hipsolverStatus_t hipsolverDgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          double*              work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     if(work && lwork)
         CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
@@ -7662,8 +7706,6 @@ try
                                                                 batch_count));
         CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
     }
-
-    CHECK_ROCBLAS_ERROR(hipsolverZeroInfo((rocblas_handle)handle, devInfo, batch_count));
 
     return hipsolver::rocblas2hip_status(
         rocsolver_dgetrs_batched((rocblas_handle)handle,
@@ -7695,12 +7737,35 @@ hipsolverStatus_t hipsolverCgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          hipFloatComplex*     work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     if(work && lwork)
         CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
@@ -7720,8 +7785,6 @@ try
                                                                 batch_count));
         CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
     }
-
-    CHECK_ROCBLAS_ERROR(hipsolverZeroInfo((rocblas_handle)handle, devInfo, batch_count));
 
     return hipsolver::rocblas2hip_status(
         rocsolver_cgetrs_batched((rocblas_handle)handle,
@@ -7753,12 +7816,35 @@ hipsolverStatus_t hipsolverZgetrsBatched(hipsolverHandle_t    handle,
                                          int                  ldb,
                                          hipDoubleComplex*    work,
                                          int                  lwork,
-                                         int*                 devInfo,
+                                         int*                 hInfo,
                                          int                  batch_count)
 try
 {
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
+
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(trans != HIPBLAS_OP_N && trans != HIPBLAS_OP_T && trans != HIPBLAS_OP_C)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(nrhs < 0)
+        *hInfo = -3;
+    else if(!A && n)
+        *hInfo = -4;
+    else if(lda < std::max(1, n))
+        *hInfo = -5;
+    else if(!devIpiv && n)
+        *hInfo = -6;
+    else if(!B && n * nrhs)
+        *hInfo = -8;
+    else if(ldb < std::max(1, n))
+        *hInfo = -9;
+    else if(batch_count < 0)
+        *hInfo = -13;
+    else
+        *hInfo = 0;
 
     if(work && lwork)
         CHECK_ROCBLAS_ERROR(rocblas_set_workspace((rocblas_handle)handle, work, lwork));
@@ -7778,8 +7864,6 @@ try
                                                                 batch_count));
         CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork));
     }
-
-    CHECK_ROCBLAS_ERROR(hipsolverZeroInfo((rocblas_handle)handle, devInfo, batch_count));
 
     return hipsolver::rocblas2hip_status(
         rocsolver_zgetrs_batched((rocblas_handle)handle,

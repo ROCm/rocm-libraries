@@ -1432,7 +1432,7 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgetrsBatched(hipsolverHandle_t    h
                                                           int                  ldb,
                                                           float*               work,
                                                           int                  lwork,
-                                                          int*                 devInfo,
+                                                          int*                 hInfo,
                                                           int                  batch_count);
 
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetrsBatched(hipsolverHandle_t    handle,
@@ -1447,7 +1447,7 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgetrsBatched(hipsolverHandle_t    h
                                                           int                  ldb,
                                                           double*              work,
                                                           int                  lwork,
-                                                          int*                 devInfo,
+                                                          int*                 hInfo,
                                                           int                  batch_count);
 
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetrsBatched(hipsolverHandle_t    handle,
@@ -1462,7 +1462,7 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgetrsBatched(hipsolverHandle_t    h
                                                           int                  ldb,
                                                           hipFloatComplex*     work,
                                                           int                  lwork,
-                                                          int*                 devInfo,
+                                                          int*                 hInfo,
                                                           int                  batch_count);
 
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrsBatched(hipsolverHandle_t    handle,
@@ -1477,7 +1477,7 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgetrsBatched(hipsolverHandle_t    h
                                                           int                  ldb,
                                                           hipDoubleComplex*    work,
                                                           int                  lwork,
-                                                          int*                 devInfo,
+                                                          int*                 hInfo,
                                                           int                  batch_count);
 
 // potrf
