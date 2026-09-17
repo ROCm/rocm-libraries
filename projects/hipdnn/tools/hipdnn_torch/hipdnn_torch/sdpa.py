@@ -182,12 +182,39 @@ class SdpaOverride(OpOverride):
                     bias.dtype,
                 )
 
-            # Output mirrors native's contract: contiguous, Q's batch/heads/seq with
-            # V's head dim (Dv). We own it, so its strides are known.
+            # Output mirrors native's VALUE contract (Q's batch/heads/seq with V's
+            # head dim Dv) but must mirror Q's LAYOUT, not blindly be contiguous.
+            #
+            # A plain torch.empty() is BHSD-contiguous. A model's Q is BSHD (a
+            # [B,S,H,D] buffer viewed as [B,H,S,D]), and an engine whose kernel
+            # bakes that layout -- the rocKE attention_dense family does, it takes
+            # no stride kernargs -- defers the O-layout check to prepare() and
+            # then declines. The symptom is a *silent* native fallback on exactly
+            # the shapes the engine advertises, which is indistinguishable from
+            # missing coverage.
+            #
+            # Allocating O in Q's own memory order keeps the fast path reachable
+            # and costs nothing: native's contract is about VALUES and shape, and
+            # every consumer goes through the returned tensor's strides.
             dv = int(value.shape[-1])
-            o = torch.empty(
-                (*query.shape[:-1], dv), dtype=query.dtype, device=query.device
-            )
+            q_strides = query.stride()
+            q_shape = tuple(query.shape)
+            if (
+                query.dim() == 4
+                and dv == int(query.shape[-1])
+                and q_strides[1] == q_shape[3]              # head stride == D
+                and q_strides[2] == q_shape[1] * q_shape[3]  # seq stride == H*D
+            ):
+                # Q is BSHD: allocate [B,S,H,D] contiguous and view it as [B,H,S,D].
+                o = torch.empty(
+                    (q_shape[0], q_shape[2], q_shape[1], dv),
+                    dtype=query.dtype,
+                    device=query.device,
+                ).transpose(1, 2)
+            else:
+                o = torch.empty(
+                    (*query.shape[:-1], dv), dtype=query.dtype, device=query.device
+                )
 
             entry = self._cached_graph(
                 (

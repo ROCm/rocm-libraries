@@ -1,0 +1,51 @@
+# Worked example: a small single-pack engine ("ScaleAdd": y = a*x + b, elementwise),
+# modeled on the shipped conv_fwd/pointwise engines. Realistic enough to round-trip
+# through generate.py --dry-run and, once a real kernel source and matcher/dispatch
+# bodies are filled in, through hipdnn_validate_descriptors.
+#
+# See README.md for how to run this config and validate its output.
+
+engine:
+  name: hipkernel:ScaleAdd
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  knobs: [block_size]
+  heuristic: native
+
+kmd_fields:
+  - name: block_size
+    type: int
+    default_value: 64
+  - name: dtype
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: embedded_source
+workspace_policy: none
+delegates_to_existing_plan: false
+
+packs:
+  - name: scale_add
+    arch: [gfx942]
+    kernels:
+      - name: scale_add.f32_block64
+        kernel_source:
+          kind: embedded_source
+          source_file: ScaleAdd.cpp
+          entry_point: ScaleAdd
+        metadata:
+          block_size: 64
+          dtype: FLOAT
+        priority: 0
+      - name: scale_add.f32_block256
+        kernel_source:
+          kind: embedded_source
+          source_file: ScaleAdd.cpp
+          entry_point: ScaleAdd
+        metadata:
+          block_size: 256
+          dtype: FLOAT
+        priority: 0

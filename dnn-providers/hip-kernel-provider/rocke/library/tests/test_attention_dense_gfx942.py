@@ -201,7 +201,7 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
 # a duplicate compile and can never serve a wrong binary -- so these are recorded,
 # not asserted against. lazy_rescale is a gfx950-only lever (this builder never reads
 # spec.lazy_rescale) that the SHARED kernel_name() nevertheless tags with `lazyrs`.
-_NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale"})
+_NAME_ONLY_SPEC_FIELDS = frozenset({"lazy_rescale", "lds_v_row_pad", "wide_lds_dma"})
 
 # Second LEGAL values per field. Every candidate is filtered through
 # supports_attention_dense before use, so a candidate that is illegal for a given
@@ -224,6 +224,7 @@ _SPEC_PERTURBATIONS = {
     "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
     "block_m": (128, 512),
     "block_n": (32, 128),
+    "lds_v_row_pad": (0, 16),
     "waves_per_eu": (3, 4),
     "lds_k_group_pad": (0, 16),
     "persistent": (True, False),
@@ -232,6 +233,7 @@ _SPEC_PERTURBATIONS = {
     "persist_decode": ("qb_major", "hkv_major"),
     "lazy_rescale": (False, True),
     "use_sinks": (),  # unbuildable (not yet supported)
+    "wide_lds_dma": (False, True),
 }
 
 # The gfx942-private half of the same table: fields Gfx942AttentionDenseSpec adds on

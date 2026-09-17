@@ -2768,6 +2768,107 @@ TEST(TestCpuFpReferenceSdpaFp8, GqaPerKvHeadDescaleMatchesDequantizedInputs)
     }
 }
 
+// Attention sinks
+//
+// A sink is a per-query-head learned logit that joins the softmax DENOMINATOR and
+// has no value vector, so it absorbs attention mass instead of contributing to the
+// output. Every expectation below is computed by hand from the softmax definition
+// rather than by calling the reference a second time -- a test that recomputes with
+// the code under test agrees with it by construction, including when both are wrong.
+// ---------------------------------------------------------------------------
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkAbsorbsAttentionMassWithoutContributingToOutput)
+{
+    // [B=1, H=1, Sq=1, Skv=2, D=1, Dv=1], every score forced to ZERO so the softmax
+    // arithmetic is exact and checkable by hand:
+    //   Q = [0] => S[kv] = 0 for both keys, whatever K holds.
+    //   V = [1, 3]
+    // Without a sink:  P = [1/2, 1/2]                     => O = 2
+    // With sink s=0:   denominator gains exp(0) = 1, so
+    //                  P = [1/3, 1/3] and 1/3 of the mass goes nowhere
+    //                                                     => O = (1 + 3)/3 = 4/3
+    Tensor<double> q({1, 1, 1, 1});
+    Tensor<double> k({1, 1, 2, 1});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 1, 1, 1});
+    Tensor<float> sink({1, 1, 1, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(1.0);
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(3.0, 0, 0, 1, 0);
+    sink.fillWithValue(0.0F);
+
+    const TensorBase<float>* noMask = nullptr;
+
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 2.0, 1e-6) << "no-sink baseline";
+
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/-1,
+                                /*rightBound=*/-1,
+                                /*topLeftAlignment=*/true,
+                                /*lse=*/nullptr,
+                                /*descaleQ=*/nullptr,
+                                /*descaleK=*/nullptr,
+                                /*descaleV=*/nullptr,
+                                &sink);
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 4.0 / 3.0, 1e-6)
+        << "a sink logit equal to the scores must take exactly 1/3 of the mass";
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, ANullSinkIsBitIdenticalToNoSinkArgument)
+{
+    // The control that keeps every pre-existing expectation in this file honest: the
+    // parameter defaults to nullptr and adding it must not perturb the no-sink path.
+    Tensor<double> q({1, 2, 3, 4});
+    Tensor<double> k({1, 2, 3, 4});
+    Tensor<double> v({1, 2, 3, 4});
+    Tensor<double> oWithout({1, 2, 3, 4});
+    Tensor<double> oWithNullptr({1, 2, 3, 4});
+
+    q.fillWithRandomValues(-1.0, 1.0, 7001);
+    k.fillWithRandomValues(-1.0, 1.0, 7002);
+    v.fillWithRandomValues(-1.0, 1.0, 7003);
+
+    const TensorBase<float>* noMask = nullptr;
+    const TensorBase<float>* noSink = nullptr;
+
+    CpuFpReferenceSdpa::forward(q, k, v, oWithout, std::nullopt, noMask);
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                oWithNullptr,
+                                std::nullopt,
+                                noMask,
+                                -1,
+                                -1,
+                                true,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                nullptr,
+                                noSink);
+
+    for(int h = 0; h < 2; ++h)
+    {
+        for(int sq = 0; sq < 3; ++sq)
+        {
+            for(int d = 0; d < 4; ++d)
+            {
+                EXPECT_EQ(oWithout.getHostValue(0, h, sq, d),
+                          oWithNullptr.getHostValue(0, h, sq, d))
+                    << "at h=" << h << " sq=" << sq << " d=" << d;
+            }
+        }
+    }
+}
+
 TEST(TestCpuFpReferenceSdpaFp8, CausalMaskOverloadForwardsDescale)
 {
     // The causalMask-bool convenience overload must forward descale tensors to the
@@ -2908,4 +3009,109 @@ TEST(TestCpuFpReferenceSdpaFp8, InvalidDescaleShapeThrows)
                                                                                     nullptr,
                                                                                     nullptr)),
         std::invalid_argument);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkIsPerQueryHeadNotShared)
+{
+    // Two heads, identical inputs, DIFFERENT sink logits. If the reference read one
+    // sink for the whole tensor -- the easy indexing mistake -- both heads would
+    // produce the same output and this test would fail.
+    //
+    // Scores are all zero again (Q=0), Skv=1, V=[2].
+    //   head 0, sink = -inf-ish (large negative): denominator ~= 1  => O ~= 2
+    //   head 1, sink = 0:        denominator = 2                    => O = 1
+    Tensor<double> q({1, 2, 1, 1});
+    Tensor<double> k({1, 2, 1, 1});
+    Tensor<double> v({1, 2, 1, 1});
+    Tensor<double> o({1, 2, 1, 1});
+    Tensor<float> sink({1, 2, 1, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(1.0);
+    v.fillWithValue(2.0);
+    sink.setHostValue(-30.0F, 0, 0, 0, 0);
+    sink.setHostValue(0.0F, 0, 1, 0, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, -1, -1, true, nullptr, nullptr, nullptr, nullptr, &sink);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 2.0, 1e-6)
+        << "a strongly negative sink absorbs almost nothing";
+    EXPECT_NEAR(o.getHostValue(0, 1, 0, 0), 1.0, 1e-6)
+        << "a sink equal to the only score takes half the mass";
+    EXPECT_NE(o.getHostValue(0, 0, 0, 0), o.getHostValue(0, 1, 0, 0))
+        << "the two heads must not share one sink logit";
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkEntersTheLseNormaliser)
+{
+    // LSE is the row's normaliser, so with a sink it must include the sink term --
+    // otherwise a backward pass recomputing probabilities from it would disagree with
+    // the probabilities the forward pass actually used.
+    //
+    // Scores all zero, Skv=2, sink=0 => sumExp = 2 + 1 = 3, maxVal = 0 => LSE = ln 3.
+    Tensor<double> q({1, 1, 1, 1});
+    Tensor<double> k({1, 1, 2, 1});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 1, 1, 1});
+    Tensor<float> lse({1, 1, 1, 1});
+    Tensor<float> sink({1, 1, 1, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(1.0);
+    v.fillWithValue(1.0);
+    sink.fillWithValue(0.0F);
+
+    const TensorBase<float>* noMask = nullptr;
+
+    CpuFpReferenceSdpa::forward(q, k, v, o, std::nullopt, noMask, -1, -1, true, &lse);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(2.0F), 1e-6F)
+        << "no-sink baseline: two keys at score 0";
+
+    CpuFpReferenceSdpa::forward(
+        q, k, v, o, std::nullopt, noMask, -1, -1, true, &lse, nullptr, nullptr, nullptr, &sink);
+    EXPECT_NEAR(lse.getHostValue(0, 0, 0, 0), std::log(3.0F), 1e-6F)
+        << "the sink's exp() must be inside the normaliser LSE reports";
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, SinkCompositesWithCausalMasking)
+{
+    // Sinks and masking are independent: masking decides WHICH keys are in the row,
+    // the sink adds a term to whatever survives. gpt-oss-style traces set both, so
+    // this composition is the shape that actually ships.
+    //
+    // [Sq=2, Skv=2], Q=0 so all live scores are 0, V=[1, 3], sink=0, top-left causal.
+    //   sq=0: only kv=0 lives => denom = 1 + 1(sink) = 2 => O = 1/2
+    //   sq=1: kv=0,1 live     => denom = 2 + 1(sink) = 3 => O = (1 + 3)/3 = 4/3
+    Tensor<double> q({1, 1, 2, 1});
+    Tensor<double> k({1, 1, 2, 1});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 1, 2, 1});
+    Tensor<float> sink({1, 1, 1, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(1.0);
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(3.0, 0, 0, 1, 0);
+    sink.fillWithValue(0.0F);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/-1,
+                                /*rightBound=*/0,
+                                /*topLeftAlignment=*/true,
+                                /*lse=*/nullptr,
+                                /*descaleQ=*/nullptr,
+                                /*descaleK=*/nullptr,
+                                /*descaleV=*/nullptr,
+                                &sink);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.5, 1e-6) << "sq=0, one live key plus sink";
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 4.0 / 3.0, 1e-6) << "sq=1, two live keys plus sink";
 }
