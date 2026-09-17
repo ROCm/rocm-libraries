@@ -50,25 +50,32 @@ def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, it
         dtype=dtype_str,
         sliding_window=sw,
         kv_block_size=shape.block_size,
-        num_sms=bench.num_sms,
+        num_cus=bench.num_sms,
     )
 
     specs = attention_sweep_space(req)
     problem = bench._problem(shape, sw, is_fp8)
 
-    # Group the offered engines by the launched path they resolve to.
-    engines_by_path = {}
-    for spec in specs:
-        engines_by_path.setdefault(spec.path, []).append(spec.name)
-
     entries = {}
-    for path, engine_names in engines_by_path.items():
+    for spec in specs:
+        path = spec.path
+        tuning_id = getattr(spec, "tuning_id", "")
+        candidate_name = getattr(spec, "candidate_name", getattr(spec, "name", path))
+        entry_key = (
+            f"{path}:{candidate_name}:{tuning_id}"
+            if tuning_id
+            else f"{path}:{candidate_name}"
+        )
         try:
             run_backend = "tiled" if path == "2d" else path
-            kernel = _sweep_kernel_name(problem, run_backend)
+            kernel = (
+                spec.kernel_name()
+                if tuning_id
+                else _sweep_kernel_name(problem, run_backend)
+            )
             out = torch.empty_like(data["query"])
 
-            def call_once(_backend=run_backend, _out=out):
+            def call_once(_backend=run_backend, _out=out, _spec=spec):
                 run_unified_attention_torch(
                     problem=problem,
                     q=data["query"],
@@ -84,20 +91,26 @@ def run_sweep(shape, data, sw, is_fp8, bench, *, arch, stream_handle, warmup, it
                     alibi_slopes=data["alibi_slopes"],
                     backend=_backend,
                     stream=stream_handle,
+                    tuning_spec=_spec if hasattr(_spec, "kernel_spec") else None,
                 )
 
             ms = time_launches(
                 call_once, warmup=warmup, iters=iters, stream=stream_handle
             )
             synchronize_and_release(stream_handle)
-            entries[path] = {
+            entries[entry_key] = {
                 "ms": ms,
-                "engines": engine_names,
+                "engines": [candidate_name],
+                "tuning_id": tuning_id,
                 "kernel": kernel,
                 "out": out,
             }
         except Exception as exc:  # noqa: BLE001  # one bad path must not sink the rest
-            entries[path] = {"error": repr(exc), "engines": engine_names}
+            entries[entry_key] = {
+                "error": repr(exc),
+                "engines": [candidate_name],
+                "tuning_id": tuning_id,
+            }
     return entries
 
 

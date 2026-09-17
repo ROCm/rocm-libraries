@@ -18,9 +18,15 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # edit on an existing one) fails ``test_declared_features_are_frozen`` until it
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
+_GFX950_DENSE_FEATURES = {"causal", "sinks", "sliding_window"}
 EXPECTED_FEATURES = {
     "attention_gfx942_dense": {"causal"},
-    "attention_gfx950_dense": {"causal", "sinks", "sliding_window"},
+    "attention_gfx950_dense": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_grid_default": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_persist_default": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_grid_bm128": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_persist_bm128": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_persist_widedma_bm128": set(_GFX950_DENSE_FEATURES),
     "attention_d256_decode": {"causal"},
     "attention_gfx1250_wmma": {"causal"},
     "attention_gfx942_dense_pipe": {"causal", "sinks", "sliding_window"},
@@ -156,9 +162,19 @@ class TestAttentionDispatch(unittest.TestCase):
         # A new candidate, or a features edit on an existing one, must be listed
         # in EXPECTED_FEATURES -- it cannot inherit a widened set unnoticed.
         actual = {
-            c.name: set(c.capability.supports_features) for c in attention_candidates()
+            c.name: set(c.capability.supports_features)
+            for c in attention_candidates()
+            if c.algorithm != "unified_tuning"
         }
         self.assertEqual(actual, EXPECTED_FEATURES)
+        tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
+        self.assertTrue(tuning)
+        for candidate in tuning:
+            with self.subTest(candidate=candidate.name):
+                self.assertEqual(
+                    set(candidate.capability.supports_features),
+                    set(ATTENTION_FEATURES),
+                )
 
     def test_feature_changes_spec_identity(self):
         # Derive one case per feature from the vocabulary: toggling a feature the
