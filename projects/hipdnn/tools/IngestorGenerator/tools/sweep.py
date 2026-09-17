@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from device_probe import ARCH_TOKEN, device_info
+from device_probe import ARCH_TOKEN, ProbeUnavailable, device_info
 
 
 class ConfigError(ValueError):
@@ -1272,7 +1272,7 @@ def main(argv=None):
         # an ordinary outcome the caller reads off the marker.
         print(f"SWEEP_INCOMPLETE: {exc}", file=sys.stderr)
         return 1
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (ProbeUnavailable, OSError, ValueError, KeyError, TypeError) as exc:
         # An operational failure is NOT an incomplete sweep. A KeyError or TypeError
         # is a defect in this driver and an OSError is a broken execution host;
         # rendering either as SWEEP_INCOMPLETE reads as a measured decline and lets

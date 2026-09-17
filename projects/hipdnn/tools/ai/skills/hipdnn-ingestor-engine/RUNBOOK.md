@@ -56,9 +56,13 @@ On the actual allocated execution host:
 
 Early mode requires the requested device and an existing writable root. It ignores
 inherited `INSTALL` and rejects `--install`; `$INSTALL` may name a future directory.
-Exit 0 proves feasibility only, exit 1 a device/path/write failure, and exit 2 an
-invalid invocation. For rocKE, confirm the actual builder/spec and `(spec, *, arch)`
-interface; an unknown architecture inventory needs source investigation.
+Exit 0 proves feasibility only, exit 1 a device/path/write failure, exit 2 an
+invalid invocation, and exit 3 that neither `rocminfo` nor `hipInfo` could be run, so
+the device was never observed. Exit 3 is not a device-absent verdict and the gate it
+leaves unmet is discharged by obtaining an inspection utility on this host, not by
+moving to another one. For rocKE, confirm the actual builder/spec and
+`(spec, *, arch)` interface; an unknown architecture inventory needs source
+investigation.
 
 **Gate:** feasible target/workspace, representable scope and capable reference. A
 missing dependency blocks its gate; host-only research may continue while a device

@@ -39,8 +39,13 @@ The device probe has two explicit interfaces:
 
 Early mode has no installation prerequisite and ignores inherited `INSTALL`.
 Installed mode follows installation. Exit 0 covers checks applicable to that mode;
-exit 1 reports device/path/write failure; exit 2 reports invalid invocation. Neither
-mode proves plugin loading, engine dispatch or numerical correctness.
+exit 1 reports device/path/write failure; exit 2 reports invalid invocation; exit 3
+reports that no inspection utility could be run, so the device was never observed
+either way. The probe tries `rocminfo` then `hipInfo` — the utility the Windows ROCm
+wheels ship instead — so exit 3 means neither was present. That is a packaging or
+platform fact about the host, not a statement about its GPUs: it leaves the gate
+unmet, but the remedy is an inspection utility rather than a different machine.
+Neither mode proves plugin loading, engine dispatch or numerical correctness.
 
 ## YAML schema
 

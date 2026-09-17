@@ -189,6 +189,20 @@ _needs_posix_exec = pytest.mark.skipif(
 )
 
 
+#: Marks a case that withdraws write access from a path to drive an operational error.
+#:
+#: Narrower than execution: `chmod` does not deny directory writes on Windows, so the
+#: condition the case exists to create never holds and the driver reaches its verdict
+#: by some other route, which is not the thing being asserted.
+_needs_posix_permissions = pytest.mark.skipif(
+    os.name != "posix",
+    reason=(
+        "making a directory unwritable needs POSIX permission semantics: chmod does "
+        "not withdraw directory write access on Windows"
+    ),
+)
+
+
 def _script(path: Path, body: str) -> Path:
     """Stage an executable the driver can run by name, the way a real one arrives."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -728,6 +742,7 @@ class TestTheDriverRefusesAnUnsafeConfig:
         assert "gfx942" in env_result.stderr
         assert "SWEEP ERROR" not in env_result.stderr
 
+    @_needs_posix_permissions
     def test_an_unwritable_output_root_is_an_operational_error_not_an_incomplete_sweep(
         self, sweep
     ):
