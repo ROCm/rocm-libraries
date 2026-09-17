@@ -39,7 +39,7 @@ This proposes adding the missing axis in the cheapest form that actually works:
   toolchain; commit it, gate regeneration as a no-op, exactly like golden. One
   column per flavor, `(key, arch) → status + evidence`; a plain `key → set of
   arches` proved too lossy (§3.2, §4/S1).
-- **S2** — make `_need()` consult it. One chokepoint, 148 keys, all call sites
+- **S2** — make `_need()` consult it. One chokepoint, every decl key, all call sites
   unchanged.
 - **S3** — remove the implicit `arch or "gfx950"` fallback that makes a forgotten
   `arch=` silently succeed.

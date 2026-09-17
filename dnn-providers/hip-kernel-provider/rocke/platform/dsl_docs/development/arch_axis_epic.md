@@ -87,16 +87,20 @@ other target" into a build-time diagnostic at the point of authorship.
 
 ## Story 1 — A trustworthy, drift-proof availability table
 
-**Status: one item left.** Generator, both flavor columns, the gate and the
-document corrections have landed. Outstanding: re-measure the nine
-`-O0`-sensitive keys on `llvm20`, which is blocked on a host with ROCm 7.1
-installed.
+**Status: one item left, and it needs a host we do not have.** Generator, both
+flavor columns, the gate and the document corrections have landed. Outstanding
+is the `llvm20` column, which no machine here can produce: it still needs the
+nine `-O0`-sensitive keys re-measured, and it is now also 19 keys short of the
+decl table, which has grown since that column was blessed. Both are the same
+errand -- one run of `tools/gen_arch_domain.py` on a ROCm 7.1 host. Until then
+the gate reports it as a named skip listing the missing keys, because a flavor
+nobody can measure must not be recorded as a flavor that answered no.
 
 ### Motivation
 
 Everything downstream needs ground truth, and ground truth cannot be
-hand-written. The decl table carries 148 keys across 7 wired targets: roughly a
-thousand cells, each answerable only by asking the compiler. An earlier
+hand-written. The decl table carries 167 keys across 7 wired targets — and it
+grows: it was 148 when the generator was written. Over a thousand cells, each answerable only by asking the compiler. An earlier
 hand-made probe table of 15 cells did not survive contact with a second flavor —
 which is precisely the argument for generating it.
 
