@@ -250,6 +250,31 @@ namespace
             GTEST_SKIP() << "the heuristic offered no candidates at all, so there is " \
                             "no tuned library here to check";                          \
     } while(0)
+
+    // The two guarded tests below assert that no offered Stream-K solution
+    // overflows. That assertion is only meaningful if Stream-K solutions were
+    // found and their macro tiles read, and both of those go through string
+    // matching on kernel names: isStreamKKernel() against a fixed set of _SK<n>
+    // tokens, and parseMacroTile() against _MT<m0>x<m1>. A new Stream-K mode or
+    // a kernel-naming change would make every candidate invisible here, leaving
+    // overflowingCount at 0 and turning both tests green without examining
+    // anything. Both guarded shapes keep their large-macro-tile Stream-K
+    // candidates (only small tiles cross the limit, 285 of 327 survive at the
+    // boundary), so finding none means the matching broke, not that the guard
+    // did its job.
+#define ASSERT_ANY_STREAM_K_WAS_ACTUALLY_EXAMINED(offered)                                \
+    do                                                                                    \
+    {                                                                                     \
+        ASSERT_GT((offered).streamKCount, 0)                                              \
+            << "none of the " << (offered).count                                          \
+            << " offered candidates were recognised as Stream-K, so the check below "     \
+               "would pass without examining anything; isStreamKKernel's _SK<n> tokens "  \
+               "have probably gone stale";                                                \
+        ASSERT_EQ((offered).unparsedCount, 0)                                             \
+            << "could not read MacroTile out of " << (offered).unparsedCount << " of "    \
+            << (offered).streamKCount                                                     \
+            << " Stream-K kernel names, so the check below did not cover them";           \
+    } while(0)
 }
 
 // Below the limit the library must still offer Stream-K solutions, and every
@@ -283,6 +308,8 @@ TEST(StreamKGridOverflowGuard_pre_checkin, AtLimitOffersNoOverflowingStreamKSolu
     const auto offered = offeredSolutionsFor(/*M=*/16777216, kN, kK);
     SKIP_UNLESS_CANDIDATES_WERE_OFFERED(offered);
 
+    ASSERT_ANY_STREAM_K_WAS_ACTUALLY_EXAMINED(offered);
+
     EXPECT_EQ(offered.overflowingCount, 0)
         << offered.overflowingCount << " of " << offered.streamKCount
         << " offered Stream-K solutions imply more than " << kMaxStreamKTiles
@@ -295,6 +322,8 @@ TEST(StreamKGridOverflowGuard_pre_checkin, AtReportedShapeOffersNoOverflowingStr
 {
     const auto offered = offeredSolutionsFor(/*M=*/33554560, kN, kK);
     SKIP_UNLESS_CANDIDATES_WERE_OFFERED(offered);
+
+    ASSERT_ANY_STREAM_K_WAS_ACTUALLY_EXAMINED(offered);
 
     EXPECT_EQ(offered.overflowingCount, 0)
         << offered.overflowingCount << " of " << offered.streamKCount

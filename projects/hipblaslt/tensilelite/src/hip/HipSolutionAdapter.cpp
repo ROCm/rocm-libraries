@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
+#include <limits>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedData.hpp>
@@ -514,6 +515,29 @@ namespace TensileLite
             return hipSuccess;
         }
 
+        namespace
+        {
+            // Both launch APIs below take 32-bit grid parameters, but the values
+            // handed to them come from dim3, which is vector3<size_t>. A grid that
+            // does not fit is narrowed silently rather than rejected: measured on
+            // gfx950, a 256-thread kernel at 2^24 + 16 workgroups wraps to a
+            // 16-workgroup launch and leaves the other 16,777,216 workgroups' worth
+            // of D holding whatever was there before, with no error raised
+            // (ROCM-31016).
+            //
+            // StreamKWorkgroupNumberCheck keeps dispatch away from the tuned
+            // Stream-K solutions that reach this, but it cannot see every path:
+            // skFixedGrid and skGridMultiplier rewrite the grid after selection, the
+            // predicate's bound assumes 256 threads, and the hand-written custom
+            // kernels carry no such predicate. Refusing the launch is what makes
+            // those remaining paths loud instead of silent.
+            bool fitsLaunchDim(TensileLite::dim3 const& dim)
+            {
+                constexpr size_t limit = std::numeric_limits<unsigned int>::max();
+                return dim.x <= limit && dim.y <= limit && dim.z <= limit;
+            }
+        }
+
         hipError_t SolutionAdapter::launchKernel(KernelInvocation const& kernel)
         {
             return launchKernel(kernel, nullptr, nullptr, nullptr);
@@ -547,6 +571,43 @@ namespace TensileLite
                 return hipSuccess;
             }
 
+#ifdef HIP_HAS_CLUSTER_LAUNCH
+            bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
+#else
+            const bool enableCluster = false;
+#endif
+
+            // Checked before the code object is looked up: a grid that cannot be
+            // expressed is impossible whether or not the kernel loads, and this is
+            // the last point where the 64-bit values are still intact. The two
+            // launch APIs below narrow different quantities, so each is bounded
+            // against the one it actually passes.
+            if(enableCluster)
+            {
+                // hipDrvLaunchKernelEx enumerates the grid in workgroups.
+                if(!fitsLaunchDim(kernel.numWorkGroups))
+                {
+                    std::cerr << "hipDrvLaunchKernelEx: workgroup count exceeds the 32-bit grid "
+                              << "dimensions (numWorkGroups " << kernel.numWorkGroups
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
+            }
+            else
+            {
+                // hipExtModuleLaunchKernel's globalWorkSize is in work items, so
+                // the workGroupSize * numWorkGroups product is what has to fit.
+                if(!fitsLaunchDim(kernel.numWorkItems))
+                {
+                    std::cerr << "hipExtModuleLaunchKernel: work-item count exceeds the 32-bit "
+                              << "globalWorkSize parameters (numWorkItems " << kernel.numWorkItems
+                              << ", from numWorkGroups " << kernel.numWorkGroups
+                              << " of workgroup size " << kernel.workGroupSize
+                              << ") for kernel: " << kernel.kernelName << std::endl;
+                    return hipErrorInvalidValue;
+                }
+            }
+
             hipFunction_t function;
             HIP_CHECK_RETURN_WITH_LOG(getKernel(function, kernel.kernelName),
                 [&](hipError_t error) {
@@ -571,7 +632,6 @@ namespace TensileLite
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
 
 #ifdef HIP_HAS_CLUSTER_LAUNCH
-            bool enableCluster = (kernel.clusterDim.x > 1 || kernel.clusterDim.y > 1);
             if(enableCluster)
             {
                 if(kernel.clusterDim.x == 0 || kernel.clusterDim.y == 0)
