@@ -755,20 +755,11 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithoutDescale)
         << "fp8 inputs without q/k/v descales must be rejected";
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsFp8WithDescale)
-{
-    SKIP_IF_NO_DEVICES();
-    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
-    {
-        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
-    }
-
-    auto builder = createSdpaFwdFp8Graph(/*withDescale=*/true);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        builder.GetBufferPointer(), builder.GetSize());
-    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper))
-        << "fp8 inputs with q/k/v descales must be accepted";
-}
+// Note: the positive "fp8 + scalar descales is accepted" case is intentionally not a
+// standalone test — IsApplicableAvailableKernels already covers it. On gfx942 that loop
+// iterates every cfg_fmha_fwd config, which includes the fp8bf16 rows; configToCompatibleGraph
+// builds them with scalar q/k/v descales and asserts isApplicable. Only the negative cases
+// below (missing / non-scalar descale) need explicit coverage.
 
 // The kernel-arg builder only wires per-tensor (scalar) descales (all s_descale_*
 // strides are zero), so a non-scalar descale (here per-[B, H_kv]) must be declined

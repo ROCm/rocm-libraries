@@ -168,14 +168,19 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     {
         const std::vector<int64_t> descaleDims = {1, 1, 1, 1};
         const auto descaleStrides = generateStrides(descaleDims);
-        const auto makeDescale = [&]() {
+        // Name each descale so the integration fixture can identify it by name (not by
+        // scalar element count) when choosing per-tensor fill values.
+        const auto makeDescale = [&](const std::string& name) {
             auto descale = std::make_shared<TensorAttributes>();
-            descale->set_dim(descaleDims).set_stride(descaleStrides).set_data_type(DataType::FLOAT);
+            descale->set_dim(descaleDims)
+                .set_stride(descaleStrides)
+                .set_data_type(DataType::FLOAT)
+                .set_name(name);
             return descale;
         };
-        attributes.set_descale_q(makeDescale());
-        attributes.set_descale_k(makeDescale());
-        attributes.set_descale_v(makeDescale());
+        attributes.set_descale_q(makeDescale("descale_q"));
+        attributes.set_descale_k(makeDescale("descale_k"));
+        attributes.set_descale_v(makeDescale("descale_v"));
     }
 
     // Configure mask type

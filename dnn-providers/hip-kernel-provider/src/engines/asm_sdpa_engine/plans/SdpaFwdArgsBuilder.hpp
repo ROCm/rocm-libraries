@@ -91,15 +91,19 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.ptr_kseq_padding = nullptr;
 
     // FP8 descale pointers (nullptr for BF16). Mirrors AITER's init_fmha_fwd_v3_args
-    // fp8 branch: the kernel dequantizes Q/K/V through these per-tensor scalars.
-    args.ptr_q_descale = (params.qDescaleUid >= 0) ? uidToPtrMap.at(params.qDescaleUid) : nullptr;
-    args.ptr_k_descale = (params.kDescaleUid >= 0) ? uidToPtrMap.at(params.kDescaleUid) : nullptr;
-    args.ptr_v_descale = (params.vDescaleUid >= 0) ? uidToPtrMap.at(params.vDescaleUid) : nullptr;
+    // fp8 branch: the kernel dequantizes Q/K/V through these per-tensor scalars. The
+    // descale UIDs are all-or-none (one optional struct), so a single has_value() gate
+    // covers all three.
+    args.ptr_q_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->q) : nullptr;
+    args.ptr_k_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->k) : nullptr;
+    args.ptr_v_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->v) : nullptr;
 
     // FP8 descale strides. Only per-tensor (scalar) descales are supported — isApplicable
     // rejects any non-scalar descale — so there is no batch/head variation and all strides
     // are zero. Per-(batch, KV-head) descales are a future extension (with the gfx950 path);
-    // wiring them means also populating these strides from the descale tensor.
+    // wiring them means populating these strides from the descale tensor AND updating the
+    // integration fixture, which selects descale tensors by name (not by scalar element
+    // count) precisely so that future non-scalar descale shape does not slip through.
     args.s_descale_q_Bs = 0;
     args.s_descale_q_Hs = 0;
     args.s_descale_k_Bs = 0;

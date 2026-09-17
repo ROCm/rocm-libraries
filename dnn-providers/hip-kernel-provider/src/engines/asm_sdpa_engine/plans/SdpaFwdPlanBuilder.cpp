@@ -647,12 +647,13 @@ void SdpaFwdPlanBuilder::buildPlan(
     // FP8 inputs are 1 byte; bf16 inputs are 2 bytes. Output stays 2-byte BF16.
     params.inBytesPerElement = (dataTypeId == "fp8bf16") ? 1U : 2U;
 
-    // FP8 requires q/k/v descales (guaranteed present by isApplicable).
+    // FP8 requires q/k/v descales (guaranteed present by isApplicable). They are set as
+    // a unit — the SdpaFwdParams::DescaleUids optional encodes the all-or-none invariant.
     if(dataTypeId == "fp8bf16")
     {
-        params.qDescaleUid = sdpaAttrs.descale_q_tensor_uid().value();
-        params.kDescaleUid = sdpaAttrs.descale_k_tensor_uid().value();
-        params.vDescaleUid = sdpaAttrs.descale_v_tensor_uid().value();
+        params.descaleUids = SdpaFwdParams::DescaleUids{sdpaAttrs.descale_q_tensor_uid().value(),
+                                                        sdpaAttrs.descale_k_tensor_uid().value(),
+                                                        sdpaAttrs.descale_v_tensor_uid().value()};
     }
 
     // Find matching kernel to graph

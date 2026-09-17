@@ -187,9 +187,7 @@ TEST(TestSdpaFwdKernelArgs, BuildArgsFp8UsesOneByteInputStridesAndWiresDescales)
 {
     SdpaFwdParams params = makeBaseParams();
     params.inBytesPerElement = 1;
-    params.qDescaleUid = 5;
-    params.kDescaleUid = 6;
-    params.vDescaleUid = 7;
+    params.descaleUids = SdpaFwdParams::DescaleUids{5, 6, 7};
 
     int qBuf = 0;
     int kBuf = 0;
