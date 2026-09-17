@@ -568,7 +568,7 @@ class GlobalWriteBatchWriter:
       if self.loadE:
         waitLoadCnt += self.eLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (load E)"%self.eLoadIssued[elementIdx])
-      if self.parentWriter.states.useGateResidual and elementIdx < len(self.gateLoadIssued):
+      if self.ss.emitGateResidual and elementIdx < len(self.gateLoadIssued):
         waitLoadCnt += self.gateLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (load Gate)"%self.gateLoadIssued[elementIdx])
       # Calculate local loads
@@ -639,7 +639,7 @@ class GlobalWriteBatchWriter:
       if self.loadE:
         vlcnt = 0
         commentList.append("E")
-      if self.parentWriter.states.useGateResidual:
+      if self.ss.emitGateResidual:
         vlcnt = 0
         commentList.append("Gate")
       # Local read wait
@@ -856,7 +856,7 @@ class GlobalWriteBatchWriter:
     # Primer SGPRs for delayed incrementToNextRow (NonEdge / optSrdIncForRow).
     module.add(SMovB32(dst=sgpr(self.tmpS01),   src=0, comment="Init sgpr offset"))
     module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
-    if self.parentWriter.states.useGateResidual:
+    if self.ss.emitGateResidual:
       module.add(SMovB32(dst=sgpr("CLSGateRowInc"), src=0, comment="Init Gate CLS row offset"))
     if self.kernel["StoreRemapVectorWidth"] and self.kernel["CompactLoopStore"]:
       # Batch 0 checks out; later batches reuse parentWriter.compactLoopStoreVgpr.
@@ -1055,7 +1055,7 @@ class GlobalWriteBatchWriter:
       data     = self.ss.elementData[elementIdx]
       dataBeta = self.ss.elementData[elementIdx]
       dataE    = self.ss.elementDataE[elementIdx]
-      dataGate = self.ss.elementDataGate[elementIdx] if self.parentWriter.states.useGateResidual else 0
+      dataGate = self.ss.elementDataGate[elementIdx] if self.ss.emitGateResidual else 0
       dataBias = self.ss.elementDataBias[elementIdx]
       dataScaleAVec = self.ss.elementDataScaleAVec[elementIdx]
       dataScaleBVec = self.ss.elementDataScaleBVec[elementIdx]
@@ -1161,7 +1161,7 @@ class GlobalWriteBatchWriter:
       if self.storeBiasD == 1:
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'Bias', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrBiasVgpr, self.addrBias, self.factorDim))
 
-      if self.parentWriter.states.useGateResidual and \
+      if self.ss.emitGateResidual and \
          (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
         _gateList = self.kernel["ProblemType"].get("GateResidualDataTypeList", [])
         _destDtype = self.kernel["ProblemType"]["DestDataType"]
@@ -1181,12 +1181,10 @@ class GlobalWriteBatchWriter:
               (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrGateVgpr, self.addrD, 0))
         if dataGate not in self.loadedDataGate:
           if self.ss.optSingleColVgpr:
-            # opt (single + multi dtype): hoisted to ONE branch after the prolog loop
-            # (see _emitHoistedGateLoadPhase).
+            # Opt path: hoisted out of the per-element prolog loop.
             pass
           elif not _multiDtypeGate:
             # no-opt single-dtype: unconditional load.
-            # Null gate -> SRD num_records==0 -> buffer_load returns 0;
             _glTgt = loadInputCode if self.kernel["GroupLoadStore"] else module
             gateLoadMod = self.parentWriter.readInput(
                 self.kernel, self.ss, 'Gate',
@@ -1211,12 +1209,6 @@ class GlobalWriteBatchWriter:
             # Snapshot mutables we'll restore after the dispatcher chain.
             _savedBpeGate = self.parentWriter.states.bpeGate
             _savedGlobalOffsetGate = addrCalc.globalOffsetGate
-
-            # Per-element skip when gate pointer is null (no-gate problem): jump past
-            # the whole dtype dispatcher straight to GateLoad_End for this element.
-            module.add(self.parentWriter.getSCMPKInstruction(
-                "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
-            module.add(SCBranchSCC1(gateLoadEndLabel.getLabelName(), "skip gate load if disabled (null gate)"))
 
             for i, nextLabel in enumerate(gateLoadTypeLabels[1:]):
               typeValue = _gateList[i].value
@@ -1314,8 +1306,8 @@ class GlobalWriteBatchWriter:
 
     module.add(loadInputCode)
 
-    # opt + multi-dtype gate: emit the gate prolog load as ONE GateType dispatch
-    # (the per-element loop above skipped it on the opt path).
+    # Opt Gate path: hoist Gate loads out of the per-element prolog loop.
+    # Multi-dtype Gate uses one GateType dispatch for all loads.
     self._emitHoistedGateLoadPhase(module, bufferOOB)
 
     # Restore SrdC+2 = BufferOOB after subtile NonEdge C-load OOB gating (which may have set it to 0).
@@ -1486,7 +1478,7 @@ class GlobalWriteBatchWriter:
           self.parentWriter.vgprPool.checkIn(dataE)
         lastDataE = dataE
 
-      if self.parentWriter.states.useGateResidual:
+      if self.ss.emitGateResidual:
         dataGate = self.ss.elementDataGate[elementIdx]
         if dataGate != 0:
           if dataGate not in checkedDataGate:
@@ -1587,8 +1579,8 @@ class GlobalWriteBatchWriter:
     return cvtMod
 
   def _emitHoistedGateLoadPhase(self, module: Module, bufferOOB):
-    """opt path: emit the gate prolog load wrapped in ONE null-gate skip branch."""
-    if not (self.parentWriter.states.useGateResidual and
+    """Concrete G1 opt path: emit the hoisted Gate prolog loads."""
+    if not (self.ss.emitGateResidual and
             (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel")):
       return
     if not self.ss.optSingleColVgpr:
@@ -1641,9 +1633,9 @@ class GlobalWriteBatchWriter:
     self.parentWriter.states.bpeGate = savedBpe
 
   def _emitGateCvtAllPhase(self, module: Module):
-    """Multi-dtype Gate: convert ALL loaded gate values to f32 in one GateType
-    dispatch."""
-    if not (self.parentWriter.states.useGateResidual and
+    """Wait for hoisted single-dtype Gate loads, or convert all multi-dtype
+    Gate values under one GateType dispatch."""
+    if not (self.ss.emitGateResidual and
             (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel")):
       return
     gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
@@ -1657,13 +1649,7 @@ class GlobalWriteBatchWriter:
     cvtTypeLabels = [Label(labels.getNameInc("GateCvtAll_%s"%g.toNameAbbrev()), "") for g in gateList]
     cvtTypeLabels.append(cvtEndLabel)
 
-    # Skip the whole gate cvt phase when the gate pointer is null (no-gate problem).
-    module.add(self.parentWriter.getSCMPKInstruction(
-        "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
-    module.add(SCBranchSCC1(cvtEndLabel.getLabelName(), "skip gate cvt if disabled (null gate)"))
-
-    # One wait for all prolog gate loads (multi-dtype already paid a blunt wait
-    # per element previously; this hoists it to a single wait).
+    # Wait once for all Gate loads before the branch-once conversion.
     module.add(SWaitCnt(vlcnt=0, comment="GateResidual: wait for prolog gate loads (branch-once cvt)"))
     for i, nextLabel in enumerate(cvtTypeLabels[1:]):
       gDtype = gateList[i]
@@ -1813,7 +1799,7 @@ class GlobalWriteBatchWriter:
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
       addr = addrCalc.addrDVgpr
       dataE = self.ss.elementDataE[elementIdx]
-      dataGate = self.ss.elementDataGate[elementIdx] if self.parentWriter.states.useGateResidual else 0
+      dataGate = self.ss.elementDataGate[elementIdx] if self.ss.emitGateResidual else 0
       dataBias = self.ss.elementDataBias[elementIdx]
       dataScaleAVec = self.ss.elementDataScaleAVec[elementIdx]
       dataScaleBVec = self.ss.elementDataScaleBVec[elementIdx]
@@ -1999,7 +1985,7 @@ class GlobalWriteBatchWriter:
       # Gate Residual: acc = gate*acc + gate. Built here but DEFERRED — added after
       # activation+scaleD (see module.add(gateModule) below), on the f32 ValuC.
       gateModule = Module("Empty GateResidual")
-      if self.parentWriter.states.useGateResidual and \
+      if self.ss.emitGateResidual and \
          (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
         # TODO: I8 input (int32 compute) — needs int32 acc -> cvt f32 -> FMA ->
         # saturate-cast. Not supported yet; reject below.
@@ -2014,33 +2000,21 @@ class GlobalWriteBatchWriter:
           gateList = [self.kernel["ProblemType"]["DestDataType"]]
 
         def _emit_gate_fma():
-          """Identity (branchless null): ValuC = (gate+s)*ValuC + gate.
-          GateNullOne (s) = 1.0 if gate null else 0.0 -> null:(0+1)*acc+0=acc; real:gate*acc+gate.
-          gwvw>1 packs 2 elements/op (v_pk_add_f32 + v_pk_fma_f32). s is broadcast from its sgpr
-          via op_sel_hi."""
+          """Concrete G1 body: ValuC = gate*ValuC + gate."""
           fmaMod = Module("GateFMA")
-          assert self.tmpVgprSize >= 2, "gate packed FMA needs a 2-vgpr store-tmps scratch"
-          tmpPk = self.tmpVgpr
           for vi in range(0, self.gwvw):
             sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              # scalar (gwvw==1 or odd tail): sgpr GateNullOne broadcasts naturally.
-              fmaMod.add(VAddF32(dst=vgpr(self.tmpVgpr), src0=vgpr(dataGate + vi),
-                src1=sgpr("GateNullOne"), comment="gate + s (vi=%d)"%vi))
-              fmaMod.add(VFmaF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(self.tmpVgpr),
+              fmaMod.add(VFmaF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(dataGate + vi),
                 src1=vgpr("ValuC+%d"%vgprIdx), src2=vgpr(dataGate + vi),
-                comment="GateResidual identity: acc = (gate+s)*acc + gate (vi=%d)"%vi))
+                comment="GateResidual: acc = gate*acc + gate (vi=%d)"%vi))
             elif vi % 2 == 1:
               assert (self.gwvw % 2 == 0)
             else:
-              # packed pair: op_sel_hi=[1,0,1] broadcasts GateNullOne (src1) low element to both lanes.
-              fmaMod.add(VAddPKF32(dst=vgpr(tmpPk, 2), src0=vgpr(dataGate + vi, 2),
-                src1=sgpr("GateNullOne", 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]),
-                comment="gate + s (vi=%d,%d)"%(vi, vi+1)))
-              fmaMod.add(VFmaPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(tmpPk, 2),
+              fmaMod.add(VFmaPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(dataGate + vi, 2),
                 src1=vgpr("ValuC+%d"%vgprIdx, 2), src2=vgpr(dataGate + vi, 2),
-                comment="GateResidual identity packed: acc = (gate+s)*acc + gate (vi=%d,%d)"%(vi, vi+1)))
+                comment="GateResidual packed: acc = gate*acc + gate (vi=%d,%d)"%(vi, vi+1)))
           return fmaMod
 
         if len(gateList) == 1:
@@ -2276,8 +2250,8 @@ class GlobalWriteBatchWriter:
         biasReductionModule.add(self.parentWriter.addStore(self.kernel, self.ss, 'Bias', addrCalc, "ValuC+%d"%vgprIdx, self.tmpS01, self.edge, comment="store Bias"))
 
       if isActivationInsertAfter:
-        if self.parentWriter.states.useGateResidual and \
-           (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
+        if self.ss.emitGateResidual and \
+           (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
           raise RuntimeError(
               "GateResidual is not supported with isActivationInsertAfter "
               "(activation applied after pack on dest-dtype value).")

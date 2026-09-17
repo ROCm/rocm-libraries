@@ -2328,8 +2328,8 @@ namespace TensileLite
                 }
             };
 
-            struct UseGateResidualEqual
-                : public Predicate_CRTP<UseGateResidualEqual, ContractionProblemGemm>
+            struct UseGateResidualCheck
+                : public Predicate_CRTP<UseGateResidualCheck, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2338,8 +2338,8 @@ namespace TensileLite
                 };
                 bool value;
 
-                UseGateResidualEqual() = default;
-                UseGateResidualEqual(bool value)
+                UseGateResidualCheck() = default;
+                UseGateResidualCheck(bool value)
                     : value(value)
                 {
                 }
@@ -2351,7 +2351,7 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.useGateResidual() == value;
+                    return !problem.useGateResidual() || value;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -2359,7 +2359,7 @@ namespace TensileLite
                 {
                     bool rv = (*this)(problem);
                     std::ostringstream details;
-                    details << "prob=" << problem.useGateResidual() << ", sol=" << value;
+                    details << "prob=" << problem.useGateResidual() << ", sol_supports=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -3229,4 +3229,3 @@ namespace TensileLite
  */
     } // namespace Predicates
 } // namespace TensileLite
-
