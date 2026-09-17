@@ -12,12 +12,15 @@ import pytest
 
 from Tensile.Common.SolutionIdGen import (
     EPOCH_MS,
+    MS_MASK,
     RANDOM_MASK,
     RANDOM_SHIFT,
+    _ms_since_epoch,
     decode_solution_id,
     ensure_solution_uid,
     generate_solution_id,
     read_solution_uid,
+    regenerate_solution_uid,
 )
 
 pytestmark = pytest.mark.unit
@@ -137,3 +140,86 @@ def test_multi_winner_batch_assigns_unique_solution_uids() -> None:
     assert len(set(uids)) == winner_count
     expected_ms = now_ms - EPOCH_MS
     assert all(decode_solution_id(uid)[0] >= expected_ms for uid in uids)
+
+
+def test_ms_since_epoch_rejects_time_before_epoch() -> None:
+    """Timestamps before the SolutionUID epoch are out of range.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a pre-epoch timestamp is accepted.
+    """
+    with pytest.raises(ValueError, match="out of range"):
+        _ms_since_epoch(EPOCH_MS - 1)
+
+
+def test_ms_since_epoch_rejects_time_after_40_bit_limit() -> None:
+    """Timestamps that overflow the 40-bit millisecond field are rejected.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a post-mask timestamp is accepted.
+    """
+    with pytest.raises(ValueError, match="out of range"):
+        generate_solution_id(now_ms=EPOCH_MS + MS_MASK + 1)
+
+
+def test_ms_since_epoch_accepts_zero_and_max_offset() -> None:
+    """Epoch and the last representable millisecond both encode.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If either bound is rejected or mis-encoded.
+    """
+    assert _ms_since_epoch(EPOCH_MS) == 0
+    assert _ms_since_epoch(EPOCH_MS + MS_MASK) == MS_MASK
+
+
+def test_ensure_solution_uid_preserves_existing_uid() -> None:
+    """``ensure_solution_uid`` is a no-op when ``SolutionUID`` is already set.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If an existing UID is overwritten.
+    """
+    solution = {"SolutionUID": 42}
+    ensure_solution_uid(solution)
+    assert solution["SolutionUID"] == 42
+
+
+def test_regenerate_solution_uid_replaces_existing_value() -> None:
+    """``regenerate_solution_uid`` always writes a new UID.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the previous UID is kept.
+    """
+    solution = {"SolutionUID": 42}
+    new_uid = regenerate_solution_uid(solution)
+    assert new_uid != 42
+    assert solution["SolutionUID"] == new_uid

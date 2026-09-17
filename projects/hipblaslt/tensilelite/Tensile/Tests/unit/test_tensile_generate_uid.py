@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
@@ -59,6 +61,47 @@ def test_find_solution_by_index_raises_when_missing() -> None:
     """Missing ``SolutionIndex`` values raise ``ValueError``."""
     with pytest.raises(ValueError, match="SolutionIndex=99"):
         find_solution_by_index(_sample_logic_data(), 99)
+
+
+def test_find_solution_by_index_raises_when_solutions_missing() -> None:
+    """Logic without a ``Solutions`` list raises ``ValueError``.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a non-list ``Solutions`` value is accepted.
+    """
+    with pytest.raises(ValueError, match="Solutions list"):
+        find_solution_by_index({"ProblemType": {}}, 0)
+    with pytest.raises(ValueError, match="Solutions list"):
+        find_solution_by_index({"Solutions": {"0": {}}}, 0)
+
+
+def test_find_solution_by_index_skips_non_dict_and_missing_index() -> None:
+    """Non-dict entries and missing ``SolutionIndex`` keys are skipped.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a later matching dict entry is not returned.
+    """
+    data = {
+        "Solutions": [
+            "not-a-solution",
+            {"SolutionNameMin": "no-index"},
+            {"SolutionIndex": 3, "SolutionUID": 300},
+        ]
+    }
+    solution = find_solution_by_index(data, 3)
+    assert solution["SolutionUID"] == 300
 
 
 def test_regenerate_uid_for_solution_replaces_uid(tmp_path: Path) -> None:
@@ -134,3 +177,90 @@ def test_main_returns_error_for_missing_index(tmp_path: Path) -> None:
 
     rc = main([str(yaml_path), "--index", "42"])
     assert rc == 1
+
+
+def test_regenerate_uid_for_solution_raises_for_missing_file(tmp_path: Path) -> None:
+    """A missing YAML path raises ``FileNotFoundError``.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If a missing file is treated as success.
+    """
+    missing = tmp_path / "does-not-exist.yaml"
+    with pytest.raises(FileNotFoundError, match="Logic YAML not found"):
+        regenerate_uid_for_solution(missing, 0)
+
+
+def test_regenerate_uid_for_solution_rejects_non_dict_yaml(tmp_path: Path) -> None:
+    """List-format YAML is rejected as not dict-format logic.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If non-dict YAML is accepted.
+    """
+    yaml_path = tmp_path / "list.yaml"
+    yaml_path.write_text("- not\n- a\n- dict\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="dict-format logic YAML"):
+        regenerate_uid_for_solution(yaml_path, 0)
+
+
+def test_main_returns_error_for_missing_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI reports ``FileNotFoundError`` on stderr and returns 1.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+        capsys: Pytest stdout/stderr capture fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the CLI does not fail for a missing path.
+    """
+    missing = tmp_path / "missing.yaml"
+    rc = main([str(missing), "--index", "0"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "Error:" in captured.err
+    assert "Logic YAML not found" in captured.err
+
+
+def test_module_main_guard_exits_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``python -m Tensile.TensileGenerateUID`` runs ``main`` via ``__main__``.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the module entry point does not exit 0.
+    """
+    yaml_path = tmp_path / "logic.yaml"
+    LibraryIO.writeYAML(str(yaml_path), _sample_logic_data())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["TensileGenerateUID.py", str(yaml_path), "--index", "0"],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_module("Tensile.TensileGenerateUID", run_name="__main__")
+    assert excinfo.value.code == 0
