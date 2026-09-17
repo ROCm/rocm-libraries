@@ -907,6 +907,23 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
     target_link_libraries(MIOpen PUBLIC ${_MIOPEN_IMPL_TARGET})
 
+    # The hipDNN side of the seam. hipdnn_frontend_dynamic is the header-only
+    # frontend configured to dlopen the backend at first use, so libMIOpen.so
+    # carries no DT_NEEDED entry for libhipdnn_backend.so and a machine without
+    # hipDNN installed still loads MIOpen. Linking hipdnn_frontend instead would
+    # make the backend a hard load-time dependency of every MIOpen consumer.
+    # In a superbuild hipDNN is already part of the build graph; its generated
+    # package config re-creates these targets as imported ones, which collides.
+    if(NOT TARGET hipdnn_frontend_dynamic)
+        find_package(hipdnn_frontend REQUIRED)
+    else()
+        # An in-tree target's headers arrive as -I, so MIOpen's -Werror set gets
+        # applied to them. An installed hipDNN arrives as -isystem and does not.
+        set_target_properties(hipdnn_frontend_dynamic PROPERTIES SYSTEM TRUE)
+    endif()
+    target_sources(MIOpen PRIVATE ${PROJECT_SOURCE_DIR}/src/private/hipdnn_forward.cpp)
+    target_link_libraries(MIOpen PRIVATE hipdnn_frontend_dynamic)
+
     # Deliberately excludes src/include: the wrapper must see only the public
     # header and its own _impl declarations. Without that restriction a stub
     # could include an internal C++ header and re-couple the public shim to

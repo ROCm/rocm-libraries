@@ -321,9 +321,12 @@ def test_provider_mirror_divergent_target_is_reported(capsys):
 # --------------------------------------------------------------------------
 # The dispatch seam
 #
-# A stub that never reaches MIOPEN_WRAPPER_DISPATCH silently loses the ability
-# to route to hipDNN, and no build catches it: the macro's assert needs the
-# macro to be present, and is compiled out under NDEBUG regardless.
+# A stub that never reaches a dispatch macro silently loses the ability to route
+# to hipDNN, and no build catches it: the macro's assert needs the macro to be
+# present, and is compiled out under NDEBUG regardless.
+#
+# MIOPEN_WRAPPER_DISPATCH and MIOPEN_WRAPPER_FORWARD open the same seam, so both
+# satisfy the check and a stub is expected to carry exactly one of them.
 # --------------------------------------------------------------------------
 
 # miopenGetErrorString is the one exempt stub, so it belongs in every fixture:
@@ -372,7 +375,10 @@ def test_stub_without_the_macro_is_reported(capsys):
         stub("miopenDestroy", ""),
     )
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
-    assert "miopenDestroy has no MIOPEN_WRAPPER_DISPATCH" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert (
+        "miopenDestroy has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
 
 
 def test_stub_dispatching_under_a_neighbours_name_is_reported(capsys):
@@ -394,7 +400,7 @@ def test_repeated_macro_is_reported(capsys):
         )
     )
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
-    assert "miopenCreate has 2 MIOPEN_WRAPPER_DISPATCH calls" in capsys.readouterr().out
+    assert "miopenCreate has 2 dispatch macros" in capsys.readouterr().out
 
 
 def test_a_commented_out_macro_does_not_count_as_present(capsys):
@@ -402,7 +408,48 @@ def test_a_commented_out_macro_does_not_count_as_present(capsys):
         stub("miopenCreate", "    // MIOPEN_WRAPPER_DISPATCH(miopenCreate);")
     )
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
-    assert "miopenCreate has no MIOPEN_WRAPPER_DISPATCH" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert (
+        "miopenCreate has no MIOPEN_WRAPPER_DISPATCH or MIOPEN_WRAPPER_FORWARD" in out
+    )
+
+
+def test_forward_macro_satisfies_the_seam(capsys):
+    source = wrapper_source(
+        stub(
+            "miopenCreate",
+            "    MIOPEN_WRAPPER_FORWARD(miopenCreate,\n"
+            "                           ::miopen::wrapper::hipdnn::Create(handle));",
+        )
+    )
+    assert abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "1 routable wrapper stubs" in capsys.readouterr().out
+
+
+def test_forward_macro_under_a_neighbours_name_is_reported(capsys):
+    source = wrapper_source(
+        stub("miopenCreate", "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);"),
+        stub(
+            "miopenDestroy",
+            "    MIOPEN_WRAPPER_FORWARD(miopenCreate,\n"
+            "                           ::miopen::wrapper::hipdnn::Destroy(handle));",
+        ),
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenDestroy dispatches as miopenCreate" in capsys.readouterr().out
+
+
+def test_stub_carrying_both_macros_is_reported(capsys):
+    source = wrapper_source(
+        stub(
+            "miopenCreate",
+            "    MIOPEN_WRAPPER_DISPATCH(miopenCreate);\n"
+            "    MIOPEN_WRAPPER_FORWARD(miopenCreate,\n"
+            "                           ::miopen::wrapper::hipdnn::Create(handle));",
+        )
+    )
+    assert not abi.check_wrapper_dispatch(dispatches_of(source))
+    assert "miopenCreate has 2 dispatch macros" in capsys.readouterr().out
 
 
 def test_exempt_stub_growing_the_macro_is_reported(capsys):
@@ -415,7 +462,7 @@ extern "C" const char* miopenGetErrorString(miopenStatus_t error)
 """
     assert not abi.check_wrapper_dispatch(dispatches_of(source))
     out = capsys.readouterr().out
-    assert "miopenGetErrorString carries MIOPEN_WRAPPER_DISPATCH but is exempt" in out
+    assert "miopenGetErrorString carries a dispatch macro but is exempt" in out
     assert "returns const char*" in out
 
 

@@ -88,6 +88,23 @@ function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
     set (MIOPEN_GTEST_FILTER_NEGATIVE ${TMP_FILTER} PARENT_SCOPE)
 endfunction()
 
+# TRUE when any of the given sources carries a hipDNN shim-surface test. Scanned rather than
+# listed by binary name, so naming a test into the surface is all it takes to have it replayed
+# -- there is no second place to forget.
+function(miopen_sources_have_shim_tests OUT_VAR)
+  foreach(SOURCE ${ARGN})
+    if(NOT IS_ABSOLUTE "${SOURCE}")
+      set(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE}")
+    endif()
+    file(STRINGS "${SOURCE}" SHIM_MATCH REGEX "${MIOPEN_FORWARDING_PARITY_TOKEN}" LIMIT_COUNT 1)
+    if(SHIM_MATCH)
+      set(${OUT_VAR} TRUE PARENT_SCOPE)
+      return()
+    endif()
+  endforeach()
+  set(${OUT_VAR} FALSE PARENT_SCOPE)
+endfunction()
+
 # Build a gtest executable and register its (optionally sharded) ctest entries.
 function(add_gtest TEST_NAME TEST_CPP)
   # cmake-lint: disable=R0912,R0915
@@ -294,35 +311,41 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
     endif()
 
-    # Forwarding parity harness: replay the hipDNN shim surface twice, changing only which
-    # implementation serves each entry point, and require the two runs to agree test for
-    # test.
-    #
-    # One entry rather than a replay-replay-compare fixture: a sharded ctest run distributes
-    # whole entries, so a fixture's members can land in different shards and fail there as
-    # unsatisfied. run_forwarding_parity.py sequences the replays, the comparison and the
-    # wrapper ABI check in one process, which also keeps the fixture's short-circuit -- a
-    # replay that dies never reaches the comparison.
-    #
-    # Not registered in the discrete branch, where each test would need its own doubled
-    # replay for the same signal.
-    #
-    # Skipped when there is no GPU: the shim surface is all *GPU* tests, which the shard
-    # filter drops in that configuration and this filter does not.
-    if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU)
+  endif()
+
+  # Forwarding parity harness: replay the hipDNN shim surface twice, changing only which
+  # implementation serves each entry point, and require the two runs to agree test for test.
+  #
+  # One entry rather than a replay-replay-compare fixture: a sharded ctest run distributes
+  # whole entries, so a fixture's members can land in different shards and fail there as
+  # unsatisfied. run_forwarding_parity.py sequences the replays, the comparison and the
+  # wrapper ABI check in one process, which also keeps the fixture's short-circuit -- a replay
+  # that dies never reaches the comparison.
+  #
+  # Registered outside the single-binary/discrete split so that both ways of building the tests
+  # get the harness, against whichever executables actually hold shim tests -- replaying the
+  # rest would run a filter that selects nothing.
+  #
+  # Skipped when there is no GPU: the shim surface is all *GPU* tests, which the shard filter
+  # drops in that configuration and this filter does not.
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU)
+    miopen_sources_have_shim_tests(HAS_SHIM_TESTS ${TEST_CPP})
+    if(HAS_SHIM_TESTS)
       add_test(NAME ${TEST_NAME}_forwarding_parity
         COMMAND ${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py
           --gtest $<TARGET_FILE:${TEST_NAME}>
           --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
           --output-dir ${PROJECT_BINARY_DIR}/test_results
           --lib-dir $<TARGET_FILE_DIR:MIOpen>
+          --known-divergences ${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt
           --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
           --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
+          --needed-baseline ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
-      # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are
-      # GPU tests registered outside the shards, so without it ctest -j would run them
-      # against a GPU the shards are already using.
+      # RUN_SERIAL for the same reason the HipGraphExist entry above carries it: these are GPU
+      # tests registered outside the shards, so without it ctest -j would run them against a
+      # GPU the shards are already using.
       #
       # The gtest shard variables are pinned rather than left inherited: a sharded CI run
       # exports them for the whole run, and a replay that honoured them would compare one
@@ -333,9 +356,11 @@ function(add_gtest TEST_NAME TEST_CPP)
         TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT}
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=1;GTEST_SHARD_INDEX=0"
       )
+      set_property(GLOBAL APPEND PROPERTY MIOPEN_FORWARDING_PARITY_ENTRIES
+        ${TEST_NAME}_forwarding_parity)
     endif()
-
   endif()
+
   target_link_libraries(${TEST_NAME} BZip2::BZip2)
   if(WIN32)
     # Refer to https://en.cppreference.com/w/cpp/language/types for details.
@@ -372,8 +397,19 @@ target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOp
 # No include directory is needed: routing.cpp includes its own header by relative
 # path, and adding src/private here would expose miopen_private_rename.h to every
 # test-common source.
+#
+# hipdnn_forward.cpp comes along because routing.cpp asks it whether hipDNN is
+# available before reporting a route. The test binary's copy only ever answers
+# that question -- the forwarding the shim tests exercise happens inside
+# libMIOpen.so, against its own copy.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+  if(NOT TARGET hipdnn_frontend_dynamic)
+    find_package(hipdnn_frontend REQUIRED)
+  endif()
+  target_sources(miopen_gtest_common PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/private/routing.cpp
+    ${PROJECT_SOURCE_DIR}/src/private/hipdnn_forward.cpp)
+  target_link_libraries(miopen_gtest_common PRIVATE hipdnn_frontend_dynamic)
 endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
@@ -389,8 +425,12 @@ endif()
 #
 # Not a cache entry, so that a -D on the configure line wins and nothing freezes a stale value
 # across reconfigures.
+#
+# The token also decides which executables get a parity entry at all, so overriding the filter
+# narrows what a replay runs without changing which binaries are replayed.
+set(MIOPEN_FORWARDING_PARITY_TOKEN "HipdnnShim")
 if(NOT DEFINED MIOPEN_FORWARDING_PARITY_FILTER)
-  set(MIOPEN_FORWARDING_PARITY_FILTER "*HipdnnShim*")
+  set(MIOPEN_FORWARDING_PARITY_FILTER "*${MIOPEN_FORWARDING_PARITY_TOKEN}*")
 endif()
 
 # Two full replays of the shim surface plus a comparison and an ABI check, so the harness is
@@ -483,8 +523,12 @@ endif()
 #
 # These are what a wrapper-on artifact is tested through: the harness runs where the shipping
 # libraries are, not against a build tree. A default artifact is built with the wrapper off and
-# carries none of them. Only the single-binary build packages a test executable and so only it
-# registers the harness mirrored here.
+# carries none of them.
+#
+# Still single-binary only, unlike the build-tree entries above: packaging installs miopen_gtest
+# and nothing else, so a discrete build has nothing for a mirrored entry to point at. No
+# coverage is lost, since artifact builds configure with MIOPEN_TEST_DISCRETE=OFF anyway --
+# packaged dbsync and the categorized test list need that same single binary.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE AND NOT MIOPEN_NO_GPU)
   # The architecture filter takes one of two forms: on an architecture test_categories.yaml
   # declares an exclusion set for, the runner requires `-L ^ex_gpu_<arch>$`; on any other it
@@ -511,6 +555,24 @@ set_tests_properties(${PARITY_ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${M
   endforeach()
 endif()
 
+# Said out loud at configure time because an unregistered harness fails silently in the same way
+# the packaged mirror above guards against: nothing selected, reported as success. Naming the
+# registered entries as well lets a job check that the binary it expects is among them.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  get_property(MIOPEN_FORWARDING_PARITY_REGISTERED
+    GLOBAL PROPERTY MIOPEN_FORWARDING_PARITY_ENTRIES)
+  if(MIOPEN_FORWARDING_PARITY_REGISTERED)
+    message(STATUS
+      "Forwarding parity harness registered: ${MIOPEN_FORWARDING_PARITY_REGISTERED}")
+  else()
+    message(STATUS
+      "Forwarding parity harness not registered: either MIOPEN_NO_GPU is set "
+      "(MIOPEN_NO_GPU=${MIOPEN_NO_GPU}) or no test source carries the "
+      "${MIOPEN_FORWARDING_PARITY_TOKEN} token. A job that enforces parity must build on a "
+      "GPU node; see test/gtest/README.md.")
+  endif()
+endif()
+
 # Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution
 if( NOT ENABLE_ASAN_PACKAGING )
   install(
@@ -523,7 +585,9 @@ if( NOT ENABLE_ASAN_PACKAGING )
   # Everything the mirrored parity entry reaches for, under the entry's own gate: it is the
   # only caller, so a wider gate would ship files nothing invokes, and with the flag off none
   # of this is installed at all. run_forwarding_parity.py is the entry's command; it runs the
-  # other two and reads the baseline and exclusion list. The ABI check ships here rather than
+  # other two and reads the baseline, the exclusion list and the known-divergence list. The
+  # installed entry passes none of those paths, so each file has to land beside the scripts for
+  # their defaults to find it. The ABI check ships here rather than
   # staying a build-time step so it inspects the libraries that actually ship, and its data
   # files sit alongside it rather than in a data directory so both land in the one artifact
   # component a test job fetches.
@@ -540,6 +604,8 @@ if( NOT ENABLE_ASAN_PACKAGING )
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
+          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline"
+          "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )

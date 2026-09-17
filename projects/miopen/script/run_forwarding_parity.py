@@ -14,9 +14,8 @@ here also keeps the fixture's best property, that a replay which dies never
 reaches the comparison, without depending on ctest to enforce it.
 
 The two replays can only diverge for entry points named in kForwardingEntries, in
-src/private/routing.cpp. That array is empty today, so both replays run the same
-code and this entry cannot fail; adding the first name there is what gives it
-detection power. Until then it is a harness kept warm, not a check.
+src/private/routing.cpp, so that array is what this entry has detection power
+over. A test that exercises an entry point outside it runs identical code twice.
 
 Registered only where MIOPEN_ENABLE_HIPDNN_WRAPPER is on, so it never has to
 work out which kind of tree it is running in. It runs from both the build tree
@@ -86,9 +85,15 @@ def main():
     )
     parser.add_argument("--compare", default=SCRIPT_DIR / "compare_forwarding_runs.py")
     parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
+    parser.add_argument(
+        "--known-divergences", default=SCRIPT_DIR / "known_forwarding_divergences.txt"
+    )
     parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")
     parser.add_argument(
         "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
+    )
+    parser.add_argument(
+        "--needed-baseline", default=SCRIPT_DIR / "wrapper_needed.baseline"
     )
     args = parser.parse_args()
 
@@ -158,7 +163,15 @@ def main():
     # so the harness and the scripts it drives cannot end up on different Pythons,
     # and a lost exec bit becomes a FAIL line instead of a PermissionError traceback.
     ok = run(
-        [sys.executable, args.compare, *reports, "--newer-than", gtest],
+        [
+            sys.executable,
+            args.compare,
+            *reports,
+            "--newer-than",
+            gtest,
+            "--known-divergences",
+            args.known_divergences,
+        ],
         "forwarding parity comparison",
     )
 
@@ -175,6 +188,8 @@ def main():
             args.baseline,
             "--excluded",
             args.excluded,
+            "--needed-baseline",
+            args.needed_baseline,
             "--private-lib",
             private_lib,
         ],

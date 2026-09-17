@@ -1,0 +1,19 @@
+# Divergences between the two forwarding replays that are known and accepted.
+#
+# One per line, four fields:
+#
+#   <test name> | <disabled outcome> | <enabled outcome> | <why it is accepted>
+#
+# The outcomes are what compare_forwarding_runs.py prints for a divergence, so the
+# quickest way to write a line is to run the harness, take the failing line, and add
+# the reason. Both outcomes are pinned deliberately: a line that named only the test
+# would also silence a different divergence appearing in it later.
+#
+# A line here is not a permanent exemption. If the test it names stops diverging, the
+# comparison fails and asks for the line to be deleted -- so the list describes gaps
+# that are open today, not ones that were open once. A run that tolerates a line says
+# so in its output; it never reports an ordinary clean pass.
+#
+# Blank lines and lines starting with # are ignored.
+
+GPU_HipdnnShimConvBiasActivApi_FP16.FusedForwardMatchesCpuReference | passed[parity_served_3d-ndhwc=true] | passed[parity_served_3d-ndhwc=false] | MIOpen serves this 3-D NDHWC case with a four-operator plan (conv + scale-add + bias + activation) matched only by ConvCKIgemmFwdBiasResAddActivFused. The forwarded path drops the scale-add, so the provider builds a three-operator plan, and its only CK solver, ConvCKIgemmFwdBiasActivFused, is 2-D only -- hipDNN finds no engine configuration. Closing it needs 3-D instances in that solver, or a case both solver sets cover.

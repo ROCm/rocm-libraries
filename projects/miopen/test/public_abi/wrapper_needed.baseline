@@ -1,0 +1,46 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# The complete DT_NEEDED list of the flag-on wrapper libMIOpen.so, checked for
+# exact equality by check_public_abi.py check-wrapper --needed-baseline.
+#
+# Two things this is here to catch, both of which a symbol-set check misses:
+#
+#   - libMIOpen_private.so.1 must be present. Without it the wrapper's stubs
+#     have nothing to forward to, and a consumer that links only -lMIOpen gets
+#     a library that loads and then fails at the first call.
+#
+#   - libhipdnn_backend.so must NOT appear. The wrapper links the frontend's
+#     dynamic-loading variant, which dlopens the backend at first use, so a
+#     machine without hipDNN installed still loads libMIOpen.so. A direct
+#     DT_NEEDED on the backend would make hipDNN a hard install dependency of
+#     every MIOpen consumer, which is the one outcome this whole design exists
+#     to avoid.
+#
+# Exact equality rather than a pair of substring tests because a new runtime
+# dependency appearing in the thin wrapper is itself worth a second look -- it
+# has three translation units and should need almost nothing. The comgr,
+# rocblas and sqlite3 entries are not used by any of them; they arrive from the
+# private library's link interface.
+#
+# ld-linux is here because the wrapper has thread-local state. A thread_local in
+# a shared library compiles to a call to __tls_get_addr, which lives in the
+# loader, not in libc. Dropping the last thread_local would drop this entry.
+#
+# Regenerate from a flag-on build with:
+#   script/check_public_abi.py dump <build>/lib/libMIOpen.so.1 /tmp/wrapper
+# and copy the entries from /tmp/wrapper.needed. The list is platform-dependent
+# (ROCm soversions, and whether the toolchain still emits libdl), so a
+# regeneration that only shuffles those is routine; one that adds a new library
+# is not.
+
+libMIOpen_private.so.1
+libamd_comgr.so.3
+librocblas.so.5
+libamdhip64.so.7
+libsqlite3.so.0
+libstdc++.so.6
+libm.so.6
+libgcc_s.so.1
+libc.so.6
+ld-linux-x86-64.so.2
