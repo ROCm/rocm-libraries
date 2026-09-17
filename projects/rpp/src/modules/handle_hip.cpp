@@ -84,7 +84,7 @@ void set_ctx(hipCtx_t ctx) {
 struct HandleImpl {
     using StreamPtr = std::shared_ptr<typename std::remove_pointer<hipStream_t>::type>;
 
-    hipCtx_t ctx;
+    hipCtx_t ctx{};
     StreamPtr stream = nullptr;
     int device = -1;
     Allocator allocator{};
@@ -95,7 +95,9 @@ struct HandleImpl {
     RppBackend backend = RppBackend::RPP_HIP_BACKEND;
     InitHandle* initHandle = nullptr;
 
-    HandleImpl() : ctx(get_ctx()) {}
+    // A host handle must not initialize HIP. The GPU-facing Handle constructor
+    // initializes ctx explicitly after constructing this backend-neutral state.
+    HandleImpl() = default;
 
     static StreamPtr reference_stream(hipStream_t s) {
         return StreamPtr{s, null_deleter{}};
@@ -196,7 +198,7 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 }
 
 void Handle::rpp_destroy_object_gpu() {
-    this->rpp_destroy_object_host();
+    free(this->GetInitHandle()->mem.mcpu.scratchBufferHost);
 
     auto status = hipFree(this->GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem);
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status, "hipFree failed for scratchBufferHip");
@@ -210,6 +212,8 @@ void Handle::rpp_destroy_object_gpu() {
 
 void Handle::rpp_destroy_object_host() {
     free(this->GetInitHandle()->mem.mcpu.scratchBufferHost);
+    delete this->GetInitHandle();
+    this->impl = nullptr;
 }
 
 size_t Handle::GetBatchSize() const {

@@ -194,7 +194,8 @@ if(HIPSPARSELT_ENABLE_HIP)
                 OR THEROCK_SANITIZER STREQUAL "ASAN"
                 OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
             list(APPEND _hipsparselt_codegen_host_sanitizer_args HOST_ASAN)
-        elseif(THEROCK_SANITIZER STREQUAL "TSAN")
+        elseif(THEROCK_SANITIZER STREQUAL "TSAN"
+                OR THEROCK_SANITIZER STREQUAL "HOST_TSAN")
             list(APPEND _hipsparselt_codegen_host_sanitizer_args HOST_TSAN)
         endif()
         set(_hipsparselt_codegen_product_args "")
