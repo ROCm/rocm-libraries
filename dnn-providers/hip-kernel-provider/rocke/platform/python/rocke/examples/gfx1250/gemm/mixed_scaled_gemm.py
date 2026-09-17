@@ -12,11 +12,19 @@ FORMATS = ("fp8e4m3", "bf8e5m2", "fp6", "bf6", "fp4")
 
 def make_spec(args) -> BlockScaledGemmSpec:
     if _canon_lowbit(args.dtype_a) == _canon_lowbit(args.dtype_b):
-        raise ValueError("choose different A/B formats or use a homogeneous mxfp example")
+        raise ValueError(
+            "choose different A/B formats or use a homogeneous mxfp example"
+        )
     return BlockScaledGemmSpec(
-        name="mixed_scaled_gemm", M=args.m, N=args.n, K=args.k,
-        dtype_a=args.dtype_a, dtype_b=args.dtype_b, dtype_c="bf16",
-        scale_dtype="e8m0", matrix_path=args.matrix_path,
+        name="mixed_scaled_gemm",
+        M=args.m,
+        N=args.n,
+        K=args.k,
+        dtype_a=args.dtype_a,
+        dtype_b=args.dtype_b,
+        dtype_c="bf16",
+        scale_dtype="e8m0",
+        matrix_path=args.matrix_path,
         block_k=16 if args.matrix_path == "wmma_scale16" else 32,
     )
 

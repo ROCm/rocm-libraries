@@ -28,7 +28,6 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 
-
 def spec_for(a="fp6", b="bf6", mode="wmma_scale", **kwargs):
     return BlockScaledGemmSpec(
         name="fp6_test",
@@ -68,7 +67,6 @@ def test_all_native_matrix_pairs(a, b, mode):
         assert block_scaled_gemm_signature(spec)[0]["type"] == "ptr<i8, global>"
 
 
-
 @pytest.mark.parametrize(
     "case,expected_sha",
     json.loads(
@@ -83,5 +81,3 @@ def test_scaled_wmma_llvm23_golden(case, expected_sha):
         build_block_scaled_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
     )
     assert hashlib.sha256(llvm.encode()).hexdigest() == expected_sha
-
-

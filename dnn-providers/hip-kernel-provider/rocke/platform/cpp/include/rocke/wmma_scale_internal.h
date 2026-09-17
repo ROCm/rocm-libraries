@@ -12,23 +12,20 @@
 
 #include "rocke/ir.h"
 
-typedef struct rocke_e8m0_scale_packing
-{
+typedef struct rocke_e8m0_scale_packing {
     /* Consecutive K groups, first group in the low byte, independently for A/B. */
     int count;
     int block_k;
 } rocke_e8m0_scale_packing_t;
 
-typedef struct rocke_scaled_wmma_op
-{
+typedef struct rocke_scaled_wmma_op {
     const char* op_id;
     int matrix_format;
     int matrix_format_b;
     rocke_e8m0_scale_packing_t scales;
 } rocke_scaled_wmma_op_t;
 
-static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma(const char* op_id)
-{
+static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma(const char* op_id) {
     static const rocke_e8m0_scale_packing_t scale = {/*count=*/4, /*block_k=*/32};
     static const rocke_e8m0_scale_packing_t scale16 = {/*count=*/8, /*block_k=*/16};
     static const rocke_scaled_wmma_op_t ops[] = {
@@ -83,32 +80,27 @@ static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma(const char
         {"wmma_scale16_f32_16x16x128_fp4_bf6", 4, 3, scale16},
         {"wmma_scale16_f32_16x16x128_fp4_fp4", 4, 4, scale16},
     };
-    if(!op_id)
-    {
+    if (!op_id) {
         return NULL;
     }
-    if(strncmp(op_id, "tile.", 5) == 0)
-    {
+    if (strncmp(op_id, "tile.", 5) == 0) {
         op_id += 5;
     }
-    for(size_t i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i)
-    {
-        if(strcmp(op_id, ops[i].op_id) == 0)
-        {
+    for (size_t i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i) {
+        if (strcmp(op_id, ops[i].op_id) == 0) {
             return &ops[i];
         }
     }
     return NULL;
 }
 
-static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma_from_op(const rocke_op_t* op)
-{
+static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma_from_op(
+    const rocke_op_t* op) {
     const char* op_id = rocke_attr_get_str(&op->attrs, "op_id");
     return rocke_gfx1250_scaled_wmma(op_id ? op_id : op->name);
 }
 
-static inline int rocke_e8m0_scale_word_bits(const rocke_e8m0_scale_packing_t* packing)
-{
+static inline int rocke_e8m0_scale_word_bits(const rocke_e8m0_scale_packing_t* packing) {
     return packing->count * 8;
 }
 
