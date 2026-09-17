@@ -59,7 +59,7 @@ number being read as measured; guessing `investigate` silently commits the user 
 |---|---|---|
 | question it answers | "does this layout conflict, and why?" (design time) | "what does this kernel actually do on this GPU?" |
 | arch | **user must supply it**; no arch ⇒ STOP and ask | must equal the **host GPU**; detect, state it, STOP on mismatch |
-| precondition | arch has a registered `ArchLDS` **and** `selftest(arch)` passes | same, **plus** a working ROCm container (7.10+) + GPU |
+| precondition | arch has a registered `ArchLDS` **and** `selftest(arch)` passes | same, **plus** a working ROCm container + GPU |
 | gate | `selftest(arch)` | `selftest(arch)` **and** sim == rocprof counters, to the number |
 | GPU needed | no | yes |
 | runtime | seconds | long (container bring-up, probe builds, pad sweep) |
@@ -88,7 +88,7 @@ accesses get different treatment and you must say which one you analyzed:
 | access | entry point | simulate gives you |
 |---|---|---|
 | **cooperative store** | `analyze_store` | full `conflicts/access` + the conflict-free pad (the write-port model) |
-| **MMA-operand wave read** | `analyze_read` | `conflicts/access` = **max_depth − 1** (the read-port rule: no port cap, no combine, phases SUM). **gfx90a only, and only inside its envelope** — 2 dwords/lane (`ds_read2_b32`), no broadcast. Outside it: geometry only, and asking for a cost RAISES |
+| **MMA-operand wave read** | `analyze_read` | `conflicts/access` = **BC/productive** (the read-port rule: no port cap, no combine, phases SUM), which reduces to `max_depth − 1` only for a full-wave, distinct-dword access. **gfx90a only, and only inside its envelope** — 2 dwords/lane (`ds_read2_b32`), no broadcast. Outside it: geometry only, and asking for a cost RAISES |
 
 Why the read cannot simply reuse `simulate()`: applying write constants to a read emits a confidently wrong
 number, the exact failure this skill exists to prevent. What IS sound without a read-port model is the
@@ -126,7 +126,7 @@ before doing any work, so a wrong target is caught in the first line and not aft
 | You want to… | Ask / trigger | You get |
 |---|---|---|
 | **Find if the STORE conflicts** (and how much) | "does the <A/B> store cause a bank conflict?" | `conflicts/access`, measured (investigate) or modelled (simulate) — never ungated |
-| **Find if the READ conflicts** | "does the wave read conflict?" | `analyze_read` — `conflicts/access = max_depth − 1` when the arch has a registered read model AND the access is in envelope (gfx90a; 2 dwords/lane; no broadcast; uniform per-instruction depth). Otherwise geometry only — WHETHER and WHERE lanes collide — and asking for a cost RAISES. See "Store vs read coverage" |
+| **Find if the READ conflicts** | "does the wave read conflict?" | `analyze_read` — `conflicts/access = BC/productive` (≈ `max_depth − 1` for a full-wave distinct-dword access) when the arch has a registered read model AND the access is in envelope (gfx90a; 2 dwords/lane; no broadcast; uniform per-instruction depth). Otherwise geometry only — WHETHER and WHERE lanes collide — and asking for a cost RAISES. See "Store vs read coverage" |
 | **Locate the collision** | (part of the analysis) | the served group (half-wave × phase) + bank + colliding `T{l}R{r}` + the N-way |
 | **Visualize it** | (part of the analysis) | the committed 3-panel register→LDS dataflow, **conflicted vs fixed** side-by-side |
 | **Understand WHY** in plain language | "why is it conflicting?" | the mechanism (e.g. K-stride aliasing) + a concrete thread walk-through + the fix |
@@ -261,17 +261,20 @@ the guardrail against the meaningless hand-drawn diagrams that motivated this mo
 
 Bare-metal `rocprofv3` on this host CRASHES on the in-process ctypes HIP load
 (`rocprofiler_at_intercept_table_registration ... error 16`, SIGABRT) because the host HSA runtime and the
-profiler disagree. Profile inside a **ROCm container, 7.10 or newer** instead.
+profiler disagree. Profile inside a **ROCm container** instead (7.14 is the version this recipe was
+verified on; older/newer may work but has not been checked).
 
-Container images and their internal paths CHANGE — treat everything below as a shape to fill in, not a
-recipe to paste. Discover the actual image and paths on the machine you are on (`docker images | grep -i
-rocm`), and confirm the container's GPU arch matches the analysis target before measuring anything.
+Container images and their internal paths CHANGE, so treat the shape below as the contract and VERIFY
+before use (`docker images | grep -i rocm`), confirming the container's GPU arch matches the analysis
+target. A **known-good** configuration, verified working on this host: image `fmha-build-a:rocm714`
+(ROCm 7.14), python `/opt/venv/bin/python3`, rocprofv3 1.3.2, host GPU gfx90a (MI210); a long-lived
+container named `lds_prof` may already exist — reuse it rather than spawning another.
 
 ```bash
 docker run -d --name lds_prof --device=/dev/kfd --device=/dev/dri --group-add video \
   --security-opt seccomp=unconfined --ipc=host \
   -v <repo-root>:/work -w /work/<path-to>/rocke/platform \
-  <rocm-7.10+ image> sleep infinity
+  <rocm image, e.g. fmha-build-a:rocm714> sleep infinity
 # inside every exec — locate the ROCm SDK libs in THIS image rather than assuming the path:
 export LD_LIBRARY_PATH=<sdk_devel>/lib:<sdk_core>/lib:$LD_LIBRARY_PATH
 export PYTHONPATH=python ROCKE_CPP_QUIET_FALLBACK=1
@@ -293,8 +296,11 @@ them a `ProbeDescs(coop_native, coop_store, wave_read)` built from the kernel's 
 implements both isolation modes:
 - **store-mirror** (`mode="store"`): loop `{store; sync; read(store-layout); sync}` — the read makes each store
   live (defeats hoisting); measures the store pattern (write+read of it).
-- **read-only** (`mode="read"`): `store once; loop {read; sync}` — isolates the read pattern.
-  `conflicts/access` is a RATIO, robust even if some iterations are optimized out.
+- **read-only** (`mode="read"`): store once, then **`n_reads` LIVE barrier-separated reads to DISTINCT
+  output slices**. Do NOT rely on the `n_iter` loop — its body is dead code (the result is unused, so the
+  compiler removes it; `n_iter` does not move the counters in this mode). The measurement is the **SLOPE**
+  `(n=2) − (n=1)`: exactly one wave read, with the single coop store cancelled by construction. **Check
+  `SQ_INSTS_LDS` scales with `n_reads`** — if it does not, the reads were merged and the slope is invalid.
 - **pad sweep is the control that PROVES the counter is live**: vary `lds_pad` (keep a multiple of 8 f16 =
   b128 alignment). If padding moves `SQ_LDS_BANK_CONFLICT`, the counter responds and the number is real; if a
   pad drives it to 0, that layout was conflicted and the pad fixes it.

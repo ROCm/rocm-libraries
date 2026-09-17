@@ -361,6 +361,7 @@ def test_gfx90a_read_model_is_registered_at_import():
     This MUST run in a fresh interpreter. Asserting on the in-process module is vacuous, because
     sibling tests call `register_read_model` themselves -- so the state under test is repaired by
     whoever ran first, and deleting the module-scope registration leaves the suite green."""
+    import os
     import subprocess
     import sys
     probe = (
@@ -369,7 +370,13 @@ def test_gfx90a_read_model_is_registered_at_import():
         "assert 'gfx90a' in lc._READ_MODELS, 'read model NOT registered at import';"
         "print('ok')"
     )
-    r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    # Propagate this interpreter's sys.path: a bare subprocess gets neither the test runner's
+    # rootdir insertion nor an exported PYTHONPATH, so `rocke` is unimportable from any cwd but
+    # platform/python -- which surfaces as a FALSE "not registered at import" rather than an
+    # ImportError. The test would be red on any CI runner and green only on a shell that happens
+    # to export PYTHONPATH.
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, env=env)
     assert r.returncode == 0, f"fresh import did not register the read model:\n{r.stderr}"
 
 
@@ -524,3 +531,38 @@ def test_each_structural_minimum_is_separately_enforced(rows, expect, capsys):
         assert expect in out, f"expected the {expect!r} minimum to fire; got:\n{out}"
     finally:
         corpus["read_hists"] = saved
+
+
+def test_footprint_is_gated_not_merely_documented():
+    """`productive` is measured at exactly one value (every corpus row is 128 dwords), so a different
+    footprint extrapolates the DENOMINATOR of conflicts/access. Documenting that in the SOT is not the
+    same as gating it -- a gate that cannot fire is not a gate.
+
+    Driven through the real path by making two lanes of DIFFERENT half-waves share a dword, which
+    lowers the footprint WITHOUT tripping the broadcast check (that check is per-(half-wave, phase))."""
+    descs = lc.ProbeDescs.from_coop(_macro_coop_descs_crc(256, 16, 16),
+                                    _wave_descs_interleaved(2, 2, 1)[0], transpose=_transpose_desc)
+    kw = dict(tile_free=256, arch=lc.GFX90A, operand_label="A", strides=(264, 1), dtype_name="f16",
+              origin=(0, 0), lds_swizzle=False, dwords_per_lane=2)
+    baseline = lc.analyze_read(descs, **kw)
+    assert baseline.in_envelope and baseline.footprint_dwords == 128
+
+    real = lc.read_datum
+
+    def shrunk(*a, **k):
+        acc, vw, datum = real(*a, **k)
+        for ph in range(2):
+            if (0, ph) in datum and (32, ph) in datum:
+                datum[(32, ph)] = datum[(0, ph)]
+        return acc, vw, datum
+
+    lc.read_datum = shrunk
+    try:
+        r = lc.analyze_read(descs, **kw)
+        assert r.footprint_dwords != 128
+        assert not r.in_envelope, "a footprint the corpus never measured must not be priced"
+        assert "footprint" in r.out_of_envelope_reason
+        with pytest.raises(lc.ConflictModelError):
+            _ = r.conflicts_per_access
+    finally:
+        lc.read_datum = real

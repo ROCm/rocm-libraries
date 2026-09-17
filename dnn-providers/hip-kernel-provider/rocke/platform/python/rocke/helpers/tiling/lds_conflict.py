@@ -1275,6 +1275,21 @@ def analyze_read(descs: ProbeDescs, *, tile_free, arch, operand_label, strides, 
     elif len(set(instr_depths)) > 1:
         reason = (f"per-instruction max_depth is not uniform ({instr_depths}); every corpus row has "
                   f"one depth for the whole access, so an aggregate cost here is extrapolation")
+    else:
+        # FOOTPRINT is the one axis the corpus does NOT vary: every row has footprint 128 dwords, so
+        # `productive` is 4 throughout and a constant 4 fits the data identically. The rule computes
+        # BC/productive correctly, but the DENOMINATOR is unvalidated anywhere else -- and the
+        # familiar `max_depth - 1` identity only holds when productive equals the served-group count.
+        # Documenting that (lds_banks.md §1.5) is not the same as gating it: "a gate that cannot fire
+        # is not a gate", and until now this axis had no gate at all, only a docstring.
+        n_groups = (a.WAVE // a.HALF) * dwords_per_lane
+        fp = per_instr[0][1]
+        if fp != a.NB * n_groups:
+            reason = (f"per-instruction footprint is {fp} dwords, not the validated "
+                      f"{a.NB * n_groups} (= NB x {n_groups} served groups). `productive` is measured "
+                      f"at exactly one value in the corpus, so a cost here extrapolates the "
+                      f"denominator -- e.g. two lanes of DIFFERENT half-waves sharing a dword lowers "
+                      f"the footprint without tripping the broadcast check.")
     model_ok = a.name in _READ_MODELS and selftest(a, verbose=False)
 
     sim = None
