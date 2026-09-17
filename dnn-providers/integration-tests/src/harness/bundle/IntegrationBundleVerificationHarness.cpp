@@ -19,7 +19,6 @@
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/ReferenceCapabilityError.hpp"
-#include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
@@ -629,21 +628,14 @@ VerificationOutcome
                                                          const ExpectedTensorLookup& expectedFor)
 {
     auto wrapper = _bundle->graphWrapper();
-
-    const auto tomlOverride = TestConfig::get().findToleranceOverride(currentTestName());
-    if(tomlOverride)
-    {
-        HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << currentTestName()
-                                                                 << ": atol=" << tomlOverride->atol
-                                                                 << " rtol=" << tomlOverride->rtol);
-    }
-
-    const auto toleranceFor = [&](hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-        ComparisonTolerance tolerance;
-        tolerance::resolveTolerance(
-            wrapper, dataType, currentTestName(), tolerance.atol, tolerance.rtol);
-        return tolerance;
-    };
+    // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
+    // applied by gradingForTensor(), which reads the validator override first and so is
+    // the only place that can log the check that actually graded this tensor.
+    const auto toleranceFor
+        = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+              const float value = tolerance::defaultTolerance(wrapper, dataType);
+              return gradingForTensor(currentTestName(), label, value, value);
+          };
 
     const auto mismatches = bundle::compareOutputs(wrapper,
                                                    _bundle->outputTensorUids,
