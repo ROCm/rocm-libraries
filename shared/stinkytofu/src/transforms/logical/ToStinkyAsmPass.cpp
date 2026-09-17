@@ -513,16 +513,20 @@ class ToStinkyAsmPassImpl : public Pass {
                     // legalizations below so, e.g., v_cmpx gets its EXEC dest first.
                     legalizeImplicitSpecialRegisters(asmInst, getWaveFrontSize(arch));
 
-                    // gfx1250 (and other RDNA) have no ds_*_b192 encoding. Match
-                    // rocisa's DSStoreB192/DSLoadB192::toString(), which always splits
-                    // into a b128 + b64 pair. The rocisa->stinky conversion path handles
-                    // this in ToStinkyTofuUtils::legalizeInstruction; the logical->asm
-                    // path (adaptor / PyLogicalModule) must do the same here. VGPR MSB
-                    // is materialized later by InsertVgprMsbPass, so pass hasVgprMsb=false.
+                    // gfx1250 (and other RDNA) have no ds_*_b192 / ds_store_b256
+                    // encoding. Match rocisa's DSStoreB192/DSLoadB192/DSStoreB256
+                    // ::toString(), which always splits into a b128 + b64/b128 pair.
+                    // The rocisa->stinky conversion path handles this in
+                    // ToStinkyTofuUtils::legalizeInstruction; the logical->asm path
+                    // (adaptor / PyLogicalModule) must do the same here. VGPR MSB
+                    // is materialized later by InsertVgprMsbPass, so these splits
+                    // do not apply an MSB offset themselves.
                     if (asmInst->getUnifiedOpcode() == GFX::ds_store_b192) {
                         legalizeDSStoreB192(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::ds_load_b192) {
                         legalizeDSLoadB192(asmInst, irBuilder, arch);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::ds_store_b256) {
+                        legalizeDSStoreB256(asmInst, irBuilder, arch);
                     } else if (asmInst->getUnifiedOpcode() == GFX::s_barrier) {
                         // gfx1250 has no plain s_barrier; it must split into
                         // s_barrier_signal -1 / s_barrier_wait -1. The rocisa->stinky

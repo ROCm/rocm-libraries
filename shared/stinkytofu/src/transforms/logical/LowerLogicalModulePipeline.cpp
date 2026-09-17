@@ -37,6 +37,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
@@ -46,9 +47,11 @@
 
 namespace stinkytofu {
 
-void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config) {
+void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config,
+                                const AsmCapsConfig& caps) {
     PassManager pm;
     pm.setGemmTileConfig(config);
+    pm.setAsmCapsConfig(caps);
     pm.addPass(createCompositeInstructionLoweringPass());
     pm.addPass(createToStinkyAsmPass());
     pm.run(func);
@@ -68,6 +71,25 @@ GemmTileConfig configFromOptions(std::array<int, 3> arch,
     cfg.NumGRM = opts.NumGRM;
     cfg.NumWaves = static_cast<uint32_t>(opts.WaveGroup0 * opts.WaveGroup1);
     return cfg;
+}
+
+// Mirror of Backend::configurePassManager(): take the explicitly requested mode
+// when TensileLite forwarded rocisa's asmCaps, else auto-probe via comgr. The
+// asm-side pipeline derives its caps this way, and ToStinkyAsmPass must see the
+// same verdict or a split ds_* half crossing a VGPR MSB bank loses its offset.
+AsmCapsConfig capsFromOptions(std::array<int, 3> arch,
+                              const StinkyAsmModule::ModuleOptions& opts) {
+    auto msbVal = opts.VgprMsbMode;
+    if (msbVal < 0 || msbVal > static_cast<int>(VgprMsbMode::Msb16)) msbVal = 0;
+
+    AsmCapsConfig caps;
+    caps.vgprMsbMode = static_cast<VgprMsbMode>(msbVal);
+    if (caps.vgprMsbMode == VgprMsbMode::None) {
+        caps = ToolchainCaps::probe(getGfxArchID(arch[0], arch[1], arch[2]));
+    }
+    caps.requiresXCntForVolatileVMEM = opts.RequiresXCntForVolatileVMEM;
+    caps.enableXnackReplay = opts.EnableXnackReplay;
+    return caps;
 }
 
 }  // anonymous namespace
@@ -278,8 +300,10 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         }
 
         assert(currentBB == entryBB && "unterminated callable function body");
+        const GemmTileConfig loweringConfig = configFromOptions(arch, moduleOptions);
+        const AsmCapsConfig loweringCaps = capsFromOptions(arch, moduleOptions);
         for (Function* function : asmModule->getFunctions()) {
-            runLogicalLoweringPipeline(*function, configFromOptions(arch, moduleOptions));
+            runLogicalLoweringPipeline(*function, loweringConfig, loweringCaps);
         }
     }
 
