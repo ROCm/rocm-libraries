@@ -24,44 +24,57 @@
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 
-namespace {
+namespace
+{
 
 int g_failures = 0;
 const char* g_case = "";
 
-void fail(const char* what, int line) {
+void fail(const char* what, int line)
+{
     fprintf(stderr, "FAIL [%s]: %s (%s:%d)\n", g_case, what, __FILE__, line);
     ++g_failures;
 }
 
-void expect_contains(const std::string& ir, const char* needle, int line) {
-    if (ir.find(needle) == std::string::npos) fail(needle, line);
+void expect_contains(const std::string& ir, const char* needle, int line)
+{
+    if(ir.find(needle) == std::string::npos)
+        fail(needle, line);
 }
 
-void expect_count(const std::string& ir, const char* needle, size_t want, int line) {
+void expect_count(const std::string& ir, const char* needle, size_t want, int line)
+{
     size_t seen = 0;
-    for (size_t at = ir.find(needle); at != std::string::npos; at = ir.find(needle, at + 1)) ++seen;
-    if (seen != want) {
+    for(size_t at = ir.find(needle); at != std::string::npos; at = ir.find(needle, at + 1))
+        ++seen;
+    if(seen != want)
+    {
         char msg[512];
-        snprintf(msg, sizeof(msg), "expected %zu occurrence(s) of \"%s\", saw %zu", want, needle,
-                 seen);
+        snprintf(
+            msg, sizeof(msg), "expected %zu occurrence(s) of \"%s\", saw %zu", want, needle, seen);
         fail(msg, line);
     }
 }
 
 #define EXPECT_IR(ir, needle) expect_contains((ir), (needle), __LINE__)
 #define EXPECT_IR_COUNT(ir, needle, n) expect_count((ir), (needle), (n), __LINE__)
-#define EXPECT_NO_IR(ir, needle)                                                           \
-    do {                                                                                   \
-        if ((ir).find(needle) != std::string::npos) fail("unexpected: " needle, __LINE__); \
-    } while (0)
+#define EXPECT_NO_IR(ir, needle)                   \
+    do                                             \
+    {                                              \
+        if((ir).find(needle) != std::string::npos) \
+            fail("unexpected: " needle, __LINE__); \
+    } while(0)
 
 /* Build a single-intrinsic kernel and return its lowered LLVM IR text. */
 template <typename BuildFn>
-std::string lower_one(const char* name, BuildFn build, const char* arch = "gfx950",
-                      rocke_llvm_flavor_t flavor = ROCKE_LLVM_FLAVOR_AUTO) {
+std::string lower_one(const char* name,
+                      BuildFn build,
+                      const char* arch = "gfx950",
+                      rocke_llvm_flavor_t flavor = ROCKE_LLVM_FLAVOR_AUTO)
+{
     rocke_ir_builder_t b;
-    if (rocke_ir_builder_init(&b, name) != ROCKE_OK) {
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
         fail("rocke_ir_builder_init", __LINE__);
         return std::string();
     }
@@ -71,14 +84,16 @@ std::string lower_one(const char* name, BuildFn build, const char* arch = "gfx95
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(rocke_ir_builder_kernel(&b), flavor,
-                                                            arch, &ll, err, sizeof(err));
+    const rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        rocke_ir_builder_kernel(&b), flavor, arch, &ll, err, sizeof(err));
     std::string ir;
-    if (st != ROCKE_OK || ll == nullptr) {
+    if(st != ROCKE_OK || ll == nullptr)
+    {
         char msg[ROCKE_ERR_MSG_CAP + 64];
         snprintf(msg, sizeof(msg), "lower failed (status %d): %s", (int)st, err);
         fail(msg, __LINE__);
-    } else
+    }
+    else
         ir.assign(ll);
     std::free(ll);
     rocke_ir_builder_free(&b);
@@ -87,11 +102,13 @@ std::string lower_one(const char* name, BuildFn build, const char* arch = "gfx95
 
 /* Build the same kernel through the public HIP-source lowerer. */
 template <typename BuildFn>
-std::string lower_one_hip(const char* name, BuildFn build, const char* arch) {
+std::string lower_one_hip(const char* name, BuildFn build, const char* arch)
+{
     rocke_ir_builder_t b;
     rocke_strbuf_t out;
     rocke_lower_hip_opts_t opts{};
-    if (rocke_ir_builder_init(&b, name) != ROCKE_OK) {
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
+    {
         fail("rocke_ir_builder_init", __LINE__);
         return std::string();
     }
@@ -99,14 +116,16 @@ std::string lower_one_hip(const char* name, BuildFn build, const char* arch) {
     rocke_b_ret(&b);
     rocke_strbuf_init(&out, 0);
     opts.arch = arch;
-    const rocke_status_t st =
-        rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
+    const rocke_status_t st
+        = rocke_lower_kernel_to_hip(&b, rocke_ir_builder_kernel(&b), &opts, &out);
     std::string hip;
-    if (st != ROCKE_OK) {
+    if(st != ROCKE_OK)
+    {
         char msg[128];
         snprintf(msg, sizeof(msg), "HIP lower failed (status %d)", (int)st);
         fail(msg, __LINE__);
-    } else
+    }
+    else
         hip.assign(rocke_strbuf_cstr(&out));
     rocke_strbuf_free(&out);
     rocke_ir_builder_free(&b);
@@ -115,7 +134,8 @@ std::string lower_one_hip(const char* name, BuildFn build, const char* arch) {
 
 rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem);
 
-void case_gfx1250_standalone_bridge() {
+void case_gfx1250_standalone_bridge()
+{
     const std::string ir = lower_one(
         "gfx1250_bridge",
         [](rocke_ir_builder_t* b) {
@@ -144,7 +164,8 @@ void case_gfx1250_standalone_bridge() {
             rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
             rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 6);
         },
-        "gfx1250", ROCKE_LLVM_FLAVOR_LLVM23);
+        "gfx1250",
+        ROCKE_LLVM_FLAVOR_LLVM23);
 
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.tensorcnt(i16 3)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.barrier.signal(i32 1)");
@@ -159,12 +180,14 @@ void case_gfx1250_standalone_bridge() {
     EXPECT_IR(ir, "call void @llvm.amdgcn.tensor.store.from.lds(");
 }
 
-rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem) {
+rocke_value_t* global_ptr_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem)
+{
     return rocke_b_param(b, name, rocke_ptr_type(b, elem, "global"), nullptr);
 }
 
 /* ---- ds_swizzle (raw offset + XOR-butterfly encoding) ---- */
-void case_ds_swizzle_raw_offset() {
+void case_ds_swizzle_raw_offset()
+{
     const std::string ir = lower_one("dssw", [](rocke_ir_builder_t* b) {
         rocke_b_ds_swizzle(b, rocke_b_const_i32(b, 1), 0x041F);
     });
@@ -173,7 +196,8 @@ void case_ds_swizzle_raw_offset() {
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 1055)");
 }
 
-void case_ds_swizzle_xor() {
+void case_ds_swizzle_xor()
+{
     /* offset = (xor_mask << 10) | 0x1F -> (2 << 10) | 31 == 2079 (0x081F). */
     const std::string ir = lower_one("dsswx", [](rocke_ir_builder_t* b) {
         rocke_b_ds_swizzle_xor(b, rocke_b_const_i32(b, 1), 2);
@@ -183,7 +207,8 @@ void case_ds_swizzle_xor() {
 }
 
 /* ---- mov_dpp8 ---- */
-void case_mov_dpp8_i32() {
+void case_mov_dpp8_i32()
+{
     const std::string ir = lower_one("dpp8i", [](rocke_ir_builder_t* b) {
         rocke_b_mov_dpp8(b, rocke_b_const_i32(b, 1), 0x765432);
     });
@@ -192,7 +217,8 @@ void case_mov_dpp8_i32() {
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.mov.dpp8.i32(i32 1, i32 7754802)");
 }
 
-void case_mov_dpp8_f32() {
+void case_mov_dpp8_f32()
+{
     const std::string ir = lower_one("dpp8f", [](rocke_ir_builder_t* b) {
         rocke_b_mov_dpp8(b, rocke_b_const_f32(b, 1.0), 0x765432);
     });
@@ -200,7 +226,8 @@ void case_mov_dpp8_f32() {
     EXPECT_IR(ir, "call float @llvm.amdgcn.mov.dpp8.f32(float");
 }
 
-void case_mov_dpp8_both_types_coexist() {
+void case_mov_dpp8_both_types_coexist()
+{
     /* Both variants used to declare a bare @llvm.amdgcn.mov.dpp8, so a kernel
      * using each type emitted two conflicting declares for one symbol. */
     const std::string ir = lower_one("dpp8_both", [](rocke_ir_builder_t* b) {
@@ -213,37 +240,53 @@ void case_mov_dpp8_both_types_coexist() {
 }
 
 /* ---- wave_reduce ---- */
-void case_wave_reduce() {
-    struct Variant {
+void case_wave_reduce()
+{
+    struct Variant
+    {
         const char* op;
         const char* llvm_ty;
         const char* suffix;
         bool is_float;
     };
     static const Variant variants[] = {
-        {"fmax", "float", "f32", true}, {"fadd", "float", "f32", true},
-        {"add", "i32", "i32", false},   {"max", "i32", "i32", false},
+        {"fmax", "float", "f32", true},
+        {"fadd", "float", "f32", true},
+        {"add", "i32", "i32", false},
+        {"max", "i32", "i32", false},
         {"min", "i32", "i32", false},
     };
 
-    for (const Variant& v : variants) {
+    for(const Variant& v : variants)
+    {
         const std::string ir = lower_one("wred", [&v](rocke_ir_builder_t* b) {
             rocke_value_t* x = v.is_float ? rocke_b_const_f32(b, 1.0) : rocke_b_const_i32(b, 1);
             rocke_b_wave_reduce(b, x, v.op, 0);
         });
         char buf[256];
-        snprintf(buf, sizeof(buf), "declare %s @llvm.amdgcn.wave.reduce.%s.%s(%s, i32 immarg)",
-                 v.llvm_ty, v.op, v.suffix, v.llvm_ty);
+        snprintf(buf,
+                 sizeof(buf),
+                 "declare %s @llvm.amdgcn.wave.reduce.%s.%s(%s, i32 immarg)",
+                 v.llvm_ty,
+                 v.op,
+                 v.suffix,
+                 v.llvm_ty);
         EXPECT_IR(ir, buf);
-        snprintf(buf, sizeof(buf), "call %s @llvm.amdgcn.wave.reduce.%s.%s(%s", v.llvm_ty, v.op,
-                 v.suffix, v.llvm_ty);
+        snprintf(buf,
+                 sizeof(buf),
+                 "call %s @llvm.amdgcn.wave.reduce.%s.%s(%s",
+                 v.llvm_ty,
+                 v.op,
+                 v.suffix,
+                 v.llvm_ty);
         EXPECT_IR(ir, buf);
         /* Trailing i32 is the strategy immediate (0 == default). */
         EXPECT_IR(ir, ", i32 0)");
     }
 }
 
-void case_wave_reduce_strategy() {
+void case_wave_reduce_strategy()
+{
     const std::string ir = lower_one("wred_strat", [](rocke_ir_builder_t* b) {
         rocke_b_wave_reduce(b, rocke_b_const_f32(b, 1.0), "fmax", 2);
     });
@@ -252,7 +295,8 @@ void case_wave_reduce_strategy() {
 }
 
 /* ---- readlane / writelane ---- */
-void case_readlane() {
+void case_readlane()
+{
     const std::string i32_ir = lower_one("rlane_i32", [](rocke_ir_builder_t* b) {
         rocke_b_readlane(b, rocke_b_const_i32(b, 7), rocke_b_const_i32(b, 0));
     });
@@ -266,10 +310,11 @@ void case_readlane() {
     EXPECT_IR(f32_ir, "call float @llvm.amdgcn.readlane.f32(float");
 }
 
-void case_writelane() {
+void case_writelane()
+{
     const std::string ir = lower_one("wlane", [](rocke_ir_builder_t* b) {
-        rocke_b_writelane(b, rocke_b_const_i32(b, 7), rocke_b_const_i32(b, 0),
-                          rocke_b_const_i32(b, 9));
+        rocke_b_writelane(
+            b, rocke_b_const_i32(b, 7), rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 9));
     });
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.writelane.i32(i32, i32, i32)");
     /* Operand order is (uniform_val, lane, passthrough). */
@@ -277,10 +322,16 @@ void case_writelane() {
 }
 
 /* ---- permlane16 / permlane64 / permlane32_swap ---- */
-void case_permlane16() {
+void case_permlane16()
+{
     const std::string ir = lower_one("pl16", [](rocke_ir_builder_t* b) {
-        rocke_b_permlane16(b, rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 1),
-                           rocke_b_const_i32(b, 2), rocke_b_const_i32(b, 3), false, false);
+        rocke_b_permlane16(b,
+                           rocke_b_const_i32(b, 0),
+                           rocke_b_const_i32(b, 1),
+                           rocke_b_const_i32(b, 2),
+                           rocke_b_const_i32(b, 3),
+                           false,
+                           false);
     });
     /* The data type is an overloaded position, so the mangled name carries its
      * suffix. LLVM accepts the bare "permlane16" and auto-upgrades it, but
@@ -294,24 +345,32 @@ void case_permlane16() {
               "(i32 0, i32 1, i32 2, i32 3, i1 false, i1 false)");
 }
 
-void case_permlane16_flags() {
+void case_permlane16_flags()
+{
     const std::string ir = lower_one("pl16_flags", [](rocke_ir_builder_t* b) {
-        rocke_b_permlane16(b, rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 1),
-                           rocke_b_const_i32(b, 2), rocke_b_const_i32(b, 3), true, true);
+        rocke_b_permlane16(b,
+                           rocke_b_const_i32(b, 0),
+                           rocke_b_const_i32(b, 1),
+                           rocke_b_const_i32(b, 2),
+                           rocke_b_const_i32(b, 3),
+                           true,
+                           true);
     });
     EXPECT_IR(ir,
               "call i32 @llvm.amdgcn.permlane16.i32"
               "(i32 0, i32 1, i32 2, i32 3, i1 true, i1 true)");
 }
 
-void case_permlane64() {
+void case_permlane64()
+{
     const std::string ir = lower_one(
         "pl64", [](rocke_ir_builder_t* b) { rocke_b_permlane64(b, rocke_b_const_i32(b, 1)); });
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.permlane64.i32(i32)");
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.permlane64.i32(i32 1)");
 }
 
-void case_permlane32_swap() {
+void case_permlane32_swap()
+{
     const std::string ir = lower_one("psw", [](rocke_ir_builder_t* b) {
         rocke_value_t* lo = nullptr;
         rocke_value_t* hi = nullptr;
@@ -330,16 +389,18 @@ void case_permlane32_swap() {
 }
 
 /* ---- alignbyte / s_wqm ---- */
-void case_alignbyte() {
+void case_alignbyte()
+{
     const std::string ir = lower_one("algn", [](rocke_ir_builder_t* b) {
-        rocke_b_alignbyte(b, rocke_b_const_i32(b, 1), rocke_b_const_i32(b, 2),
-                          rocke_b_const_i32(b, 8));
+        rocke_b_alignbyte(
+            b, rocke_b_const_i32(b, 1), rocke_b_const_i32(b, 2), rocke_b_const_i32(b, 8));
     });
     EXPECT_IR(ir, "declare i32 @llvm.amdgcn.alignbyte(i32, i32, i32)");
     EXPECT_IR(ir, "call i32 @llvm.amdgcn.alignbyte(i32 1, i32 2, i32 8)");
 }
 
-void case_s_wqm() {
+void case_s_wqm()
+{
     const std::string i32_ir = lower_one(
         "wqm_i32", [](rocke_ir_builder_t* b) { rocke_b_s_wqm(b, rocke_b_const_i32(b, 0xF)); });
     /* Result and operand are separately overloaded, so the canonical name
@@ -354,7 +415,8 @@ void case_s_wqm() {
 }
 
 /* ---- av.load / av.store (agent-scope 128-bit vector mem) ---- */
-void case_av_load_b128() {
+void case_av_load_b128()
+{
     const std::string ir = lower_one("avld", [](rocke_ir_builder_t* b) {
         rocke_b_av_load_b128(b, global_ptr_param(b, "p", rocke_i32()));
     });
@@ -366,7 +428,8 @@ void case_av_load_b128() {
     EXPECT_IR(ir, "!3 = !{!\"agent\"}");
 }
 
-void case_av_store_b128() {
+void case_av_store_b128()
+{
     const std::string ir = lower_one("avst", [](rocke_ir_builder_t* b) {
         rocke_value_t* p = global_ptr_param(b, "p", rocke_i32());
         rocke_b_av_store_b128(b, p, rocke_b_av_load_b128(b, p));
@@ -379,9 +442,10 @@ void case_av_store_b128() {
 }
 
 /* ---- s_alloc_vgpr ---- */
-void case_s_alloc_vgpr() {
-    const std::string ir =
-        lower_one("valloc", [](rocke_ir_builder_t* b) { rocke_b_s_alloc_vgpr(b, 8); });
+void case_s_alloc_vgpr()
+{
+    const std::string ir
+        = lower_one("valloc", [](rocke_ir_builder_t* b) { rocke_b_s_alloc_vgpr(b, 8); });
     EXPECT_IR(ir, "declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)");
     EXPECT_IR(ir, "call i1 @llvm.amdgcn.s.alloc.vgpr(i32 8)");
     /* The intrinsic returns i1; the IR value is an i32, so a zext is required. */
@@ -389,30 +453,34 @@ void case_s_alloc_vgpr() {
 }
 
 /* ---- async markers / event waits / prefetch ---- */
-void case_asyncmark() {
+void case_asyncmark()
+{
     const std::string ir = lower_one("amark", [](rocke_ir_builder_t* b) { rocke_b_asyncmark(b); });
     EXPECT_IR(ir, "declare void @llvm.amdgcn.asyncmark()");
     EXPECT_IR(ir, "call void @llvm.amdgcn.asyncmark()");
 }
 
-void case_wait_asyncmark() {
-    const std::string ir =
-        lower_one("await", [](rocke_ir_builder_t* b) { rocke_b_wait_asyncmark(b, 3); });
+void case_wait_asyncmark()
+{
+    const std::string ir
+        = lower_one("await", [](rocke_ir_builder_t* b) { rocke_b_wait_asyncmark(b, 3); });
     EXPECT_IR(ir, "declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.wait.asyncmark(i16 3)");
 }
 
-void case_s_wait_event() {
-    const std::string ir =
-        lower_one("sevt", [](rocke_ir_builder_t* b) { rocke_b_s_wait_event(b, 1); });
+void case_s_wait_event()
+{
+    const std::string ir
+        = lower_one("sevt", [](rocke_ir_builder_t* b) { rocke_b_s_wait_event(b, 1); });
     EXPECT_IR(ir, "declare void @llvm.amdgcn.s.wait.event(i16 immarg)");
     EXPECT_IR(ir, "call void @llvm.amdgcn.s.wait.event(i16 1)");
 }
 
-void case_s_prefetch_inst() {
+void case_s_prefetch_inst()
+{
     const std::string ir = lower_one("sprefetch", [](rocke_ir_builder_t* b) {
-        rocke_b_s_prefetch_inst(b, global_ptr_param(b, "code", rocke_i32()),
-                                rocke_b_const_i32(b, 64));
+        rocke_b_s_prefetch_inst(
+            b, global_ptr_param(b, "code", rocke_i32()), rocke_b_const_i32(b, 64));
     });
     /* The operand is llvm_anyptr_ty, so the call and its declare have to name
      * the pointer's real space. A bare `ptr` for this addrspace(1) param is
@@ -423,15 +491,19 @@ void case_s_prefetch_inst() {
 }
 
 /* ---- async buffer / global -> LDS ---- */
-void case_buffer_load_lds_async() {
+void case_buffer_load_lds_async()
+{
     const std::string ir = lower_one("buf_async", [](rocke_ir_builder_t* b) {
         rocke_value_t* X = global_ptr_param(b, "X", rocke_f16());
         rocke_value_t* N = rocke_b_param(b, "N_bytes", rocke_i32(), nullptr);
         rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, X, N);
         const int shape[] = {64, 8};
         rocke_value_t* lds = rocke_b_smem_alloc(b, rocke_f16(), shape, 2, "stage");
-        rocke_b_buffer_load_lds_async(b, rsrc, rocke_b_smem_addr_of(b, lds),
-                                      rocke_b_const_i32(b, 0), rocke_b_const_i32(b, 0),
+        rocke_b_buffer_load_lds_async(b,
+                                      rsrc,
+                                      rocke_b_smem_addr_of(b, lds),
+                                      rocke_b_const_i32(b, 0),
+                                      rocke_b_const_i32(b, 0),
                                       /*dwords=*/4,
                                       /*coherency=*/2);
     });
@@ -445,7 +517,8 @@ void case_buffer_load_lds_async() {
     EXPECT_IR(ir, "ptr addrspace(3) %lds_ptr");
 }
 
-void case_global_load_async_to_lds_b8() {
+void case_global_load_async_to_lds_b8()
+{
     /* width_bytes=1 selects the LLVM 23 `.b8` async copy. The opcode is a
      * gfx1250 one, but its lowering is arch-independent, so this runs on the
      * default gfx950 backend -- the C++ engine has no gfx1250 ISA backend. */
@@ -454,7 +527,11 @@ void case_global_load_async_to_lds_b8() {
         const int shape[] = {64};
         rocke_value_t* lds = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "stage");
         rocke_value_t* const idx[] = {rocke_b_const_i32(b, 0)};
-        rocke_b_global_load_async_to_lds(b, src, rocke_b_const_i32(b, 0), lds, idx,
+        rocke_b_global_load_async_to_lds(b,
+                                         src,
+                                         rocke_b_const_i32(b, 0),
+                                         lds,
+                                         idx,
                                          /*num_lds_indices=*/1,
                                          /*width_bytes=*/1,
                                          /*coherency=*/0,
@@ -470,7 +547,8 @@ void case_global_load_async_to_lds_b8() {
 }
 
 /* ---- HIP zero-extension source signedness ---- */
-void case_hip_zext_uses_unsigned_source_cast() {
+void case_hip_zext_uses_unsigned_source_cast()
+{
     const std::string hip = lower_one_hip(
         "zext_i8",
         [](rocke_ir_builder_t* b) {
@@ -486,8 +564,10 @@ void case_hip_zext_uses_unsigned_source_cast() {
 }
 
 /* ---- gfx1250 native SCALE / SCALE16 FP8/FP4 WMMA ---- */
-void case_gfx1250_scaled_wmma() {
-    struct Variant {
+void case_gfx1250_scaled_wmma()
+{
+    struct Variant
+    {
         bool scale16;
         const rocke_type_t* (*scale_type)(void);
         const char* intrinsic;
@@ -495,30 +575,41 @@ void case_gfx1250_scaled_wmma() {
         const char* scale_llvm_type;
     };
     static const Variant variants[] = {
-        {false, rocke_i32, "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-         "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4", "i32"},
-        {true, rocke_i64, "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
-         "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4", "i64"},
+        {false,
+         rocke_i32,
+         "llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+         "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4",
+         "i32"},
+        {true,
+         rocke_i64,
+         "llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32",
+         "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
+         "i64"},
     };
 
     const rocke_arch_target_t* arch = rocke_arch_target_from_gfx("gfx1250");
     char scratch[32];
-    if (strcmp(rocke_normalize_dtype(" FP4E2M1 ", scratch, sizeof(scratch)), "fp4") != 0) {
+    if(strcmp(rocke_normalize_dtype(" FP4E2M1 ", scratch, sizeof(scratch)), "fp4") != 0)
+    {
         fail("fp4e2m1 must normalize to fp4", __LINE__);
     }
-    for (const Variant& v : variants) {
+    for(const Variant& v : variants)
+    {
         const char* family = v.scale16 ? "wmma_scale16" : "wmma_scale";
-        if (!arch ||
-            !rocke_mma_catalog_has_shape(&arch->mma, family, "fp4e2m1", "fp4", "fp32", 16, 16,
-                                         128) ||
-            !rocke_mma_catalog_has_shape(&arch->mma, family, "fp4", "fp4e2m1", "fp32", 16, 16,
-                                         128)) {
+        if(!arch
+           || !rocke_mma_catalog_has_shape(
+               &arch->mma, family, "fp4e2m1", "fp4", "fp32", 16, 16, 128)
+           || !rocke_mma_catalog_has_shape(
+               &arch->mma, family, "fp4", "fp4e2m1", "fp32", 16, 16, 128))
+        {
             fail("fp4e2m1 must select the packed FP4 atom for either operand", __LINE__);
         }
     }
 
-    for (int fmt : {0, 4}) {
-        for (const Variant& v : variants) {
+    for(int fmt : {0, 4})
+    {
+        for(const Variant& v : variants)
+        {
             const auto build = [&v, fmt](rocke_ir_builder_t* b) {
                 rocke_value_t* matrix = global_ptr_param(b, "matrix", rocke_i32());
                 rocke_value_t* accum = global_ptr_param(b, "accum", rocke_f32());
@@ -566,8 +657,10 @@ void case_gfx1250_scaled_wmma() {
  *
  * ROCKE_OP_CF_RETURN is the last enumerator, so it catches a shift introduced
  * anywhere ahead of it -- including by an opcode this list does not name. */
-void case_opcode_names_are_aligned() {
-    static const struct {
+void case_opcode_names_are_aligned()
+{
+    static const struct
+    {
         rocke_opcode_t opcode;
         const char* name;
     } k_expect[] = {
@@ -605,18 +698,26 @@ void case_opcode_names_are_aligned() {
         {ROCKE_OP_TILE_TENSOR_STORE_FROM_LDS, "tile.tensor_store_from_lds"},
         {ROCKE_OP_CF_RETURN, "cf.return"},
     };
-    for (const auto& e : k_expect) {
-        if (strcmp(rocke_opcode_name(e.opcode), e.name) != 0) {
+    for(const auto& e : k_expect)
+    {
+        if(strcmp(rocke_opcode_name(e.opcode), e.name) != 0)
+        {
             char msg[256];
-            snprintf(msg, sizeof(msg), "opcode %d is named \"%s\", expected \"%s\"", (int)e.opcode,
-                     rocke_opcode_name(e.opcode), e.name);
+            snprintf(msg,
+                     sizeof(msg),
+                     "opcode %d is named \"%s\", expected \"%s\"",
+                     (int)e.opcode,
+                     rocke_opcode_name(e.opcode),
+                     e.name);
             fail(msg, __LINE__);
         }
-        if (rocke_opcode_from_name(e.name) != e.opcode) fail(e.name, __LINE__);
+        if(rocke_opcode_from_name(e.name) != e.opcode)
+            fail(e.name, __LINE__);
     }
 }
 
-struct TestCase {
+struct TestCase
+{
     const char* name;
     void (*fn)();
 };
@@ -652,17 +753,20 @@ const TestCase k_cases[] = {
     {"opcode_names_are_aligned", case_opcode_names_are_aligned},
 };
 
-}  // namespace
+} // namespace
 
-int main(void) {
-    for (const TestCase& tc : k_cases) {
+int main(void)
+{
+    for(const TestCase& tc : k_cases)
+    {
         g_case = tc.name;
         tc.fn();
     }
     g_case = "";
 
     const size_t num_cases = sizeof(k_cases) / sizeof(k_cases[0]);
-    if (g_failures != 0) {
+    if(g_failures != 0)
+    {
         fprintf(stderr, "%zu case(s) run, %d failure(s)\n", num_cases, g_failures);
         return 1;
     }
