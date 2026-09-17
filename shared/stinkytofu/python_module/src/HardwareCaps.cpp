@@ -332,7 +332,10 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     rv["MaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 256;
     rv["MaxSgpr"] = (v[0] == 12 && v[1] == 5) ? 106 : 102;
     rv["PhysicalMaxVgpr"] = (v[0] == 12 && v[1] == 5) ? 1024 : 512;
-    rv["PhysicalMaxSgpr"] = 800;
+    // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it
+    // never binds. Keep in lock-step with rocisa hardware_caps.hpp
+    // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
+    rv["PhysicalMaxSgpr"] = v[0] == 11 ? 1696 : 800;
     rv["maxLDSConstOffset"] = 65536;
 
     if (v[0] == 10) {

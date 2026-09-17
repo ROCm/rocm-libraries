@@ -39,6 +39,10 @@ namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities
 ///
 /// Tensors and nodes compare in vector order, fixed by `IGraph`'s topological-order
 /// precondition: two construction orders of one logical DAG miss rather than mismatch.
+///
+/// A key is usable as an unordered-container key only when `isUsable()` is true. Callers
+/// must check that precondition before lookup or insertion: an unusable key is
+/// intentionally non-reflexive, so an inserted unusable key can never be found again.
 class GraphContentKey
 {
 public:
@@ -291,6 +295,16 @@ private:
         {
             return nullptr;
         }
+
+        // `IGraph::bytes()`'s validity precondition is documented but unenforced, and
+        // `root()` calls GetRoot on this copy. Verifying here costs one pass over bytes
+        // this method already copies, and a malformed buffer becomes an unusable key.
+        ::flatbuffers::Verifier verifier(bytes.data, bytes.size);
+        if(!hipdnn_flatbuffers_sdk::data_objects::VerifyGraphBuffer(verifier))
+        {
+            return nullptr;
+        }
+
         return std::make_shared<const std::vector<uint8_t>>(bytes.data, bytes.data + bytes.size);
     }
 
@@ -300,7 +314,7 @@ private:
         {
             return nullptr;
         }
-        // Verified by GraphWrapper before bytes() would hand them over.
+        // Verified in retain() before the copy this reads.
         return ::flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::Graph>(
             _content->data());
     }
