@@ -242,10 +242,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (trans_A == rocsparse_operation_conjugate_transpose);
@@ -279,7 +275,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -402,10 +397,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (trans_A == rocsparse_operation_conjugate_transpose);
@@ -439,7 +430,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -587,10 +577,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (trans_A == rocsparse_operation_conjugate_transpose);
@@ -624,7 +610,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -750,10 +735,6 @@ namespace rocsparse
 
         case rocsparse_format_csc:
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
             // A CSC solve is a transposed CSR solve sharing the same arrays; the CSR
             // descriptor is built on the stack (no allocation, nothing to free).
             const bool force_conj = (trans_A == rocsparse_operation_conjugate_transpose);
@@ -787,7 +768,6 @@ namespace rocsparse
                                                              csrsm_buffer,
                                                              force_conj));
             break;
-#endif
         }
 
         case rocsparse_format_coo_aos:
@@ -926,10 +906,6 @@ namespace rocsparse
 
             case rocsparse_format_csc:
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-                // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 // CSC: treat as CSR with transposed operation; for force_conj, use
                 // conjugate_transpose to get same buffer allocation as transpose case
                 const rocsparse_operation trans_csr_buf
@@ -970,7 +946,6 @@ namespace rocsparse
                            * 256;
                 }
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_coo_aos:
@@ -1075,10 +1050,6 @@ namespace rocsparse
 
             case rocsparse_format_csc:
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-                // CSC support disabled at build time (BUILD_WITH_CSC_TRSM=OFF).
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-#else
                 const rocsparse_operation trans_csr = (trans_A == rocsparse_operation_none)
                                                           ? rocsparse_operation_transpose
                                                           : rocsparse_operation_none;
@@ -1118,7 +1089,6 @@ namespace rocsparse
                                                    csrsm_buffer)));
                 }
                 return rocsparse_status_success;
-#endif
             }
 
             case rocsparse_format_coo_aos:

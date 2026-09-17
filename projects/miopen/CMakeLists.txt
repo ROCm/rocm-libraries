@@ -114,8 +114,16 @@ set(MIOPEN_ENABLE_SQLITE On CACHE BOOL "")
 # Use SQLITE for compiled kernels, when turned off this will use raw files
 set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 
-# By default build shared libraries
-option(BUILD_SHARED_LIBS "Create shared libraries" ON)
+# By default build shared libraries. Use a directory-scoped (non-cache) default
+# rather than option()/a cache entry: a cache write to the global BUILD_SHARED_LIBS
+# leaks out of MIOpen's subtree and forces sibling subprojects in a parent
+# superbuild to build shared too (e.g. hipDNN's internal, un-exported
+# hipdnn_backend_private, which then breaks install(EXPORT)). An explicit
+# user/parent value (cache or -D) is still honored because we only set a default
+# when BUILD_SHARED_LIBS is not already defined.
+if(NOT DEFINED BUILD_SHARED_LIBS)
+    set(BUILD_SHARED_LIBS ON)
+endif()
 
 # PREPEND (rather than APPEND) so MIOpen's local cmake helpers (ClangTidy,
 # ClangCheck, etc.) take precedence over any same-named modules a parent
