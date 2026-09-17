@@ -466,14 +466,14 @@ private:
         }
 
         state.set_items(items);
-
-        for(auto& data : cases_data)
-        {
-            T* d_input = data.get_d_input(bytes);
-
-            state.run(
-                [&]
+        state.add_reads<T>(items * Channels * cases_data.size());
+        state.run(
+            [&]
+            {
+                for(auto& data : cases_data)
                 {
+                    T* d_input = data.get_d_input(bytes);
+
                     HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                         d_temporary_storage.get(),
                         temporary_storage_bytes,
@@ -485,10 +485,8 @@ private:
                         data.upper_level,
                         stream,
                         false)));
-                });
-
-            state.add_reads<T>(items * Channels);
-        }
+                }
+            });
 
         for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
         {
@@ -730,27 +728,19 @@ struct device_histogram_benchmark_generator
                      unsigned int ActiveChannels,
                      unsigned int items_per_thread = ItemsPerThread>
             auto create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage,
-                        const std::vector<unsigned int>&                              cases) ->
-                typename std::enable_if<(items_per_thread * Channels <= max_items_per_thread),
-                                        void>::type
+                        const std::vector<unsigned int>&                              cases)
             {
-                storage.emplace_back(
-                    std::make_unique<device_multi_histogram_even_benchmark<T,
-                                                                           Channels,
-                                                                           ActiveChannels,
-                                                                           true,
-                                                                           generated_config>>(
-                        cases));
+                if constexpr(items_per_thread * Channels <= max_items_per_thread)
+                {
+                    storage.emplace_back(
+                        std::make_unique<device_multi_histogram_even_benchmark<T,
+                                                                               Channels,
+                                                                               ActiveChannels,
+                                                                               true,
+                                                                               generated_config>>(
+                            cases));
+                }
             }
-
-            template<unsigned int Channels,
-                     unsigned int ActiveChannels,
-                     unsigned int items_per_thread = ItemsPerThread>
-            auto create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& /*storage*/,
-                        const std::vector<unsigned int>& /*cases*/) ->
-                typename std::enable_if<!(items_per_thread * Channels <= max_items_per_thread),
-                                        void>::type
-            {}
 
             void operator()(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage,
                             const std::vector<unsigned int>&                              cases)

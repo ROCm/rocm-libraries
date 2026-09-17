@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
+import json
 import re
 import socket
 import subprocess
@@ -18,6 +19,83 @@ def search(pattern, string):
     if m is not None:
         return m.group(1)
     return None
+
+
+def _run_amdsmi_json(cmd: list):
+    """
+    Runs an ``amd-smi`` command that emits JSON and returns the parsed object.
+
+    Returns None if amd-smi is unavailable or the output cannot be parsed.
+    """
+    try:
+        completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if getattr(completed, "returncode", 0) != 0:
+            return None
+        return json.loads(completed.stdout.decode("utf-8", errors="replace"))
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def get_amdsmi_specs(devicenum: int = 0) -> dict:
+    """
+    Collects per-device GPU specs using ``amd-smi`` structured JSON output.
+
+    Returns a dict with the following fields (any field that cannot be
+    resolved is returned as None):
+
+      vbios_version, gpuid, vram (bytes), performance_level,
+      memory_clk, system_clk
+    """
+    g = str(devicenum)
+    static = _run_amdsmi_json(
+        ["amd-smi", "static", "-g", g, "--asic", "--vbios", "--json"]
+    )
+    metric = _run_amdsmi_json(
+        [
+            "amd-smi", "metric", "-g", g,
+            "--mem-usage", "--clock", "--perf-level", "--json",
+        ]
+    )
+
+    result = {
+        "vbios_version": None,
+        "gpuid": None,
+        "vram": None,
+        "performance_level": None,
+        "memory_clk": None,
+        "system_clk": None,
+    }
+
+    if static and static.get("gpu_data"):
+        d = static["gpu_data"][0]
+        result["gpuid"] = d.get("asic", {}).get("device_id")
+        # rocm-smi --showvbios reported the board part number as VBIOS version.
+        result["vbios_version"] = d.get("ifwi", {}).get("part_number")
+
+    if metric and metric.get("gpu_data"):
+        d = metric["gpu_data"][0]
+
+        total = d.get("mem_usage", {}).get("total_vram", {}).get("value")
+        if total is not None:
+            # amd-smi reports total VRAM in MB; convert to bytes to match the
+            # downstream "/1024**3" GiB formatting used for rocm-smi output.
+            result["vram"] = int(total) * 1024 * 1024
+
+        perf = d.get("perf_level")
+        if isinstance(perf, str):
+            # Normalize e.g. "AMDSMI_DEV_PERF_LEVEL_AUTO" -> "auto" to match the
+            # lowercase value rocm-smi used to print.
+            result["performance_level"] = perf.split("_")[-1].lower()
+
+        clock = d.get("clock", {})
+        sclk = clock.get("gfx_0", {}).get("clk", {}).get("value")
+        if sclk is not None:
+            result["system_clk"] = f"{sclk}Mhz"
+        mclk = clock.get("mem_0", {}).get("clk", {}).get("value")
+        if mclk is not None:
+            result["memory_clk"] = f"{mclk}Mhz"
+
+    return result
 
 
 def _subprocess_helper(cmd: list) -> tuple:
@@ -239,29 +317,13 @@ def get_machine_specs(filename: str, devicenum: int = 0):
             rocm_info = rocm_path.read_text()
         else:
             rocm_info = None
-        try:
-            rocm_smi = run(
-                [
-                    "rocm-smi",
-                    "--showvbios",
-                    "--showid",
-                    "--showproductname",
-                    "--showperflevel",
-                    "--showclocks",
-                    "--showmeminfo",
-                    "vram",
-                    "lshw",
-                ]
-            )
-        except FileNotFoundError as e:
-            rocm_smi = None
+        amdsmi_specs = get_amdsmi_specs(devicenum)
 
         try:
             rocminfo = run(["rocminfo"])
         except FileNotFoundError as e:
             rocminfo = None
 
-        device = rf"^GPU\[{devicenum}\]\s*: "
         hostname = socket.gethostname()
 
         if rocm_info is None:
@@ -269,21 +331,12 @@ def get_machine_specs(filename: str, devicenum: int = 0):
         else:
             rocm_version = rocm_info.strip()
 
-        if rocm_smi is None:
-            vbios_version = (
-                gpuid
-            ) = deviceinfo = vram = performance_level = memory_clk = system_clk = None
-        else:
-            if device is None:
-                device = ""
-            vbios_version = search(device + r"VBIOS version: (.*?)$", rocm_smi)
-            gpuid = search(device + r"Device ID: (.*?)$", rocm_smi)
-            if not gpuid:
-                gpuid = search(device + r"GPU ID: (.*?)$", rocm_smi)
-            vram = search(device + r".... Total Memory .B.: (\d+)$", rocm_smi)
-            performance_level = search(device + r"Performance Level: (.*?)$", rocm_smi)
-            memory_clk = search(device + r"mclk.*\((.*?)\)$", rocm_smi)
-            system_clk = search(device + r"sclk.*\((.*?)\)$", rocm_smi)
+        vbios_version = amdsmi_specs["vbios_version"]
+        gpuid = amdsmi_specs["gpuid"]
+        vram = amdsmi_specs["vram"]
+        performance_level = amdsmi_specs["performance_level"]
+        memory_clk = amdsmi_specs["memory_clk"]
+        system_clk = amdsmi_specs["system_clk"]
 
         architecture_name, internal_product_name = get_device_info()
 

@@ -340,6 +340,16 @@ namespace rocRoller
             std::string name() const;
         };
 
+        struct LoadTiledTDMToLDS
+        {
+            LoadTiledTDMToLDS();
+            explicit LoadTiledTDMToLDS(VariableType const varType);
+
+            VariableType varType;
+
+            std::string name() const;
+        };
+
         /**
          * Multiply - Multiply two MacroTiles
          */

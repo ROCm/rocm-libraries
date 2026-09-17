@@ -42,6 +42,8 @@ macro(_miopen_save_var name)
     endif()
 endmacro()
 
+# Restore a cache variable saved by _miopen_save_var, or unset it if it was
+# undefined before we touched it.
 macro(_miopen_restore_cache_var name docstring)
     if(_miopen_saved_${name}_was_defined)
         set(${name} "${_miopen_saved_${name}}" CACHE BOOL "${docstring}" FORCE)
@@ -52,6 +54,8 @@ macro(_miopen_restore_cache_var name docstring)
     unset(_miopen_saved_${name}_was_defined)
 endmacro()
 
+# Restore a normal (non-cache) variable saved by _miopen_save_var, or unset it
+# if it was undefined before we touched it.
 macro(_miopen_restore_var name)
     if(_miopen_saved_${name}_was_defined)
         set(${name} "${_miopen_saved_${name}}")
@@ -119,10 +123,14 @@ endfunction()
 # original handler for MIOpen's own code.
 # -----------------------------------------------------------------------------
 macro(_miopen_suppress_rocm_toolchain_checks)
+    # Override ROCMChecks's watcher with a no-op for the duration of a fetch.
     function(rocm_check_toolchain_var)
     endfunction()
 endmacro()
 
+# Re-include ROCMChecks to restore the real rocm_check_toolchain_var handler
+# for MIOpen's own code, with the warn/error toggles off so no second watch is
+# installed.
 macro(_miopen_restore_rocm_toolchain_checks)
     set(ROCM_WARN_TOOLCHAIN_VAR OFF)
     set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
@@ -165,6 +173,27 @@ if(NOT nlohmann_json_FOUND)
         SYSTEM
         OVERRIDE_FIND_PACKAGE)
     FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
+# Workaround: TheRock's prebuilt nlohmann_json artifact may be missing the
+# natvis file (a Visual Studio debug visualizer) referenced by
+# INTERFACE_SOURCES.  Drop it from the imported target only if the file
+# doesn't exist on disk.  Once the artifact is fixed upstream, the file
+# will be present and the property is left untouched.
+if(TARGET nlohmann_json::nlohmann_json)
+    get_target_property(_njson_srcs nlohmann_json::nlohmann_json INTERFACE_SOURCES)
+    if(_njson_srcs)
+        set(_njson_filtered "${_njson_srcs}")
+        foreach(_src IN LISTS _njson_srcs)
+            string(GENEX_STRIP "${_src}" _src_plain)
+            if(_src_plain MATCHES "\\.natvis$" AND NOT EXISTS "${_src_plain}")
+                message(STATUS "nlohmann_json: dropping missing natvis entry: ${_src_plain}")
+                list(REMOVE_ITEM _njson_filtered "${_src}")
+            endif()
+        endforeach()
+        set_property(TARGET nlohmann_json::nlohmann_json
+                     PROPERTY INTERFACE_SOURCES "${_njson_filtered}")
+    endif()
 endif()
 
 # -----------------------------------------------------------------------------

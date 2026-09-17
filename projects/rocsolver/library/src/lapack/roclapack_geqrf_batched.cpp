@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_geqrf.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -38,6 +39,7 @@ rocblas_status rocsolver_geqrf_batched_impl(rocblas_handle handle,
                                             T* ipiv,
                                             const rocblas_stride stridep,
                                             const rocblas_int batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("geqrf_batched", "-m", m, "-n", n, "--lda", lda, "--strideP", stridep,
                         "--batch_count", batch_count);
@@ -100,6 +102,10 @@ rocblas_status rocsolver_geqrf_batched_impl(rocblas_handle handle,
         handle, m, n, A, shiftA, lda, strideA, ipiv, stridep, batch_count, (T*)scalars,
         work_workArr_work1, work2, work3, work4, (T*)Abyx_norms_trfact, (T*)diag_tmptr,
         (T**)workArr, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

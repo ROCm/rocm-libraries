@@ -96,6 +96,10 @@ TEST(EnumToStringTest, ALL)
         {DataType::Bool64, "Bool64"},
         {DataType::E8M0, "E8M0"},
         {DataType::E8M0x4, "E8M0x4"},
+        {DataType::E5M3, "E5M3"},
+        {DataType::E5M3x4, "E5M3x4"},
+        {DataType::E4M3, "E4M3"},
+        {DataType::E4M3x4, "E4M3x4"},
         {DataType::None, "None"},
     });
 
@@ -104,6 +108,7 @@ TEST(EnumToStringTest, ALL)
         {PointerType::PointerLocal, "PointerLocal"},
         {PointerType::PointerGlobal, "PointerGlobal"},
         {PointerType::Buffer, "Buffer"},
+        {PointerType::TDM, "TDM"},
     });
 
     verify<MemoryType>({
@@ -144,6 +149,7 @@ TEST(EnumToStringTest, ALL)
         {GPUArchitectureGFX::GFX1030, "gfx1030"},
         {GPUArchitectureGFX::GFX1200, "gfx1200"},
         {GPUArchitectureGFX::GFX1201, "gfx1201"},
+        {GPUArchitectureGFX::GFX1250, "gfx1250"},
     });
 
     verify<Graph::ElementType>({

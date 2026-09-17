@@ -1,0 +1,38 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+
+- caption: Install
+  entries:
+  - file: install/rpp-install.rst
+    title: Install RPP
+  - file: install/rpp-build.rst
+    title: Build from source
+
+- caption: Reference
+  entries:
+  - file: reference/rpp-env-variables.rst
+    title: Environment variables
+  - file: reference/rpp-supported-functionalities.rst
+    title: Supported functionalities and variants
+  - file: reference/rpp-supported-func-and-var-examples.rst
+    title: Functionality and variant example outputs
+  - file: reference/rpp-api-reference.rst
+    title: RPP API reference
+    subtrees:
+    - entries:
+      - file: doxygen/html/files
+        title: RPP header files
+      - file: doxygen/html/group__group__rppdefs
+        title: RPP Common definitions
+      - file: doxygen/html/annotated
+        title: RPP data structures
+
+
+- caption: About
+  entries:
+  - file: license.rst

@@ -697,6 +697,10 @@ TYPED_TEST(VectorTests, TestVectorResizing)
 
 TYPED_TEST(VectorTests, TestVectorReserving)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   using Vector = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());

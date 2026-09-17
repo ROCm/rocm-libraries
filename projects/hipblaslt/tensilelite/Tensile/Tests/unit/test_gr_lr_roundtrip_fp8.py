@@ -36,6 +36,7 @@ from gpu_test_helpers import (
     setup_roundtrip_writer,
     build_roundtrip_inner_asm,
     alloc_export_vgprs,
+    requires_gpu,
 )
 
 BPE = 1  # fp8: 1 byte per element
@@ -271,7 +272,7 @@ def compare_tiles_fp8(actual_bytes, expected_tiles, tileInfoA, tileInfoB, wave_i
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+@requires_gpu
 class TestGrLrRoundtripFP8:
 
     @pytest.fixture(params=TILE_CONFIGS_FP8, ids=lambda c: c.label)

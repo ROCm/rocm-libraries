@@ -39,6 +39,8 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
+
 namespace detail
 {
 
@@ -46,6 +48,8 @@ template<class...>
 using void_t = void;
 
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Extension of `std::make_unsigned`, which includes support for 128-bit integers.
 template<class T>
@@ -162,6 +166,8 @@ struct get_unsigned_bits_type<T, 16>
     using unsigned_type = ::rocprim::uint128_t;
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -349,6 +355,8 @@ struct guarded_inequality_wrapper
 
 } // end namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Similar to ``rocprim::invoke_result``, but also checks if the result
 /// can be converted to a specified return type when the return type is not ``void``.
 ///
@@ -404,6 +412,8 @@ using invoke_result_binary_op_t
 /// \brief The type of intermediate accumulator (according to CCCL)
 template<typename Invokable, typename InputT, typename InitT = InputT>
 using accumulator_t = ::std::decay_t<invoke_result_t<Invokable, InitT, InputT>>;
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -484,6 +494,8 @@ struct is_binary_functional<minimum<T>>
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Helper struct it has the Type and the number of aligned bytes.
 ///
 /// \tparam T is the Type used to get the number of aligned bytes.
@@ -506,7 +518,9 @@ struct align_bytes<const T> : align_bytes<T>
 template<typename T>
 struct align_bytes<const volatile T> : align_bytes<T>
 {};
-#endif
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -570,6 +584,8 @@ static_assert(variadic_list<short, int>::all([](auto t)
 static_assert(variadic_list<float, int>::any([](auto t)
                                              { return std::is_integral_v<decltype(t)>; }));
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
 

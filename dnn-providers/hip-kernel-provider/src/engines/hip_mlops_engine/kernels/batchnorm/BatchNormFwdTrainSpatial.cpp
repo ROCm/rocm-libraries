@@ -526,9 +526,8 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         unsigned int grpid = blockIdx.x;
         unsigned int cidx = grpid * hip_plugin_bn_config::hw;
 
-#if(HIP_PLUGIN_BN_N < HIP_PLUGIN_BN_MAXN)
+        // Unused if hip_plugin_bn_config::n >= hip_plugin_bn_config::max_n
         FpType minibatch[HIP_PLUGIN_BN_N];
-#endif
 
         if(lid == 0)
         {
@@ -545,9 +544,10 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
                     mean += xin;
                     variance = fma(xin, xin, variance);
 
-#if(HIP_PLUGIN_BN_N < HIP_PLUGIN_BN_MAXN)
-                    minibatch[n] = (*(in + index));
-#endif
+                    if constexpr(hip_plugin_bn_config::n < hip_plugin_bn_config::max_n)
+                    {
+                        minibatch[n] = (*(in + index));
+                    }
                 }};
         }
         __syncthreads();
@@ -592,12 +592,15 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
             static_unroll_count<unsigned int, 0, hip_plugin_bn_config::n, 1, 2>{
                 [&](unsigned int n) { // apply normalization
                     index = n * hip_plugin_bn_config::chw + cidx + lid;
-#if(HIP_PLUGIN_BN_N < HIP_PLUGIN_BN_MAXN)
-                    inhat = (cast<FpPrecType>(minibatch[n]) - mean)
-                            * invVariance; // (in[index] - mean) * invVariance;
-#else
-                    inhat = (cast<FpPrecType>(*(in + index)) - mean) * invVariance;
-#endif
+                    if constexpr(hip_plugin_bn_config::n < hip_plugin_bn_config::max_n)
+                    {
+                        inhat = (cast<FpPrecType>(minibatch[n]) - mean)
+                                * invVariance; // (in[index] - mean) * invVariance;
+                    }
+                    else
+                    {
+                        inhat = (cast<FpPrecType>(*(in + index)) - mean) * invVariance;
+                    }
                     out[index] = cast<FpType>(
                         hip_kernel_provider::applyActivation<FpPrecType,
                                                              hip_kernel_provider::ActivationMode{
@@ -751,9 +754,9 @@ struct BatchNormFwdTrainSpatialImplVar2
         FinalMeanVariance(FpType* __restrict__ meanvarbuff,
                           FpPrecType INHW,
                           double epsilon,
-                          unsigned int& xgid,
-                          unsigned int& ygid,
-                          unsigned int& zgid,
+                          const unsigned int& xgid,
+                          const unsigned int& ygid,
+                          const unsigned int& zgid,
                           unsigned int& commitID,
                           FpPrecType_C& mean,
                           FpPrecType_C& variance,
@@ -764,8 +767,6 @@ struct BatchNormFwdTrainSpatialImplVar2
         mean = cast<FpPrecType_C>(0.);
 
         unsigned int xgrp_id = blockIdx.x;
-        unsigned int ygrp_id = blockIdx.y;
-        unsigned int zgrp_id = blockIdx.z;
 
         // These values (?grp_sz) cannot be substituted with hip_plugin_bn_config::launch_dim.grp? because
         // the dimensions of the blocks for this kernel may be different from the other
@@ -780,17 +781,10 @@ struct BatchNormFwdTrainSpatialImplVar2
         unsigned int ylid = threadIdx.y;
         unsigned int zlid = threadIdx.z;
 
-        xgid = xgrp_id * xgrp_sz + xlid;
-        ygid = ygrp_id * ygrp_sz + ylid;
-        zgid = zgrp_id * zgrp_sz + zlid;
-
         unsigned int xstride = hip_plugin_config::layout_nhwc ? 1 : hip_plugin_bn_config::hw;
         unsigned int ystride = hip_plugin_config::layout_nhwc ? hip_plugin_bn_config::c : 1;
 
         commitID = 0;
-
-        if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::c)
-            return;
 
         for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
@@ -1130,10 +1124,13 @@ extern "C" __global__ void
     fp_prec_c_type variance;
     fp_prec_c_type invVariance;
 
-    unsigned int xgid;
-    unsigned int ygid;
-    unsigned int zgid;
+    unsigned int xgid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int ygid = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int zgid = blockIdx.z * blockDim.z + threadIdx.z;
     unsigned int commitID;
+
+    if(xgid * hip_plugin_bn_config::vec_size_x >= hip_plugin_bn_config::c)
+        return;
 
     hip_kernel_provider::batchnorm::BNFwdTrainSpatialVar2{}.FinalMeanVariance(
         meanvarbuff, INHW, epsilon, xgid, ygid, zgid, commitID, mean, variance, invVariance);

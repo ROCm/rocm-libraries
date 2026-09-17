@@ -67,7 +67,8 @@ namespace rocRoller
         size_t            dataOutSize   = 0;
         auto const        arch          = GPUArchitectureLibrary::getInstance()->GetArch(target);
         auto const        wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-        std::string const targetID      = fmt::format("amdgcn-amd-amdhsa--{}", target.toString());
+        std::string const targetID
+            = fmt::format("amdgcn-amd-amdhsa--{}", target.toAssemblerString());
 
         amd_comgr_data_t        assemblyData, execData;
         amd_comgr_data_set_t    assemblyDataSet, relocatableDataSet, execDataSet;

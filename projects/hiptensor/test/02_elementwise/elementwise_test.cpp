@@ -330,7 +330,11 @@ namespace hiptensor
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(logLevel));
+            CHECK_HIPTENSOR_ERROR(hiptensorLoggerSetMask(
+                logLevel
+                & ~HIPTENSOR_LOG_LEVEL_PERF_TRACE)); // keep ERROR/API_TRACE diagnostics but strip
+                                                     // PERF_TRACE so the CK backend does not run its
+                                                     // internal cold/hot timed loop
 
             hiptensorTensorDescriptor_t descA = nullptr;
             CHECK_HIPTENSOR_ERROR(
@@ -387,17 +391,26 @@ namespace hiptensor
                 *(reinterpret_cast<float*>(&alphaValue)) = static_cast<float>(alpha);
             }
 
+            auto& opts     = HiptensorOptions::instance();
+            int   coldRuns = opts->coldRuns();
+            int   hotRuns  = std::max(1, opts->hotRuns());      // guard hot_runs <= 0
+            // untimed warm-up: ramps clocks, primes plan/caches
+            for(int i = 0; i < coldRuns; ++i)
+                CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle, plan, &alphaValue,
+                    resource->deviceInput1().get(), resource->deviceOutput().get(), nullptr));
+
             hipEvent_t startEvent, stopEvent;
             CHECK_HIP_ERROR(hipEventCreate(&startEvent));
             CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
             CHECK_HIP_ERROR(hipEventRecord(startEvent));
 
-            CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle,
-                                                   plan,
-                                                   &alphaValue,
-                                                   resource->deviceInput1().get(),
-                                                   resource->deviceOutput().get(),
-                                                   nullptr /* stream */));
+            for(int i = 0; i < hotRuns; ++i)                     // timed: M clean launches
+                CHECK_HIPTENSOR_ERROR(hiptensorPermute(handle,
+                                                       plan,
+                                                       &alphaValue,
+                                                       resource->deviceInput1().get(),
+                                                       resource->deviceOutput().get(),
+                                                       nullptr /* stream */));
 
             CHECK_HIP_ERROR(hipEventRecord(stopEvent));
             CHECK_HIP_ERROR(hipEventSynchronize(stopEvent))
@@ -415,7 +428,7 @@ namespace hiptensor
                                            hiptensorDataTypeSize(abDataType),
                                            std::multiplies<size_t>());
 
-            mElapsedTimeMs        = float64_t(timeMs);
+            mElapsedTimeMs        = float64_t(timeMs) / hotRuns;
             mTotalGFlops          = 2.0 * (resource->getCurrentMatrixElement()) * 1e-9;
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 

@@ -136,9 +136,19 @@ inline void gemm([[maybe_unused]] const Handle& handle,
 #if USE_ROCBLAS_EX3
         case miopenFloat8_fnuz: return rocblas_datatype::rocblas_datatype_f8_r;
         case miopenBFloat8_fnuz: return rocblas_datatype::rocblas_datatype_bf8_r;
+#else
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
 #endif
-        default: return rocblas_datatype::rocblas_datatype_invalid;
+        case miopenBFloat16:
+        case miopenHalf:
+        case miopenInt32:
+        case miopenInt8:
+        case miopenDouble:
+        case miopenInt64: break;
         }
+
+        return rocblas_datatype::rocblas_datatype_invalid;
     };
 
     // fp32 x fp32 case

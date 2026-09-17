@@ -189,14 +189,10 @@ def get_args(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--token", help="Benchmark token to run.")
     parser.add_argument(
+        "--amd_smi",
         "--rocm_smi",
-        default="rocm-smi",
-        help="Location of rocm-smi.",
-    )
-    parser.add_argument(
-        "--pin_clocks",
-        action="store_true",
-        help="Pin clocks before launching benchmark clients.",
+        default="amd-smi",
+        help="Location of amd-smi (--rocm_smi is deprecated).",
     )
     parser.add_argument(
         "--l2",
@@ -223,8 +219,7 @@ def run_cli(  # noqa: C901
     id_filter: list[str] = None,
     rundir: str = None,
     build_dir: str = None,
-    rocm_smi: str = "rocm-smi",
-    pin_clocks: bool = False,
+    amd_smi: str = "amd-smi",
     recast: bool = False,
     l2: bool = False,
     **kwargs,
@@ -233,9 +228,6 @@ def run_cli(  # noqa: C901
 
     Implements the CLI 'run' subcommand.
     """
-
-    if pin_clocks:
-        rrperf.rocm_control.pin_clocks(rocm_smi)
 
     if suite is None and token is None:
         if rrperf.utils.rocm_gfx().startswith("gfx120"):
@@ -272,7 +264,7 @@ def run_cli(  # noqa: C901
         git_commit.write_text("NO_COMMIT\n")
     # pts.create_specs_info(str(wrkdir / "machine-specs.txt"))
     machine_specs = rundir / "machine-specs.txt"
-    machine_specs.write_text(str(rrperf.specs.get_machine_specs(0, rocm_smi)) + "\n")
+    machine_specs.write_text(str(rrperf.specs.get_machine_specs(0, amd_smi)) + "\n")
 
     timestamp = rundir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")

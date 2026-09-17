@@ -22,10 +22,13 @@
  * ************************************************************************ */
 
 #pragma once
+#include <hip/hip_fp16.h>
 #include <ostream>
 
 // std::ostream has no operator<< for _Float16, provide one
 inline std::ostream& operator<<(std::ostream& os, const _Float16& val)
 {
-    return os << static_cast<float>(val);
+
+    os << static_cast<float>(val);
+    return os;
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -185,8 +185,8 @@ rocsparse_status rocsparse::gpsv_interleaved_batch_template(rocsparse_handle    
         T* B = reinterpret_cast<T*>(ptr);
 
         // Initialize buffers with zero
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(dt1, 0, sizeof(T) * m * batch_count, stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(dt2, 0, sizeof(T) * m * batch_count, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(dt1, 0, sizeof(T) * m * batch_count, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(dt2, 0, sizeof(T) * m * batch_count, stream));
 
 #define GPSV_DIM 256
         dim3 gpsv_blocks((batch_count - 1) / GPSV_DIM + 1);
@@ -232,9 +232,9 @@ rocsparse_status rocsparse::gpsv_interleaved_batch_template(rocsparse_handle    
         T* r4 = reinterpret_cast<T*>(ptr);
         ptr += ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256;
 
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             r3, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             r4, 0, ((sizeof(T) * m * batch_count - 1) / 256 + 1) * 256, handle->stream));
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

@@ -7,9 +7,8 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
 
 BenchmarkProblems:
@@ -44,7 +43,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -52,11 +51,11 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2,4]
-        - PreloadKernArgs: [1]
+        - PreloadKernArgs: [true]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - GlobalSplitUCoalesced: [False,True]
         - GlobalSplitUWorkGroupMappingRoundRobin: [False,True]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

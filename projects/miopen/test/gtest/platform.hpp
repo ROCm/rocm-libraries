@@ -43,11 +43,6 @@ public:
     bool Synchronize() const;
 
 private:
-#if MIOPEN_BACKEND_OPENCL
-    cl_command_queue cmd_queue;
-    cl_context context;
-#endif
-
     friend class DevMem;
 };
 
@@ -67,12 +62,7 @@ public:
 private:
     DevMem(const Device& device, size_t size);
 
-#if MIOPEN_BACKEND_HIP
     void* ptr;
-#elif MIOPEN_BACKEND_OPENCL
-    cl_command_queue cmd_queue;
-    cl_mem ptr;
-#endif
 
     friend class Device;
 };

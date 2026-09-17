@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_gecon.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -38,6 +39,7 @@ rocblas_status rocsolver_gecon_impl(rocblas_handle handle,
                                     const S* anorm,
                                     S* rcond,
                                     const I max_iter = 5)
+try
 {
     ROCSOLVER_ENTER_TOP("gecon", "--norm_type", norm_type, "-n", n, "--lda", lda);
 
@@ -101,6 +103,10 @@ rocblas_status rocsolver_gecon_impl(rocblas_handle handle,
         (T*)work_x, (I*)work_isgn, (S*)scalar_est, (I*)scalar_max_idx, (rocblas_int*)scalar_kase,
         (rocblas_int*)scalar_jump, optim_mem, work_trsm_1, work_trsm_2, work_trsm_3, work_trsm_4,
         max_iter);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

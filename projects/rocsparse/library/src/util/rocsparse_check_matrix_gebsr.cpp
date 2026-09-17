@@ -54,11 +54,11 @@ rocsparse_status rocsparse::check_matrix_gebsr_core(rocsparse_handle       handl
 
     I start = 0;
     I end   = 0;
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&end, &bsr_row_ptr[mb], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&start, &bsr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        &end, &bsr_row_ptr[mb], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        &start, &bsr_row_ptr[0], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     if(nnzb != (end - start))
     {
@@ -75,7 +75,7 @@ rocsparse_status rocsparse::check_matrix_gebsr_core(rocsparse_handle       handl
     ptr += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
 
     RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status), handle->stream));
+        rocsparse_hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status), handle->stream));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_row_ptr_array<256>),
                                        dim3((mb - 1) / 256 + 1),
@@ -86,12 +86,12 @@ rocsparse_status rocsparse::check_matrix_gebsr_core(rocsparse_handle       handl
                                        bsr_row_ptr,
                                        d_data_status);
 
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(data_status,
-                                       d_data_status,
-                                       sizeof(rocsparse_data_status),
-                                       hipMemcpyDeviceToHost,
-                                       handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
+                                                 d_data_status,
+                                                 sizeof(rocsparse_data_status),
+                                                 hipMemcpyDeviceToHost,
+                                                 handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     if(*data_status != rocsparse_data_status_success)
     {
@@ -159,12 +159,12 @@ rocsparse_status rocsparse::check_matrix_gebsr_core(rocsparse_handle       handl
                                        storage,
                                        d_data_status);
 
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(data_status,
-                                       d_data_status,
-                                       sizeof(rocsparse_data_status),
-                                       hipMemcpyDeviceToHost,
-                                       handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
+                                                 d_data_status,
+                                                 sizeof(rocsparse_data_status),
+                                                 hipMemcpyDeviceToHost,
+                                                 handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     if(*data_status != rocsparse_data_status_success)
     {

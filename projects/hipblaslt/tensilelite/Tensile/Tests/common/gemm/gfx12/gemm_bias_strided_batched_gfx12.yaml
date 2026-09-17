@@ -5,15 +5,13 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   DataInitValueActivationArgs: [0.5, -1]
   PruneSparseMode: 0
-  MinKForGSU: 1
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
@@ -52,7 +50,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -61,7 +59,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -117,7 +115,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -126,7 +124,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -182,7 +180,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -191,7 +189,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -247,7 +245,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -256,7 +254,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -312,7 +310,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -321,7 +319,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -377,7 +375,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -386,7 +384,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -442,7 +440,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -451,7 +449,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]
@@ -507,7 +505,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [8] #
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]       #
+        - ExpandPointerSwap: [false]       #
         - TransposeLDS: [0, 1]
         - LdsBlockSizePerPadA: [-1]  #
         - LdsBlockSizePerPadB: [-1]  #
@@ -516,7 +514,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1] #,2] #known bug
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         #- StoreRemapVectorWidth: [-1,0,4] #known bug
         #- DirectToVgprSparseMetadata: [0]
         #- WorkGroupMapping: [18]

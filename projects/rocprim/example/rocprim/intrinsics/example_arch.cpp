@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -77,23 +77,22 @@ int main()
     HIP_CHECK(hipDeviceSynchronize());
 
     // Load results back to host
-    auto h_runtime = d_runtime.load(); // size 1
+    auto h_runtime = d_runtime.load();
     auto h_min     = d_min.load();
     auto h_max     = d_max.load();
     auto h_target  = d_target.load();
 
-    // On AMD HIP device builds expecting: runtime == min == max (32 or 64)
-    bool passed = true;
-    passed      = passed && (h_runtime[0] == h_min[0]);
-    passed      = passed && (h_runtime[0] == h_max[0]);
-
-    // If device reported a concrete target (32 or 64), check against it
-    if(h_target[0] != 0u)
+    // If on SPIR-V, or unknown architecture
+    if(h_target[0] == 0u)
     {
-        passed = passed && (h_runtime[0] == h_target[0]);
+        // In SPIRV the wavefront size is unknown at compile time.
+        ASSERT_TRUE(h_min[0] == 32u && h_max[0] == 64u && h_target[0] == 0);
     }
-
-    ASSERT_TRUE(passed);
+    else
+    {
+        ASSERT_TRUE(h_min[0] == h_runtime[0] && h_max[0] == h_runtime[0]
+                    && h_target[0] == h_runtime[0]);
+    }
 
     return 0;
 }

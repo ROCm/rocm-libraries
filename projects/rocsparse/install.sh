@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,7 @@ function display_help()
   echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
   echo "    [-s|--static] build static library"
   echo "    [--memstat] build with memory statistics enabled."
+  echo "    [--rocsparse-debugging] build library with its own debugging features."
   echo "    [--offload-compress] Apply offload compression (enabled by default)."
   echo "    [--no-offload-compress] Do not apply offload compression."
   echo "    [--rocsparse_ILP64] build with rocsparse_int equal to int64_t."
@@ -319,6 +320,7 @@ rocm_path=/opt/rocm
 build_relocatable=false
 build_address_sanitizer=false
 build_memstat=false
+build_rocsparse_debug=false
 build_rocsparse_ILP64=false
 build_with_rocblas=true
 build_with_roctx=true
@@ -336,7 +338,7 @@ declare -a cmake_client_options
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
- GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,clients-only,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,no-roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicodgrska: -- "$@")
+ GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,clients-only,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse-debugging,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,no-roctx,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicodgrska: -- "$@")
 
 else
   echo "Need a new version of getopt"
@@ -385,6 +387,9 @@ while true; do
             shift ;;
         --memstat)
             build_memstat=true
+            shift ;;
+        --rocsparse-debugging)
+            build_rocsparse_debug=true
             shift ;;
         --rocsparse_ILP64)
             build_rocsparse_ILP64=true
@@ -586,6 +591,11 @@ pushd .
   # memstat
   if [[ "${build_memstat}" == true ]]; then
     cmake_common_options+=("-DBUILD_MEMSTAT=ON")
+  fi
+
+  # memstat
+  if [[ "${build_rocsparse_debug}" == true ]]; then
+    cmake_common_options+=("-DBUILD_ROCSPARSE_DEBUGGING=ON")
   fi
 
   # rocsparse_ILP64

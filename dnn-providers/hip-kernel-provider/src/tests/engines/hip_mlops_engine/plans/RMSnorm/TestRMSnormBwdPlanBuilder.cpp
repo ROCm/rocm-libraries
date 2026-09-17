@@ -72,6 +72,21 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueForValidSingleNodeGraph
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+        {150528, 50176, 224, 1},
+        {2, 3, 224, 224},
+        /*hasOptionalAttributes=*/true,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestRMSnormBwdPlanBuilder, IsApplicableReturnsTrueWithoutOptionalAttributes)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(

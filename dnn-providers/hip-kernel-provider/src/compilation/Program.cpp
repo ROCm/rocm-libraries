@@ -54,14 +54,17 @@ Program::Program(std::string kernelFileName, const std::vector<std::string>& opt
     auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());
     if(result != HIPRTC_SUCCESS)
     {
-        // Get compilation log
-        size_t logSize = 0;
-        hiprtcGetProgramLogSize(prog, &logSize);
+        // Get compilation log (check return values gracefully — we are already
+        // on the error path, so avoid throwing from log retrieval itself).
         std::string log;
-        if(logSize > 1)
+        size_t logSize = 0;
+        if(hiprtcGetProgramLogSize(prog, &logSize) == HIPRTC_SUCCESS && logSize > 1)
         {
             log.resize(logSize);
-            hiprtcGetProgramLog(prog, log.data());
+            if(hiprtcGetProgramLog(prog, log.data()) != HIPRTC_SUCCESS)
+            {
+                log = "(failed to retrieve compilation log)";
+            }
         }
         hiprtcDestroyProgram(&prog);
         throw hipdnn_plugin_sdk::HipdnnPluginException(

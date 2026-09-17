@@ -1,0 +1,36 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "ReductionTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "in_tensor_uid": 0,
+      "is_deterministic": false,
+      "mode": "${case.attributes.mode}",
+      "name": "Reduction_0",
+      "out_tensor_uid": 1,
+      "type": "ReductionAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "y",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    }
+  ]
+}

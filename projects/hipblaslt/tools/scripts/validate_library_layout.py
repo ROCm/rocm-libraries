@@ -20,11 +20,13 @@ REQUIRED_PER_BASE_FILES = (
 
 TENSILE_MASTER_CANDIDATES = (
     "TensileLibrary_{arch}.dat",
+    "TensileLibrary_{arch}.dat.zlib",
     "TensileLibrary_{arch}.yaml",
 )
 
 TENSILE_LAZY_CANDIDATES = (
     "TensileLibrary_lazy_{arch}.dat",
+    "TensileLibrary_lazy_{arch}.dat.zlib",
     "TensileLibrary_lazy_{arch}.yaml",
 )
 
@@ -32,13 +34,23 @@ PER_ARCH_REQUIRED = {
     "gfx950": ("rr_custom_kernels_gfx950.co",),
 }
 
+# Silicon-revision subtree -> the arch it is a revision of. gfx1250's revisions
+# share one compiler target, so only the GEMM library splits into
+# library/gfx1250/ and library/gfx1250v0/; every other artifact stays on gfx1250.
+REVISION_SUBTREES = {
+    "gfx1250v0": "gfx1250",
+}
+
 FORBIDDEN_FLAT_ROOT_BASENAMES = (
     "TensileLibrary.dat",
+    "TensileLibrary.dat.zlib",
     "TensileLibrary.yaml",
     "TensileLibrary_lazy.dat",
+    "TensileLibrary_lazy.dat.zlib",
     "TensileLibrary_lazy.yaml",
     "hipblasltTransform.hsaco",
     "hipblasltExtOpLibrary.dat",
+    "hipblasltExtOpLibrary.dat.zlib",
     "extop.co",
 )
 
@@ -73,6 +85,16 @@ def _library_root(install_root: Path) -> Optional[Path]:
     return None
 
 
+def _has_required_file(entries: Set[str], template: str, arch: str) -> bool:
+    """Check if entries contains the required file or its .zlib variant (for .dat only)."""
+    wanted = template.format(arch=arch)
+    if wanted in entries:
+        return True
+    if wanted.endswith(".dat"):
+        return (wanted + ".zlib") in entries
+    return False
+
+
 def validate(install_root: Path) -> List[str]:
     install_root = Path(install_root).resolve()
     violations: List[str] = []
@@ -95,7 +117,7 @@ def validate(install_root: Path) -> List[str]:
             )
 
     for entry in library_dir.iterdir():
-        if entry.is_file() and entry.suffix in (".dat", ".co", ".hsaco", ".yaml"):
+        if entry.is_file() and entry.suffix in (".dat", ".zlib", ".co", ".hsaco", ".yaml"):
             violations.append(
                 f"unexpected payload file at library root: {entry} "
                 f"(per-base layout requires files in library/<base>/)"
@@ -115,16 +137,33 @@ def validate(install_root: Path) -> List[str]:
             )
 
     for arch_dir in base_arch_dirs:
-        base = arch_dir.name
+        # A revision subtree is validated against the architecture it is a
+        # revision of, because that is the name every file inside it carries:
+        # the runtime selects the directory by ASIC revision and then forms the
+        # filename from the compiler target, which is the same for both.
+        revision_of = REVISION_SUBTREES.get(arch_dir.name)
+        base = revision_of or arch_dir.name
         if not _arch_dir_name_is_base(base):
             continue
 
         entries: Set[str] = {p.name for p in arch_dir.iterdir() if p.is_file()}
 
-        for template in REQUIRED_PER_BASE_FILES:
-            wanted = template.format(arch=base)
-            if wanted not in entries:
-                violations.append(f"missing required file in {arch_dir}: {wanted}")
+        for fname in sorted(entries):
+            if fname.endswith(".dat") and (fname + ".zlib") in entries:
+                violations.append(
+                    f"both compressed and uncompressed payloads present in {arch_dir}: "
+                    f"{fname} and {fname}.zlib (stale .dat shadows the .zlib at runtime; "
+                    f"the producer must remove the uncompressed sibling)"
+                )
+
+        # ExtOp and Transform are resolved at runtime from gcnArchName, which is
+        # the architecture name on either revision, so they live in the base
+        # subtree only and a revision subtree that carried copies would be
+        # dead files nothing opens.
+        if not revision_of:
+            for template in REQUIRED_PER_BASE_FILES:
+                if not _has_required_file(entries, template, base):
+                    violations.append(f"missing required file in {arch_dir}: {template.format(arch=base)}")
 
         master_present = any(
             t.format(arch=base) in entries for t in TENSILE_MASTER_CANDIDATES
@@ -135,8 +174,8 @@ def validate(install_root: Path) -> List[str]:
         if not (master_present or lazy_present):
             violations.append(
                 f"missing TensileLibrary master/lazy file for {base} in {arch_dir} "
-                f"(expected one of: TensileLibrary_{base}.{{dat,yaml}} or "
-                f"TensileLibrary_lazy_{base}.{{dat,yaml}})"
+                f"(expected one of: TensileLibrary_{base}.{{dat,dat.zlib,yaml}} or "
+                f"TensileLibrary_lazy_{base}.{{dat,dat.zlib,yaml}})"
             )
 
         for extra in PER_ARCH_REQUIRED.get(base, ()):
@@ -149,9 +188,17 @@ def validate(install_root: Path) -> List[str]:
             if fname == "metadata.yaml":
                 continue
             if not _filename_arch_matches_dir(fname, base):
-                violations.append(
-                    f"filename arch suffix does not match dir {base}: {arch_dir / fname}"
-                )
+                if revision_of:
+                    violations.append(
+                        f"filename in the {arch_dir.name} subtree is not named for the "
+                        f"compiler target {base}: {arch_dir / fname} (the revision "
+                        f"belongs in the directory only; the runtime forms filenames "
+                        f"from the target, so this one is never opened)"
+                    )
+                else:
+                    violations.append(
+                        f"filename arch suffix does not match dir {base}: {arch_dir / fname}"
+                    )
 
     for arch, extras in PER_ARCH_REQUIRED.items():
         for fname in extras:

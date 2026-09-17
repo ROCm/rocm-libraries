@@ -3,14 +3,16 @@
 
 #include "plans/SdpaFwdPlan.hpp"
 #include "asm/SdpaFwdKernelArgs.hpp"
+#include "plans/SdpaFwdLaunchParams.hpp"
+#include "plans/SdpaPlanUtils.hpp"
+
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>
-#include <utility>
 
 namespace asm_sdpa_engine
 {
 
-SdpaFwdPlan::SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params)
+SdpaFwdPlan::SdpaFwdPlan(CachedModule kernel, SdpaFwdParams params)
     : _kernel(std::move(kernel))
     , _params(std::move(params))
 {
@@ -48,10 +50,19 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.ptr_q = qPtr;
     args.ptr_k = kPtr;
     args.ptr_v = vPtr;
-    args.ptr_lse = nullptr; // POC: no LSE output (withStats = false)
+    if(_params.lseUid >= 0)
+    {
+        args.ptr_lse = uidToPtrMap.at(_params.lseUid);
+    }
+    else
+    {
+        args.ptr_lse = nullptr;
+    }
 
-    // Attention scale
-    args.scalar = _params.attnScale;
+    // Attention scale — resolved at execute for runtime pass-by-value support.
+    args.scalar
+        = static_cast<float>(hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
+            _params.attnScale, deviceBuffers, numDeviceBuffers)));
 
     // Q dimensions and strides (convert to bytes: stride * sizeof(bfloat16))
     // TODO: When adding the fp8 kernels, modify this to check for the datatype
@@ -70,20 +81,10 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.s_k_Hs = _params.kStrideHead * K_BF16_SIZE;
     args.s_k_Bs = _params.kStrideBatch * K_BF16_SIZE;
 
-    // Options
-    uint32_t tuneOpt = 5;
-    // if num_head is not 8N, or seqlen is bigger than 16K, downgrade to 2and3
-    if(!_params.noMask && ((_params.numHeadsQ % 8 != 0) || (_params.seqLenQ > 16384)))
-    {
-        tuneOpt -= 2;
-    }
-    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
-    {
-        tuneOpt = 0;
-    }
-
-    args.s_opt = tuneOpt;
-    args.s_lse = 0; // POC: don't compute LSE
+    // Options and grid dimensions
+    const auto launchParams = computeFwdLaunchParams(_params);
+    args.s_opt = launchParams.tuneOpt;
+    args.s_lse = (_params.lseUid >= 0) ? 1 : 0;
 
     // KV dimensions
     args.s_kv_seq_len = _params.seqLenKv;
@@ -105,8 +106,9 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.ptr_qseq = nullptr;
     args.ptr_kseq = nullptr;
 
-    // LSE stride (not used since ptr_lse = nullptr)
-    args.s_lse_Hs = 0;
+    // LSE stride (head dimension, in bytes)
+    constexpr unsigned int K_FP32_SIZE = 4;
+    args.s_lse_Hs = (_params.lseUid >= 0) ? _params.lseStrideHead * K_FP32_SIZE : 0;
 
     // Padding pointers (nullptr for batch mode)
     args.ptr_qseq_padding = nullptr;
@@ -125,28 +127,20 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.s_descale_v_Bs = 0;
     args.s_descale_v_Hs = 0;
 
-    // Compute grid dimensions
-    // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
-    unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
-    unsigned int gridDimY = _params.numHeadsQ;
-    const unsigned int gridDimZ = _params.batchSize;
-
-    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
+    if(!launchKernel("fwd",
+                     _kernel->function(),
+                     &args,
+                     sizeof(args),
+                     launchParams.gridDimX,
+                     launchParams.gridDimY,
+                     launchParams.gridDimZ,
+                     launchParams.blockDimX,
+                     handle.getStream()))
     {
-        std::swap(gridDimX, gridDimY);
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlan::execute: hipModuleLaunchKernel failed for SDPA forward");
     }
-
-    const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
-
-    launchKernel("fwd",
-                 _kernel.function(),
-                 &args,
-                 sizeof(args),
-                 gridDimX,
-                 gridDimY,
-                 gridDimZ,
-                 blockDimX,
-                 handle.getStream());
 }
 
 } // namespace asm_sdpa_engine

@@ -206,7 +206,11 @@ namespace
                                    "stride_y",
                                    stridey,
                                    "batch_count",
-                                   batch_count);
+                                   batch_count,
+                                   "stride_alpha",
+                                   handle->get_stride_alpha(),
+                                   "stride_beta",
+                                   handle->get_stride_beta());
         }
 
         rocblas_status arg_status = rocblas_internal_gemv_arg_check(handle,

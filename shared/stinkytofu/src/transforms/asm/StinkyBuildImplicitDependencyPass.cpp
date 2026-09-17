@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -47,9 +48,9 @@
 // 2) RegType::LDS pseudo-registers (keyed by MemTokenData token IDs). The
 //    instruction type determines src vs dest placement:
 //
-//      tensor_load / ds_write  →  LDS token to dest  (LDS producer)
-//      ds_read                 →  LDS token to src   (LDS consumer)
-//      barrier / signal / wait →  LDS token to both  (synchronization point)
+//      tensor_load / ds_write                      →  LDS token to dest (LDS producer)
+//      ds_read / global_store_async_from_lds_*      →  LDS token to src  (LDS consumer)
+//      barrier / signal / wait                      →  LDS token to both (synchronization point)
 //
 //    The def-use chain builder then sees:
 //      producer(def LDS[t]) → barrier(use+def LDS[t]) → consumer(use LDS[t])
@@ -106,10 +107,12 @@ static void processLdsWriter(StinkyInstruction& inst, const MemTokenData& mt,
     for (int tokenId : mt.tokens) addUniqueLdsDest(inst, tokenId);
 }
 
-// LDS readers (ds_read): LDS tokens to src.
+// LDS readers (ds_read, global_store_async_from_lds_*): LDS tokens to src.
 static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
                              [[maybe_unused]] const std::string& bbLabel) {
-    PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS reader (ds_read) tokens=[";
+    PASS_DEBUG(std::cerr << "[BuildImplicitDep] LDS reader ("
+                         << (isDSRead(inst) ? "ds_read" : "global_store_async_from_lds")
+                         << ") tokens=[";
                for (int t
                     : mt.tokens) std::cerr
                << t << " ";
@@ -119,13 +122,6 @@ static void processLdsReader(StinkyInstruction& inst, const MemTokenData& mt,
 }
 
 void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
-    bool doLdsTokenHandling = true;
-    if (!passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier) {
-        PASS_DEBUG(std::cerr << "[BuildImplicitDep] skip LDS-token handling BB label=\""
-                             << bb.getLabel() << "\" (unrollMovableBarrier=false)\n");
-        doLdsTokenHandling = false;
-    }
-
     const uint32_t wavefrontSize = passCtx.getWavefrontSize();
     for (auto it = bb.begin(); it != bb.end(); ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
@@ -133,8 +129,6 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
 
         // Always attach implicit special registers (SCC/VCC/EXEC) declared by HW flags
         legalizeImplicitSpecialRegisters(inst, wavefrontSize);
-
-        if (!doLdsTokenHandling) continue;
 
         const MemTokenData* mt = inst->getModifier<MemTokenData>();
         if (!mt) continue;
@@ -144,12 +138,15 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
             processBarrier(*inst, *mt, bb.getLabel());
         else if (isTensorLoad(*inst) || isDSWrite(*inst))
             processLdsWriter(*inst, *mt, bb.getLabel());
-        else if (isDSRead(*inst))
+        else if (isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst))
             processLdsReader(*inst, *mt, bb.getLabel());
         else
+            // StinkyWaitCntInsertionPass tags s_wait_tensorcnt with MemTokenData,
+            // which would hit this assert — safe only because it runs strictly after
+            // this pass. If reordered, teach this branch to tolerate wait-cnt insts.
             assert(false &&
                    "instruction has MemTokenData but is not a barrier, fence, "
-                   "tensor_load, ds_write, or ds_read");
+                   "tensor_load, ds_write, ds_read, or global_store_async_from_lds");
     }
 }
 

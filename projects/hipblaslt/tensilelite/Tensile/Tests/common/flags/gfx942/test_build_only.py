@@ -40,7 +40,6 @@ GlobalParameters:
   NumElementsToValidate: 0
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  NewClient: 2
   Device: 0
 
 BenchmarkProblems:
@@ -51,8 +50,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup
@@ -68,7 +67,7 @@ BenchmarkProblems:
         - DepthU: [32]
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -76,7 +75,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -95,11 +94,18 @@ def _write_config(path: str) -> None:
 def test_compile(tensile_args: list[str], tmp_path: Path) -> None:
     """
     Compile the kernel. This can run on any machine.
+
+    Explicitly pins --gpu-targets to gfx942, overriding any --gpu-targets
+    tensile_args may have forwarded from the harness (e.g. tox injects one
+    for the host's detected revision target). --gpu-targets takes priority
+    over the config's own ISA in Tensile.py, so without this the test would
+    silently compile for the host's architecture instead of gfx942.
     """
     config_path = str(tmp_path / "config.yaml")
     _write_config(config_path)
     output_dir = str(tmp_path / "output")
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args])
+    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args,
+                      "--gpu-targets", "gfx942"])
 
 
 @pytest.mark.skipif(not _HAS_GFX942, reason="gfx942 GPU not available")
@@ -112,7 +118,9 @@ def test_use_cache(tensile_args: list[str], tmp_path: Path) -> None:
     output_dir = str(tmp_path / "output")
 
     # First run: compile only
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args])
+    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args,
+                      "--gpu-targets", "gfx942"])
 
     # Second run: use cache
-    Tensile.Tensile([config_path, output_dir, "--use-cache", *tensile_args])
+    Tensile.Tensile([config_path, output_dir, "--use-cache", *tensile_args,
+                      "--gpu-targets", "gfx942"])

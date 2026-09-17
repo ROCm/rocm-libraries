@@ -516,7 +516,7 @@ ROCSOLVER_KERNEL void bdsqr_lower2upper(const rocblas_int n,
             D[i] = r;
             E[i] = -s * D[i + 1];
             f = c * D[i + 1];
-            g = E[i + 1];
+            g = ((i + 1) < (n - 1)) ? E[i + 1] : 0;
 
             // save rotation to update singular vectors
             if(nu || nc)

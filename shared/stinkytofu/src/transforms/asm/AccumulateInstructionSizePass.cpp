@@ -78,7 +78,7 @@ int64_t accumulateInstructionSize(BasicBlock& bb,
         count++;
         // TODO: check if the cost cycles is correct
         int cost;
-        if (isMFMA(inst) || isWMMA(inst)) {
+        if (isMatrixInstruction(inst)) {
             cost = inst.latencyCycles;
         } else {
             cost = inst.issueCycles;
@@ -96,7 +96,8 @@ int64_t accumulateInstructionSize(BasicBlock& bb,
                 *debugOut << "+" << literalExtra << "(literal)=" << instBytes << " bytes";
             else
                 *debugOut << " bytes";
-            *debugOut << ", total=" << totalBytes << " bytes";
+            *debugOut << ", total=" << (baseByteOffset + totalBytes)
+                      << " bytes, totalBytes in BB=" << totalBytes << " bytes";
             *debugOut << ", opcode=" << inst.getUnifiedOpcode() << " (isa=" << inst.getISAOpcode()
                       << ")] ";
             inst.dump(*debugOut);
@@ -151,7 +152,7 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
         m_totalBytes = 0;
         m_labelByteOffset.clear();
         m_byteOffsetBase = 0;
-        collectAsmSetSymbolValues(func, m_asmSetSymbols);
+        m_asmSetSymbols.clear();
 
         if (m_debug) {
             if (!m_debugOutputPath.empty()) {
@@ -162,15 +163,52 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
             }
         }
 
+        // Whole-kernel: callable functions are emitted into the same image after
+        // the entry function (see StinkyAsmModule::emitAssembly), so their bytes
+        // must be counted for the .amdhsa_inst_pref_size total. m_byteOffsetBase
+        // carries across functions so label byte offsets stay monotonic in the
+        // linked image. Falls back to the single pipeline Function when the pass
+        // is not bound to a module.
+        if (m_moduleForTotalBytes) {
+            for (Function* f : m_moduleForTotalBytes->getFunctions()) {
+                if (f) accumulateFunction(*f, passCtx);
+            }
+        } else {
+            accumulateFunction(func, passCtx);
+        }
+
+        if (m_debug) {
+            *m_debugStream << "[AccumulateInstructionSizePass] total instruction count = "
+                           << m_totalInstructionCount << "\n";
+            *m_debugStream << "[AccumulateInstructionSizePass] total cycles = " << m_totalCycles
+                           << "\n";
+            *m_debugStream << "[AccumulateInstructionSizePass] total size = " << m_totalBytes
+                           << " bytes\n";
+            if (!m_labelByteOffset.empty()) {
+                *m_debugStream << "[AccumulateInstructionSizePass] label -> byte offset:\n";
+                for (const auto& kv : m_labelByteOffset)
+                    *m_debugStream << "  \"" << kv.first << "\" -> " << kv.second << " bytes\n";
+            }
+            if (m_debugFile.is_open()) m_debugFile.close();
+        }
+
+        if (m_moduleForTotalBytes) m_moduleForTotalBytes->setTotalInstructionBytes(m_totalBytes);
+        return PreservedAnalyses::none();
+    }
+
+    /// Accumulate cycles/bytes for one function into the running totals.
+    void accumulateFunction(Function& func, PassContext& passCtx) {
+        collectAsmSetSymbolValues(func, m_asmSetSymbols);
+
         // Count total basic blocks in the function (for debugging)
         int totalBlocksInFunction = 0;
         for ([[maybe_unused]] const BasicBlock& bb : func) totalBlocksInFunction++;
 
         int blocksProcessed = 0;
         if (m_debug) {
-            *m_debugStream << "[AccumulateInstructionSizePass] processAllBlocks="
-                           << (m_processAllBlocks ? "true" : "false") << ", function has "
-                           << totalBlocksInFunction << " basic block(s)\n";
+            *m_debugStream << "[AccumulateInstructionSizePass] function \"" << func.getName()
+                           << "\" processAllBlocks=" << (m_processAllBlocks ? "true" : "false")
+                           << ", function has " << totalBlocksInFunction << " basic block(s)\n";
             dumpAsmSetSymbolMap(*m_debugStream, m_asmSetSymbols);
             *m_debugStream << "[AccumulateInstructionSizePass] blocks to process:\n";
         }
@@ -190,22 +228,7 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
         if (m_debug) {
             *m_debugStream << "[AccumulateInstructionSizePass] processed " << blocksProcessed
                            << " / " << totalBlocksInFunction << " basic block(s)\n";
-            *m_debugStream << "[AccumulateInstructionSizePass] total instruction count = "
-                           << m_totalInstructionCount << "\n";
-            *m_debugStream << "[AccumulateInstructionSizePass] total cycles = " << m_totalCycles
-                           << "\n";
-            *m_debugStream << "[AccumulateInstructionSizePass] total size = " << m_totalBytes
-                           << " bytes\n";
-            if (!m_labelByteOffset.empty()) {
-                *m_debugStream << "[AccumulateInstructionSizePass] label -> byte offset:\n";
-                for (const auto& kv : m_labelByteOffset)
-                    *m_debugStream << "  \"" << kv.first << "\" -> " << kv.second << " bytes\n";
-            }
-            if (m_debugFile.is_open()) m_debugFile.close();
         }
-
-        if (m_moduleForTotalBytes) m_moduleForTotalBytes->setTotalInstructionBytes(m_totalBytes);
-        return PreservedAnalyses::none();
     }
 
     /// Total accumulated cycles (instruction size) after run().
@@ -290,6 +313,12 @@ std::unique_ptr<Pass> createAccumulateInstructionSizePass(const std::string& deb
         p->setDebugOutputPath(debugOutputPath);
         p->setDebug(true);
     }
+    return p;
+}
+
+std::unique_ptr<Pass> createAccumulateInstructionSizePassWithDebug() {
+    auto p = std::make_unique<AccumulateInstructionSizePass>();
+    p->setDebug(true);
     return p;
 }
 

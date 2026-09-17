@@ -39,12 +39,12 @@ namespace rocsparse
                                                   J                   mb,
                                                   const I* __restrict__ bsr_row_ptr,
                                                   const J* __restrict__ bsr_col_ind,
-                                                  T* __restrict__ bsr_val,
+                                                  T* bsr_val,
                                                   const I* __restrict__ bsr_diag_ind,
                                                   J block_dim,
                                                   int32_t* __restrict__ done_array,
                                                   const J* __restrict__ map,
-                                                  J* __restrict__ zero_pivot,
+                                                  J*                   zero_pivot,
                                                   rocsparse_index_base idx_base,
                                                   int32_t              boost,
                                                   double               boost_tol,
@@ -376,14 +376,14 @@ namespace rocsparse
                              J                   mb,
                              const I* __restrict__ bsr_row_ptr,
                              const J* __restrict__ bsr_col_ind,
-                             T* __restrict__ bsr_val,
+                             T*      bsr_val,
                              int64_t bsr_val_stride,
                              const I* __restrict__ bsr_diag_ind,
                              J bsr_dim,
                              int32_t* __restrict__ done_array,
                              int64_t done_array_stride,
                              const J* __restrict__ map,
-                             J* __restrict__ zero_pivot,
+                             J*                   zero_pivot,
                              int64_t              zero_pivot_stride,
                              rocsparse_index_base idx_base,
                              int                  enable_boost,
@@ -495,7 +495,7 @@ namespace rocsparse
         {
             return rocsparse::bsrilu0_kernel_9_32_launch<BLOCKSIZE, WF_SIZE, BBDIM, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -521,7 +521,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, BBDIM, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");

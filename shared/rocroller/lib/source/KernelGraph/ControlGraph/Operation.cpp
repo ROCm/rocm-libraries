@@ -128,6 +128,12 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
+    LoadTiledTDMToLDS::LoadTiledTDMToLDS() = default;
+    LoadTiledTDMToLDS::LoadTiledTDMToLDS(rocRoller::VariableType const varType)
+        : varType(varType)
+    {
+    }
+
     StoreTiled::StoreTiled() = default;
     StoreTiled::StoreTiled(VariableType const varType)
         : varType(varType)
@@ -207,6 +213,7 @@ namespace rocRoller::KernelGraph::ControlGraph
     RR_CLASS_NAME_IMPL(LoadLinear);
     RR_CLASS_NAME_IMPL(LoadSGPR);
     RR_CLASS_NAME_IMPL(LoadTileDirect2LDS);
+    RR_CLASS_NAME_IMPL(LoadTiledTDMToLDS);
     RR_CLASS_NAME_IMPL(LoadTiled);
     RR_CLASS_NAME_IMPL(LoadVGPR);
     RR_CLASS_NAME_IMPL(Multiply);

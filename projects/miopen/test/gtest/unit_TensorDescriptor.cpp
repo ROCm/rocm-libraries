@@ -633,6 +633,14 @@ public:
             TestCase{{miopenHalf, {maxv, maxv1, maxv1, maxv1}, {1, 1, 1, 1}}, false, true},
             TestCase{{miopenHalf, {1, 1, 1, 1}, {maxv1, maxv, maxv1, maxv1}}, true, false},
             TestCase{{miopenHalf, {maxv1, maxv1, maxv1, maxv}, {maxv1, maxv1, maxv1, maxv1}}, false, false},
+
+            // Boundary at exactly INT_MAX in a single position (other positions trivial).
+            // CheckDimsFitIntoInt uses strict `>`, so exactly INT_MAX must pass.
+            TestCase{{miopenHalf, {1, 1, 1, maxv}, {1, 1, 1, 1}}, true, true},
+            TestCase{{miopenHalf, {1, 1, 1, 1}, {1, 1, 1, maxv}}, true, true},
+            // One past INT_MAX in a single position must be rejected.
+            TestCase{{miopenHalf, {1, 1, 1, maxv1}, {1, 1, 1, 1}}, false, true},
+            TestCase{{miopenHalf, {1, 1, 1, 1}, {1, 1, 1, maxv1}}, true, false},
             // clang-format on
         };
     }

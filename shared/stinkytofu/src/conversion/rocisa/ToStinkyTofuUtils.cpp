@@ -30,10 +30,15 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cstdint>
+#include <functional>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <typeinfo>
+#include <unordered_map>
 #include <vector>
 
 #include "AllHwMappings.hpp"
@@ -45,6 +50,8 @@
 #include "instruction/cvt.hpp"
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
+#include "stinkytofu/Config/Config.h"
+#include "stinkytofu/Version.h"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
@@ -53,7 +60,13 @@
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
+
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+#include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
+#endif
 
 namespace nb = nanobind;
 
@@ -68,6 +81,19 @@ std::string itemToString(const rocisa::Item* item) {
     return item->toString();
 }
 
+static std::string formatModulePath(const std::vector<const std::string*>& moduleNames) {
+    std::string out;
+    for (size_t i = 0; i < moduleNames.size(); ++i) {
+        if (i) out += '/';
+        out += moduleNames[i] ? *moduleNames[i] : std::string("<null>");
+    }
+    return out;
+}
+
+// Forward decls (definitions appear below; convertFLATModifiers references them).
+stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope);
+stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th);
+
 // Helper functions to convert rocisa modifiers to stinkytofu modifiers
 stinkytofu::DSModifiers convertDSModifiers(const rocisa::DSModifiers& rocMod) {
     return stinkytofu::DSModifiers(rocMod.na, rocMod.offset, rocMod.offset0, rocMod.offset1,
@@ -78,8 +104,9 @@ stinkytofu::FLATModifiers convertFLATModifiers(const rocisa::FLATModifiers& rocM
                                                const std::map<std::string, int>& asmCaps) {
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
-    return stinkytofu::FLATModifiers(rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds,
-                                     rocMod.isStore, hasGLCModifier, hasSC0Modifier);
+    return stinkytofu::FLATModifiers(
+        rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds, rocMod.isStore, hasGLCModifier,
+        hasSC0Modifier, convertMUBUFScope(rocMod.scope), convertTemporalHint(rocMod.th));
 }
 
 stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
@@ -97,15 +124,55 @@ stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
     }
 }
 
+// rocisa and StinkyTofu use the same ISA TH[2:0] encoding, but keep distinct enum
+// types; map explicitly rather than static_cast so the two stay decoupled. Note
+// TH_WB aliases TH_LU and TH_NT_WB aliases TH_RESERVED (same encoding), so only the
+// canonical labels appear here.
+stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th) {
+    switch (th) {
+        case rocisa::TemporalHint::TH_RT:
+            return stinkytofu::TemporalHint::TH_RT;
+        case rocisa::TemporalHint::TH_NT:
+            return stinkytofu::TemporalHint::TH_NT;
+        case rocisa::TemporalHint::TH_HT:
+            return stinkytofu::TemporalHint::TH_HT;
+        case rocisa::TemporalHint::TH_LU:
+            return stinkytofu::TemporalHint::TH_LU;
+        case rocisa::TemporalHint::TH_NT_RT:
+            return stinkytofu::TemporalHint::TH_NT_RT;
+        case rocisa::TemporalHint::TH_RT_NT:
+            return stinkytofu::TemporalHint::TH_RT_NT;
+        case rocisa::TemporalHint::TH_NT_HT:
+            return stinkytofu::TemporalHint::TH_NT_HT;
+        case rocisa::TemporalHint::TH_RESERVED:
+            return stinkytofu::TemporalHint::TH_RESERVED;
+        default:
+            return stinkytofu::TemporalHint::TH_NONE;
+    }
+}
+
+stinkytofu::NonVolatile convertNonVolatile(rocisa::NonVolatile nv) {
+    switch (nv) {
+        case rocisa::NonVolatile::NV_NONE:
+            return stinkytofu::NonVolatile::NV_NONE;
+        case rocisa::NonVolatile::NV:
+            return stinkytofu::NonVolatile::NV;
+        default:
+            return stinkytofu::NonVolatile::NV_NONE;
+    }
+}
+
 stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod,
                                                  const std::map<std::string, int>& asmCaps) {
     bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
     stinkytofu::MUBUFScope scope = convertMUBUFScope(rocMod.scope);
+    stinkytofu::TemporalHint th = convertTemporalHint(rocMod.th);
+    stinkytofu::NonVolatile nv = convertNonVolatile(rocMod.nv);
     return stinkytofu::MUBUFModifiers(rocMod.offen, rocMod.offset12, rocMod.glc, rocMod.slc,
                                       rocMod.nt, rocMod.lds, rocMod.isStore, hasMUBUFConst,
-                                      hasGLCModifier, hasSC0Modifier, scope);
+                                      hasGLCModifier, hasSC0Modifier, scope, th, nv);
 }
 
 /// Returns true when vaddr is the MUBUF "off" keyword.
@@ -144,6 +211,11 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
     bool hasSCOPEModifier = asmCaps.count("HasSCOPEModifier") && asmCaps.at("HasSCOPEModifier");
     return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv != rocisa::NonVolatile::NV_NONE,
                                      rocMod.offset, hasSCOPEModifier);
+}
+
+stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
+    return stinkytofu::GLOBALModifiers(rocMod.offset, convertTemporalHint(rocMod.th),
+                                       convertMUBUFScope(rocMod.scope));
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
@@ -217,6 +289,8 @@ stinkytofu::DPPModifiers convertDPPModifiers(const rocisa::DPPModifiers& rocMod)
     } else if (rocMod.quad_perm.size() == 4) {
         ctrl = stinkytofu::dppQuadPerm(rocMod.quad_perm[0], rocMod.quad_perm[1],
                                        rocMod.quad_perm[2], rocMod.quad_perm[3]);
+    } else if (rocMod.row_xmask != kUnset) {
+        ctrl = stinkytofu::dppRowXmask(rocMod.row_xmask);
     }
 
     // bound_ctrl is {0, 1}. Anything else (unset -1, or stray) -> default 0.
@@ -241,11 +315,29 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
     // (Flags.def) to the instruction.
     legalizeImplicitSpecialRegisters(inst, getWaveFrontSize(archId));
 
+    if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
+        assert(isCall(*inst) && "SSwapPCB64 must lower to an IF_Call instruction");
+        if (!swappc->calleeFuncs.empty()) {
+            inst->addModifier<CallTargetData>(CallTargetData{swappc->calleeFuncs});
+        }
+        return {nullptr, nullptr};
+    }
+
     if (isBranch(*inst)) {
         // Handle branch instructions
         rocisa::BranchInstruction* branchInst =
             dynamic_cast<rocisa::BranchInstruction*>(rocisaInst);
         assert(branchInst != nullptr && "This should be a rocisa Branch.");
+
+        // SSetPCB64 records its long-branch target in a dedicated longBranchLabel
+        // field (populated by the SLongBranch* helpers in rocisa extension.hpp)
+        if (auto* setpc = dynamic_cast<rocisa::SSetPCB64*>(rocisaInst)) {
+            if (!setpc->longBranchLabel.empty()) {
+                inst->addModifier<LabelData>(LabelData{setpc->longBranchLabel});
+            }
+            return {nullptr, nullptr};
+        }
+
         inst->addModifier<LabelData>(LabelData{branchInst->labelName});
         return {nullptr, nullptr};
     }
@@ -326,6 +418,18 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
 
     // Add source registers
     std::vector<InstructionInput> srcParams = inst->getSrcParams();
+
+    // MUBUF atomics carry vdata as a read-write destination operand. rocisa
+    // keeps that register in getSrcParams() for dependency tracking, but the
+    // StinkyTofu instruction definition models D0 as RW and the assembly syntax
+    // must not print vdata a second time as S0.
+    if (dynamic_cast<const rocisa::BufferAtomicAddF32*>(inst) ||
+        dynamic_cast<const rocisa::BufferAtomicCmpswapB32*>(inst) ||
+        dynamic_cast<const rocisa::BufferAtomicCmpswapB64*>(inst)) {
+        if (!srcParams.empty()) {
+            srcParams.erase(srcParams.begin());
+        }
+    }
 
     // Adjust source parameters for VLShiftLeftAddU32 CompositeInstruction
     // VLShiftLeftAddU32 stores parameters as: {src0, src1, shift}
@@ -440,7 +544,7 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
         size_t pos = instString.find(prefix);
         if (pos == std::string_view::npos) return {};
         size_t valStart = pos + std::string_view(prefix).size();
-        size_t valEnd = instString.find(' ', valStart);
+        size_t valEnd = instString.find_first_of(" \t\n\r", valStart);
         if (valEnd == std::string_view::npos) valEnd = instString.size();
         return instString.substr(valStart, valEnd - valStart);
     };
@@ -455,6 +559,11 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
     if (!aScaleVal.empty()) fmts.scaleFmtA = parseMatrixScaleFmt(aScaleVal);
     if (!bScaleVal.empty()) fmts.scaleFmtB = parseMatrixScaleFmt(bScaleVal);
 
+    auto aScaleSel = extractValue("matrix_a_scale:");
+    auto bScaleSel = extractValue("matrix_b_scale:");
+    if (!aScaleSel.empty()) fmts.scaleSelA = parseMatrixScaleSel(aScaleSel);
+    if (!bScaleSel.empty()) fmts.scaleSelB = parseMatrixScaleSel(bScaleSel);
+
     return fmts;
 }
 
@@ -462,14 +571,20 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
 void handleMXMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     // MXMFMA does not support neg_lo/neg_hi modifiers; only matrix formats.
     auto fmts = extractMatrixFormats(instString);
-    if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+    if (!fmts.empty()) {
+        stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+        stinkyInst->resolveMatrixFmtOverrides();
+    }
     stinkyInst->addModifier<MFMAModifiers>(MFMAModifiers{});
 }
 
 /// Helper to handle MFMA instruction modifiers
 void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     auto fmts = extractMatrixFormats(instString);
-    if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+    if (!fmts.empty()) {
+        stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+        stinkyInst->resolveMatrixFmtOverrides();
+    }
 
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
@@ -481,6 +596,23 @@ void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& inst
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
     stinkyInst->addModifier<MFMAModifiers>(mod);
+}
+
+/// Helper to handle global_prefetch_b8 (gl2-prefetch) temporal-hint / cache-scope
+/// modifiers. Read directly from rocisa's GLOBALModifiers (via getModifier()).
+void handleGlobalPrefetchModifier(StinkyInstruction* stinkyInst,
+                                  const rocisa::GlobalPrefetchB8* inst) {
+    const std::optional<rocisa::GLOBALModifiers>& gm = inst->getModifier();
+    if (!gm) return;
+
+    stinkytofu::TemporalHint th = convertTemporalHint(gm->th);
+    stinkytofu::MUBUFScope scope = convertMUBUFScope(gm->scope);
+    if (th == stinkytofu::TemporalHint::TH_NONE && scope == stinkytofu::MUBUFScope::SCOPE_NONE &&
+        gm->offset == 0) {
+        return;
+    }
+    stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
+        stinkytofu::GLOBALModifiers(gm->offset, th, scope));
 }
 
 /// Helper to handle SWaitCnt instruction modifiers
@@ -587,6 +719,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
@@ -594,6 +727,18 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
         else if (auto typed = dynamic_cast<const MUBUFStoreInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
+        }
+        else if (auto typed = dynamic_cast<const GlobalAtomicIncU32Saddr*>(inst)) {
+            // GlobalAtomicIncU32Saddr carries cache scope / temporal hint / offset as rocisa
+            // GLOBALModifiers; translate so the emitter prints them (the returning-atomic
+            // th:TH_ATOMIC_RETURN is added separately by the emitter). Scoped to the atomic
+            // specifically -- the GLOBALStoreInstruction base also covers global_store_*,
+            // whose modifier handling must not change here.
+            if (typed->modifier.has_value()) {
+                const auto& gm = typed->modifier.value();
+                stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(stinkytofu::GLOBALModifiers(
+                    gm.offset, convertTemporalHint(gm.th), convertMUBUFScope(gm.scope)));
+            }
         }
         else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
             [&](const auto& mod) { return convertSMEMModifiers(mod, asmCaps); })
@@ -634,6 +779,10 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
                                 stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
                                     stinkytofu::CacheScopeModifiers(
                                         convertMUBUFScope(typedInst->scope))))
+
+            // global_prefetch_b8 (gl2-prefetch): temporal hint + cache scope.
+            else HANDLE_INST_TYPE(rocisa::GlobalPrefetchB8,
+                                handleGlobalPrefetchModifier(stinkyInst, typedInst))
         }
     // clang-format on
 
@@ -819,6 +968,11 @@ std::shared_ptr<stinkytofu::SignatureBase> toStinkySignature(const rocisa::Signa
  */
 using ItemVisitor =
     std::function<void(rocisa::Item*, const std::vector<const std::string*>& moduleNames)>;
+enum class ModuleSubtreeAction { Recurse, SkipSubtree };
+using ModuleEnter = std::function<ModuleSubtreeAction(
+    const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
+using ModuleLeave =
+    std::function<void(const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
 
 /**
  * @brief traversal rocisa::Module with DFS path and process each item
@@ -827,12 +981,20 @@ using ItemVisitor =
  * @param visitor The visitor to process each item
  */
 void traverseModule(const rocisa::Module& module,
-                    const std::vector<const std::string*>& parentModuleNames, ItemVisitor visitor) {
+                    const std::vector<const std::string*>& parentModuleNames, ItemVisitor visitor,
+                    ModuleEnter onEnter = nullptr, ModuleLeave onLeave = nullptr) {
     std::vector<const std::string*> moduleNames(parentModuleNames);
     moduleNames.push_back(&module.name);
     for (auto& item : module.itemList) {
         if (const auto subModule = dynamic_cast<const rocisa::Module*>(item.get())) {
-            traverseModule(*subModule, moduleNames, visitor);
+            ModuleSubtreeAction action = ModuleSubtreeAction::Recurse;
+            if (onEnter) {
+                action = onEnter(*subModule, moduleNames);
+            }
+            if (action != ModuleSubtreeAction::SkipSubtree) {
+                traverseModule(*subModule, moduleNames, visitor, onEnter, onLeave);
+                if (onLeave) onLeave(*subModule, moduleNames);
+            }
         } else {
             visitor(item.get(), moduleNames);
         }
@@ -845,8 +1007,22 @@ namespace stinkytofu {
 static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
-    // Get GfxArchID from architecture array
+    // Resolve the GfxArchID from this kernel's ISA triple. Steppings that share a triple (e.g.
+    // gfx1250 v0/v1 on {12,5,0}) are indistinguishable by triple alone, so the lookup returns the
+    // first-registered stepping. ModuleOptions.ArchName carries the concrete stepping to pick
+    // instead -- but only to disambiguate *within the same triple*. In a multi-arch build (e.g.
+    // gfx942;gfx1250v0) ArchName is set build-wide, so we must not retag a kernel of a different
+    // arch: honor the name only when the named arch's triple matches this kernel's triple.
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    if (!moduleOptions.ArchName.empty()) {
+        const GfxArchID named = getGfxArchID(moduleOptions.ArchName);
+        const auto* namedInfo = ArchHelper::getInstance().getArchInfo(named);
+        if (namedInfo && namedInfo->major == static_cast<uint32_t>(arch[0]) &&
+            namedInfo->minor == static_cast<uint32_t>(arch[1]) &&
+            namedInfo->stepping == static_cast<uint32_t>(arch[2])) {
+            archId = named;
+        }
+    }
 
     // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
     // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
@@ -864,6 +1040,13 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
 
     // Create IRBuilder for lower-level instruction creation
     AsmIRBuilder irBuilder(*currentBB, archId);
+
+    std::vector<BasicBlock*> bbStack;
+    bbStack.push_back(currentBB);
+
+    // Callable names are Function symbols. rocisa duplicate activation canonicalization must run
+    // before conversion, so any duplicate callable name reaching this point is a producer bug.
+    std::unordered_map<std::string, std::string> callableDefPathByName;
 
     // Process each item
     std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
@@ -1007,6 +1190,52 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
     };
 
+    ModuleEnter onModuleEnter =
+        [&](const rocisa::Module& subMod,
+            const std::vector<const std::string*>& names) -> ModuleSubtreeAction {
+        if (!subMod.isCallable) {
+            return ModuleSubtreeAction::Recurse;
+        }
+
+        const std::string fnName = subMod.callableName.empty() ? subMod.name : subMod.callableName;
+        const std::string path = formatModulePath(names);
+        const std::string defPath =
+            path.empty() ? subMod.name : path + std::string("/") + subMod.name;
+
+        const auto it = callableDefPathByName.find(fnName);
+        if (it != callableDefPathByName.end()) {
+            report_fatal_error("Duplicate isCallable rocisa Module for '" + fnName +
+                               "'. First definition at '" + it->second +
+                               "', conflicting definition at '" + defPath +
+                               "'. Duplicate activation functions should be canonicalized by "
+                               "rocisa removeDuplicatedFunction before StinkyTofu conversion.");
+        }
+        callableDefPathByName.emplace(fnName, defPath);
+
+        // Mark where this callable function body belongs in the final linear ASM
+        // stream. FlattenCalleesPass consumes the marker for SwPrefetch's legacy
+        // single-stream view. Function name is stored in LabelData.
+        irBuilder.setInsertionPoint(*currentBB);
+        irBuilder.createFunctionAsmPlacementMarker(fnName);
+
+        Function& callable = stinkyAsmModule.createFunction(fnName, /*isCallable=*/true);
+        BasicBlock* callableEntry = callable.getEntryBlock();
+        assert(callableEntry && "createFunction must provide an entry block");
+        bbStack.push_back(callableEntry);
+        currentBB = callableEntry;
+        irBuilder.setInsertionPoint(*currentBB);
+        return ModuleSubtreeAction::Recurse;
+    };
+
+    ModuleLeave onModuleLeave = [&](const rocisa::Module& subMod,
+                                    const std::vector<const std::string*>& /*names*/) {
+        if (!subMod.isCallable) return;
+        assert(bbStack.size() > 1 && "onModuleLeave underflow (callable Function not pushed)");
+        bbStack.pop_back();
+        currentBB = bbStack.back();
+        irBuilder.setInsertionPoint(*currentBB);
+    };
+
     // Check whether a rocisa Instruction is a global/buffer/flat load or tensor load.
     // Excludes SMemLoadInstruction (s_load) which also inherits from GlobalReadInstruction.
     auto isPrefetchLoadInst = [](const rocisa::Instruction* inst) -> bool {
@@ -1040,8 +1269,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
         if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
             if (subMod->name == "loopBody") {
-                loopBodyIdx = i;
-                break;
+                loopBodyIdx = i;  // keep updating loop bodies
             }
         }
     }
@@ -1049,18 +1277,51 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const bool hasPGR = (pgrStartIdx != -1 && loopBodyIdx != -1 && pgrStartIdx <= loopBodyIdx);
     static const std::string kPGR = "loopWithPrefetch";
 
+    // Recursively check whether an item is, or contains, a Module named \p name.
+    std::function<bool(const rocisa::Item*, const std::string&)> containsModule =
+        [&](const rocisa::Item* item, const std::string& name) -> bool {
+        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
+            if (mod->name == name) return true;
+            for (const auto& child : mod->itemList)
+                if (containsModule(child.get(), name)) return true;
+        }
+        return false;
+    };
+
+    // Tag every top-level item whose subtree holds Module("GlobalWriteElements"),
+    // from the first such item through the last. Covers both the main store
+    // epilogue and the separate GSU-split OptNLL store.
+    int epilogueStartIdx = -1;
+    int epilogueEndIdx = -1;
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        if (containsModule(module.itemList[i].get(), "GlobalWriteElements")) {
+            if (epilogueStartIdx == -1) epilogueStartIdx = i;
+            epilogueEndIdx = i;
+        }
+    }
+    const bool hasEpilogue =
+        (epilogueStartIdx != -1 && epilogueEndIdx != -1 && epilogueStartIdx <= epilogueEndIdx);
+    static const std::string kEpilogue = "globalWriteEpilogue";
+
     // Traverse top-level items, injecting the loopWithPrefetch group name
-    // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx].
+    // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx]
+    // (spans all main-loop bodies when present).
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
+        const bool inEpilogue = hasEpilogue && (i >= epilogueStartIdx && i <= epilogueEndIdx);
 
         std::vector<const std::string*> base;
+        if (inEpilogue) base.push_back(&kEpilogue);
         if (inPGR) base.push_back(&kPGR);
         base.push_back(&module.name);
 
         if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
-            traverseModule(*subMod, base, processItem);
+            const ModuleSubtreeAction enterAct = onModuleEnter(*subMod, base);
+            if (enterAct != ModuleSubtreeAction::SkipSubtree) {
+                traverseModule(*subMod, base, processItem, onModuleEnter, onModuleLeave);
+                onModuleLeave(*subMod, base);
+            }
         } else {
             processItem(item.get(), base);
         }
@@ -1101,6 +1362,44 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
+    // rocisa was compiled against whichever stinkytofu/Version.h it saw at build
+    // time (STINKYTOFU_FULL_VERSION, a compile-time macro expansion in this TU).
+    // stinkytofu::getRuntimeVersion() instead reports the truth about whatever
+    // stinkytofu is actually loaded/linked right now — a separately-installed
+    // shared lib, a vendored copy, or (in a static build) the same binary this
+    // function itself lives in. A mismatch means a different stinkytofu build
+    // than the one rocisa was compiled against is present at runtime; rocisa
+    // does not support running against a different stinkytofu build, so fail
+    // loudly at import time rather than risk silent ABI/behavior drift.
+    if (!stinkytofu::versionsMatch(STINKYTOFU_FULL_VERSION, stinkytofu::getRuntimeVersion())) {
+        throw std::runtime_error(
+            std::string("rocisa was built against stinkytofu ") + STINKYTOFU_FULL_VERSION +
+            " but " + stinkytofu::getRuntimeVersion() +
+            " is loaded at runtime — rebuild rocisa against a matching stinkytofu.");
+    }
+
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+
+    m.def("loadPlugin", &PassBuilder::loadPlugin, nb::arg("path"),
+          "Load a plugin shared library (.so/.dll) that exports registerPlugin()");
+    m.def("loadPluginsFromDirectory", &PassBuilder::loadPluginsFromDirectory, nb::arg("dirPath"),
+          "Load all plugin shared libraries (.so/.dll) from a directory");
+    m.def("stinkytofuExamplePluginPath", &PassBuilder::examplePluginPath,
+          "Absolute path to StinkyTofu's bundled example plugin, or \"\" if it was not built. "
+          "For tests/demos; consumers with their own plugins pass their path to loadPlugin().");
+
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+    m.def("registerExamplePlugin", &stinkytofu::registerHelloWorldPassPlugin,
+          "Register StinkyTofu's built-in example HelloWorldPass, compiled directly into "
+          "rocisa (LLVM-style static-plugin pattern). Only available when rocisa was built "
+          "with ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON.");
+#endif
+
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1112,6 +1411,19 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+    m.def(
+        "isMnemonicSupportedByStinkyTofu",
+        [](const std::string& mnemonic, nb::object arch_obj) {
+            std::array<int, 3> archArray = convertArch(arch_obj);
+            const auto* info =
+                ArchHelper::getInstance().getArchInfo(archArray[0], archArray[1], archArray[2]);
+            if (!info) return false;
+            const auto& map = info->getMnemonicToIsaOpcodeMap();
+            return map.find(mnemonic) != map.end();
+        },
+        nb::arg("mnemonic"), nb::arg("arch"),
+        "Check if StinkyTofu has a hardware instruction definition for the mnemonic on this "
+        "architecture. Lets rocisa ask before emitting an instruction StinkyTofu cannot lower.");
     // Wrapper class to add signature support to StinkyAsmModule
     class StinkyAsmModuleWithSignature {
        private:
@@ -1148,16 +1460,73 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_->getOutputDir();
         }
 
+        size_t numFunctions() const {
+            return module_->numFunctions();
+        }
+
+        std::vector<std::string> getFunctionNames() const {
+            std::vector<std::string> names;
+            for (const auto* function : module_->getFunctions()) {
+                if (function) names.push_back(function->getName());
+            }
+            return names;
+        }
+
+        bool hasFunction(const std::string& name) const {
+            return module_->getFunction(name) != nullptr;
+        }
+
         // Override emitAssembly to include signature
         std::string emitAssembly() const {
             std::string result;
             if (signature_) {
                 int64_t totalBytes = module_->getTotalInstructionBytes();
                 if (totalBytes >= 0) signature_->setTotalInstructionBytes(totalBytes);
+                refreshSgprCount();
                 result = signature_->toString();
             }
             result += module_->emitAssembly();
             return result;
+        }
+
+        /// A pass that rewrites operands invalidates the declared SGPR count, so
+        /// it is taken from the final code here rather than trusted from the
+        /// producer. Only that count moves: everything else in the descriptor
+        /// says what the hardware does before entry. Never raised, so a flow
+        /// whose registers did not move keeps the producer's number.
+        void refreshSgprCount() const {
+            stinkytofu::SignatureKernelDescriptor& kd = signature_->kernelDescriptor;
+            uint32_t required = 0;
+            for (const auto* function : module_->getFunctions()) {
+                if (function == nullptr) continue;
+                required = std::max(required, stinkytofu::requiredSgprCount(
+                                                  *function, kd.numSgprPreload, kd.sgprWorkGroup));
+            }
+            if (required == 0 || static_cast<int>(required) >= kd.totalSgprs) return;
+            signature_->setGprs(kd.totalVgprs, kd.totalAgprs, static_cast<int>(required));
+        }
+
+        // Plugin data forwarding
+        void setPluginDataI64(const std::string& key, int64_t value) {
+            module_->setPluginDataI64(key, value);
+        }
+        int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const {
+            return module_->getPluginDataI64(key, defaultVal);
+        }
+        void setPluginDataStr(const std::string& key, const std::string& value) {
+            module_->setPluginDataStr(key, value);
+        }
+        std::string getPluginDataStr(const std::string& key,
+                                     const std::string& defaultVal = "") const {
+            return module_->getPluginDataStr(key, defaultVal);
+        }
+
+        void registerPassAtExtensionPoint(PipelineExtensionPoint ep, const std::string& passName) {
+            module_->getPassBuilder().registerAtExtensionPoint(
+                ep, [passName](PassManager& PM, StinkyAsmModule& module) {
+                    auto pass = PassBuilder::createPassByName(passName, module);
+                    if (pass) PM.addPass(std::move(pass));
+                });
         }
 
         // Provide access to underlying module if needed
@@ -1165,6 +1534,13 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_;
         }
     };
+
+    // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
+    // Used by Tensile to declare per-kernel region-clone jobs (e.g. InitCIterWmma).
+    nb::class_<CloneSpec>(m, "CloneSpec")
+        .def(nb::init<std::string, std::string>(), nb::arg("name"), nb::arg("startLabel"))
+        .def_rw("name", &CloneSpec::name)
+        .def_rw("startLabel", &CloneSpec::startLabel);
 
     // Bind the wrapper class
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
@@ -1178,7 +1554,24 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
              "Set output dir for cost file: comparison_output/<yaml_name>; file at "
              "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
         .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
-        .def("getModule", &StinkyAsmModuleWithSignature::getModule);
+        .def("numFunctions", &StinkyAsmModuleWithSignature::numFunctions,
+             "Number of Functions in the lowered module (entry + callable functions)")
+        .def("getFunctionNames", &StinkyAsmModuleWithSignature::getFunctionNames,
+             "List every Function name in this module (entry first, then callable functions)")
+        .def("hasFunction", &StinkyAsmModuleWithSignature::hasFunction, nb::arg("name"),
+             "Return true when the lowered module contains a Function with the given name")
+        .def("getModule", &StinkyAsmModuleWithSignature::getModule)
+        .def("setPluginDataI64", &StinkyAsmModuleWithSignature::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModuleWithSignature::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModuleWithSignature::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModuleWithSignature::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def("registerPassAtExtensionPoint",
+             &StinkyAsmModuleWithSignature::registerPassAtExtensionPoint, nb::arg("extensionPoint"),
+             nb::arg("passName"), "Register a named C++ pass at a pipeline extension point");
 
     // Bind toStinkyTofuModule with signature support
     m.def(
@@ -1190,8 +1583,12 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            // Sentinel: <0 means use legacy default scratch SGPR in SwPrefetchInsertionPass (102).
-            moduleOptions.SwPrefetchScratchSgpr = -1;
+            // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
+            // is itself a valid (if extreme) value for the former and a valid enumerator for the
+            // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
+            // other DAG-scheduler knobs below.
+            moduleOptions.DsReadPerWmma = -1;
+            moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 
@@ -1209,17 +1606,23 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     }
 
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
+#define SET_MODULE_OPTION_WITH_DEFAULT(name, type, value) SET_MODULE_OPTION(name, type)
+                MODULE_OPTIONS_WITH_DEFAULTS_LIST(SET_MODULE_OPTION_WITH_DEFAULT)
+#undef SET_MODULE_OPTION_WITH_DEFAULT
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
             }
 
-            // Convert module to StinkyAsmModule (StinkyAsmModule ctor sets
-            // EnableSwPrefetchInsertion from Sgpr != -1)
             auto stinkyModule =
                 stinkytofu::toStinkyTofuModule(module, archArray, moduleName, moduleOptions);
 
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
             auto stinkySig = toStinkySignature(signature, archArray, moduleOptions.wavefrontSize);
+
+            // Expose per-wave VGPR allocation on the Function.
+            stinkyModule->getFunction().setMetaData(
+                kSigTotalVgprsMetaKey,
+                static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};

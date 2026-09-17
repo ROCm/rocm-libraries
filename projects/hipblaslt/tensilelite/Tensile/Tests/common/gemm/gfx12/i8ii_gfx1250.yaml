@@ -5,8 +5,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: False
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -24,11 +23,9 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
-  MinKForGSU: 1
   Architecture: gfx1250
   KeepBuildTmp: True
   PrintLevel: 2
-  UseGPUTimer: False
 
 BenchmarkProblems:
   #######################################
@@ -70,7 +67,8 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - LDSTrInst: [True, False]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -81,15 +79,15 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -142,7 +140,8 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - LDSTrInst: [True, False]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -153,15 +152,15 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -214,7 +213,8 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - LDSTrInst: [True, False]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -225,15 +225,15 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -286,7 +286,8 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - LDSTrInst: [True, False]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -297,15 +298,15 @@ BenchmarkProblems:
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
-        - 1LDSBuffer: [1]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

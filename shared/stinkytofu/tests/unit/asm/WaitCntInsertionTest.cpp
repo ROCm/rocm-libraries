@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -52,12 +53,12 @@ class WaitCntInsertionTest : public ::testing::Test {
         return func;
     }
 
-    void runInsertionPass(Function& func) {
+    void runInsertionPass(Function& func, WaitCntInsertionOptions options = {}) {
         PassContext passCtx;
         passCtx.setGemmTileConfig(gemmConfig);
         AnalysisManager am;
         registerAllAnalyses(am);
-        auto pass = stinkytofu::createStinkyWaitCntInsertionPass();
+        auto pass = stinkytofu::createStinkyWaitCntInsertionPass(options);
         pass->run(func, passCtx, am);
     }
 
@@ -349,6 +350,43 @@ st.func @test_ds_read_wmma() {
     EXPECT_EQ(waitcnts[1].waitData->vscnt, -1);
     EXPECT_EQ(waitcnts[1].waitData->dscnt, -1);
     EXPECT_EQ(waitcnts[1].waitData->kmcnt, -1);
+}
+
+TEST_F(WaitCntInsertionTest, WaitCountIsCappedAtMaxInFlightMinusOne) {
+    std::string irString = R"(
+st.func @test_wait_count_cap() {
+^entry:
+)";
+    for (int i = 0; i < 65; ++i) {
+        irString += "  v" + std::to_string(i) +
+                    " = \"st.ds_load_b32\"(v100) { issueCycles = 1, latencyCycles = 52 }\n";
+    }
+    irString += R"(  v200 = "st.v_add_f32"(v0, v0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
+
+    ASSERT_EQ(waitcnts.size(), 1) << "The first load should still be tracked after 65 issues";
+
+    StinkyInstruction* add = findNthInst(entryBB, GFX::v_add_f32, 0);
+    ASSERT_NE(add, nullptr);
+
+    int addPos = getInstructionPosition(entryBB, add);
+    EXPECT_EQ(waitcnts[0].position, addPos - 1);
+    EXPECT_EQ(waitcnts[0].waitData->dlcnt, 63)
+        << "64 in-flight DS ops ahead of the producer must clamp to max wait count 63";
+    EXPECT_EQ(waitcnts[0].waitData->vlcnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->vscnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->kmcnt, -1);
 }
 
 // ============================================================================
@@ -805,6 +843,87 @@ st.func @test_two_block_chain2() {
 }
 
 /**
+ * @brief Loop-carried LDS token deps do not force a header tensor wait.
+ *
+ * CFG:
+ *   entry -> loop_header -> loop_body -> loop_tail -> loop_header
+ *
+ * The tensor load in loop_header defines LDS token 0. When loop_tail flows
+ * back to loop_header, that token dependency is loop-carried and should not
+ * make the header barrier wait on its own earlier-iteration tensor load.
+ */
+TEST_F(WaitCntInsertionTest, LoopCarriedMemTokenPredDoesNotForceHeaderTensorWait) {
+    std::string irString = R"(
+st.func @test_loop_carried_memtoken_header() {
+^entry:
+  Successors: ^loop_header
+^loop_header:
+  LDS0 = "st.s_barrier_signal"(-1, LDS0) { issueCycles = 1, latencyCycles = 2, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.s_barrier_wait"(-1, LDS0) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop_body
+^loop_body:
+  Successors: ^loop_tail
+^loop_tail:
+  Successors: ^loop_header
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    BasicBlock& loopHeader = *std::next(func->begin());
+
+    runInsertionPass(*func);
+
+    StinkyInstruction* barrierSignal = findNthInst(loopHeader, GFX::s_barrier_signal, 0);
+    ASSERT_NE(barrierSignal, nullptr);
+
+    EXPECT_EQ(findTensorWaitCntBefore(loopHeader, barrierSignal), nullptr)
+        << "Frozen CK_Tensor state should not force "
+           "s_wait_tensorcnt before the loop header barrier";
+    EXPECT_EQ(countTensorWaitCnt(loopHeader), 0);
+}
+
+TEST_F(WaitCntInsertionTest, LoopCarriedMemTokenPredCanForceHeaderTensorWaitWhenEnabled) {
+    std::string irString = R"(
+st.func @test_loop_carried_memtoken_header_enabled() {
+^entry:
+  Successors: ^loop_header
+^loop_header:
+  LDS0 = "st.s_barrier_signal"(-1, LDS0) { issueCycles = 1, latencyCycles = 2, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.s_barrier_wait"(-1, LDS0) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop_body
+^loop_body:
+  Successors: ^loop_tail
+^loop_tail:
+  Successors: ^loop_header
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    BasicBlock& loopHeader = *std::next(func->begin());
+
+    WaitCntInsertionOptions options;
+    options.enableLoopCarriedTokenDeps = true;
+    runInsertionPass(*func, options);
+
+    StinkyInstruction* barrierSignal = findNthInst(loopHeader, GFX::s_barrier_signal, 0);
+    ASSERT_NE(barrierSignal, nullptr);
+
+    SWaitTensorCntData* tensorWait = findTensorWaitCntBefore(loopHeader, barrierSignal);
+    ASSERT_NE(tensorWait, nullptr)
+        << "Conservative mode should iterate CK_Tensor through loop-carried token state";
+    EXPECT_EQ(tensorWait->tlcnt, 0);
+    EXPECT_EQ(countTensorWaitCnt(loopHeader), 1);
+}
+
+/**
  * @brief Diamond CFG with multi-predecessor merge.
  *
  * CFG:
@@ -1216,10 +1335,8 @@ st.func @test_ds_store_raw_ds_load() {
 // Test Suite 6: Conservative Fallback for Missing MemTokenData
 //
 // The pass uses MemTokenData for three LDS-related decisions: barrier-vs-DS
-// conflict, WAR-on-LDS synthesis, and tensor-load/barrier matching. When the
-// upstream StinkyBuildImplicitDependencyPass is configured to skip token
-// annotation (e.g. unrollMovableBarrier=false) or any specific op is missing
-// MemTokenData, a hybrid conservative policy fires:
+// conflict, WAR-on-LDS synthesis, and tensor-load/barrier matching. When any
+// specific op is missing MemTokenData, a hybrid conservative policy fires:
 //
 //   * Anchor missing tokens (writer / barrier) -> full drain on the relevant
 //     counter (s_wait_dscnt 0 or s_wait_tensorcnt 0).

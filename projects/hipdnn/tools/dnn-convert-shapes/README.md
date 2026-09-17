@@ -11,7 +11,7 @@ Convert MIOpen driver shape files to hipDNN JSON graph files.
 
 It supports convolution and batchnorm operations, 2-D and 3-D convolutions, forward/backward/wgrad directions, and NCHW/NHWC layouts.
 
-The generated JSON graphs are consumed by [`dnn-benchmark`](../dnn-benchmarking/README.md) to run and benchmark the shapes against hipDNN providers.
+The generated JSON graphs are consumed by [`dnn-benchmark`](https://github.com/ROCm/dnn-benchmarking) to run and benchmark shapes against hipDNN providers, and by hipDNN provider integration tests as committed graph descriptions in [`integration-test-bundles`](../../../../dnn-providers/integration-tests/integration-test-bundles/).
 
 ## Installation
 

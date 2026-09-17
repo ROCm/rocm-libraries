@@ -18,7 +18,7 @@ Tests:
   pointer_mode_host: [true, false]
   algo: 1 # internal logging with hipblaslt backend
   os_flags: [ LINUX ]
-  gpu_arch: [ '12??' ] # expected backend for LAYER=8
+  gpu_arch: [ '120?' ] # expected backend for LAYER=8
 
 
 ...

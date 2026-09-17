@@ -22,13 +22,17 @@
  * ************************************************************************ */
 #include "stinkytofu/bindings/python/Module.hpp"
 
+#include <cstdint>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
+#include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -64,9 +68,17 @@ struct StinkyAsmModule::Impl {
     std::unordered_map<std::string, InstructionGroupRange> instructionGroups;
 
     Function function;
+    std::vector<std::unique_ptr<Function>> callableFunctions;
 
     // Total instruction encoding size in bytes (for .amdhsa_inst_pref_size). -1 if not set.
     int64_t totalInstructionBytes = -1;
+
+    // Plugin data: opaque key-value stores for pass plugins.
+    std::unordered_map<std::string, int64_t> pluginDataI64;
+    std::unordered_map<std::string, std::string> pluginDataStr;
+
+    // Per-module pass builder for plugin pass registration.
+    PassBuilder passBuilder;
 
     Impl(const std::string& name, const std::array<int, 3>& arch) : name(name), arch(arch) {
         // Create a single BasicBlock to hold all instructions
@@ -81,11 +93,7 @@ struct StinkyAsmModule::Impl {
 
 StinkyAsmModule::StinkyAsmModule(const std::string& name, const std::array<int, 3>& arch,
                                  const ModuleOptions& moduleOptions)
-    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {
-    // SwPrefetchScratchSgpr == -1: do not run SwPrefetchInsertionPass (see Gfx1250Backend).
-    this->moduleOptions.EnableSwPrefetchInsertion =
-        (this->moduleOptions.SwPrefetchScratchSgpr != -1);
-}
+    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {}
 
 StinkyAsmModule::~StinkyAsmModule() = default;
 
@@ -124,6 +132,57 @@ const Function& StinkyAsmModule::getFunction() const {
     return pImpl->function;
 }
 
+Function& StinkyAsmModule::createFunction(std::string_view name, bool isCallable) {
+    if (name.empty()) {
+        report_fatal_error("Cannot create a callable Function with an empty name");
+    }
+    if (getFunction(name) != nullptr) {
+        report_fatal_error("Duplicate StinkyTofu Function name '" + std::string(name) +
+                           "' (names must be unique within the module)");
+    }
+    auto& func =
+        pImpl->callableFunctions.emplace_back(std::make_unique<Function>(std::string(name)));
+    func->setIsCallable(isCallable);
+    func->createBasicBlock("entry");
+    return *func;
+}
+
+Function* StinkyAsmModule::getFunction(std::string_view name) {
+    if (name.empty()) return &pImpl->function;
+    for (auto& func : pImpl->callableFunctions) {
+        if (func && func->getName() == name) return func.get();
+    }
+    return nullptr;
+}
+
+const Function* StinkyAsmModule::getFunction(std::string_view name) const {
+    if (name.empty()) return &pImpl->function;
+    for (const auto& func : pImpl->callableFunctions) {
+        if (func && func->getName() == name) return func.get();
+    }
+    return nullptr;
+}
+
+std::vector<Function*> StinkyAsmModule::getFunctions() {
+    std::vector<Function*> out;
+    out.reserve(1 + pImpl->callableFunctions.size());
+    out.push_back(&pImpl->function);
+    for (auto& func : pImpl->callableFunctions) out.push_back(func.get());
+    return out;
+}
+
+std::vector<const Function*> StinkyAsmModule::getFunctions() const {
+    std::vector<const Function*> out;
+    out.reserve(1 + pImpl->callableFunctions.size());
+    out.push_back(&pImpl->function);
+    for (const auto& func : pImpl->callableFunctions) out.push_back(func.get());
+    return out;
+}
+
+size_t StinkyAsmModule::numFunctions() const {
+    return 1 + pImpl->callableFunctions.size();
+}
+
 std::string StinkyAsmModule::emitAssembly() const {
     // Configure the emitter with default options
     stinkytofu::AsmEmitterOptions options;
@@ -134,7 +193,11 @@ std::string StinkyAsmModule::emitAssembly() const {
     options.useSymbolicNames = true;  // Enable symbolic register names
 
     stinkytofu::StinkyAsmEmitter emitter(options);
-    return emitter.emit(getFunction());
+    std::string result = emitter.emit(getFunction());
+    for (const auto& callable : pImpl->callableFunctions) {
+        if (callable) result += emitter.emit(*callable);
+    }
+    return result;
 }
 
 void StinkyAsmModule::runOptimizationPipeline() {
@@ -215,6 +278,33 @@ void StinkyAsmModule::setTotalInstructionBytes(int64_t totalBytes) {
 
 int64_t StinkyAsmModule::getTotalInstructionBytes() const {
     return pImpl->totalInstructionBytes;
+}
+
+void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {
+    pImpl->pluginDataI64[key] = value;
+}
+
+int64_t StinkyAsmModule::getPluginDataI64(const std::string& key, int64_t defaultVal) const {
+    auto it = pImpl->pluginDataI64.find(key);
+    return it != pImpl->pluginDataI64.end() ? it->second : defaultVal;
+}
+
+void StinkyAsmModule::setPluginDataStr(const std::string& key, const std::string& value) {
+    pImpl->pluginDataStr[key] = value;
+}
+
+std::string StinkyAsmModule::getPluginDataStr(const std::string& key,
+                                              const std::string& defaultVal) const {
+    auto it = pImpl->pluginDataStr.find(key);
+    return it != pImpl->pluginDataStr.end() ? it->second : defaultVal;
+}
+
+PassBuilder& StinkyAsmModule::getPassBuilder() {
+    return pImpl->passBuilder;
+}
+
+const PassBuilder& StinkyAsmModule::getPassBuilder() const {
+    return pImpl->passBuilder;
 }
 
 }  // namespace stinkytofu

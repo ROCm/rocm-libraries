@@ -609,7 +609,7 @@ constexpr arch::wavefront::target get_wavefront_size(const gen gen = gen::unknow
  */
 constexpr target_arch device_target_arch()
 {
-#if defined(__amdgcn_processor__) && !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
+#if defined(__amdgcn_processor__)
     // The terminating zero is not counted in the length of the string
     return get_target_arch_from_name(__amdgcn_processor__,
                                      sizeof(__amdgcn_processor__) - sizeof('\0'));
@@ -733,8 +733,8 @@ template<class Config,
          template<class, class, class>
          class LaunchSelector,
          arch::wavefront::target TargetWaveSize = get_wavefront_size(Target::g)>
-ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
-void trampoline_kernel(Kernel kernel)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS((LaunchSelector<Config, Selector, Target>::block_size)) void
+    trampoline_kernel(Kernel kernel)
 {
     using TargetConfig = target_config<Config, Selector, Target, TargetWaveSize>;
 

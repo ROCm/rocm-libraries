@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_stebz.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -47,6 +48,7 @@ rocblas_status rocsolver_stebz_impl(rocblas_handle handle,
                                     rocblas_int* iblock,
                                     rocblas_int* isplit,
                                     rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("stebz", "--erange", erange, "--eorder", eorder, "-n", n, "--vl", vl,
                         "--vu", vu, "--il", il, "--iu", iu, "--abstol", abstol);
@@ -100,6 +102,10 @@ rocblas_status rocsolver_stebz_impl(rocblas_handle handle,
         handle, erange, eorder, n, vl, vu, il, iu, abstol, D, shiftD, strideD, E, shiftE, strideE,
         nev, nsplit, W, strideW, iblock, strideIblock, isplit, strideIsplit, info, batch_count,
         (rocblas_int*)work, (T*)pivmin, (T*)Esqr, (T*)bounds, (T*)inter, (rocblas_int*)ninter);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

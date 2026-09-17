@@ -71,7 +71,7 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");
@@ -293,9 +293,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
-                SKIP("This observer only applies to CDNA archictectures");
+                SKIP("This observer only applies to CDNA4 or earlier archictectures");
             }
 
             SECTION("Has hazard with 2nd op (non-trans) accessing the same register")
@@ -384,9 +384,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
-                SKIP("This observer only applies to CDNA archictectures");
+                SKIP("This observer only applies to CDNA4 or earlier archictectures");
             }
 
             SECTION("Hazard with VALU write followed by a readlane or permlane")
@@ -493,7 +493,7 @@ namespace HazardObserverTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");
@@ -602,9 +602,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
-                SKIP("This observer only applies to CDNA archictectures");
+                SKIP("This observer only applies to CDNA4 or earlier archictectures");
             }
 
             auto context = TestContext::ForTarget(arch);
@@ -637,7 +637,7 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            if(!arch.isCDNAGPU() || arch.isCDNA5GPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");

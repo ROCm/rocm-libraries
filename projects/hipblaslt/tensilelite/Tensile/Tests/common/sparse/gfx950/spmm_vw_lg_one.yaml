@@ -3,10 +3,9 @@ TestParameters:
 
 GlobalParameters:
   SleepPercent: 50
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
-  MaxFileName: 256
   # PrintTensorD: 0x2
   #DataInitTypeA: 1
   #DataInitTypeB: 8
@@ -26,7 +25,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumBenchmarks: 1
   # KernelTime: False
-  MinKForGSU: 1
   # PrintCodeCommands: True
   # CpuThreads: 1
   # GenerateSourcesAndExit: True
@@ -74,7 +72,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -122,7 +120,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -170,7 +168,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -218,7 +216,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -267,7 +265,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -315,7 +313,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -363,7 +361,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:
@@ -411,7 +409,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
       BenchmarkForkParameters:

@@ -1,0 +1,18 @@
+{
+  "version": "0.1",
+  "id": "ukd-pointwise-add-f32-b128",
+  "name": "PointwiseAdd f32 block128",
+  "kernel_source": {
+    "kind": "hip",
+    "source": "PointwiseAdd.cpp",
+    "entry": "PointwiseAdd",
+    "build": {
+      "defines": {
+        "HIP_PLUGIN_POINTWISE_ADD_TYPE": "float",
+        "HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE": 128
+      }
+    }
+  },
+  "metadata": { "dtype": "FLOAT", "block_size": 128 },
+  "priority": 0
+}

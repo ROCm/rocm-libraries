@@ -30,6 +30,12 @@
 
 HIPSOLVER_BEGIN_NAMESPACE
 
+struct hipsolverDnHandle
+{
+    cusolverDnHandle_t handle;
+    cublasHandle_t     blas_handle;
+};
+
 cublasOperation_t hip2cuda_operation(hipsolverOperation_t op);
 
 hipsolverOperation_t cuda2hip_operation(cublasOperation_t op);
@@ -64,9 +70,13 @@ cusolverDeterministicMode_t hip2cuda_deterministic(hipsolverDeterministicMode_t 
 hipsolverDeterministicMode_t cuda2hip_deterministic(cusolverDeterministicMode_t mode);
 #endif
 
-hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus);
+cusolverDirectMode_t hip2cuda_direct(hipsolverDirectMode_t direct);
+
+cusolverStorevMode_t hip2cuda_storev(hipsolverStorevMode_t storev);
 
 hipsolverStatus_t cuda2hip_status(cublasStatus_t cuStatus);
+
+hipsolverStatus_t cuda2hip_status(cusolverStatus_t cuStatus);
 
 // Dense API
 cusolverDnFunction_t hip2cuda_function(hipsolverDnFunction_t func);

@@ -9,21 +9,17 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 21
   DataInitTypeB: 21
   DataInitTypeC: 21
-  DataInitTypeeScaleE: 21
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
   DataInitTypeScaleAlphaVec: 21
   BoundsCheck: 2
   #KeepBuildTmp: True
-  MaxLDS: 163840
-  DeviceLDS: 163840
 
 BenchmarkProblems:
   ########################################
@@ -65,7 +61,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [4]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [0]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -78,9 +74,9 @@ BenchmarkProblems:
         #- GlobalReadPerMfma: [1]
         #- LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - ConvertAfterDS: [True]
 
       BenchmarkJoinParameters:
@@ -136,7 +132,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [4]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -149,9 +145,9 @@ BenchmarkProblems:
         #- GlobalReadPerMfma: [1]
         #- LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - ConvertAfterDS: [True]
 
       BenchmarkJoinParameters:
@@ -207,7 +203,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [4]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [0]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -220,9 +216,9 @@ BenchmarkProblems:
         #- GlobalReadPerMfma: [1]
         #- LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - ConvertAfterDS: [True]
 
       BenchmarkJoinParameters:
@@ -278,7 +274,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [4]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [0]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -291,9 +287,9 @@ BenchmarkProblems:
         #- GlobalReadPerMfma: [1]
         #- LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - ConvertAfterDS: [True]
 
       BenchmarkJoinParameters:

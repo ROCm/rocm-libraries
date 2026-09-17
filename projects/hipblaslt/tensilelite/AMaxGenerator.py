@@ -42,13 +42,14 @@ from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assi
 from Tensile.Common.Types import IsaVersion
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
-def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
+def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnack: bool = False):
     vgpr = ((vgpr+7)//8)*8
     sgpr = ((sgpr+7)//8)*8
     lds  = ((lds+31)//32)*32
 
+    target_id = f'{gfx_arch}:xnack+' if xnack else gfx_arch
     header = ""
-    header += f'.amdgcn_target "amdgcn-amd-amdhsa--{gfx_arch}"\n'
+    header += f'.amdgcn_target "amdgcn-amd-amdhsa--{target_id}"\n'
     header += f'.text\n'
     header += f'.protected {name}\n'
     header += f'.globl {name}\n'
@@ -685,6 +686,7 @@ class AMaxKernelGenerator:
         label_upper = Label("upper", f'upper')
         label_lower = Label("lower", f'lower')
         label_empty = Label("empty", f'empty')
+        label_sync  = Label("inter_sync", f'inter-wave LDS reuse')
         label_end   = Label("end", f'end')
         mod = Module("inter_wave_reduction")
         mod.addComment0("inter_wave_reduction")
@@ -711,7 +713,7 @@ class AMaxKernelGenerator:
         mod.add(DSStorex1(vgpr("Tmp"), vgpr("Output"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(ri.SBarrier())
-        mod.add(ri.SBranch(label_inter.getLabelName()))
+        mod.add(ri.SBranch(label_sync.getLabelName()))
         mod.add(label_lower)
         mod.add(ri.SBarrier())
         mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), int(log2(self.bpe)), vgpr("Widx")))
@@ -720,8 +722,13 @@ class AMaxKernelGenerator:
         mod.add(DSLoadx1(vgpr("OutputB"), vgpr("Tmp"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(self.merge_sum())
-        mod.add(ri.SBranch(label_inter.getLabelName()))
+        mod.add(ri.SBranch(label_sync.getLabelName()))
         mod.add(label_empty)
+        mod.add(ri.SBarrier())
+        mod.add(label_sync)
+        # The first barrier publishes the upper-wave writes. This second
+        # barrier retires the lower-wave reads before the next tree level
+        # reuses the same LDS slots.
         mod.add(ri.SBarrier())
         mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_end)
@@ -862,6 +869,7 @@ if __name__ == '__main__':
     ap.add_argument('--debug-build', action='store_true', dest='debug_build', help='Build with debug information')
     ap.add_argument('--is-scale', action='store_true', dest='is_scale', help='Enable scaled output or not')
     ap.add_argument('--arch', type=str, default='gfx90a', help='Target architecture for assembler, e.g. gfx908. Default is gfx90a')
+    ap.add_argument('--xnack', action='store_true', help='Append :xnack+ to the .amdgcn_target code-object id (arch logic still uses the base arch)')
     ap.set_defaults(debug_build=False)
 
     args = ap.parse_args()
@@ -875,6 +883,7 @@ if __name__ == '__main__':
     debug_build: bool = args.debug_build
     arch: str = args.arch
     is_scale: bool = args.is_scale
+    xnack: bool = args.xnack
     isa = gfxToIsa(arch)
 
     if any([not i for i in (arch, toolchain_path, isa)]):
@@ -894,7 +903,7 @@ if __name__ == '__main__':
     func_name = amax.func_name
     meta = KernelMeta(func_name, amax.vgpr_pool.size(), amax.sgpr_pool.size(), 0, amax.lds_usage_byte, waveFrontSize, w, 8, args)
     meta.update_args_offsets()
-    k_str = '\n'.join([kernel_header(func_name, arch, amax.vgpr_pool.size(), amax.sgpr_pool.size(), amax.lds_usage_byte),
+    k_str = '\n'.join([kernel_header(func_name, arch, amax.vgpr_pool.size(), amax.sgpr_pool.size(), amax.lds_usage_byte, xnack),
                        meta_str((meta,)),
                        str(kernel_body)])
 

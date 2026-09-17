@@ -25,13 +25,13 @@
 #include "check_numerics_matrix.hpp"
 #include "handle.hpp"
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
 
 #include "int64_helpers.hpp"
 #include "tensile_host.hpp"
 
 /*******************************************************************************
- * Tensile Function call
+ * Tensile / HipBLASLt GEMM dispatch (problem construction shared)
  ******************************************************************************/
 template <typename Ti, typename To, typename Tc>
 inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
@@ -247,4 +247,4 @@ inline rocblas_status rocblas_call_tensile(rocblas_handle     handle,
     return rocblas_status_success;
 }
 
-#endif // BUILD_WITH_TENSILE
+#endif // BUILD_WITH_TENSILE || BUILD_WITH_HIPBLASLT

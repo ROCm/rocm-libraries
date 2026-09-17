@@ -56,7 +56,13 @@ bool MultiMarginLossForward::IsImprovementOverROCm(
         case miopenFloat: return C <= 33;
         case miopenHalf: return C <= 43;
         case miopenBFloat16: return C <= 44;
-        default: return true;
+
+        case miopenInt32:
+        case miopenInt8:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenInt64: return true;
         }
     }
     else
@@ -66,7 +72,13 @@ bool MultiMarginLossForward::IsImprovementOverROCm(
         case miopenFloat: return C <= 31;
         case miopenHalf: return C <= 38;
         case miopenBFloat16: return C <= 40;
-        default: return true;
+
+        case miopenInt32:
+        case miopenInt8:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenInt64: return true;
         }
     }
 }

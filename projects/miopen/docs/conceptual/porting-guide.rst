@@ -620,7 +620,7 @@ Convolution operations
 
           .. important::
              ``miopenConvolutionBackwardBias`` is deprecated and will be removed in a future
-             release. The underlying OpenCL kernel has been removed and this function now
+             release. This function now
              returns ``miopenStatusNotImplemented``.
 
     *
