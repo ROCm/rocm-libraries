@@ -242,7 +242,9 @@ void rocke_dconv4c_build_descriptors(rocke_dconv_4c_ctx_t* ctx)
         static const char* const up_h[1] = {"y_iter"};
         static const char* const up_w[2] = {"wo", "s"};
         int strides_h[1] = {1};
-        int strides_w[2] = {1, 1};
+        int strides_w[2];
+        strides_w[0] = p->stride;
+        strides_w[1] = 1;
 
         lengths[0] = p->N;
         lengths[1] = p->H;
@@ -253,7 +255,7 @@ void rocke_dconv4c_build_descriptors(rocke_dconv_4c_ctx_t* ctx)
         /* embed(upper=("y_iter",), into="h", strides=(1,), offset=-PAD,
          *       lo=0, hi=H). */
         xforms[0] = rocke_embed_bounded(b, up_h, 1, "h", strides_h, -p->PAD, 0, p->H);
-        /* embed(upper=("wo","s"), into="w", strides=(1,1), offset=-PAD,
+        /* embed(upper=("wo","s"), into="w", strides=(stride,1), offset=-PAD,
          *       lo=0, hi=W). */
         xforms[1] = rocke_embed_bounded(b, up_w, 2, "w", strides_w, -p->PAD, 0, p->W);
 
