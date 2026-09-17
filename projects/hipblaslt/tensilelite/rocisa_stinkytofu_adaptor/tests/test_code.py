@@ -1177,6 +1177,12 @@ class _MockLogicalModule:
     def add_set_directive(self, symbol, value):
         self.items.append(("set", symbol, value))
 
+    def add_if_directive(self, condition):
+        self.items.append(("if", condition))
+
+    def add_endif_directive(self, comment):
+        self.items.append(("endif", comment))
+
     def add_textblock(self, text):
         self.items.append(("textblock", text))
 
@@ -1263,6 +1269,22 @@ class TestPopulateLogicalModule(unittest.TestCase):
         self.assertEqual(items[3], ("inst", "B"))
         self.assertEqual(items[4], ("set", "vgprBase", "UNDEF"))
 
+    def test_if_and_endif_emitted_as_conditional_directives(self):
+        m = Module()
+        m.add(_FakeLogicalInst("A"))
+        m.add(ValueIf("0"))
+        m.add(_FakeLogicalInst("B"))
+        m.add(ValueEndif("overflowed resources"))
+        self.assertEqual(
+            self._payloads(m),
+            [
+                ("inst", "A"),
+                ("if", "0"),
+                ("inst", "B"),
+                ("endif", "overflowed resources"),
+            ],
+        )
+
     def test_callable_module_emits_callable_markers(self):
         outer = Module()
         callable_module = Module("activation")
@@ -1293,6 +1315,8 @@ try:
         and hasattr(_stinky, "lower_logical_module")
         and hasattr(_stinky, "VMovB32")
         and hasattr(_stinky.LogicalModule, "begin_callable")
+        and hasattr(_stinky.LogicalModule, "add_if_directive")
+        and hasattr(_stinky.LogicalModule, "add_endif_directive")
     )
 except ImportError:
     _STINKY_OK = False
@@ -1388,6 +1412,19 @@ class TestToStinkyAsm(unittest.TestCase):
         self.assertIn("v_mov_b32", text)
         self.assertIn("a header comment", text)
         self.assertIn("a footer comment", text)
+
+    def test_if_and_endif_appear_in_output(self):
+        m = Module("kConditional")
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueIf("0"))
+        m.add(self._make_fake_vmovb32())
+        m.add(ValueEndif("overflowed resources"))
+        text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+        self.assertIn(".if 0\n", text)
+        self.assertIn(
+            ".endif" + " " * 44 + " // overflowed resources\n",
+            text,
+        )
 
     def test_arch_accepts_sequence_not_just_list(self):
         # Tuples / arrays are common in KernelWriter (kernel["ISA"] is
@@ -1967,7 +2004,7 @@ class TestStructuredModuleCountType(unittest.TestCase):
 
 
 class TestValueIfConstruction(unittest.TestCase):
-    """``ValueIf`` ctor + toString format + Item integration."""
+    """``ValueIf`` payload and Item integration."""
 
     def test_construction_positional(self):
         vi = ValueIf("foo == 1")
@@ -1992,23 +2029,6 @@ class TestValueIfConstruction(unittest.TestCase):
         # The whole point of inheriting Item in Commit Y: standard
         # type-walks see ValueIf as a code-composition node.
         self.assertIsInstance(ValueIf("x"), Item)
-
-    def test_toString_format(self):
-        # ``".if " + value + "\\n"``. The trailing newline matters
-        # because Module.toString concatenates child toString()
-        # outputs verbatim.
-        self.assertEqual(ValueIf("a == b").toString(), ".if a == b\n")
-
-    def test_toString_empty_value(self):
-        # C++ doesn't reject empty value; produces ".if \n".
-        # KernelWriter never does this in practice but parity is
-        # cheap so we keep it.
-        self.assertEqual(ValueIf("").toString(), ".if \n")
-
-    def test_str_delegates_to_toString(self):
-        # Inherited Item.__str__ -> self.toString().
-        self.assertEqual(str(ValueIf("k > 0")), ".if k > 0\n")
-
 
 class TestValueElseIfConstruction(unittest.TestCase):
     """``ValueElseIf`` -- mirror of ``ValueIf`` with ``.elseif`` prefix."""
@@ -2059,61 +2079,6 @@ class TestValueEndifConstruction(unittest.TestCase):
         self.assertIsInstance(ValueEndif(), Item)
 
 
-class TestValueEndifToStringFormatting(unittest.TestCase):
-    """ValueEndif's ``toString`` mirrors rocisa's ``formatStr``
-    byte-for-byte. The padding-to-column-50 behaviour is the only
-    non-trivial bit in this batch; we pin it explicitly because
-    production-build diffs against the rocisa baseline would
-    otherwise show as spurious whitespace changes."""
-
-    def test_empty_comment_no_padding(self):
-        # rocisa formatStr: empty comment -> ".endif\n" with no
-        # padding (avoids trailing-whitespace lines).
-        self.assertEqual(ValueEndif().toString(), ".endif\n")
-        self.assertEqual(ValueEndif("").toString(), ".endif\n")
-
-    def test_nonempty_comment_padded_to_column_50(self):
-        # ``.endif`` is 6 chars, so 44 spaces are appended to reach
-        # column 50, then ``" // closing\n"``. Total line length:
-        # 6 + 44 + 4 + 7 + 1 = 62 chars.
-        out = ValueEndif("closing").toString()
-        expected = ".endif" + " " * 44 + " // closing\n"
-        self.assertEqual(out, expected)
-        self.assertEqual(len(out), 62)
-        # The ``//`` must land at exactly column 51 (0-indexed),
-        # the same column rocisa instruction lines target.
-        self.assertEqual(out.index("//"), 51)
-
-    def test_long_instr_no_negative_padding(self):
-        # The ``max(0, 50 - len)`` guard in _format_endif_str
-        # protects against the unlikely future case where the
-        # instruction string itself exceeds width 50. We exercise
-        # it via the private helper directly since ValueEndif's
-        # instr is always ``.endif`` (6 chars).
-        from rocisa_stinkytofu_adaptor.code import _format_endif_str
-        out = _format_endif_str("X" * 55, "tail")
-        # No padding (negative clamped to 0), so the comment is
-        # appended immediately after the long instr.
-        self.assertEqual(out, "X" * 55 + " // tail\n")
-
-    def test_outputNoComment_suppresses_comment(self):
-        # When the rocIsa output-options flag is set, ValueEndif
-        # drops the comment AND the padding -- matches rocisa's
-        # ``formatStr`` ``noComment=True`` branch (falls through to
-        # ``formattedStr + "\n"``).
-        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
-        opts = rocIsa.getInstance().getOutputOptions()
-        saved = opts.outputNoComment
-        try:
-            opts.outputNoComment = True
-            self.assertEqual(
-                ValueEndif("would be suppressed").toString(),
-                ".endif\n",
-            )
-        finally:
-            opts.outputNoComment = saved
-
-
 class TestValueConditionalPickle(unittest.TestCase):
     """Pickle round-trip preserves the single string field on each of
     the three classes. Mirrors rocisa's pickle hooks which serialise
@@ -2126,7 +2091,6 @@ class TestValueConditionalPickle(unittest.TestCase):
         self.assertEqual(restored.value, "count > 0")
         self.assertEqual(restored.name, "ValueIf")
         self.assertIsNone(restored.parent)
-        self.assertEqual(restored.toString(), original.toString())
 
     def test_valueelseif_pickle_round_trip(self):
         original = ValueElseIf("y == 2")
@@ -2140,7 +2104,6 @@ class TestValueConditionalPickle(unittest.TestCase):
         restored = pickle.loads(pickle.dumps(original))
         self.assertIsInstance(restored, ValueEndif)
         self.assertEqual(restored.comment, "EndIf guard")
-        self.assertEqual(restored.toString(), original.toString())
 
     def test_valueendif_pickle_round_trip_default(self):
         # The bare ``ValueEndif()`` case picks up the default "".
@@ -2173,10 +2136,7 @@ class TestValueConditionalDeepCopy(unittest.TestCase):
 
 
 class TestValueConditionalModuleIntegration(unittest.TestCase):
-    """A full ``.if`` / ``.elseif`` / ``.endif`` block built inside a
-    Module reproduces the CustomSchedule.py:448-466 pattern. The
-    emitted string must concatenate the three children verbatim
-    (each child supplies its own trailing newline)."""
+    """Conditional nodes remain ordered and owned by their Module."""
 
     def _build_if_elseif_endif_module(self) -> Module:
         m = Module("conditional")
@@ -2184,15 +2144,6 @@ class TestValueConditionalModuleIntegration(unittest.TestCase):
         m.add(ValueElseIf("\\useGR == 0"))
         m.add(ValueEndif("EndIf useGR"))
         return m
-
-    def test_module_toString_concatenates_block(self):
-        out = str(self._build_if_elseif_endif_module())
-        expected = (
-            ".if \\useGR == 1\n"
-            ".elseif \\useGR == 0\n"
-            ".endif" + " " * 44 + " // EndIf useGR\n"
-        )
-        self.assertEqual(out, expected)
 
     def test_reparented_on_add(self):
         # Item.parent must be set to the containing Module on add()
@@ -2213,15 +2164,13 @@ class TestValueConditionalModuleIntegration(unittest.TestCase):
         self.assertEqual(m.countType(ValueElseIf), 1)
         self.assertEqual(m.countType(ValueEndif), 1)
 
-    def test_deepcopy_module_with_conditionals_preserves_block(self):
-        # Cloning a Module containing ValueIf/ElseIf/Endif must
-        # round-trip the emitted block exactly -- ParallelMap2-style
-        # workers rely on this if they ever decide to deepcopy a
-        # Module subtree (rare but legal).
+    def test_deepcopy_module_with_conditionals_preserves_payloads(self):
         m = self._build_if_elseif_endif_module()
         clone = copy.deepcopy(m)
         self.assertIsNot(clone, m)
-        self.assertEqual(str(clone), str(m))
+        self.assertEqual(clone.items()[0].value, "\\useGR == 1")
+        self.assertEqual(clone.items()[1].value, "\\useGR == 0")
+        self.assertEqual(clone.items()[2].comment, "EndIf useGR")
 
 
 # ===========================================================================

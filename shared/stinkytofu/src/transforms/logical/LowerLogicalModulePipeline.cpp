@@ -115,11 +115,13 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
     {
         const auto& instructions = module.getInstructions();
         const auto& directives = module.getSetDirectives();
+        const auto& conditionalDirectives = module.getConditionalDirectives();
         const auto& labels = module.getLabels();
         const auto& textBlocks = module.getTextBlocks();
         const auto& groupMarkers = module.getGroupMarkers();
         const auto& callableMarkers = module.getCallableMarkers();
         size_t dirIdx = 0;
+        size_t condIdx = 0;
         size_t lblIdx = 0;
         size_t tbIdx = 0;
         size_t gmIdx = 0;
@@ -221,6 +223,21 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                     }
                     return;
                 }
+                case 4: {
+                    const auto& entry = conditionalDirectives[condIdx++];
+                    AsmDirective* dir = IRBase::createIR<AsmDirective>();
+                    if (entry.kind == ConditionalDirectiveKind::IF) {
+                        dir->kind = AsmDirectiveKind::IF;
+                        dir->name = ".if";
+                        dir->condition = entry.payload;
+                    } else {
+                        dir->kind = AsmDirectiveKind::ENDIF;
+                        dir->name = ".endif";
+                        dir->comment = entry.payload;
+                    }
+                    currentBB->appendIR(dir);
+                    break;
+                }
                 default:
                     break;
             }
@@ -253,6 +270,12 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                     callableMarkers[cmIdx].order < bestOrder) {
                     bestOrder = callableMarkers[cmIdx].order;
                     bestType = 3;
+                }
+                if (condIdx < conditionalDirectives.size() &&
+                    conditionalDirectives[condIdx].position <= pos &&
+                    conditionalDirectives[condIdx].order < bestOrder) {
+                    bestOrder = conditionalDirectives[condIdx].order;
+                    bestType = 4;
                 }
 
                 if (bestType == -1) break;

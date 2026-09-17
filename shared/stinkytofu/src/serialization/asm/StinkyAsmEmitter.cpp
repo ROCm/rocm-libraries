@@ -874,9 +874,23 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
         // Output raw text as-is (no newline added since text may already have it)
         os << directive.value;
         return;
-    } else if (directive.kind == AsmDirectiveKind::IF ||
-               directive.kind == AsmDirectiveKind::ENDIF) {
-        os << directive.value;
+    } else if (directive.kind == AsmDirectiveKind::IF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".if " << directive.condition << "\n";
+        }
+        return;
+    } else if (directive.kind == AsmDirectiveKind::ENDIF) {
+        if (!directive.value.empty()) {
+            os << directive.value;
+        } else {
+            os << ".endif";
+            if (options.emitComments && !directive.comment.empty()) {
+                os << std::string(44, ' ') << " // " << directive.comment;
+            }
+            os << "\n";
+        }
         return;
     }
 
