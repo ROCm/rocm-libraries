@@ -49,6 +49,8 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_f32_16x16x96_fp6", "acc6"},
     {"mfma_f32_16x16x128_fp8", "acc128"},
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
+    {"wmma_scale_f32_16x16x128_fp8_fp8", "mxacc"},
+    {"wmma_scale16_f32_16x16x128_fp8_fp8", "mxacc"},
 };
 
 /* Accumulator fragment length for op_id, from the arch SSOT
@@ -649,6 +651,32 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
     extra[0] = a_scale;
     extra[1] = b_scale;
     return rocke_b_mma(b, "mfma_scale_f32_16x16x128_f8f6f4", a, bb, c, extra, 2);
+}
+
+rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                        rocke_value_t* a,
+                                                        rocke_value_t* bb,
+                                                        rocke_value_t* c,
+                                                        rocke_value_t* a_scale,
+                                                        rocke_value_t* b_scale)
+{
+    rocke_value_t* extra[2];
+    extra[0] = a_scale;
+    extra[1] = b_scale;
+    return rocke_b_mma(b, "wmma_scale_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
+}
+
+rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                          rocke_value_t* a,
+                                                          rocke_value_t* bb,
+                                                          rocke_value_t* c,
+                                                          rocke_value_t* a_scale,
+                                                          rocke_value_t* b_scale)
+{
+    rocke_value_t* extra[2];
+    extra[0] = a_scale;
+    extra[1] = b_scale;
+    return rocke_b_mma(b, "wmma_scale16_f32_16x16x128_fp8_fp8", a, bb, c, extra, 2);
 }
 
 /* ===================================================================== */
