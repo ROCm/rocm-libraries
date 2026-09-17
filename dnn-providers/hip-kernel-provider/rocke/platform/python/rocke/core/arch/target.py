@@ -764,6 +764,15 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         None,
         _wmma_gfx12_acc_16x16,
     ),
+    "wmma_scale_f32_16x16x128_bf8_bf8": _FragInfo(
+        16,
+        16,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
+    ),
     "wmma_scale_f32_16x16x128_fp4_fp4": _FragInfo(
         16,
         16,
@@ -774,6 +783,15 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
         _wmma_gfx12_acc_16x16,
     ),
     "wmma_scale16_f32_16x16x128_fp8_fp8": _FragInfo(
+        16,
+        16,
+        8,
+        32,
+        None,
+        None,
+        _wmma_gfx12_acc_16x16,
+    ),
+    "wmma_scale16_f32_16x16x128_bf8_bf8": _FragInfo(
         16,
         16,
         8,

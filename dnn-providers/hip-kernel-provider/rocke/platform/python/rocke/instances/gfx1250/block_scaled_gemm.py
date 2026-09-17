@@ -156,8 +156,11 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     if native_scale and (
         _canon_lowbit(spec.dtype_a),
         _canon_lowbit(spec.dtype_b),
-    ) not in (("fp8", "fp8"), ("fp4", "fp4")):
-        return False, "native gfx1250 SCALE/SCALE16 supports fp8 x fp8 or fp4 x fp4"
+    ) not in (("fp8", "fp8"), ("bf8", "bf8"), ("fp4", "fp4")):
+        return (
+            False,
+            "native gfx1250 SCALE/SCALE16 supports matching fp8, bf8, or fp4 operands",
+        )
     if not target.mma.has_shape(
         family=family,
         a_dtype=_canon_lowbit(spec.dtype_a),

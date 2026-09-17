@@ -148,9 +148,19 @@ static void build_wmma_scale(rocke_ir_builder_t* b)
     wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp8_fp8");
 }
 
+static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_bf8_bf8");
+}
+
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
     wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp8_fp8");
+}
+
+static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_bf8_bf8");
 }
 
 static void build_wmma_scale_fp4(rocke_ir_builder_t* b)
@@ -373,6 +383,8 @@ static const config_t CONFIGS[] = {
     {build_global_tr16_bf16, "gfx1250"},
     {build_global_tr16_i16, "gfx1250"},
     {build_tensor_transfers, "gfx1250"},
+    {build_wmma_scale_bf8, "gfx1250"},
+    {build_wmma_scale16_bf8, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

@@ -280,7 +280,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--k", type=int, default=128)
     p.add_argument("--block-k", type=int, default=None)
     p.add_argument(
-        "--dtype", default="fp8e4m3", choices=("fp8e4m3", "bf8e5m2", "fp4", "fp4e2m1")
+        "--dtype",
+        default="fp8e4m3",
+        choices=("fp8", "bf8", "fp8e4m3", "bf8e5m2", "fp4", "fp4e2m1"),
     )
     p.add_argument("--tol", type=float, default=2e-2, help="legacy WMMA tolerance only")
     p.add_argument(

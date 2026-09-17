@@ -45,7 +45,7 @@ class ScaledWmmaOp:
 
     @property
     def matrix_format(self) -> int:
-        return {"fp8": 0, "fp4": 4}[self.matrix_dtype]
+        return {"fp8": 0, "bf8": 1, "fp4": 4}[self.matrix_dtype]
 
 
 _SCALE = E8M0ScalePacking(count=4, block_k=32)
@@ -53,7 +53,7 @@ _SCALE16 = E8M0ScalePacking(count=8, block_k=16)
 _GFX1250_WMMA_SCALE = {
     op_id: ScaledWmmaOp(op_id=op_id, matrix_dtype=dtype, scales=packing)
     for family, packing in (("wmma_scale", _SCALE), ("wmma_scale16", _SCALE16))
-    for dtype in ("fp8", "fp4")
+    for dtype in ("fp8", "bf8", "fp4")
     for op_id in (f"{family}_f32_16x16x128_{dtype}_{dtype}",)
 }
 

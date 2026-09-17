@@ -32,7 +32,9 @@ static inline const rocke_scaled_wmma_op_t* rocke_gfx1250_scaled_wmma(const char
     static const rocke_e8m0_scale_packing_t scale16 = {/*count=*/8, /*block_k=*/16};
     static const rocke_scaled_wmma_op_t ops[] = {
         {"wmma_scale_f32_16x16x128_fp8_fp8", 0, scale},
+        {"wmma_scale_f32_16x16x128_bf8_bf8", 1, scale},
         {"wmma_scale16_f32_16x16x128_fp8_fp8", 0, scale16},
+        {"wmma_scale16_f32_16x16x128_bf8_bf8", 1, scale16},
         {"wmma_scale_f32_16x16x128_fp4_fp4", 4, scale},
         {"wmma_scale16_f32_16x16x128_fp4_fp4", 4, scale16},
     };

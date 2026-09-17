@@ -6,7 +6,7 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 
 | Example | Matrix inputs | Scale contract |
 | --- | --- | --- |
-| `mxfp8_gemm` | FP8 E4M3 on both operands | E8M0 |
+| `mxfp8_gemm` | FP8 E4M3 (`fp8`) or BF8 E5M2 (`bf8`) on both operands | E8M0 |
 | `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
 
 ```sh
@@ -32,3 +32,9 @@ runtime/packing utilities are shared; each example exposes one input contract.
 The generic `block_scaled_gemm_verify` CLI remains available for regression
 testing and the older software-scaled WMMA path. That older path is not the
 default in the focused MX examples.
+
+`mxfp8_gemm` runs both FP8 E4M3 and BF8 E5M2 by default, as separate
+homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
+or `--dtype both` explicitly. The names follow the FP6/BF6 convention.
+Both operands use the selected format with E8M0 scales; mixed matrix formats
+have a separate example.
