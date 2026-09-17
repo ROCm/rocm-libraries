@@ -103,8 +103,11 @@ class TestGemmUnalignedMNK : public ::testing::Test
 using UnalignedMNKDataTypes =
     ::testing::Types<std::tuple<ck_tile::half_t, ck_tile::half_t, float, ck_tile::half_t>,
                      std::tuple<ck_tile::bf16_t, ck_tile::bf16_t, float, ck_tile::bf16_t>,
+// fp8/bf8 WMMA compute requires gfx12/gfx950
+#ifdef CK_USE_WMMA_FP8
                      std::tuple<ck_tile::fp8_t, ck_tile::fp8_t, float, ck_tile::half_t>,
                      std::tuple<ck_tile::bf8_t, ck_tile::bf8_t, float, ck_tile::half_t>,
+#endif
                      std::tuple<ck_tile::int8_t, ck_tile::int8_t, int32_t, int32_t>>;
 TYPED_TEST_SUITE(TestGemmUnalignedMNK, UnalignedMNKDataTypes);
 
