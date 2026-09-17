@@ -171,7 +171,7 @@ namespace rocsparse
             = gemvi_use_single_wavefront<WFSIZE>(nnz)
                   ? gemvi_part1_grid_y<WFSIZE, WFSIZE, gemvi_part1_unroll, T>(handle, m, nnz)
                   : gemvi_part1_grid_y<gemvi_part1_blocksize, WFSIZE, gemvi_part1_unroll, T>(
-                        handle, m, nnz);
+                      handle, m, nnz);
 
         return grid_y > 1 ? sizeof(T) * static_cast<size_t>(WFSIZE)
                                 * static_cast<size_t>(gemvi_part1_grid_x<WFSIZE>(m))
