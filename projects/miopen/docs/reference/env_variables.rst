@@ -138,6 +138,22 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | non-naive time.
       - | Integer percentage (default: 300)
 
+    * - | ``MIOPEN_NAIVE_MAX_DRAINING``
+        | Caps how many streams abandoned by ``MIOPEN_NAIVE_TIMEOUT``
+        | may be outstanding at once. On reaching the cap, the next
+        | naive evaluation waits for one to retire rather than creating
+        | another stream. When unset, the cap derives from
+        | ``GPU_MAX_HW_QUEUES`` - the HIP variable governing how many
+        | hardware queues streams get before they start sharing one -
+        | less the handle's own stream and the one being handed out, so
+        | the default of 4 queues gives a cap of 2. An evaluation
+        | sharing a queue with a kernel abandoned earlier times that
+        | contention rather than the solver, and that measurement
+        | reaches FindDb. Raise it only if profiling shows the extra
+        | concurrent streams do not contend on your architecture.
+      - | Integer count
+        | 0 or unset: Derive from ``GPU_MAX_HW_QUEUES`` (default)
+
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
       - | 1: Disable FindDb
