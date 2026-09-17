@@ -400,25 +400,97 @@ const char* const* rocke_known_arches(int* count)
     return rocke_ati_known_arches;
 }
 
-const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap)
+/* Return the final gfx component without discarding profile or feature suffixes. */
+static const char* rocke_target_id_start(const char* isa)
 {
-    const char* dash;
-    const char* tok;
-    size_t len;
-
-    if(!isa || !out || out_cap == 0)
-        return NULL;
-    /* Python: isa.rsplit("-", 1)[-1] if "-" in isa else isa.
-     * rsplit on the last '-' yields everything after the final '-'. */
-    dash = strrchr(isa, '-');
-    tok = dash ? dash + 1 : isa;
-    len = strlen(tok);
-    if(len + 1 > out_cap)
+    const char* target = isa;
+    const char* next = isa;
+    while((next = strstr(next, "gfx")) != NULL)
     {
-        /* Truncate to fit (NUL-terminated); mirrors a best-effort copy. */
-        len = out_cap - 1;
+        target = next;
+        next += 3;
     }
-    memcpy(out, tok, len);
+    return target;
+}
+
+/* Length of the base architecture in target_id; consult the shared catalog so
+ * names such as gfx11-generic are preserved before removing profile suffixes. */
+static size_t rocke_base_arch_length(const char* target_id)
+{
+    size_t name_len = strcspn(target_id, ":");
+    size_t best = 0;
+    int i;
+    for(i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const char* arch = rocke_ati_known_arches[i];
+        size_t len = strlen(arch);
+        if(len <= name_len && strncmp(target_id, arch, len) == 0)
+        {
+            if(len == name_len)
+                return len;
+            if(target_id[len] == '-' && len > best)
+                best = len;
+        }
+    }
+    if(best != 0)
+        return best;
+    /* Python's fallback is ^(gfx[0-9a-z]+), with ASCII character semantics. */
+    if(name_len > 3 && strncmp(target_id, "gfx", 3) == 0)
+    {
+        size_t len = 3;
+        while(len < name_len
+              && ((target_id[len] >= '0' && target_id[len] <= '9')
+                  || (target_id[len] >= 'a' && target_id[len] <= 'z')))
+            ++len;
+        if(len > 3)
+            return len;
+    }
+    return name_len;
+}
+
+static const char* rocke_copy_target(const char* target, size_t len, char* out, size_t out_cap)
+{
+    if(len >= out_cap)
+        len = out_cap - 1;
+    memcpy(out, target, len);
     out[len] = '\0';
     return out;
+}
+
+const char* rocke_target_id_from_isa(const char* isa, char* out, size_t out_cap)
+{
+    if(!isa || !out || out_cap == 0)
+        return NULL;
+    const char* target = rocke_target_id_start(isa);
+    return rocke_copy_target(target, strlen(target), out, out_cap);
+}
+
+const char* rocke_base_arch_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    return rocke_copy_target(target_id, rocke_base_arch_length(target_id), out, out_cap);
+}
+
+const char* rocke_compiler_target_from_target_id(const char* target_id, char* out, size_t out_cap)
+{
+    if(!target_id || !out || out_cap == 0)
+        return NULL;
+    size_t name_len = strcspn(target_id, ":");
+    const char* features = target_id + name_len;
+    size_t base_len = rocke_base_arch_length(target_id);
+    if(base_len < name_len && target_id[base_len] == '-')
+        name_len = base_len;
+    if(name_len >= out_cap)
+        return rocke_copy_target(target_id, name_len, out, out_cap);
+    memcpy(out, target_id, name_len);
+    rocke_copy_target(features, strlen(features), out + name_len, out_cap - name_len);
+    return out;
+}
+
+const char* rocke_arch_from_isa(const char* isa, char* out, size_t out_cap)
+{
+    if(!isa || !out || out_cap == 0)
+        return NULL;
+    return rocke_base_arch_from_target_id(rocke_target_id_start(isa), out, out_cap);
 }
