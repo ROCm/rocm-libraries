@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the pure table builders in
-``Tensile.Common.ValidParameters``: ``makeValidWorkGroups`` /
+``tensilelite.Common.ValidParameters``: ``makeValidWorkGroups`` /
 ``makeValidWMMA`` / ``makeValidSWMMAC`` / ``makeValidMFMA`` /
 ``makeValidSMFMA`` / ``makeValidMatrixInstructions``, plus the module-level
 ``validParameters`` dict.
@@ -38,7 +38,7 @@ expansions and the 700k-entry master matrix-instruction list) are pinned via a
 
 import pytest
 
-import Tensile.Common.ValidParameters as VP
+import tensilelite.Common.ValidParameters as VP
 
 pytestmark = pytest.mark.unit
 

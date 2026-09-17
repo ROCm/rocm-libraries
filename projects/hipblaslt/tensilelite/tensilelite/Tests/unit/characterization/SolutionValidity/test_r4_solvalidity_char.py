@@ -33,11 +33,11 @@ import importlib
 
 import pytest
 
-from Tensile.Common.DataType import DataType
+from tensilelite.Common.DataType import DataType
 
 pytestmark = pytest.mark.unit
 
-_SolMod = importlib.import_module("Tensile.SolutionStructs.Solution")
+_SolMod = importlib.import_module("tensilelite.SolutionStructs.Solution")
 Solution = _SolMod.Solution
 
 
