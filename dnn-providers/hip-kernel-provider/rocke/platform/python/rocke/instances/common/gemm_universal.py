@@ -38,12 +38,12 @@ What this file implements *now*:
   - epilogue `default` (vectorised direct global stores) and
     `cshuffle` (LDS-staged C with the wide-store distribution)
   - layout RCR (row(A), col(B), row(C)) — the production layout
+  - persistent kernels (`persistent` + `persistent_ctas`): a fixed,
+    occupancy-sized grid whose CTAs grid-stride over the output-tile
+    strip, mirroring CK Tile's `UsePersistentKernel` universal GEMM
 
 What is left out for now (called out explicitly):
   - bf16/fp8 input dtypes (no atom yet; mechanical extension)
-  - persistent kernels (the dispatcher allows both; `persistent=False`
-    is what every preselected_fp16_rcr_compute entry uses for the
-    standard variant)
   - padding (`pad_m/n/k`) — the standard configs in default_config.json
     use `pad_*=false`; the dispatcher tries pad-on variants in the
     preselect set; we accept those as input but emit the same body
@@ -143,6 +143,9 @@ class TraitSpec:
       ``"amdgpu-waves-per-eu"`` on the kernel attribute list. Default
       ``None`` keeps the LLVM backend's heuristic choice; set to 2
       (or a ``(min, max)`` tuple) when targeting two workgroups per CU.
+
+    * ``persistent`` / ``persistent_ctas``: CK Tile's
+      ``UsePersistentKernel``. See :func:`universal_gemm_grid`.
     """
 
     pipeline: Pipeline = "compv4"
@@ -151,7 +154,27 @@ class TraitSpec:
     pad_m: bool = False
     pad_n: bool = False
     pad_k: bool = False
+    # Persistent (grid-stride) tile loop, the DSL counterpart of CK Tile's
+    # ``TileGemmUniversalTraits::UsePersistentKernel``. The launch grid stops
+    # tracking the problem: instead of one CTA per output tile
+    # (``ceil(N/tile_n) x ceil(M/tile_m)``) the host launches exactly
+    # ``persistent_ctas`` CTAs and each one walks the flattened tile strip
+    # ``tile_idx = block_id_x; tile_idx < M_tiles*N_tiles;
+    # tile_idx += persistent_ctas`` -- the same ``block_id += grid_size``
+    # stride CK Tile's persistent ``operator()`` uses. Sizing the grid to the
+    # device (``#CU * blocks_per_CU``, the CK Tile ``MaxOccupancyGridSize``
+    # formula) means the CTAs reach the MFMA steady state once and stay there,
+    # instead of paying a fresh prologue + LDS fill per tile behind the
+    # hardware dispatcher. It also removes the tail wave: a grid of
+    # ``1.3 * #CU`` tiles otherwise runs one full wave and then a
+    # 30%-occupied one.
+    #
+    # ``persistent_ctas`` is a codegen constant, not a kernel argument, so the
+    # stride folds into an ``s_add_i32`` immediate; the host launcher and the
+    # spec must therefore agree, which :func:`universal_gemm_grid` enforces by
+    # being the only place a grid is computed.
     persistent: bool = False
+    persistent_ctas: int = 0
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -335,7 +358,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
             f"{tr.pipeline}_{tr.scheduler}_{tr.epilogue}",
             flags={
                 "pad": any([tr.pad_m, tr.pad_n, tr.pad_k]),
-                "pers": tr.persistent,
+                f"pers{tr.persistent_ctas}": tr.persistent,
                 "bat": self.batched,
                 "preb": tr.preshuffle_b,
                 "dtl": tr.direct_to_lds,
@@ -615,10 +638,19 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"WMMA path supports the {spec.trait.epilogue!r} epilogue "
                 f"only on gfx1250, not {arch}"
             )
+        # ``lds_swizzle`` is rejected for the whole family, not just the load
+        # paths that structurally cannot express it (direct-to-LDS and TDM, both
+        # of which used to reject it separately below). It XORs the *global*
+        # column so the LDS destination can stay wave-contiguous, a gfx9-shaped
+        # assumption that does not carry over to WMMA's ds_read geometry: on the
+        # VGPR-staged path it emits, runs fast, and returns wrong results, so
+        # sweeps rank it as a winner while it is incorrect. Bit-exact and worth
+        # ~+3% on CDNA MFMA, hence the family scope rather than a global gate.
         for flag, label in (
             (spec.trait.preshuffle_b, "preshuffle_b"),
             (spec.trait.active_tile_skip, "active_tile_skip"),
             (spec.trait.chiplet_swizzle, "chiplet_swizzle"),
+            (spec.trait.lds_swizzle, "lds_swizzle"),
         ):
             if flag:
                 return False, f"WMMA path does not support {label} on {arch}"
@@ -633,20 +665,12 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
             # ``lds_k_pad`` IS supported here: gfx1250's
             # ``global_load_async_to_lds`` is per-lane addressed, so a padded
             # LDS row stride costs nothing (see the _lds_pad comment below).
-            # ``lds_swizzle`` still is not -- it XORs the *global* column so the
-            # LDS destination can stay wave-contiguous, which is a gfx9-shaped
-            # assumption that does not carry over.
-            if spec.trait.lds_swizzle:
-                return False, "gfx1250 WMMA direct_to_lds does not support lds_swizzle"
+            # (``lds_swizzle`` is rejected for the whole family above.)
         if spec.trait.tdm:
             if arch != "gfx1250":
                 return False, f"WMMA path does not support tdm on {arch}"
             if spec.trait.direct_to_lds:
                 return False, "tdm and direct_to_lds are alternative load paths"
-            # The mover writes LDS from a descriptor, so the global-column XOR
-            # that lds_swizzle applies on the store side has nowhere to live.
-            if spec.trait.lds_swizzle:
-                return False, "tdm does not support lds_swizzle"
             # pad_m/pad_n/pad_k are not consulted: OOB is handled by clipping
             # the descriptor's tensor extents, so the mover simply copies less
             # rather than the VGPR path's predicated masking.
@@ -793,7 +817,62 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     if sk > 1 and family != "mma":
         return False, f"split_k > 1 is CDNA-only (got family {family!r} on {arch})"
 
+    # Persistent (grid-stride) tile loop. The three exclusions below are all
+    # the same shape of problem: the flag in question resolves something from
+    # ``blockIdx`` once at CTA entry, which is exactly what the persistent
+    # kernel makes per-tile instead of per-CTA.
+    if spec.trait.persistent:
+        if spec.trait.persistent_ctas <= 0:
+            return False, (
+                "persistent needs persistent_ctas > 0 (the grid-stride step "
+                "is a codegen constant, so the CTA count must be explicit)"
+            )
+        if spec.trait.pipeline == "wsp3":
+            return False, "persistent is not wired for the wsp3 pipeline"
+        if spec.trait.split_k > 1:
+            # CK Tile folds the k-batch into the work index
+            # (``k_batch = block_id / num_tiles``); here the K-slice bounds are
+            # hoisted out of the tile loop from ``block_id_z``, so the two
+            # cannot compose until the slice is recomputed per tile.
+            return False, "persistent does not compose with split_k > 1"
+        if spec.trait.active_tile_skip:
+            # The MoE gate loads its bucket head from ``block_m_off`` before
+            # the tile loop exists, so an inactive tile would gate the whole
+            # CTA rather than one tile.
+            return False, "persistent does not compose with active_tile_skip"
+
     return True, "ok"
+
+
+def universal_gemm_grid(
+    spec: UniversalGemmSpec,
+    m: int,
+    n: int,
+    *,
+    batch: int = 1,
+) -> Tuple[int, int, int]:
+    """Launch grid for ``spec`` on an ``(m, n)`` problem.
+
+    The single place a universal-GEMM grid is computed, because the
+    persistent variant only works if the host's CTA count is exactly the
+    ``persistent_ctas`` the kernel's grid-stride step was compiled with.
+
+    * non-persistent: ``(ceil(n/tile_n), ceil(m/tile_m), z)`` -- one CTA per
+      output tile, ``block_id_x`` the N-tile and ``block_id_y`` the M-tile.
+    * persistent: ``(persistent_ctas, 1, z)`` -- a device-sized grid whose
+      CTAs stride over the whole tile strip (CK Tile's
+      ``MaxOccupancyGridSize`` in place of ``GridSize``).
+
+    ``z`` is the batch count for a batched spec and the split-K factor
+    otherwise; both collapse to 1 for the plain GEMM.
+    """
+    from ...helpers.spec import ceil_div_grid
+
+    z = batch if spec.batched else spec.trait.split_k
+    if spec.trait.persistent:
+        return (spec.trait.persistent_ctas, 1, z)
+    t = spec.tile
+    return ceil_div_grid((n, t.tile_n), (m, t.tile_m), (z, 1))
 
 
 # ---------------------------------------------------------------------
@@ -1249,7 +1328,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # ``trait.chiplet_swizzle=True`` we instead flatten the 2D grid
     # into a linear WGID and run it through the chiplet-aware
     # super-tile remap so consecutive workgroups land on the same XCD.
-    if spec.trait.chiplet_swizzle:
+    #
+    # ``trait.persistent`` moves the whole assignment inside a grid-stride
+    # loop, so the origin is recomputed per tile rather than once per CTA;
+    # it is emitted at the dispatch site at the end of this function.
+    _persistent = spec.trait.persistent
+    if _persistent:
+        block_m_off = None
+        block_n_off = None
+    elif spec.trait.chiplet_swizzle:
         from ...helpers.grid import chiplet_aware_super_tile_dynamic
 
         # Compute M_tiles / N_tiles at runtime from the dynamic M/N args.
@@ -2606,7 +2693,69 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 fused_epilogue=fused_ep,
             )
 
-    if do_work_cond is None:
+    def _emit_persistent_tile_loop() -> None:
+        """CK Tile's persistent ``operator()``: grid-stride over output tiles.
+
+        The launch grid is ``(persistent_ctas, 1, batch)`` (see
+        :func:`universal_gemm_grid`) rather than one CTA per tile, so a CTA
+        owns a strided subset of the flattened ``M_tiles x N_tiles`` strip::
+
+            for tile_idx in range(block_id_x, num_tiles, persistent_ctas):
+
+        which is the DSL spelling of CK Tile's ``block_id += grid_size``
+        (``universal_gemm_kernel.hpp``, the ``PersistentKernel`` overload).
+        The tile decode matches CK's ``GetOutputTileIndex`` and the launcher's
+        X-fastest order: ``iM = tile_idx / N_tiles``, ``iN = tile_idx %
+        N_tiles``, so a persistent kernel walks tiles in the same sequence the
+        non-persistent one is dispatched in.
+        """
+        nonlocal block_m_off, block_n_off
+
+        n_pid_m = b.div(b.add(M, b.const_i32(block_m - 1)), c_block_m)
+        n_pid_n = b.div(b.add(N, b.const_i32(block_n - 1)), c_block_n)
+        num_tiles = b.mul(n_pid_m, n_pid_n)
+        loop = b.scf_for(
+            b.block_id_x(),
+            num_tiles,
+            b.const_i32(spec.trait.persistent_ctas),
+            iv_name="tile_idx",
+        )
+        with loop as tile_idx:
+            # The induction variable is CTA-uniform, so pin it (and everything
+            # derived from it) in SGPRs exactly as the non-persistent path
+            # pins the blockIdx-derived origins.
+            ti = b.to_sgpr_u32(tile_idx)
+            if spec.trait.chiplet_swizzle:
+                from ...helpers.grid import chiplet_aware_super_tile_dynamic
+
+                swz = chiplet_aware_super_tile_dynamic(
+                    b,
+                    ti,
+                    num_pid_m=n_pid_m,
+                    num_pid_n=n_pid_n,
+                    wgm=spec.trait.chiplet_wgm,
+                    num_xcds=spec.trait.chiplet_num_xcds,
+                    chunk_size=spec.trait.chiplet_chunk_size,
+                )
+                block_m_off = b.to_sgpr_u32(b.mul(swz.row, c_block_m))
+                block_n_off = b.to_sgpr_u32(b.mul(swz.col, c_block_n))
+            else:
+                block_m_off = b.to_sgpr_u32(b.mul(b.div(ti, n_pid_n), c_block_m))
+                block_n_off = b.to_sgpr_u32(b.mul(b.mod(ti, n_pid_n), c_block_n))
+            # Inter-tile LDS guard, the counterpart of CK Tile's
+            # ``s_waitcnt_barrier()`` at the top of its persistent while-body.
+            # A CTA reuses one A/B staging region (and, under the cshuffle
+            # epilogue, the C tile aliased onto it) for every tile it owns.
+            # Neither the K-loop's final ds_read nor the epilogue's last LDS
+            # read is followed by a barrier, so without this the next tile's
+            # global->LDS writes would race a lagging wave still reading the
+            # previous tile's data.
+            b.sync()
+            emit_compute_and_epilogue()
+
+    if _persistent:
+        _emit_persistent_tile_loop()
+    elif do_work_cond is None:
         emit_compute_and_epilogue()
     else:
         with b.scf_if(do_work_cond):
@@ -3168,6 +3317,42 @@ def _emit_epilogue_cshuffle(
         col = b.mul(col_v, b.const_i32(store_vec)) if store_vec > 1 else col_v
         return row, col_v, col
 
+    # EXPERIMENT (ROCKE_CSHUFFLE_STORE_BATCH): the LDS->global hand-off is a
+    # pure copy, so issuing a group of LDS reads before their global stores
+    # lets them pipeline instead of paying one full LDS round trip per store.
+    # Only the unguarded/unfused vector path can batch: the guarded paths need
+    # their per-element control flow inline. batch == 1 reproduces the
+    # load-use pairing verbatim, so every other config stays byte-identical.
+    import os
+
+    _batch = int(os.environ.get("ROCKE_CSHUFFLE_STORE_BATCH", "1"))
+    if (
+        _batch > 1
+        and store_vec > 1
+        and not pad_m
+        and not pad_n
+        and fused_epilogue is None
+    ):
+        for start in range(0, vecs_per_thread, _batch):
+            group = range(start, min(start + _batch, vecs_per_thread))
+            offs = []
+            for e in group:
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                row, _col_v, col = _vec_rc(vec_idx)
+                c_off = b.add(
+                    b.mul(b.add(block_m_off, row), N), b.add(block_n_off, col)
+                )
+                if batch_off_c is not None:
+                    c_off = b.add(batch_off_c, c_off)
+                offs.append((row, col, c_off))
+            hvs = [
+                _load_smem_vec(b, Cs, row, col, store_vec, storage_dtype)
+                for row, col, _ in offs
+            ]
+            for (_, _, c_off), hv in zip(offs, hvs):
+                b.global_store_vN(C, c_off, hv, store_vec)
+        return
+
     for e in range(vecs_per_thread):
         vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
         row, col_v, col = _vec_rc(vec_idx)
@@ -3281,6 +3466,9 @@ def all_dispatcher_configs(
     epilogue: Sequence[Epilogue] = ("default", "cshuffle"),
     pad: Sequence[bool] = (False,),
     persistent: Sequence[bool] = (False,),
+    # Only consulted for the ``persistent=True`` entries; a persistent spec
+    # with no CTA count is rejected by ``is_valid_spec`` and never yielded.
+    persistent_ctas: int = 0,
     wave_size: int = 64,
     name_prefix: str = "rocke_universal",
     arch: str = "gfx950",
@@ -3325,6 +3513,9 @@ def all_dispatcher_configs(
                                                             pad_n=p,
                                                             pad_k=p,
                                                             persistent=pers,
+                                                            persistent_ctas=(
+                                                                persistent_ctas
+                                                            ),
                                                         ),
                                                         wave_size=wave_size,
                                                     )

@@ -48,11 +48,17 @@ def run_gemm_manifest_problem(
         A = A_values.astype(np.float16)
         B = B_values.astype(np.float16)
         C = np.empty((M, N), dtype=np.float16)
-    gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
-    gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
-    if manifest.get("grid_order") == "MN":
-        gx, gy = gy, gx
-    grid = (gx, gy, 1)
+    if "grid_explicit" in manifest:
+        # A grid the tile shape cannot imply -- a persistent kernel, whose CTA
+        # count is a property of the device, not the problem.
+        gx, gy, gz = (int(x) for x in manifest["grid_explicit"])
+    else:
+        gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
+        gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
+        if manifest.get("grid_order") == "MN":
+            gx, gy = gy, gx
+        gz = 1
+    grid = (gx, gy, gz)
     block = (int(manifest["threads_per_block"]), 1, 1)
     flop = 2.0 * M * N * K
     bytes_xfer = 2.0 * (M * K + N * K + M * N)

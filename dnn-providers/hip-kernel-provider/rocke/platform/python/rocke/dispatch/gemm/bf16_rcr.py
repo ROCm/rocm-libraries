@@ -25,13 +25,13 @@ from typing import Callable, Sequence, Tuple
 
 from ...core.arch import ArchTarget
 from ...helpers.manifest import gemm_args_signature
-from ...helpers.spec import ceil_div_grid
 from ...instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
     build_universal_gemm,
+    universal_gemm_grid,
 )
 from ..core import (
     CandidateRegistry,
@@ -262,11 +262,11 @@ def _make_candidate(
 
 
 def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]:
-    t = spec.tile
     assert isinstance(req, GemmRequest)
     # Split-K adds a Z dimension of ``split_k`` K-slice CTAs per (m,n) tile;
-    # split_k == 1 (default) collapses to the canonical 2D grid.
-    return ceil_div_grid((req.N, t.tile_n), (req.M, t.tile_m), (spec.trait.split_k, 1))
+    # split_k == 1 (default) collapses to the canonical 2D grid. A persistent
+    # spec instead gets its fixed ``(persistent_ctas, 1, z)`` grid.
+    return universal_gemm_grid(spec, req.M, req.N)
 
 
 # Explicit gfx targets rather than a cdna/rdna family label; see fp16_rcr for

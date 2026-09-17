@@ -377,6 +377,67 @@ class TestGfx1250Gemm(unittest.TestCase):
                     # load-bearing for correctness.
                     self.assertEqual(sorted(waits), [0, depth - 2])
 
+    def test_wmma_rejects_lds_swizzle_on_every_load_path(self):
+        """``lds_swizzle`` miscompiles on WMMA, so the family gate must catch it.
+
+        It XORs the *global* column so the LDS destination stays wave-contiguous
+        -- a gfx9-shaped assumption that does not carry over to WMMA's ds_read
+        geometry. The direct-to-LDS and TDM paths cannot even express it and
+        rejected it already; the gap was the plain VGPR-staged path, where it
+        emits and runs *fast* while returning wrong results. Since the sweep
+        verifies only its top candidates, such a config ranks as a winner while
+        being incorrect, so the gate has to refuse it rather than the config file.
+        """
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        base = self._dtl_spec()
+        for label, trait in (
+            ("vgpr-staged", {"direct_to_lds": False, "dtl_prefetch": False}),
+            ("direct-to-lds", {"direct_to_lds": True}),
+            ("tdm", {"direct_to_lds": False, "dtl_prefetch": False, "tdm": True}),
+        ):
+            with self.subTest(label):
+                spec = replace(
+                    base,
+                    trait=replace(base.trait, lds_swizzle=True, **trait),
+                )
+                ok, why = is_valid_spec(spec, arch="gfx1250")
+                self.assertFalse(ok)
+                self.assertIn("lds_swizzle", why)
+        # The swizzle is bit-exact and worth ~+3% on CDNA MFMA, so the gate is
+        # scoped to the WMMA family and must not reach the MFMA path.
+        from rocke.instances.common.gemm_universal import (
+            DataSpec,
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+        )
+
+        mfma = UniversalGemmSpec(
+            name="gfx950_swizzle_control",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv3",
+                scheduler="intrawave",
+                epilogue="default",
+                lds_swizzle=True,
+            ),
+            data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16"),
+            wave_size=64,
+        )
+        ok, why = is_valid_spec(mfma, arch="gfx950")
+        self.assertTrue(ok, why)
+
     def test_wmma_tdm_compiles_to_hsaco_per_depth(self):
         from rocke.helpers.compile import compile_kernel
         from rocke.instances.common.gemm_universal import build_universal_gemm
