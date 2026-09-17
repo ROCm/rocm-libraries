@@ -184,14 +184,6 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
     return resolved;
 }
 
-/// @brief A distinct graph identity, so cache-keyed tests do not collide.
-inline hipdnn_flatbuffers_sdk::utilities::UuidBytes makeGraphId(uint8_t seed)
-{
-    hipdnn_flatbuffers_sdk::utilities::UuidBytes id{};
-    id.fill(seed);
-    return id;
-}
-
 /// Wraps a built graph buffer so a test reads it the way an engine does.
 class GraphFixture
 {
