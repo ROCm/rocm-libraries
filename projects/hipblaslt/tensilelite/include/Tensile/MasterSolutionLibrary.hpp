@@ -347,6 +347,15 @@ namespace TensileLite
         /// not call this, or it pays the very cost the indexed layout defers.
         void materializeAllSolutions() const
         {
+            // A lazy master starts with only the mapping; neither a cache nor a
+            // loaded shard exists until a lookup descends into one. Enumeration
+            // is the one caller that needs every shard, so resolve each mapping
+            // boundary before collecting the cache sources below. loadLibrary()
+            // deduplicates prefixes, which also covers mappings with multiple
+            // ranges served by the same file.
+            for(auto const& entry : libraryMapping)
+                loadLibrary(entry.first);
+
             std::vector<std::shared_ptr<SolutionBlobCache<MySolution>>> sources;
             if(blobCache)
                 sources.push_back(blobCache);
@@ -575,4 +584,3 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
-
