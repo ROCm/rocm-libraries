@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -27,13 +28,30 @@ namespace
 using hipdnn_plugin_sdk::HipdnnPluginException;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
+/// Resolve the vendored kpack test archive. Prefers the compile-time source path;
+/// falls back to an exe-relative installed copy for repackaged layouts (TheRock CI).
+std::string resolveTestKpackArchive()
+{
+    if(std::filesystem::exists(HIPDNN_TEST_KPACK_ARCHIVE))
+    {
+        return HIPDNN_TEST_KPACK_ARCHIVE;
+    }
+    auto candidate = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / "fixtures"
+                     / "test_zstd.kpack";
+    if(std::filesystem::exists(candidate))
+    {
+        return candidate.string();
+    }
+    return HIPDNN_TEST_KPACK_ARCHIVE;
+}
+
 /// rocm-kpack's own test archive, path supplied by CMake from ROCM_KPACK_SOURCE_DIR.
 /// It holds gfx1100 and gfx1101 binaries under the toc keys "lib/libhip.so#0" and
 /// "bin/hiptest#0". Used rather than a hand-forged file so the reader under test is
 /// the pinned reader meeting an archive it actually accepts. The parse-level cases
 /// need a real *container*, not a matching *device*; the device cases read this
 /// build's own packed archive -- see PACKED_DESCRIPTOR_ROOT.
-constexpr const char* REAL_ARCHIVE = HIPDNN_TEST_KPACK_ARCHIVE;
+const std::string REAL_ARCHIVE = resolveTestKpackArchive();
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
