@@ -406,9 +406,8 @@ def _wholeStripsAlongFreeDim(gr_cfg, macroTile, depthU):
   """Subtile grid whose free-dim strip count is rounded up to whole strips.
 
   A macro tile that is not a multiple of the stack (96 free-dim elements over an
-  8-tile stack) still occupies a whole strip, and the surplus M tiles are fetched
-  into LDS and never read back.  LDS sizing, the GR m0 walk and the LR K-window
-  stride all key off this, so the round-up happens once, here.
+  8-tile stack) still occupies a whole strip.  LDS sizing, the GR m0 walk and the
+  LR K-window stride all key off this, so the round-up happens once, here.
   """
   grid = list(gr_cfg.globalSubtileGrid(macroTile, depthU))
   grid[0] = math.ceil(grid[0])

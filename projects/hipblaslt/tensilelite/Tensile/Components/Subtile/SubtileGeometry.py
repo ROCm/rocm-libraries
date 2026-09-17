@@ -734,8 +734,8 @@ def planGRCoopSpread(wavesPerStrip: int,
   and where slices alone cannot absorb the group the remainder goes over K windows
   -- a window being one strip column of the macro tile further on.
 
-  Degrades to no spreading when nothing divides evenly, which is slower but always
-  valid.  Raises on geometry it cannot plan for at all.
+  Degrades to no spreading when nothing divides evenly.  Raises on geometry it
+  cannot plan for.
   """
   geometry = dict(wavesPerStrip=wavesPerStrip, otherWaves=otherWaves,
                   stripBytes=stripBytes, numWindows=numWindows)

@@ -277,9 +277,9 @@ def _graTileAssignmentScaleSwizzledCommon(tc, writer, kernel):
 
   stmp = writer.sgprPool.checkOut(1, tag="_graTileAssignmentScaleSwizzledCommon_stmp")
 
-  # numThreadsPerGroup follows the scale K-subtile count, which is not always a
-  # power of two, so the split has to be a real divide rather than a shift and a
-  # mask.  The helper picks the shift itself when it can.
+  # numThreadsPerGroup follows the scale K-subtile count, so it is not always a
+  # power of two.  The helper emits shift-and-mask when it is and a reciprocal
+  # multiply when it is not, never a hardware divide.
   divTmp = writer.vgprPool.checkOut(2, tag="_graTileAssignmentScaleSwizzledCommon_div")
   module.add(vectorStaticDivideAndRemainder(
       vtmp, ti_.sharedVgprGROffset[0], "Serial", numThreadsPerGroup,

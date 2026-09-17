@@ -374,9 +374,9 @@ GlobalParameters:
 # both the K slices of a window AND several K windows, so a wave issues
 # more than one window at a per-wave window offset.
 # 
-# K=1024 is 32 K blocks, which is where the scale buffer's padded extent
-# first differs between the two orientations; it used to abort in the
-# client's scale swizzle.  K=512 brackets it from below.
+# K=1024 is 32 K blocks, the smallest K where the scale buffer's padded
+# extent differs between the two orientations, so it covers that boundary
+# in the client's scale swizzle.  K=512 brackets it from below.
 .MacroTile96DepthU512: &macro_tile_96_depthu512
   OperationType: GEMM
   DataType: F4
@@ -419,7 +419,7 @@ GlobalParameters:
 # Keep the sizes -- the shapes make this reachable, not the tiles.
 # 
 # At K=2048 these are also the largest scale buffers here, so they cover
-# the padded-extent path that used to abort in the client's scale swizzle.
+# the padded-extent path in the client's scale swizzle.
 .BufferWindowTail: &buffer_window_tail
   OperationType: GEMM
   DataType: F4

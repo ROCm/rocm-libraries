@@ -261,10 +261,9 @@ def _subtileStackForTile(mtTiles):
   """Free-dim MFMA-M tiles per LDS strip for one TLU=1 fp4 operand.
 
   Tallest power-of-two stack that still holds the tile in one strip, else the
-  tallest exact divisor.  The pad tiles rounding adds are written to LDS but
-  never read, and not fetched at all since the pad lanes go to BufferOOB, so
-  they cost footprint rather than traffic.  Rounding past the tile would need a
-  partial trailing strip that the subtile grids do not count.
+  tallest exact divisor.  Pad tiles cost LDS footprint but no traffic, since the
+  pad lanes go to BufferOOB.  Rounding past the tile would need a partial
+  trailing strip that the subtile grids do not count.
   """
   mtTiles = int(mtTiles)
   exact = next((s for s in _SUBTILE_STACK_SIZES if mtTiles % s == 0),
@@ -353,11 +352,9 @@ def _subtileTLU1StackReason(state, tc, mtTiles, stack):
 def _subtileStackForTLU1(state, tc, mtTiles):
   """Stack height for a TLU=1 fp4 operand, backing off when the geometry refuses it.
 
-  _subtileStackForTile picks purely on cache-line utilization.  A height it
-  likes can still be unlayoutable for this wave group, and a shorter one often
-  is not, so walk down the ladder rather than rejecting the solution outright.
-  The preferred height is tried first, so a solution that is valid today keeps
-  the stack it has today.
+  _subtileStackForTile picks purely on cache-line utilization, and a height it
+  likes can still be unlayoutable for this wave group.  Walk down the ladder
+  from the preferred height rather than rejecting the solution outright.
   """
   preferred = _subtileStackForTile(mtTiles)
   for stack in [preferred] + [s for s in _SUBTILE_STACK_SIZES if s < preferred]:

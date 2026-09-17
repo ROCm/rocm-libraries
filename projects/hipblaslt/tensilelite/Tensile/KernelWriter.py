@@ -12206,18 +12206,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     the instruction tagged ``t`` touches whatever the instruction tagged
     ``map[t]`` touched on trip ``k``. postMainLoopBarrierCheckAndReset uses that
     to carry loop-tail phases onto the right token across the back edge. Empty
-    when the tokens do not rotate, which leaves the carry an identity - the
-    classic behaviour, and what the binary 0<->1 toggle already amounts to once
-    ExpandPointerSwap's two loop copies have each taken it.
+    when the tokens do not rotate, leaving the carry an identity.
 
     A token is not an LDS buffer index, so the advance cannot be arithmetic on
     the token itself: ``_getLdsReadMemToken`` builds it as
     ``memTokenLdsSplit[buffer][half]``, which for TDMSplit puts the half-1 tokens
     in a numbering disjoint from the buffer tokens. Rotate the buffer row with
-    ``_nextLdsToken``, the same primitive codegen swaps with, then read the token
-    back out of the same table so each LDS region stays in its own ring.
-    Tokens outside the table (the metadata token) name no rotating buffer and are
-    left out, so the caller's lookup falls back to identity for them.
+    ``_nextLdsToken``, then read the token back out of the same table so each
+    LDS region stays in its own ring.  Tokens outside the table (the metadata
+    token) name no rotating buffer and are left out, so the caller's lookup
+    falls back to identity for them.
     """
     if self.states.kernel.get("TDMPlusLdsBuf", 0) != 1:
       return {}

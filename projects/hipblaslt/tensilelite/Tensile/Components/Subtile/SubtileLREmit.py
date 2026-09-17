@@ -261,11 +261,8 @@ def _emitLROffset_TLU0(tag, tile, ti, writer, kernel):
 def _allocLROffsetRegs_tlu(tag, tile, ti, writer, kernel):
   """Allocate LR offset registers for the free-dim contiguous (TLU=1) shape.
 
-  One base, not one per read.  The transpose read reaches every subtile of the
-  strip from a single per-lane address through its immediate offset, so the
-  extra bases the row-major shape needs would never be used as an address --
-  and each one also costs a swap register and its double-buffer xor, in the
-  main loop as well as at setup.
+  One base, not one per read: the transpose read reaches every subtile of the
+  strip from a single per-lane address through its immediate offset.
   """
   tile.sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_tlu_sharedVgprLROffset")]
   tile.sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_tlu_sharedVgprLROffsetSwap")]
@@ -664,9 +661,8 @@ def _lraTileAssignment_tlu(writer, kernel, module, tileInfo):
       base(lane) = (kGroup * groupKStride + frow) * mStripBytes
 
   The second read within a tile and the M-tile selection are constant ds offsets
-  applied by emitSingleDsRead.  Verified on gfx950 (benchmark-tools
-  tr4_nt_readmap): this reconstructs A exactly.  The shipping non-subtile
-  s+m+k formula assumes a *padded* layout and does not match this image.
+  applied by emitSingleDsRead.  The non-subtile s+m+k formula assumes a padded
+  layout and does not match this image.
   """
   tc = tileInfo.tc
   wavesize = kernel["WavefrontSize"]

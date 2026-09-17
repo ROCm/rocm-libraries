@@ -2403,10 +2403,9 @@ def _make_swaitcnt(comment: str = "", vlcnt: int = -1, vscnt: int = -1,
     The C++ lowering (ToStinkyAsmPass) forwards this to a ``SWaitCntData``
     modifier and calls ``legalizeWaitCnt`` before the O3 pipeline, splitting it
     into the gfx12+ typed waits (s_wait_loadcnt / s_wait_dscnt / ...) exactly as
-    the native rocisa->asm path does. This replaces the old comment-marker +
-    assembly-text post-processing scheme, which left an opaque combined
-    ``s_waitcnt`` in the IR that ``waitReconstruction()`` could not rebuild — so
-    it was never stripped/re-inserted and perturbed scheduling.
+    the native rocisa->asm path does.  Keeping the counters in the IR is what
+    lets ``waitReconstruction()`` rebuild the wait instead of seeing an opaque
+    combined ``s_waitcnt``.
 
     If every counter is ``-1`` (a no-op wait) no SWaitCntData is attached and a
     bare ``s_waitcnt`` is returned unchanged.

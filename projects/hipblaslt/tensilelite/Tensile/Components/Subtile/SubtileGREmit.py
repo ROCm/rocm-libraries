@@ -572,11 +572,9 @@ def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel):
   """Advance the SRD base pointer by one DepthU K-window.
 
   The free dim is unit-stride here and K is strided, so a DepthU window spans
-  DepthU * bpe * strideK bytes.  depthUBytes is already DepthU * bpe and is
-  sub-byte safe, so it only needs scaling by the runtime K stride.
-
-  When K is itself unit-stride the window is plain DepthU * bpe, which is the
-  TLU=0 advance, so that case and the TDM descriptor path both defer to it.
+  DepthU * bpe * strideK bytes.  depthUBytes is already DepthU * bpe, so it only
+  needs scaling by the runtime K stride.  When K is itself unit-stride the window
+  is the plain TLU=0 advance, which that case and the TDM path both defer to.
   """
   tc = ti.tc
   strideK = writer.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
@@ -972,13 +970,10 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
 def _tluPadFreeExtent(kernel, tileInfo):
   """Real free-dim element extent when the GR strip is padded, else None.
 
-  _subtileStackForTile can round an operand onto a taller stack, whose extra
-  tiles are fetched and written to LDS but never read.  The SRD limit cannot
-  exclude them -- it is one linear bound over the K window, so a pad offset
-  exceeds it only on the final K row -- so the caller sends the pad lanes out of
-  range using this extent.  The two guards below are both load-bearing: only the
-  single-strip case pads, and only at wave group 1 does the strip coincide with
-  the macro tile, making m_chunk the absolute free-dim position.
+  A padded stack fetches tiles that are never read, and the SRD limit cannot
+  exclude them (one linear bound over the K window), so the caller uses this
+  extent to push the pad lanes out of range.  Only a single strip pads, and
+  only at wave group 1 is m_chunk the absolute free-dim position.
   """
   tc = tileInfo.tc
   wgIdx = 0 if tc == 'A' else 1
@@ -1117,13 +1112,9 @@ def _graTileAssignment_tlu_colScatter(writer, kernel, tileInfo, module, laneId,
 def _b128ChunkTiling(tileInfo, mStripBytes):
   """How one lane's b128 divides a strip: (chunks per K row, elements per chunk).
 
-  A b128 covers 16/bpe contiguous free-dim elements at one K row.  The baseline
-  2x1 fp4 stack fits exactly one chunk per K row, so the per-lane offset is a
-  pure K ramp.  Taller fp4 stacks make a b128 cover only part of a row, so the
-  physical chunk P = i*wavesize + laneId splits into K row P // chunksPerK and an
-  intra-row M block P % chunksPerK.  Only fp4 subdivides; the other TLU dtypes
-  (bf16 AB_B16_TLU1) keep one chunk per K row.  emitSingleDsRead in
-  SubtileLREmit has the matching LDS image.
+  A b128 covers 16/bpe contiguous free-dim elements at one K row.  Only fp4
+  subdivides a row; every other TLU dtype keeps one chunk per K row, making the
+  per-lane offset a pure K ramp.
   """
   chunksPerK = max(1, mStripBytes // 16) if float(tileInfo.bpe) == 0.5 else 1
   return chunksPerK, int(16 / tileInfo.bpe)
@@ -1137,10 +1128,8 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
 
       offset(lane, i) = (laneId + i * wavesize) * strideK * bpe
 
-  One VGPR per GR load into sharedVgprGROffset[].  The M/N position then lives
-  inside the load width, needing no free-dim term and no bank swizzle.  A taller
-  fp4 stack makes a load cover only part of a K row; the M-tiling and swizzle
-  paths below handle that.
+  One VGPR per GR load into sharedVgprGROffset[]; the M/N position lives inside
+  the load width, so there is no free-dim term and no bank swizzle.
   """
   module = Module()
   tc = tileInfo.tc
@@ -1242,10 +1231,10 @@ def _graTileAssignment_tlu(writer, kernel, tileInfo):
 def _tluKRowsPerWave(tileInfo, coopWaves):
   """K rows one wave owns when several share a strip.
 
-  The unit has to match what the per-lane GR offset walks.  Under col_scatter
-  the load index is itself the K column (col = col_group*N + load), so a wave
-  owning numGRPerSubtile consecutive loads starts that many columns in.  On the
-  plain K ramp the lane walks chunks, so the strip's K rows divide by the group.
+  The unit matches what the per-lane GR offset walks: under col_scatter the load
+  index is itself the K column, so a wave owning numGRPerSubtile loads starts
+  that many columns in; on the plain K ramp the strip's K rows divide by the
+  group.
   """
   if selectTLUColScatter(tileInfo) is not None:
     return int(tileInfo.numGRPerSubtile)
@@ -1434,9 +1423,8 @@ def _tluKWaveSlots(tileInfo):
   A strip column is cut kSplit ways inside a single K window and winSplit ways
   across whole K windows.  Fetch-group index g decomposes as
   ``slice = g % kSplit`` and ``run = (g // kSplit) % winSplit``; the two row
-  counts convert each of those to K rows.  The sId1 an emit sees is the FIRST
-  window of a winSplit-sized group -- both the scheduler's grA.k and the
-  globalReadDoSubtile loop step by winSplit -- so one run is one window.
+  counts convert each of those to K rows.  The sId1 an emit sees is the first
+  window of a winSplit-sized group, so one run is one window.
   """
   coop = int(tileInfo.grCoopWaves)
   perStrip = max(1, int(tileInfo.grWavesPerStrip))
