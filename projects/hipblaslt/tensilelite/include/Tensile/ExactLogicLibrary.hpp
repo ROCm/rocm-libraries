@@ -107,10 +107,25 @@ namespace TensileLite
             std::shared_ptr<MySolution> fallbackRv;
             const bool                  streamK = Debug::Instance().useExperimentalSelection() == 2;
 
+            const bool meshbasedLib = Debug::Instance().useMeshBasedLibrary();
+            bool       hasMeshBased = false;
+            if(meshbasedLib)
+            {
+                for(auto const& r : rows)
+                    if(r.first.value->type() == "MeshBasedMatching")
+                    {
+                        hasMeshBased = true;
+                        break;
+                    }
+            }
+
             // Return exact match immediately; otherwise keep first successful fallback.
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
+                    continue;
+
+                if(hasMeshBased && row.first.value->type() == "PredictionMatching")
                     continue;
 
                 if(!row.first(problem, hardware))
@@ -124,6 +139,11 @@ namespace TensileLite
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
                            row.first.value.get()))
                         rv->tag = MySolution::MatchingTag::Equal;
+
+                    if(rv
+                       && dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                           row.first.value.get()))
+                        rv->tag = MySolution::MatchingTag::MeshBased;
 
                     if(rv)
                     {
@@ -143,6 +163,11 @@ namespace TensileLite
                        && dynamic_cast<Predicates::Contraction::EqualityMatching*>(
                            row.first.value.get()))
                         fallbackRv->tag = MySolution::MatchingTag::Equal;
+
+                    if(fallbackRv
+                       && dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                           row.first.value.get()))
+                        fallbackRv->tag = MySolution::MatchingTag::MeshBased;
                 }
             }
 
@@ -206,6 +231,12 @@ namespace TensileLite
                         for(auto& sol : rowSolutions)
                             sol->tag = MySolution::MatchingTag::GridBased;
                     }
+                    else if(dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                                row.first.value.get()))
+                    {
+                        for(auto& sol : rowSolutions)
+                            sol->tag = MySolution::MatchingTag::MeshBased;
+                    }
                     else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
                                 row.first.value.get()))
                     {
@@ -268,10 +299,22 @@ namespace TensileLite
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
 
             const auto forceDynamic = Debug::Instance().streamK5ForceMode();
-            const bool effectiveDynamic = 
+            const bool effectiveDynamic =
                 (forceDynamic == 1) ||
                 (forceDynamic != 0 && problem.getParams().streamKTileSchedulingMode() != 0);
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary() || effectiveDynamic;
+
+            const bool meshbasedLib = Debug::Instance().useMeshBasedLibrary();
+            bool       hasMeshBased = false;
+            if(meshbasedLib)
+            {
+                for(auto const& r : rows)
+                    if(r.first.value->type() == "MeshBasedMatching")
+                    {
+                        hasMeshBased = true;
+                        break;
+                    }
+            }
 
             // false in case of early return;
             lastFindTopRetAll = false;
@@ -284,6 +327,9 @@ namespace TensileLite
                 if(predictionLib
                    && ((row.first.value->type() == "EqualityMatching")
                        || (row.first.value->type() == "RangeMatching")))
+                    continue;
+
+                if(hasMeshBased && row.first.value->type() == "PredictionMatching")
                     continue;
 
                 if(row.first(problem, hardware))
@@ -306,6 +352,12 @@ namespace TensileLite
                         {
                             for(auto& sol : solutions)
                                 sol->tag = MySolution::MatchingTag::GridBased;
+                        }
+                        else if(dynamic_cast<Predicates::Contraction::MeshBasedMatching*>(
+                                    row.first.value.get()))
+                        {
+                            for(auto& sol : solutions)
+                                sol->tag = MySolution::MatchingTag::MeshBased;
                         }
                         else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(
                                     row.first.value.get()))
