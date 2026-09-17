@@ -341,8 +341,8 @@ def _validateStreamKMulticast(state, printRejectionReason, isaInfoMap):
 # module (Tensile/Tests/unit/test_validateParameterTypes.py) that imports
 # them from Solution.
 
-_cacheHintTensors = ("A", "B", "C", "D", "E", "MXSA", "MXSB", "WS", "Metadata")
-_cacheHintLoadTensors = ("A", "B", "C", "E", "MXSA", "MXSB", "WS", "Metadata")
+_cacheHintTensors = ("A", "B", "C", "D", "E", "Gate", "MXSA", "MXSB", "WS", "Metadata")
+_cacheHintLoadTensors = ("A", "B", "C", "E", "Gate", "MXSA", "MXSB", "WS", "Metadata")
 
 # Module-level collector that accumulates type mismatches across all Solution
 # instances during a build.  Key is (param_name, actual_type_name,
@@ -1856,15 +1856,22 @@ class Solution(collections.abc.Mapping):
       if state["InternalSupportParams"]["KernArgsVersion"] < 3:
         state["InternalSupportParams"]["KernArgsVersion"] = 3
 
+    # SupportStreamKPerTileExtraIters is a pure CAPABILITY flag (see
+    # defaultInternalSupportParams): "this kernel's asm carries BOTH Stream-K
+    # K-split mappings and honors bit 29 of MagicShiftItersPerTile as the
+    # runtime selector". It is fully derived here, overriding whatever the
+    # solution YAML said, because only the generator knows what it just emitted.
+    # Newly generated SK3 / SK5 kernels emit both mappings plus the bit-29 gate.
+    # SK4 (dynamic) and SK0 do not, and custom kernels are hand-written asm that
+    # this generator did not produce, so none of them may claim the capability.
+    isCustomKernel = bool(state["CustomKernelName"])
+    state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = \
+        (state["StreamK"] in (3, 5)) and not isCustomKernel
+
     if state["StreamK"] != 0:
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
-      # Newly generated SK3 / SK5 kernels emit the per-tile extra-iters asm
-      # path. SK4 (dynamic) does not. Older/custom kernels keep the default
-      # False via YAML omission / defaultInternalSupportParams.
-      if state["StreamK"] in (3, 5):
-        state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] = True
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if state["ClusterDim"] != [1, 1]:
