@@ -39,6 +39,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <vector>
@@ -1565,6 +1566,12 @@ namespace TensileLite
                 // The threshold mirrors KernelWriterAssembly.py's BufferOOB
                 // sentinel (0xfffff000, ~4 GiB - 4 KiB) that allocPostLoopSrd
                 // programs as the SRD's num_records.
+                //
+                // That mirroring holds for code-generated kernels only. The
+                // hand-written kernels under Tensile/CustomKernels still set
+                // BufferOOB to the older 0x80000000, so for those this single
+                // global threshold is too permissive between 2 and 4 GiB. That
+                // gap is tracked as ROCM-31258 and is not addressed here.
                 static constexpr uint64_t BufferOOBBytes = 0xfffff000ull;
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
@@ -1696,6 +1703,7 @@ namespace TensileLite
                 // fallback is predicted: if the tile grid itself is unsafe,
                 // dispatch cannot rely on always landing on the CU-scaled
                 // path.
+
                 // Integer ceiling division, exact for every input; a float
                 // ceil() here would lose precision once a dimension exceeds
                 // 2^24 and could undercount tiles right at the boundary this
@@ -1705,6 +1713,10 @@ namespace TensileLite
                     return (numerator + denominator - 1) / denominator;
                 }
 
+                // Mirrors ContractionProblemGemm::getNumTiles(sizeMapping, 1),
+                // the count solve() uses to build the fallback grid. Kept
+                // separate because a predicate is handed MacroTile0/MacroTile1
+                // as its value rather than the solution's sizeMapping.
                 static size_t tiles(ContractionProblemGemm const& problem,
                                     std::array<int, 2> const&     value)
                 {
@@ -1713,9 +1725,32 @@ namespace TensileLite
                            * problem.batchSize(0);
                 }
 
+                // The launch narrows the 64-bit work-item count
+                // (workGroupSize * numWorkGroups, both size_t) to the
+                // `unsigned int` globalWorkSize parameters of
+                // hipExtModuleLaunchKernel, so a tile-scaled Stream-K grid is
+                // only safe while that product still fits in 32 bits.
+                // Measured on gfx950 at 256 threads: 2^24 + 16 workgroups
+                // wraps to a 16-workgroup grid and leaves the other
+                // 16,777,216 workgroups' worth of D unwritten with no error
+                // reported, and 2^24 workgroups lands on exactly 2^32, which
+                // narrows to 0 and HIP rejects outright.
+                //
+                // NumThreads is not carried in this predicate's value, so the
+                // bound assumes the 256-thread configuration that dominates
+                // the shipped Stream-K solutions. That is exact at 256
+                // threads, conservative at 64 and 128 (whose real limits are
+                // 2^26 and 2^25), and still too loose for the one 512-thread
+                // family, MacroTile 448x128, which wraps at 2^23 but needs
+                // roughly 896 GiB of D to get there. Deliberately *not*
+                // MAX_WORKGROUP_NUMBER: that constant happens to have the
+                // same magnitude but guards an unrelated fp32 conversion.
+                static constexpr size_t MAX_STREAMK_TILE_COUNT
+                    = std::numeric_limits<uint32_t>::max() / 256;
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return tiles(problem, value) <= MAX_WORKGROUP_NUMBER;
+                    return tiles(problem, value) <= MAX_STREAMK_TILE_COUNT;
                 }
 
                 virtual std::string toString() const override
@@ -1726,8 +1761,13 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem, stream, "sk_tiles", tiles(problem, value), "<=", "max", MAX_WORKGROUP_NUMBER);
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "sk_tiles",
+                                        tiles(problem, value),
+                                        "<=",
+                                        "max",
+                                        MAX_STREAMK_TILE_COUNT);
                 }
             };
 
