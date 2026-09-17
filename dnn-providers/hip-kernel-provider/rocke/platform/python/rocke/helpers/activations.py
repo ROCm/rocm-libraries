@@ -23,7 +23,24 @@ from __future__ import annotations
 from ..core.ir import IRBuilder, Value
 
 
-__all__ = ["_sigmoid_via_exp2", "_tanh_via_exp2"]
+__all__ = [
+    "SOFTPLUS_THRESHOLD",
+    "LN2",
+    "LOG2E",
+    "_sigmoid_via_exp2",
+    "_tanh_via_exp2",
+]
+
+
+# softplus(x) = log1p(exp(x)). Above this x the two agree to f32 precision, so
+# the branch returns x directly -- and exp(20) ~ 4.9e8 is close enough to the
+# clamped exp2 range that evaluating it buys nothing but risk. Every emitter
+# AND every host reference must switch at the SAME point: an oracle that keeps
+# its own copy stops being independent of the kernel it checks, and the
+# disagreement between the two thresholds is far below any tolerance.
+SOFTPLUS_THRESHOLD = 20.0
+LN2 = 0.6931471805599453
+LOG2E = 1.4426950408889634
 
 
 def _sigmoid_via_exp2(b: IRBuilder, x: Value) -> Value:

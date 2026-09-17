@@ -8,9 +8,7 @@ then updates it, so cost per token does not grow with sequence length.
 
 One page per family, as with [`kda.md`](kda.md) and
 [`attention.md`](attention.md): each kernel in the family gets a section here.
-Today that is **decode**. Prefill -- many tokens at once, a different shape of
-problem -- is not implemented yet and will be added as a second section by the
-change that ships it.
+Today that is **decode** and **prefill**.
 
 For the equation and GPU-mapping walkthrough, see
 [`library/builders/gfx950/gdn/ALGORITHM.md`](../../../library/builders/gfx950/gdn/ALGORITHM.md).
@@ -148,3 +146,66 @@ than by a fixed list.
   write until the next decode step reads it. The numeric test compares both.
 - **Padding lane touched.** A `-1` `read_indices` / `write_indices` entry
   must leave its state slot bit-identical.
+
+## Prefill
+
+Many tokens at once, for the sequence that has just arrived. This is a
+different shape of problem from decode: there is no single-token step to
+serialize, so the work is done **chunkwise** and the recurrent state is carried
+across chunks by a scan.
+
+GDN prefill is **not a separate kernel**. It is the shared KDA chunkwise pair
+run in a different gate mode:
+
+- `library/kernels/gfx950/kda_chunkwise.py` -- emitter, `gate_kind="gdn"`
+- `library/builders/gfx950/kda/gdn_prefill.py` -- host driver and fp64 oracle
+- `library/dispatch/gdn/prefill_gfx950.py` -- the two candidates
+- `library/dispatch/gdn/prefill_common.py` -- request, ABI version, vocabulary
+- `library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py` -- `value_splits` sweep
+
+### Why one emitter, not two
+
+The chunkwise algorithm is identical for KDA and GDN -- chunk factorization, triangular
+solve, state scan. Only the decay gate differs: KDA's is per channel and floored, GDN's is a
+scalar per `(token, head)` broadcast across `DK` and unbounded below. Both are log-domain;
+the equations, their ranges and the derivation are owned by
+[`ALGORITHM.md`](../../../library/builders/gfx950/gdn/ALGORITHM.md) SS2.2-2.3 and are
+deliberately not restated here.
+
+Forking the emitter would have duplicated the chunk factorization, the triangular solve and
+the state scan -- three pieces of real algebra -- to vary one expression.
+
+`gate_kind` defaults to `"kda"`, so every KDA spec emits byte-identical code:
+the golden fixture gains two GDN cases and **no existing case SHA moves**.
+
+The unbounded GDN gate is the reason `test_gdn_prefill_decay_guard.py` exists:
+KDA's gate is floored by `lower_bound`, GDN's is not, so the supported envelope
+is enforced rather than assumed. The bound is `EXP2_CLAMP / (log2(e) * chunk/2)`
+-- **5.46** per token at `chunk=32` -- computed by `decay_limit_for_chunk` in
+[`gdn_prefill.py`](../../../library/builders/gfx950/kda/gdn_prefill.py) and
+raised on at launch. It is the point the hardware `exp2` clamp begins to
+saturate, i.e. where the result stops being exact; past it the kernel returns a
+bounded, finite, WRONG answer, and the final state stays clean while the output
+degrades, so a loop validating only its carried state sees nothing.
+
+### Two launches, no fused default
+
+`dispatch_gdn_prefill` rejects `algorithm="auto"`. A GDN prefill is
+`chunk_prep` then `chunk_scan`; resolving `auto` to one half would dispatch
+half a computation and return successfully. The caller pins each half:
+
+```python
+prep = dispatch_gdn_prefill(GdnPrefillRequest(..., algorithm="chunk_prep"))
+scan = dispatch_gdn_prefill(GdnPrefillRequest(..., algorithm="chunk_scan"))
+```
+
+`value_splits` bands a head's value extent across workgroups, turning a `BH`-wide
+grid into `BH x value_splits`. It buys parallelism when `batch_heads` is small,
+which is when the scan's natural grid starves.
+
+The bands do not overlap and need **no reduction** afterwards -- there is no
+cross-workgroup traffic. What a split costs is **redundant reads**: the per-chunk
+tiles are addressed by chunk only, so every band re-reads the full tile set for
+every chunk. The quantity that grows is roughly `tile_bytes x value_splits x
+num_chunks` per `(batch, head)`, which is why the win reverses as `batch_heads`
+grows and the sweep script exists to find the crossover.

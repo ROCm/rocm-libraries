@@ -107,6 +107,7 @@ as described in the notes.
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
 | `gdn_decode` | ❌ | ✅ | ❌ | gated delta rule, single-token decode over a paged recurrent state; no softmax |
+| `gdn_prefill` | ❌ | ✅ | ❌ | gated delta rule, chunkwise prefill, **bf16 only**; the KDA chunkwise pair in `gate_kind="gdn"` mode, two launches (`chunk_prep` then `chunk_scan`), no fused default |
 ---
 
 ## Arch-specific native instances

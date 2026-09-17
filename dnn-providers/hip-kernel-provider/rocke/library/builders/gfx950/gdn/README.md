@@ -1,8 +1,14 @@
-# GDN Decode Driver, Benchmark, and Tuning
+# GDN Host Tools: Driver, Benchmark, and Tuning
 
-This directory contains the host-side tools for the gfx950 GDN decode kernel.
-The kernel emitter itself lives at
+This directory contains the host-side tools for the gfx950 GDN kernels. Most of
+the page is about **decode**, whose emitter lives at
 [`library/kernels/gfx950/gdn_decode.py`](../../../kernels/gfx950/gdn_decode.py).
+
+**Prefill** is driven from
+[`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) and runs
+the shared KDA chunkwise kernels in `gate_kind="gdn"` mode, so its tools live in
+the `kda/` directory rather than here. Its commands are in [Prefill](#prefill)
+below.
 
 Start with [`ALGORITHM.md`](ALGORITHM.md) if you want to understand the equations
 and GPU thread mapping. Use this page when you want to run, check, benchmark, or
@@ -16,6 +22,7 @@ retune the kernel.
 - [Benchmark dispatched kernels](#benchmark-dispatched-kernels)
 - [Retune the tile table](#retune-the-tile-table)
 - [Run tests](#run-tests)
+- [Prefill](#prefill)
 - [Understand the output](#understand-the-output)
 - [Exit codes](#exit-codes)
 - [Common failures](#common-failures)
@@ -33,6 +40,11 @@ retune the kernel.
 | [`library/tests/test_gdn_decode_prepare.py`](../../../tests/test_gdn_decode_prepare.py) | Host-side input validation: shapes, dtypes, contiguity, pool-index range |
 | [`library/tests/test_gdn_decode_gfx950_numeric.py`](../../../tests/test_gdn_decode_gfx950_numeric.py) | On-device output and state correctness |
 | [`library/tests/test_gdn_decode_golden.py`](../../../tests/test_gdn_decode_golden.py) | Detect unexpected LLVM-IR changes |
+| [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
+| [`library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py`](../../../benchmarks/gfx950/gdn/sweep_prefill_value_splits.py) | Sweep `value_splits` for prefill at a given `batch_heads` |
+| [`library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py`](../../../tests/dispatch/gdn/test_gfx950_prefill_wiring.py) | Prefill dispatch: candidate selection, the two-launch guard, launch geometry |
+| [`library/tests/test_gdn_prefill_decay_guard.py`](../../../tests/test_gdn_prefill_decay_guard.py) | Pin the supported envelope of the unbounded GDN decay gate |
+| [`library/tests/test_kda_gdn_gfx950_numeric.py`](../../../tests/test_kda_gdn_gfx950_numeric.py) | On-device prefill correctness in `gate_kind="gdn"` mode |
 
 ## Environment
 
@@ -194,6 +206,38 @@ The project-level check entry point is:
 
 ```bash
 python3 tools/run_checks.py
+```
+
+## Prefill
+
+Prefill is the KDA chunkwise pair in GDN gate mode; the driver and its fp64
+oracle are in `kda/`, not this directory.
+
+Check correctness against the oracle:
+
+```bash
+python3 library/builders/gfx950/kda/gdn_prefill.py
+```
+
+Sweep `value_splits` for a given `batch_heads` band:
+
+```bash
+python3 library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py
+```
+
+Tests:
+
+```bash
+python3 -m pytest \
+  library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py \
+  library/tests/test_gdn_prefill_decay_guard.py \
+  library/tests/test_kda_chunkwise_spec.py
+```
+
+On-device numeric coverage (needs a gfx950 GPU):
+
+```bash
+python3 -m pytest library/tests/test_kda_gdn_gfx950_numeric.py
 ```
 
 ## Understand the output
