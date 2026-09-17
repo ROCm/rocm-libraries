@@ -80,10 +80,13 @@ The legalizer also rejects unsupported dtypes and layouts, op kinds outside
 mixed-dtype matmul, incompatible broadcast ranks). Treat a legalizer rejection as
 a signal the boundary is wrong, not as an obstacle to force past.
 
-## How to fuse in rocKE
+## Fusion and adjacent techniques in rocKE
 
-Pick the lightest form that captures the win. They are ordered cheapest to
-heaviest.
+Three techniques, ordered cheapest to heaviest. Only the first is fusion in the
+strict sense — merging distinct operations into one kernel so the intermediate
+never leaves the chip. The other two are adjacent techniques that attack the same
+launch/bandwidth overheads without necessarily merging ops. Pick the lightest one
+that captures the win.
 
 ### 1. Epilogue fusion
 
@@ -101,11 +104,14 @@ producer's store. This is the most common and most reusable form.
   [`fusion/overview.md`](./overview.md) and
   [`development/extending.md`](../development/extending.md) §4.
 
-### 2. Producer-consumer fusion
+### 2. Warp specialization (producer-consumer)
 
-Warp-specialize within one kernel: some warps produce (load / MMA) into LDS while
-others consume, so the intermediate lives in LDS across the pipeline. Suited to
-stages that share a grid and tile-compatible shapes.
+Split the warps of one kernel: some produce (load / MMA) into LDS while others
+consume, so the intermediate lives in LDS across the pipeline. In its shipped form
+this is an intra-kernel scheduling/pipelining technique on a single op, not fusion;
+it *becomes* fusion only when the producer and consumer are genuinely distinct
+operations (e.g. a scorer feeding a selector). Suited to stages that share a grid
+and tile-compatible shapes.
 
 - The realized pattern is the warp-specialized GEMM pipeline
   (`instances/common/gemm_wsp3.py`, `wsp3`), where a subset of warps does the
@@ -115,10 +121,12 @@ stages that share a grid and tile-compatible shapes.
   `_emit_epilogue_default` from `gemm_universal`; it does not instantiate the
   generic `MfmaAtom` / `SchedulePolicy` / `SoftwarePipeline` classes.
 
-### 3. Whole-pipeline fusion
+### 3. Pipeline orchestration (and graph-level fusion)
 
 When stages cannot share on-chip state but the launch/sync overhead is the cost,
-fuse at the pipeline level rather than the kernel level.
+work at the pipeline level rather than the kernel level. The launch-level form
+below is orchestration, not fusion — the kernels stay distinct; only the
+graph-level form is true fusion, and it is not wired in yet.
 
 - Graph-level: `compile_fn` / `explain_fn` in `helpers/fuse.py` currently match
   `_PATTERN_TABLE` directly and support a single GEMM-plus-epilogue kernel; use
@@ -233,8 +241,8 @@ shares nothing.
    (bandwidth / launch / compute) with a roofline argument and a trace.
 2. **Confirm fusion can pay** — the stage is bandwidth- or launch-bound, not
    already compute-bound.
-3. **Choose the lightest form** that captures the win (epilogue < producer-consumer
-   < whole-pipeline).
+3. **Choose the lightest form** that captures the win (epilogue fusion < warp
+   specialization < pipeline orchestration).
 4. **Compose over bespoke** — add an `EpilogueOp` / pattern entry / schedule choice
    rather than a monolithic kernel; parameterize the case-specific stage.
 5. **Mirror both engines** and re-run `tools/check_byte_identity.py` GREEN at
