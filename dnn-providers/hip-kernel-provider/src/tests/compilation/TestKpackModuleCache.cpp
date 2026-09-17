@@ -23,12 +23,13 @@ namespace
 using hip_kernel_provider::testing::findPackedArchDirectory;
 using hip_kernel_provider::testing::PackedKernelSource;
 using hip_kernel_provider::testing::readPackedKernelSource;
+using hip_kernel_provider::testing::testKpackArchive;
 using hip_kernel_provider::testing::unitKpackRoot;
 
-/// rocm-kpack's own test archive, vendored beside this test. Its entries are placeholder
-/// payloads rather than HSA code objects, which is what makes it useful here: it is a
-/// real container, so the reader parses it, but nothing in it can load.
-constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
+/// The arch and toc key of rocm-kpack's own test archive, which testKpackArchive() resolves
+/// from this binary's location. Its entries are placeholder payloads rather than HSA code
+/// objects, which is what makes it useful here: it is a real container, so the reader parses
+/// it, but nothing in it can load.
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
@@ -39,7 +40,7 @@ constexpr const char* DIGEST = "0123456789abcdef0123456789abcdef0123456789abcdef
 
 /// The standalone descriptor of the packed conv set, whose archive this build produced for
 /// the local arch. The ordinal case below needs a code object HIP actually accepts, which
-/// REAL_ARCHIVE's placeholder payloads deliberately are not.
+/// the test kpack archive's placeholder payloads deliberately are not.
 constexpr const char* PACKED_UKD_DESCRIPTOR = "conv_fwd_f16_block64.ukd.json";
 
 TEST(TestKpackModuleCacheKey, MakeKeyFormatsCorrectly)
@@ -102,12 +103,14 @@ TEST(TestKpackModuleCacheKey, KeyIgnoresArchFeatureDecoration)
 
 TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 {
-    ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
 
     try
     {
-        KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, ARCHIVE_ARCH, 0, DIGEST);
+        KpackModuleCache::load(
+            testKpackArchive().string(), ARCHIVE_TOC_KEY, ARCHIVE_ARCH, 0, DIGEST);
         FAIL() << "expected a payload without code-object magic to be rejected";
     }
     catch(const KpackModuleLoadFailure& failure)
@@ -130,12 +133,13 @@ TEST(TestKpackModuleCacheLoad, RejectsAPayloadThatIsNotACodeObject)
 
 TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
 {
-    ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
 
     try
     {
-        KpackModuleCache::load(REAL_ARCHIVE, ARCHIVE_TOC_KEY, "gfx90a", 0, DIGEST);
+        KpackModuleCache::load(testKpackArchive().string(), ARCHIVE_TOC_KEY, "gfx90a", 0, DIGEST);
         FAIL() << "expected an arch the archive does not hold to be rejected";
     }
     catch(const KpackModuleLoadFailure& failure)
