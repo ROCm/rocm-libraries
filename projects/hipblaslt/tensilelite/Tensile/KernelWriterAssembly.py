@@ -15820,7 +15820,7 @@ class KernelWriterAssembly(KernelWriter):
         # s = gate null ? 1.0 : 0.0. FMA does acc = (gate+s)*acc + gate.
         # No separate compare needed: allocPostLoopSrdSuppress leaves SCC = (AddressGate == 0)
         # module.add(self.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate null? (SrdGate num_records==0)"))
-        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=hex(0x3f800000), src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
+        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=1.0, src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
         module.add(self.shiftSrd("Gate"))
         ssslist.append("Gate")
         useSize.append(False)
