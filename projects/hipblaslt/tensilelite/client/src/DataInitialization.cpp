@@ -2908,9 +2908,8 @@ namespace TensileLite
                             (m_mxScaleLayout == MXScaleLayout::GFX1250 || m_mxScaleLayout == MXScaleLayout::GFX950)
                             && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc)
                     {
-                        // The cache says gpuInput.valid already holds the swizzled
-                        // bytes for this descriptor, so reuse that device buffer as-is
-                        // instead of rebuilding the layout from cpuInput.valid.
+                        // Already swizzled, and initOneMXSide kept the source bytes
+                        // unchanged, so skip the host-side permute.
                         ptr = p.gpuInput.valid.get();
                     }
 
