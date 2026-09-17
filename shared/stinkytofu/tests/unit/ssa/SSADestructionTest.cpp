@@ -305,6 +305,27 @@ TEST_F(SSADestructionTest, RejectsAPhiThatWouldNeedACopy) {
     EXPECT_EQ(physicalIR(), before);
 }
 
+TEST_F(SSADestructionTest, AcceptsAPhiWhoseMovedInputIsUndefined) {
+    SelfLoopJoinCfg cfg = buildSelfLoopJoinCfg(*func, kArch);
+    ASSERT_NE(cfg.entry, nullptr);
+    lift();
+
+    StinkySSAValue* moved = firstPhiIncoming(*func);
+    ASSERT_NE(moved, nullptr);
+
+    // The same colouring the test above rejects, over an input holding nothing.
+    // A copy has no contents to move, so the edge is free to disagree -- the
+    // freedom AllocationConstraints::build() relies on when it drops the edge.
+    moved->setUndefined(true);
+
+    AllocationResult colouring = createLegacyColoring(*func);
+    colouring.assign(moved->valueId(), RegKey{RegType::V, 200, RegHalf::NONE});
+
+    const SSADestructionResult result = destroyAttachedSSA(*func, colouring);
+
+    EXPECT_TRUE(result.ok()) << result.toString();
+}
+
 TEST_F(SSADestructionTest, RejectsAGraphThatNoLongerDescribesTheFunction) {
     BasicBlock* entry = makeEntry();
     StinkyInstruction* add = createVAddInBlock(entry, kArch, 2, 0, 1);

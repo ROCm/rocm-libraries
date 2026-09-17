@@ -549,7 +549,7 @@ flowchart LR
     Arena["SSAArena::values()"] --> ClassOf["classOf()"]
     Arena --> Hint["hintFor()<br/>from PhysicalBinding"]
     Ops["srcRegs / destRegs<br/>via liftedSSAUnits()"] --> Tuple["tupleRuns()"]
-    Args["block ssaArguments()"] -->|has incoming| Aff["affinitySets()"]
+    Args["block ssaArguments()"] -->|"has incoming, less the undefined ones"| Aff["affinitySets()"]
     Args -->|"no incoming, dispatch-filled"| Pin["isPinned()"]
     Args -->|"no incoming, above its class's line"| Undef["undefinedLiveIns()"]
     RMW["read-write dest/src pair"] --> Aff
@@ -562,7 +562,7 @@ Everything is stored per value ID, so every query is an array lookup. Only `isAl
 | Constraint | Source | Rule |
 |---|---|---|
 | Consecutive range | operand + `liftedSSAUnits()` | `tupleRuns()`: one operand's slots occupy consecutive units, in operand order |
-| Merge | `SSABlockArgument.incoming` | `affinitySets()`: the argument and every incoming value get one colour |
+| Merge | `SSABlockArgument.incoming` | `affinitySets()`: the argument and every incoming value the program defines get one colour |
 | Pinned | block argument with no incoming, in a register the dispatch fills | `isPinned()`: must keep its original register |
 | Hint | `PhysicalBinding` | `hintFor()`: first candidate, not an obligation |
 | Class | `StinkySSAValue::type()` | `classOf()` / `isAllocatable()` |
@@ -574,10 +574,11 @@ Everything is stored per value ID, so every query is an array lookup. Only `isAl
 
 **An index ceiling is legality, like pinning.** Some operand fields carry eight bits of index and no bank selector, so they can only name a register inside one 256-register window. A value used through such a field has to live there. Ignoring it emits an operand naming a register the instruction cannot reach, which is wrong arithmetic rather than a slower kernel — so `maxIndexFor()` is a hard limit the allocator places under, not a cost. Note that "bank" here means that addressing window, not the `index % 4` read port of the register file; the two are unrelated and this framework models only the first.
 
-Three things deliberately yield no constraint, which is as useful to know:
+Four things deliberately yield no constraint, which is as useful to know:
 
 - a one-unit operand — a run needs two or more units, so single-DWORD operands are free;
 - an affinity set that collapses to one member after sort and dedup, so a merge already agreeing with its incoming value adds nothing;
+- a merge edge whose incoming value is undefined, which is the paragraph on `StinkySSAValue::isUndefined()` below;
 - a reserved hint — `isAllocatable()` is class-level and never consults `hintFor()`, so a value whose original register is reserved stays a candidate that simply cannot keep its hint.
 
 **Read-write operands must share a colour.** `s_cmov_b32 d, s` is `if (SCC) d = s`: on the untaken path `d` keeps what it already held. `HwInstDesc` marks that field `isReadWrite` and `AsmVerifierPass` already requires the register in both `destRegs` and `srcRegs`. The IR models the old value as an extra implicit source that the assembler does not print. Overlapping bindings *permit* sharing; `collectReadWriteTies` adds an `AffinitySet` per pair so the colourer *must* keep them together — the same mechanism as a merge. `tests/filecheck/allocation_read_write_tie.stir` uses an untied input so the colouring has to bring the two together rather than merely preserve them.
@@ -588,7 +589,11 @@ Three things deliberately yield no constraint, which is as useful to know:
 
 Every unknown pins. The line arrives as `kSigDispatchFilledSgprsMetaKey` on the Function, the descriptor not being reachable from a pass, and absent or zero reads as the whole file — so a `.stir` file or a test keeps the old behaviour. A kernel with no preloaded kernargs never publishes it at all, the descriptor leaving it unsettled whether the kernarg segment pointer sits in `s[0:1]` ahead of the workgroup ids; understating the line is the one direction that produces wrong code.
 
-**Vectors have a line of their own, and it is `v0`.** The only VGPRs a dispatch fills hold the workitem id, and `.amdhsa_system_vgpr_workitem_id` counts enabled *dimensions*, not registers. Which of the two conventions a target uses is `.packedWorkitemId` in its `DEF_ARCH`, read through `hasPackedWorkitemId()` — packed means x, y and z share `v0`'s bits 0:9, 10:19 and 20:29, so one register arrives filled whatever the field says, and `settledDispatchFilledVgprCount()` answers 1 without consulting the descriptor at all. An unpacked target needs the field, which the allocator cannot reach, so the answer is nothing and every vector live-in stays pinned as before. No metadata key either way: `AllocationConstraints::build` has `target.arch()`, which is the whole question.
+**Vectors have a line of their own, and it is `v0`.** The only VGPRs a dispatch fills hold the workitem id, and `.amdhsa_system_vgpr_workitem_id` counts enabled *dimensions*, not registers. Which of the two conventions a target uses is `.packedWorkitemId` in its `DEF_ARCH`, read through `hasPackedWorkitemId()` — packed means x, y and z share `v0`'s bits 0:9, 10:19 and 20:29, so one register arrives filled whatever the field says, and `settledDispatchFilledVgprCount()` answers 1 without consulting the descriptor at all. An unpacked target needs the field, which the allocator cannot reach, so the answer is nothing and every vector live-in stays pinned as before. No metadata key either way: `markUndefinedLiveIns()` has `target.arch()`, which is the whole question.
+
+**Undefined is a property of the value, decided once.** `markUndefinedLiveIns()` runs before `build()` and stamps `StinkySSAValue::setUndefined()` on every entry live-in above its class's line. Three readers need that answer and none can hand it to the others: `build()` uses it for the pin split and for the merge exclusion below, and `SSADestruction::checkPhis` uses it having been given a function and a colouring and nothing else. False is the safe default — a value nobody stamps stays defined and therefore pinned, so a forgotten marker loses an optimisation where the reverse would lose what the dispatch wrote.
+
+**An undefined merge edge asks for nothing.** Unpinning the live-ins is not enough on its own: a live-in that feeds a merge is also an incoming value, and welding it to the merge puts it back under a hard constraint by another route. The merge reads garbage along that edge whichever register it takes, so `build()` leaves the member out; the result stays welded to the edges that genuinely define it, and to any pinned live-in among them, so a filled register still forces agreement. `checkPhis` grants the matching exception, a copy having no contents to move. The two sides have to move together — either alone is a contradiction between the colouring and the check — and the effect is `f8_tn_maf`-scale, 505 merges in one kernel.
 
 This matters more than the scalar line does. A kernel lifted mid-stream can name hundreds of VGPRs nothing in the function defines — an F8 GEMM came back with 506, of which only `v0` had arrived holding anything. Pinning the other 505 left no aligned 16-wide window free anywhere in the file and the kernel would not colour, which is why the shadow report prints a count and a sample rather than the list.
 
