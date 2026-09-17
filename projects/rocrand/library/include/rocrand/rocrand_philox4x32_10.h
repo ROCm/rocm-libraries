@@ -75,6 +75,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ROCRAND_PHILOX4x32_DEFAULT_SEED 0xdeadbeefdeadbeefULL
 /** @} */ // end of group rocranddevice
 
+//#define PHILOX_OPTIMIZATION_NONE
+//#define PHILOX_OPTIMIZATION_UNION
+//#define PHILOX_OPTIMIZATION_SWITCH
+#define PHILOX_OPTIMIZATION_ARRAY
+
 namespace rocrand_device
 {
 
@@ -83,6 +88,7 @@ class philox4x32_10_engine
 public:
     struct philox4x32_10_state
     {
+#ifdef PHILOX_OPTIMIZATION_UNION
         // Unions are used here to force the compiler to map the variables
         // strictly to VGPRs instead of spilling them to local scratch memory.
         union
@@ -109,11 +115,12 @@ public:
                 unsigned int key_x, key_y;
             };
         };
-        /*
+#else // NONE or SWITCH
         uint4 counter;
         uint4 result;
         uint2 key;
-        */
+#endif
+
         unsigned int substate;
 
     #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
@@ -197,6 +204,31 @@ public:
 
     __forceinline__ __device__ __host__ unsigned int next()
     {
+#ifdef PHILOX_OPTIMIZATION_NONE
+        asm volatile("// philox_read_start_ref");
+
+        #if defined(__HIP_PLATFORM_AMD__)
+            unsigned int ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
+        #else
+            unsigned int ret = (&m_state.result.x)[m_state.substate];
+        #endif
+
+        asm volatile("// philox_read_end_ref");
+
+        m_state.substate++;
+        if(m_state.substate == 4)
+        {
+            m_state.substate = 0;
+            this->discard_state();
+            m_state.result = this->ten_rounds(m_state.counter, m_state.key);
+        }
+
+        return ret;
+#endif
+
+#ifdef PHILOX_OPTIMIZATION_UNION
+        asm volatile("// philox_read_start_union");
+
         unsigned int s = m_state.substate;
         unsigned int ret;
         if(s == 0)
@@ -208,6 +240,8 @@ public:
         else
             ret = m_state.result_w;
 
+        asm volatile("// philox_read_end_union");
+
         s++;
         if(s == 4)
         {
@@ -217,24 +251,54 @@ public:
         }
         m_state.substate = s;
         return ret;
+#endif
 
-        /*
-    #if defined(__HIP_PLATFORM_AMD__)
-        unsigned int ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
-    #else
-        unsigned int ret = (&m_state.result.x)[m_state.substate];
-    #endif
+#ifdef PHILOX_OPTIMIZATION_SWITCH
+        asm volatile("// philox_read_start_switch");
 
-        m_state.substate++;
-        if(m_state.substate == 4)
+        unsigned int s = m_state.substate;
+        unsigned int ret;
+        if(s == 0)
+            ret = m_state.result.x;
+        else if(s == 1)
+            ret = m_state.result.y;
+        else if(s == 2)
+            ret = m_state.result.z;
+        else
+            ret = m_state.result.w;
+
+        asm volatile("// philox_read_switch");
+
+        s++;
+        if(s == 4)
         {
-            m_state.substate = 0;
+            s = 0;
             this->discard_state();
             m_state.result = this->ten_rounds(m_state.counter, m_state.key);
         }
+        m_state.substate = s;
         return ret;
-        */
+#endif
 
+#ifdef PHILOX_OPTIMIZATION_ARRAY
+        asm volatile("// philox_read_start_array");
+
+        unsigned int s = m_state.substate;
+        unsigned int vs[4] = {m_state.result.x, m_state.result.y, m_state.result.z, m_state.result.w};
+        unsigned int ret = vs[s];
+
+        asm volatile("// philox_read_array");
+
+        s++;
+        if(s == 4)
+        {
+            s = 0;
+            this->discard_state();
+            m_state.result = this->ten_rounds(m_state.counter, m_state.key);
+        }
+        m_state.substate = s;
+        return ret;
+#endif
     }
 
     __forceinline__ __device__ __host__ uint4 next4()
@@ -265,14 +329,18 @@ protected:
     {
         unsigned int lo = static_cast<unsigned int>(subsequence);
         unsigned int hi = static_cast<unsigned int>(subsequence >> 32);
-/*
+
+#if defined(PHILOX_OPTIMIZATION_NONE) || defined(PHILOX_OPTIMIZATION_SWITCH) || defined(PHILOX_OPTIMIZATION_ARRAY)
         unsigned int temp = m_state.counter.z;
         m_state.counter.z += lo;
         m_state.counter.w += hi + (m_state.counter.z < temp ? 1 : 0);
-*/
+#endif
+
+#ifdef PHILOX_OPTIMIZATION_UNION
         unsigned int temp = m_state.counter_z;
         m_state.counter_z += lo;
         m_state.counter_w += hi + (m_state.counter_z < temp ? 1 : 0);
+#endif
     }
 
     // Advances the internal state by offset times.
@@ -283,16 +351,20 @@ protected:
         unsigned int hi = static_cast<unsigned int>(offset >> 32);
 
         uint4 temp = m_state.counter;
-/*
+
+#if defined(PHILOX_OPTIMIZATION_NONE) || defined(PHILOX_OPTIMIZATION_SWITCH) || defined(PHILOX_OPTIMIZATION_ARRAY) 
         m_state.counter.x += lo;
         m_state.counter.y += hi + (m_state.counter.x < temp.x ? 1 : 0);
         m_state.counter.z += (m_state.counter.y < temp.y ? 1 : 0);
         m_state.counter.w += (m_state.counter.z < temp.z ? 1 : 0);
-*/
+#endif
+
+#ifdef PHILOX_OPTIMIZATION_UNION
         m_state.counter_x += lo;
         m_state.counter_y += hi + (m_state.counter_x < temp.x ? 1 : 0);
         m_state.counter_z += (m_state.counter_y < temp.y ? 1 : 0);
         m_state.counter_w += (m_state.counter_z < temp.z ? 1 : 0);
+#endif
     }
 
     // Advances the internal state to the next state
