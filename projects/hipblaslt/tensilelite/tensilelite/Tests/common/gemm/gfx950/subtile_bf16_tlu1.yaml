@@ -110,6 +110,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [96, 256, 1, 128]    # M edge 
           - Exact: [128, 128, 1,  64]   # one DepthU chunk at DepthU 64
           - Exact: [128, 128, 1, 128]   # exact multiple of both DepthU values
           - Exact: [128, 128, 1,  96]   # tail at DepthU 64 (64 + 32)
