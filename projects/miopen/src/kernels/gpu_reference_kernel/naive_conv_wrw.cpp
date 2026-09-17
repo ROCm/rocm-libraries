@@ -76,9 +76,11 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
     // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
-    // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+    // Tile sized from gridDim.y so tile (and atomicAdd) count is host-controlled.
+    int tile_size =
+        (spatial_length + static_cast<int>(gridDim.y) - 1) / static_cast<int>(gridDim.y);
+    int tile_start = static_cast<int>(blockIdx.y) * tile_size;
+    int tile_end   = min(tile_start + tile_size, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -93,7 +95,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
         int iy = (weight_idx / fx) % fy;
         int ic = weight_idx / (fx * fy);
 
-        acc_data_t value = 0;
+        CompensatedSum<acc_data_t> value;
         if(worker_id < workers)
         {
             if(use_atomic)
@@ -186,7 +188,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
             }
         }
 
-        smem[tx] = value;
+        smem[tx] = value.value();
         __syncthreads();
 
         if(worker_id == 0)
@@ -245,7 +247,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
             int iy = (tid / fx) % fy;
             int ic = tid / (fx * fy);
 
-            acc_data_t value = 0;
+            CompensatedSum<acc_data_t> value;
 
             if(use_atomic)
             {
@@ -354,14 +356,14 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
             else
@@ -372,14 +374,14 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
         }
@@ -466,9 +468,11 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
     // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
-    // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+    // Tile sized from gridDim.y so tile (and atomicAdd) count is host-controlled.
+    int tile_size =
+        (spatial_length + static_cast<int>(gridDim.y) - 1) / static_cast<int>(gridDim.y);
+    int tile_start = static_cast<int>(blockIdx.y) * tile_size;
+    int tile_end   = min(tile_start + tile_size, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -483,7 +487,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
         int iz = (weight_idx / (fx * fy)) % fz;
         int ic = weight_idx / (fx * fy * fz);
 
-        acc_data_t value = 0;
+        CompensatedSum<acc_data_t> value;
         if(worker_id < workers)
         {
             if(use_atomic)
@@ -590,7 +594,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
             }
         }
 
-        smem_ncdhw[tx] = value;
+        smem_ncdhw[tx] = value.value();
         __syncthreads();
 
         if(worker_id == 0)
@@ -652,7 +656,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
             int iz = (tid / (fx * fy)) % fz;
             int ic = tid / (fx * fy * fz);
 
-            acc_data_t value = 0;
+            CompensatedSum<acc_data_t> value;
 
             if(use_atomic)
             {
@@ -780,14 +784,14 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
             else
@@ -799,14 +803,14 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
         }
@@ -886,9 +890,11 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
     // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
-    // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+    // Tile sized from gridDim.y so tile (and atomicAdd) count is host-controlled.
+    int tile_size =
+        (spatial_length + static_cast<int>(gridDim.y) - 1) / static_cast<int>(gridDim.y);
+    int tile_start = static_cast<int>(blockIdx.y) * tile_size;
+    int tile_end   = min(tile_start + tile_size, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -902,7 +908,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
         int ix = (weight_idx / c_per_group) % fx;
         int iy = weight_idx / (c_per_group * fx);
 
-        acc_data_t value = 0;
+        CompensatedSum<acc_data_t> value;
         if(worker_id < workers)
         {
             if(use_atomic)
@@ -995,7 +1001,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
             }
         }
 
-        smem_nhwc[tx] = value;
+        smem_nhwc[tx] = value.value();
         __syncthreads();
 
         if(worker_id == 0)
@@ -1054,7 +1060,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
             int ix = (tid / c_per_group) % fx;
             int iy = tid / (c_per_group * fx);
 
-            acc_data_t value = 0;
+            CompensatedSum<acc_data_t> value;
 
             if(use_atomic)
             {
@@ -1163,14 +1169,14 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
             else
@@ -1181,14 +1187,14 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
         }
@@ -1274,9 +1280,11 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
     // constexpr guard takes the non-atomic fallback path for unsupported types.
     bool use_atomic = (gridDim.y > 1);
 
-    // Spatial tile range for cross-block tiling (gridDim.y > 1)
-    int tile_start = static_cast<int>(blockIdx.y) * bdx;
-    int tile_end   = min(tile_start + bdx, spatial_length);
+    // Tile sized from gridDim.y so tile (and atomicAdd) count is host-controlled.
+    int tile_size =
+        (spatial_length + static_cast<int>(gridDim.y) - 1) / static_cast<int>(gridDim.y);
+    int tile_start = static_cast<int>(blockIdx.y) * tile_size;
+    int tile_end   = min(tile_start + tile_size, spatial_length);
 
     if(num_weights <= bdx / 2)
     {
@@ -1291,7 +1299,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
         int iy = (weight_idx / (c_per_group * fx)) % fy;
         int iz = weight_idx / (c_per_group * fx * fy);
 
-        acc_data_t value = 0;
+        CompensatedSum<acc_data_t> value;
         if(worker_id < workers)
         {
             if(use_atomic)
@@ -1398,7 +1406,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
             }
         }
 
-        smem_ndhwc[tx] = value;
+        smem_ndhwc[tx] = value.value();
         __syncthreads();
 
         if(worker_id == 0)
@@ -1460,7 +1468,7 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
             int iy = (tid / (c_per_group * fx)) % fy;
             int iz = tid / (c_per_group * fx * fy);
 
-            acc_data_t value = 0;
+            CompensatedSum<acc_data_t> value;
 
             if(use_atomic)
             {
@@ -1588,14 +1596,14 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
             else
@@ -1607,14 +1615,14 @@ inline __device__ void naive_conv_wrw_ndhwc(const src_data_t* __restrict__ p_in,
                 if constexpr(has_native_atomic_add<dst_data_t>::value)
                 {
                     if(use_atomic)
-                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value));
+                        naive_atomic_add(&p_wei[f_idx], cast_to<acc_data_t, dst_data_t>(value.value()));
                     else
                         applyalphaBetaUpdate<dst_data_t, acc_data_t>(
-                            p_wei, value, alpha, beta, f_idx);
+                            p_wei, value.value(), alpha, beta, f_idx);
                 }
                 else
                 {
-                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value, alpha, beta, f_idx);
+                    applyalphaBetaUpdate<dst_data_t, acc_data_t>(p_wei, value.value(), alpha, beta, f_idx);
                 }
             }
         }

@@ -33,6 +33,7 @@
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/datatype.hpp>
 #include <ostream>
+#include <algorithm>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
 
@@ -53,6 +54,22 @@ constexpr size_t NAIVE_CONV_BLOCK_SIZE = 256;
 // weight buffer and atomic contention. 262144 = 1024 * 256, roughly the point
 // where one block can no longer cover the spatial dimension in its thread-loop.
 constexpr size_t WRW_SPATIAL_TILING_THRESHOLD = 262144;
+
+// Cross-block WRW tiling combines per-tile partial sums via a hardware
+// atomicAdd into the float32 weight buffer, once per tile per weight element.
+// Uncapped, tile count is ceil(spatial/block_size), which for large-image WRW
+// shapes can reach hundreds of thousands. This is capped for two reasons that
+// both generalize across hardware, not just the GPU used to derive the value:
+//  1. gridDim.y/z is capped at 65535 by the portable HIP/CUDA grid-dimension
+//     spec (a compute-capability constraint, not one device's quirk).
+//  2. Compensated summation (CompensatedSum, naive_conv.hpp) cannot correct
+//     across an atomicAdd — every atomic rounds to float32 — so error grows
+//     with the number of atomics landing on one address, empirically as
+//     sqrt(tile count) (an IEEE754 float32 property, independent of GPU).
+// 1024 keeps that error well inside MIOpenDriver's tolerance with margin to
+// spare, and parallelism beyond a few thousand tiles brings no further benefit
+// once the launch already saturates the device.
+constexpr size_t WRW_MAX_ATOMIC_TILES = 1024;
 
 // The fp8 naive conv path lives in a separate source file. The BWD-data block-size
 // heuristic special-cases it (see NaiveConv2DBWDBlockSize), and the invoker uses it
@@ -887,7 +904,8 @@ GetConv2DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t spatial           = static_cast<size_t>(n) * ho * wo;
     size_t num_spatial_tiles = 1;
     if(!IsAccInt32(problem) && IsOutputFp32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
-        num_spatial_tiles = (spatial + block_size - 1) / block_size;
+        num_spatial_tiles = std::min<size_t>((spatial + block_size - 1) / block_size,
+                                             WRW_MAX_ATOMIC_TILES);
 
     KernelInfo kernel;
 
@@ -1047,7 +1065,8 @@ GetConv3DWRWSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     size_t spatial           = static_cast<size_t>(n) * do_ * ho * wo;
     size_t num_spatial_tiles = 1;
     if(!IsAccInt32(problem) && IsOutputFp32(problem) && spatial > WRW_SPATIAL_TILING_THRESHOLD)
-        num_spatial_tiles = (spatial + block_size - 1) / block_size;
+        num_spatial_tiles = std::min<size_t>((spatial + block_size - 1) / block_size,
+                                             WRW_MAX_ATOMIC_TILES);
 
     KernelInfo kernel;
 

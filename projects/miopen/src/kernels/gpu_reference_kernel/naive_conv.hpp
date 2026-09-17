@@ -94,6 +94,32 @@ inline __device__ __host__ bool IsZero(double val) { return val == 0.0; }
 
 inline __device__ __host__ bool IsOne(double val) { return val == 1.0; }
 
+// Compensated (Kahan) summation. WRW's reduction depth (n * ho * wo, or
+// n * do * ho * wo) is unbounded, unlike FWD/BWD-d (bounded by C*Y*X / K*Y*X),
+// so a plain running sum's rounding error grows with depth and can exceed
+// MIOpenDriver's fixed tolerance on large-image convolutions. Kahan bounds the
+// error at O(eps) independent of depth, so the accumulator can stay float32 —
+// these reduction loops are memory/latency-bound, not ALU-bound, so the extra
+// ops are effectively free. Requires IEEE-compliant (non-reassociating) codegen;
+// exposes operator+= so call sites are unchanged from a plain scalar sum.
+template <typename T>
+struct CompensatedSum
+{
+    T sum = static_cast<T>(0);
+    T c   = static_cast<T>(0);
+
+    inline __device__ CompensatedSum& operator+=(T v)
+    {
+        T y = v - c;
+        T t = sum + y;
+        c   = (t - sum) - y;
+        sum = t;
+        return *this;
+    }
+
+    inline __device__ T value() const { return sum; }
+};
+
 // Type trait: does atomicAdd exist for this type?
 // float/double have native hardware support on all GPUs. half/hip_bfloat16
 // use CAS-based atomicAdd overloads defined below, which only require
