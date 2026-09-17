@@ -317,6 +317,8 @@ add_executable(test_gen_instructions
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/test_gen_instructions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/GenInstructions.cpp
 )
+set_property(TARGET test_gen_instructions PROPERTY
+    STINKYTOFU_TEST_ARCHITECTURES "${STINKYTOFU_ARCHS_TO_BUILD}")
 target_link_libraries(test_gen_instructions PRIVATE stinkytofu-warnings)
 
 target_link_libraries(test_gen_instructions PRIVATE gfxisa)
