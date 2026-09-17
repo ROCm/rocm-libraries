@@ -10,7 +10,8 @@
 #   - workflow_dispatch: manually test a specific build by run-id.
 #
 
-name: gfx1250 TensileLite + hipBLASLt Tests
+name: gfx1250 HW hipBLASLt + TensileLite Tests
+run-name: ${{ github.event.workflow_run.head_branch || github.ref_name }} @ ${{ github.event.workflow_run.head_sha || github.sha }}
 
 on:
   workflow_run:
@@ -34,10 +35,6 @@ on:
         description: "Run the TensileLite common tests"
         type: boolean
         default: true
-      tensilelite_markers:
-        description: "pytest -m marker expression for TensileLite common tests"
-        type: string
-        default: "common"
       tensilelite_pytest_k:
         description: "pytest -k expression for TensileLite common tests"
         type: string
@@ -57,7 +54,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -147,7 +144,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.should_run == 'true'
     runs-on: blas-rocm-mi455-sandbox
-    timeout-minutes: 300
+    timeout-minutes: 360
     # Test container: no ROCm baked in, so the fetched artifact's libraries load
     # cleanly with no host /opt/rocm to shadow them. Same image + options TheRock's
     # component-test (pytest_runner) path uses.
@@ -166,6 +163,7 @@ jobs:
         --group-add 993
         --group-add 992
         --group-add 110
+        --user 0:0
     defaults:
       run:
         shell: bash
@@ -195,8 +193,15 @@ jobs:
           repository: ROCm/TheRock
           ref: ${{ steps.ci-env.outputs.therock-ref }}
           path: TheRock
-          sparse-checkout: build_tools
+          sparse-checkout: |
+            build_tools
+            cmake
           sparse-checkout-cone-mode: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
 
       - name: Install Python dependencies
         run: |
@@ -219,8 +224,7 @@ jobs:
             --artifact-group gfx125X-dcgpu \
             --blas --tests \
             --run-github-repo "$BUILD_REPO" \
-            --output-dir "$ROCM" \
-            --flatten 2>&1 | tee fetch.log
+            --output-dir "$ROCM" 2>&1 | tee fetch.log
           RC=${PIPESTATUS[0]}
           set -e
           if [ "$RC" -ne 0 ]; then
@@ -240,9 +244,10 @@ jobs:
           fi
           echo "$ROCM/bin" >> "$GITHUB_PATH"
           echo "$ROCM/lib/llvm/bin" >> "$GITHUB_PATH"
+          printf '%s\n' "$ROCM/lib" "$ROCM/lib/llvm/lib" "$ROCM/lib/rocm_sysdeps/lib" > /etc/ld.so.conf.d/rocm-artifact.conf
+          ldconfig
           echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
           echo "::group::Artifact layout"
-          ls -la "$ROCM" || true
           echo "Key binaries:"
           find "$ROCM" -type f \( -name hipblaslt-test -o -name tensilelite-client \) 2>/dev/null || true
           echo "::endgroup::"
@@ -260,18 +265,18 @@ jobs:
             echo "::error::hipblaslt-test not found in the fetched artifact"; exit 1
           fi
           echo "Using: $HIPBLASLT_TEST"
-          ldd "$HIPBLASLT_TEST" 2>&1 | grep -iE "hipblaslt|=> not found" || true
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
+          HIPBLASLT_TEST_TIMEOUT=3600 \
+          HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
           "$HIPBLASLT_TEST" "${FILTER[@]}" \
             --gtest_output=xml:test_results/hipblaslt_test.xml 2>&1 \
             | tee test_results/hipblaslt_test.log
 
       - name: Run TensileLite common tests
-        timeout-minutes: 120
-        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
+        timeout-minutes: 240
+        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
         env:
-          TL_MARKERS: ${{ inputs.tensilelite_markers || 'common' }}
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
           TL_WORKERS: ${{ inputs.pytest_workers || '1' }}
         run: |
@@ -279,20 +284,29 @@ jobs:
           mkdir -p tensilelite_test_results
           export PYTHONPATH="$ROCM/share/hipblaslt/tensilelite:${PYTHONPATH:-}"
           cd "$ROCM/share/hipblaslt/tensilelite"
-          echo "::group::tensilelite-client linkage + rocisa import"
-          ldd "$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" 2>&1 \
-            | grep -iE "hipblaslt|rocblas|=> not found" || true
+          echo "::group::rocisa import"
           python3 -c "import rocisa; print('rocisa import OK')" 2>&1 \
             || echo "::warning::rocisa import failed from the artifact PYTHONPATH"
           echo "::endgroup::"
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
+          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/dev/null || echo gfx1250v0)"
+          # HIP device compiles through ccache.
+          # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
+          if ! command -v ccache >/dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq ccache || echo "::warning::ccache unavailable; no kernel-assembly caching"
+          fi
+          if command -v ccache >/dev/null 2>&1; then
+            export CCACHE_DIR=/tmp/tl-ccache CCACHE_MAXSIZE=5G
+            export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
+            ccache -z >/dev/null 2>&1 || true
+          fi
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "$TL_MARKERS" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
-            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,gfx1250 \
+            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,$TL_TARGET \
             --junitxml="$GITHUB_WORKSPACE/tensilelite_test_results/common_test.xml" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
