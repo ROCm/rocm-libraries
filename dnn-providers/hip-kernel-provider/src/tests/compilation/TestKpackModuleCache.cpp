@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "compilation/KpackModuleCache.hpp"
@@ -17,10 +18,27 @@ namespace hip_kernel_provider::compilation
 namespace
 {
 
+/// Resolve the vendored kpack test archive. Prefers the compile-time source path;
+/// falls back to an exe-relative installed copy for repackaged layouts (TheRock CI).
+std::string resolveTestKpackArchive()
+{
+    if(std::filesystem::exists(HIPDNN_TEST_KPACK_ARCHIVE))
+    {
+        return HIPDNN_TEST_KPACK_ARCHIVE;
+    }
+    auto candidate = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / "fixtures"
+                     / "test_zstd.kpack";
+    if(std::filesystem::exists(candidate))
+    {
+        return candidate.string();
+    }
+    return HIPDNN_TEST_KPACK_ARCHIVE;
+}
+
 /// rocm-kpack's own test archive, vendored beside this test. Its entries are placeholder
 /// payloads rather than HSA code objects, which is what makes it useful here: it is a
 /// real container, so the reader parses it, but nothing in it can load.
-constexpr const char* REAL_ARCHIVE = HIPDNN_TEST_KPACK_ARCHIVE;
+const std::string REAL_ARCHIVE = resolveTestKpackArchive();
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
 
