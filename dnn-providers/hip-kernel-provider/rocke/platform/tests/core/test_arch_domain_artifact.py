@@ -40,6 +40,7 @@ import unittest
 from pathlib import Path
 
 from rocke.core.isa.backend import wired_arches
+from rocke.core.lower_llvm import _resolve_llvm_flavor
 
 _HERE = Path(__file__).resolve().parent
 _ROCKE = _HERE.parents[1]  # tests/core -> platform
@@ -108,23 +109,47 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
         one intrinsic nobody has measured yet. Nothing else in the tree notices,
         because the JSON is still valid and every row it does have is still
         right.
+
+        Enforced asymmetrically, for the same reason the artifact separates
+        ``arch_absent`` from ``target_unsupported``:
+
+        * a **stale** key -- in the artifact, gone from the decl table -- is
+          always a defect, and is caught on every column from any host. Nothing
+          about it needs a toolchain to fix.
+        * an **unmeasured** key can only be answered on a host running that
+          flavor's toolchain. Failing every column here would mean one new decl
+          key reds the build on every machine until someone has run all three
+          toolchains -- "we did not get an answer" recorded as "the answer is
+          no", which is exactly what the design forbids. So full coverage is
+          required of this host's flavor, and reported as a named skip for the
+          rest.
         """
+        host = _resolve_llvm_flavor()
         arches = sorted(wired_arches())
         for flavor, path in _columns():
             with self.subTest(flavor=flavor):
                 doc = json.loads(path.read_text())
                 expected = set(G._decl_table(flavor))
                 got = set(doc["keys"])
-                self.assertEqual(
-                    got,
-                    expected,
-                    "arch-domain artifact is out of step with the decl table; "
-                    f"unmeasured={sorted(expected - got)} "
-                    f"stale={sorted(got - expected)} -- "
-                    "re-run tools/gen_arch_domain.py and commit the result",
-                )
                 for key, row in doc["keys"].items():
                     self.assertEqual(sorted(row), arches, key)
+                self.assertEqual(
+                    sorted(got - expected),
+                    [],
+                    f"{path.name} measures keys the decl table no longer has "
+                    "-- re-run tools/gen_arch_domain.py and commit the result",
+                )
+                missing = sorted(expected - got)
+                if not missing:
+                    continue
+                why = (
+                    f"{path.name} has no answer for {len(missing)} decl "
+                    f"key(s): {missing} -- re-run tools/gen_arch_domain.py on "
+                    f"a {flavor} toolchain and commit the result"
+                )
+                if flavor == host:
+                    self.fail(why)
+                self.skipTest(why)
 
     def test_every_cell_carries_an_actionable_answer(self):
         for flavor, path in _columns():
