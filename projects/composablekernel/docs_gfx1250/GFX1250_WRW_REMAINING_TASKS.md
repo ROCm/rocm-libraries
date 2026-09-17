@@ -63,6 +63,17 @@ target shape). **Not yet ported to `grouped_conv2d_bwd_weight`** — see Task 4.
 
 ## Task 1 — Split-K auto-heuristic for `TwoStage` WMMA bwd-weight is measurably suboptimal for small-grid shapes
 
+**Status: RESOLVED** (commit `980e8001ae0`, see "Resolution" below). Landed
+approach 2 from the implementation plan below: derive the cap from this
+kernel's own measured `max_occupancy_` rather than a per-dimension
+padding-waste gate. `k_batch_ = min(k_batch_, max_occupancy_per_cu^2)`,
+applied unconditionally right after the existing occupancy-driven pick -
+the `min()` self-gates (a no-op whenever `grid_size >= num_cu /
+max_occupancy_per_cu`, which is exactly the regime where the unmodified
+formula is already correct). No per-dimension (`gemmM`/`gemmN` vs.
+`MPerBlock`/`NPerBlock`) condition needed at all - see "Resolution" for why
+that axis doesn't actually distinguish the two named example shapes.
+
 **Priority**: high (proven real, bounded effort, no kernel changes needed).
 **Risk**: low if scoped correctly (see the failure mode below).
 
@@ -161,6 +172,63 @@ bash /tmp/run_miopen_shapes.sh <binary> <out.csv>
 # For any shape whose SplitK changes: interleaved A/B per the rigor note above,
 # ≥5 rounds each direction, before declaring win or regression.
 ```
+
+### Resolution
+
+Landed in `device_grouped_conv_bwd_weight_two_stage_wmma_cshuffle_v3.hpp`'s
+`Argument` constructor, immediately after the existing
+`k_batch_ = std::min(k_batch_, k_batch_max)` gemmK-derived cap:
+
+```cpp
+const ck::index_t occupancy_k_batch_ceiling =
+    active_workgroups_per_cu.max_occupancy_ * active_workgroups_per_cu.max_occupancy_;
+k_batch_ = clamp_gemm_k_batch(std::min(k_batch_, occupancy_k_batch_ceiling));
+```
+
+**Why the per-dimension gate (plan step 1) doesn't work, confirmed on the
+doc's own two named shapes**: neither `gemmM` nor `gemmN` is narrower than
+its `MPerBlock`/`NPerBlock=16` tile for the *first* example shape
+(`M18`/G1,N42,K24,C3,Y=X=3,480x640,s2,p1: `gemmM=24`, `gemmN=27`, both
+>16) - a "narrower than one tile" gate never fires for it at all, leaving
+its real ~15-19% loss completely unaddressed. Conversely the *second*
+example shape (`M00`/G1,N42,K10,C128,Y=X=1,120x160: `gemmM=10<16`) *does*
+trip such a gate, and an earlier attempt at exactly this gate (tightening
+to `2 * max_occupancy_per_cu` when triggered) cut `M00`'s k_batch from the
+already-correct auto pick of 1024 down to 64 - a **~3.2x slowdown**, far
+worse than the `MinIters` attempt's already-reverted -26.6%. Per-dimension
+tile narrowness is not the axis that separates these two shapes.
+
+**What actually separates them is `grid_size`** (4 for `M18`, 8 for
+`M00`) relative to `num_cu / max_occupancy_per_cu` (`256 / 32 = 8` for
+this tile/GPU): both shapes' true optimum sits at essentially the same
+*absolute* `k_batch` (~1024 for both, empirically), which is exactly
+`max_occupancy_per_cu^2` - the value the unmodified occupancy formula
+itself would produce right at `grid_size == num_cu /
+max_occupancy_per_cu`. Capping there via `min()` therefore self-gates: it
+is a no-op for any `grid_size` at or above that threshold (where the
+unmodified formula already picks `<= max_occupancy_per_cu^2`), and only
+ever pulls `k_batch_` down when `grid_size` is smaller.
+
+**Validated** (gfx1250, bf16, the exact - and currently only - registered
+`<32,16,16,32,...>` `TwoStage` tile, via a standalone probe instantiating
+the device op directly against `ReferenceConvBwdWeight`):
+
+| Shape (grid_size) | k_batch: before → after | avg_time: before → after | Δ |
+|---|---|---|---|
+| `M00` (8) | 1024 → 1024 (no-op) | 0.177 → 0.168 ms | ~+5% (noise, no regression) |
+| `M18` (4) | 2048 → 1024 | 0.411 → 0.330 ms | **-19.6%** |
+| synthetic grid=2 (K16,C3,Y=X=3, else = M18) | 4096 → 1024 | 0.562 → 0.286 ms | **-49%** |
+| synthetic grid=6 (K24,C40,Y=X=1, else = M00) | 1365 → 1024 | 0.222 → 0.196 ms | **-12%** |
+| synthetic grid=16 (K10,C256,Y=X=1, else = M00) | 512 → 512 (no-op) | 0.285 → 0.285 ms | 0% |
+
+All 29 `miopen_wrw_shapes.txt` shapes re-verified (`verify=1`) directly
+against the `TwoStage` device op post-fix: **29/29 pass**. The 5 shapes
+where `TwoStage` is ckProfiler's selected-best instance in
+`miopen_baseline_results.csv` (`M00,M06,M14,M15,M19,M25`, excluding
+`M18` which is also `TwoStage`-best) show no regression (all within
+±5%, consistent with this machine's documented run-to-run noise); `M19`
+specifically confirmed via `CK_LOGGING=1` to pick an unchanged `k_batch`
+(`grid_size=24 > 8`, cap correctly a no-op).
 
 ---
 
