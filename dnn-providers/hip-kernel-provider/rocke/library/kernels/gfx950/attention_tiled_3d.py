@@ -186,6 +186,7 @@ class UnifiedAttention3DTiledSpec:
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
             f"seg{self.num_segments}",
             self.dtype,
+            "segmajor",
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "i64kv" if self.use_i64_kv_addr else "",
             "sinks" if self.use_sinks else "",
@@ -370,9 +371,9 @@ def build_unified_attention_3d_tiled(
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
 
-    q_block_global_idx = b.block_id_x()
+    q_block_global_idx = b.block_id_z()
     kv_head_idx = b.block_id_y()
-    seg_idx = b.block_id_z()
+    seg_idx = b.block_id_x()
     tid = b.thread_id_x()
 
     seq_idx = _binary_search_seq_idx_helper(

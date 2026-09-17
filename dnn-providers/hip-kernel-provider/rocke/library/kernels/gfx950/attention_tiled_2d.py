@@ -850,6 +850,9 @@ class UnifiedAttention2DTiledSpec:
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
             "" if not self.use_sinks else "sinks",
+            "sinkstate" if (self.use_sinks
+                and self.use_transposed_qk_32x32
+                and not self.use_transposed_scalar_state) else "",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
@@ -1780,7 +1783,7 @@ def build_unified_attention_2d_tiled(
 
     if USE_SINKS:
         m_inits = []
-        if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_SCALAR_STATE:
+        if USE_MFMA_32X32 and TRANSPOSED_QK_32X32:
             row = b.add(wave_row_base, lane_col32)
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
@@ -1788,7 +1791,10 @@ def build_unified_attention_2d_tiled(
             qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
             sink_h = b.global_load(sinks, qh, dtype, align=2)
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
-            m_inits.append(b.select(qh_in, sink_f, neg_inf))
+            # Transposed state is per query column even without scalar-state
+            # compression. Every output-dimension slot must share that sink.
+            initial = b.select(qh_in, sink_f, neg_inf)
+            m_inits = [initial for _ in range(SOFTMAX_STATE_SLOTS)]
         else:
             for r in range(REGS_PER_LANE):
                 row = b.add(wave_row_base, _state_row(r))

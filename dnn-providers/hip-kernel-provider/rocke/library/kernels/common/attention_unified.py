@@ -1704,6 +1704,23 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         split-KV path via ``select_path``, and the autotuner's win starts at
         S=1024 -- short prefill stays on the legacy path where it is a tie).
     """
+    # Enable the wide/transposed path for D128 sliding windows and sinks.
+    if (
+        _resolve_attention_arch() == "gfx950"
+        and problem.head_size == 128
+        and (
+            problem.sliding_window > 0
+            or (problem.use_sinks and problem.sliding_window == 0)
+        )
+        and problem.num_seqs == 1
+        and problem.max_seqlen_q > 256
+        and problem.dtype in ("fp16", "bf16")
+        and not problem.use_fp8
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        and problem.softcap == 0
+    ):
+        return True
     if _resolve_attention_arch() != "gfx950":
         return False
     if problem.num_seqs != 1:
@@ -3962,15 +3979,18 @@ def _get_3d_pipeline(
         if _resolve_attention_arch() == "gfx1250"
         else 1
     )
+    seg_grid = (
+        int(total_num_q_blocks), int(problem.num_kv_heads), int(num_segments)
+    )
+    if _resolve_attention_arch() == "gfx950":
+        seg_grid = (
+            int(num_segments), int(problem.num_kv_heads), int(total_num_q_blocks)
+        )
     prepared = _Attention3DPrepared(
         pipeline=pipeline,
         pool=pool,
         seg_config=LaunchConfig(
-            grid=(
-                int(total_num_q_blocks),
-                int(problem.num_kv_heads),
-                int(num_segments),
-            ),
+            grid=seg_grid,
             block=(wave_size * seg_waves, 1, 1),
         ),
         red_config=LaunchConfig(

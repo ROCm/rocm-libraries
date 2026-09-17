@@ -137,7 +137,8 @@ def _scan_spec(req: OperatorRequest) -> KdaChunkScanSpec:
         head_k=int(req.head_k),
         head_v=int(req.head_v),
         dtype=req.dtype.lower(),
-        tile=_split_tile(req),
+        tile=dataclasses.replace(_split_tile(req), scan_atom_m=16),
+        value_splits=2,
         has_initial_state=bool(req.has_initial_state),
         store_final_state=bool(req.store_final_state),
     )

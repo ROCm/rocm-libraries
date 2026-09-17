@@ -78,6 +78,10 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
+    # Use KV-head-major traversal for persistent masked D128 attention.
+    if (persistent and sw == 0 and not use_sinks
+            and int(req.hdim_q) == 128 and int(req.mask_type) != 0):
+        decode = "hkv_major"
     # Capability gate for gfx950 128-bit buffer-to-LDS slab DMA plus IGLP.
     # Shape-specific production qualification used to restrict this to one
     # Llama-3-8B point; retain only the implementation's actual invariants so
