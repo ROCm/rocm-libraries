@@ -449,6 +449,7 @@ class _LazyProblemType:
     useScaleAB = "None"
     useScaleCD = False
     useScaleAlphaVec = False
+    useRMSEpilogue = False
     sparse = 0
     metadataLayout = 0
     f32XdlMathOp = _FakeType("f32", single=True)
@@ -493,6 +494,7 @@ class _LazyProblemType2:
     useScaleAB = "Scalar"                    # -> _SAB
     useScaleCD = True
     useScaleAlphaVec = True
+    useRMSEpilogue = True
     sparse = 2                               # -> _SPB
     metadataLayout = 1
     f32XdlMathOp = _FakeType("xf32", single=False)
@@ -521,7 +523,7 @@ def test_from_state_lazy_all_suffix_toggles(monkeypatch):
     )
     name = next(iter(rv.lazyLibraries))
     for frag in ("_A", "_MXA", "_MXB", "_STA", "_STB", "_Bias", "_Grad", "_GG",
-                 "_SAB", "_SCD", "_SAV", "_SPB", "_UA"):
+                 "_SAB", "_SCD", "_SAV", "_RMSE", "_SPB", "_UA"):
         assert frag in name, frag
 
 
