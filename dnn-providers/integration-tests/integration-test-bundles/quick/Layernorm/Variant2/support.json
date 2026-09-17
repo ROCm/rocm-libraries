@@ -1,0 +1,82 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count1",
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count2",
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count3",
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count4",
+          "2_2_3_2_2_bfp16_ndhwc_normalized_dim_count1",
+          "2_2_3_2_2_bfp16_ndhwc_normalized_dim_count2",
+          "2_2_3_2_2_bfp16_ndhwc_normalized_dim_count3",
+          "2_2_3_2_2_bfp16_ndhwc_normalized_dim_count4",
+          "2_2_3_2_2_fp16_ncdhw_normalized_dim_count1",
+          "2_2_3_2_2_fp16_ncdhw_normalized_dim_count2",
+          "2_2_3_2_2_fp16_ncdhw_normalized_dim_count3",
+          "2_2_3_2_2_fp16_ncdhw_normalized_dim_count4",
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count1",
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count2",
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count3",
+          "2_2_3_2_2_fp16_ndhwc_normalized_dim_count4",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count1",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count2",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count3",
+          "2_2_3_2_2_fp32_ncdhw_normalized_dim_count4",
+          "2_2_3_2_2_fp32_ndhwc_normalized_dim_count1",
+          "2_2_3_2_2_fp32_ndhwc_normalized_dim_count2",
+          "2_2_3_2_2_fp32_ndhwc_normalized_dim_count3",
+          "2_2_3_2_2_fp32_ndhwc_normalized_dim_count4",
+          "2_2_3_2_bfp16_nchw_normalized_dim_count1",
+          "2_2_3_2_bfp16_nchw_normalized_dim_count2",
+          "2_2_3_2_bfp16_nchw_normalized_dim_count3",
+          "2_2_3_2_bfp16_nhwc_normalized_dim_count1",
+          "2_2_3_2_bfp16_nhwc_normalized_dim_count2",
+          "2_2_3_2_bfp16_nhwc_normalized_dim_count3",
+          "2_2_3_2_fp16_nchw_normalized_dim_count1",
+          "2_2_3_2_fp16_nchw_normalized_dim_count2",
+          "2_2_3_2_fp16_nchw_normalized_dim_count3",
+          "2_2_3_2_fp16_nhwc_normalized_dim_count1",
+          "2_2_3_2_fp16_nhwc_normalized_dim_count2",
+          "2_2_3_2_fp16_nhwc_normalized_dim_count3",
+          "2_2_3_2_fp32_nchw_normalized_dim_count1",
+          "2_2_3_2_fp32_nchw_normalized_dim_count2",
+          "2_2_3_2_fp32_nchw_normalized_dim_count3",
+          "2_2_3_2_fp32_nhwc_normalized_dim_count1",
+          "2_2_3_2_fp32_nhwc_normalized_dim_count2",
+          "2_2_3_2_fp32_nhwc_normalized_dim_count3",
+          "32_1_32_32_32_bfp16_ncdhw_normalized_dim_count1",
+          "32_1_32_32_32_bfp16_ndhwc_normalized_dim_count1",
+          "32_1_32_32_32_fp16_ncdhw_normalized_dim_count1",
+          "32_1_32_32_32_fp16_ndhwc_normalized_dim_count1",
+          "32_1_32_32_32_fp32_ncdhw_normalized_dim_count1",
+          "32_1_32_32_32_fp32_ndhwc_normalized_dim_count1",
+          "32_32_14_25_59_bfp16_ncdhw_normalized_dim_count1",
+          "32_32_14_25_59_bfp16_ndhwc_normalized_dim_count1",
+          "32_32_14_25_59_fp16_ncdhw_normalized_dim_count1",
+          "32_32_14_25_59_fp16_ndhwc_normalized_dim_count1",
+          "32_32_14_25_59_fp32_ncdhw_normalized_dim_count1",
+          "32_32_14_25_59_fp32_ndhwc_normalized_dim_count1",
+          "32_4_4_256_bfp16_nchw_normalized_dim_count3",
+          "32_4_4_256_bfp16_nhwc_normalized_dim_count3",
+          "32_4_4_256_fp16_nchw_normalized_dim_count3",
+          "32_4_4_256_fp16_nhwc_normalized_dim_count3",
+          "32_4_4_256_fp32_nchw_normalized_dim_count3",
+          "32_4_4_256_fp32_nhwc_normalized_dim_count3"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

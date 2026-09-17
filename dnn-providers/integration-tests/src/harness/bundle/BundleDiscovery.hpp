@@ -349,6 +349,10 @@ inline std::vector<std::string> readSweepCaseIds(const std::filesystem::path& sw
         }
 
         const auto caseId = caseJson.at("id").get<std::string>();
+        if(caseId.empty())
+        {
+            throw std::runtime_error("Sweep case has empty id in " + sweepPath.string());
+        }
         if(!seenIds.insert(caseId).second)
         {
             throw std::runtime_error("Duplicate sweep case id '" + caseId + "' in "
