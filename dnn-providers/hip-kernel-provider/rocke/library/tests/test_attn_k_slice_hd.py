@@ -172,7 +172,7 @@ def _capture_gate_kwargs(arch, dtype, d=128, bs=64):
     au._RESOLVED_ATTENTION_ARCH = arch
     au._tiled_2d_impl = lambda _a: (spec_cls, build, _spy)
     try:
-        au.supports_native_unified_attention_tiled(_problem(dtype, d=d, bs=bs))
+        au.supports_native_unified_attention_tiled(_problem(dtype, d=d, bs=bs), arch)
     finally:
         au._RESOLVED_ATTENTION_ARCH = old_arch
         au._tiled_2d_impl = old_impl
@@ -204,7 +204,7 @@ def _nonring_spec(dtype="bf16", d=128, k_slice_hd=32, nw=2, t=64):
 def test_selector_routes_the_width_by_head_size(gfx942, dtype, d, bs, width):
     p = _problem(dtype, d=d, bs=bs)
     assert au._select_gfx942_flash_k_slice_hd(p) == width
-    assert au._tiled_spec_from_problem(p).k_slice_hd == width
+    assert au._tiled_spec_from_problem(p, "gfx942").k_slice_hd == width
 
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
@@ -217,7 +217,7 @@ def test_routed_width_puts_both_head_sizes_on_four_slices(gfx942, dtype, d, bs):
     traffic follows. Routing D64 to 16 and D128 to 32 puts both on four slices --
     the group count the shipped D128 ring already runs.
     """
-    spec = au._tiled_spec_from_problem(_problem(dtype, d=d, bs=bs))
+    spec = au._tiled_spec_from_problem(_problem(dtype, d=d, bs=bs), "gfx942")
     assert spec.head_size // spec.k_slice_hd == 4
 
 
@@ -229,7 +229,7 @@ def test_routed_ring_never_reserves_a_slot_it_cannot_reach(gfx942, dtype):
     are never written while their LDS stays reserved -- the same shape of waste the
     validator already rejects at one slice, one step further along.
     """
-    spec = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16))
+    spec = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16), "gfx942")
     if not spec.use_k_sliced_ring:
         pytest.skip("D64 is not routed onto the ring")
     assert spec.head_size // spec.k_slice_hd >= spec.ring_depth
@@ -238,7 +238,7 @@ def test_routed_ring_never_reserves_a_slot_it_cannot_reach(gfx942, dtype):
 def test_narrowed_d64_ring_is_a_distinct_kernel(gfx942):
     # A narrowed ring is a different schedule and a different K_lds extent, so it
     # must not collide with the width-32 kernel in the name or the HSACO cache.
-    spec = au._tiled_spec_from_problem(_problem("bf16", d=64, bs=16))
+    spec = au._tiled_spec_from_problem(_problem("bf16", d=64, bs=16), "gfx942")
     assert spec.use_k_sliced_ring, "D64 is expected to route onto the ring"
     assert "ks16" in spec.kernel_name()
 
@@ -284,7 +284,7 @@ def test_ring_params_are_passed_to_the_gfx942_gate(gfx942, dtype, d, bs):
     p = _problem(dtype, d=d, bs=bs)
     captured = _capture_gate_kwargs("gfx942", dtype, d=d, bs=bs)
     assert captured, "the shared caller never reached supports_tiled_2d"
-    assert captured.get("ring_depth") == au._select_gfx942_flash_ring_depth(p)
+    assert captured.get("ring_depth") == au._select_gfx942_flash_ring_depth(p, "gfx942")
     assert captured.get("k_slice_hd") == au._select_gfx942_flash_k_slice_hd(p)
 
 
@@ -312,7 +312,7 @@ def test_env_override_selects_width(gfx942, monkeypatch, d, bs, width):
     monkeypatch.setenv(ENV, str(width))
     p = _problem("fp16", d=d, bs=bs)
     assert au._select_gfx942_flash_k_slice_hd(p) == width
-    assert au._tiled_spec_from_problem(p).k_slice_hd == width
+    assert au._tiled_spec_from_problem(p, "gfx942").k_slice_hd == width
 
 
 @pytest.mark.parametrize(
@@ -346,7 +346,7 @@ def test_env_override_out_of_range_falls_back_to_the_routed_default(
     monkeypatch.setenv(ENV, bogus)
     p = _problem("fp16", d=d, bs=bs)
     assert au._select_gfx942_flash_k_slice_hd(p) == expected
-    assert au._tiled_spec_from_problem(p).k_slice_hd == expected
+    assert au._tiled_spec_from_problem(p, "gfx942").k_slice_hd == expected
 
 
 # ---------------------------------------------------------------------------
@@ -374,21 +374,21 @@ def test_cache_key_distinguishes_width_on_the_ring(gfx942, monkeypatch):
     # did not separate them, the second width in a process would silently reuse the
     # first one's cached launcher -- the failure mode #10102 hit with batch.
     p = _problem("fp16")  # fp16 D128 is on the ring
-    assert au._enable_gfx942_flash_k_sliced_ring(p)
+    assert au._enable_gfx942_flash_k_sliced_ring(p, "gfx942")
     monkeypatch.setenv(ENV, "32")
-    key32 = au._tiled_cache_key(p)
+    key32 = au._tiled_cache_key(p, "gfx942")
     monkeypatch.setenv(ENV, "16")
-    key16 = au._tiled_cache_key(p)
+    key16 = au._tiled_cache_key(p, "gfx942")
     assert key32 != key16
 
 
 def test_cache_key_ignores_width_off_the_ring(gfx942, monkeypatch):
     p = _problem("bf16")  # bf16 D128 is non-ring
-    assert not au._enable_gfx942_flash_k_sliced_ring(p)
+    assert not au._enable_gfx942_flash_k_sliced_ring(p, "gfx942")
     monkeypatch.setenv(ENV, "32")
-    key32 = au._tiled_cache_key(p)
+    key32 = au._tiled_cache_key(p, "gfx942")
     monkeypatch.setenv(ENV, "16")
-    key16 = au._tiled_cache_key(p)
+    key16 = au._tiled_cache_key(p, "gfx942")
     assert key32 == key16
 
 
@@ -547,7 +547,7 @@ def test_routed_d64_ring_emits_the_drain_on_reuse_fence(gfx942, flavor, dtype):
     fails if the routing and the schedule ever stop agreeing about D64.
     """
     call = _drain_call()
-    spec16 = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16))
+    spec16 = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16), "gfx942")
     assert spec16.use_k_sliced_ring, "D64 is expected to route onto the ring"
     assert spec16.k_slice_hd == 16
     spec32 = dataclasses.replace(spec16, k_slice_hd=32)

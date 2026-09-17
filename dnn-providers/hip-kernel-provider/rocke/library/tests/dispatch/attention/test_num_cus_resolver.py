@@ -212,7 +212,7 @@ def test_problem_lowercases_arch_for_the_clamp():
     # count: both normalize to gfx950 and take the same clamp.
     p_mixed = A._problem(_req(num_cus=256, arch="GFX950"))
     p_lower = A._problem(_req(num_cus=256, arch="gfx950"))
-    assert au._num_segments(p_mixed) == au._num_segments(p_lower)
+    assert au._num_segments(p_mixed, "gfx950") == au._num_segments(p_lower, "gfx950")
 
 
 def test_request_layer_rejects_mixed_case_arch():
@@ -231,17 +231,17 @@ def test_segments_bounded_after_bump():
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
         # decode D128 kv8192: the bump is clamped -> no over-split (s120 == s304)
-        s120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=8192, batch=1))
-        s304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=8192, batch=1))
+        s120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942")
+        s304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=8192, batch=1), "gfx942")
         assert s120 == s304, f"bump over-split D128 decode: {s120} -> {s304}"
         # kv boundary: 16385 and 32767 must STILL clamp (only kv>=32768 uncapped)
         for kv in (16385, 32767):
-            b120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=kv, batch=1))
-            b304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=kv, batch=1))
+            b120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942")
+            b304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=kv, batch=1), "gfx942")
             assert b120 == b304, f"D128 kv={kv} must clamp: {b120} -> {b304}"
         # kv>=32768: uncapped -> the bump IS allowed to raise the split
-        u120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=32768, batch=1))
-        u304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=32768, batch=1))
+        u120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942")
+        u304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=32768, batch=1), "gfx942")
         assert u304 > u120, f"kv32768 should scale: {u120} -> {u304}"
 
         # q>1 (prefill / spec-decode) D128: the else-branch clamp also holds
@@ -261,8 +261,8 @@ def test_segments_bounded_after_bump():
                 num_cus=num_cus,
             )
 
-        q120 = au._num_segments(qprob(120))
-        q304 = au._num_segments(qprob(304))
+        q120 = au._num_segments(qprob(120), "gfx942")
+        q304 = au._num_segments(qprob(304), "gfx942")
         assert q120 == q304, f"q>1 clamp must hold: {q120} -> {q304}"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
@@ -289,8 +289,8 @@ def test_gfx950_segments_conservatively_clamped():
             dict(nq=32, nk=4, D=64, kv=32768, batch=1),
         ]
         for c in cases:
-            s120 = au._num_segments(_prob(120, **c))
-            s256 = au._num_segments(_prob(256, **c))
+            s120 = au._num_segments(_prob(120, **c), "gfx950")
+            s256 = au._num_segments(_prob(256, **c), "gfx950")
             assert s120 == s256, f"gfx950 over-split {c}: {s120} -> {s256}"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
@@ -315,8 +315,8 @@ def test_target_ctas_bypasses_the_gfx950_clamp():
         ceiling = au._pre_bump_segments(_prob(120, clamp_arch="gfx950", **shape))
 
         # Default callers: clamped to the pre-bump ceiling regardless of the bump.
-        assert au._num_segments(_prob(120, clamp_arch="gfx950", **shape)) == ceiling
-        assert au._num_segments(_prob(256, clamp_arch="gfx950", **shape)) == ceiling
+        assert au._num_segments(_prob(120, clamp_arch="gfx950", **shape), "gfx950") == ceiling
+        assert au._num_segments(_prob(256, clamp_arch="gfx950", **shape), "gfx950") == ceiling
 
         # Explicit target_ctas: clamp steps aside, caller gets the raw split.
         pinned = _prob(120, tctas=1024, clamp_arch="gfx950", **shape)
@@ -324,16 +324,16 @@ def test_target_ctas_bypasses_the_gfx950_clamp():
         assert (
             raw > ceiling
         ), f"shape no longer exercises the bypass: {raw} <= {ceiling}"
-        assert au._num_segments(pinned) == raw, (
+        assert au._num_segments(pinned, "gfx950") == raw, (
             "explicit target_ctas must bypass the gfx950 clamp: "
-            f"got {au._num_segments(pinned)}, want the unclamped {raw}"
+            f"got {au._num_segments(pinned, 'gfx950')}, want the unclamped {raw}"
         )
 
         # The bypass is scoped to gfx950's blanket clamp; gfx942 keeps its measured
         # carve-outs, which are NOT a target_ctas override surface.
         p.attr(au, "_resolve_attention_arch", lambda: "gfx942")
         g942 = _prob(120, tctas=1024, clamp_arch="gfx942", **shape)
-        assert au._num_segments(g942) <= au._pre_bump_segments(g942)
+        assert au._num_segments(g942, "gfx942") <= au._pre_bump_segments(g942)
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
         p.restore()
@@ -398,7 +398,7 @@ def test_gfx942_partition_routing_matches_develop():
             unfloored = A._problem(_req(num_cus=38, arch="gfx942", **shape))
             assert resolved.num_cus == 38, shape
             assert resolved.select_path() == unfloored.select_path(), shape
-            assert au._num_segments(resolved) == au._num_segments(unfloored), shape
+            assert au._num_segments(resolved, "gfx942") == au._num_segments(unfloored, "gfx942"), shape
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
         p.restore()
@@ -420,11 +420,13 @@ def test_segment_clamp_keys_on_request_arch():
     try:
         au._RESOLVED_ATTENTION_ARCH = None
         p.attr(au, "_resolve_attention_arch", _spy)
-        # clamp_arch set -> resolver is never consulted.
-        au._num_segments(_prob(256, clamp_arch="gfx942", **shape))
+        # clamp_arch set -> resolver is never consulted (arch derived from clamp_arch).
+        prob_with_clamp = _prob(256, clamp_arch="gfx942", **shape)
+        au._num_segments(prob_with_clamp, prob_with_clamp.clamp_arch)
         assert calls["n"] == 0, "running-box arch consulted despite clamp_arch set"
         # clamp_arch unset -> falls back to the running-box resolver.
-        au._num_segments(_prob(256, **shape))
+        prob_no_clamp = _prob(256, **shape)
+        au._num_segments(prob_no_clamp, au._resolve_attention_arch())
         assert calls["n"] >= 1, "running-box resolver not used as fallback"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
@@ -452,9 +454,9 @@ def test_every_auto_resolve_arch_clamps_the_split():
             f"test shape no longer exercises the clamp on {arch}: "
             f"raw {raw} <= ceiling {ceiling}"
         )
-        assert au._num_segments(prob) <= ceiling, (
+        assert au._num_segments(prob, arch) <= ceiling, (
             f"{arch} is in _AUTO_RESOLVE_ARCHS but has no segment clamp: "
-            f"split {au._num_segments(prob)} exceeds the pre-bump ceiling {ceiling}"
+            f"split {au._num_segments(prob, arch)} exceeds the pre-bump ceiling {ceiling}"
         )
 
 

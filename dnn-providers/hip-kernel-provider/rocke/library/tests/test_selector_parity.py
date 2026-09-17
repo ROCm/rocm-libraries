@@ -54,7 +54,7 @@ def _patch_arch(arch: str):
 def _spec(problem: UnifiedAttentionProblem, arch: str = "gfx950") -> dict:
     """Return _tiled_spec_from_problem as a plain dict for easy assertions."""
     with _patch_arch(arch):
-        return asdict(_asb._tiled_spec_from_problem(problem))
+        return asdict(_asb._tiled_spec_from_problem(problem, arch))
 
 
 def _prob(
@@ -123,7 +123,7 @@ class TestEnableCombo2d(unittest.TestCase):
 
     def _gate(self, problem: UnifiedAttentionProblem, arch: str = "gfx950") -> bool:
         with _patch_arch(arch):
-            return _au._enable_combo_2d(problem)
+            return _au._enable_combo_2d(problem, arch)
 
     def test_canonical_combo_fires(self):
         self.assertTrue(self._gate(_combo_prob()))
