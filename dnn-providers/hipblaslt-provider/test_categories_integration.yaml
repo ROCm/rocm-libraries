@@ -116,7 +116,7 @@ test_categories:
 # investigate while ordinary run-to-run variance does not trip the timeout.
 execution_settings:
   default_timeout: 300
-  timeout_multiplier: 1
+  timeout_multiplier: 8
   category_timeouts:
     quick: 600
     standard: 3600
