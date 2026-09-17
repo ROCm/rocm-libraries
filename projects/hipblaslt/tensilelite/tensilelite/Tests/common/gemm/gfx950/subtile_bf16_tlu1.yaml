@@ -117,3 +117,24 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 160]   # tail at both DepthU (2*64+32, 128+32)
           - Exact: [256, 256, 1, 384]
           - Exact: [256, 256, 1, 512]
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 2, 2,  2, 2]   # MT  64x64,  waves share a strip
+        - DepthU: [64]
+        - PrefetchGlobalRead: [0, 2]
+        - PrefetchLocalRead: [1]
+        - ExpandPointerSwap: [False]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+
