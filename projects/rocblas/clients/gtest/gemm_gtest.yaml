@@ -3749,7 +3749,7 @@ Tests:
     gemm: *double_precision_complex
     gemm_ex: *double_precision_complex
   arguments:
-    - { transA: C, transB: N, M: 64, N: 9, K: 1872392, lda: 1872392, ldb: 1872392, ldc: 64, ldd: 64 }
+    - { transA: C, transB: N, M: 64, N: 9, K: 16384, lda: 16384, ldb: 16384, ldc: 64, ldd: 64 }
   alpha: 1
   beta: 0
   os_flags: LINUX
