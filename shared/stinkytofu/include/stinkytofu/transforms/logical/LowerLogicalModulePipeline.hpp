@@ -27,6 +27,7 @@
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/Types.hpp"
 
 namespace stinkytofu {
 class Function;
@@ -55,8 +56,13 @@ struct GemmTileConfig;
  * @param func   Function to lower (mutated in place).
  * @param config GemmTileConfig used by the passes. @c config.arch must be set;
  *               tile / wave fields can be left zero for trivial bring-up cases.
+ * @param caps   Assembler capabilities. ToStinkyAsmPass reads @c vgprMsbMode to
+ *               decide whether a split ds_*_b192 / ds_store_b256 half that lands
+ *               in another VGPR MSB bank needs its own encoding offset. Leaving
+ *               this defaulted keeps the pre-MSB behaviour (no re-encoding).
  */
-STINKYTOFU_EXPORT void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config);
+STINKYTOFU_EXPORT void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config,
+                                                  const AsmCapsConfig& caps = {});
 
 /**
  * @brief One-shot helper: build a StinkyAsmModule from a Python-side

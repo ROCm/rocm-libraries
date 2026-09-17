@@ -1154,6 +1154,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         {logical::DSLoadB96TrB6, {{12, 5, 0}}},   {logical::DSLoadB64TrB4, {{12, 5, 0}}},
         {logical::DSLoadB64TrB8, {{12, 5, 0}}},   {logical::DSLoadB128TrB16, {{12, 5, 0}}},
         {logical::DSLoadB192, {{12, 5, 0}}},      {logical::DSStoreB192, {{12, 5, 0}}},
+        {logical::DSStoreB256, {{12, 5, 0}}},
     };
 
     std::cout << "Testing " << testedOpcodes.size() << " instructions on " << archs.size()

@@ -36,8 +36,11 @@ than the old substring assertions).
 from __future__ import annotations
 
 import copy
+import json
 import os
+import subprocess
 import sys
+import textwrap
 import unittest
 
 # ---------------------------------------------------------------------------
@@ -355,6 +358,33 @@ class TestInstructionBase(unittest.TestCase):
         import pickle
         with self.assertRaises(RuntimeError):
             pickle.dumps(Instruction(InstType.INST_B32))
+
+
+class TestMemIssueLatencyExplicit(unittest.TestCase):
+    """Factory ``latency=`` is KernelWriter Python SIA, not logical-IR cycles."""
+
+    def test_ds_overrides_match_rocisa_mem_hpp(self):
+        from rocisa_stinkytofu_adaptor.instruction import (
+            DSLoadB64, DSLoadB128, DSLoadB192,
+            DSStoreB8, DSStoreU16, DSStoreB32, DSStoreB64, DSStoreB96,
+            DSStoreB128, DSStoreB192, DSStoreB256,
+        )
+        self.assertEqual(DSLoadB64.issueLatency(), 1)
+        self.assertEqual(DSLoadB128.issueLatency(), 2)
+        self.assertEqual(DSLoadB192.issueLatency(), 3)
+        self.assertEqual(DSStoreB8.issueLatency(), 1)
+        self.assertEqual(DSStoreU16.issueLatency(), 2)
+        self.assertEqual(DSStoreB32.issueLatency(), 2)
+        self.assertEqual(DSStoreB64.issueLatency(), 3)
+        self.assertEqual(DSStoreB96.issueLatency(), 4)
+        self.assertEqual(DSStoreB128.issueLatency(), 5)
+        self.assertEqual(DSStoreB192.issueLatency(), 8)
+        self.assertEqual(DSStoreB256.issueLatency(), 10)
+
+    def test_instance_getIssueLatency_matches_static(self):
+        from rocisa_stinkytofu_adaptor.instruction import DSLoadB192
+        inst = DSLoadB192()
+        self.assertEqual(inst.getIssueLatency(), DSLoadB192.issueLatency())
 
 
 # ===========================================================================
@@ -2774,6 +2804,71 @@ class TestSSchedulingFence(unittest.TestCase):
         m = Module()
         m.add(SSchedulingFence())
         self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestIssueLatencyParity(unittest.TestCase):
+    """``issueLatency()`` must match native rocisa for every mirrored shim.
+
+    KernelWriter's software instruction scheduler budgets each MFMA slot with
+    ``miLatencyLeft`` and subtracts ``issueLatency()*2`` per scheduled local
+    read/write (``scheduleLocalRead`` / ``localReadsVacancy``). An
+    underestimate here does not fail loudly -- it silently opens extra
+    vacancy slots, so the adapter and native backends emit differently
+    scheduled (but individually valid) asm for the same kernel.
+    """
+
+    # Native rocisa lives in a separate process: importing it in-process
+    # would collide with the adapter when ROCISA_BACKEND is set, and the
+    # parent runner's env is not guaranteed to be clean.
+    _SENTINEL = "<<<LAT_A17C33>>>"
+
+    def _native_latencies(self, names):
+        script = textwrap.dedent(f"""\
+            import json
+            import rocisa.instruction as ri
+            names = {names!r}
+            out = {{}}
+            for n in names:
+                cls = getattr(ri, n, None)
+                fn = getattr(cls, "issueLatency", None)
+                if fn is not None:
+                    out[n] = fn()
+            print({self._SENTINEL!r} + json.dumps(out) + {self._SENTINEL!r})
+        """)
+        env = os.environ.copy()
+        env.pop("ROCISA_BACKEND", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env, capture_output=True, text=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            self.skipTest(f"native rocisa not importable:\n{proc.stderr}")
+        start = proc.stdout.find(self._SENTINEL)
+        end = proc.stdout.rfind(self._SENTINEL)
+        if start < 0 or end <= start:
+            self.skipTest(f"native rocisa produced no payload:\n{proc.stdout}")
+        return json.loads(proc.stdout[start + len(self._SENTINEL):end])
+
+    def test_matches_native(self):
+        import rocisa_stinkytofu_adaptor.instruction as adaptor
+
+        mine = {}
+        for name in dir(adaptor):
+            cls = getattr(adaptor, name)
+            fn = getattr(cls, "issueLatency", None)
+            if isinstance(cls, type) and callable(fn):
+                mine[name] = fn()
+
+        theirs = self._native_latencies(sorted(mine))
+        self.assertTrue(theirs, "no comparable classes found in native rocisa")
+
+        mismatches = {
+            n: (theirs[n], mine[n]) for n in theirs if theirs[n] != mine[n]
+        }
+        self.assertEqual(
+            mismatches, {},
+            "issueLatency drift (class: native vs adapter): " + repr(mismatches),
+        )
 
 
 if __name__ == "__main__":
