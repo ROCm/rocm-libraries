@@ -97,7 +97,7 @@ Docker container. Untracked mutation output does not fail the check.
 ```bash
 bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/slice-preflight.sh \
   --slice 1 \
-  --module Tensile/Common/Utilities.py \
+  --module tensilelite/Common/Utilities.py \
   --container tl-mut \
   --out work/mutation/slices/1-utilities
 ```
@@ -105,7 +105,7 @@ bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/slice-prefligh
 Expected terminal output has this shape (SHA, branch, status, and version vary):
 
 ```text
-slice-preflight: OK slice=1 module=Tensile/Common/Utilities.py slug=utilities
+slice-preflight: OK slice=1 module=tensilelite/Common/Utilities.py slug=utilities
 slice-preflight: wrote work/mutation/slices/1-utilities/env.json
 slice-preflight: sha=<commit> branch=<branch> container=tl-mut(running) mutmut=<version>
 ```
@@ -145,8 +145,8 @@ Set one or more source modules and pytest selections:
 bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/pyproject-mutmut.sh \
   set \
   --src projects/hipblaslt/tensilelite \
-  --only-mutate Tensile/Common/Utilities.py \
-  --test-selection Tensile/Tests/unit/characterization/CommonUtilities
+  --only-mutate tensilelite/Common/Utilities.py \
+  --test-selection tensilelite/Tests/unit/characterization/CommonUtilities
 ```
 
 Expected output:
@@ -201,9 +201,9 @@ docker exec \
 Representative output (mutant names and statuses vary):
 
 ```text
-    Tensile.Common.Utilities.x__mutmut_1: survived
-    Tensile.Common.Utilities.x__mutmut_2: no tests
-    Tensile.Common.Utilities.x__mutmut_3: timeout
+    tensilelite.Common.Utilities.x__mutmut_1: survived
+    tensilelite.Common.Utilities.x__mutmut_2: no tests
+    tensilelite.Common.Utilities.x__mutmut_3: timeout
 ```
 
 Inspect a survivor's exact source change before deciding whether it exposes a
@@ -213,7 +213,7 @@ characterization gap:
 docker exec \
   -w /work/projects/hipblaslt/tensilelite \
   tl-mut \
-  mutmut show Tensile.Common.Utilities.x__mutmut_1
+  mutmut show tensilelite.Common.Utilities.x__mutmut_1
 ```
 
 Rerun one mutant after adding a focused test with:
@@ -222,7 +222,7 @@ Rerun one mutant after adding a focused test with:
 docker exec \
   -w /work/projects/hipblaslt/tensilelite \
   tl-mut \
-  mutmut run Tensile.Common.Utilities.x__mutmut_1 --max-children 1
+  mutmut run tensilelite.Common.Utilities.x__mutmut_1 --max-children 1
 ```
 
 ## 4. Restore the mutation configuration
@@ -270,7 +270,7 @@ Create a tab-separated manifest. The header and column order are required:
 
 ```text
 mutant_id	file	apply_method	test_node	expect_clean_rc	expect_mutant_rc_nonzero
-Tensile.Common.Utilities.x__mutmut_1	Tensile/Common/Utilities.py	mutmut_apply	Tensile/Tests/unit/characterization/CommonUtilities/test_example.py::test_example	0	true
+tensilelite.Common.Utilities.x__mutmut_1	tensilelite/Common/Utilities.py	mutmut_apply	tensilelite/Tests/unit/characterization/CommonUtilities/test_example.py::test_example	0	true
 ```
 
 For kill-proof rows, `expect_clean_rc` must be `0`: a test that already fails on
@@ -293,7 +293,7 @@ A successful kill has output like:
 
 ```text
 MUTANT                       VERDICT DETAIL
-Tensile...__mutmut_1         KILLED   base_rc=0 mut_rc=1
+tensilelite...__mutmut_1      KILLED   base_rc=0 mut_rc=1
 ============================================================
 CLEAN: tracked worktree and untracked path set match the pre-run baseline.
 RESULT: ALL KILLED (1)

@@ -2,7 +2,7 @@
 
 ## For Users
 
-- [Global Parameters](user/global-parameters.md) -- Control StinkyTofu via Tensile's GlobalParameters
+- [Global Parameters](user/global-parameters.md) -- Control StinkyTofu via TensileLite's GlobalParameters
 - [IR Converter](user/ir-converter.md) -- Convert instruction strings to IRList
 - [Assembly Emitter](user/asm-emitter.md) -- Convert IR to GPU assembly
 - [Virtual Registers](user/virtual-registers.md) -- Template-based code generation with register remapping

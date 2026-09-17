@@ -47,13 +47,13 @@ question that this section returns to below. It matters more than the headline c
 | Item | Detail |
 | --- | --- |
 | Framework | pytest, orchestrated by `tox` |
-| Location | [`Tensile/Tests/unit/`](Tensile/Tests/unit/) |
+| Location | [`tensilelite/Tests/unit/`](tensilelite/Tests/unit/) |
 | Golden snapshots | [syrupy](https://github.com/syrupy-project/syrupy), `.ambr` files in per-module `__snapshots__/` directories |
 | How to run | `cd tensilelite && tox -e unit` (skips the client build), or `tox -e rocisa` for the extension only |
 | Coverage | `tox -e coverage-unit` measures; `tox -e coverage-gate` enforces the floors against what it wrote |
 
 A significant part of that suite is a **characterization suite** under
-[`Tensile/Tests/unit/characterization/`](Tensile/Tests/unit/characterization/), established in
+[`tensilelite/Tests/unit/characterization/`](tensilelite/Tests/unit/characterization/), established in
 [PR #7989](https://github.com/ROCm/rocm-libraries/pull/7989) and grown considerably since. It now
 spans dozens of characterized module directories, each backed by one or more `.ambr` golden files
 in its own `__snapshots__/` directory, plus a separate codegen harness that characterizes generated
@@ -83,7 +83,7 @@ and it still owes a real test.
 > <details>
 > <summary>The full account: the churn, the deadlock, and the plan that makes the net unnecessary</summary>
 >
-> [`KernelWriterAssembly.py`](Tensile/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
+> [`KernelWriterAssembly.py`](tensilelite/KernelWriterAssembly.py) is where a GEMM kernel actually becomes
 > assembly, which makes it one of the highest-consequence files in the repository. It is 20,259 lines.
 > Since the monorepo reorganization in April 2025 it has taken 303 commits from 78 authors, adding
 > 13,810 lines and removing 7,277. That window undercounts the file, which is years older than this
@@ -146,7 +146,7 @@ How that migration gets measured, and why no enforced number can see it, is cove
 [Coverage](#coverage).
 
 The discipline that goes with goldens is documented in the suite's
-[README.md](Tensile/Tests/unit/characterization/README.md) and is worth stating here because it is
+[README.md](tensilelite/Tests/unit/characterization/README.md) and is worth stating here because it is
 easy to get wrong: **never run a blanket `pytest --snapshot-update`.** It rewrites every golden at
 once and produces a green run that proves nothing. Update the smallest node id you intend to change,
 read the resulting diff, and explain the behavior change in your PR description.
@@ -163,9 +163,9 @@ A GPU-less seam, the `--cpu-only` switch, lets the client and device-probe paths
 flow be exercised without hardware, via an architecture spoof and a client-launch stub. Its
 performance output is synthetic and fixed, so it is useful for testing the plumbing and useless for
 anything performance-related. The switch is covered by
-[`Tensile/Tests/unit/test_cpu_only_switch.py`](Tensile/Tests/unit/test_cpu_only_switch.py) and
+[`tensilelite/Tests/unit/test_cpu_only_switch.py`](tensilelite/Tests/unit/test_cpu_only_switch.py) and
 documented, with that caveat, at
-[`_codegen/GPU-MOCK.md`](Tensile/Tests/unit/characterization/_codegen/GPU-MOCK.md).
+[`_codegen/GPU-MOCK.md`](tensilelite/Tests/unit/characterization/_codegen/GPU-MOCK.md).
 
 **Mutation testing** is how the scaffolding earns its keep. Coverage only says a line was executed;
 a surviving mutant says the suite did not notice when that line's behavior changed, which is exactly
@@ -209,12 +209,12 @@ fixture or pinning current behavior. In spirit this is closer to
 validate tuning data rather than code, and where each one lives follows from that.
 
 Two of these checks — sibling-`DeviceNames` consistency and the gfx1250v0-overlay's logic-tree shape —
-are implemented in `Tensile.TensileLogic.ValidCorpusConsistency` and run unconditionally inside
+are implemented in `tensilelite.TensileLogic.ValidCorpusConsistency` and run unconditionally inside
 `TensileLogic --check-all`, so every kernel-generating build checks them regardless of which test lane
 executes; see [Build-Time Validation of Library Logic](#build-time-validation-of-library-logic). A
 corpus-backed pytest copy of each also lives in
-[`test_PlaceholderMerge.py`](Tensile/Tests/unit/test_PlaceholderMerge.py) and
-[`test_GpuRevisionTarget.py`](Tensile/Tests/unit/test_GpuRevisionTarget.py) respectively — redundant
+[`test_PlaceholderMerge.py`](tensilelite/Tests/unit/test_PlaceholderMerge.py) and
+[`test_GpuRevisionTarget.py`](tensilelite/Tests/unit/test_GpuRevisionTarget.py) respectively — redundant
 confirmation wherever the real corpus happens to be on disk, not the enforcement point.
 
 The chip-ID-aware-arch lock, confirming that only gfx950 carries chip-ID-aware dispatch predicates,
@@ -230,7 +230,7 @@ All of the above, including the corpus-backed pytest copies, are gated on whethe
 to be present, which it is not everywhere these tests run (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc, and [CI visibility and gating](#ci-visibility-and-gating) below). A separate hermetic suite,
-[`test_valid_corpus_consistency.py`](Tensile/Tests/unit/test_valid_corpus_consistency.py), tests the
+[`test_valid_corpus_consistency.py`](tensilelite/Tests/unit/test_valid_corpus_consistency.py), tests the
 `ValidCorpusConsistency` checker itself against synthetic fixtures and does not depend on that gate.
 
 ### How this one was learned: a naming drift silently dropped a working kernel
@@ -433,7 +433,7 @@ of reaching a customer's model three months earlier in the story. There is no wa
 times that has already happened, because a build that fails on line one of a bad YAML file does not
 generate a ticket, a meeting, or a revert. That absence is the whole return on the investment.
 
-Its known-bug list, [`Tensile/TensileLogic/known_bugs.yaml`](Tensile/TensileLogic/known_bugs.yaml), is
+Its known-bug list, [`tensilelite/TensileLogic/known_bugs.yaml`](tensilelite/TensileLogic/known_bugs.yaml), is
 the best-structured quarantine in the component (see
 [Known Bugs and Expected Failures](../TESTING.md#known-bugs-and-expected-failures) in the hipBLASLt
 doc). Entries are keyed on the logic file path plus the solution's `SolutionNameMin`, a
@@ -460,9 +460,9 @@ overview). The Math CI job that matters most for TensileLite is **`preliminary`*
 for TensileLite, which runs two stages on gfx12, gfx90a, gfx942, and gfx950.
 
 As of the Aug-26 2026 `rocJenkins` reorder (`bc21df82`, AIHPBLAS-4431), the stage order is: first
-`tox -e unit -- Tensile/Tests/unit`, which carries no marker filter and therefore runs the entire unit
+`tox -e unit -- tensilelite/Tests/unit`, which carries no marker filter and therefore runs the entire unit
 tree, characterization included, on all four architectures. Then, *only if that stage passed*,
-`tox -e py3 -- Tensile/Tests "-m common"`, the GEMM selection that genuinely needs hardware. (Before
+`tox -e py3 -- tensilelite/Tests "-m common"`, the GEMM selection that genuinely needs hardware. (Before
 that reorder, `common` ran first and `unit` was conditional on it; if you are reading an older mirror
 of this document or a stale local copy, check which order applies before trusting either stage's
 gating story.)
@@ -564,7 +564,7 @@ change; see the corrected rows in Known Risks and Gaps below.
 
 ### Where these tests actually run
 
-The TensileLite Python tree under `Tensile/Tests/unit` (characterization *and* unit, about six
+The TensileLite Python tree under `tensilelite/Tests/unit` (characterization *and* unit, about six
 thousand tests) executes in four separate CI lanes. They are easy to confuse with each other, and
 with three adjacent lanes that sound like them but run none of these tests, so the whole set is worth
 laying out once.
@@ -711,7 +711,7 @@ and Windows are not tracked separately. The exclusions in
 rather than product modules. The kernel writers are sometimes described as uncovered exceptions, but
 they are not: `KernelWriter.py`, `KernelWriterAssembly.py` and `SolutionStructs/Solution.py` all
 carry active per-file floors in the seventies. The genuinely uncovered modules are elsewhere,
-including `ExperimentalLibrary.py` at zero and much of `Tensile/Components/`.
+including `ExperimentalLibrary.py` at zero and much of `tensilelite/Components/`.
 
 **No C++ coverage target exists** for the reasons given under
 [../TESTING.md#unit-testing-strategy](../TESTING.md#unit-testing-strategy) (the C++ client's own
@@ -793,9 +793,9 @@ the note there: an empty cell means the gap is real and acknowledged but not yet
 | `Tests/common` (real codegen, build, execution) does not run in TheRock CI or GitHub Actions for any architecture today, including gfx1250 (see [Pre-submit / CI Gates](#pre-submit--ci-gates)); coverage of that suite is Math-CI-only | Medium | High if hit | Math CI's `preliminary` runs it on real hardware, `gfx90a`/`gfx942`/`gfx950`/`gfx12` |  |
 | The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation |  |
 | The installed-artifact lane silently skips the snapshot tests, since syrupy is not in the installed tree | Low | Low | The goldens are enforced upstream; the skip is stated in `conftest.py` but reads like an accident |  |
-| Math CI's `preliminary` job appears to skip the `Tensile/Tests/unit` suite entirely on YAML-only diffs, running only numeric/solution-correctness checks instead. Of the three logic-corpus consistency checks, this leaves only the chip-ID-arch-lock check uncovered on that path; sibling-`DeviceNames` and the gfx1250v0-overlay shape run unconditionally via `TensileLogic --check-all` regardless | Medium | Medium | `TensileLogic --check-all` covers two of the three checks regardless of this gap; Math CI's own suite still covers the chip-ID-arch-lock check whenever it runs |  |
+| Math CI's `preliminary` job appears to skip the `tensilelite/Tests/unit` suite entirely on YAML-only diffs, running only numeric/solution-correctness checks instead. Of the three logic-corpus consistency checks, this leaves only the chip-ID-arch-lock check uncovered on that path; sibling-`DeviceNames` and the gfx1250v0-overlay shape run unconditionally via `TensileLogic --check-all` regardless | Medium | Medium | `TensileLogic --check-all` covers two of the three checks regardless of this gap; Math CI's own suite still covers the chip-ID-arch-lock check whenever it runs |  |
 | The `_needs_logic_dir` xfail (see [../TESTING.md#known-bugs-and-expected-failures](../TESTING.md#known-bugs-and-expected-failures)) is unconditional in TheRock CI, so the pytest-only logic-corpus checks gated on it never execute there. Only the chip-ID-arch-lock check is actually exposed to this; the other two run unconditionally via `TensileLogic --check-all` regardless | Low | Medium | `TensileLogic --check-all` covers two of the three checks regardless; Math CI's pytest suite can still catch a chip-ID-arch-lock violation when it runs | |
-| For gfx1250 specifically, TheRock's `amdgpu_family_matrix.py` has an empty `test-runs-on` for the `gfx125x` family (`gfx125X-dcgpu`, build-only, no runner wired up), so the whole Test stage — including the pytest copies of the logic-corpus consistency checks under `Tensile/Tests/unit` — is skipped outright. Sibling-`DeviceNames` and the gfx1250v0-overlay shape still get build-time coverage there via `TensileLogic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the empty `test-runs-on` | |
+| For gfx1250 specifically, TheRock's `amdgpu_family_matrix.py` has an empty `test-runs-on` for the `gfx125x` family (`gfx125X-dcgpu`, build-only, no runner wired up), so the whole Test stage — including the pytest copies of the logic-corpus consistency checks under `tensilelite/Tests/unit` — is skipped outright. Sibling-`DeviceNames` and the gfx1250v0-overlay shape still get build-time coverage there via `TensileLogic --check-all`; only the chip-ID-arch-lock check has no gfx1250 coverage at all | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the empty `test-runs-on` | |
 
 ### Known bugs and flaky tests
 
