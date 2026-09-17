@@ -19,8 +19,8 @@ namespace ai {
 namespace lgbm {
 
 // Number of features the rank model consumes per row. Matches
-// model_meta.json rank.feature_order length (41 base + 20 derived).
-inline constexpr int kNumFeatures = 61;
+// model_meta.json rank.feature_order length (39 base + 20 derived).
+inline constexpr int kNumFeatures = 59;
 
 // Singleton bundling the rank-model metadata (categorical vocabularies +
 // solver list). Constructed lazily on first call to Get(); thread-safe via the

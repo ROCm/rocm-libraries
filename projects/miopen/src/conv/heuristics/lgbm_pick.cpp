@@ -36,9 +36,9 @@ namespace lgbm {
 
 namespace {
 
-// Indices into the 61-feature row, matching model_meta.json rank.feature_order:
-// 41 base features + 20 derived (13 tn_* GEMM-geometry + 7 al_* tile-alignment)
-// at 28..47, then the categorical and GPU blocks. GPU inputs are the six
+// Indices into the 59-feature row, matching model_meta.json rank.feature_order:
+// 39 base features + 20 derived (13 tn_* GEMM-geometry + 7 al_* tile-alignment)
+// at 26..45, then the categorical and GPU blocks. GPU inputs are the six
 // hipDeviceProp_t fields + gfx_id; derived features come from conv dims +
 // cu_count.
 constexpr int kIdxNMiniBatchSize = 0;
@@ -67,38 +67,36 @@ constexpr int kIdxFlopCnt        = 22;
 constexpr int kIdxBytesRead      = 23;
 constexpr int kIdxBytesWritten   = 24;
 constexpr int kIdxBytesProcessed = 25;
-constexpr int kIdxGflops         = 26;
-constexpr int kIdxBandwidthGbps  = 27;
-// Derived TunaNet GEMM-geometry features occupy indices [28..40] in
+// Derived TunaNet GEMM-geometry features occupy indices [26..38] in
 // EngineeredConvFeatures output order (tn_log_flops, tn_log_M/N/K,
 // tn_M_over_N/M_over_K/N_over_K, tn_log_gemm_size, tn_log_work_per_cu,
 // tn_spatial_reduction, tn_filter_coverage, tn_channel_ratio, tn_group_density).
 // They are written as a contiguous block from this base index.
-constexpr int kIdxTnBlockBegin = 28;
+constexpr int kIdxTnBlockBegin = 26;
 constexpr int kNumTnFeatures   = 13;
-// Derived tile-alignment features (41..47).
-constexpr int kIdxAlC64     = 41;
-constexpr int kIdxAlC32     = 42;
-constexpr int kIdxAlOc64    = 43;
-constexpr int kIdxAlOc32    = 44;
-constexpr int kIdxAlN8      = 45;
-constexpr int kIdxAlCRem64  = 46;
-constexpr int kIdxAlOcRem64 = 47;
-// Categorical problem features (48..52).
-constexpr int kIdxDataType  = 48;
-constexpr int kIdxDirection = 49;
-constexpr int kIdxInLayout  = 50;
-constexpr int kIdxFilLayout = 51;
-constexpr int kIdxOutLayout = 52;
-// GPU numeric features (53..58), all hipDeviceProp_t-backed.
-constexpr int kIdxCuCount               = 53;
-constexpr int kIdxWaveSize              = 54;
-constexpr int kIdxLdsSizePerWorkgroupKb = 55;
-constexpr int kIdxL2CacheTotalKb        = 56;
-constexpr int kIdxBoostClockMhz         = 57;
-constexpr int kIdxVramBytes             = 58;
-constexpr int kIdxGfxId                 = 59;
-constexpr int kIdxSolverName            = 60;
+// Derived tile-alignment features (39..45).
+constexpr int kIdxAlC64     = 39;
+constexpr int kIdxAlC32     = 40;
+constexpr int kIdxAlOc64    = 41;
+constexpr int kIdxAlOc32    = 42;
+constexpr int kIdxAlN8      = 43;
+constexpr int kIdxAlCRem64  = 44;
+constexpr int kIdxAlOcRem64 = 45;
+// Categorical problem features (46..50).
+constexpr int kIdxDataType  = 46;
+constexpr int kIdxDirection = 47;
+constexpr int kIdxInLayout  = 48;
+constexpr int kIdxFilLayout = 49;
+constexpr int kIdxOutLayout = 50;
+// GPU numeric features (51..56), all hipDeviceProp_t-backed.
+constexpr int kIdxCuCount               = 51;
+constexpr int kIdxWaveSize              = 52;
+constexpr int kIdxLdsSizePerWorkgroupKb = 53;
+constexpr int kIdxL2CacheTotalKb        = 54;
+constexpr int kIdxBoostClockMhz         = 55;
+constexpr int kIdxVramBytes             = 56;
+constexpr int kIdxGfxId                 = 57;
+constexpr int kIdxSolverName            = 58;
 
 // SetNumeric, DirectionPerfDbCode, DataTypeName are shared with the perf-config
 // picker; see lgbm_common.hpp. SetCategorical is layer-1-only (the solver_name
@@ -125,9 +123,9 @@ common::ConvDirection ToEngineeredDirection(conv::Direction d)
     return common::ConvDirection::Forward;
 }
 
-// Fill the base problem feature block (indices 0..27). The 6 workload features
-// (flop_cnt/bytes_*/gflops/bandwidth_gbps) are fed as NaN because they cannot be
-// reproduced at runtime; LightGBM routes NaN through the trained missing branch.
+// Fill the base problem feature block (indices 0..25). The 4 workload features
+// (flop_cnt/bytes_*) are fed as NaN because they cannot be reproduced at
+// runtime; LightGBM routes NaN through the trained missing branch.
 void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
 {
     const double nan_v = std::numeric_limits<double>::quiet_NaN();
@@ -159,11 +157,9 @@ void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
     SetNumeric(row[kIdxBytesRead], nan_v);
     SetNumeric(row[kIdxBytesWritten], nan_v);
     SetNumeric(row[kIdxBytesProcessed], nan_v);
-    SetNumeric(row[kIdxGflops], nan_v);
-    SetNumeric(row[kIdxBandwidthGbps], nan_v);
 }
 
-// Fill the 13 tn_* GEMM-geometry features (28..40) via common::EngineeredConvFeatures
+// Fill the 13 tn_* GEMM-geometry features (26..38) via common::EngineeredConvFeatures
 // (shared with the TunaNet/candidate-selection encoders). H_out/W_out come from
 // the output descriptor; 2D geometry is used for all convs, with 3D extent carried
 // by the base depth/spatial features.
@@ -187,7 +183,7 @@ void FillTunaNetFeatures(LgbmEntry* row, const conv::ProblemDescription& p, std:
         SetNumeric(row[kIdxTnBlockBegin + i], static_cast<double>(feats[i]));
 }
 
-// Fill the 7 al_* tile-alignment features (41..47). Integer divisibility /
+// Fill the 7 al_* tile-alignment features (39..45). Integer divisibility /
 // last-64-tile under-fill of the GEMM-contracting channel dims (see
 // deploy/README_CPP_DERIVED.md).
 void FillAlignFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
@@ -206,7 +202,7 @@ void FillAlignFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
     SetNumeric(row[kIdxAlOcRem64], static_cast<double>((64 - (c_out % 64)) % 64) / 64.0);
 }
 
-// Fill the categorical problem features (48..52).
+// Fill the categorical problem features (46..50).
 void FillProblemCategoricals(LgbmEntry* row,
                              const conv::ProblemDescription& p,
                              const LgbmMetadata& meta)
@@ -221,7 +217,7 @@ void FillProblemCategoricals(LgbmEntry* row,
     SetCategorical(row[kIdxOutLayout], meta.CategoricalCode("out_layout", p.GetOutLayout()));
 }
 
-// Fill the GPU feature block (53..59): six hipDeviceProp_t fields + gfx_id.
+// Fill the GPU feature block (51..57): six hipDeviceProp_t fields + gfx_id.
 void FillGpuFeatures(LgbmEntry* row,
                      const Handle& handle,
                      const std::string& gfx_id,
