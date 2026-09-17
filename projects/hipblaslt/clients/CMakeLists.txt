@@ -5,12 +5,13 @@ add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
 
 target_include_directories(hipblaslt-clients-common
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
+    SYSTEM PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
-    PRIVATE
+    SYSTEM PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
