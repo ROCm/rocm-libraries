@@ -4066,6 +4066,8 @@ try
         *hInfo = -4;
     else if(!tau && m * n)
         *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
     else
         *hInfo = 0;
 
@@ -4113,6 +4115,8 @@ try
         *hInfo = -4;
     else if(!tau && m * n)
         *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
     else
         *hInfo = 0;
 
@@ -4160,6 +4164,8 @@ try
         *hInfo = -4;
     else if(!tau && m * n)
         *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
     else
         *hInfo = 0;
 
@@ -4212,6 +4218,8 @@ try
         *hInfo = -4;
     else if(!tau && m * n)
         *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
     else
         *hInfo = 0;
 

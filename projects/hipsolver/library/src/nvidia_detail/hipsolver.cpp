@@ -2316,9 +2316,28 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cublasSgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, hInfo, batch_count));
+        cublasSgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, &info, batch_count));
 }
 catch(...)
 {
@@ -2340,9 +2359,28 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(
-        cublasDgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, hInfo, batch_count));
+        cublasDgeqrfBatched(dn->blas_handle, m, n, A, lda, tau, &info, batch_count));
 }
 catch(...)
 {
@@ -2364,9 +2402,28 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cublasCgeqrfBatched(
-        dn->blas_handle, m, n, (cuComplex**)A, lda, (cuComplex**)tau, hInfo, batch_count));
+        dn->blas_handle, m, n, (cuComplex**)A, lda, (cuComplex**)tau, &info, batch_count));
 }
 catch(...)
 {
@@ -2388,14 +2445,33 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    hipsolver::hipsolverDnHandle* dn = (hipsolver::hipsolverDnHandle*)handle;
+    // override returned info due to extra arguments
+    if(!hInfo)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    else if(m < 0)
+        *hInfo = -1;
+    else if(n < 0)
+        *hInfo = -2;
+    else if(!A && m * n)
+        *hInfo = -3;
+    else if(lda < std::max(1, m))
+        *hInfo = -4;
+    else if(!tau && m * n)
+        *hInfo = -5;
+    else if(batch_count < 0)
+        *hInfo = -9;
+    else
+        *hInfo = 0;
+
+    int                           info = 0;
+    hipsolver::hipsolverDnHandle* dn   = (hipsolver::hipsolverDnHandle*)handle;
     return hipsolver::cuda2hip_status(cublasZgeqrfBatched(dn->blas_handle,
                                                           m,
                                                           n,
                                                           (cuDoubleComplex**)A,
                                                           lda,
                                                           (cuDoubleComplex**)tau,
-                                                          hInfo,
+                                                          &info,
                                                           batch_count));
 }
 catch(...)
