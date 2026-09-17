@@ -467,6 +467,12 @@ constexpr auto get_compiler_target()
 #define CK_TILE_GPU_TARGET_IDS 0x0950
 #elif defined(CK_USE_GFX94)
 #define CK_TILE_GPU_TARGET_IDS 0x0942
+#elif USE_NEW_UNIFIED_FRAMEWORK
+#pragma message(                                                                             \
+    "ck_tile: no GPU target known at compile time; falling back to the current pass's "      \
+    "target, which makes the host pass see HOST and the device pass see the real arch. "     \
+    "Pass -DCK_CMAKE_GPU_TARGET_IDS=0x0942 (gfx942), or -DCK_USE_GFX94 / -DCK_USE_GFX950 / " \
+    "-DCK_USE_GFX1250, so both passes agree.")
 #endif
 
 // Note: The trivial template and always_false_v are necessary to avoid triggering the first static
@@ -518,15 +524,9 @@ static constexpr auto getCMakeCompilerTarget()
         return amdgcn_target<>{}; // By default, return HOST target.
     }
 #else
-#if USE_NEW_UNIFIED_FRAMEWORK
-    static_assert(false,
-                  "No GPU target is known at compile time. Building ck_tile outside CK's CMake "
-                  "requires naming the target on the compile line, e.g. "
-                  "-DCK_CMAKE_GPU_TARGET_IDS=0x0942 for gfx942, or one of -DCK_USE_GFX94 / "
-                  "-DCK_USE_GFX950 / -DCK_USE_GFX1250. It must be a -D flag (not a header guard) "
-                  "so the host and device compilation passes agree.\n");
-#endif
-    return amdgcn_target<>{}; // By default, return HOST target.
+    // No configure-time target: fall back to the current pass. Host and device therefore
+    // disagree, so any type selected from this result differs between the two passes.
+    return get_compiler_target();
 #endif
 }
 
