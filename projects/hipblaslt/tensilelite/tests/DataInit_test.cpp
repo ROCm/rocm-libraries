@@ -148,6 +148,24 @@ namespace
         setOption(args, "output-amaxD", false);
         setOption(args, "use-scaleAB", std::string());
         setOption(args, "use-scaleCD", false);
+        // ClientProblemFactory::m_useBias / m_biasSrc are plain `int` members
+        // with NO default member initializer (see ClientProblemFactory.hpp);
+        // they're only assigned when args.count("use-bias") /
+        // args.count("bias-source") is true. Without these two options,
+        // m_useBias holds whatever garbage was left on the stack/heap when
+        // ClientProblemFactory was constructed. If that garbage is non-zero,
+        // ContractionProblemGemm::setBias() takes a branch that indexes
+        // m_tensors[m_biasSrc].sizes()[batchIdx] with batchIdx left at its
+        // default of 2 for this non-batched dummy problem (m_batchIndices is
+        // empty) -- an out-of-bounds read that segfaults. This is why the
+        // crash only showed up when the test ran in isolation (a fresh
+        // process, as CI's per-test ctest invocation does): the leftover
+        // stack/heap contents differ from running the whole 733-test binary
+        // in one process, where prior tests happened to leave zeroed memory
+        // behind and masked the bug. Setting these explicitly makes the
+        // behavior deterministic regardless of process/memory history.
+        setOption(args, "use-bias", 0);
+        setOption(args, "bias-source", static_cast<int>(ContractionProblemGemm::TENSOR::D));
         setOption(args, "use-scaleAlphaVec", 0);
         setOption(args, "device-idx", 0);
         setOption(args, "num-elements-to-validate", 0);
