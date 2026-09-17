@@ -63,7 +63,8 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -71,7 +72,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -135,7 +136,8 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -206,7 +208,8 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -214,7 +217,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -277,7 +280,8 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsPadMetadata: [0]
         - StaggerU: [0]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
