@@ -17,10 +17,13 @@ from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
     DimRelation,
+    DispatchResult,
     KernelCandidate,
     KernelId,
     OperatorRequest,
     ShapeRange,
+    opt_in_probe,
+    spec_identity,
 )
 
 
@@ -53,20 +56,27 @@ def _candidate(
     abi="dummy/v1",
     capability=_ANY_ARCH,
     _supports=lambda _req: (True, "ok"),
+    algorithm="dummy_algorithm",
+    select_spec=None,
+    sweep_space=None,
 ):
+    if select_spec is None:
+        select_spec = lambda _req: object()
+    if sweep_space is None:
+        sweep_space = lambda _req: ()
     return KernelCandidate(
         name=name,
         family=family,
-        algorithm="dummy_algorithm",
+        algorithm=algorithm,
         spec_id=f"{name}_spec",
         abi_version=abi,
         priority=priority,
         _supports=_supports,
-        select_spec=lambda _req: object(),
+        select_spec=select_spec,
         signature=lambda _spec: (),
         grid=lambda _spec, _req: (1, 1, 1),
         block=lambda _spec: (1, 1, 1),
-        sweep_space=lambda _req: (),
+        sweep_space=sweep_space,
         capability=capability,
     )
 
@@ -565,6 +575,107 @@ class TestForArch(unittest.TestCase):
 
     def test_an_unserved_arch_returns_nothing(self):
         self.assertEqual(self._registry().for_arch("gfx1250"), ())
+
+
+@dataclass(frozen=True)
+class _SweepRequest(OperatorRequest):
+    arch: str = "gfx950"
+    algorithm: str = "auto"
+    spec_id: str = "auto"
+
+    def normalized(self) -> dict:
+        return {
+            "arch": self.arch,
+            "algorithm": self.algorithm,
+            "spec_id": self.spec_id,
+        }
+
+
+class TestRegistryCombos(unittest.TestCase):
+    """Sweep primitive: probe opt-in candidates and expand sweep_space."""
+
+    def _registry(self) -> CandidateRegistry:
+        registry = CandidateRegistry("dummy")
+
+        def support_prod(_req):
+            return True, "ok"
+
+        def support_optin(req):
+            if getattr(req, "algorithm", "auto") == "auto":
+                return False, "opt-in: name this candidate"
+            return True, "ok"
+
+        prod = _candidate(
+            "prod",
+            priority=10,
+            algorithm="prod_alg",
+            _supports=support_prod,
+            select_spec=lambda _req: "prod-default",
+            sweep_space=lambda _req: ("prod-default",),
+        )
+        opt_in = _candidate(
+            "optin",
+            priority=30,
+            algorithm="optin_alg",
+            _supports=support_optin,
+            select_spec=lambda _req: "optin-a",
+            sweep_space=lambda _req: ("optin-a", "optin-b"),
+        )
+        registry.register(prod)
+        registry.register(opt_in)
+        return registry
+
+    def test_supported_hides_opt_in_under_auto(self):
+        names = [c.name for c in self._registry().supported(_SweepRequest())]
+        self.assertEqual(names, ["prod"])
+
+    def test_combos_probes_opt_in_and_expands_sweep_space(self):
+        pairs = self._registry().combos(_SweepRequest())
+        self.assertEqual(
+            [(c.name, spec) for c, spec in pairs],
+            [("prod", "prod-default"), ("optin", "optin-a"), ("optin", "optin-b")],
+        )
+
+    def test_sweep_space_dedupes_specs(self):
+        specs = self._registry().sweep_space(_SweepRequest())
+        self.assertEqual(specs, ("prod-default", "optin-a", "optin-b"))
+
+    def test_include_opt_in_false_matches_supported(self):
+        specs = self._registry().sweep_space(_SweepRequest(), include_opt_in=False)
+        self.assertEqual(specs, ("prod-default",))
+
+    def test_algorithm_filter_still_applies(self):
+        pairs = self._registry().combos(_SweepRequest(algorithm="optin_alg"))
+        self.assertEqual([c.name for c, _spec in pairs], ["optin", "optin"])
+
+    def test_dispatch_all_returns_one_result_per_combo(self):
+        def kernel_id(req, candidate, spec):
+            return KernelId(
+                op="dummy",
+                family="dummy",
+                candidate=candidate.name,
+                algorithm=candidate.algorithm,
+                spec_id=candidate.spec_id,
+                arch=req.arch,
+                abi_version=candidate.abi_version,
+                request_hash="r",
+                spec_hash=spec_identity(spec),
+            )
+
+        results = self._registry().dispatch_all(_SweepRequest(), kernel_id=kernel_id)
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all(isinstance(r, DispatchResult) for r in results))
+        self.assertEqual(
+            [r.candidate.name for r in results], ["prod", "optin", "optin"]
+        )
+
+    def test_spec_identity_hashes_dataclasses(self):
+        @dataclass(frozen=True)
+        class Spec:
+            tile: int
+
+        self.assertEqual(spec_identity(Spec(16)), spec_identity(Spec(16)))
+        self.assertNotEqual(spec_identity(Spec(16)), spec_identity(Spec(32)))
 
 
 if __name__ == "__main__":

@@ -18,8 +18,8 @@ passed from Python, it does not recompute it.
 
 **Standalone candidates are a bounded exception.** A candidate that owns its own
 kernel module builds that kernel's own spec here, tuning included:
-`gfx950.py::_dense_spec` resolves `block_n`, the persistent decision and the CTA
-count, and `gfx942.py::_dense_spec` resolves those plus `waves_per_eu`. Those specs
+`gfx950.py::_dense_spec` resolves tile geometry from the frozen variant plus persist /
+wide-DMA, and `gfx942.py::_dense_spec` resolves those plus `waves_per_eu`. Those specs
 are consumed only by their own builder and never enter the C++ parity identity. One
 rule governs the exception: **any value the kernel bakes into its `kernel_name` must
 be resolved from the kernel's own policy function**, not pinned here — `gfx942.py`
@@ -40,22 +40,58 @@ params). Correctness rests entirely on the key.
 | priority | candidate | declared arches | module | scope |
 |---|---|---|---|---|
 | 3 | `attention_gfx942_dense` | gfx942 | `gfx942.py` | bf16/fp16 D64/D128 dense prefill, default **and** persistent grids (opt-in only) |
-| 3 | `attention_gfx950_dense` | gfx950 | `gfx950.py` | bf16/fp16 dense persistent prefill (opt-in only) |
+| 3 | `attention_gfx950_dense` | gfx950 | `gfx950.py` | persist + wide-DMA, default 256×64 tile (opt-in; production name) |
+| 3 | `attention_gfx950_dense_grid_default` | gfx950 | `gfx950.py` | dense grid, default tile (opt-in) |
+| 3 | `attention_gfx950_dense_persist_default` | gfx950 | `gfx950.py` | dense persist, default tile, no wide-DMA (opt-in) |
+| 3 | `attention_gfx950_dense_grid_bm128` | gfx950 | `gfx950.py` | dense grid, 128×64 tile (opt-in) |
+| 3 | `attention_gfx950_dense_persist_bm128` | gfx950 | `gfx950.py` | dense persist, 128×64 tile (opt-in) |
+| 3 | `attention_gfx950_dense_persist_widedma_bm128` | gfx950 | `gfx950.py` | persist + wide-DMA, 128×64 tile (opt-in) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942.py` | fp16 2D prefill flash |
 | 5 | `attention_gfx950_d256` | gfx950 | `gfx950.py` | bf16 D256 2D prefill |
 | 5 | `attention_gfx1250_wmma` | gfx1250 | `gfx1250.py` | fp16 WMMA FMHA forward (opt-in only) |
 | 5 | `attention_d256_decode` | gfx942, gfx950 | `generic.py` | bf16 D256 3D decode |
 | 10 | `attention_unified_2d` | all | `generic.py` | generic 2D prefill fallback |
 | 10 | `attention_unified_3d` | all | `generic.py` | generic 3D decode fallback |
+| 30 | `attention_gfx{942,950}_u{2d,3d}_*` | one arch each | `gfx{942,950}_tuning.py` | explicit geometry/codepath candidates; sweep/opt-in only |
 
 Lower priority number = higher precedence. Generic candidates (10) remain the
 fallback for everything a specialized candidate does not claim.
 
-Three candidates are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx942_dense`, `attention_gfx950_dense` and `attention_gfx1250_wmma`.
-Registering a kernel makes it reachable; making it an arch's default is a
-separate decision that wants benchmark evidence, so none of them silently
-displaces the unified path its arch routes to today.
+The priority-30 tuning candidates are generated from a bounded geometry catalog
+(160 candidates total), while each candidate's `sweep_space` expands the
+dependency-valid schedule micro-configurations for the concrete request. They
+reject `algorithm="auto"` before constructing a spec, so normal dispatch does
+not pay the enumeration cost and the historical winner is unchanged. Sweeps
+probe them with `algorithm="unified_tuning"` and execute the returned
+`AttentionTuningSpec`, which owns the concrete arch spec, builder kind, compile
+backend, launch geometry, and tuning id.
+
+Policy-free spec construction lives in
+`builders/common/attention_tuning_builder.py`. It never calls `_select_*`,
+`_enable_*`, `_num_segments`, or `_resolve_lds_budget`; problem semantics are
+derived from `UnifiedAttentionProblem`, while explicit geometry/codegen points
+are accepted or rejected by the concrete spec and `supports_tiled_*` validators.
+This is deliberately separate from the heuristic production builders.
+
+Four candidate families are **opt-in only** and never win under `algorithm="auto"`:
+`attention_gfx942_dense`, every `attention_gfx950_dense*` variant, and
+`attention_gfx1250_wmma`, plus every priority-30 unified tuning candidate.
+Registering a kernel makes it reachable; making it an
+arch's default is a separate decision that wants benchmark evidence, so none
+of them silently displaces the unified path its arch routes to today.
+
+gfx950 dense is six frozen `(tile × persist × wide-DMA)` candidates sharing
+`algorithm="attention_dense"`. The production name `attention_gfx950_dense` is
+the persist + wide-DMA default-tile combo (`spec_id=gfx950_attention_dense`).
+Wide-DMA variants do not admit SWA or sinks; `dispatch_attention` uses
+`attention_ranker` so an unpinned request still follows the historical auto
+policy (default tile, persist once `nqb*Hq*B >= num_persistent`, wide DMA on
+aligned causal D128) rather than always picking the production name. Pin
+`dense_tile` / `dense_persistent` / `dense_wide_lds_dma` on `AttentionRequest`
+to filter. `registered_attention_combos(req)` is the multi-engine bench
+entry: it probes every registry candidate for `req.arch` and flattens each
+candidate's `sweep_space` (dense and unified tuning are opt-in, so
+`supported(req)` with `algorithm="auto"` would miss them).
 
 **Tier 3 is reserved for opt-in candidates.** Because they outrank every other
 tier, that opt-in check is the only thing keeping them off the default path — a
@@ -132,9 +168,10 @@ support `req` in two stages:
 2. A **ranker** — `Callable[(request, supported) -> reordered]` — reorders them
    best-first; `dispatch_attention` takes `ranked[0]`.
 
-When no ranker is supplied, the named default `priority_ranker` (in
-`attention.py`) is used: it is an identity pass, so the registered priority order
-wins (behavior-preserving). A heuristic ranker is a **drop-in replacement** that
+When no ranker is supplied, the named default `attention_ranker` is used: gfx950
+dense variants are reordered so the auto-policy combo is first; every other
+candidate keeps registered `(priority, name)` order (`priority_ranker` is still
+the identity pass). A heuristic ranker is a **drop-in replacement** that
 scores candidates against problem metadata (or offline benchmark data) and sorts
 by score — no change to the registry or candidates. Safety invariant enforced by
 the registry: a ranker may reorder or drop candidates but **cannot introduce one
@@ -205,15 +242,23 @@ indirection must be preserved by any code that touches the gfx950 override.
 
 ## Multi-engine benchmarking: `attention_sweep_space`
 
-`attention_sweep_space(req)` returns the deduped `select_spec` of every candidate
-that supports `req` — the "evaluate multiple engines for one problem" primitive.
-It can time 2D/3D paths from the **prefill** harness only; the dedicated decode
+The probe that walks opt-in candidates and expands `sweep_space` now lives on
+`CandidateRegistry` (`combos` / `sweep_space` / `dispatch_all`). Every operator
+family wraps those methods (`registered_*_combos`, `*_sweep_space`,
+`dispatch_*_all`). Attention keeps a thin wrapper so gfx950 dense still returns
+its standalone dense spec rather than the unified path label.
+
+`attention_sweep_space(req)` is the unified 2D/3D slice of that primitive: the
+deduped spec of every candidate that supports `req` and carries a `path`. It
+can time 2D/3D paths from the **prefill** harness only; the dedicated decode
 benchmarks have no sweep lane. The prefill benches
 (`benchmarks/gfx{942,950}/attention/prefill/benchmark_prefill2d_live.py`) consume
 it via the opt-in `--variants sweep` lane — a shared helper
 (`benchmarks/common/attention_sweep.py:run_sweep`) that times each launched path
 the registry offers and records which engine names mapped to it. Contract tests:
-`tests/dispatch/attention/test_sweep_space.py`.
+`tests/dispatch/attention/test_sweep_space.py`. The same enumeration for GEMM,
+KDA, grouped conv, MoE, and norm is the family `*_sweep_space` /
+`dispatch_*_all` wrappers.
 
 Framework-phase caveat: because geometry is deferred (see below), engines that
 route to the same launched path collapse to one timed entry. The decode benches

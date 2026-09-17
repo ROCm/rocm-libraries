@@ -19,6 +19,8 @@ from dispatch.attention import (
     ATTENTION_REGISTRY,
     AttentionRequest,
     attention_sweep_space,
+    dispatch_attention_all,
+    registered_attention_combos,
 )
 
 
@@ -67,7 +69,8 @@ class TestSweepSpace(unittest.TestCase):
         # genuinely spans multiple engines.
         self.assertGreater(len(supported), 1)
         self.assertGreaterEqual(len(specs), 1)
-        self.assertLessEqual(len(specs), len(supported))
+        self.assertGreater(len(specs), len(supported))
+        self.assertTrue(any(hasattr(s, "tuning_id") for s in specs))
 
     def test_specs_are_deduped(self):
         with _PinnedArch("gfx942"):
@@ -80,13 +83,26 @@ class TestSweepSpace(unittest.TestCase):
             req = _gfx942_fp16_mha()
             manual = []
             seen = set()
-            for c in ATTENTION_REGISTRY.supported(req):
-                s = c.select_spec(req)
+            for _candidate, s in registered_attention_combos(req):
+                if not hasattr(s, "path"):
+                    continue
                 if repr(s) not in seen:
                     seen.add(repr(s))
                     manual.append(s)
             specs = attention_sweep_space(req)
         self.assertEqual(list(specs), manual)
+
+    def test_dispatch_all_is_one_result_per_combo(self):
+        with _PinnedArch("gfx942"):
+            req = _gfx942_fp16_mha()
+            combos = registered_attention_combos(req)
+            results = dispatch_attention_all(req)
+        self.assertGreater(len(results), 1)
+        self.assertEqual(len(results), len(combos))
+        self.assertEqual(
+            [r.candidate.name for r in results],
+            [c.name for c, _spec in combos],
+        )
 
 
 if __name__ == "__main__":

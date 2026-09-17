@@ -2313,6 +2313,64 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
             self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
 
+    def test_gfx950_3d_graph_replay_default_on_decode(self):
+        """gfx950 3D split-KV decode captures segment+reduce by default.
+
+        Same contract as gfx942: unset / ``=1`` enable, ``=0`` disables,
+        long prefill and feature-flagged shapes stay off. The previous
+        opt-in (``HIPDNN_GFX950_3D_GRAPH=1`` required) left decode on the
+        ~43us eager floor.
+        """
+        import os
+        from unittest import mock
+
+        import kernels.common.attention_unified as au
+
+        decode = UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=1024,
+            dtype="bf16",
+        )
+        prefill = UnifiedAttentionProblem(
+            total_q=2048,
+            num_seqs=1,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            dtype="bf16",
+        )
+        sinks = UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=1024,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        with _patch_resolved_arch("gfx950"):
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
+                self.assertTrue(au._enable_3d_graph_replay(decode))
+                self.assertFalse(au._enable_3d_graph_replay(prefill))
+                self.assertFalse(au._enable_3d_graph_replay(sinks))
+            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "0"}):
+                self.assertFalse(au._enable_3d_graph_replay(decode))
+            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
+                self.assertTrue(au._enable_3d_graph_replay(decode))
+
     def test_tiled_2d_spec_builder_constructs_per_arch_all_branches(self):
         """Drive ``_tiled_spec_from_problem`` through its three branches and
         assert each constructs the arch's 2D spec without signature drift:

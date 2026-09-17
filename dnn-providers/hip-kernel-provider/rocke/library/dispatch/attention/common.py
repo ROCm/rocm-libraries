@@ -47,7 +47,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import IntEnum
 from operator import index
-from typing import Tuple
+from typing import Any, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
@@ -120,6 +120,10 @@ class AttentionRequest(OperatorRequest):
     dtype: str = "fp16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    # Concrete micro-configuration returned by a unified_tuning candidate.
+    # "auto" selects that geometry candidate's baseline; sweep APIs enumerate
+    # every valid value and persist this id with the result.
+    attention_tuning_id: str = "auto"
     use_fp8: bool = False
     fp8_fnuz: bool = False
     # --- standalone attention_dense knobs (only consumed by the opt-in
@@ -134,6 +138,11 @@ class AttentionRequest(OperatorRequest):
     dense_num_persistent: int = 256
     # Common: auto/qb_major/hkv_major; gfx950 also supports gqa_pair variants.
     dense_persist_decode: str = "auto"
+    # gfx950 dense variant pins. ``auto`` does not filter that axis; the
+    # ranker / ``dense_spec_for_request`` still apply the historical policy.
+    # ``dense_tile`` names a DENSE_TILE_GEOMETRIES key (``default`` / ``bm128``).
+    dense_tile: str = "auto"  # "auto" | "default" | "bm128"
+    dense_wide_lds_dma: str = "auto"  # "auto" | "on" | "off"
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -370,3 +379,26 @@ class AttentionSpec:
         if self.use_fp8:
             parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
         return kernel_name_join(*parts)
+
+
+@dataclass(frozen=True)
+class AttentionTuningSpec:
+    """Concrete dispatcher-owned tiled spec used by exhaustive sweeps.
+
+    Generic production candidates intentionally return :class:`AttentionSpec`
+    and defer geometry.  A tuning candidate returns this wrapper instead: the
+    exact arch spec, builder choice, compile backend, and optional 3D reduce
+    spec are serializable and therefore participate in dispatch/cache identity.
+    """
+
+    path: str
+    arch: str
+    builder_kind: str
+    compile_backend: str
+    candidate_name: str
+    tuning_id: str
+    kernel_spec: Any
+    reduce_spec: Any = None
+
+    def kernel_name(self) -> str:
+        return self.kernel_spec.kernel_name()

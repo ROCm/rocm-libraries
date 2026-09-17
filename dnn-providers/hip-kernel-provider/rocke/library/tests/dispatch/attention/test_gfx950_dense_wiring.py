@@ -511,32 +511,42 @@ class TestDenseCapabilitySlidingWindow(unittest.TestCase):
         self.assertIn("causal", candidate.capability.supports_features)
 
     def test_dispatch_selects_dense_for_sinks_request(self):
-        """Dispatch selects dense candidate for sinks requests."""
-        req = _gfx950_dense_req(use_sinks=True)
-
-        # Find which candidates admit this request
-        candidates = [c for c in attention_candidates() if c.admits(req)[0]]
-
-        # Verify dense is among them
-        dense = next(
-            (c for c in candidates if c.name == "attention_gfx950_dense"), None
+        """A non-wide-DMA dense variant admits sinks; production widedma does not."""
+        req = _gfx950_dense_req(
+            use_sinks=True,
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
         )
-        self.assertIsNotNone(dense, "Dense candidate should admit sinks requests")
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertTrue(names, "A gfx950 dense variant should admit sinks requests")
+        self.assertNotIn("attention_gfx950_dense", names)
+        self.assertIn("attention_gfx950_dense_persist_default", names)
 
     def test_dispatch_selects_dense_for_sliding_window_request(self):
-        """Dispatch selects dense candidate for sliding_window requests (AICK-1933)."""
-        req = _gfx950_dense_req(sliding_window=256)
-
-        # Find which candidates admit this request
-        candidates = [c for c in attention_candidates() if c.admits(req)[0]]
-
-        # Verify dense is among them
-        dense = next(
-            (c for c in candidates if c.name == "attention_gfx950_dense"), None
+        """A non-wide-DMA dense variant admits SWA; production widedma does not."""
+        req = _gfx950_dense_req(
+            sliding_window=256,
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
         )
-        self.assertIsNotNone(
-            dense, "Dense candidate should admit sliding_window requests"
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertTrue(
+            names, "A gfx950 dense variant should admit sliding_window requests"
         )
+        self.assertNotIn("attention_gfx950_dense", names)
+        self.assertIn("attention_gfx950_dense_persist_default", names)
 
 
 class TestSWASinkComposition(unittest.TestCase):
@@ -836,6 +846,134 @@ class TestSinksValidation(unittest.TestCase):
             )
 
         self.assertEqual(str(cm.exception), "sinks must be a CUDA tensor")
+
+
+class TestGfx950DenseVariants(unittest.TestCase):
+    """One registered candidate per frozen (tile x persist x wide-DMA) combo."""
+
+    def test_six_dense_candidates_are_registered(self):
+        from dispatch.attention.gfx950 import GFX950_DENSE_VARIANTS
+
+        names = [c.name for c in attention_candidates()]
+        expected = [v.candidate_name for v in GFX950_DENSE_VARIANTS]
+        self.assertEqual(len(expected), 6)
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertIn(name, names)
+
+    def test_d128_admits_all_six_dense_variants(self):
+        from dispatch.attention.gfx950 import GFX950_DENSE_VARIANTS
+
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=2048,
+            seqlen_k=2048,
+        )
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertEqual(names, {v.candidate_name for v in GFX950_DENSE_VARIANTS})
+
+    def test_d64_refuses_wide_dma_variants(self):
+        req = _gfx950_dense_req()
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertIn("attention_gfx950_dense_grid_default", names)
+        self.assertNotIn("attention_gfx950_dense", names)
+        self.assertNotIn("attention_gfx950_dense_persist_widedma_bm128", names)
+
+    def test_dense_tile_bm128_pin_filters_and_selects_block_m(self):
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
+            dense_tile="bm128",
+        )
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertEqual(
+            names,
+            {
+                "attention_gfx950_dense_grid_bm128",
+                "attention_gfx950_dense_persist_bm128",
+                "attention_gfx950_dense_persist_widedma_bm128",
+            },
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.block_m, 128)
+        self.assertTrue(spec.persistent)
+        self.assertTrue(spec.wide_lds_dma)
+
+    def test_unpinned_llama3_8b_s8192_is_persist_widedma_default(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.block_m, 256)
+        self.assertTrue(spec.persistent)
+        self.assertTrue(spec.wide_lds_dma)
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        from dispatch.attention import dispatch_attention
+
+        result = dispatch_attention(req)
+        self.assertEqual(result.candidate.name, "attention_gfx950_dense")
+
+    def test_registered_combos_include_dense_and_unified_2d(self):
+        from dispatch.attention import registered_attention_combos
+
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            algorithm="auto",
+        )
+        names = {c.name for c, _spec in registered_attention_combos(req)}
+        self.assertIn("attention_gfx950_dense", names)
+        self.assertIn("attention_gfx950_dense_grid_bm128", names)
+        self.assertIn("attention_unified_2d", names)
+
+    def test_d256_combos_include_d256_not_dense(self):
+        from dispatch.attention import registered_attention_combos
+
+        req = _gfx950_dense_req(
+            hdim_q=256,
+            hdim_v=256,
+            nhead_q=16,
+            nhead_k=2,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            dtype="bf16",
+            algorithm="auto",
+        )
+        combos = registered_attention_combos(req)
+        names = {c.name for c, _spec in combos}
+        self.assertIn("attention_gfx950_d256", names)
+        self.assertFalse(
+            any(c.algorithm == "attention_dense" for c, _spec in combos),
+            names,
+        )
 
 
 if __name__ == "__main__":
