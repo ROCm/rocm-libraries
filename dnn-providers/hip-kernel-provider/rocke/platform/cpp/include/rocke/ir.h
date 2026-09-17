@@ -48,12 +48,13 @@ extern "C" {
 
 /* ------------------------------------------------------------------ status */
 
-typedef enum rocke_status {
+typedef enum rocke_status
+{
     ROCKE_OK = 0,
-    ROCKE_ERR_VALUE,  /* maps to Python ValueError                          */
-    ROCKE_ERR_TYPE,   /* maps to Python TypeError                           */
-    ROCKE_ERR_KEY,    /* maps to Python KeyError (unknown op_id / param)    */
-    ROCKE_ERR_OOM,    /* allocation failure                                 */
+    ROCKE_ERR_VALUE, /* maps to Python ValueError                          */
+    ROCKE_ERR_TYPE, /* maps to Python TypeError                           */
+    ROCKE_ERR_KEY, /* maps to Python KeyError (unknown op_id / param)    */
+    ROCKE_ERR_OOM, /* allocation failure                                 */
     ROCKE_ERR_NOTIMPL /* maps to Python NotImplementedError                 */
 } rocke_status_t;
 
@@ -69,28 +70,31 @@ typedef enum rocke_status {
  * unintended truncation (e.g. into a codegen name buffer) is still caught. */
 #if defined(__GNUC__)
 #define ROCKE_ERR_SNPRINTF(buf, cap, ...)                                   \
-    do {                                                                    \
+    do                                                                      \
+    {                                                                       \
         _Pragma("GCC diagnostic push")                                      \
             _Pragma("GCC diagnostic ignored \"-Wformat-truncation\"")(void) \
                 snprintf((buf), (cap), __VA_ARGS__);                        \
         _Pragma("GCC diagnostic pop")                                       \
-    } while (0)
+    } while(0)
 #else
 #define ROCKE_ERR_SNPRINTF(buf, cap, ...) (void)snprintf((buf), (cap), __VA_ARGS__)
 #endif
 
 /* --------------------------------------------------------------- type kinds */
 
-typedef enum rocke_type_kind {
+typedef enum rocke_type_kind
+{
     ROCKE_TYPE_SCALAR = 0, /* i1/i8/i16/i32/i64/bf16/f16/f32/fp8e4m3/bf8e5m2     */
-    ROCKE_TYPE_VECTOR,     /* vec<elem x count>                                  */
-    ROCKE_TYPE_PTR,        /* ptr<pointee, space>                                */
-    ROCKE_TYPE_SMEM        /* smem<elem, [shape...]>                             */
+    ROCKE_TYPE_VECTOR, /* vec<elem x count>                                  */
+    ROCKE_TYPE_PTR, /* ptr<pointee, space>                                */
+    ROCKE_TYPE_SMEM /* smem<elem, [shape...]>                             */
 } rocke_type_kind_t;
 
 /* Canonical scalar type tags. The scalar singletons (rocke_i32() etc.) carry one
  * of these so consumers can switch on the element kind without strcmp. */
-typedef enum rocke_scalar_kind {
+typedef enum rocke_scalar_kind
+{
     ROCKE_SCALAR_I1 = 0,
     ROCKE_SCALAR_I8,
     ROCKE_SCALAR_I16,
@@ -108,7 +112,8 @@ typedef enum rocke_scalar_kind {
  * "ptr<f16,global>", "smem<f16, [64x32]>") -- byte-identical to Python so the
  * printer/lowerers reproduce existing output. Scalar types are interned
  * singletons; composite types are arena-allocated and value-compared by name. */
-typedef struct rocke_type {
+typedef struct rocke_type
+{
     rocke_type_kind_t kind;
     const char* name; /* canonical, arena/static owned, never NULL */
 
@@ -117,15 +122,15 @@ typedef struct rocke_type {
 
     /* ROCKE_TYPE_VECTOR */
     const struct rocke_type* elem; /* element type (VECTOR and SMEM)            */
-    int count;                     /* lane count (VECTOR)                       */
+    int count; /* lane count (VECTOR)                       */
 
     /* ROCKE_TYPE_PTR */
     const struct rocke_type* pointee;
     const char* space; /* "global","constant",...                   */
 
     /* ROCKE_TYPE_SMEM */
-    const int* shape;   /* arena-owned array of dim sizes            */
-    int rank;           /* number of dims in shape                   */
+    const int* shape; /* arena-owned array of dim sizes            */
+    int rank; /* number of dims in shape                   */
     int smem_exclusive; /* 1 => smem-pool packer gives this alloc its own
                          * byte range (cshuffle no-alias mode). Kept OUT of
                          * `name` so default (0) stays byte-identical.       */
@@ -133,43 +138,50 @@ typedef struct rocke_type {
 
 /* -------------------------------------------------------------- attr values */
 
-typedef enum rocke_attr_kind {
+typedef enum rocke_attr_kind
+{
     ROCKE_ATTR_INT = 0, /* int64_t  (value, vec, align, rank, index, num, ...) */
-    ROCKE_ATTR_FLOAT,   /* double   (fp constant value, fill)                  */
-    ROCKE_ATTR_STR,     /* const char* (ity, pred, op_id, elem, elem_type,...) */
-    ROCKE_ATTR_BOOL,    /* bool     (pure, unroll, elide_trailing_barrier,...) */
-    ROCKE_ATTR_LIST,    /* nested attr list (scf.for iter_args metadata)       */
+    ROCKE_ATTR_FLOAT, /* double   (fp constant value, fill)                  */
+    ROCKE_ATTR_STR, /* const char* (ity, pred, op_id, elem, elem_type,...) */
+    ROCKE_ATTR_BOOL, /* bool     (pure, unroll, elide_trailing_barrier,...) */
+    ROCKE_ATTR_LIST, /* nested attr list (scf.for iter_args metadata)       */
     ROCKE_ATTR_INT_LIST /* list of bare ints, e.g. agpr_alloc (0,0)            */
 } rocke_attr_kind_t;
 
 struct rocke_attr_map; /* forward: a list element is itself a small attr map */
 
-typedef struct rocke_attr_value {
+typedef struct rocke_attr_value
+{
     rocke_attr_kind_t kind;
-    union {
+    union
+    {
         int64_t i;
         double f;
         const char* s; /* arena-owned                         */
         bool b;
-        struct {
+        struct
+        {
             struct rocke_attr_map** items; /* arena array of maps               */
             int count;
         } list;
-        struct {
+        struct
+        {
             int64_t* ints; /* arena array of bare ints (l:[ i:.., .. ])      */
             int count;
         } ilist;
     } u;
 } rocke_attr_value_t;
 
-typedef struct rocke_attr_entry {
+typedef struct rocke_attr_entry
+{
     const char* key; /* arena-owned                                    */
     rocke_attr_value_t value;
 } rocke_attr_entry_t;
 
 /* Op.attrs: an insertion-ordered key->variant map. Small (<=10 entries);
  * lookups are linear by key. ir_print sorts a copy for stable output. */
-typedef struct rocke_attr_map {
+typedef struct rocke_attr_map
+{
     rocke_attr_entry_t* entries; /* arena-owned, grows by reallocation in arena */
     int count;
     int cap;
@@ -180,7 +192,8 @@ typedef struct rocke_attr_map {
 /* One enumerator per distinct op name string in rocke.core.ir. Every lowerer
  * dispatches on this enum instead of Python getattr(self, "_op_"+name). The
  * canonical dotted name string is recovered with rocke_opcode_name(). */
-typedef enum rocke_opcode {
+typedef enum rocke_opcode
+{
     ROCKE_OP_INVALID = 0,
 
     /* arith.* */
@@ -413,7 +426,8 @@ struct rocke_region;
 
 /* SSA value. Mutable: `op` is back-patched after the producing op is built
  * (Python Value.op = op). `name` is "%vN" / "%paramname" / "%k0" form. */
-typedef struct rocke_value {
+typedef struct rocke_value
+{
     const char* name; /* arena-owned, includes leading '%'            */
     const rocke_type_t* type;
     struct rocke_op* op; /* producing op, or NULL for params/iv/iter args */
@@ -421,7 +435,8 @@ typedef struct rocke_value {
 
 /* Operation. `opcode` replaces the Python op.name string; `name` keeps the
  * dotted text for printing. operands/results/regions are arena-backed arrays. */
-typedef struct rocke_op {
+typedef struct rocke_op
+{
     rocke_opcode_t opcode;
     const char* name; /* dotted name, e.g. "arith.add"          */
     rocke_value_t** operands;
@@ -435,7 +450,8 @@ typedef struct rocke_op {
 } rocke_op_t;
 
 /* Region (basic block / control-flow body). */
-typedef struct rocke_region {
+typedef struct rocke_region
+{
     const char* label; /* "entry","body","then",...                       */
     rocke_op_t** ops;
     int num_ops;
@@ -445,7 +461,8 @@ typedef struct rocke_region {
 /* Kernel parameter ABI options (the Python **attrs on IRBuilder.param). A field
  * is "unset" via the *_set companion flag so defaults match Python (absent key).
  */
-typedef struct rocke_param_opts {
+typedef struct rocke_param_opts
+{
     bool noalias;
     bool noalias_set;
     bool readonly;
@@ -457,18 +474,20 @@ typedef struct rocke_param_opts {
     const char* addr_space; /* NULL => default "global"                     */
 } rocke_param_opts_t;
 
-typedef struct rocke_param {
+typedef struct rocke_param
+{
     const char* name; /* identifier WITHOUT leading '%'               */
     const rocke_type_t* type;
     rocke_attr_map_t attrs; /* materialised ABI attrs (noalias/align/...)   */
 } rocke_param_t;
 
-typedef struct rocke_kernel_def {
+typedef struct rocke_kernel_def
+{
     const char* name;
     rocke_param_t** params;
     int num_params;
     int cap_params;
-    rocke_region_t* body;   /* the "entry" region                          */
+    rocke_region_t* body; /* the "entry" region                          */
     rocke_attr_map_t attrs; /* max_workgroup_size, ...                      */
 } rocke_kernel_def_t;
 
@@ -476,9 +495,10 @@ typedef struct rocke_kernel_def {
 
 #define ROCKE_REGION_STACK_MAX 64
 
-typedef struct rocke_ir_builder {
+typedef struct rocke_ir_builder
+{
     rocke_arena_t arena; /* owns every node below               */
-    int counter;         /* SSA name counter (%vN)              */
+    int counter; /* SSA name counter (%vN)              */
     rocke_kernel_def_t* kernel;
     rocke_region_t* region_stack[ROCKE_REGION_STACK_MAX];
     int region_depth; /* region_stack[depth-1] is current    */
@@ -499,7 +519,8 @@ typedef struct rocke_ir_builder {
  *        rocke_b_region_enter(b, f.body);   ... body ops using f.iv ...
  *        rocke_b_region_leave(b);
  * iter_vars/iter_inits carry the loop-carried values for scf_for_iter. */
-typedef struct rocke_for {
+typedef struct rocke_for
+{
     rocke_op_t* op;
     rocke_value_t* iv;
     rocke_region_t* body;
@@ -508,26 +529,30 @@ typedef struct rocke_for {
 } rocke_for_t;
 
 /* If handle: the C analog of _IfBuilder. */
-typedef struct rocke_if {
+typedef struct rocke_if
+{
     rocke_op_t* op;
     rocke_region_t* then_region;
 } rocke_if_t;
 
 /* If/else handle: the C analog of _IfElseBuilder (scf.if_else). */
-typedef struct rocke_if_else {
+typedef struct rocke_if_else
+{
     rocke_op_t* op;
     rocke_region_t* then_region;
     rocke_region_t* else_region;
 } rocke_if_else_t;
 
 /* (name, init) pair for scf_for_iter. */
-typedef struct rocke_iter_arg {
+typedef struct rocke_iter_arg
+{
     const char* name; /* WITHOUT leading '%'                          */
     rocke_value_t* init;
 } rocke_iter_arg_t;
 
 /* Options for inline_asm (Python keyword-only args). */
-typedef struct rocke_inline_asm_opts {
+typedef struct rocke_inline_asm_opts
+{
     bool sideeffect; /* default true                                     */
     bool convergent; /* default false                                    */
     bool sideeffect_set;
@@ -557,17 +582,18 @@ const rocke_type_t* rocke_scalar_by_name(const char* name);
  * PtrType(pointee,space) -> "ptr<{pointee},{space}>"
  * SmemType(elem,shape)   -> "smem<{elem}, [{d0}x{d1}...]>"  */
 const rocke_type_t* rocke_vector_type(rocke_ir_builder_t* b, const rocke_type_t* elem, int count);
-const rocke_type_t* rocke_ptr_type(rocke_ir_builder_t* b, const rocke_type_t* pointee,
-                                   const char* space);
-const rocke_type_t* rocke_smem_type(rocke_ir_builder_t* b, const rocke_type_t* elem,
-                                    const int* shape, int rank, int exclusive);
+const rocke_type_t*
+    rocke_ptr_type(rocke_ir_builder_t* b, const rocke_type_t* pointee, const char* space);
+const rocke_type_t* rocke_smem_type(
+    rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape, int rank, int exclusive);
 
 /* Structural type equality (matches Python frozen-dataclass __eq__: compares by
  * canonical name, which encodes kind + components). */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b);
 
 /* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
-typedef enum rocke_cache_policy {
+typedef enum rocke_cache_policy
+{
     ROCKE_CACHE_ALL = 0,
     ROCKE_CACHE_GLOBAL = 1,
     ROCKE_CACHE_STREAM = 2,
@@ -582,8 +608,8 @@ void rocke_attr_set_float(rocke_ir_builder_t* b, rocke_attr_map_t* m, const char
 void rocke_attr_set_str(rocke_ir_builder_t* b, rocke_attr_map_t* m, const char* key, const char* v);
 void rocke_attr_set_bool(rocke_ir_builder_t* b, rocke_attr_map_t* m, const char* key, bool v);
 /* Set a list of bare ints (serialized as l:[ i:v0, i:v1, ... ]). */
-void rocke_attr_set_int_list(rocke_ir_builder_t* b, rocke_attr_map_t* m, const char* key,
-                             const int64_t* vals, int count);
+void rocke_attr_set_int_list(
+    rocke_ir_builder_t* b, rocke_attr_map_t* m, const char* key, const int64_t* vals, int count);
 /* Returns the entry for `key`, or NULL if absent. */
 const rocke_attr_value_t* rocke_attr_get(const rocke_attr_map_t* m, const char* key);
 bool rocke_attr_get_int(const rocke_attr_map_t* m, const char* key, int64_t* out);
@@ -625,19 +651,28 @@ rocke_kernel_def_t* rocke_ir_builder_kernel(rocke_ir_builder_t* b);
 const char* rocke_b_fresh(rocke_ir_builder_t* b, const char* prefix);
 void rocke_b_emit(rocke_ir_builder_t* b, rocke_op_t* op);
 void rocke_b_region_enter(rocke_ir_builder_t* b, rocke_region_t* r); /* push */
-void rocke_b_region_leave(rocke_ir_builder_t* b);                    /* pop  */
+void rocke_b_region_leave(rocke_ir_builder_t* b); /* pop  */
 rocke_region_t* rocke_b_current_region(rocke_ir_builder_t* b);
 
 /* Generic op builder. Creates fresh result Values (one per result_types entry,
  * named with result_name_hint), builds the Op, links results back, emits it, and
  * returns it. attrs/regions may be NULL. This is IRBuilder._op. */
-rocke_op_t* rocke_b_op(rocke_ir_builder_t* b, rocke_opcode_t opcode, rocke_value_t* const* operands,
-                       int num_operands, const rocke_type_t* const* result_types, int num_results,
-                       const rocke_attr_map_t* attrs, rocke_region_t* const* regions,
-                       int num_regions, const char* result_name_hint, const char* loc);
+rocke_op_t* rocke_b_op(rocke_ir_builder_t* b,
+                       rocke_opcode_t opcode,
+                       rocke_value_t* const* operands,
+                       int num_operands,
+                       const rocke_type_t* const* result_types,
+                       int num_results,
+                       const rocke_attr_map_t* attrs,
+                       rocke_region_t* const* regions,
+                       int num_regions,
+                       const char* result_name_hint,
+                       const char* loc);
 
 /* ----- params ----- */
-rocke_value_t* rocke_b_param(rocke_ir_builder_t* b, const char* name, const rocke_type_t* t,
+rocke_value_t* rocke_b_param(rocke_ir_builder_t* b,
+                             const char* name,
+                             const rocke_type_t* t,
                              const rocke_param_opts_t* opts);
 rocke_value_t* rocke_b_get_param(rocke_ir_builder_t* b, const char* name);
 
@@ -672,15 +707,17 @@ rocke_value_t* rocke_b_fmul(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value
 rocke_value_t* rocke_b_fdiv(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fneg(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_fabs(rocke_ir_builder_t* b, rocke_value_t* a);
-rocke_value_t* rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c,
-                           rocke_value_t* d);
+rocke_value_t*
+    rocke_b_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_fmin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
-rocke_value_t* rocke_b_fmax3(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c,
-                             rocke_value_t* d);
-rocke_value_t* rocke_b_fmin3(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c,
-                             rocke_value_t* d);
-rocke_value_t* rocke_b_clamp_f32(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* lo,
+rocke_value_t*
+    rocke_b_fmax3(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+rocke_value_t*
+    rocke_b_fmin3(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
+rocke_value_t* rocke_b_clamp_f32(rocke_ir_builder_t* b,
+                                 rocke_value_t* v,
+                                 rocke_value_t* lo,
                                  rocke_value_t* hi);
 
 /* ----- comparisons (return i1) ----- */
@@ -691,8 +728,8 @@ rocke_value_t* rocke_b_cmp_ge(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 rocke_value_t* rocke_b_cmp_eq(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
-rocke_value_t* rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a,
-                            rocke_value_t* c);
+rocke_value_t*
+    rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
 
 /* ----- math ----- */
 rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a);
@@ -709,24 +746,30 @@ rocke_value_t* rocke_b_zext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke
 rocke_value_t* rocke_b_sext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_trunc(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
-rocke_value_t* rocke_b_select(rocke_ir_builder_t* b, rocke_value_t* cond, rocke_value_t* lhs,
+rocke_value_t* rocke_b_select(rocke_ir_builder_t* b,
+                              rocke_value_t* cond,
+                              rocke_value_t* lhs,
                               rocke_value_t* rhs);
-rocke_value_t* rocke_b_masked_select(rocke_ir_builder_t* b, rocke_value_t* cond, rocke_value_t* lhs,
+rocke_value_t* rocke_b_masked_select(rocke_ir_builder_t* b,
+                                     rocke_value_t* cond,
+                                     rocke_value_t* lhs,
                                      rocke_value_t* rhs);
 rocke_value_t* rocke_b_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_trunc_f32_to_bf16(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_rint_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cast_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
-rocke_value_t* rocke_b_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v,
-                                   const rocke_type_t* target);
+rocke_value_t*
+    rocke_b_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_sitofp_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_fp8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_bf8_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v);
-rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b, rocke_value_t* v,
+rocke_value_t* rocke_b_cvt_scalef32_pk_f32_fp8x4(rocke_ir_builder_t* b,
+                                                 rocke_value_t* v,
                                                  rocke_value_t* scale);
-rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b, rocke_value_t* v,
+rocke_value_t* rocke_b_cvt_scalef32_pk_f32_bf8x4(rocke_ir_builder_t* b,
+                                                 rocke_value_t* v,
                                                  rocke_value_t* scale);
 rocke_value_t* rocke_b_cvt_f32_to_fp8(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cvt_f32_to_bf8(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -736,17 +779,26 @@ rocke_value_t* rocke_b_cvt_pk_bf8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v)
 rocke_value_t* rocke_b_cvt_pk_i8_f32x4(rocke_ir_builder_t* b, rocke_value_t* v);
 
 /* ----- atomics ----- */
-rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                         rocke_value_t* idx, rocke_value_t* value,
+rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
+                                         rocke_value_t* ptr,
+                                         rocke_value_t* idx,
+                                         rocke_value_t* value,
                                          const char* ordering /* NULL=>monotonic */);
-rocke_value_t* rocke_b_lds_atomic_add(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                      rocke_value_t* const* indices, int num_indices,
-                                      rocke_value_t* value, const char* ordering);
-rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                                 rocke_value_t* idx, rocke_value_t* value,
+rocke_value_t* rocke_b_lds_atomic_add(rocke_ir_builder_t* b,
+                                      rocke_value_t* smem,
+                                      rocke_value_t* const* indices,
+                                      int num_indices,
+                                      rocke_value_t* value,
+                                      const char* ordering);
+rocke_value_t* rocke_b_global_atomic_add_pk_bf16(rocke_ir_builder_t* b,
+                                                 rocke_value_t* ptr,
+                                                 rocke_value_t* idx,
+                                                 rocke_value_t* value,
                                                  const char* ordering);
-rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                                rocke_value_t* idx, rocke_value_t* value,
+rocke_value_t* rocke_b_global_atomic_add_pk_f16(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
                                                 const char* ordering);
 
 /* ----- gpu ids ----- */
@@ -756,45 +808,78 @@ rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
 
 /* ----- global memory ----- */
-rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b, const rocke_type_t* elem, const int* shape,
-                                  int rank, const char* name_hint);
+rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
+                                  const rocke_type_t* elem,
+                                  const int* shape,
+                                  int rank,
+                                  const char* name_hint);
 /* Like rocke_b_smem_alloc but marks the allocation `exclusive` (cshuffle
  * no-alias mode): the smem-pool packer gives it its own byte range. The
  * plain rocke_b_smem_alloc forwards here with exclusive=0. */
-rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b, const rocke_type_t* elem,
-                                     const int* shape, int rank, const char* name_hint,
+rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
+                                     const rocke_type_t* elem,
+                                     const int* shape,
+                                     int rank,
+                                     const char* name_hint,
                                      int exclusive);
-rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
-                                   const rocke_type_t* dtype, int align /* <=0 => 1 */);
-rocke_value_t* rocke_b_global_load_f16(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                       rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_global_load_f32(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                       rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_global_load_i32(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                       rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_global_load_i64(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                       rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                        rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
+rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
+                                   rocke_value_t* ptr,
+                                   rocke_value_t* idx,
+                                   const rocke_type_t* dtype,
+                                   int align /* <=0 => 1 */);
+rocke_value_t* rocke_b_global_load_f16(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_f32(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_i32(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_i64(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_bf16(rocke_ir_builder_t* b,
+                                        rocke_value_t* ptr,
+                                        rocke_value_t* idx,
+                                        int align);
+rocke_value_t* rocke_b_global_load_i8(rocke_ir_builder_t* b,
+                                      rocke_value_t* ptr,
+                                      rocke_value_t* idx,
                                       int align);
-rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                       rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                           rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                           rocke_value_t* idx, int align);
-rocke_value_t* rocke_b_masked_global_load(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                          rocke_value_t* idx, rocke_value_t* mask,
-                                          rocke_value_t* other, const rocke_type_t* dtype,
+rocke_value_t* rocke_b_global_load_i16(rocke_ir_builder_t* b,
+                                       rocke_value_t* ptr,
+                                       rocke_value_t* idx,
+                                       int align);
+rocke_value_t* rocke_b_global_load_bf8e5m2(rocke_ir_builder_t* b,
+                                           rocke_value_t* ptr,
+                                           rocke_value_t* idx,
+                                           int align);
+rocke_value_t* rocke_b_global_load_fp8e4m3(rocke_ir_builder_t* b,
+                                           rocke_value_t* ptr,
+                                           rocke_value_t* idx,
+                                           int align);
+rocke_value_t* rocke_b_masked_global_load(rocke_ir_builder_t* b,
+                                          rocke_value_t* ptr,
+                                          rocke_value_t* idx,
+                                          rocke_value_t* mask,
+                                          rocke_value_t* other,
+                                          const rocke_type_t* dtype,
                                           int align);
-void rocke_b_global_store(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
-                          rocke_value_t* value, int align);
-rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
-                                      const rocke_type_t* dtype, int n,
+void rocke_b_global_store(
+    rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int align);
+rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
+                                      rocke_value_t* ptr,
+                                      rocke_value_t* idx,
+                                      const rocke_type_t* dtype,
+                                      int n,
                                       int align /* <=0 => default */);
-rocke_value_t* rocke_b_global_load_vN_f16(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                          rocke_value_t* idx, int n, int align);
+rocke_value_t* rocke_b_global_load_vN_f16(
+    rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, int n, int align);
 
 /* ----- vector ops ----- */
 rocke_value_t* rocke_b_vector_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
@@ -807,49 +892,77 @@ rocke_value_t* rocke_b_vector_lshr(rocke_ir_builder_t* b, rocke_value_t* a, rock
 rocke_value_t* rocke_b_vector_smax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_vector_smin(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
 rocke_value_t* rocke_b_vector_max(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
-rocke_value_t* rocke_b_vector_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c,
-                                  rocke_value_t* d);
+rocke_value_t*
+    rocke_b_vector_fma(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d);
 rocke_value_t* rocke_b_vector_sum(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_vector_reduce_max(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_vector_splat(rocke_ir_builder_t* b, rocke_value_t* scalar, int n);
-rocke_value_t* rocke_b_vector_select(rocke_ir_builder_t* b, rocke_value_t* mask, rocke_value_t* lhs,
+rocke_value_t* rocke_b_vector_select(rocke_ir_builder_t* b,
+                                     rocke_value_t* mask,
+                                     rocke_value_t* lhs,
                                      rocke_value_t* rhs);
-rocke_value_t* rocke_b_vector_cmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a,
-                                  rocke_value_t* c);
-rocke_value_t* rocke_b_vector_trunc(rocke_ir_builder_t* b, rocke_value_t* v,
-                                    const rocke_type_t* target);
-rocke_value_t* rocke_b_vector_sext(rocke_ir_builder_t* b, rocke_value_t* v,
-                                   const rocke_type_t* target);
+rocke_value_t*
+    rocke_b_vector_cmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
+rocke_value_t*
+    rocke_b_vector_trunc(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
+rocke_value_t*
+    rocke_b_vector_sext(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 
 /* ----- LDS (shared memory) ----- */
-void rocke_b_smem_store_f16(rocke_ir_builder_t* b, rocke_value_t* smem,
-                            rocke_value_t* const* indices, int num_indices, rocke_value_t* value);
-void rocke_b_smem_store_vN(rocke_ir_builder_t* b, rocke_value_t* smem,
-                           rocke_value_t* const* indices, int num_indices, rocke_value_t* value,
+void rocke_b_smem_store_f16(rocke_ir_builder_t* b,
+                            rocke_value_t* smem,
+                            rocke_value_t* const* indices,
+                            int num_indices,
+                            rocke_value_t* value);
+void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
+                           rocke_value_t* smem,
+                           rocke_value_t* const* indices,
+                           int num_indices,
+                           rocke_value_t* value,
                            int n);
-void rocke_b_smem_store_vN_f16(rocke_ir_builder_t* b, rocke_value_t* smem,
-                               rocke_value_t* const* indices, int num_indices, rocke_value_t* value,
+void rocke_b_smem_store_vN_f16(rocke_ir_builder_t* b,
+                               rocke_value_t* smem,
+                               rocke_value_t* const* indices,
+                               int num_indices,
+                               rocke_value_t* value,
                                int n);
-rocke_value_t* rocke_b_smem_load_v4_f16(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                        rocke_value_t* row, rocke_value_t* col);
-rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                    rocke_value_t* const* indices, int num_indices,
-                                    const rocke_type_t* dtype, int n);
-rocke_value_t* rocke_b_smem_load_vN_f16(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                        rocke_value_t* const* indices, int num_indices, int n);
+rocke_value_t* rocke_b_smem_load_v4_f16(rocke_ir_builder_t* b,
+                                        rocke_value_t* smem,
+                                        rocke_value_t* row,
+                                        rocke_value_t* col);
+rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
+                                    rocke_value_t* smem,
+                                    rocke_value_t* const* indices,
+                                    int num_indices,
+                                    const rocke_type_t* dtype,
+                                    int n);
+rocke_value_t* rocke_b_smem_load_vN_f16(rocke_ir_builder_t* b,
+                                        rocke_value_t* smem,
+                                        rocke_value_t* const* indices,
+                                        int num_indices,
+                                        int n);
 
 /* ----- target-neutral MMA ----- */
 /* op_id is the atom identifier ("mfma_f32_16x16x16_f16", "wmma_...", ...).
  * extra carries scaled-MX scale operands (a_scale,b_scale) or is NULL/0. */
-rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b, const char* op_id, rocke_value_t* a,
-                           rocke_value_t* bb, rocke_value_t* c, rocke_value_t* const* extra,
+rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
+                           const char* op_id,
+                           rocke_value_t* a,
+                           rocke_value_t* bb,
+                           rocke_value_t* c,
+                           rocke_value_t* const* extra,
                            int num_extra);
 
 /* gfx1250 scaled WMMA with independently selected A/B scale formats.
  * NULL scale dtypes preserve E8M0. Matrix formats come from op_id. */
-rocke_value_t* rocke_b_mma_scaled(rocke_ir_builder_t* b, const char* op_id, rocke_value_t* a,
-                                  rocke_value_t* bb, rocke_value_t* c, rocke_value_t* a_scale,
-                                  rocke_value_t* b_scale, const char* scale_dtype_a,
+rocke_value_t* rocke_b_mma_scaled(rocke_ir_builder_t* b,
+                                  const char* op_id,
+                                  rocke_value_t* a,
+                                  rocke_value_t* bb,
+                                  rocke_value_t* c,
+                                  rocke_value_t* a_scale,
+                                  rocke_value_t* b_scale,
+                                  const char* scale_dtype_a,
                                   const char* scale_dtype_b);
 
 /* ----- inline asm ----- */
@@ -863,10 +976,14 @@ rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t
 /* operands/result_types are explicit arrays; constraints/template are strings.
  * Returns the op (results accessible via op->results) since asm may be 0/1/N
  * results. */
-rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b, const char* asm_template,
-                               const char* constraints, rocke_value_t* const* operands,
-                               int num_operands, const rocke_type_t* const* result_types,
-                               int num_results, const rocke_inline_asm_opts_t* opts);
+rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
+                               const char* asm_template,
+                               const char* constraints,
+                               rocke_value_t* const* operands,
+                               int num_operands,
+                               const rocke_type_t* const* result_types,
+                               int num_results,
+                               const rocke_inline_asm_opts_t* opts);
 void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_wait_alu(rocke_ir_builder_t* b, int imm);
 void rocke_b_s_clause(rocke_ir_builder_t* b, int imm);
@@ -876,83 +993,138 @@ void rocke_b_s_wait_xcnt(rocke_ir_builder_t* b, int imm);
 rocke_value_t* rocke_b_readfirstlane(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_lane_id(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_vec_extract(rocke_ir_builder_t* b, rocke_value_t* v, int i);
-rocke_value_t* rocke_b_vec_insert(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* scalar,
-                                  int i);
-rocke_value_t* rocke_b_vec_pack(rocke_ir_builder_t* b, rocke_value_t* const* components,
-                                int num_components, const rocke_type_t* elem);
+rocke_value_t*
+    rocke_b_vec_insert(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* scalar, int i);
+rocke_value_t* rocke_b_vec_pack(rocke_ir_builder_t* b,
+                                rocke_value_t* const* components,
+                                int num_components,
+                                const rocke_type_t* elem);
 rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb);
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
  * (a, b, c) and return <c_frag_len x acc_elem>. The scaled MX atom takes the
  * two extra E8M0 scale operands. */
-rocke_value_t* rocke_b_mfma_f32_16x16x16_f16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x32_f16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x16_bf16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                              rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x32_bf16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                              rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x32_fp8(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x32_bf8(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_32x32x8_f16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                            rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_32x32x8_bf16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_32x32x16_f16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_32x32x16_bf16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                              rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_32x32x16_fp8(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_32x32x16_bf8(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                          rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b, rocke_value_t* a,
-                                              rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_f32_16x16x96_fp6(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b, rocke_value_t* a,
-                                                       rocke_value_t* bb, rocke_value_t* c,
+rocke_value_t* rocke_b_mfma_f32_16x16x16_f16(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_16x16x32_f16(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_16x16x16_bf16(rocke_ir_builder_t* b,
+                                              rocke_value_t* a,
+                                              rocke_value_t* bb,
+                                              rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_16x16x32_bf16(rocke_ir_builder_t* b,
+                                              rocke_value_t* a,
+                                              rocke_value_t* bb,
+                                              rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_16x16x32_fp8(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_16x16x32_bf8(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_32x32x8_f16(rocke_ir_builder_t* b,
+                                            rocke_value_t* a,
+                                            rocke_value_t* bb,
+                                            rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_32x32x8_bf16(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_32x32x16_f16(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_32x32x16_bf16(rocke_ir_builder_t* b,
+                                              rocke_value_t* a,
+                                              rocke_value_t* bb,
+                                              rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_32x32x16_fp8(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_32x32x16_bf8(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_4x4x4_f16(rocke_ir_builder_t* b,
+                                          rocke_value_t* a,
+                                          rocke_value_t* bb,
+                                          rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4(rocke_ir_builder_t* b,
+                                              rocke_value_t* a,
+                                              rocke_value_t* bb,
+                                              rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_f32_16x16x96_fp6(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
+                                                       rocke_value_t* a,
+                                                       rocke_value_t* bb,
+                                                       rocke_value_t* c,
                                                        rocke_value_t* a_scale,
                                                        rocke_value_t* b_scale);
-rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b, rocke_value_t* a,
-                                                        rocke_value_t* bb, rocke_value_t* c,
+rocke_value_t* rocke_b_wmma_scale_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                        rocke_value_t* a,
+                                                        rocke_value_t* bb,
+                                                        rocke_value_t* c,
                                                         rocke_value_t* a_scale,
                                                         rocke_value_t* b_scale);
-rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b, rocke_value_t* a,
-                                                          rocke_value_t* bb, rocke_value_t* c,
+rocke_value_t* rocke_b_wmma_scale16_f32_16x16x128_fp8_fp8(rocke_ir_builder_t* b,
+                                                          rocke_value_t* a,
+                                                          rocke_value_t* bb,
+                                                          rocke_value_t* c,
                                                           rocke_value_t* a_scale,
                                                           rocke_value_t* b_scale);
-rocke_value_t* rocke_b_wmma_f32_16x16x16_f16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                             rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_wmma_f32_16x16x16_bf16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                              rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_wmma_gfx12_f32_16x16x16_f16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                                   rocke_value_t* bb, rocke_value_t* c);
-rocke_value_t* rocke_b_wmma_gfx12_f32_16x16x16_bf16(rocke_ir_builder_t* b, rocke_value_t* a,
-                                                    rocke_value_t* bb, rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_f32_16x16x16_f16(rocke_ir_builder_t* b,
+                                             rocke_value_t* a,
+                                             rocke_value_t* bb,
+                                             rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_f32_16x16x16_bf16(rocke_ir_builder_t* b,
+                                              rocke_value_t* a,
+                                              rocke_value_t* bb,
+                                              rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_gfx12_f32_16x16x16_f16(rocke_ir_builder_t* b,
+                                                   rocke_value_t* a,
+                                                   rocke_value_t* bb,
+                                                   rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_gfx12_f32_16x16x16_bf16(rocke_ir_builder_t* b,
+                                                    rocke_value_t* a,
+                                                    rocke_value_t* bb,
+                                                    rocke_value_t* c);
 
 /* ----- multi-output inline asm (LLVM literal-struct return). Returns the op;
  * its results[] holds the N output Values in declaration order. */
-rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b, const char* asm_template,
-                                     const char* constraints, rocke_value_t* const* operands,
-                                     int num_operands, const rocke_type_t* const* result_types,
-                                     int num_results, const rocke_inline_asm_opts_t* opts);
+rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
+                                     const char* asm_template,
+                                     const char* constraints,
+                                     rocke_value_t* const* operands,
+                                     int num_operands,
+                                     const rocke_type_t* const* result_types,
+                                     int num_results,
+                                     const rocke_inline_asm_opts_t* opts);
 
 /* ----- register-fragment reshape (P13) ----- */
-rocke_value_t* rocke_b_register_p_from_qk_c(rocke_ir_builder_t* b, rocke_value_t* qk_c,
+rocke_value_t* rocke_b_register_p_from_qk_c(rocke_ir_builder_t* b,
+                                            rocke_value_t* qk_c,
                                             const rocke_type_t* target_dtype);
 
 /* ----- distributed / cooperative epilogue stores ----- */
-void rocke_b_smem_store_distributed(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                    const rocke_attr_map_t* layout_attrs, rocke_value_t* values);
-void rocke_b_cooperative_global_store(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                      rocke_value_t* addrs, rocke_value_t* values);
+void rocke_b_smem_store_distributed(rocke_ir_builder_t* b,
+                                    rocke_value_t* smem,
+                                    const rocke_attr_map_t* layout_attrs,
+                                    rocke_value_t* values);
+void rocke_b_cooperative_global_store(rocke_ir_builder_t* b,
+                                      rocke_value_t* ptr,
+                                      rocke_value_t* addrs,
+                                      rocke_value_t* values);
 
 /* ----- uniform / wave-scalar helpers ----- */
 rocke_value_t* rocke_b_pin_sgpr(rocke_ir_builder_t* b, rocke_value_t* v);
@@ -963,135 +1135,237 @@ rocke_value_t* rocke_b_wave_ballot(rocke_ir_builder_t* b, rocke_value_t* predica
 
 /* ----- cross-lane permute / dpp ----- */
 rocke_value_t* rocke_b_ds_bpermute(rocke_ir_builder_t* b, rocke_value_t* addr, rocke_value_t* data);
-rocke_value_t* rocke_b_ds_bpermute_b64(rocke_ir_builder_t* b, rocke_value_t* addr,
-                                       rocke_value_t* data);
+rocke_value_t*
+    rocke_b_ds_bpermute_b64(rocke_ir_builder_t* b, rocke_value_t* addr, rocke_value_t* data);
 rocke_value_t* rocke_b_ds_swizzle_xor(rocke_ir_builder_t* b, rocke_value_t* data, int xor_mask);
 rocke_value_t* rocke_b_ds_swizzle(rocke_ir_builder_t* b, rocke_value_t* data, int offset);
 rocke_value_t* rocke_b_mov_dpp8(rocke_ir_builder_t* b, rocke_value_t* data, int sel);
-rocke_value_t* rocke_b_wave_reduce(rocke_ir_builder_t* b, rocke_value_t* v, const char* reduce_op,
+rocke_value_t* rocke_b_wave_reduce(rocke_ir_builder_t* b,
+                                   rocke_value_t* v,
+                                   const char* reduce_op,
                                    int strategy);
 rocke_value_t* rocke_b_readlane(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* lane);
-rocke_value_t* rocke_b_writelane(rocke_ir_builder_t* b, rocke_value_t* uniform_val,
-                                 rocke_value_t* lane, rocke_value_t* passthrough);
-rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b, rocke_value_t* old, rocke_value_t* src0,
-                                  rocke_value_t* src1, rocke_value_t* src2, bool fi,
+rocke_value_t* rocke_b_writelane(rocke_ir_builder_t* b,
+                                 rocke_value_t* uniform_val,
+                                 rocke_value_t* lane,
+                                 rocke_value_t* passthrough);
+rocke_value_t* rocke_b_permlane16(rocke_ir_builder_t* b,
+                                  rocke_value_t* old,
+                                  rocke_value_t* src0,
+                                  rocke_value_t* src1,
+                                  rocke_value_t* src2,
+                                  bool fi,
                                   bool bound_ctrl);
 rocke_value_t* rocke_b_permlane64(rocke_ir_builder_t* b, rocke_value_t* src);
-rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb,
+rocke_value_t* rocke_b_alignbyte(rocke_ir_builder_t* b,
+                                 rocke_value_t* a,
+                                 rocke_value_t* bb,
                                  rocke_value_t* shift);
 rocke_value_t* rocke_b_s_wqm(rocke_ir_builder_t* b, rocke_value_t* mask);
 rocke_value_t* rocke_b_av_load_b128(rocke_ir_builder_t* b, rocke_value_t* ptr);
 void rocke_b_av_store_b128(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* data);
 rocke_value_t* rocke_b_s_alloc_vgpr(rocke_ir_builder_t* b, int count);
 /* mov_dpp: exactly one of row_shr/row_shl must be >= 0 (the other < 0 = unset). */
-rocke_value_t* rocke_b_mov_dpp(rocke_ir_builder_t* b, rocke_value_t* data, int row_shr, int row_shl,
-                               bool bound_ctrl);
+rocke_value_t* rocke_b_mov_dpp(
+    rocke_ir_builder_t* b, rocke_value_t* data, int row_shr, int row_shl, bool bound_ctrl);
 /* permlane32_swap returns two values via out params (new_lo, new_hi). */
-void rocke_b_permlane32_swap(rocke_ir_builder_t* b, rocke_value_t* lo, rocke_value_t* hi,
-                             rocke_value_t** out_lo, rocke_value_t** out_hi);
-rocke_value_t* rocke_b_perm_b32(rocke_ir_builder_t* b, rocke_value_t* src0, rocke_value_t* src1,
+void rocke_b_permlane32_swap(rocke_ir_builder_t* b,
+                             rocke_value_t* lo,
+                             rocke_value_t* hi,
+                             rocke_value_t** out_lo,
+                             rocke_value_t** out_hi);
+rocke_value_t* rocke_b_perm_b32(rocke_ir_builder_t* b,
+                                rocke_value_t* src0,
+                                rocke_value_t* src1,
                                 rocke_value_t* sel);
 rocke_value_t* rocke_b_permlanex16(rocke_ir_builder_t* b, rocke_value_t* v);
-rocke_value_t* rocke_b_byte_perm(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb,
-                                 int64_t sel);
+rocke_value_t*
+    rocke_b_byte_perm(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb, int64_t sel);
 rocke_value_t* rocke_b_warp_shuffle_xor(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor);
 
 /* ----- transpose LDS reads ----- */
-rocke_value_t* rocke_b_ds_read_tr16_b64(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                        rocke_value_t* const* indices, int num_indices,
+rocke_value_t* rocke_b_ds_read_tr16_b64(rocke_ir_builder_t* b,
+                                        rocke_value_t* smem,
+                                        rocke_value_t* const* indices,
+                                        int num_indices,
                                         const rocke_type_t* dtype /* NULL=>f16 */);
-rocke_value_t* rocke_b_ds_read_tr16_b128(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                         rocke_value_t* const* indices, int num_indices,
+rocke_value_t* rocke_b_ds_read_tr16_b128(rocke_ir_builder_t* b,
+                                         rocke_value_t* smem,
+                                         rocke_value_t* const* indices,
+                                         int num_indices,
                                          const rocke_type_t* dtype /* NULL=>f16 */);
-rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                     rocke_value_t* const* indices, int num_indices,
+rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
+                                     rocke_value_t* smem,
+                                     rocke_value_t* const* indices,
+                                     int num_indices,
                                      const rocke_type_t* dtype /* NULL=>fp8e4m3 */);
 
 /* ----- vector bitcast / packed f32->f16 conversion ----- */
-rocke_value_t* rocke_b_vec_bitcast(rocke_ir_builder_t* b, rocke_value_t* v,
-                                   const rocke_type_t* target);
+rocke_value_t*
+    rocke_b_vec_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_vec_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_vec_trunc_f32_to_bf16(rocke_ir_builder_t* b, rocke_value_t* v);
-rocke_value_t* rocke_b_vec_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v,
-                                       const rocke_type_t* target);
+rocke_value_t*
+    rocke_b_vec_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 
 /* ----- LDS pointer arithmetic + async DRAM->LDS ----- */
 rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem);
-rocke_value_t* rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr,
-                                    rocke_value_t* byte_off);
-void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                        rocke_value_t* lds_addr, rocke_value_t* voffset,
-                                        rocke_value_t* soffset, int dwords, int coherency);
-void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                   rocke_value_t* lds_ptr, rocke_value_t* voffset,
-                                   rocke_value_t* soffset, int dwords, int coherency);
-void rocke_b_buffer_load_lds_async(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                   rocke_value_t* lds_ptr, rocke_value_t* voffset,
-                                   rocke_value_t* soffset, int dwords, int coherency);
-void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b, rocke_value_t* src_ptr,
-                                      rocke_value_t* src_index, rocke_value_t* lds_smem,
-                                      rocke_value_t* const* lds_indices, int num_lds_indices,
-                                      int width_bytes, int coherency, int offset_bytes);
-void rocke_b_global_store_async_from_lds(rocke_ir_builder_t* b, rocke_value_t* dst_ptr,
-                                         rocke_value_t* lds_ptr, int width_bytes, int offset_bytes,
+rocke_value_t*
+    rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off);
+void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
+                                        rocke_value_t* rsrc,
+                                        rocke_value_t* lds_addr,
+                                        rocke_value_t* voffset,
+                                        rocke_value_t* soffset,
+                                        int dwords,
+                                        int coherency);
+void rocke_b_async_buffer_load_lds(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* lds_ptr,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   int dwords,
+                                   int coherency);
+void rocke_b_buffer_load_lds_async(rocke_ir_builder_t* b,
+                                   rocke_value_t* rsrc,
+                                   rocke_value_t* lds_ptr,
+                                   rocke_value_t* voffset,
+                                   rocke_value_t* soffset,
+                                   int dwords,
+                                   int coherency);
+void rocke_b_global_load_async_to_lds(rocke_ir_builder_t* b,
+                                      rocke_value_t* src_ptr,
+                                      rocke_value_t* src_index,
+                                      rocke_value_t* lds_smem,
+                                      rocke_value_t* const* lds_indices,
+                                      int num_lds_indices,
+                                      int width_bytes,
+                                      int coherency,
+                                      int offset_bytes);
+void rocke_b_global_store_async_from_lds(rocke_ir_builder_t* b,
+                                         rocke_value_t* dst_ptr,
+                                         rocke_value_t* lds_ptr,
+                                         int width_bytes,
+                                         int offset_bytes,
                                          int cachepolicy);
-rocke_value_t* rocke_b_global_load_tr16_b128(rocke_ir_builder_t* b, rocke_value_t* src_ptr,
+rocke_value_t* rocke_b_global_load_tr16_b128(rocke_ir_builder_t* b,
+                                             rocke_value_t* src_ptr,
                                              const rocke_type_t* dtype);
-void rocke_b_tensor_load_to_lds(rocke_ir_builder_t* b, rocke_value_t* d0, rocke_value_t* d1,
-                                rocke_value_t* d2, rocke_value_t* d3, rocke_value_t* d4,
+void rocke_b_tensor_load_to_lds(rocke_ir_builder_t* b,
+                                rocke_value_t* d0,
+                                rocke_value_t* d1,
+                                rocke_value_t* d2,
+                                rocke_value_t* d3,
+                                rocke_value_t* d4,
                                 int cachepolicy);
-void rocke_b_tensor_store_from_lds(rocke_ir_builder_t* b, rocke_value_t* d0, rocke_value_t* d1,
-                                   rocke_value_t* d2, rocke_value_t* d3, rocke_value_t* d4,
+void rocke_b_tensor_store_from_lds(rocke_ir_builder_t* b,
+                                   rocke_value_t* d0,
+                                   rocke_value_t* d1,
+                                   rocke_value_t* d2,
+                                   rocke_value_t* d3,
+                                   rocke_value_t* d4,
                                    int cachepolicy);
-void rocke_b_global_load_lds(rocke_ir_builder_t* b, rocke_value_t* src_ptr, rocke_value_t* byte_off,
-                             rocke_value_t* lds_addr, int size_bytes, int coherency);
+void rocke_b_global_load_lds(rocke_ir_builder_t* b,
+                             rocke_value_t* src_ptr,
+                             rocke_value_t* byte_off,
+                             rocke_value_t* lds_addr,
+                             int size_bytes,
+                             int coherency);
 
 /* ----- global pointer arithmetic + buffer resource descriptors ----- */
-rocke_value_t* rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                      rocke_value_t* byte_off);
-rocke_value_t* rocke_b_buffer_rsrc(rocke_ir_builder_t* b, rocke_value_t* ptr,
-                                   rocke_value_t* num_bytes);
-rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                          rocke_value_t* voffset, rocke_value_t* soffset,
+rocke_value_t*
+    rocke_b_global_ptr_add(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* byte_off);
+rocke_value_t*
+    rocke_b_buffer_rsrc(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* num_bytes);
+rocke_value_t* rocke_b_buffer_load_vN_f16(rocke_ir_builder_t* b,
+                                          rocke_value_t* rsrc,
+                                          rocke_value_t* voffset,
+                                          rocke_value_t* soffset,
                                           int dwords);
-rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                       rocke_value_t* voffset, rocke_value_t* soffset);
-void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* voffset,
-                                 rocke_value_t* soffset, rocke_value_t* value, int dwords);
-void rocke_b_buffer_store_f16(rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* voffset,
-                              rocke_value_t* soffset, rocke_value_t* value);
-rocke_value_t* rocke_b_buffer_load_bf16(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                        rocke_value_t* voffset, rocke_value_t* soffset);
-rocke_value_t* rocke_b_buffer_load_vN_bf16(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                           rocke_value_t* voffset, rocke_value_t* soffset,
+rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* voffset,
+                                       rocke_value_t* soffset);
+void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int dwords);
+void rocke_b_buffer_store_f16(rocke_ir_builder_t* b,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voffset,
+                              rocke_value_t* soffset,
+                              rocke_value_t* value);
+rocke_value_t* rocke_b_buffer_load_bf16(rocke_ir_builder_t* b,
+                                        rocke_value_t* rsrc,
+                                        rocke_value_t* voffset,
+                                        rocke_value_t* soffset);
+rocke_value_t* rocke_b_buffer_load_vN_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset,
                                            int dwords);
-void rocke_b_buffer_store_bf16(rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* voffset,
-                               rocke_value_t* soffset, rocke_value_t* value);
-void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b, rocke_value_t* rsrc,
-                                  rocke_value_t* voffset, rocke_value_t* soffset,
-                                  rocke_value_t* value, int dwords);
-void rocke_b_buffer_store_f32(rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* voffset,
-                              rocke_value_t* soffset, rocke_value_t* value);
-void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b, rocke_value_t* rsrc, rocke_value_t* voffset,
-                                 rocke_value_t* soffset, rocke_value_t* value, int n);
+void rocke_b_buffer_store_bf16(rocke_ir_builder_t* b,
+                               rocke_value_t* rsrc,
+                               rocke_value_t* voffset,
+                               rocke_value_t* soffset,
+                               rocke_value_t* value);
+void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b,
+                                  rocke_value_t* rsrc,
+                                  rocke_value_t* voffset,
+                                  rocke_value_t* soffset,
+                                  rocke_value_t* value,
+                                  int dwords);
+void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voffset,
+                              rocke_value_t* soffset,
+                              rocke_value_t* value);
+void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int n);
 
 /* ----- f32 LDS ops (cshuffle epilogue) ----- */
-rocke_value_t* rocke_b_smem_alloc_f32(rocke_ir_builder_t* b, const int* shape, int rank,
+rocke_value_t* rocke_b_smem_alloc_f32(rocke_ir_builder_t* b,
+                                      const int* shape,
+                                      int rank,
                                       const char* name_hint);
-void rocke_b_smem_store_vN_f32(rocke_ir_builder_t* b, rocke_value_t* smem,
-                               rocke_value_t* const* indices, int num_indices, rocke_value_t* value,
+void rocke_b_smem_store_vN_f32(rocke_ir_builder_t* b,
+                               rocke_value_t* smem,
+                               rocke_value_t* const* indices,
+                               int num_indices,
+                               rocke_value_t* value,
                                int n);
-rocke_value_t* rocke_b_smem_load_vN_f32(rocke_ir_builder_t* b, rocke_value_t* smem,
-                                        rocke_value_t* const* indices, int num_indices, int n);
+rocke_value_t* rocke_b_smem_load_vN_f32(rocke_ir_builder_t* b,
+                                        rocke_value_t* smem,
+                                        rocke_value_t* const* indices,
+                                        int num_indices,
+                                        int n);
 
 /* ----- vectorised global stores + split-K atomics ----- */
-void rocke_b_global_store_vN(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
-                             rocke_value_t* value, int n, int align /* <=0 => default */);
-void rocke_b_global_store_vN_f16(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
-                                 rocke_value_t* value, int n, int align);
-void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
+void rocke_b_global_store_vN(rocke_ir_builder_t* b,
+                             rocke_value_t* ptr,
+                             rocke_value_t* idx,
+                             rocke_value_t* value,
+                             int n,
+                             int align /* <=0 => default */);
+void rocke_b_global_store_vN_f16(rocke_ir_builder_t* b,
+                                 rocke_value_t* ptr,
+                                 rocke_value_t* idx,
+                                 rocke_value_t* value,
+                                 int n,
+                                 int align);
+void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b,
+                                   rocke_value_t* ptr,
+                                   rocke_value_t* idx,
                                    rocke_value_t* value);
-void rocke_b_store_f16(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx,
+void rocke_b_store_f16(rocke_ir_builder_t* b,
+                       rocke_value_t* ptr,
+                       rocke_value_t* idx,
                        rocke_value_t* value);
 rocke_value_t* rocke_b_zero_vec_f16(rocke_ir_builder_t* b, int n);
 
@@ -1106,9 +1380,11 @@ void rocke_b_s_wait_asynccnt(rocke_ir_builder_t* b, int n);
 void rocke_b_s_wait_tensorcnt(rocke_ir_builder_t* b, int n);
 void rocke_b_s_barrier_signal(rocke_ir_builder_t* b, uint32_t barrier_type);
 void rocke_b_s_barrier_wait(rocke_ir_builder_t* b, int barrier_type);
-void rocke_b_s_barrier_init(rocke_ir_builder_t* b, rocke_value_t* barrier,
+void rocke_b_s_barrier_init(rocke_ir_builder_t* b,
+                            rocke_value_t* barrier,
                             rocke_value_t* member_count);
-void rocke_b_s_barrier_signal_var(rocke_ir_builder_t* b, rocke_value_t* barrier,
+void rocke_b_s_barrier_signal_var(rocke_ir_builder_t* b,
+                                  rocke_value_t* barrier,
                                   rocke_value_t* member_count);
 void rocke_b_s_barrier_join(rocke_ir_builder_t* b, rocke_value_t* barrier);
 void rocke_b_s_wakeup_barrier(rocke_ir_builder_t* b, rocke_value_t* barrier);
@@ -1127,12 +1403,20 @@ void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int
  * emitted, so no builder entry point is needed. Documented here for parity.) */
 
 /* ----- control flow ----- */
-rocke_for_t rocke_b_scf_for(rocke_ir_builder_t* b, rocke_value_t* lo, rocke_value_t* hi,
-                            rocke_value_t* step, const char* iv_name /* NULL=>"k0" */);
-rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b, rocke_value_t* lo, rocke_value_t* hi,
-                                 rocke_value_t* step, const rocke_iter_arg_t* iter_args,
-                                 int num_iter_args, const char* iv_name /* NULL=>"k0" */,
-                                 bool unroll, bool elide_trailing_barrier);
+rocke_for_t rocke_b_scf_for(rocke_ir_builder_t* b,
+                            rocke_value_t* lo,
+                            rocke_value_t* hi,
+                            rocke_value_t* step,
+                            const char* iv_name /* NULL=>"k0" */);
+rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
+                                 rocke_value_t* lo,
+                                 rocke_value_t* hi,
+                                 rocke_value_t* step,
+                                 const rocke_iter_arg_t* iter_args,
+                                 int num_iter_args,
+                                 const char* iv_name /* NULL=>"k0" */,
+                                 bool unroll,
+                                 bool elide_trailing_barrier);
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values);
 rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else: both then and else converge at the same join block.
