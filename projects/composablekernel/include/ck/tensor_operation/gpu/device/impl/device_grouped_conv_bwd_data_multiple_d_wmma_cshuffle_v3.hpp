@@ -1858,7 +1858,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
             p_ds_grid_dummy[i] = nullptr;
             StrideDs_dummy[i]  = I0;
         });
-        for(std::size_t i = 0; i < arg.gemm_kernel_args_.size(); i++)
+        for(std::size_t i = 0; i < arg.a_grid_desc_m_k_container_.size(); i++)
         {
             const index_t GemmM = arg.a_grid_desc_m_k_container_[i].GetLength(I0);
             const index_t GemmN = arg.b_grid_desc_n_k_container_[i].GetLength(I0);
