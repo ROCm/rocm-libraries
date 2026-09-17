@@ -592,7 +592,7 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = None
         data["Library"]["table"] = [0, len(data["Solutions"])]
         data["Library"]["distance"] = None
-    elif libraryType in ("Equality", "GridBased", "Range"):
+    elif libraryType in ("Equality", "GridBased", "MeshBased", "Range"):
         data["LibraryType"] = "Matching"
         data["Library"] = {}
         data["Library"]["indexOrder"] = data["IndexOrder"]

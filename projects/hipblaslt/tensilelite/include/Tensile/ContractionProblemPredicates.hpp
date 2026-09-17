@@ -2107,6 +2107,36 @@ namespace TensileLite
                 }
             };
 
+            struct MeshBasedMatching
+                : public Predicate_CRTP<MeshBasedMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                MeshBasedMatching() = default;
+
+                static std::string Type()
+                {
+                    return "MeshBasedMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    PredicateDebugger::printRow(stream, rv, this->type());
+                    return rv;
+                }
+            };
+
             struct UseGradientEqual
                 : public Predicate_CRTP<UseGradientEqual, ContractionProblemGemm>
             {
