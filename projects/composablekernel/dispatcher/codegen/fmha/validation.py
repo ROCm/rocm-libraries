@@ -881,8 +881,34 @@ def validate_config(
             result.add_error("batch_prefill page_size must be a positive power of two")
         if sig.get("mode", "batch") != "group":
             result.add_error("batch_prefill requires group mode")
-        if pipeline != "qr_async":
-            result.add_error("batch_prefill currently uses qr_async pipeline")
+        if pipeline not in {"qr_async", "batch_prefill_gfx11"}:
+            result.add_error(
+                "batch_prefill currently uses qr_async or batch_prefill_gfx11 pipeline"
+            )
+        if arch == "gfx1100" and pipeline != "batch_prefill_gfx11":
+            result.add_error(
+                "gfx1100 batch_prefill must use batch_prefill_gfx11 policy"
+            )
+        if pipeline == "batch_prefill_gfx11":
+            # Mirror of Gfx11Policy::UseIndependentVBuffer. Outside this
+            # predicate gemm1 falls back to a shape gfx11 WMMA cannot consume.
+            if arch != "gfx1100":
+                result.add_error("batch_prefill_gfx11 is only supported on gfx1100")
+            if sig.get("kv_memory_layout") != "linear":
+                result.add_error(
+                    "batch_prefill_gfx11 currently supports only linear KV layout"
+                )
+            if (hdim_q, hdim_v) != (128, 128):
+                result.add_error("batch_prefill_gfx11 currently supports only hdim 128")
+            if sig.get("dropout", False):
+                result.add_error("batch_prefill_gfx11 does not support dropout")
+            wave = alg["wave"]
+            if len(wave) >= 3 and wave[0] * wave[1] * wave[2] * 32 != 256:
+                result.add_error("batch_prefill_gfx11 requires block size 256")
+            if len(tile) >= 5 and (tile[1], tile[3], tile[4]) != (32, 128, 32):
+                result.add_error(
+                    "batch_prefill_gfx11 requires tile N0=32, N1=128, K1=32"
+                )
 
     if family == "fwd_appendkv":
         if sig.get("mode", "batch") != "batch":
