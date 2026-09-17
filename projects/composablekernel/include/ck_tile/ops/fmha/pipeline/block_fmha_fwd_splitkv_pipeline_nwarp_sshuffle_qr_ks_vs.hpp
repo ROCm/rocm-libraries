@@ -258,7 +258,15 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
         clear_tile(o_acc);
         if((__builtin_isinf_sign(sink_v) >= 0) && i_split == 0)
         {
-            set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E)});
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E) * scale_s});
+            else
+                set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E)});
+#else
+            set_tile(m, SMPLComputeDataType{sink_v});
+#endif
             set_tile(l, SMPLComputeDataType{1.0f});
         }
         else
@@ -348,7 +356,16 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
                 q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, num_splits, i_split - 1);
             if((__builtin_isinf_sign(sink_v) >= 0) && start >= end)
             {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                    set_tile(m,
+                             SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E) * scale_s});
+                else
+                    set_tile(m, SMPLComputeDataType{sink_v * static_cast<float>(C_LOG2E)});
+#else
                 set_tile(m, SMPLComputeDataType{sink_v});
+#endif
                 set_tile(l, SMPLComputeDataType{1.0f});
             }
         }
