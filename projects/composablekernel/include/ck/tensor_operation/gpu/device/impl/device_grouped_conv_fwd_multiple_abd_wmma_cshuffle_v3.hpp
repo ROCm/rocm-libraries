@@ -154,6 +154,74 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, MinimumOccupancy)
 #endif // End of if (!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
 }
 
+// T2-01 block-diagonal WMMA packing (GroupsPerWmma > 1): prepass that packs
+// GroupsPerWmma consecutive groups' weights into a dense, block-diagonal
+// [GroupsPerWmma*K_per_group, GroupsPerWmma*Y*X*C_per_group] tile per group-cluster.
+// Off-diagonal (cross-group) entries are zeroed by construction: a lane only ever
+// loads from the source weight tensor when its output row's group-in-cluster equals
+// its output column's group-in-cluster, mirroring hipConv's `nz` load predicate (see
+// docs_gfx1250/T2-01_BLOCK_DIAGONAL_WMMA_PACKING_DESIGN.md) but realized once at pack
+// time instead of per-WMMA-lane. Assumes a packed (contiguous) GKYXC weight tensor,
+// consistent with the MakeBDescriptor_N_K overload this prepass feeds.
+template <typename BDataType>
+__global__ void kernel_pack_block_diagonal_wmma_weight(const BDataType* __restrict__ p_b_in,
+                                                       BDataType* __restrict__ p_b_out,
+                                                       index_t num_clusters,
+                                                       index_t groups_per_wmma,
+                                                       index_t k_per_group,
+                                                       index_t y_size,
+                                                       index_t x_size,
+                                                       index_t c_per_group,
+                                                       index_t g_stride_in)
+{
+    const index_t yxc     = y_size * x_size * c_per_group;
+    const index_t xc      = x_size * c_per_group;
+    const index_t n_local = groups_per_wmma * k_per_group;
+    const index_t k_local = groups_per_wmma * yxc;
+
+    const long_index_t cluster_elems = static_cast<long_index_t>(n_local) * k_local;
+    const long_index_t total_elems   = static_cast<long_index_t>(num_clusters) * cluster_elems;
+    const long_index_t stride =
+        static_cast<long_index_t>(blockDim.x) * static_cast<long_index_t>(gridDim.x);
+
+    for(long_index_t idx = static_cast<long_index_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        idx < total_elems;
+        idx += stride)
+    {
+        const index_t cluster = static_cast<index_t>(idx / cluster_elems);
+        const index_t within =
+            static_cast<index_t>(idx - static_cast<long_index_t>(cluster) * cluster_elems);
+        const index_t row = within / k_local;
+        const index_t col = within - row * k_local;
+
+        const index_t gi_row = row / k_per_group;
+        const index_t gi_col = col / yxc;
+
+        BDataType value{};
+
+        if(gi_row == gi_col)
+        {
+            const index_t kp        = row - gi_row * k_per_group;
+            const index_t yxc_local = col - gi_col * yxc;
+            const index_t y         = yxc_local / xc;
+            const index_t yxc_rem   = yxc_local - y * xc;
+            const index_t x         = yxc_rem / c_per_group;
+            const index_t c         = yxc_rem - x * c_per_group;
+
+            const index_t g = cluster * groups_per_wmma + gi_row;
+
+            const long_index_t in_offset =
+                static_cast<long_index_t>(g) * g_stride_in + static_cast<long_index_t>(kp) * yxc +
+                static_cast<long_index_t>(y) * xc + static_cast<long_index_t>(x) * c_per_group +
+                static_cast<long_index_t>(c);
+
+            value = p_b_in[in_offset];
+        }
+
+        p_b_out[idx] = value;
+    }
+}
+
 } // namespace
 
 template <typename T>
@@ -229,7 +297,8 @@ template <index_t NDimSpatial,
                                                      // in tuple for MultiAB), unpack if tuple was
                                                      // passed
           typename BComputeDataType = AComputeDataType,
-          index_t NumGroupsToMerge  = 1>
+          index_t NumGroupsToMerge  = 1,
+          index_t GroupsPerWmma     = 1>
 struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
     : public DeviceGroupedConvFwdMultipleABD<NDimSpatial,
                                              ALayout,
@@ -293,6 +362,19 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                                        (is_same_v<ELayout, tensor_layout::convolution::NGKHW> ||
                                         is_same_v<ELayout, tensor_layout::convolution::NGKDHW>);
 
+    // T2-01 block-diagonal WMMA packing is currently scoped to plain grouped_conv2d_fwd:
+    // NDimSpatial=2, NHWGC/GNHWC (A), GKYXC (B), NHWGK/GNHWK/G_NHW_K (E) layouts, no
+    // multi-A/B/D, no NGCHW transpose kernel, no CTranspose, and the general (Default)
+    // im2col path. See docs_gfx1250/T2-01_BLOCK_DIAGONAL_WMMA_PACKING_DESIGN.md.
+    static_assert(GroupsPerWmma >= 1);
+    static_assert(GroupsPerWmma == 1 ||
+                      (NDimSpatial == 2 && !isMultiA && !isMultiB && !isMultiD &&
+                       !NeedTransposeKernel && !CTranspose && NumDTensor == 0 &&
+                       ConvForwardSpecialization == ConvolutionForwardSpecialization::Default),
+                  "GroupsPerWmma > 1 (T2-01) is scoped to plain grouped_conv2d_fwd, no "
+                  "multi-A/B/D, no NGCHW transpose, no CTranspose, no Ds, and "
+                  "ConvolutionForwardSpecialization::Default");
+
     // Generate vector size for C & Ds
     using CDEBlockTransferScalarPerVectors =
         typename uniform_sequence_gen<NumDTensor + 1,
@@ -305,7 +387,8 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                                                             EDataType,
                                                             NumGroupsToMerge,
                                                             index_t,
-                                                            CTranspose>;
+                                                            CTranspose,
+                                                            GroupsPerWmma>;
 
     using ComputePtrOffset = ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>;
 
@@ -728,10 +811,21 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             // A/B/E Batch/N Stride
             compute_ptr_offset_of_groups_.BatchStrideA_ =
                 CTranspose ? b_g_k_c_xs_strides_[0] * NumGroupsToMerge
-                           : a_g_n_c_wis_strides_[0] * NumGroupsToMerge;
-            compute_ptr_offset_of_groups_.BatchStrideB_ =
-                CTranspose ? a_g_n_c_wis_strides_[0] * NumGroupsToMerge
-                           : b_g_k_c_xs_strides_[0] * NumGroupsToMerge;
+                           : a_g_n_c_wis_strides_[0] * (NumGroupsToMerge * GroupsPerWmma);
+            if constexpr(GroupsPerWmma > 1)
+            {
+                // B has been packed into a dense block-diagonal scratch buffer (see the
+                // GroupsPerWmma prepass kernel): the stride between group-clusters is
+                // simply that buffer's per-cluster element count.
+                compute_ptr_offset_of_groups_.BatchStrideB_ =
+                    static_cast<long_index_t>(b_grid_desc_n_k_.GetElementSpaceSize());
+            }
+            else
+            {
+                compute_ptr_offset_of_groups_.BatchStrideB_ =
+                    CTranspose ? a_g_n_c_wis_strides_[0] * NumGroupsToMerge
+                               : b_g_k_c_xs_strides_[0] * NumGroupsToMerge;
+            }
             compute_ptr_offset_of_n_.BatchStrideA_ =
                 CTranspose ? 0 : a_g_n_c_wis_strides_[1] * conv_N_per_block_;
             compute_ptr_offset_of_n_.BatchStrideB_ =
@@ -782,7 +876,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             });
 
             compute_ptr_offset_of_groups_.BatchStrideE_ =
-                e_g_n_k_wos_strides_[0] * NumGroupsToMerge;
+                e_g_n_k_wos_strides_[0] * (NumGroupsToMerge * GroupsPerWmma);
             compute_ptr_offset_of_n_.BatchStrideE_ = e_g_n_k_wos_strides_[1] * conv_N_per_block_;
 
             if constexpr(NeedTransposeKernel)
@@ -861,6 +955,13 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                 // Align to 128B
                 return math::integer_divide_ceil(sizeof(BDataType) * b_acum, 128) * 128;
             }
+            else if constexpr(GroupsPerWmma > 1)
+            {
+                // Block-diagonal weight-packing scratch buffer (T2-01): one dense
+                // (GroupsPerWmma*K_)-by-(GroupsPerWmma*Y_*X_*C_) tile per group-cluster.
+                return static_cast<std::size_t>(b_grid_desc_n_k_.GetElementSpaceSize()) *
+                       static_cast<std::size_t>(num_group_ / GroupsPerWmma) * sizeof(BDataType);
+            }
             else
             {
                 return 0;
@@ -894,7 +995,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         auto GetRotMemAsTensorSizeBytes() const
         {
             std::array<std::size_t, NumATensor> size_as_buffers;
-            ck::index_t eff_num_group = num_group_ / NumGroupsToMerge;
+            ck::index_t eff_num_group = num_group_ / (NumGroupsToMerge * GroupsPerWmma);
 
             static_for<0, NumATensor, 1>{}([&](auto i) {
                 using ADataType_single = remove_cvref_t<tuple_element_t<i.value, GemmAsDataType>>;
@@ -930,7 +1031,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         auto GetRotMemBsTensorSizeBytes() const
         {
             std::array<std::size_t, NumBTensor> size_bs_buffers;
-            ck::index_t eff_num_group = num_group_ / NumGroupsToMerge;
+            ck::index_t eff_num_group = num_group_ / (NumGroupsToMerge * GroupsPerWmma);
 
             static_for<0, NumBTensor, 1>{}([&](auto i) {
                 using BDataType_single = remove_cvref_t<tuple_element_t<i.value, GemmBsDataType>>;
@@ -944,7 +1045,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         auto GetRotMemDsTensorSizeBytes() const
         {
             std::array<std::size_t, NumDTensor> size_ds_buffers;
-            ck::index_t eff_num_group = num_group_ / NumGroupsToMerge;
+            ck::index_t eff_num_group = num_group_ / (NumGroupsToMerge * GroupsPerWmma);
 
             // TODO: Ds packed size consideration?
             static_for<0, NumDTensor, 1>{}([&](auto i) {
@@ -1082,7 +1183,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                     ? GridwiseGemmCTranspose::CalculateGridSize(GemmN, GemmM, I1 /*arg.KBatch*/)
                     : GridwiseGemmCTranspose::CalculateGridSize(GemmM, GemmN, I1 /*arg.KBatch*/);
 
-            gdy = arg.num_group_ / NumGroupsToMerge;
+            gdy = arg.num_group_ / (NumGroupsToMerge * GroupsPerWmma);
             gdz = num_workgroups_per_Conv_N;
 
             index_t K_split = (GemmK + KPerBlock - 1) / KPerBlock * KPerBlock;
@@ -1132,6 +1233,14 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                         (arg.GetWorkspaceATensorSizeBytes() + arg.GetWorkspaceBTensorSizeBytes()) /
                             sizeof(EDataType);
                 }
+            }
+            else if constexpr(GroupsPerWmma > 1)
+            {
+                // B has been packed into a dense block-diagonal scratch buffer by the
+                // GroupsPerWmma prepass kernel (launched once in Invoker::Run(), before
+                // RunGemm()); the gridwise gemm reads B from workspace, not from the
+                // original (unpacked) weight tensor.
+                p_bs_grid[0] = type_convert<const void*>(arg.p_workspace_);
             }
 
             const auto Run = [&](const auto& kernel) {
@@ -1491,6 +1600,51 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                         a_grid_size);
                 }
 
+                if constexpr(GroupsPerWmma > 1)
+                {
+                    // T2-01 block-diagonal WMMA packing: pack GroupsPerWmma consecutive
+                    // groups' weights into a dense, block-diagonal scratch buffer before
+                    // the main gemm reads it as an ordinary (already-packed) B operand.
+                    // See docs_gfx1250/T2-01_BLOCK_DIAGONAL_WMMA_PACKING_DESIGN.md.
+                    if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                    {
+                        printf("\033[32mPacking B into block-diagonal GroupsPerWmma=%d scratch "
+                               "buffer\033[0m\n",
+                               GroupsPerWmma);
+                    }
+
+                    const auto& xformer              = arg.conv_to_gemm_transformer_;
+                    const index_t num_clusters       = arg.num_group_ / GroupsPerWmma;
+                    const index_t yxc                = xformer.Y_ * xformer.X_ * xformer.C_;
+                    const index_t n_local            = GroupsPerWmma * xformer.K_;
+                    const index_t k_local            = GroupsPerWmma * yxc;
+                    const long_index_t cluster_elems = static_cast<long_index_t>(n_local) * k_local;
+                    const long_index_t total_elems =
+                        static_cast<long_index_t>(num_clusters) * cluster_elems;
+
+                    constexpr index_t pack_block_size = 256;
+                    const index_t pack_grid_size =
+                        static_cast<index_t>((total_elems + pack_block_size - 1) / pack_block_size);
+
+                    BDataType* p_b_packed = type_convert<BDataType*>(arg.p_workspace_);
+
+                    avg_time +=
+                        launch_and_time_kernel(stream_config,
+                                               kernel_pack_block_diagonal_wmma_weight<BDataType>,
+                                               dim3(pack_grid_size == 0 ? 1 : pack_grid_size),
+                                               dim3(pack_block_size),
+                                               0,
+                                               type_convert<const BDataType*>(arg.p_bs_grid_[0]),
+                                               p_b_packed,
+                                               num_clusters,
+                                               GroupsPerWmma,
+                                               xformer.K_,
+                                               xformer.Y_,
+                                               xformer.X_,
+                                               xformer.C_,
+                                               arg.b_g_k_c_xs_strides_[0]);
+                }
+
                 avg_time += RunGemm(arg, stream_config);
 
                 // Transpose result back to NGCHW
@@ -1708,6 +1862,19 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                 return false;
             }
         }
+        if constexpr(GroupsPerWmma > 1)
+        {
+            if(G % GroupsPerWmma != 0)
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Number of groups must be divisible by GroupsPerWmma!" << " In "
+                              << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
+                              << std::endl;
+                }
+                return false;
+            }
+        }
 
         // check vector access of A
         // FIXME: layout
@@ -1792,7 +1959,13 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                      is_same_v<BLayout, ctc::GKCYX> || is_same_v<BLayout, ctc::GKCZYX>)
 
         {
-            if(!(BBlockTransferSrcVectorDim == 2 && C % BBlockTransferSrcScalarPerVector == 0))
+            const index_t b_contiguous_run =
+                GroupsPerWmma > 1
+                    ? GroupsPerWmma * arg.conv_to_gemm_transformer_.Y_ *
+                          arg.conv_to_gemm_transformer_.X_ * arg.conv_to_gemm_transformer_.C_
+                    : C;
+            if(!(BBlockTransferSrcVectorDim == 2 &&
+                 b_contiguous_run % BBlockTransferSrcScalarPerVector == 0))
             {
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
@@ -2356,7 +2529,8 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             << BlkGemmPipelineSchedulerToString[BlkGemmPipeSched] << ", "
             << "BlkGemmPipelineVersion: "
             << BlkGemmPipelineVersionToString[BlkGemmPipelineVer] << ", "
-            << NumGroupsToMerge
+            << NumGroupsToMerge << ", "
+            << GroupsPerWmma
             << ">";
         // clang-format on
 
