@@ -70,6 +70,14 @@ struct Preference {
     bool operator==(const Preference& other) const = default;
 };
 
+/// Stamp every entry live-in the dispatch does not fill as undefined.
+///
+/// Recorded on the value because three consumers need it: pinning and affinity
+/// in build() below, and the phi check in SSA destruction, which is given only a
+/// function and a colouring. Run before build(); forgetting leaves every live-in
+/// pinned, an optimisation lost rather than correctness.
+void markUndefinedLiveIns(Function& function, const AsmTargetRegisters& target);
+
 class AllocationConstraints {
    public:
     /// Recover constraints from \p function, letting \p rules append the offset
@@ -117,12 +125,14 @@ class AllocationConstraints {
     /// reach, which is wrong arithmetic rather than a slower kernel.
     uint32_t maxIndexFor(SSAValueID id) const;
 
-    /// Scalar live-ins left unpinned: read before anything defines them, but
-    /// above where the dispatch stops writing, so they arrive holding nothing.
+    /// Live-ins left unpinned: read before anything defines them, but above
+    /// where the dispatch stops writing, so they arrive holding nothing.
     ///
     /// Exposed rather than merely acted on, because "nothing defines it" and "it
     /// is undefined" differ by whether lifting saw every definition, so a run
     /// that moves one should be able to say which.
+    ///
+    /// Collected from isUndefined(), so empty unless markUndefinedLiveIns() ran.
     std::span<const SSAValueID> undefinedLiveIns() const {
         return undefinedLiveIns_;
     }
