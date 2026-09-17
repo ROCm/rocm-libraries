@@ -496,6 +496,24 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
     assert not ok and "block_n" in why
 
 
+def test_supports_rejects_sliding_window_past_seqlen_kv():
+    """SWA + causal where the last query block's window starts past seqlen_kv:
+    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
+    as the block_n zero-trip guards above."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
+    )
+    assert not ok and "sliding_window" in why
+
+
+def test_supports_accepts_sliding_window_in_range():
+    """SWA + causal where the window stays within seqlen_kv is accepted."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=2048, seqlen_kv=2048, sliding_window=128), arch="gfx942"
+    )
+    assert ok, why
+
+
 def test_supports_rejects_over_budget_lds():
     """block_n=128 at D128/bf16 needs 2*128*(128+8)*2 = 69632 B > the 64 KB gfx942 LDS.
     Without this gate it reaches comgr and dies with an opaque CODEGEN abort.

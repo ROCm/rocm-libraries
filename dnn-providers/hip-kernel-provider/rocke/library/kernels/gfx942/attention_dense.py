@@ -640,6 +640,10 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
 
+# 32-bit addressing ceiling. The dense ABI bakes every extent at build time, so the
+# limits below are static properties of the spec, not runtime conditions.
+_INT32_LIMIT = 2**31
+
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
 # / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
 # (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
@@ -919,8 +923,8 @@ def supports_attention_dense(
     In scope for this port: gfx942, bf16/fp16, D64/D128, MHA/GQA including
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
     grid-stride variant, ``block_n`` dividing the ``block_m`` query tile, within the
-    LDS budget and 32-bit addressing. varlen / ragged / sliding-window are later
-    follow-ups (rejected below).
+    LDS budget and 32-bit addressing, and sliding-window (KV-loop prune + window mask).
+    varlen / ragged / sinks are later follow-ups (rejected below).
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
@@ -1095,6 +1099,38 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
+    # --- 32-bit addressing. Every offset below is built from IRBuilder add/mul, which
+    # lower to `add nsw` / `mul nsw` i32 -- signed overflow is UB, not a wrap, so LLVM
+    # may poison the whole address chain rather than merely read the wrong place. The
+    # buffer-resource num_records field is unsigned in hardware, but it is emitted via
+    # const_i32 (no range check) and the voffset feeding it is signed i32 arithmetic,
+    # so the signed bound is the binding one on both paths.
+    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
+    if kv_bytes >= _INT32_LIMIT:
+        return False, (
+            f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
+            f"limit ({_INT32_LIMIT} B)"
+        )
+    qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
+    if qo_elems >= _INT32_LIMIT:
+        return False, (
+            f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
+            f"limit ({_INT32_LIMIT})"
+        )
+    # Sliding-window + causal: the last query block's window can start past
+    # seqlen_kv (start_tile >= n_up), giving a zero-trip KV loop -> l == 0 ->
+    # rcp(0) -> NaN. Same class as the block_m % block_n gate above; reject.
+    if spec.sliding_window and spec.causal:
+        _n_q = spec.seqlen_q // spec.block_m
+        _n_ktiles = (spec.seqlen_kv + spec.block_n - 1) // spec.block_n
+        _n_per = spec.block_m // spec.block_n
+        _swt = spec.sliding_window // spec.block_n
+        if (_n_q - 1) * _n_per - _swt >= _n_ktiles:
+            return False, (
+                f"sliding_window={spec.sliding_window}: last query block's window "
+                f"starts at tile {(_n_q - 1) * _n_per - _swt}, past seqlen_kv tile "
+                f"count {_n_ktiles} -> zero-trip KV loop -> NaN"
+            )
     return True, ""
 
 
@@ -1733,7 +1769,10 @@ def _build_attention_dense_single_buffer(
             # Every visited tile gets the causal upper bound; W > 0 additionally
             # applies the window lower bound (redundant no-op compares on tiles
             # fully inside the window). W == 0 -> lower=False, byte-identical.
-            do_mask(s, j, lower=(SW > 0), upper=causal)
+            # do_mask early-returns when non-causal, so upper is only read on the
+            # causal path (where it is the causal bound); the arg is kept for
+            # signature parity with the gfx950 do_mask, which does use upper=False.
+            do_mask(s, j, lower=(SW > 0), upper=True)
 
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
