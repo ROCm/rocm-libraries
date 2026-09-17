@@ -79,6 +79,7 @@ from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGat
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
+from .SolutionStructs.Problem import blockDequantItersPerGroupA
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
@@ -5013,6 +5014,13 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMovB32(dst=sgpr("SrdScaleA+3"), src="Srd127_96",
                        comment="scaleA: set bits 127_96 in SRD"))
 
+    if self.blockScaleAItersPerGroup(kernel) > 1:
+      # Counts K iterations so the pointer can step every itersPerGroup of
+      # them. Starts at 0 so the first increment, which closes iteration 0,
+      # leaves the pointer alone.
+      module.add(SMovB32(dst=sgpr("ScaleAKCnt"), src=0,
+                         comment="scaleA: K-iteration counter within a group"))
+
     if kernel["ProblemType"]["ScaleZeroPointA"]:
       module.add(self.blockScaleZeroAComputeSrd(kernel))
     return module
@@ -5151,12 +5159,68 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmp)
     return module
 
+  def blockScaleAItersPerGroup(self, kernel):
+    """How many K iterations share one scale group; >1 only when DepthU < G."""
+    return blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"])
+
+  def blockScaleASlowIncrement(self, kernel, incBytes, zeroIncBytes, tmpSgpr):
+    """The DepthU < ScaleBlockSizeA advance: step the scale pointers once every
+    itersPerGroup iterations instead of every one.
+
+    A group spans several iterations here, so the pointer has to stand still
+    in between. Rather than branch, the wrap is turned into a select: the
+    counter is masked (itersPerGroup is a power of two, enforced by
+    BlockDequant.py), which leaves SCC set exactly when the counter has *not*
+    wrapped, and each increment is then chosen as zero or its full stride.
+    That keeps the main loop branchless and costs three extra SALU.
+    """
+    module = Module("blockScaleASlowIncrement")
+    itersPerGroup = self.blockScaleAItersPerGroup(kernel)
+    inc = tmpSgpr
+
+    module.addComment1("global read inc block-scale A (%u bytes every %u iters)"
+                       % (incBytes, itersPerGroup))
+    module.add(SAddU32(dst=sgpr("ScaleAKCnt"), src0=sgpr("ScaleAKCnt"), src1=1,
+                       comment="scaleA: one more K iteration done"))
+    module.add(SAndB32(dst=sgpr(inc), src0=sgpr("ScaleAKCnt"), src1=hex(itersPerGroup - 1),
+                       comment="scaleA: SCC = counter has not wrapped"))
+    # Both selects read the SCC that SAndB32 left; neither writes it. The
+    # SAddU32 below does write SCC, so every select has to come first.
+    module.add(SCSelectB32(dst=sgpr(inc), src0=0, src1=hex(incBytes),
+                           comment="scaleA: advance only on a wrap"))
+    if kernel["ProblemType"]["ScaleZeroPointA"]:
+      module.add(SCSelectB32(dst=sgpr(inc + 1), src0=0, src1=hex(zeroIncBytes),
+                             comment="scaleZeroA: advance only on a wrap"))
+
+    module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=sgpr(inc),
+                       comment="scaleA SRD += inc(lower)"))
+    module.add(SAddCU32(dst=sgpr("SrdScaleA+1"), src0=sgpr("SrdScaleA+1"), src1=0,
+                        comment="scaleA SRD += inc(upper)"))
+    module.add(SSubU32(dst=sgpr("SrdScaleA+2"), src0=sgpr("SrdScaleA+2"), src1=sgpr(inc),
+                       comment="scaleA limit -= inc"))
+    if kernel["ProblemType"]["ScaleZeroPointA"]:
+      module.add(SAddU32(dst=sgpr("SrdScaleZeroA+0"), src0=sgpr("SrdScaleZeroA+0"),
+                         src1=sgpr(inc + 1), comment="scaleZeroA SRD += inc(lower)"))
+      module.add(SAddCU32(dst=sgpr("SrdScaleZeroA+1"), src0=sgpr("SrdScaleZeroA+1"), src1=0,
+                          comment="scaleZeroA SRD += inc(upper)"))
+      module.add(SSubU32(dst=sgpr("SrdScaleZeroA+2"), src0=sgpr("SrdScaleZeroA+2"),
+                         src1=sgpr(inc + 1), comment="scaleZeroA limit -= inc"))
+    return module
+
   def blockScaleAIncrement(self, kernel):
     """Advance SrdScaleA by one DepthU worth of K-groups."""
     module = Module("blockScaleAIncrement")
     blockSize = kernel["ProblemType"]["ScaleBlockSizeA"]
     bpe       = self.blockScaleABytesPerElement(kernel)
-    # BlockDequant.py guarantees DepthU % blockSize == 0.
+
+    if self.blockScaleAItersPerGroup(kernel) > 1:
+      # DepthU < blockSize: one group, one element, several iterations.
+      numTmp = 2 if kernel["ProblemType"]["ScaleZeroPointA"] else 1
+      with self.allocTmpSgpr(numTmp, tag="blockScaleAIncrement") as tmpSgprInfo:
+        module.add(self.blockScaleASlowIncrement(kernel, bpe, 1, tmpSgprInfo.idx))
+      return module
+
+    # BlockDequant.py guarantees blockSize divides DepthU on this path.
     incBytes  = (kernel["DepthU"] // blockSize) * bpe
     module.addComment1("global read inc block-scale A (%u bytes)" % incBytes)
     module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=hex(incBytes),

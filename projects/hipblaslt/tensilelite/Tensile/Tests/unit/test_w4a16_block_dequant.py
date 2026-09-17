@@ -180,7 +180,8 @@ def _emit(toolchain, **kw):
 # Validator (no toolchain needed beyond Solution construction)
 # ---------------------------------------------------------------------------
 def test_block_dequant_solution_is_valid(toolchain):
-    for blockSize, depthU in ((32, 64), (32, 128), (128, 128)):
+    # The last two have DepthU < G, where one group spans 2 and 4 K iterations.
+    for blockSize, depthU in ((32, 64), (32, 128), (128, 128), (128, 64), (128, 32)):
         sol = _solution(toolchain, blockSize=blockSize, depthU=depthU)
         assert sol.get("Valid") is True, f"G={blockSize} DepthU={depthU} should be valid"
 
@@ -189,7 +190,8 @@ def test_block_dequant_solution_is_valid(toolchain):
     "kw,reason",
     [
         ({"blockSize": 96}, "ScaleBlockSizeA"),          # unsupported group size
-        ({"blockSize": 128, "depthU": 64}, "DepthU"),    # DepthU % G != 0
+        # Neither divides the other, so one iteration would straddle two groups.
+        ({"blockSize": 128, "depthU": 96}, "divide one another"),
         ({"glvwA": 16}, "one dword per A load"),         # >1 dword per load
         ({"problemType": {"TransposeA": False}}, "TransposeA"),
         ({"ConvertAfterDS": True}, "ConvertAfterDS"),
@@ -211,6 +213,21 @@ def test_prefetch_and_schedule_are_each_fine_alone(toolchain, kw):
     rejected by itself -- otherwise the gate would silently cost every solution
     a scheduling knob it is entitled to."""
     assert _solution(toolchain, **kw).get("Valid") is True
+
+
+def test_iters_per_group_is_the_counter_period():
+    """The period blockScaleAIncrement counts to. An off-by-one here scales A by
+    a neighbouring K group, which is wrong by a factor rather than a little."""
+    from Tensile.SolutionStructs.Problem import blockDequantItersPerGroupA
+
+    pt = {"UseScaleAB": "Block", "ScaleBlockSizeA": 128}
+    assert blockDequantItersPerGroupA(pt, 128) == 1
+    assert blockDequantItersPerGroupA(pt, 64) == 2
+    assert blockDequantItersPerGroupA(pt, 32) == 4
+    # DepthU > G still advances every iteration; the period never goes below 1.
+    assert blockDequantItersPerGroupA(pt, 256) == 1
+    # Block dequantize off entirely: no scale tensor, so no counter.
+    assert blockDequantItersPerGroupA({"UseScaleAB": "", "ScaleBlockSizeA": 0}, 64) == 1
 
 
 def test_scale_block_size_without_block_mode_is_rejected(toolchain):
@@ -274,6 +291,7 @@ def test_dequantize_reads_source_before_overwriting_it(toolchain):
 
 
 def test_scale_srd_increment_matches_group_size(toolchain):
+    """DepthU >= G: a literal advance of DepthU/G scale elements every iteration."""
     for blockSize, depthU in ((32, 128), (128, 128), (32, 64)):
         _, src = _emit(toolchain, blockSize=blockSize, depthU=depthU)
         want = (depthU // blockSize) * 2  # bf16 scale elements -> bytes
@@ -288,6 +306,43 @@ def test_scale_srd_increment_matches_group_size(toolchain):
         assert re.search(
             r"s_sub_u32 s\[sgprSrdScaleA\+2\], s\[sgprSrdScaleA\+2\], (\S+)\s+// scaleA limit",
             src)
+
+
+@pytest.mark.parametrize("depthU,itersPerGroup", [(64, 2), (32, 4)])
+def test_scale_srd_advances_every_nth_iteration(toolchain, depthU, itersPerGroup):
+    """DepthU < G: the group outlives the iteration, so the pointer must step
+    once every itersPerGroup iterations instead of every one.
+
+    Checked on the emitted instructions rather than on results, because a
+    pointer that advanced every iteration would still produce plausible numbers
+    -- just scaled by the wrong group -- on any input whose scales do not vary
+    much along K.
+    """
+    _, src = _emit(toolchain, blockSize=128, depthU=depthU)
+
+    # The counter wraps with an AND, whose mask fixes the period.
+    mask = re.findall(
+        r"s_and_b32 (\S+), s\[sgprScaleAKCnt\], (\S+)\s+// scaleA: SCC", src)
+    assert mask, f"no scale counter mask emitted for DepthU={depthU}"
+    for _dst, got in mask:
+        assert int(got, 0) == itersPerGroup - 1, (
+            f"DepthU={depthU}: mask {got}, want {itersPerGroup - 1}")
+
+    # Counter starts at zero, so the increment closing iteration 0 does nothing.
+    assert re.search(r"s_mov_b32 s\[sgprScaleAKCnt\], 0\b", src), "counter not zeroed"
+
+    # One step is one group: 2 bytes of bf16 scale, whatever DepthU is.
+    sel = re.findall(r"s_cselect_b32 (\S+), 0, (\S+)\s+// scaleA: advance", src)
+    assert sel, "no conditional scale advance"
+    for _dst, got in sel:
+        assert int(got, 0) == 2, f"DepthU={depthU}: step {got}, want 2 bytes"
+
+    # The advance must be register-sourced now; a literal would mean the
+    # every-iteration path leaked through.
+    for got in re.findall(
+            r"s_add_u32 s\[sgprSrdScaleA\+0\], s\[sgprSrdScaleA\+0\], (\S+)\s+// scaleA SRD",
+            src):
+        assert got.startswith("s"), f"DepthU={depthU}: unconditional advance by {got}"
 
 
 def test_scale_offset_uses_group_shift(toolchain):
@@ -414,7 +469,9 @@ def test_no_vgpr_aliasing_for_zero_point_state(toolchain):
 # Asymmetric: per-group zero-points
 # ---------------------------------------------------------------------------
 def test_zero_point_solution_is_valid(toolchain):
-    for blockSize, depthU in ((32, 64), (32, 128), (128, 128)):
+    # The last two have DepthU < G, exercising the zero-point pointer's
+    # every-Nth-iteration walk as well as the scale pointer's.
+    for blockSize, depthU in ((32, 64), (32, 128), (128, 128), (128, 64), (128, 32)):
         sol = _solution(toolchain, blockSize=blockSize, depthU=depthU, zeroPoint=True)
         assert sol.get("Valid") is True, f"G={blockSize} DepthU={depthU} should be valid"
 

@@ -417,6 +417,22 @@ def usesBlockDequantZeroPointA(problemType):
     return usesBlockDequantA(problemType) and bool(problemType["ScaleZeroPointA"])
 
 
+def blockDequantItersPerGroupA(problemType, depthU):
+    """How many K iterations share one scale group.
+
+    1 whenever an iteration spans at least a whole group (DepthU >= G), where
+    the scale pointer advances every iteration. When DepthU < G the group
+    outlives the iteration, and the pointer must hold still for this many
+    iterations before stepping to the next group.
+
+    BlockDequant.py keeps this a power of two, which is what lets the kernel
+    count iterations with an AND mask rather than a divide.
+    """
+    if not usesBlockDequantA(problemType):
+        return 1
+    return max(1, problemType["ScaleBlockSizeA"] // depthU)
+
+
 # Encodings the int4 weights in A may use, and the suffix each contributes to
 # the kernel name. See the "Int4EncodingA" entry in defaultProblemType.
 INT4_ENCODINGS_A = ("Signed", "UnsignedBias8", "UnsignedBias8ExLlama")

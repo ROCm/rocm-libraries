@@ -12,7 +12,8 @@ element by the scale of its K-group, converts to ``MacDataTypeA`` and writes
 Public entry point: :func:`validateBlockDequantCombination`.
 """
 
-from ..Problem import INT4_ENCODINGS_A, usesBlockDequantA, usesBlockDequantZeroPointA
+from ..Problem import (INT4_ENCODINGS_A, blockDequantItersPerGroupA, usesBlockDequantA,
+                       usesBlockDequantZeroPointA)
 from ..Utilities import reject
 
 
@@ -156,12 +157,26 @@ def validateBlockDequantCombination(state, printRejectionReason):
                % state["MacroTile0"])
         return False
 
-    # The per-iteration scale-pointer advance is DepthU/blockSize scale
-    # elements; a fractional advance would need a modulo counter.
-    if state["DepthU"] % blockSize != 0:
+    # One of DepthU and the group size has to divide the other, so that a group
+    # boundary never falls inside an iteration. Which way round decides how the
+    # scale pointer walks: DepthU >= G advances it DepthU/G elements every
+    # iteration, DepthU < G holds it still for G/DepthU iterations at a time
+    # (blockScaleAIncrement). A ratio that divides neither way would put two
+    # different groups in one iteration for the same thread, which the single
+    # per-thread scale offset cannot express.
+    depthU = state["DepthU"]
+    if depthU % blockSize != 0 and blockSize % depthU != 0:
         reject(state, printRejectionReason,
-               "UseScaleAB=Block requires DepthU (%d) %% ScaleBlockSizeA (%d) == 0"
-               % (state["DepthU"], blockSize))
+               "UseScaleAB=Block requires DepthU (%d) and ScaleBlockSizeA (%d) to divide "
+               "one another" % (depthU, blockSize))
+        return False
+
+    # The DepthU < G counter wraps with an AND mask rather than a divide.
+    itersPerGroup = blockDequantItersPerGroupA(problemType, depthU)
+    if itersPerGroup & (itersPerGroup - 1):
+        reject(state, printRejectionReason,
+               "UseScaleAB=Block requires ScaleBlockSizeA / DepthU to be a power of 2 "
+               "when DepthU < ScaleBlockSizeA (got %d)" % itersPerGroup)
         return False
 
     # --- paths that bypass the localWrite conversion entirely ---

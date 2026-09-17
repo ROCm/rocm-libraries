@@ -52,6 +52,7 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Problem import blockDequantItersPerGroupA
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
@@ -10006,6 +10007,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # dense, so it needs no stride kernel argument), plus its buffer SRD.
       self.defineSgpr("StrideScaleA", 1)
       self.defineSgpr("SrdScaleA", 4, 4)
+      if blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"]) > 1:
+        # DepthU < ScaleBlockSizeA: one group outlives the iteration, so the
+        # scale pointer only steps once every itersPerGroup iterations and
+        # needs a counter to know when. See blockScaleAIncrement.
+        self.defineSgpr("ScaleAKCnt", 1)
       if kernel["ProblemType"]["ScaleZeroPointA"]:
         # Asymmetric: a second kernel-argument pointer to the packed int4
         # zero-points. The library derives it from scaleA + the scale-region
