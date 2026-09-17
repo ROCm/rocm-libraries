@@ -13,7 +13,7 @@
 .amdhsa_kernel Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr 256 // vgprs
-  .amdhsa_next_free_sgpr 86 // sgprs
+  .amdhsa_next_free_sgpr 90 // sgprs
   .amdhsa_group_segment_fixed_size 65024 // lds bytes
   .amdhsa_wavefront_size32 1 // 32-thread wavefronts
   .amdhsa_private_segment_fixed_size 0
@@ -27,7 +27,7 @@
 .text
 /* Num VGPR   =256 */
 /* Num AccVGPR=0 */
-/* Num SGPR   =86 */
+/* Num SGPR   =90 */
 
 /******************************************/
 /* Optimizations and Config:              */
@@ -214,7 +214,7 @@ amdhsa.kernels:
     .kernarg_segment_size:       160
     .max_flat_workgroup_size:    128
     .private_segment_fixed_size: 0
-    .sgpr_count:                 86
+    .sgpr_count:                 90
     .sgpr_spill_count:           0
     .vgpr_count:                 256
     .vgpr_spill_count:           0
@@ -300,9 +300,10 @@ label_ASM_Start:  /// Main body of the asm kernel
 .set sgprAddressScaleB, 50
 .set sgprStrideScaleA, 47
 .set sgprSrdScaleA, 52
-.set sgprScaleAKCnt, 56
-.set sgprAddressScaleZeroA, 58
-.set sgprSrdScaleZeroA, 60
+.set sgprScaleAPkMagic, 56
+.set sgprScaleAKCnt, 60
+.set sgprAddressScaleZeroA, 62
+.set sgprSrdScaleZeroA, 64
 
 /* Size Assignments */
 .set sgprSizeI, sgprSizesFree+0
@@ -406,71 +407,71 @@ v_mov_b32 v[vgprSerial], v0                        // thread serial id
 s_mov_b32 vcc_hi, 0                                // Ensure hi bits are zero
 
 /* remap workgroup to XCCs */
-s_lshr_b32 s68, s[sgprWGM], 0x10                   // Get WGMXCC
-s_ff1_i32_b32 s68, s68                             // Get log(WGMXCC)
-s_lshr_b32 s69, s[sgprWGM], 0x16                   // Get CU_Count
+s_lshr_b32 s72, s[sgprWGM], 0x10                   // Get WGMXCC
+s_ff1_i32_b32 s72, s72                             // Get log(WGMXCC)
+s_lshr_b32 s73, s[sgprWGM], 0x16                   // Get CU_Count
 /* remap WGs if WGMXCC > 1 ( log(WGMXCC) > 0 ) */
-s_cmp_gt_i32 s68, 0
+s_cmp_gt_i32 s72, 0
 s_cbranch_scc0 label_skip_WGMXCC
 /* only remap WGs in the range */
-s_lshr_b32 s65, s23, s68
-s_lshl_b32 s65, s65, s68
-s_cmp_ge_u32 s[sgprWorkGroup0], s65
+s_lshr_b32 s69, s23, s72
+s_lshl_b32 s69, s69, s72
+s_cmp_ge_u32 s[sgprWorkGroup0], s69
 s_cbranch_scc1 label_skip_WGMXCC
-s_cmp_eq_u32 s69, 0                                // CU_Count == 0 ?
+s_cmp_eq_u32 s73, 0                                // CU_Count == 0 ?
 s_cbranch_scc0 label_XCCG_nonzero
-s_lshr_b32 s65, s[sgprWorkGroup0], s68
-s_bfm_b32 s66, s68, 0
-s_and_b32 s66, s[sgprWorkGroup0], s66
-s_lshr_b32 s67, s23, s68
-s_mul_i32 s66, s66, s67
-s_add_u32 s[sgprWorkGroup0], s65, s66
+s_lshr_b32 s69, s[sgprWorkGroup0], s72
+s_bfm_b32 s70, s72, 0
+s_and_b32 s70, s[sgprWorkGroup0], s70
+s_lshr_b32 s71, s23, s72
+s_mul_i32 s70, s70, s71
+s_add_u32 s[sgprWorkGroup0], s69, s70
 s_branch label_skip_WGMXCC
 label_XCCG_nonzero:
 /* temp0 = (wg//CU_Count)*CU_Count */
-v_cvt_f64_u32 v[6:7], s69                          // s65 = s[sgprWorkGroup0] / s69
-v_rcp_f64 v[6:7], v[6:7]                           // s65 = s[sgprWorkGroup0] / s69
-v_cvt_f64_u32 v[8:9], s[sgprWorkGroup0]            // s65 = s[sgprWorkGroup0] / s69
-v_mul_f64 v[6:7], v[6:7], v[8:9]                   // s65 = s[sgprWorkGroup0] / s69
-v_cvt_u32_f64 v6, v[6:7]                           // s65 = s[sgprWorkGroup0] / s69
-v_mul_lo_u32 v7, v6, s69                           // s65 = s[sgprWorkGroup0] / s69
-v_sub_nc_u32 v8, s[sgprWorkGroup0], v7             // s65 = s[sgprWorkGroup0] / s69
-v_cmp_ge_u32 vcc_lo, v8, s69                       // s65 = s[sgprWorkGroup0] / s69
-s_mov_b32 exec_lo, vcc_lo                          // s65 = s[sgprWorkGroup0] / s69
-v_add_nc_u32 v6, v6, 1                             // s65 = s[sgprWorkGroup0] / s69
+v_cvt_f64_u32 v[6:7], s73                          // s69 = s[sgprWorkGroup0] / s73
+v_rcp_f64 v[6:7], v[6:7]                           // s69 = s[sgprWorkGroup0] / s73
+v_cvt_f64_u32 v[8:9], s[sgprWorkGroup0]            // s69 = s[sgprWorkGroup0] / s73
+v_mul_f64 v[6:7], v[6:7], v[8:9]                   // s69 = s[sgprWorkGroup0] / s73
+v_cvt_u32_f64 v6, v[6:7]                           // s69 = s[sgprWorkGroup0] / s73
+v_mul_lo_u32 v7, v6, s73                           // s69 = s[sgprWorkGroup0] / s73
+v_sub_nc_u32 v8, s[sgprWorkGroup0], v7             // s69 = s[sgprWorkGroup0] / s73
+v_cmp_ge_u32 vcc_lo, v8, s73                       // s69 = s[sgprWorkGroup0] / s73
+s_mov_b32 exec_lo, vcc_lo                          // s69 = s[sgprWorkGroup0] / s73
+v_add_nc_u32 v6, v6, 1                             // s69 = s[sgprWorkGroup0] / s73
 s_mov_b32 exec_lo, -1                              // Reset exec
-v_mul_lo_u32 v7, v6, s69                           // s65 = s[sgprWorkGroup0] / s69
-v_sub_nc_u32 v8, s[sgprWorkGroup0], v7             // s65 = s[sgprWorkGroup0] / s69
-v_readfirstlane_b32 s65, v6                        // quotient
-v_readfirstlane_b32 s66, v8                        // remainder
-s_mul_i32 s65, s65, s69
+v_mul_lo_u32 v7, v6, s73                           // s69 = s[sgprWorkGroup0] / s73
+v_sub_nc_u32 v8, s[sgprWorkGroup0], v7             // s69 = s[sgprWorkGroup0] / s73
+v_readfirstlane_b32 s69, v6                        // quotient
+v_readfirstlane_b32 s70, v8                        // remainder
+s_mul_i32 s69, s69, s73
 /* temp1 = (wg%CU_Count)//WGMXCC */
-s_lshr_b32 s66, s66, s68
+s_lshr_b32 s70, s70, s72
 /* temp0 = temp0 + temp1 */
-s_add_u32 s65, s65, s66
+s_add_u32 s69, s69, s70
 /* temp1 = (wg%WGMXCC) * ((WGs - (WGs//CU_Count) * CU_Count) if (wg > (WGs//CU_Count) * CU_Count) else CU_Count)//WGMXCC */
-v_cvt_f64_u32 v[6:7], s69                          // s66 = s23 / s69
-v_rcp_f64 v[6:7], v[6:7]                           // s66 = s23 / s69
-v_cvt_f64_u32 v[8:9], s23                          // s66 = s23 / s69
-v_mul_f64 v[6:7], v[6:7], v[8:9]                   // s66 = s23 / s69
-v_cvt_u32_f64 v6, v[6:7]                           // s66 = s23 / s69
-v_mul_lo_u32 v7, v6, s69                           // s66 = s23 / s69
-v_sub_nc_u32 v8, s23, v7                           // s66 = s23 / s69
-v_cmp_ge_u32 vcc_lo, v8, s69                       // s66 = s23 / s69
-s_mov_b32 exec_lo, vcc_lo                          // s66 = s23 / s69
-v_add_nc_u32 v6, v6, 1                             // s66 = s23 / s69
+v_cvt_f64_u32 v[6:7], s73                          // s70 = s23 / s73
+v_rcp_f64 v[6:7], v[6:7]                           // s70 = s23 / s73
+v_cvt_f64_u32 v[8:9], s23                          // s70 = s23 / s73
+v_mul_f64 v[6:7], v[6:7], v[8:9]                   // s70 = s23 / s73
+v_cvt_u32_f64 v6, v[6:7]                           // s70 = s23 / s73
+v_mul_lo_u32 v7, v6, s73                           // s70 = s23 / s73
+v_sub_nc_u32 v8, s23, v7                           // s70 = s23 / s73
+v_cmp_ge_u32 vcc_lo, v8, s73                       // s70 = s23 / s73
+s_mov_b32 exec_lo, vcc_lo                          // s70 = s23 / s73
+v_add_nc_u32 v6, v6, 1                             // s70 = s23 / s73
 s_mov_b32 exec_lo, -1                              // Reset exec
-v_readfirstlane_b32 s66, v6                        // quotient
-s_mul_i32 s66, s66, s69
-s_sub_u32 s67, s23, s66
-s_cmp_gt_u32 s[sgprWorkGroup0], s66
-s_cselect_b32 s66, s67, s69
-s_lshr_b32 s66, s66, s68
-s_bfm_b32 s67, s68, 0
-s_and_b32 s67, s[sgprWorkGroup0], s67
-s_mul_i32 s66, s66, s67
+v_readfirstlane_b32 s70, v6                        // quotient
+s_mul_i32 s70, s70, s73
+s_sub_u32 s71, s23, s70
+s_cmp_gt_u32 s[sgprWorkGroup0], s70
+s_cselect_b32 s70, s71, s73
+s_lshr_b32 s70, s70, s72
+s_bfm_b32 s71, s72, 0
+s_and_b32 s71, s[sgprWorkGroup0], s71
+s_mul_i32 s70, s70, s71
 /* WorkGroup0 = temp0 + temp1 */
-s_add_u32 s[sgprWorkGroup0], s65, s66
+s_add_u32 s[sgprWorkGroup0], s69, s70
 label_skip_WGMXCC:  /// skip WGMXCC if no enough WGs to remap
 s_cmp_eq_u32 s21, 3
 s_cbranch_scc1 label_ArgType3_Routed_To_ArgType0
@@ -646,19 +647,19 @@ s_and_b32 s16, s[sgprArgType], 0xff                // mask ArgType domain (bit 8
 s_cmp_eq_u32 s16, 2                                // ArgType == 2 ?
 s_cbranch_scc1 label_IsExternalValid               // branch if ArgType == 2
 s_mov_b32 s15, 112                                 // KernArgAddressOffset
-s_mul_i32 s70, s20, 4
-s_mov_b64 s[64:65], s[sgprKernArgAddress:sgprKernArgAddress+1]
+s_mul_i32 s74, s20, 4
+s_mov_b64 s[68:69], s[sgprKernArgAddress:sgprKernArgAddress+1]
 s_branch label_IsExternalValidEnd
 label_IsExternalValid:
 s_mov_b32 s15, 228
-s_mov_b32 s70, 0
-s_mov_b64 s[64:65], s[sgprKernArgAddress:sgprKernArgAddress+1]
+s_mov_b32 s74, 0
+s_mov_b64 s[68:69], s[sgprKernArgAddress:sgprKernArgAddress+1]
 label_IsExternalValidEnd:
 
 /* Grouped Gemm:: prefetch 1 arg load */
 s_mov_b32 s14, 1
-s_mov_b32 s71, 0
-s_load_b128 s[24:27], s[64:65], s70
+s_mov_b32 s75, 0
+s_load_b128 s[24:27], s[68:69], s74
 s_cmpk_eq_u32 s20, 1                               // if gemm_count is 1?
 s_cbranch_scc1 label_wgTable_noLoadLoop
 
@@ -666,28 +667,28 @@ s_cbranch_scc1 label_wgTable_noLoadLoop
 /* Grouped Gemm:: loop start */
 label_Loop_GemmCount:
 s_waitcnt lgkmcnt(0)
-s_lshr_b32 s68, s24, 6                             // s68 = s24 / 64
-s_and_b32 s66, 63, s24                             // s66 = s24 % 64
-s_addc_u32 s68, s68, 0
-s_mov_b32 s67, 0                                   // STATIC_DIV: divisor=160
-s_mul_i32 s66, 819, s25                            // tmp1 = dividend * magic hi
-s_lshl_b64 s[66:67], s[66:67], 16                  // left shift 16 bits
-s_mul_i32 s69, s25, 13108                          // tmp0 = dividend * magic lo
-s_add_u32 s66, s69, s66                            // add lo
-s_addc_u32 s67, s67, 0                             // add hi
-s_lshr_b64 s[66:67], s[66:67], 33                  // tmp0 = quotient
-s_mul_i32 s67, s66, 160                            // tmp1 = quotient * divisor
-s_cmp_lg_u32 s67, s25                              // if (quotient * divisor != dividend), result+=1
-s_addc_u32 s69, s66, 0                             // if (quotient * divisor != dividend), result+=1
-s_mul_i32 s68, s68, s69
-s_mul_i32 s68, s68, s26
-s_and_b32 s69, s[sgprGSU], 0xfff                   // Restore GSU
-s_mul_i32 s68, s68, s69
-s_add_u32 s71, s71, s68
-s_cmp_lt_u32 s[sgprWorkGroup0], s71
+s_lshr_b32 s72, s24, 6                             // s72 = s24 / 64
+s_and_b32 s70, 63, s24                             // s70 = s24 % 64
+s_addc_u32 s72, s72, 0
+s_mov_b32 s71, 0                                   // STATIC_DIV: divisor=160
+s_mul_i32 s70, 819, s25                            // tmp1 = dividend * magic hi
+s_lshl_b64 s[70:71], s[70:71], 16                  // left shift 16 bits
+s_mul_i32 s73, s25, 13108                          // tmp0 = dividend * magic lo
+s_add_u32 s70, s73, s70                            // add lo
+s_addc_u32 s71, s71, 0                             // add hi
+s_lshr_b64 s[70:71], s[70:71], 33                  // tmp0 = quotient
+s_mul_i32 s71, s70, 160                            // tmp1 = quotient * divisor
+s_cmp_lg_u32 s71, s25                              // if (quotient * divisor != dividend), result+=1
+s_addc_u32 s73, s70, 0                             // if (quotient * divisor != dividend), result+=1
+s_mul_i32 s72, s72, s73
+s_mul_i32 s72, s72, s26
+s_and_b32 s73, s[sgprGSU], 0xfff                   // Restore GSU
+s_mul_i32 s72, s72, s73
+s_add_u32 s75, s75, s72
+s_cmp_lt_u32 s[sgprWorkGroup0], s75
 s_cbranch_scc1 label_FOUND
-s_add_u32 s70, s70, s15
-s_load_b128 s[24:27], s[64:65], s70
+s_add_u32 s74, s74, s15
+s_load_b128 s[24:27], s[68:69], s74
 s_add_u32 s14, s14, 1
 s_cmp_lt_u32 s14, s20
 s_cbranch_scc1 label_Loop_GemmCount
@@ -695,30 +696,30 @@ s_cbranch_scc1 label_Loop_GemmCount
 /* Grouped Gemm:: noLoadLoop */
 label_wgTable_noLoadLoop:
 s_waitcnt lgkmcnt(0)
-s_lshr_b32 s68, s24, 6                             // s68 = s24 / 64
-s_and_b32 s66, 63, s24                             // s66 = s24 % 64
-s_addc_u32 s68, s68, 0
-s_mov_b32 s67, 0                                   // STATIC_DIV: divisor=160
-s_mul_i32 s66, 819, s25                            // tmp1 = dividend * magic hi
-s_lshl_b64 s[66:67], s[66:67], 16                  // left shift 16 bits
-s_mul_i32 s69, s25, 13108                          // tmp0 = dividend * magic lo
-s_add_u32 s66, s69, s66                            // add lo
-s_addc_u32 s67, s67, 0                             // add hi
-s_lshr_b64 s[66:67], s[66:67], 33                  // tmp0 = quotient
-s_mul_i32 s67, s66, 160                            // tmp1 = quotient * divisor
-s_cmp_lg_u32 s67, s25                              // if (quotient * divisor != dividend), result+=1
-s_addc_u32 s69, s66, 0                             // if (quotient * divisor != dividend), result+=1
-s_mul_i32 s68, s68, s69
-s_mul_i32 s68, s68, s26
-s_and_b32 s64, s[sgprGSU], 0xfff                   // Restore GSU
-s_mul_i32 s68, s68, s64
-s_add_u32 s71, s71, s68
+s_lshr_b32 s72, s24, 6                             // s72 = s24 / 64
+s_and_b32 s70, 63, s24                             // s70 = s24 % 64
+s_addc_u32 s72, s72, 0
+s_mov_b32 s71, 0                                   // STATIC_DIV: divisor=160
+s_mul_i32 s70, 819, s25                            // tmp1 = dividend * magic hi
+s_lshl_b64 s[70:71], s[70:71], 16                  // left shift 16 bits
+s_mul_i32 s73, s25, 13108                          // tmp0 = dividend * magic lo
+s_add_u32 s70, s73, s70                            // add lo
+s_addc_u32 s71, s71, 0                             // add hi
+s_lshr_b64 s[70:71], s[70:71], 33                  // tmp0 = quotient
+s_mul_i32 s71, s70, 160                            // tmp1 = quotient * divisor
+s_cmp_lg_u32 s71, s25                              // if (quotient * divisor != dividend), result+=1
+s_addc_u32 s73, s70, 0                             // if (quotient * divisor != dividend), result+=1
+s_mul_i32 s72, s72, s73
+s_mul_i32 s72, s72, s26
+s_and_b32 s68, s[sgprGSU], 0xfff                   // Restore GSU
+s_mul_i32 s72, s72, s68
+s_add_u32 s75, s75, s72
 
 /* Grouped Gemm:: gemmIndex found */
 label_FOUND:
-s_sub_u32 s65, s14, 1
-s_sub_u32 s64, s71, s68
-s_sub_u32 s[sgprWorkGroup0], s[sgprWorkGroup0], s64
+s_sub_u32 s69, s14, 1
+s_sub_u32 s68, s75, s72
+s_sub_u32 s[sgprWorkGroup0], s[sgprWorkGroup0], s68
 /* Check if custom structure pointer is null */
 s_and_b32 s16, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
 s_cmp_eq_u32 s16, 2                                // ArgType == 2 ?
@@ -729,8 +730,8 @@ s_cbranch_scc1 label_LoadExternalStruct            // branch if ArgType == 2
 s_lshl2_add_u32 s[sgprKernArgAddress], s20, s[sgprKernArgAddress]
 s_addc_u32 s[sgprKernArgAddress+1], s[sgprKernArgAddress+1], 0
 /* Grouped Gemm: offset address from args_start to gemm_start */
-s_mul_i32 s65, s65, 112                            // KernArgAddressOffset
-s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s65
+s_mul_i32 s69, s69, 112                            // KernArgAddressOffset
+s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s69
 s_addc_u32 s[sgprKernArgAddress+1], s[sgprKernArgAddress+1], 0
 
 /* Load Kernel Args */
@@ -742,8 +743,8 @@ s_load_b64 s[sgprAddressScaleZeroA:sgprAddressScaleZeroA+1], s[sgprKernArgAddres
 s_branch label_LoadExternalStructEnd
 label_LoadExternalStruct:
 /* Grouped Gemm: offset address from args_start to gemm_start */
-s_mul_i32 s65, s65, 228
-s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s65
+s_mul_i32 s69, s69, 228
+s_add_u32 s[sgprKernArgAddress], s[sgprKernArgAddress], s69
 s_addc_u32 s[sgprKernArgAddress+1], s[sgprKernArgAddress+1], 0
 s_load_b64 s[sgprAddressD:sgprAddressD+1], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x10
 s_load_b64 s[sgprAddressC:sgprAddressC+1], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x18
@@ -937,15 +938,15 @@ s_endpgm
 label_NoEarlyStop_wgExceed:
 
 label_MultiGemmEnd:
-.set sgprSrdA, 64
-.set sgprSrdB, 68
-.set sgprShadowLimitA, 72
-.set sgprShadowLimitB, 74
-.set sgprStaggerUIter, 57
-.set sgprWrapUA, 76
-.set sgprWrapUB, 78
-.set sgprGlobalReadIncsA, 80
-.set sgprGlobalReadIncsB, 81
+.set sgprSrdA, 68
+.set sgprSrdB, 72
+.set sgprShadowLimitA, 76
+.set sgprShadowLimitB, 78
+.set sgprStaggerUIter, 61
+.set sgprWrapUA, 80
+.set sgprWrapUB, 82
+.set sgprGlobalReadIncsA, 84
+.set sgprGlobalReadIncsB, 85
 s_and_b32 s16, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
 s_cmp_eq_u32 s16, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc1 label_Skip_Address_Prepad_For_Pointer_Array
@@ -1289,6 +1290,10 @@ s_sub_u32 s[sgprSrdScaleA+2], s17, s16             // scaleA: buffer limit from 
 s_add_u32 s[sgprSrdScaleA+0], s[sgprAddressScaleA+0], s16 // scaleA: SRD base lo
 s_addc_u32 s[sgprSrdScaleA+1], s[sgprAddressScaleA+1], 0 // scaleA: SRD base hi
 s_mov_b32 s[sgprSrdScaleA+3], Srd127_96            // scaleA: set bits 127_96 in SRD
+s_mov_b32 s[sgprScaleAPkMagic+0], 0x64006400       // w4a16: two fp16 holding 1024, for the fused mask+OR
+s_mov_b32 s[sgprScaleAPkMagic+2], 0xe400e400       // w4a16: two fp16 holding -1024, for the fused bias
+s_mov_b32 s[sgprScaleAPkMagic+1], 0x54005400       // w4a16: two fp16 holding 64, for the fused mask+OR
+s_mov_b32 s[sgprScaleAPkMagic+3], 0xd400d400       // w4a16: two fp16 holding -64, for the fused bias
 s_mov_b32 s[sgprScaleAKCnt], 0                     // scaleA: K-iteration counter within a group
 
 /* global read addresses: block-scale A zero-point srd */
@@ -1697,14 +1702,14 @@ s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit // Move shadow t
 /* End setupNewTile                       */
 /******************************************/
 label_ShadowInitStart:
-s_and_b32 s82, s[sgprGSU], 0x3fff                  // Restore GSU
-s_cmp_eq_u32 s82, 1                                // GSU == 1 ?
+s_and_b32 s86, s[sgprGSU], 0x3fff                  // Restore GSU
+s_cmp_eq_u32 s86, 1                                // GSU == 1 ?
 s_cbranch_scc1 label_ArgTypeCheckD                 // Handling General Batched GEMM SRD initialization
 s_mov_b64 s[sgprSrdD+0:sgprSrdD+0+1], s[sgprAddressD+0:sgprAddressD+0+1] // init SRD base address
 s_branch label_GeneralBatchedGemmSrdInitiationD_End // End of handling General Batched GEMM SRD initialization
 label_ArgTypeCheckD:  /// Check if ArgType is for General Batched GEMM for D
-s_and_b32 s82, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s82, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s86, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s86, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc0 label_RegularSrdInitializationD
 s_branch label_GeneralBatchedGemmSrdInitiationD    // General Batched GEMM, Srd initialized to 0
 label_RegularSrdInitializationD:  /// Regular SRD initialization for non-General Batched GEMM for D
@@ -1716,14 +1721,14 @@ label_GeneralBatchedGemmSrdInitiationD_End:  /// End of handling General Batched
 s_mov_b32 s[sgprSrdD+2], BufferOOB
 s_mov_b32 s[sgprSrdD+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
-s_and_b32 s82, s[sgprGSU], 0x3fff                  // Restore GSU
-s_cmp_eq_u32 s82, 1                                // GSU == 1 ?
+s_and_b32 s86, s[sgprGSU], 0x3fff                  // Restore GSU
+s_cmp_eq_u32 s86, 1                                // GSU == 1 ?
 s_cbranch_scc1 label_ArgTypeCheckC                 // Handling General Batched GEMM SRD initialization
 s_mov_b64 s[sgprSrdC+0:sgprSrdC+0+1], s[sgprAddressC+0:sgprAddressC+0+1] // init SRD base address
 s_branch label_GeneralBatchedGemmSrdInitiationC_End // End of handling General Batched GEMM SRD initialization
 label_ArgTypeCheckC:  /// Check if ArgType is for General Batched GEMM for C
-s_and_b32 s82, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s82, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s86, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s86, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc0 label_RegularSrdInitializationC
 s_branch label_GeneralBatchedGemmSrdInitiationC    // General Batched GEMM, Srd initialized to 0
 label_RegularSrdInitializationC:  /// Regular SRD initialization for non-General Batched GEMM for C
@@ -1736,94 +1741,94 @@ s_mov_b32 s[sgprSrdC+2], BufferOOB
 s_mov_b32 s[sgprSrdC+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
 
-s_mul_i32 s84, MT1, s[sgprWorkGroup1]              // <- wg1*MT1
-s_and_b32 s83, s[sgprGSU], 0xfff                   // Restore GSU
-s_mul_hi_u32 s83, s84, s[sgprStrideC1J]            // ScaleC s84 by Stride
-s_mul_i32 s82, s84, s[sgprStrideC1J]               // ScaleC s84 by Stride
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeC]  // scale by bpe
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82        // add lo to SRD
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83       // add hi to SRD
-s_and_b32 s83, s[sgprGSU], 0xfff                   // Restore GSU
-s_mul_hi_u32 s83, s84, s[sgprStrideD1J]            // ScaleD s84 by Stride
-s_mul_i32 s82, s84, s[sgprStrideD1J]               // ScaleD s84 by Stride
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeD]  // scale by bpe
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82        // add lo to SRD
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // add hi to SRD
+s_mul_i32 s88, MT1, s[sgprWorkGroup1]              // <- wg1*MT1
+s_and_b32 s87, s[sgprGSU], 0xfff                   // Restore GSU
+s_mul_hi_u32 s87, s88, s[sgprStrideC1J]            // ScaleC s88 by Stride
+s_mul_i32 s86, s88, s[sgprStrideC1J]               // ScaleC s88 by Stride
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeC]  // scale by bpe
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86        // add lo to SRD
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87       // add hi to SRD
+s_and_b32 s87, s[sgprGSU], 0xfff                   // Restore GSU
+s_mul_hi_u32 s87, s88, s[sgprStrideD1J]            // ScaleD s88 by Stride
+s_mul_i32 s86, s88, s[sgprStrideD1J]               // ScaleD s88 by Stride
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeD]  // scale by bpe
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86        // add lo to SRD
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87       // add hi to SRD
 
-s_and_b32 s83, s[sgprGSU], 0xfff                   // Restore GSU
-s_cmp_eq_u32 s83, 1                                // GSU == 1 ?
+s_and_b32 s87, s[sgprGSU], 0xfff                   // Restore GSU
+s_cmp_eq_u32 s87, 1                                // GSU == 1 ?
 s_cbranch_scc0 label_StridedBatchedGemmLoadC
-s_and_b32 s85, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s85, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s89, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s89, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc1 label_GeneralBatchedGemmLoadC
 label_StridedBatchedGemmLoadC:  /// Computing the Batch Matrix's base address for Strided Batched GEMM
-s_mul_hi_u32 s83, s[sgprWorkGroup2], s[sgprStrideCK] // ScaleC s[sgprWorkGroup2] by Stride
-s_mul_i32 s82, s[sgprWorkGroup2], s[sgprStrideCK]  // ScaleC s[sgprWorkGroup2] by Stride
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeC]  // scale by bpe
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82        // add lo to SRD
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83       // add hi to SRD
+s_mul_hi_u32 s87, s[sgprWorkGroup2], s[sgprStrideCK] // ScaleC s[sgprWorkGroup2] by Stride
+s_mul_i32 s86, s[sgprWorkGroup2], s[sgprStrideCK]  // ScaleC s[sgprWorkGroup2] by Stride
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeC]  // scale by bpe
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86        // add lo to SRD
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87       // add hi to SRD
 s_branch label_GeneralBatchedGemmLoadC_End
 label_GeneralBatchedGemmLoadC:  /// Computing the Batch Matrix's base address for General Batched GEMM
-s_mul_i32 s82, 8, s[sgprWorkGroup2]                // Compute stride in bytes into Pointer Array
-s_add_u32 s82, s82, s[sgprAddressC+0]              // Offsetting to the location [Lower half of address]
-s_addc_u32 s83, s[sgprAddressC+1], 0               // Offsetting to the location [Higher half of address]
-s_load_b64 s[82:83], s[82:83], 0                   // Load the Matrix Address in the Pointer Array
+s_mul_i32 s86, 8, s[sgprWorkGroup2]                // Compute stride in bytes into Pointer Array
+s_add_u32 s86, s86, s[sgprAddressC+0]              // Offsetting to the location [Lower half of address]
+s_addc_u32 s87, s[sgprAddressC+1], 0               // Offsetting to the location [Higher half of address]
+s_load_b64 s[86:87], s[86:87], 0                   // Load the Matrix Address in the Pointer Array
 s_waitcnt lgkmcnt(0)                               // Wait for the Matrix Address Load from the Pointer Array
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82        // Offsetting within the Batch Matrix [Lower half of address]
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83       // Offsetting within the Batch Matrix [Higher half of address]
-s_load_b64 s[82:83], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x78 // Load batchOffsetC from kernel args
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86        // Offsetting within the Batch Matrix [Lower half of address]
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87       // Offsetting within the Batch Matrix [Higher half of address]
+s_load_b64 s[86:87], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x78 // Load batchOffsetC from kernel args
 s_waitcnt lgkmcnt(0)                               // Wait for Matrix Address and Batch Offset Loads
-s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s82        // Add matrix address to SRD (low)
-s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s83       // Add matrix address to SRD (high)
+s_add_u32 s[sgprSrdC+0], s[sgprSrdC+0], s86        // Add matrix address to SRD (low)
+s_addc_u32 s[sgprSrdC+1], s[sgprSrdC+1], s87       // Add matrix address to SRD (high)
 label_GeneralBatchedGemmLoadC_End:  /// End of label GeneralBatchedGemmLoadC
-s_and_b32 s83, s[sgprGSU], 0xfff                   // Restore GSU
-s_cmp_eq_u32 s83, 1                                // GSU == 1 ?
+s_and_b32 s87, s[sgprGSU], 0xfff                   // Restore GSU
+s_cmp_eq_u32 s87, 1                                // GSU == 1 ?
 s_cbranch_scc0 label_StridedBatchedGemmLoadD
-s_and_b32 s85, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
-s_cmp_eq_u32 s85, 3                                // ArgType == 3 for General Batched GEMM
+s_and_b32 s89, s[sgprArgType], 0xff                // mask ArgType domain (bit 8 = TDM wave-parity)
+s_cmp_eq_u32 s89, 3                                // ArgType == 3 for General Batched GEMM
 s_cbranch_scc1 label_GeneralBatchedGemmLoadD
 label_StridedBatchedGemmLoadD:  /// Computing the Batch Matrix's base address for Strided Batched GEMM
-s_mul_hi_u32 s83, s[sgprWorkGroup2], s[sgprStrideDK] // ScaleD s[sgprWorkGroup2] by Stride
-s_mul_i32 s82, s[sgprWorkGroup2], s[sgprStrideDK]  // ScaleD s[sgprWorkGroup2] by Stride
-s_lshl_b64 s[82:83], s[82:83], s[sgprGSULog2BpeD]  // scale by bpe
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82        // add lo to SRD
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // add hi to SRD
+s_mul_hi_u32 s87, s[sgprWorkGroup2], s[sgprStrideDK] // ScaleD s[sgprWorkGroup2] by Stride
+s_mul_i32 s86, s[sgprWorkGroup2], s[sgprStrideDK]  // ScaleD s[sgprWorkGroup2] by Stride
+s_lshl_b64 s[86:87], s[86:87], s[sgprGSULog2BpeD]  // scale by bpe
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86        // add lo to SRD
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87       // add hi to SRD
 s_branch label_GeneralBatchedGemmLoadD_End
 label_GeneralBatchedGemmLoadD:  /// Computing the Batch Matrix's base address for General Batched GEMM
-s_mul_i32 s82, 8, s[sgprWorkGroup2]                // Compute stride in bytes into Pointer Array
-s_add_u32 s82, s82, s[sgprAddressD+0]              // Offsetting to the location [Lower half of address]
-s_addc_u32 s83, s[sgprAddressD+1], 0               // Offsetting to the location [Higher half of address]
-s_load_b64 s[82:83], s[82:83], 0                   // Load the Matrix Address in the Pointer Array
+s_mul_i32 s86, 8, s[sgprWorkGroup2]                // Compute stride in bytes into Pointer Array
+s_add_u32 s86, s86, s[sgprAddressD+0]              // Offsetting to the location [Lower half of address]
+s_addc_u32 s87, s[sgprAddressD+1], 0               // Offsetting to the location [Higher half of address]
+s_load_b64 s[86:87], s[86:87], 0                   // Load the Matrix Address in the Pointer Array
 s_waitcnt lgkmcnt(0)                               // Wait for the Matrix Address Load from the Pointer Array
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82        // Offsetting within the Batch Matrix [Lower half of address]
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // Offsetting within the Batch Matrix [Higher half of address]
-s_load_b64 s[82:83], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x70 // Load batchOffsetD from kernel args
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86        // Offsetting within the Batch Matrix [Lower half of address]
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87       // Offsetting within the Batch Matrix [Higher half of address]
+s_load_b64 s[86:87], s[sgprKernArgAddress:sgprKernArgAddress+1], 0x70 // Load batchOffsetD from kernel args
 s_waitcnt lgkmcnt(0)                               // Wait for Matrix Address and Batch Offset Loads
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82        // Add matrix address to SRD (low)
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // Add matrix address to SRD (high)
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86        // Add matrix address to SRD (low)
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87       // Add matrix address to SRD (high)
 label_GeneralBatchedGemmLoadD_End:  /// End of label GeneralBatchedGemmLoadD
 
-s_and_b32 s82, s[sgprGSU], 0xfff                   // Restore GSU
-s_cmp_eq_u32 s82, 1                                // GSU == 1 ?
+s_and_b32 s86, s[sgprGSU], 0xfff                   // Restore GSU
+s_cmp_eq_u32 s86, 1                                // GSU == 1 ?
 s_cbranch_scc1 label_GSU_2                         // branch if GSU == 1
 // GSU Output Buffer offset: Free0 + (Free1-1)*StrideC1J + (Free2-1)*StrideCK * GSUIdx * bpe%s
-s_mul_hi_u32 s83, s[sgprSizesFree+0], s[sgprGSUSumIdx] // Free0
-s_mul_i32 s82, s[sgprSizesFree+0], s[sgprGSUSumIdx] // Free0
-s_sub_u32 s84, s[sgprSizesFree+1], 1               // Free1
-s_mul_i32 s84, s84, s[sgprGSUSumIdx]               // Free1
-s_mul_hi_u32 s85, s84, s[sgprStrideC1J]            // Free1
-s_mul_i32 s84, s84, s[sgprStrideC1J]               // Free1
-s_add_u32 s82, s82, s84                            // Free1
-s_addc_u32 s83, s83, s85                           // Free1
-s_sub_u32 s84, s[sgprSizesFree+2], 1               // Free2
-s_mul_i32 s84, s84, s[sgprGSUSumIdx]               // Free2
-s_mul_hi_u32 s85, s84, s[sgprStrideCK]             // Free2
-s_mul_i32 s84, s84, s[sgprStrideCK]                // Free2
-s_add_u32 s82, s82, s84                            // Free2
-s_addc_u32 s83, s83, s85                           // Free2
-s_lshl_b64 s[82:83], s[82:83], 2                   // scale by bpe
-s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s82        // add lo GSU offset to SRD
-s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s83       // add hi GSU offset to SRD
+s_mul_hi_u32 s87, s[sgprSizesFree+0], s[sgprGSUSumIdx] // Free0
+s_mul_i32 s86, s[sgprSizesFree+0], s[sgprGSUSumIdx] // Free0
+s_sub_u32 s88, s[sgprSizesFree+1], 1               // Free1
+s_mul_i32 s88, s88, s[sgprGSUSumIdx]               // Free1
+s_mul_hi_u32 s89, s88, s[sgprStrideC1J]            // Free1
+s_mul_i32 s88, s88, s[sgprStrideC1J]               // Free1
+s_add_u32 s86, s86, s88                            // Free1
+s_addc_u32 s87, s87, s89                           // Free1
+s_sub_u32 s88, s[sgprSizesFree+2], 1               // Free2
+s_mul_i32 s88, s88, s[sgprGSUSumIdx]               // Free2
+s_mul_hi_u32 s89, s88, s[sgprStrideCK]             // Free2
+s_mul_i32 s88, s88, s[sgprStrideCK]                // Free2
+s_add_u32 s86, s86, s88                            // Free2
+s_addc_u32 s87, s87, s89                           // Free2
+s_lshl_b64 s[86:87], s[86:87], 2                   // scale by bpe
+s_add_u32 s[sgprSrdD+0], s[sgprSrdD+0], s86        // add lo GSU offset to SRD
+s_addc_u32 s[sgprSrdD+1], s[sgprSrdD+1], s87       // add hi GSU offset to SRD
 label_GSU_2:
 .set sgprGSULog2BpeC, UNDEF
 .set sgprAddressC, UNDEF
@@ -1919,210 +1924,106 @@ s_cmp_eq_u32 s[sgprLoopCounterL], 0                // at last iteration?
 
 /* label_PrefetchGlobalLastIterEnd */
 s_cbranch_scc0 label_NoBranch_0                    // Only branch on scc1
-s_getpc_b64 s[82:83]                               // addr of next instr
-s_add_i32 s84, label_PrefetchGlobalLastIterEnd, 4  // target branch offset
-s_add_u32 s82, s82, s84                            // add target branch offset
-s_addc_u32 s83, s83, 0                             // add high and carry
-s_setpc_b64 s[82:83]                               // branch to label_PrefetchGlobalLastIterEnd
+s_getpc_b64 s[86:87]                               // addr of next instr
+s_add_i32 s88, label_PrefetchGlobalLastIterEnd, 4  // target branch offset
+s_add_u32 s86, s86, s88                            // add target branch offset
+s_addc_u32 s87, s87, 0                             // add high and carry
+s_setpc_b64 s[86:87]                               // branch to label_PrefetchGlobalLastIterEnd
 label_NoBranch_0:
 s_waitcnt vmcnt(0)                                 // wait for global read
 
 /* local write a */
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+0]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+0+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+0+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+1]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+4+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+4+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+2]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+8+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+8+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+3]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+0], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+1], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+2], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+3], v231, v232        // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+12+0], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+1], v232, v234          // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+12+2], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+3], v232, v234          // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write b */
@@ -2344,201 +2245,97 @@ ds_load_b128 v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3], v[vgprLocalReadAddrB+0]
 s_waitcnt vmcnt(0)                                 // 1wait for global read
 
 /* local write A */
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+0]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+0+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+0+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS1
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+1]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+4+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+4+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS1
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+2]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+8+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+8+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS1
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+3]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+0], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+1], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+2], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+3], v231, v232        // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+12+0], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+1], v232, v234          // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+12+2], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+3], v232, v234          // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS1
 
 /* local write MXSA */
@@ -2581,12 +2378,12 @@ v_xor_b32 v[vgprLocalReadAddrB], 0x8000, v[vgprLocalReadAddrB] // swap Red Blk
 
 /* global read inc A loopL */
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?
-s_cselect_b32 s82, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0] // incLower <- ?
-s_cselect_b32 s83, s[sgprWrapUA+1], 0              // incUpper <- ?
-s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s82        // gra SRD += inc(lower)
-s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s83       // gra SRD += inc(upper)
-s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s82 // limit -= inc)
-s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s83 // limit -= inc)
+s_cselect_b32 s86, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0] // incLower <- ?
+s_cselect_b32 s87, s[sgprWrapUA+1], 0              // incUpper <- ?
+s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s86        // gra SRD += inc(lower)
+s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s87       // gra SRD += inc(upper)
+s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s86 // limit -= inc)
+s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s87 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
@@ -2606,12 +2403,12 @@ s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], s41 // scaleZeroA limi
 
 /* global read inc B loopL */
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?
-s_cselect_b32 s82, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0] // incLower <- ?
-s_cselect_b32 s83, s[sgprWrapUB+1], 0              // incUpper <- ?
-s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s82        // gra SRD += inc(lower)
-s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s83       // gra SRD += inc(upper)
-s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s82 // limit -= inc)
-s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s83 // limit -= inc)
+s_cselect_b32 s86, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0] // incLower <- ?
+s_cselect_b32 s87, s[sgprWrapUB+1], 0              // incUpper <- ?
+s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s86        // gra SRD += inc(lower)
+s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s87       // gra SRD += inc(upper)
+s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s86 // limit -= inc)
+s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s87 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitB+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit // Move shadow to real if we are within 2^32
 
@@ -2716,12 +2513,12 @@ ds_load_b128 v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3], v[vgprLocalReadAddrB+0]
 
 /* global read inc A loopL */
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?
-s_cselect_b32 s82, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0] // incLower <- ?
-s_cselect_b32 s83, s[sgprWrapUA+1], 0              // incUpper <- ?
-s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s82        // gra SRD += inc(lower)
-s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s83       // gra SRD += inc(upper)
-s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s82 // limit -= inc)
-s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s83 // limit -= inc)
+s_cselect_b32 s86, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0] // incLower <- ?
+s_cselect_b32 s87, s[sgprWrapUA+1], 0              // incUpper <- ?
+s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s86        // gra SRD += inc(lower)
+s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s87       // gra SRD += inc(upper)
+s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s86 // limit -= inc)
+s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s87 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
 
@@ -2741,12 +2538,12 @@ s_sub_u32 s[sgprSrdScaleZeroA+2], s[sgprSrdScaleZeroA+2], s41 // scaleZeroA limi
 
 /* global read inc B loopL */
 s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?
-s_cselect_b32 s82, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0] // incLower <- ?
-s_cselect_b32 s83, s[sgprWrapUB+1], 0              // incUpper <- ?
-s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s82        // gra SRD += inc(lower)
-s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s83       // gra SRD += inc(upper)
-s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s82 // limit -= inc)
-s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s83 // limit -= inc)
+s_cselect_b32 s86, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0] // incLower <- ?
+s_cselect_b32 s87, s[sgprWrapUB+1], 0              // incUpper <- ?
+s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s86        // gra SRD += inc(lower)
+s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s87       // gra SRD += inc(upper)
+s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s86 // limit -= inc)
+s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s87 // limit -= inc)
 s_cmp_eq_u32 s[sgprShadowLimitB+1], 0              // are we within 2^32?
 s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit // Move shadow to real if we are within 2^32
 s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0
@@ -2870,201 +2667,97 @@ ds_load_b128 v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3], v[vgprLocalReadAddrB+0]
 s_waitcnt vmcnt(0)                                 // 1wait for global read
 
 /* local write A */
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+0]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+0]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+0] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+0], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+2+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+0+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+0+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+0+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+0+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+0:vgprG2LA+0+3] offset:0 // lwoA_0_0_0_0 = (0*LSCA)*(MT0I+PAD) + (0*LSPA) = 0 sync LDS0
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+1]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+1]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+1] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+1], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+6+0]                    // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+4+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+4+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+4+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+4+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+4:vgprG2LA+4+3] offset:2304 // lwoA_0_0_1_0 = (0*LSCA)*(MT0I+PAD) + (1*LSPA) = 2304 sync LDS0
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+2]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+2]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+2] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+2], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+10+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+0], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+1], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+2], v231, v232         // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+8+3], v231, v232         // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+8+0], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+1], v232, v234           // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+8+2], v232, v234           // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+8+3], v232, v234           // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+8:vgprG2LA+8+3] offset:4608 // lwoA_0_0_2_0 = (0*LSCA)*(MT0I+PAD) + (2*LSPA) = 4608 sync LDS0
-v_cvt_f32_f16 v234, v[vgprG2LScaleA+3]             // scaleA: fp16 -> f32
-v_and_b32 v235, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
-v_lshlrev_b32 v235, 2, v235                        // scaleZeroA: -> nibble shift 0 or 4
-v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v235, 0x4  // scaleZeroA: extract the selected nibble (unsigned)
-v_cvt_f32_i32 v231, v231                           // scaleZeroA: int4 -> f32
-v_add_f32 v231, 0x43000000, v231                   // scaleZeroA: + 128 to cancel the magic bias
-v_mul_f32 v235, v234, v231                         // scaleZeroA: z*s
-v_xor_b32 v235, 0x80000000, v235                   // w4a16: negate -> -z*s
+v_and_b32 v234, 0xffff, v[vgprG2LScaleA+3]         // scaleA: drop the stale high half of the d16 load
+v_lshl_or_b32 v234, v234, 16, v234                 // scaleA: fp16 s -> both halves
+v_and_b32 v231, 1, v[vgprGlobalReadOffsetScaleZeroA+3] // scaleZeroA: 0 or 1 from row parity
+v_lshlrev_b32 v231, 2, v231                        // scaleZeroA: -> nibble shift 0 or 4
+v_bfe_u32 v231, v[vgprG2LScaleZeroA+3], v231, 0x4  // scaleZeroA: extract the selected nibble
+v_lshl_or_b32 v231, v231, 16, v231                 // scaleZeroA: z -> both halves
+v_lshl_or_b32 v235, v231, 0, s[sgprScaleAPkMagic+2] // scaleZeroA: two fp16 holding -(1024+z)
+v_lshl_or_b32 v236, v231, 4, s[sgprScaleAPkMagic+3] // scaleZeroA: two fp16 holding -(64+z)
 v_mov_b32 v233, v[vgprG2LA+14+0]                   // w4a16: save packed int4 dword 0
-v_and_b32 v232, 0xf000f, v233                      // w4a16: isolate int4 #0 and #1
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+0], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x4, v233                      // w4a16: nibble pair 1
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #2 and #3
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+1], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0x8, v233                      // w4a16: nibble pair 2
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #4 and #5
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+2], v231, v232        // w4a16: pack 2 fp16
-v_lshrrev_b32 v232, 0xc, v233                      // w4a16: nibble pair 3
-v_and_b32 v232, 0xf000f, v232                      // w4a16: isolate int4 #6 and #7
-v_or_b32 v232, 0x43004300, v232                    // w4a16: -> two bf16 holding 128+q
-v_lshlrev_b32 v231, 16, v232                       // w4a16: low bf16 -> f32
-v_and_b32 v232, 0xffff0000, v232                   // w4a16: high bf16 -> f32
-v_fma_f32 v231, v231, v234, v235                   // w4a16: q*s - z*s
-v_fma_f32 v232, v232, v234, v235                   // w4a16: q*s - z*s
-v_cvt_f16_f32 v231, v231                           // w4a16: f32 -> fp16
-v_cvt_f16_f32 v232, v232                           // w4a16: f32 -> fp16
-v_pack_b32_f16 v[vgprG2LA+12+3], v231, v232        // w4a16: pack 2 fp16
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #0 and #1 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+12+0], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #2 and #3 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+1], v232, v234          // w4a16: (q - z)*s, packed
+v_lshrrev_b32 v233, 0x8, v233                      // w4a16: next two nibbles down to bits 0-7
+v_and_or_b32 v232, v233, 0xf000f, s[sgprScaleAPkMagic+0] // w4a16: int4 #4 and #5 -> two fp16 holding 1024+q
+v_pk_add_f16 v232, v232, v235                      // w4a16: q - z (exact: both sides are integers near 1024)
+v_pk_mul_f16 v[vgprG2LA+12+2], v232, v234          // w4a16: (q - z)*s, packed
+v_and_or_b32 v232, v233, 0xf000f0, s[sgprScaleAPkMagic+1] // w4a16: int4 #6 and #7 -> two fp16 holding 64+q
+v_pk_add_f16 v232, v232, v236                      // w4a16: q - z (exact: both sides are integers near 64)
+v_pk_mul_f16 v[vgprG2LA+12+3], v232, v234          // w4a16: (q - z)*s, packed
 ds_store_b128 v[vgprLocalWriteAddrA+0], v[vgprG2LA+12:vgprG2LA+12+3] offset:6912 // lwoA_0_0_3_0 = (0*LSCA)*(MT0I+PAD) + (3*LSPA) = 6912 sync LDS0
 
 /* local write MXSA */
@@ -3327,6 +3020,7 @@ label_Summation_End_2:
 .set sgprAddressScaleA, UNDEF
 .set sgprAddressScaleB, UNDEF
 .set sgprSrdScaleA, UNDEF
+.set sgprScaleAPkMagic, UNDEF
 .set sgprScaleAKCnt, UNDEF
 .set sgprStaggerUIter, UNDEF
 .set sgprAddressScaleZeroA, UNDEF
