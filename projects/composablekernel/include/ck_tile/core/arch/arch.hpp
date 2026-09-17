@@ -456,14 +456,27 @@ constexpr auto get_compiler_target()
  * will always pick the *first* cmakelists target arch, so there will be issues when compiling for
  * multiple target architectures.
  */
+// Every tier below must be a whole-translation-unit `-D` macro: this selects a template argument
+// type, so a device-pass-only `__gfx*__` tier would make the host and device passes instantiate
+// different types. The CK_USE_GFX* tier is family-coarse and picks a representative target.
+#if defined(CK_CMAKE_GPU_TARGET_IDS)
+#define CK_TILE_GPU_TARGET_IDS CK_CMAKE_GPU_TARGET_IDS
+#elif defined(CK_USE_GFX1250)
+#define CK_TILE_GPU_TARGET_IDS 0x1250
+#elif defined(CK_USE_GFX950)
+#define CK_TILE_GPU_TARGET_IDS 0x0950
+#elif defined(CK_USE_GFX94)
+#define CK_TILE_GPU_TARGET_IDS 0x0942
+#endif
+
 // Note: The trivial template and always_false_v are necessary to avoid triggering the first static
 // assert. Without this trick the static assert would be triggered regardless of the value of "id".
 template <typename = void>
 static constexpr auto getCMakeCompilerTarget()
 {
     using ck_tile::core::arch::amdgcn_target_id;
-#ifdef CK_CMAKE_GPU_TARGET_IDS
-    constexpr uint32_t ids[] = {CK_CMAKE_GPU_TARGET_IDS};
+#ifdef CK_TILE_GPU_TARGET_IDS
+    constexpr uint32_t ids[] = {CK_TILE_GPU_TARGET_IDS};
     constexpr amdgcn_target_id id =
         static_cast<amdgcn_target_id>(ids[0]); // We pick the *first* target arch. TODO.
 
@@ -500,13 +513,18 @@ static constexpr auto getCMakeCompilerTarget()
     {
 #if USE_NEW_UNIFIED_FRAMEWORK // Avoid hard errors for third parties including arch.hpp
         static_assert(always_false_v<decltype(id)>,
-                      "CK_CMAKE_GPU_TARGET_IDS[0] is HOST or UNKNOWN!\n");
+                      "CK_TILE_GPU_TARGET_IDS[0] is HOST or UNKNOWN!\n");
 #endif
         return amdgcn_target<>{}; // By default, return HOST target.
     }
 #else
 #if USE_NEW_UNIFIED_FRAMEWORK
-    static_assert(false, "The CK_CMAKE_GPU_TARGET_IDS macro was not made available!\n");
+    static_assert(false,
+                  "No GPU target is known at compile time. Building ck_tile outside CK's CMake "
+                  "requires naming the target on the compile line, e.g. "
+                  "-DCK_CMAKE_GPU_TARGET_IDS=0x0942 for gfx942, or one of -DCK_USE_GFX94 / "
+                  "-DCK_USE_GFX950 / -DCK_USE_GFX1250. It must be a -D flag (not a header guard) "
+                  "so the host and device compilation passes agree.\n");
 #endif
     return amdgcn_target<>{}; // By default, return HOST target.
 #endif
