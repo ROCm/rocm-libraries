@@ -55,7 +55,7 @@ function(print_configuration_summary)
     endif()
 
     message(STATUS "")
-    message(STATUS "******** Summary ********")
+    message(STATUS "******** hipCUB Summary ********")
     message(STATUS "General:")
     message(STATUS "  System                : ${CMAKE_SYSTEM_NAME}")
     message(STATUS "  HIP ROOT              : ${HIP_ROOT_DIR}")

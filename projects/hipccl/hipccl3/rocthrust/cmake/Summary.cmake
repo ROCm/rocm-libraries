@@ -65,7 +65,7 @@ function (print_configuration_summary)
     list(JOIN CMAKE_CXX_FLAGS_AND_OPTIONS_LIST " " CMAKE_CXX_FLAGS_AND_OPTIONS)
 
     message(STATUS "")
-    message(STATUS "******** Summary ********")
+    message(STATUS "******** rocThrust Summary ********")
     message(STATUS "General:")
     message(STATUS "  System                : ${CMAKE_SYSTEM_NAME}")
     message(STATUS "  HIP ROOT              : ${HIP_ROOT_DIR}")

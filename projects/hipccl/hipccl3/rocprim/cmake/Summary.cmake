@@ -59,7 +59,7 @@ function(print_configuration_summary)
   string(REPLACE ";" "\n" CMAKE_CXX_COMPILER_VERBOSE_DETAILS "${CMAKE_CXX_COMPILER_VERBOSE_DETAILS}")
 
   message(STATUS "")
-  message(STATUS "******** Summary ********")
+  message(STATUS "******** rocPRIM Summary ********")
   message(STATUS "General:")
   message(STATUS "  System                : ${CMAKE_SYSTEM_NAME}")
   if(USE_HIPCXX)

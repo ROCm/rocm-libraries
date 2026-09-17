@@ -26,6 +26,9 @@ set(HIPCCL_VERSION_MINOR 1)
 set(HIPCCL_VERSION_PATCH 0)
 set(HIPCCL_VERSION "${HIPCCL_VERSION_MAJOR}.${HIPCCL_VERSION_MINOR}.${HIPCCL_VERSION_PATCH}")
 
+# --- Default install prefix ---
+set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+
 project(hipccl VERSION ${HIPCCL_VERSION} LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
@@ -62,6 +65,7 @@ set(VERSION_STRING "${HIPCCL_VERSION}" CACHE STRING "Unified hipCCL component ve
 option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" ON)
 option(HIPCCL_BUILD_HIPCUB "Build hipCUB as part of the unified hipCCL build" ON)
 option(HIPCCL_BUILD_ROCTHRUST "Build rocThrust as part of the unified hipCCL build" ON)
+
 # NOTE(hipccl3): libhipcxx is present under projects/hipccl/hipccl3/libhipcxx
 # (pinned to ROCm/libhipcxx@5ac455d737937ba2dfd1a4e85ad13f19a775f692) but is
 # NOT wired into this superbuild yet. Its CMakeLists.txt is structured around
@@ -79,7 +83,7 @@ if(HIPCCL_BUILD_ALL)
     set(HIPCCL_BUILD_ROCPRIM ON CACHE BOOL "" FORCE)
     set(HIPCCL_BUILD_HIPCUB ON CACHE BOOL "" FORCE)
     set(HIPCCL_BUILD_ROCTHRUST ON CACHE BOOL "" FORCE)
-    set(HIPCCL_BUILD_LIBHIPCXX ON CACHE BOOL "" FORCE)
+    #set(HIPCCL_BUILD_LIBHIPCXX ON CACHE BOOL "" FORCE) #TODO: Turn this back on once libhipcxx is properly integrated
 endif()
 
 if(HIPCCL_BUILD_ROCPRIM)
@@ -113,5 +117,5 @@ if(HIPCCL_BUILD_LIBHIPCXX)
         "needs to be reconciled with the unified version/install scheme before "
         "it can be added here. See the NOTE(hipccl3) comment above HIPCCL_BUILD_LIBHIPCXX."
     )
-    # add_subdirectory(libhipcxx)
+    add_subdirectory(libhipcxx)
 endif()
