@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: the ``if os.environ.get("ROCM_PATH")``
-predicate in ``Tensile/Toolchain/Validators.py`` at line 97, inside
+predicate in ``tensilelite/Toolchain/Validators.py`` at line 97, inside
 ``_posixSearchPaths``.
 
 Branch c03b6953169e51d676e1f454d11aef7debf7110a.  The predicate tests Python
