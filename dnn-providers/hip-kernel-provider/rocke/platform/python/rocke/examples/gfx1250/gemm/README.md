@@ -6,7 +6,7 @@ LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
 
 | Example | Matrix inputs | Scale contract |
 | --- | --- | --- |
-| `mxfp8_gemm` | FP8 E4M3 on both operands | E8M0 |
+| `mxfp8_gemm` | FP8 E4M3 (`fp8`) or BF8 E5M2 (`bf8`) on both operands | E8M0 |
 | `mxfp4_gemm` | Packed FP4 E2M1 on both operands | E8M0 |
 
 ```sh
@@ -74,3 +74,13 @@ explicit FP32 rounding step before output conversion. See [NVFP4.md](NVFP4.md).
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.nvfp4_gemm
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.nvfp4_gemm --dtype-c fp16 --compile-route hip
 ```
+
+`mxfp8_gemm` runs both FP8 E4M3 and BF8 E5M2 by default, as separate
+homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
+or `--dtype both` explicitly. The names follow the FP6/BF6 convention.
+Both operands use the selected format with E8M0 scales; mixed matrix formats
+have a separate example.
+
+`mxfp6_gemm` runs both `fp6` (E2M3) and `bf6` (E3M2) by default, as
+separate homogeneous cases. Use `--dtype fp6`, `--dtype bf6`, or explicit
+`--dtype both` to select the encodings.

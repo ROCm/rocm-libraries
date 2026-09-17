@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""FP8 E4M3 x E4M3 GEMM with packed E8M0 block scales on gfx1250."""
+"""Homogeneous FP8 E4M3 or BF8 E5M2 GEMM with E8M0 block scales on gfx1250."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ def make_spec(args) -> BlockScaledGemmSpec:
         M=args.m,
         N=args.n,
         K=args.k,
-        dtype_a="fp8e4m3",
-        dtype_b="fp8e4m3",
+        dtype_a=args.dtype,
+        dtype_b=args.dtype,
         dtype_c="bf16",
         scale_dtype="e8m0",
         matrix_path=args.matrix_path,
@@ -24,8 +24,14 @@ def make_spec(args) -> BlockScaledGemmSpec:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = argument_parser(__doc__).parse_args(argv)
-    return verify(make_spec(args), args)
+    parser = argument_parser(__doc__)
+    parser.add_argument("--dtype", choices=("fp8", "bf8", "both"), default="both")
+    args = parser.parse_args(argv)
+    dtypes = ("fp8", "bf8") if args.dtype == "both" else (args.dtype,)
+    for dtype in dtypes:
+        args.dtype = dtype
+        verify(make_spec(args), args)
+    return 0
 
 
 if __name__ == "__main__":

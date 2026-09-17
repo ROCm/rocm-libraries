@@ -14,7 +14,7 @@ from rocke.instances.gfx1250.block_scaled_gemm import build_block_scaled_gemm
 
 @pytest.mark.parametrize(
     "family,dtype",
-    [("mxfp8", "fp8e4m3"), ("mxfp4", "fp4"), ("mxfp6", "fp6"), ("mxfp6", "bf6")],
+    [("mxfp8", "fp8"), ("mxfp4", "fp4"), ("mxfp6", "fp6"), ("mxfp6", "bf6")],
 )
 @pytest.mark.parametrize("path,block_k", [("wmma_scale", 32), ("wmma_scale16", 16)])
 def test_example_contract_and_lowering(family, dtype, path, block_k):
