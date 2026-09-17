@@ -11,6 +11,7 @@
 #
 
 name: gfx1250 TensileLite + hipBLASLt Tests
+run-name: gfx1250 HW - ${{ github.event.workflow_run.head_branch || github.ref_name }} @ ${{ github.event.workflow_run.head_sha || github.sha }}
 
 on:
   # SCRATCH ONLY (DO NOT MERGE): self-trigger on push to validate the job body pre-merge.
@@ -258,6 +259,8 @@ jobs:
           fi
           echo "$ROCM/bin" >> "$GITHUB_PATH"
           echo "$ROCM/lib/llvm/bin" >> "$GITHUB_PATH"
+          printf '%s\n' "$ROCM/lib" "$ROCM/lib/llvm/lib" "$ROCM/lib/rocm_sysdeps/lib" > /etc/ld.so.conf.d/rocm-artifact.conf
+          ldconfig
           echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
           echo "::group::Artifact layout"
           ls -la "$ROCM" || true
@@ -270,9 +273,6 @@ jobs:
         run: |
           set +e
           HTB="$(find "$ROCM" -type f -name hipblaslt-test | head -1)"
-          echo "::group::rocminfo (device + ISA + xnack)"
-          "$ROCM/bin/rocminfo" 2>&1 | grep -iE "Name:|gfx|xnack|Uuid" | head -40 || echo "rocminfo not in artifact / failed"
-          echo "::endgroup::"
           echo "::group::libhsa the test binary loads + artifact HSA"
           ldd "$HTB" 2>&1 | grep -iE "hsa|amdhip64|=> not found"
           find "$ROCM" -name 'libhsa-runtime64.so*' 2>/dev/null
@@ -306,6 +306,7 @@ jobs:
           ldd "$HIPBLASLT_TEST" 2>&1 | grep -iE "hipblaslt|=> not found" || true
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
+          HIPBLASLT_TEST_TIMEOUT=3600 \
           HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
           "$HIPBLASLT_TEST" "${FILTER[@]}" \
             --gtest_output=xml:test_results/hipblaslt_test.xml 2>&1 \
@@ -332,8 +333,20 @@ jobs:
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
-          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/dev/null || echo gfx1250v0)"
-          echo "TensileLite gpu-target (asic-revision detected): $TL_TARGET"
+          echo "::group::asic-revision detection"
+          echo "hipcc: $(command -v hipcc || echo MISSING)"
+          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/tmp/rev_err.log || echo gfx1250v0)"
+          echo "-- detection stderr --"; cat /tmp/rev_err.log 2>/dev/null || true
+          echo "TensileLite gpu-target: $TL_TARGET"
+          echo "artifact amdclang++: $("$ROCM/bin/amdclang++" --version 2>&1 | head -1)"
+          echo "::endgroup::"
+          CLIENT="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client"
+          echo "::group::libomp diagnosis"
+          find "$ROCM" -name 'libomp.so*'
+          readelf -d "$CLIENT" 2>/dev/null | grep -E 'NEEDED|RPATH|RUNPATH'
+          ldd "$CLIENT" 2>&1 | grep -iE 'omp|=> not found'
+          ldconfig -p | grep -i omp || echo "libomp NOT in ld cache"
+          echo "::endgroup::"
           pytest -p no:cacheprovider Tensile/Tests/common \
             -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
