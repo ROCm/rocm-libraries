@@ -184,6 +184,7 @@ rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
     s.trait.pad_n = false;
     s.trait.pad_k = false;
     s.trait.persistent = false;
+    s.trait.persistent_ctas = 0; /* default 0 (persistent off) */
     s.trait.chiplet_swizzle = false;
     s.trait.chiplet_wgm = 8; /* default 8  */
     s.trait.chiplet_num_xcds = 8; /* default 8  */
@@ -240,7 +241,7 @@ void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec)
  *          f"w{warp_m}x{warp_n}x{warp_k}",
  *          f"wt{wt_m}x{wt_n}x{wt_k}",
  *          f"{pipeline}_{scheduler}_{epilogue}",
- *          flags={"pad": any(pad_*), "pers": persistent, "bat": batched,
+ *          flags={"pad": any(pad_*), f"pers{persistent_ctas}": persistent, "bat": batched,
  *                 "preb": preshuffle_b, "dtl": direct_to_lds,
  *                 "pref": dtl_prefetch, "actt": active_tile_skip})
  *
@@ -256,6 +257,7 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
     char part_w[64];
     char part_wt[64];
     char part_pipe[128];
+    char part_pers[32];
     char part_spk[32];
     const char* parts[5];
     const char* flag_names[9];
@@ -285,7 +287,10 @@ rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_
 
     /* flags map, in Python insertion order. */
     flag_names[0] = "pad";
-    flag_names[1] = "pers";
+    /* Python flag key f"pers{tr.persistent_ctas}" (dynamic name; on when
+     * persistent). */
+    snprintf(part_pers, sizeof(part_pers), "pers%d", tr->persistent_ctas);
+    flag_names[1] = part_pers;
     flag_names[2] = "bat";
     flag_names[3] = "preb";
     flag_names[4] = "dtl";
@@ -619,6 +624,16 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         {
             CK_GEMM_REJECT("WMMA path does not support chiplet_swizzle on %s", arch);
         }
+        /* lds_swizzle is rejected for the whole family, not just the load paths
+         * that structurally cannot express it. It XORs the *global* column so
+         * the LDS destination can stay wave-contiguous, a gfx9-shaped
+         * assumption that does not carry over to WMMA's ds_read geometry: on
+         * the VGPR-staged path it emits, runs fast, and returns wrong results.
+         * Bit-exact and worth ~+3% on CDNA MFMA, hence the family scope. */
+        if(spec->trait.lds_swizzle)
+        {
+            CK_GEMM_REJECT("WMMA path does not support lds_swizzle on %s", arch);
+        }
         if(spec->trait.dtl_prefetch)
         {
             if(strcmp(arch, "gfx1250") != 0)
@@ -638,13 +653,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
             }
             /* lds_k_pad IS supported here: gfx1250's global_load_async_to_lds
              * is per-lane addressed, so a padded LDS row stride costs nothing.
-             * lds_swizzle still is not -- it XORs the *global* column so the
-             * LDS destination can stay wave-contiguous, a gfx9-shaped
-             * assumption that does not carry over. */
-            if(spec->trait.lds_swizzle)
-            {
-                CK_GEMM_REJECT("gfx1250 WMMA direct_to_lds does not support lds_swizzle");
-            }
+             * (lds_swizzle is rejected for the whole family above.) */
         }
     }
 
@@ -731,6 +740,31 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         if(sk > 1 && strcmp(family, "mma") != 0)
         {
             CK_GEMM_REJECT("split_k > 1 is CDNA-only (got family '%s' on %s)", family, arch);
+        }
+    }
+
+    /* Persistent (grid-stride) tile loop. The three exclusions are all the same
+     * shape of problem: the flag in question resolves something from blockIdx
+     * once at CTA entry, which is exactly what the persistent kernel makes
+     * per-tile instead of per-CTA. */
+    if(spec->trait.persistent)
+    {
+        if(spec->trait.persistent_ctas <= 0)
+        {
+            CK_GEMM_REJECT("persistent needs persistent_ctas > 0 (the grid-stride step "
+                           "is a codegen constant; see persistent_ctas_for_device)");
+        }
+        if(strcmp(spec->trait.pipeline, "wsp3") == 0)
+        {
+            CK_GEMM_REJECT("persistent is not wired for the wsp3 pipeline");
+        }
+        if(spec->trait.split_k > 1)
+        {
+            CK_GEMM_REJECT("persistent does not compose with split_k > 1");
+        }
+        if(spec->trait.active_tile_skip)
+        {
+            CK_GEMM_REJECT("persistent does not compose with active_tile_skip");
         }
     }
 

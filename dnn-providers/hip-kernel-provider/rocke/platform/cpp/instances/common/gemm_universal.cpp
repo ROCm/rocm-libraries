@@ -1170,8 +1170,16 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
         ctx.batch_off_c = ctx.c0;
     }
 
-    /* ---- per-CTA tile origins (SGPR-pinned) -- */
-    if(spec->trait.chiplet_swizzle)
+    /* ---- per-CTA tile origins (SGPR-pinned) --
+     * trait.persistent moves the whole assignment inside a grid-stride loop, so
+     * the origin is recomputed per tile rather than once per CTA; it is emitted
+     * at the dispatch site at the end of this function. */
+    if(spec->trait.persistent)
+    {
+        ctx.block_m_off = NULL;
+        ctx.block_n_off = NULL;
+    }
+    else if(spec->trait.chiplet_swizzle)
     {
         rocke_value_t* n_pid_m = rocke_b_div(
             b, rocke_b_add(b, ctx.M, rocke_b_const_i32(b, ctx.block_m - 1)), ctx.c_block_m);
@@ -1419,8 +1427,67 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
     /* ---- K-loop result accumulators init -- */
     ctx.num_for_results = 0;
 
-    /* ---- dispatch: emit_compute_and_epilogue, optionally under the gate -- */
-    if(ctx.do_work_cond == NULL)
+    /* ---- dispatch: the persistent tile loop, or emit_compute_and_epilogue
+     * directly / under the active-tile gate --
+     *
+     * Persistent mirrors CK Tile's PersistentKernel operator(): the grid is
+     * (persistent_ctas, 1, batch) rather than one CTA per tile, and each CTA
+     * grid-strides the flattened M_tiles x N_tiles strip. The tile decode
+     * matches CK's GetOutputTileIndex and the launcher's X-fastest order:
+     * iM = tile_idx / N_tiles, iN = tile_idx % N_tiles. */
+    if(spec->trait.persistent)
+    {
+        rocke_value_t* n_pid_m = rocke_b_div(
+            b, rocke_b_add(b, ctx.M, rocke_b_const_i32(b, ctx.block_m - 1)), ctx.c_block_m);
+        rocke_value_t* n_pid_n = rocke_b_div(
+            b, rocke_b_add(b, ctx.N, rocke_b_const_i32(b, ctx.block_n - 1)), ctx.c_block_n);
+        rocke_value_t* num_tiles = rocke_b_mul(b, n_pid_m, n_pid_n);
+        /* Python evaluates the scf_for arguments left to right, so the
+         * blockIdx read is emitted before the step constant. C's argument
+         * evaluation order is unspecified; pin it with temporaries. */
+        rocke_value_t* tile_lo = rocke_b_block_id_x(b);
+        rocke_value_t* tile_step = rocke_b_const_i32(b, spec->trait.persistent_ctas);
+        rocke_for_t loop = rocke_b_scf_for(b, tile_lo, num_tiles, tile_step, "tile_idx");
+        rocke_b_region_enter(b, loop.body);
+        {
+            /* The induction variable is CTA-uniform, so pin it (and everything
+             * derived from it) in SGPRs exactly as the non-persistent path pins
+             * the blockIdx-derived origins. */
+            rocke_value_t* ti = rocke_b_to_sgpr_u32(b, loop.iv);
+            if(spec->trait.chiplet_swizzle)
+            {
+                rocke_super_tile_swizzle_result_t swz
+                    = rocke_chiplet_aware_super_tile_dynamic(b,
+                                                             ti,
+                                                             n_pid_m,
+                                                             n_pid_n,
+                                                             spec->trait.chiplet_wgm,
+                                                             spec->trait.chiplet_num_xcds,
+                                                             spec->trait.chiplet_chunk_size);
+                ctx.block_m_off
+                    = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.row, ctx.c_block_m));
+                ctx.block_n_off
+                    = rocke_b_to_sgpr_u32(b, rocke_b_mul(b, swz.col, ctx.c_block_n));
+            }
+            else
+            {
+                ctx.block_m_off = rocke_b_to_sgpr_u32(
+                    b, rocke_b_mul(b, rocke_b_div(b, ti, n_pid_n), ctx.c_block_m));
+                ctx.block_n_off = rocke_b_to_sgpr_u32(
+                    b, rocke_b_mul(b, rocke_b_mod(b, ti, n_pid_n), ctx.c_block_n));
+            }
+            /* Inter-tile LDS guard, the counterpart of CK Tile's
+             * s_waitcnt_barrier() at the top of its persistent while-body. A CTA
+             * reuses one A/B staging region (and, under the cshuffle epilogue,
+             * the C tile aliased onto it) for every tile it owns, and neither
+             * the K-loop's final ds_read nor the epilogue's last LDS read is
+             * followed by a barrier. */
+            rocke_b_sync(b);
+            rocke_gemm_emit_compute_and_epilogue(&ctx);
+        }
+        rocke_b_region_leave(b);
+    }
+    else if(ctx.do_work_cond == NULL)
     {
         rocke_gemm_emit_compute_and_epilogue(&ctx);
     }

@@ -32,6 +32,7 @@ from rocke.instances.common.gemm_universal import (
     UniversalGemmSpec,
     build_universal_gemm,
     is_valid_spec,
+    universal_gemm_grid,
 )
 from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import HipError, Runtime
@@ -62,6 +63,7 @@ def _make_spec(
     dtl_prefetch: bool = False,
     tdm: bool = False,
     tdm_depth: int = 1,
+    persistent_ctas: int = 0,
 ) -> UniversalGemmSpec:
     target = config["target"]
     problem = config["problem"]
@@ -97,6 +99,8 @@ def _make_spec(
             dtl_prefetch=dtl_prefetch,
             tdm=tdm,
             tdm_depth=tdm_depth,
+            persistent=persistent_ctas > 0,
+            persistent_ctas=persistent_ctas,
         ),
         data=DataSpec(
             dtype_a=dtype,
@@ -213,21 +217,24 @@ def enumerate_trait_configs(
                         for lds_swizzle in traits["lds_swizzle"]:
                             for lds_k_pad in traits["lds_k_pad"]:
                                 for path in _load_paths(traits):
-                                    specs.append(
-                                        replace(
-                                            base,
-                                            trait=replace(
-                                                base.trait,
-                                                pipeline=pipeline,
-                                                scheduler=scheduler,
-                                                epilogue=epilogue,
-                                                waves_per_eu=waves_per_eu,
-                                                lds_swizzle=lds_swizzle,
-                                                lds_k_pad=lds_k_pad,
-                                                **path,
-                                            ),
+                                    for pers in traits.get("persistent_ctas", [0]):
+                                        specs.append(
+                                            replace(
+                                                base,
+                                                trait=replace(
+                                                    base.trait,
+                                                    pipeline=pipeline,
+                                                    scheduler=scheduler,
+                                                    epilogue=epilogue,
+                                                    waves_per_eu=waves_per_eu,
+                                                    lds_swizzle=lds_swizzle,
+                                                    lds_k_pad=lds_k_pad,
+                                                    persistent=int(pers) > 0,
+                                                    persistent_ctas=int(pers),
+                                                    **path,
+                                                ),
+                                            )
                                         )
-                                    )
     return _dedupe_valid(specs, arch=config["target"]["arch"])
 
 
@@ -352,14 +359,7 @@ def _launch_geometry(
     spec: UniversalGemmSpec, shape: Tuple[int, int, int]
 ) -> Tuple[Tuple[int, int, int], Tuple[int, int, int]]:
     m, n, _k = shape
-    return (
-        (
-            math.ceil(n / spec.tile.tile_n),
-            math.ceil(m / spec.tile.tile_m),
-            1,
-        ),
-        (spec.block_size, 1, 1),
-    )
+    return universal_gemm_grid(spec, m, n), (spec.block_size, 1, 1)
 
 
 def _time_function(
@@ -1029,6 +1029,12 @@ _CONFIG_OVERRIDES: Tuple[Tuple[str, Tuple[str, ...], Any, str], ...] = (
     ),
     ("--tdm", ("trait_config", "tdm"), _csv(_flag), "tensor-descriptor mover path"),
     ("--tdm-depth", ("trait_config", "tdm_depth"), _csv(int), "TDM pipeline depth"),
+    (
+        "--persistent-ctas",
+        ("trait_config", "persistent_ctas"),
+        _csv(int),
+        "persistent CTA counts to try (0 = problem-sized grid)",
+    ),
     ("--tile-finalists", ("selection", "tile_finalists"), int, "tiles kept after screening"),
     ("--final-timed", ("selection", "final_timed"), int, "candidates re-timed out-of-process"),
     ("--tolerance", ("selection", "tolerance"), float, "verification tolerance"),

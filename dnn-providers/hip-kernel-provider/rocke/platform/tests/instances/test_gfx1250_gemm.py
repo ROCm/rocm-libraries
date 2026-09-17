@@ -311,11 +311,23 @@ class TestGfx1250Gemm(unittest.TestCase):
                     ),
                     arch="gfx1250",
                 )
-                counts = {
+                waits = [
                     int(n)
                     for n in re.findall(r"wait\.tensorcnt\(i16 (\d+)\)", ll)
-                }
-                self.assertEqual(counts, {max(0, depth - 2)})
+                ]
+                if depth >= 3:
+                    # Two distinct waits on the ring path, and the distinction
+                    # is the point: the in-loop wait is partial (the lever),
+                    # while the loop is followed by exactly one full drain so no
+                    # mover write outlives the K-loop. Without that drain the
+                    # trailing look-ahead fills stay in flight into the
+                    # epilogue, where the smem packer has aliased the cshuffle C
+                    # tile onto the ring's bytes.
+                    self.assertEqual(sorted(waits), [0, depth - 2])
+                else:
+                    # Depths 1 and 2 keep the original emission: every wait on
+                    # the ping-pong path is a full drain.
+                    self.assertEqual(set(waits), {0})
                 if depth >= 3:
                     # One prologue fill per ring slot bar the one computed
                     # first, plus the single look-ahead fill in the loop body,
@@ -323,6 +335,108 @@ class TestGfx1250Gemm(unittest.TestCase):
                     # call site, so match on the call prefix.
                     issues = ll.count("call void @llvm.amdgcn.tensor.load.to.lds")
                     self.assertEqual(issues, 2 * (depth - 1) + 2)
+
+    def test_wmma_tdm_deep_ring_drains_before_aliased_cshuffle_tile(self):
+        """A deep ring must not leave mover writes in flight into the epilogue.
+
+        The ring's per-tile wait is partial, so its final iterations' look-ahead
+        fills are still in flight when the K-loop ends -- writes aimed at ring
+        slots inside the A/B pool. Under ``cshuffle`` the smem packer aliases the
+        C staging tile onto exactly those bytes, because IR liveness sees A/B die
+        at the loop's last *read* rather than when the hardware write lands. No
+        barrier helps: ``tile.sync`` drains VMEM and LDS, not TENSORcnt. Without
+        the post-loop drain a late fill overwrites the staged C tile, which is a
+        wrong answer rather than a fault, so assert the drain on the emission.
+        """
+        import re
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        for depth in (3, 4):
+            for no_alias in (False, True):
+                with self.subTest(tdm_depth=depth, cshuffle_no_alias=no_alias):
+                    ll = lower_kernel_to_llvm(
+                        build_universal_gemm(
+                            self._tdm_spec(
+                                depth=depth,
+                                epilogue="cshuffle",
+                                cshuffle_no_alias=no_alias,
+                            ),
+                            arch="gfx1250",
+                        ),
+                        arch="gfx1250",
+                    )
+                    waits = [
+                        int(n)
+                        for n in re.findall(r"wait\.tensorcnt\(i16 (\d+)\)", ll)
+                    ]
+                    # The drain is unconditional rather than predicated on the
+                    # aliasing: it is the ring that owes the invariant, and
+                    # ``cshuffle_no_alias`` is a tuning knob that must not be
+                    # load-bearing for correctness.
+                    self.assertEqual(sorted(waits), [0, depth - 2])
+
+    def test_wmma_rejects_lds_swizzle_on_every_load_path(self):
+        """``lds_swizzle`` miscompiles on WMMA, so the family gate must catch it.
+
+        It XORs the *global* column so the LDS destination stays wave-contiguous
+        -- a gfx9-shaped assumption that does not carry over to WMMA's ds_read
+        geometry. The direct-to-LDS and TDM paths cannot even express it and
+        rejected it already; the gap was the plain VGPR-staged path, where it
+        emits and runs *fast* while returning wrong results. Since the sweep
+        verifies only its top candidates, such a config ranks as a winner while
+        being incorrect, so the gate has to refuse it rather than the config file.
+        """
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        base = self._dtl_spec()
+        for label, trait in (
+            ("vgpr-staged", {"direct_to_lds": False, "dtl_prefetch": False}),
+            ("direct-to-lds", {"direct_to_lds": True}),
+            ("tdm", {"direct_to_lds": False, "dtl_prefetch": False, "tdm": True}),
+        ):
+            with self.subTest(label):
+                spec = replace(
+                    base,
+                    trait=replace(base.trait, lds_swizzle=True, **trait),
+                )
+                ok, why = is_valid_spec(spec, arch="gfx1250")
+                self.assertFalse(ok)
+                self.assertIn("lds_swizzle", why)
+        # The swizzle is bit-exact and worth ~+3% on CDNA MFMA, so the gate is
+        # scoped to the WMMA family and must not reach the MFMA path.
+        from rocke.instances.common.gemm_universal import (
+            DataSpec,
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+        )
+
+        mfma = UniversalGemmSpec(
+            name="gfx950_swizzle_control",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv3",
+                scheduler="intrawave",
+                epilogue="default",
+                lds_swizzle=True,
+            ),
+            data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16"),
+            wave_size=64,
+        )
+        ok, why = is_valid_spec(mfma, arch="gfx950")
+        self.assertTrue(ok, why)
 
     def test_wmma_tdm_compiles_to_hsaco_per_depth(self):
         from rocke.helpers.compile import compile_kernel

@@ -260,6 +260,7 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
                               "pad_n",
                               "pad_k",
                               "persistent",
+                              "persistent_ctas",
                               "chiplet_swizzle",
                               "chiplet_wgm",
                               "chiplet_num_xcds",
@@ -290,6 +291,8 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
         spec->trait.pad_n = dict_bool(tr, "pad_n", spec->trait.pad_n);
         spec->trait.pad_k = dict_bool(tr, "pad_k", spec->trait.pad_k);
         spec->trait.persistent = dict_bool(tr, "persistent", spec->trait.persistent);
+        spec->trait.persistent_ctas
+            = dict_int(tr, "persistent_ctas", spec->trait.persistent_ctas);
         spec->trait.chiplet_swizzle = dict_bool(tr, "chiplet_swizzle", spec->trait.chiplet_swizzle);
         spec->trait.chiplet_wgm = dict_int(tr, "chiplet_wgm", spec->trait.chiplet_wgm);
         spec->trait.chiplet_num_xcds
@@ -413,6 +416,7 @@ SpecHolder build_spec(const py::dict& root)
                               "pad_n",
                               "pad_k",
                               "persistent",
+                              "persistent_ctas",
                               "chiplet_swizzle",
                               "chiplet_wgm",
                               "chiplet_num_xcds",
@@ -443,6 +447,8 @@ SpecHolder build_spec(const py::dict& root)
         h.spec.trait.pad_n = dict_bool(tr, "pad_n", h.spec.trait.pad_n);
         h.spec.trait.pad_k = dict_bool(tr, "pad_k", h.spec.trait.pad_k);
         h.spec.trait.persistent = dict_bool(tr, "persistent", h.spec.trait.persistent);
+        h.spec.trait.persistent_ctas
+            = dict_int(tr, "persistent_ctas", h.spec.trait.persistent_ctas);
         h.spec.trait.chiplet_swizzle
             = dict_bool(tr, "chiplet_swizzle", h.spec.trait.chiplet_swizzle);
         h.spec.trait.chiplet_wgm = dict_int(tr, "chiplet_wgm", h.spec.trait.chiplet_wgm);

@@ -278,6 +278,49 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 128;
         spec->batched = false;
         break;
+    case 13: /* Persistent (grid-stride) tile loop, plain decode (cf. case 1) */
+        spec->name = "test_persistent";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 256,
+                                              .tile_n = 256,
+                                              .tile_k = 64,
+                                              .warp_m = 4,
+                                              .warp_n = 4,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 32,
+                                              .warp_tile_n = 32,
+                                              .warp_tile_k = 16};
+        spec->trait.pipeline = "compv4";
+        spec->trait.epilogue = "cshuffle";
+        spec->trait.persistent = true;
+        spec->trait.persistent_ctas = 304;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 64;
+        spec->block_size = 1024;
+        spec->batched = false;
+        break;
+    case 14: /* Persistent composed with the chiplet super-tile swizzle */
+        spec->name = "test_persistent_chiplet";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 128,
+                                              .tile_n = 128,
+                                              .tile_k = 32,
+                                              .warp_m = 2,
+                                              .warp_n = 2,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 16};
+        spec->trait.pipeline = "compv3";
+        spec->trait.epilogue = "default";
+        spec->trait.persistent = true;
+        spec->trait.persistent_ctas = 256;
+        spec->trait.chiplet_swizzle = true;
+        spec->data.dtype_a = "bf16";
+        spec->data.dtype_b = "bf16";
+        spec->data.dtype_c = "bf16";
+        spec->wave_size = 64;
+        spec->block_size = 256;
+        spec->batched = false;
+        break;
     default:
         return -1;
     }
@@ -308,7 +351,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..12>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..14>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

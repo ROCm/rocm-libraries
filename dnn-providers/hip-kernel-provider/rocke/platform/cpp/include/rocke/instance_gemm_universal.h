@@ -86,6 +86,7 @@ typedef struct rocke_gemm_trait_spec
     bool pad_n;
     bool pad_k;
     bool persistent;
+    int persistent_ctas; /* grid-stride step; required when persistent */
     bool chiplet_swizzle;
     int chiplet_wgm; /* default 8  */
     int chiplet_num_xcds; /* default 8  */

@@ -319,6 +319,66 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx1201",
         )
+    if idx == 13:
+        # Persistent (grid-stride) tile loop, plain decode: the whole
+        # K-loop + cshuffle epilogue lives inside a scf.for strided by
+        # persistent_ctas, and the tile origin comes from the induction
+        # variable instead of blockIdx. Same shape as idx 1 so the two
+        # configs isolate the persistent knob.
+        return UniversalGemmSpec(
+            name="test_persistent",
+            tile=TileSpec(
+                tile_m=256,
+                tile_n=256,
+                tile_k=64,
+                warp_m=4,
+                warp_n=4,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv4",
+                epilogue="cshuffle",
+                persistent=True,
+                persistent_ctas=304,
+            ),
+            data=DataSpec(dtype_a="fp16"),
+            wave_size=64,
+            block_size=1024,
+            batched=False,
+        )
+    if idx == 14:
+        # Persistent composed with the chiplet super-tile swizzle: the tile
+        # index feeding the XCD remap is the loop's induction variable rather
+        # than the flattened blockIdx, which is the other half of the
+        # persistent tile-decode branch.
+        return UniversalGemmSpec(
+            name="test_persistent_chiplet",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv3",
+                epilogue="default",
+                persistent=True,
+                persistent_ctas=256,
+                chiplet_swizzle=True,
+            ),
+            data=DataSpec(dtype_a="bf16", dtype_b="bf16", dtype_c="bf16"),
+            wave_size=64,
+            block_size=256,
+            batched=False,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -326,7 +386,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..12>\n",
+        usage="usage: gemm_emit.py <config_index 0..14>\n",
     )
 
 

@@ -33,6 +33,7 @@ from rocke.instances.common.gemm_universal import (
     TraitSpec,
     UniversalGemmSpec,
     build_universal_gemm,
+    universal_gemm_grid,
 )
 from rocke.instances import GemmPipelinePolicy
 
@@ -99,6 +100,14 @@ def main() -> int:
         help="give the cshuffle C tile its own LDS bytes (no A/B aliasing) and "
         "elide the step-0 reuse barrier (lower small-tile latency, more LDS).",
     )
+    p.add_argument(
+        "--persistent-ctas",
+        type=int,
+        default=0,
+        help="launch this many CTAs and grid-stride the output tiles from "
+        "each one (CK Tile's persistent kernel) instead of one CTA per tile. "
+        "0 (default) keeps the problem-sized grid.",
+    )
     p.add_argument("--output-dir", default=None)
     p.add_argument("--no-verify", action="store_true")
     p.add_argument(
@@ -144,6 +153,8 @@ def main() -> int:
         dtl_prefetch=args.dtl_prefetch,
         tdm=args.tdm,
         tdm_depth=args.tdm_depth,
+        persistent=args.persistent_ctas > 0,
+        persistent_ctas=args.persistent_ctas,
     )
     data = DataSpec(
         dtype_a=args.dtype,
@@ -190,6 +201,13 @@ def main() -> int:
         dtype=args.dtype,
         default_shape=(args.m, args.n, args.k),
         atoms=[f"{atom_family}_f32_{wtm}x{wtn}x{wtk}_{args.dtype}"],
+        # A persistent kernel's grid is not derivable from the tile shape, so
+        # pin it explicitly rather than letting the runner infer it.
+        extra=(
+            {"grid_explicit": list(universal_gemm_grid(spec, args.m, args.n))}
+            if spec.trait.persistent
+            else None
+        ),
     )
     write_artifact(art, out, manifest)
 
