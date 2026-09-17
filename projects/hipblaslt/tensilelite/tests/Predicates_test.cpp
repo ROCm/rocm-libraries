@@ -200,7 +200,9 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_JustUnderCeiling_Accepted)
                                                          /*ldd=*/m,
                                                          /*dStride=*/-1,
                                                          /*beta=*/0.0);
-    auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(64);
+    // macroTile1 == n so min(macroTile1, n) == n and the predicate actually
+    // checks the full extent this test claims to exercise.
+    auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(n);
     EXPECT_TRUE((*pred)(problem));
 }
 
@@ -309,7 +311,7 @@ TEST(Predicates, StreamKWorkgroupNumberCheck_JustPastBoundary_Rejected_ROCM31016
     EXPECT_FALSE((*pred)(problem))
         << "M=" << m << " N=" << n << ": tiles == " << m
         << " > 2^24; confirmed on gfx950 hardware to silently drop most of D when "
-           "a Stream-K launch-time fallback grids one workgroup per tile.";
+           "a Stream-K launch-time fallback uses one workgroup per tile.";
 }
 
 TEST(Predicates, StreamKWorkgroupNumberCheck_OrdinaryProblem_Accepted)
