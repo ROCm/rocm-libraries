@@ -358,14 +358,17 @@ void geqrf_getError(const hipsolverHandle_t   handle,
     }
 
     // check info
-    err = 0;
-    for(int b = 0; b < bc; ++b)
+    if(!BATCHED)
     {
-        EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
-        if(hInfo[b][0] != hInfoRes[b][0])
-            err++;
+        err = 0;
+        for(int b = 0; b < bc; ++b)
+        {
+            EXPECT_EQ(hInfo[b][0], hInfoRes[b][0]) << "where b = " << b;
+            if(hInfo[b][0] != hInfoRes[b][0])
+                err++;
+        }
+        *max_err += err;
     }
-    *max_err += err;
 }
 
 template <testAPI_t API,
@@ -506,6 +509,7 @@ void testing_geqrf(Arguments& argus)
     {
         if constexpr(BATCHED)
         {
+            host_strided_batch_vector<int> hInfo(1, 1, 1, bc);
             EXPECT_ROCBLAS_STATUS(hipsolver_geqrf(API,
                                                   handle,
                                                   params,
@@ -520,7 +524,7 @@ void testing_geqrf(Arguments& argus)
                                                   (SIZE)0,
                                                   (T*)nullptr,
                                                   (SIZE)0,
-                                                  (int*)nullptr,
+                                                  hInfo.data(),
                                                   bc),
                                   HIPSOLVER_STATUS_INVALID_VALUE);
         }

@@ -2223,6 +2223,8 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
@@ -2239,6 +2241,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
@@ -2262,6 +2266,8 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
         return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
     return HIPSOLVER_STATUS_SUCCESS;
@@ -2283,6 +2289,8 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!lwork)
+        return HIPSOLVER_STATUS_INVALID_VALUE;
+    if(m < 0 || n < 0 || lda < m || batch_count < 0)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     *lwork = 0;
