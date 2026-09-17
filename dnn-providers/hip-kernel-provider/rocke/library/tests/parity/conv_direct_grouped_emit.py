@@ -18,11 +18,13 @@ from kernels.common.conv_direct_grouped import (
     DirectConv8cSpec,
     DirectConv32cSpec,
     DirectDepthwiseSpec,
+    DirectDepthwiseSpatialSpec,
     build_direct_conv_16c,
     build_direct_conv_4c,
     build_direct_conv_8c,
     build_direct_conv_32c,
     build_direct_depthwise,
+    build_direct_depthwise_spatial,
 )
 
 try:
@@ -107,6 +109,37 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=16, block_waves=2),
             "gfx950",
         )
+    if idx == 9:
+        # depthwise with stride=2: exercises Ho/Wo output descriptors and
+        # stride-aware flush (p_flush_val % stride == 0 guard)
+        p = DirectConvProblem(
+            N=2, H=14, W=14, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+        )
+        return (
+            "depthwise",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
+            "gfx950",
+        )
+    if idx == 10:
+        # spatial layout: groups=3 (non-power-of-two, exercises partial wave)
+        p = DirectConvProblem(
+            N=2, H=14, W=14, groups=3, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
+        )
+        return (
+            "spatial",
+            DirectDepthwiseSpatialSpec(problem=p, block_waves=2),
+            "gfx950",
+        )
+    if idx == 11:
+        # spatial layout with stride=2: exercises Ho/Wo + spatial thread mapping
+        p = DirectConvProblem(
+            N=2, H=14, W=14, groups=3, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+        )
+        return (
+            "spatial",
+            DirectDepthwiseSpatialSpec(problem=p, block_waves=1),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -125,6 +158,8 @@ def main() -> int:
         kernel = build_direct_conv_8c(spec, arch=arch)
     elif kind == "32c":
         kernel = build_direct_conv_32c(spec, arch=arch)
+    elif kind == "spatial":
+        kernel = build_direct_depthwise_spatial(spec, arch=arch)
     else:
         kernel = build_direct_depthwise(spec, arch=arch)
     if mode == "ll":
