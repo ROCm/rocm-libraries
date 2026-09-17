@@ -2588,6 +2588,11 @@ public:
             std::cerr << "Error: Can't call run() before calling set_items()\n";
             exit(EXIT_FAILURE);
         }
+        if(m_has_run)
+        {
+            std::cerr << "Error: Can't call run() twice\n";
+            exit(EXIT_FAILURE);
+        }
         m_has_run = true;
 
         std::string name            = m_meta.serialize_name();
@@ -2716,8 +2721,9 @@ private:
 
         elapsed_gpu_secs += batch_gpu_secs;
 
-        double bytes_per_batch = m_read_write_bytes * m_kernels_per_batch;
-        double bytes_per_sec   = bytes_per_batch / batch_gpu_secs;
+        double bytes_per_batch  = m_read_write_bytes * m_kernels_per_batch;
+        double bytes_per_sec    = bytes_per_batch / batch_gpu_secs;
+        m_last_bytes_per_second = bytes_per_sec;
 
         double items_per_batch = m_items * m_kernels_per_batch;
         double items_per_sec   = items_per_batch / batch_gpu_secs;
