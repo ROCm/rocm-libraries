@@ -1,34 +1,45 @@
 # AMD Matrix Instruction (MFMA / WMMA / SWMMA / SMFMAC) Support by Architecture
 
-Summary of matrix-multiply-accumulate instructions documented in the ISA / shader
-programming guides in this folder. Each table gives the **Opcode** (the VOP3P `OP`
-field, bits [22:16]) and the **PDF page** where the instruction is defined. A secondary
-page is given in each section header for the pseudocode and the opcode-encoding summary
-table.
+Summary of matrix-multiply-accumulate instructions, transcribed from the AMD
+instruction-set-architecture documentation. **This file is a convenience index, not a
+source of truth — for any instruction, refer to the official AMD ISA document for the
+corresponding architecture.** Each table gives the **Opcode** (the VOP3P `OP` field,
+bits [22:16]) and the **page** where the instruction is defined in that document. A
+secondary page is given in each section header for the pseudocode and the
+opcode-encoding summary table.
 
 Instruction naming convention: `V_<engine>_<Cfmt>_<M>X<N>X<K>_<ABfmt>`
 - **MFMA** – Matrix Fused Multiply-Add (CDNA / Instinct)
 - **SMFMAC** – Sparse MFMA with Compression (structured sparsity, CDNA3+)
-- **WMMA** – Wave Matrix Multiply-Accumulate (RDNA)
-- **SWMMAC** – Sparse WMMA with Compression (RDNA4 / 5)
+- **WMMA** – Wave Matrix Multiply-Accumulate (GFX10+ / GFX12)
+- **SWMMAC** – Sparse WMMA with Compression
 
-| Architecture | Engine(s) | Source PDF |
+| Architecture | Engine(s) | Source |
 |---|---|---|
-| CDNA1 | MFMA | `instinct-mi100-cdna1-shader-instruction-set-architecture.pdf` |
-| CDNA2 | MFMA (+F64) | `instinct-mi200-cdna2-instruction-set-architecture.pdf` |
-| CDNA3 | MFMA, SMFMAC | `instinct-mi300-cdna3-instruction-set-architecture.pdf` |
-| CDNA4 | MFMA, SMFMAC | `instinct-mi350-cdna4-instruction-set-architecture.pdf` |
-| RDNA3 | WMMA | `rdna3-shader-instruction-set-architecture-feb-2023_0.pdf` |
-| RDNA3.5 | WMMA | `rdna35_instruction_set_architecture.pdf` |
-| RDNA4 | WMMA, SWMMAC | `rdna4-instruction-set-architecture.pdf` |
-| RDNA5 | WMMA, SWMMAC | `rdna5 Shader Programming Guide.pdf` |
+| CDNA1 | MFMA | official CDNA1 ISA documentation |
+| CDNA2 | MFMA (+F64) | official CDNA2 ISA documentation |
+| CDNA3 | MFMA, SMFMAC | official CDNA3 ISA documentation |
+| CDNA4 | MFMA, SMFMAC | official CDNA4 ISA documentation |
+| RDNA3 | WMMA | official RDNA3 ISA documentation |
+| RDNA3.5 | WMMA | official RDNA3.5 ISA documentation |
+| RDNA4 | WMMA, SWMMAC | official RDNA4 ISA documentation |
+| GFX12 (gfx1250-class) | WMMA, SWMMAC | official ISA / shader programming guide for that part |
 
 > Opcodes are taken from each document's authoritative "VOP3P Opcodes" table. Page
-> numbers are the **PDF page index** (not the printed page label).
+> numbers are the page index within the source document, and are indicative only —
+> they shift between document revisions. Always confirm against the official ISA
+> document for the architecture you are targeting.
+
+**On the last row's label.** This document previously labelled the gfx1250-class part
+inconsistently ("RDNA5" in this table, "CDNA5" in the body). Neither label is used
+here now. rocKE's own architecture SSOT classifies it as `family: "cdna"` with
+`target_family: "gfx12_cdna"` (`core/arch/data/arch_specs.json`) — a CDNA-class device
+on the GFX12 programming model (wave32, WMMA, no MFMA) — and this file uses the
+neutral **GFX12 (gfx1250-class)** throughout to match.
 
 ---
 
-## CDNA1 — (`instinct-mi100-cdna1-shader-instruction-set-architecture.pdf`)
+## CDNA1 — (official CDNA1 ISA documentation)
 
 Instruction list p.11; pseudocode pp.156–157; opcode table & definitions pp.258–260.
 
@@ -60,7 +71,7 @@ original 2-element (non-1K) form.
 
 ---
 
-## CDNA2 — (`instinct-mi200-cdna2-instruction-set-architecture.pdf`)
+## CDNA2 — (official CDNA2 ISA documentation)
 
 Pseudocode pp.156–157; opcode table & definitions pp.252–254. Adds **FP64** matrix ops
 and the **BF16 "1K"** (full-width bf16) variants relative to CDNA1.
@@ -99,7 +110,7 @@ and the **BF16 "1K"** (full-width bf16) variants relative to CDNA1.
 
 ---
 
-## CDNA3 — (`instinct-mi300-cdna3-instruction-set-architecture.pdf`)
+## CDNA3 — (official CDNA3 ISA documentation)
 
 Instruction definitions pp.269–289; opcode summary table (Table) pp.541–542. Adds
 **XF32** (tf32-like), **FP8/BF8** inputs, and the **SMFMAC** sparse engine.
@@ -163,7 +174,7 @@ sparse via SMFMAC.
 
 ---
 
-## CDNA4 —  (`instinct-mi350-cdna4-instruction-set-architecture.pdf`)
+## CDNA4 — (official CDNA4 ISA documentation)
 
 Instruction definitions pp.286–316; opcode summary Table 90 pp.596–597. Adds the
 **F8F6F4** mixed narrow-precision ops (with **scale** variants) and wider-K formats.
@@ -256,7 +267,7 @@ per-block **scaling** (microscaling / MX). **No XF32.**
 
 ---
 
-## RDNA3 (`rdna3-shader-instruction-set-architecture-feb-2023_0.pdf`)
+## RDNA3 — (official RDNA3 ISA documentation)
 
 First RDNA generation with WMMA. Encoding p.75; pseudocode pp.82–84; definitions
 pp.367–368.
@@ -274,7 +285,7 @@ pp.367–368.
 
 ---
 
-## RDNA3.5 (`rdna35_instruction_set_architecture.pdf`)
+## RDNA3.5 — (official RDNA3.5 ISA documentation)
 
 Same WMMA set and opcodes as RDNA3. Encoding p.77; pseudocode pp.84–86; definitions
 pp.390–392.
@@ -292,7 +303,7 @@ pp.390–392.
 
 ---
 
-## RDNA4 (`rdna4-instruction-set-architecture.pdf`)
+## RDNA4 — (official RDNA4 ISA documentation)
 
 Adds **FP8/BF8** WMMA, larger-K IU4, and the **SWMMAC** sparse engine. Encoding p.100;
 opcode table (Table 98) p.198; definitions pp.409–419.
@@ -332,14 +343,16 @@ No XF32.
 
 ---
 
-## CNDA5 (`Shader Programming Guide.pdf`)
+## GFX12 (gfx1250-class) — (official ISA / shader programming guide for that part)
 
-CNDA5 uses the RDNA-style **WMMA / SWMMAC** naming (not MFMA). It expands supported
-shapes and formats, adds **F64 WMMA**, **F8F6F4/FP4** with per-block scaling
-(`V_WMMA_SCALE*` / `V_WMMA_LD_SCALE*`). Instruction list pp.15–17; register/operation
-details pp.154–168; opcode summary table pp.330–331.
+This part uses the **WMMA / SWMMAC** naming (not MFMA), consistent with rocKE's
+`arch_specs.json` entry for `gfx1250` (`family: "cdna"`, `target_family:
+"gfx12_cdna"`, `has_mfma: false`, `has_wmma: true`). It expands supported shapes and
+formats, adds **F64 WMMA**, **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
+`V_WMMA_LD_SCALE*`). Instruction list pp.15–17; register/operation details pp.154–168;
+opcode summary table pp.330–331.
 
-> **CDNA5 explicitly removes TF32/XF32 WMMA support** (p.10) and adds WMMA MXFP
+> This part **explicitly removes TF32/XF32 WMMA support** (p.10) and adds WMMA MXFP
 > block-size-16 support.
 
 ### WMMA (dense)
@@ -402,22 +415,27 @@ details pp.154–168; opcode summary table pp.330–331.
 | V_WMMA_LD_SCALE16_B64 | 167 |
 | V_WMMA_LD_SCALE16_PAIRED_B64 | 167 |
 
-**Data types:** F16, BF16, F32, **F64**, IU8, IU4, FP8/BF8, and **F8F6F4 & FP4** with
+**Data types:** F16, BF16, F32, **F64**, IU8, FP8/BF8, and **F8F6F4 & FP4** with
 per-block **scale** operands. **No XF32/TF32.** (p.15 also lists reduced-K legacy-shape
 16X16X16 / 16X16X32 variants for compatibility.)
+
+> **IU4 is not listed above on purpose.** The dense opcode table for this part
+> enumerates `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8` only — no
+> `IU4` form was located. Treat INT4 on this part as **unconfirmed** and check the
+> official ISA document before relying on it.
 
 ---
 
 ## Cross-architecture capability summary
 
-| Feature | CDNA1 | CDNA2 | CDNA3 | CDNA4 | RDNA3 | RDNA3.5 | RDNA4 | RDNA5 |
+| Feature | CDNA1 | CDNA2 | CDNA3 | CDNA4 | RDNA3 | RDNA3.5 | RDNA4 | GFX12 (gfx1250-class) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | Engine | MFMA | MFMA | MFMA | MFMA | WMMA | WMMA | WMMA | WMMA |
 | F32 accum | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | F16 in | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | BF16 in | ✅ | ✅ (1K) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | INT8 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| INT4 | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| INT4 | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ❓ |
 | FP64 | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | **XF32 / TF32** | ❌ | ❌ | **✅** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | FP8/BF8 | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
@@ -425,10 +443,14 @@ per-block **scale** operands. **No XF32/TF32.** (p.15 also lists reduced-K legac
 | Block scaling (MX) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | Sparse (SMFMAC/SWMMAC) | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
 
-**XF32 note:** XF32 (AMD's tf32-equivalent, `V_MFMA_F32_16X16X8_XF32` = opcode 62 and
-`V_MFMA_F32_32X32X4_XF32` = opcode 63) is documented **only in CDNA3**. CDNA4
-removes it, and the CDNA5 guide explicitly states TF32/XF32 WMMA support is
-removed. RDNA parts never had it.
+`❓` = not located in the source document's opcode table; see the per-section note.
 
-*Opcodes are the VOP3P `OP` field from each ISA's opcode table. Page references are to
-the PDF page index (not the printed page label).*
+**XF32 note:** XF32 (AMD's tf32-equivalent, `V_MFMA_F32_16X16X8_XF32` = opcode 62 and
+`V_MFMA_F32_32X32X4_XF32` = opcode 63) is documented **only in CDNA3**. CDNA4 removes
+it, and the gfx1250-class guide explicitly states TF32/XF32 WMMA support is removed.
+RDNA parts never had it. **There is therefore no TF32-class matrix instruction on any
+architecture rocKE currently targets.**
+
+*Opcodes are the VOP3P `OP` field from each ISA's opcode table. Page references are
+indicative page indices within the source document and shift between revisions —
+refer to the official AMD ISA document for the corresponding architecture.*
