@@ -86,7 +86,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 3abd365b9c2cda5bcb5ddf52208eb3a31cd41b3d # stack dependency; update with TheRock leaf
+          ref: 8cb695d3859952456f756f05e4532769ba1a96d0 # TheRock host-ASAN split T6
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -105,7 +105,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3abd365b9c2cda5bcb5ddf52208eb3a31cd41b3d # 2026-09-17
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@8cb695d3859952456f756f05e4532769ba1a96d0 # 2026-09-17
     with:
       build_variant: ${{ inputs.sanitizer_mode || 'asan' }}
       # Host instrumentation is architecture-independent, so presubmit builds
@@ -125,7 +125,7 @@ jobs:
       build_stages: ${{ (github.event_name == 'pull_request' || inputs.sanitizer_mode == 'host-asan') && 'compiler-runtime,runtime-tests,math-libs,comm-libs,storage-libs' || '' }}
       build_native_linux: ${{ github.event_name != 'pull_request' && inputs.sanitizer_mode != 'host-asan' }}
       repository: ROCm/TheRock
-      ref: 3abd365b9c2cda5bcb5ddf52208eb3a31cd41b3d # 2026-09-17
+      ref: 8cb695d3859952456f756f05e4532769ba1a96d0 # 2026-09-17
       changed_projects: ${{ needs.configure.outputs.changed_projects }}
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
@@ -138,7 +138,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3abd365b9c2cda5bcb5ddf52208eb3a31cd41b3d # 2026-09-17
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@8cb695d3859952456f756f05e4532769ba1a96d0 # 2026-09-17
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -152,7 +152,7 @@ jobs:
       # the explicit phased host-ASAN admission list in TheRock.
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
-      ref: 3abd365b9c2cda5bcb5ddf52208eb3a31cd41b3d # 2026-09-17
+      ref: 8cb695d3859952456f756f05e4532769ba1a96d0 # 2026-09-17
     permissions:
       contents: read
       id-token: write
@@ -170,7 +170,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 3abd365b9c2cda5bcb5ddf52208eb3a31cd41b3d # 2026-09-17
+          ref: 8cb695d3859952456f756f05e4532769ba1a96d0 # 2026-09-17
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
