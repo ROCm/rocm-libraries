@@ -55,75 +55,6 @@ ROCSOLVER_BEGIN_NAMESPACE
 // device functions that are used by many kernels
 // **********************************************************
 
-// NaN helpers
-template <typename T, std::enable_if_t<std::is_integral<T>{}, int> = 0>
-__device__ __host__ inline bool rocblas_isnan(T)
-{
-    return false;
-}
-
-template <typename T,
-          std::enable_if_t<
-              !std::is_integral<T>{}
-                  && !rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
-              int> = 0>
-__device__ __host__ inline bool rocblas_isnan(T arg)
-{
-    return std::isnan(arg);
-}
-
-template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-__device__ __host__ inline bool rocblas_isnan(const T& arg)
-{
-    return rocblas_isnan(std::real(arg)) || rocblas_isnan(std::imag(arg));
-}
-
-__device__ __host__ inline bool rocblas_isnan(rocblas_half arg)
-{
-    union
-    {
-        rocblas_half fp;
-        uint16_t data;
-    } x = {arg};
-    // NaN if exponent is all 1s and mantissa is non-zero (IEEE 754 half)
-    return (~x.data & 0x7c00) == 0 && (x.data & 0x03ff) != 0;
-}
-
-__device__ __host__ inline bool rocblas_isnan(rocblas_bfloat16 arg)
-{
-    // NaN if exponent is all 1s and mantissa is non-zero
-    return (~arg.data & 0x7f80) == 0 && (arg.data & 0x007f) != 0;
-}
-
-// max that propagates NaNs consistently:
-//   rocblas_max_nan( 1,   NaN ) = NaN
-//   rocblas_max_nan( NaN, 1   ) = NaN
-template <typename T, std::enable_if_t<std::is_integral<T>{}, int> = 0>
-__device__ __host__ inline T rocblas_max_nan(T x, T y)
-{
-    return y >= x ? y : x;
-}
-
-template <typename T,
-          std::enable_if_t<
-              !std::is_integral<T>{}
-                  && !rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
-              int> = 0>
-__device__ __host__ inline T rocblas_max_nan(T x, T y)
-{
-    return (rocblas_isnan(y) || y >= x) ? y : x;
-}
-
-__device__ __host__ inline rocblas_half rocblas_max_nan(rocblas_half x, rocblas_half y)
-{
-    return (rocblas_isnan(y) || float(y) >= float(x)) ? y : x;
-}
-
-__device__ __host__ inline rocblas_bfloat16 rocblas_max_nan(rocblas_bfloat16 x, rocblas_bfloat16 y)
-{
-    return (rocblas_isnan(y) || float(y) >= float(x)) ? y : x;
-}
-
 template <typename S, typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __device__ S aabs(T val)
 {
@@ -1650,6 +1581,101 @@ __device__ inline void reduce_wave_sum(T& val)
     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
         val += shift_left(val, r);
 #endif
+}
+
+//------------------------------------------------------------------------------
+// Returns block index within V matrix for V{i,j} block.
+// The V blocks are conceptually stored in a lower triangular matrix.
+// nt is number of block columns in the conceptual triangular V.
+// i and j are block row and col in the conceptual triangular V.
+// Sweep j is in column j, with task 0 being in the top, diagonal block,
+// then task 1 in the 2nd block, and so on.
+// In unmtr_hb2st, these are applied in sets of independent V blocks, indexed
+// by k. Each set k is on a diagonal with slope -2.
+//
+//      |'.         independent sets, k
+//      | 0 '.
+//      |'.  |'.
+//      |-1'.| 1 '.
+//      |'.  |'.   |'.
+//      |-2'.| 0 '.| 2 '.
+//      |'.  |'.   |'.   |'.
+//      |-3'.|-1 '.| 1 '.| 3 '.
+//      |'.  |'.   |'.   |'.   |'.
+//      |-4'.|-2 '.| 0 '.| 2 '.| 4 '.
+//      '''''''''''''''''''''''''''''
+//
+// To facilitate batching, the V blocks in each set k are stored contiguously
+// in V, with block index r:
+//
+//      |'.        storage order, r
+//      | 6 '.
+//      |'.  |'.
+//      | 4'.| 9 '.
+//      |'.  |'.   |'.
+//      | 2'.| 7 '.|11 '.
+//      |'.  |'.   |'.   |'.
+//      | 1'.| 5 '.|10 '.|13 '.
+//      |'.  |'.   |'.   |'.   |'.
+//      | 0'.| 3 '.| 8 '.|12 '.|14 '.
+//      '''''''''''''''''''''''''''''
+//
+// That is, V is stored as a (2*kd)-by-(nt*kd) array like:
+//
+//      k =  -4   -3   -2   -2   -1   -1    0    0    0    1    1    2    2    3    4
+//      j =   0    0    0    1    0    1    0    1    2    1    2    2    3    3    4
+//      i =   4    3    2    4    1    3    0    2    4    1    3    2    4    3    4
+//          |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |'.  |
+//      r = | 0'.| 1'.| 2'.| 3'.| 4'.| 5'.| 6'.| 7'.| 8'.| 9'.|10'.|11'.|12'.|13'.|14'.|
+//          |''''|'.  |'.  |''''|'.  |'.  |'.  |'.  |''''|'.  |'.  |'.  |''''|'.  |''''|
+//          |    |  '.|  '.|    |  '.|  '.|  '.|  '.|    |  '.|  '.|  '.|    |  '.|    |
+//
+// with explicit 1's on the diagonals and 0's outside the trapezoids.
+//
+template <typename I>
+__host__ __device__ I get_v_block_index(I nt, I i, I j)
+{
+    I r;
+    // k in unmtr goes from -(nt-1) to (nt-1), inclusive. k2 = k + nt - 1.
+    I k2 = 2 * j - i + nt - 1;
+    if(k2 < nt)
+    {
+        // Lower-left portion of conceptual triangular V, where k <= 0.
+        // The number of V blocks in set k2 follows the pattern,
+        // for example with nt=8, k2=0 to 2*(nt-1):
+        //   1, 1, 2, 2, 3, 3, 4, 4, 4, 3, 3, 2, 2, 1, 1
+        // For k2 < nt, sum the first k2 terms.
+        // Recall sum( 1, 2, ..., L ) = L*(L+1)/2; double that.
+        I L = k2 / 2;
+        r = (k2 % 2 == 0 ? L * (L + 1) : (L + 1) * (L + 1));
+        r += j;
+    }
+    else // k2 >= nt
+    {
+        // Upper-right portion of conceptual triangular V, where k > 0.
+        // Take total number of V blocks and subtract
+        // last 2*nt - 1 - k2 terms of ( ..., 2, 2, 1, 1 ).
+        I total = nt * (nt + 1) / 2;
+        I L = nt - 1 - k2 / 2;
+        I sub = (k2 % 2 != 0 ? L * (L + 1) : (L + 1) * (L + 1));
+        r = total - sub + i - j;
+    }
+    return r;
+}
+
+//------------------------------------------------------------------------------
+// Returns (vi, vj) row and col index within V array for the current
+// Householder vector, determined by sweep and task.
+//
+template <typename I>
+__host__ __device__ void get_v_index(I n, I kd, I sweep, I task, I& vi, I& vj)
+{
+    I nt = (n > 0) ? ceildiv(n - 1, kd) : 0; // number of block-cols in conceptual triangular V.
+    I j = sweep / kd; // block-col j
+    I i = j + task; // block-row i
+    I r = get_v_block_index(nt, i, j);
+    vi = sweep % kd; // row within V array
+    vj = vi + r * kd; // col within V array
 }
 
 ROCSOLVER_END_NAMESPACE

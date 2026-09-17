@@ -28,16 +28,20 @@
 
 namespace stinkytofu {
 class Pass;
-class StinkyAsmModule;
+class ModulePass;
 
 /// Insert s_wait_alu instructions for SCHED_MODE 2 (VA_VDST + VM_VSRC).
 ///
-/// The module overload reaches callee Functions for their conservative entry
-/// drain. The no-argument overload (stinkytofu-opt single-pass mode, unit tests)
-/// processes just the Function it is given and skips callee iteration.
+/// Function pass: full scoreboard analysis when run on the entry, conservative
+/// entry drain when run on a callable function. Used by stinkytofu-opt single-pass
+/// mode and unit tests.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
-    StinkyAsmModule& module, bool enableESM2TrackValuVsrc = false);
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertWaitAluPass(
+    bool enableESM2TrackValuVsrc = false);
+
+/// Whole-kernel driver: full analysis on the entry function, then the conservative
+/// call-boundary drain on every callee. Reserves a seam for future caller<->callee
+/// analysis.
+STINKYTOFU_EXPORT std::unique_ptr<ModulePass> createInsertWaitAluModulePass(
     bool enableESM2TrackValuVsrc = false);
 
 }  // namespace stinkytofu

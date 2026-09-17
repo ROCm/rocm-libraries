@@ -245,13 +245,17 @@ function(_fetch_spdlog VERSION HASH)
     _mark_targets_as_system(${spdlog_SOURCE_DIR})
 endfunction()
 
-# Doesn't conform with the others and ignores the VERSION and HASH arguments, but this will change
-# very soon
-#
 # Fetches nlohmann_json
 function(_fetch_nlohmann_json VERSION HASH)
+    if(NOT VERSION)
+        set(VERSION "3.12.0")
+    endif()
+    if(HASH)
+        set(HASH_ARG HASH ${HASH})
+    endif()
     fetchcontent_declare(
-        json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+        json URL https://github.com/nlohmann/json/releases/download/v${VERSION}/json.tar.xz
+                 ${HASH_ARG} DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
 
     set(JSON_Install ON CACHE BOOL "Install nlohmann_json CMake package files" FORCE)

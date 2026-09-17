@@ -513,6 +513,17 @@ struct reference_fft_data_t
         cached_data.clear();
     }
 
+    reference_fft_data_t(reference_fft_data_t&& other) noexcept
+    {
+        swap(other);
+    }
+    reference_fft_data_t& operator=(reference_fft_data_t&& other) noexcept
+    {
+        if(this != &other)
+            swap(other);
+        return *this;
+    }
+
 private:
     // to validate test parameters as argument of public member functions
     bool can_use_direct_input_copy_with(const fft_params& other) const

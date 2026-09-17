@@ -18,6 +18,7 @@ test_categories:
       - "*"
     exclude:
       - "*multi_gpu*"
+      - "hipfftXtSuite*"
     extra_args:
       - "--test_prob"
       - "0.02"
@@ -37,6 +38,7 @@ test_categories:
     description: "Multi-GPU only - hipfft-test *multi_gpu* (multi-GPU runner)"
     test_patterns:
       - "*multi_gpu*"
+      - "hipfftXtSuite*"
     exclude:
     extra_args:
       - "--test_prob"

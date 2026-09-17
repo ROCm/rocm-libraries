@@ -91,13 +91,13 @@ Instructions are defined using a declarative C++ DSL:
 
 See the full guide: [How to Add a New Architecture](../../docs/developer-guide/how-to-add-new-architecture.md).
 
-**Summary:** Add your arch to `cmake/StinkytofuArchList.cmake` and `Config.h.in`. Create `hardware/src/gfx/GfxYourArch/` with:
+**Summary:** Add your arch to `STINKYTOFU_ALL_ARCHS` in `cmake/StinkytofuArchList.cmake` (or leave it out to keep it opt-in), and to `Config.h.in`. Create `hardware/src/gfx/GfxYourArch/` with:
 - `arch.cmake` -- ARCH_MAJOR, ARCH_WAVEFRONT, ARCH_DEFAULT_CYCLE, ARCH_MAX_VGPR, etc.
 - `GfxYourArchInstructions.def` -- DEF_T for all instructions (tablegen generates `*_init.inc`, `*_costs.inc`)
 - `GfxYourArchFormats.def`
 - `GfxYourArch.cpp` -- only `setGfxYourArchLogicalToArchMap`, `setGfxYourArchRocisaToArchMap`, `setGfxYourArchConversionMap`
 
-Update `tools/tablegen/CMakeLists.txt` to add your arch to INSTRUCTION_GEN_FILES and INSTRUCTION_DEF_FILES. The `defineGfxYourArchInsts` and cost application are **auto-generated** from templates.
+`tools/tablegen/CMakeLists.txt` needs no edit: the `.def` inputs and declared outputs are derived from `STINKYTOFU_ARCHS_TO_BUILD`, and the generator is invoked with the built-in `Gfx1250` default or, for any other stepping, with `--arch=<Arch>` from that same variable. The `defineGfxYourArchInsts` and cost application are **auto-generated** from templates.
 
 ## Build Integration
 

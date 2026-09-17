@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
+#include <vector>
 
 #include "SdpaTensorBundles.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -17,6 +19,11 @@
 namespace hipdnn_sdk_test_utils
 {
 
+// When `generateStats` is true, the SDPA node is configured to emit its softmax
+// log-sum-exp (LSE) statistics tensor, shape [B, H, Sq, 1], FLOAT typed and non-virtual,
+// so it becomes a bindable graph output exercising the LSE/stats path. The stats tensor's
+// uid is discoverable from the serialized node's stats_tensor_uid(); callers that bind it
+// must allocate a matching FLOAT buffer and add it to the variant pack themselves.
 template <typename InputType>
 std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType>& tensorBundle,
@@ -28,7 +35,11 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
                       hipdnn_frontend::DiagonalAlignment diagonalAlignment
                       = hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
                       bool alibiMask = false,
-                      float* runtimeScaleHostPtr = nullptr)
+                      bool generateStats = false,
+                      // Non-const: the variant pack stores void*.
+                      // NOLINTNEXTLINE(readability-non-const-parameter)
+                      float* runtimeScaleHostPtr
+                      = nullptr) // NOLINT(readability-non-const-parameter)
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
@@ -60,6 +71,7 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
     sdpaAttrs.set_causal_mask_bottom_right(causalMaskBottomRight);
     sdpaAttrs.set_alibi_mask(alibiMask);
     sdpaAttrs.set_diagonal_alignment(diagonalAlignment);
+    sdpaAttrs.set_generate_stats(generateStats);
     if(leftBound.has_value())
     {
         sdpaAttrs.set_diagonal_band_left_bound(leftBound.value());
@@ -98,6 +110,22 @@ std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<in
         .set_stride(oStrides)
         .set_is_virtual(false);
 
+    // Finalize the stats/LSE output as a bindable FLOAT tensor [B, H, Sq, 1].
+    if(generateStats && statsAttr)
+    {
+        if(!statsAttr->has_uid())
+        {
+            statsAttr->set_uid(uid++);
+        }
+        const auto qDims = tensorBundle.qTensor.dims();
+        const std::vector<int64_t> statsDims = {qDims[0], qDims[1], qDims[2], 1};
+        const auto statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+        statsAttr->set_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_dim(statsDims)
+            .set_stride(statsStrides)
+            .set_is_virtual(false);
+    }
+
     auto variantPack
         = tensorBundle.createVariantPack(*qTensorAttr, *kTensorAttr, *vTensorAttr, *oTensorAttr);
     if(scaleTensorAttr)
@@ -112,6 +140,8 @@ template <typename InputType>
 std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildSdpaBwdGraph(SdpaBwdTensorBundle<InputType>& tensorBundle,
                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                      // Non-const: the variant pack stores void*.
+                      // NOLINTNEXTLINE(readability-non-const-parameter)
                       float* runtimeScaleHostPtr = nullptr)
 {
     const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);

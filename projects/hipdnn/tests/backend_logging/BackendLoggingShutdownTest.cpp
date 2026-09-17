@@ -146,14 +146,27 @@ void createAndDestroyHandle(const char* context)
 }
 
 // Run a worker loop that continuously creates/destroys handles until the stop
-// flag is set. Signals readiness after the first API call completes.
-void runWorkerLoop(std::atomic<bool>& stopFlag, const char* context)
+// flag is set.
+//
+// Readiness is signalled only once this worker has observably produced logging.
+// For a callback worker that means its callback has actually been INVOKED, which
+// @p deliveredCount reports; returning from the API call proves only that the
+// message was ENQUEUED. Delivery happens later, on the shared logger's single
+// background thread, so enqueue order says nothing about whether this worker's
+// sink has been served yet. Waiting on enqueue would let main() return -- and
+// shutdown begin -- while this worker's only message is still queued, and
+// shutdown disables every callback before draining that queue, so the message
+// would be dropped and the worker would end with a zero count.
+void runWorkerLoop(std::atomic<bool>& stopFlag,
+                   const char* context,
+                   const std::atomic<int>* deliveredCount = nullptr)
 {
     bool signaled = false;
     while(!stopFlag.load(std::memory_order_acquire))
     {
         createAndDestroyHandle(context);
-        if(!signaled)
+        if(!signaled
+           && (deliveredCount == nullptr || deliveredCount->load(std::memory_order_acquire) > 0))
         {
             gWorkersReady.fetch_add(1, std::memory_order_release);
             gReadyCV.notify_one();
@@ -217,7 +230,7 @@ void callbackWorker(std::atomic<bool>& stopFlag,
                                  HIPDNN_LOG_CALLBACK_ASYNC,
                                  static_cast<hipdnnUserLogCallbackHandle_t>(cbData));
 
-    runWorkerLoop(stopFlag, "callback worker (loop)");
+    runWorkerLoop(stopFlag, "callback worker (loop)", &cbData->callCount);
 
     // Intentionally do NOT deregister the user callback before exiting.
     // This tests that BackendLogState::~BackendLogState (via loggerShutdownLocked)
@@ -467,10 +480,11 @@ int main(int argc, char* argv[])
     std::cout << "[Test]      After last worker joined, BackendLogState is truly destroyed\n";
     std::cout << "\n";
 
-    // Wait for all worker threads to complete at least one hipDNN API call cycle,
-    // ensuring they have produced log output and (for callback workers) their
-    // registered callbacks have been invoked at least once. This replaces a fixed
-    // delay which could be insufficient on heavily loaded systems.
+    // Wait until every worker has observably produced logging: a plain worker once its
+    // API call returned, a callback worker once its callback has actually fired. Only
+    // then may main() return, because returning starts shutdown, and shutdown disables
+    // callbacks before draining the queue -- so a worker whose message is still queued
+    // here would never be called back and would end at zero.
     {
         std::unique_lock<std::mutex> lock(gReadyMutex);
         if(!gReadyCV.wait_for(lock, std::chrono::seconds(30), [&] {

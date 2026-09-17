@@ -11,11 +11,35 @@ tools: Bash,Read,Write,Edit,Grep,Glob
 
 # Capture Kernel Trace (CK DSL)
 
-⚠️ **IMPORTANT**: ATT (Advanced Thread Trace) requires `rocprof-trace-decoder` library to be installed.
-If the decoder is not available on your system, use **PMC (Performance Counter) profiling** instead (see Alternative: PMC Profiling section below).
+⚠️ **IMPORTANT**: ATT (Advanced Thread Trace) requires the `rocprof-trace-decoder` library.
+It does **not** ship with ROCm and is not in the ROCm apt repository — it is distributed
+separately from <https://github.com/ROCm/rocprof-trace-decoder> (pick the release asset matching
+the distro; it installs a single `librocprof-trace-decoder.so` into `/opt/rocm/lib`). Override the
+location with `ROCPROF_TRACE_DECODER_LIB` if it lives elsewhere. If you cannot install it, use
+**PMC (Performance Counter) profiling** instead (see Alternative: PMC Profiling below).
 
 Capture rocprofv3 ATT traces from CK DSL kernels running on local GPU or remote Docker container,
 then download the trace output for analysis.
+
+## Quick path: one command
+
+`tools/stage2_capture/capture_att_trace.py` does the whole of Steps 2-5 — preflights the decoder,
+discovers the kernel name, runs the capture, and reports each decoded dispatch with the numbers
+that say whether it is usable:
+
+```bash
+python3 tools/stage2_capture/capture_att_trace.py --output-dir ./att_out \
+  -- python3 -m rocke.run_manifest out/kernel.hsaco out/manifest.json
+```
+
+Each invocation writes a fresh `capture-<trace-id>` generation below `att_out`
+and prints the exact decoded dispatch folder to open. Completed, truncated, and
+nonempty unfinalized generations remain separate and cannot satisfy a later
+capture that matched no dispatch. A generation is removed automatically only
+when the current attempt published nothing and `rmdir()` proves it is empty.
+
+Pass `--kernel-regex` to skip the discovery pass. The manual steps below remain the reference for
+remote/Docker captures and for anything the wrapper does not cover.
 
 ## Arguments
 
@@ -135,10 +159,13 @@ Key configuration:
 
 ## Step 4: Run rocprofv3 with ATT
 
-**NOTE**: CK DSL does not expose a `debug=` parameter in `compile_kernel()`. Source mapping in ATT traces
-depends on LLVM backend flags which are not directly controllable from CK DSL user code.
+**NOTE**: `compile_kernel()` has no `debug=` parameter, but source mapping *is* available — set
+`ROCKE_DEBUG_LOC=1` on the process that builds the kernel. See
+[Debug Info in CK DSL](#debug-info-in-ck-dsl) below for what it does and why it is opt-in. Without
+it there is no DWARF and the `Source` column stays empty.
 
-**For ISA-level analysis** (which always works), you can extract and disassemble the HSACO after rocprof completes:
+**For ISA-level analysis** (which works either way), you can extract and disassemble the HSACO after
+rocprof completes:
 ```python
 # Extract ISA from compiled HSACO (no debug info required)
 # See src/stage3_extract_isa/extract_isa.py for automated extraction
@@ -219,26 +246,75 @@ print(f'Instructions: {n}, with source mapping: {has_src} ({100*has_src//max(n,1
 
 ---
 
+## Step 6: View the trace in WaveScope
+
+A decoded `ui_output_*_dispatch_*` folder is exactly what the **WaveScope** viewer reads. It
+gives a per-wave timeline over the ISA listing, dependency brackets from memory ops to the
+`s_waitcnt` that waits on them, an occupancy heatmap, and rule-based bottleneck detection —
+the interactive equivalent of `tools/stage4_analyze/parse_kernel_trace.py`.
+
+Install the extension from the WaveScope releases page:
+
+```bash
+cursor --install-extension wavescope-<version>.vsix --force   # or: code --install-extension ...
+```
+
+On a remote session install it on the **remote** side — the extension reads the trace from the
+remote filesystem and streams it into the webview, so nothing is copied to the client.
+
+Then run **WaveScope: Open Trace Folder...** and pick the dispatch folder. The Source tab appears
+only when the kernel was built with `ROCKE_DEBUG_LOC=1` (see
+[Debug Info in CK DSL](#debug-info-in-ck-dsl) below); everything else works either way.
+
+### Closing the loop with an agent
+
+WaveScope carries a two-way annotation protocol, which is the reason to prefer it over reading
+`code.json` by hand:
+
+- An agent analyzing the trace writes **`annotations.json`** into the dispatch folder — bottleneck
+  findings, each anchored to instruction indices, so the viewer overlays numbered flags on the
+  timeline and you can verify a claim by looking at it rather than trusting it. `n`/`p` walk the
+  findings in severity order.
+- You reply with **`notes.json`**, authored by pressing `m` and marking the thing the agent missed
+  (a block, a dragged time window, a dependency bracket, every match of a search). Notes tagged
+  `constraint` or `rejected` are hard limits the agent may not violate or re-propose; `question`
+  notes must be answered in its next pass.
+
+Two files, one writer each: the agent owns `annotations.json` and rewrites it wholesale each
+round, so notes must not share it. Instruction and wave/time anchors always work; the
+source-line anchor needs the trace to have been captured with `ROCKE_DEBUG_LOC=1`.
+
+---
+
 ## Output
 
 After capture, report:
 
 1. **Trace location**: Local path to the downloaded trace directory
 2. **Kernel info**: Name, VGPR/AGPR counts, grid size, duration (from out_kernel_trace.csv)
-3. **Source mapping**: Whether debug info is present (% of instructions with source annotations)
+3. **Source mapping**: % of instructions with source annotations (high with `ROCKE_DEBUG_LOC=1`, 0%
+   without it — see [Debug Info in CK DSL](#debug-info-in-ck-dsl) below)
 4. **Instruction count**: Total instructions in code.json
-5. **Next step**: Suggest running `/kernel-trace-analysis` on the downloaded trace for bottleneck analysis
+5. **Next step**: Open the folder in WaveScope (Step 6), or run `/kernel-trace-analysis` for a
+   text-only bottleneck report
 
 Example output:
 ```
 Trace captured: ./trace_data/20260516_153000_conv_implicit_gemm/
   Kernel: conv_implicit_gemm_v4r1_nhwc_kc_gemmm_gemmn_gemmk_64x128x64
-  Duration: 182.7 us
   arch_vgpr=104, accum_vgpr=128, SGPR=80
-  Instructions: 2845, source-mapped: 2103 (74%)
+  Instructions: 2845, source-mapped: 0 (0%)   # 0% => rebuilt needed with ROCKE_DEBUG_LOC=1
 
-Run /kernel-trace-analysis to analyze bottlenecks.
+Open in WaveScope, or run /kernel-trace-analysis to analyze bottlenecks.
 ```
+
+### Reading `code.json`: totals, not averages
+
+`Latency` (col 7) and `Stall` (col 8) are **hit-weighted totals summed over every execution**,
+not per-execution averages. Divide by `Hit` (col 6) for a per-execution figure. Reading them as
+averages inflates per-instruction cost by the hit count and yields stall figures larger than the
+kernel's whole wall-clock, which is the single easiest way to misread this file. `Latency` is
+inclusive of `Stall`, so a class's actual compute is `latency - stall`.
 
 ---
 
@@ -289,10 +365,11 @@ PMC gives high-level bottleneck categories (MFMA utilization, memory stalls, LDS
 
 | Error | Fix |
 |-------|-----|
-| `rocprof-trace-decoder library path not found` | **Use PMC profiling instead** (see Alternative section above) |
+| `rocprof-trace-decoder library path not found` | Install it from <https://github.com/ROCm/rocprof-trace-decoder>, or set `ROCPROF_TRACE_DECODER_LIB`. Failing that, **use PMC profiling** (see Alternative section) |
 | `INVALID_SHADER_DATA` | aqlprofile/decoder version mismatch, update both |
 | Empty ui_output_agent_* | kernel_include_regex didn't match -- re-check kernel name from Step 2 |
-| No source mapping in code.json | CK DSL doesn't expose debug flags; use ISA disassembly instead |
+| No source mapping in code.json | The kernel was built without `ROCKE_DEBUG_LOC=1`, so there is no DWARF. Rebuild with it set and re-capture, or analyze with ISA disassembly / WaveScope's Trace tab |
+| Stall cycles exceed kernel wall-clock | Cols 7/8 are hit-weighted totals, not averages -- divide by `Hit` |
 | Trace truncated (missing instructions) | Increase `att_buffer_size` to `0xC000000` (192MB) |
 | SSH timeout | Increase timeout, check host connectivity |
 | `kernel_iteration_range` mismatch | Test runs fewer iterations than expected -- use `"[0, [1-2]]"` |
@@ -304,21 +381,42 @@ PMC gives high-level bottleneck categories (MFMA utilization, memory stalls, LDS
 
 ### Debug Info in CK DSL
 
-Unlike FlyDSL's `FLYDSL_DEBUG_ENABLE_DEBUG_INFO=1` environment variable, CK DSL controls
-debug info at compile time:
+**Source mapping is opt-in, via `ROCKE_DEBUG_LOC=1`.** Set it on the process that *builds*
+the kernel — it is read when `IRBuilder` constructs the kernel, not at compile time:
+
+```bash
+ROCKE_DEBUG_LOC=1 python your_bench.py
+```
 
 ```python
 from rocke.helpers import compile_kernel
 
-# WITHOUT debug info (default)
+# No debug= parameter; the env var (or IRBuilder(capture_loc=True)) is the switch.
 artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950")
-
-# WITH debug info (for ATT source mapping)
-artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950", debug=True)
 ```
 
-The `debug=True` flag passes `-g` to LLVM, generating DWARF debug information in the HSACO.
-This enables `code.json` to contain source file:line annotations for each ISA instruction.
+With it set, `IRBuilder` records the authoring Python call stack on every `Op.loc`, the
+lowering turns each stack into a `DICompileUnit` / `DISubprogram` / `DILocation` chain, and
+comgr's normal compile carries the resulting DWARF into the `.hsaco` — no `-g` needed, because
+the metadata is in the IR rather than requested from a source file. The `Source` column of
+`code.json` then names the Python line that emitted each instruction, and
+`tools/wavescope/emit_inline_frames.py` recovers the *call stack* above that line from the
+same DWARF.
+
+Two properties worth knowing:
+
+- **Off by default, and byte-identical when off.** Capturing a frame per op costs real time on
+  sweeps that build thousands of kernels, and the metadata changes the emitted `.ll` bytes,
+  which the IR goldens and the byte-identity gate both pin.
+- **Backend-independent.** The location rides the serialized `ck.dsl.ir/v1` artifact as `@loc`,
+  and both the Python lowerer and the C++ engine emit the same metadata from it, so
+  `ROCKE_BACKEND=cpp` (the default when `rocke_engine` is installed) produces the same DWARF —
+  `ROCKE_BACKEND=both` asserts exactly that.
+
+Without the variable set there is no DWARF and the `Source` column is empty; analyze at ISA
+level instead. `llvm-objdump` and `tools/stage3_extract_isa/extract_isa.py` give you the
+disassembly, and WaveScope's Trace tab correlates ISA against the wave timeline without
+needing source.
 
 ### Kernel Naming Convention
 
@@ -382,10 +480,9 @@ spec = ImplicitGemmConvSpec(
     pipeline="mem", epilogue="cshuffle"
 )
 
-# Compile with debug info for ATT source mapping
-print("Compiling kernel with debug info...")
+print("Compiling kernel...")
 kernel = build_implicit_gemm_conv(spec)
-artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950", debug=True)
+artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950")
 print(f"Kernel name: {artifact.kernel_name}")
 
 # Run kernel
@@ -412,6 +509,7 @@ Save this as `bench_conv_profile.py` and use it with rocprofv3.
 
 ## See Also
 
+- `tools/stage2_capture/capture_att_trace.py` - One-command capture (the Quick path above)
 - `/kernel-trace-analysis` - Analyze captured ATT traces
 - `src/stage3_extract_isa/extract_isa.py` - Extract ISA from CK DSL HSACO
 - `.claude/OPTIMIZATION_RUNBOOK.md` Section 10 - Profiling methodology

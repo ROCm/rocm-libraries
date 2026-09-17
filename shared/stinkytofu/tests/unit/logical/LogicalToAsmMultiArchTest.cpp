@@ -51,7 +51,7 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
         case logical::VAddPKF16:
             return VAddPKF16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VAdd3U32:
-            return VAdd3U32(vgpr(0), vgpr(1), vgpr(2));
+            return VAdd3U32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VSubF32:
             return VSubF32(vgpr(0), vgpr(1), vgpr(2));
         case logical::VSubI32:
@@ -634,6 +634,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SFf1B32(sgpr(0), sgpr(1));
         case logical::SBfmB32:
             return SBfmB32(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SBfmB64:
+            return SBfmB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SMovkI32:
             return SMovkI32(sgpr(0), sgpr(1));
         case logical::SSExtI16toI32:
@@ -666,10 +668,12 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VLShiftLeftAddU32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VAddNCU64:
             return VAddNCU64(vgpr(0), vgpr(1), vgpr(2));
+        // Lane select must be scalar (ssrc); v_readlane writes an SGPR and
+        // v_writelane reads its data operand from one.
         case logical::VReadlaneB32:
-            return VReadlaneB32(vgpr(0), vgpr(1), vgpr(2));
+            return VReadlaneB32(sgpr(0), vgpr(1), sgpr(2));
         case logical::VWritelaneB32:
-            return VWritelaneB32(vgpr(0), vgpr(1), vgpr(2));
+            return VWritelaneB32(vgpr(0), sgpr(1), sgpr(2));
         case logical::VPermlane16SwapB32:
             return VPermlane16SwapB32(vgpr(0), vgpr(1));
         case logical::VPermlane32SwapB32:
@@ -729,6 +733,10 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SAtomicInc(sgpr(0), sgpr(1), sgpr(2));
         case logical::SAtomicDec:
             return SAtomicDec(sgpr(0), sgpr(1));
+        case logical::SAtomicCmpswapX2:
+            return SAtomicCmpswapX2(sgpr(0, 4), sgpr(1), sgpr(2));
+        case logical::SAtomicUmaxX2:
+            return SAtomicUmaxX2(sgpr(0, 2), sgpr(1), sgpr(2));
         case logical::SCSelectB64:
             return SCSelectB64(sgpr(0), sgpr(1), sgpr(2));
         case logical::SCmpKEQU32:
@@ -866,6 +874,8 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VLShiftRightB64, "v_lshrrev_b64"},
     // Vector Other
     {logical::VReadfirstlaneB32, "v_readfirstlane_b32"},
+    {logical::VReadlaneB32, "v_readlane_b32"},
+    {logical::VWritelaneB32, "v_writelane_b32"},
     // Scalar Compare
     {logical::SCmpEQI32, "s_cmp_eq_i32"},
     {logical::SCmpEQU32, "s_cmp_eq_u32"},
@@ -906,19 +916,21 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VCmpNeU32, "v_cmp_ne_u32"},
     {logical::VCmpNeU64, "v_cmp_ne_u64"},
     {logical::VCmpClassF32, "v_cmp_class_f32"},
-    // Vector CompareX
-    {logical::VCmpXClassF32, "v_cmpx_class_f32"},
-    {logical::VCmpXEqU32, "v_cmpx_eq_u32"},
-    {logical::VCmpXGeU32, "v_cmpx_ge_u32"},
-    {logical::VCmpXGtU32, "v_cmpx_gt_u32"},
-    {logical::VCmpXLeU32, "v_cmpx_le_u32"},
-    {logical::VCmpXLeI32, "v_cmpx_le_i32"},
-    {logical::VCmpXLtF32, "v_cmpx_lt_f32"},
-    {logical::VCmpXLtI32, "v_cmpx_lt_i32"},
-    {logical::VCmpXLtU32, "v_cmpx_lt_u32"},
-    {logical::VCmpXLtU64, "v_cmpx_lt_u64"},
-    {logical::VCmpXNeU16, "v_cmpx_ne_u16"},
-    {logical::VCmpXNeU32, "v_cmpx_ne_u32"},
+    // Vector CompareX: on gfx12 (RDNA, CMPXWritesSGPR=false) ToStinkyAsmPass
+    // legalizes v_cmpx_* into v_cmp_* (writes vcc) + s_mov exec, vcc, so the
+    // FIRST lowered instruction is the non-x v_cmp_* compare, not v_cmpx_*.
+    {logical::VCmpXClassF32, "v_cmp_class_f32"},
+    {logical::VCmpXEqU32, "v_cmp_eq_u32"},
+    {logical::VCmpXGeU32, "v_cmp_ge_u32"},
+    {logical::VCmpXGtU32, "v_cmp_gt_u32"},
+    {logical::VCmpXLeU32, "v_cmp_le_u32"},
+    {logical::VCmpXLeI32, "v_cmp_le_i32"},
+    {logical::VCmpXLtF32, "v_cmp_lt_f32"},
+    {logical::VCmpXLtI32, "v_cmp_lt_i32"},
+    {logical::VCmpXLtU32, "v_cmp_lt_u32"},
+    {logical::VCmpXLtU64, "v_cmp_lt_u64"},
+    {logical::VCmpXNeU16, "v_cmp_ne_u16"},
+    {logical::VCmpXNeU32, "v_cmp_ne_u32"},
     // Scalar Min/Max/Abs
     {logical::SAbsI32, "s_abs_i32"},
     {logical::SMaxI32, "s_max_i32"},
@@ -1106,14 +1118,15 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::SStoreB512,
         logical::SAtomicInc,
         logical::SAtomicDec,
+        logical::SAtomicCmpswapX2,
+        logical::SAtomicUmaxX2,
         logical::SCSelectB64,
         logical::SCmpKEQU32,
         logical::SCmpKGeU32,
         logical::SCmpKGtU32,
         logical::SCmpKLGU32,
         logical::SFlbitI32B32,
-        logical::VReadlaneB32,
-        logical::VWritelaneB32,
+        logical::SBfmB64,
         logical::VPermlane16SwapB32,
         logical::VPermlane32SwapB32,
         logical::BufferLoadB16,
@@ -1354,6 +1367,76 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions) {
         EXPECT_EQ(numSrcs, 4) << "TensorLoadToLds with optional sources: Expected 4 operands";
         if (numSrcs == 4) {
             std::cout << "  ? TensorLoadToLds with 4 sources (optional) works correctly\n";
+        }
+    }
+}
+
+/**
+ * @brief Lane-select instructions lower with an immediate lane index
+ *
+ * AllInstructionsAllArchitectures builds these with an SGPR lane select. The
+ * auto-WGMXCC path (WorkGroupMappingXCC: -1) instead passes a compile-time lane
+ * index, so the ssrc operand arrives as a literal rather than a register. That
+ * form skips the register type check entirely, so cover it here as well.
+ */
+TEST(LogicalToAsmComprehensive, LaneSelectImmediateLowering) {
+    std::cout << "\n=== Lane-Select Immediate Test ===\n";
+
+    struct LaneCase {
+        const char* name;
+        LogicalInstruction* (*build)();
+        const char* expectedMnemonic;
+    };
+
+    std::vector<LaneCase> cases = {
+        {"VReadlaneB32", [] { return VReadlaneB32(sgpr(0), vgpr(1), literal(1)); },
+         "v_readlane_b32"},
+        {"VWritelaneB32", [] { return VWritelaneB32(vgpr(0), sgpr(1), literal(1)); },
+         "v_writelane_b32"},
+    };
+
+    for (const auto& c : cases) {
+        Function func("kernel");
+        BasicBlock* bb = func.createBasicBlock("test");
+
+        PassManager pm;
+        GemmTileConfig config;
+        config.arch = {12, 5, 0};
+        config.TileA0 = 16;
+        config.TileB0 = 16;
+        config.TileM0 = 16;
+        config.NumGRA = 4;
+        config.NumGRB = 4;
+        config.NumGRM = 4;
+        config.NumWaves = 1;
+        pm.setGemmTileConfig(config);
+
+        bb->appendIR(static_cast<IRBase*>(c.build()));
+
+        pm.addPass(createCompositeInstructionLoweringPass());
+        pm.addPass(createToStinkyAsmPass());
+        pm.run(func);
+
+        size_t stinkyInsts = 0;
+        std::string actualMnemonic;
+        for (BasicBlock& block : func) {
+            for (IRBase& ir : block) {
+                if (ir.getType() == IRBase::IRType::StinkyTofu) {
+                    stinkyInsts++;
+                    actualMnemonic =
+                        static_cast<StinkyInstruction*>(&ir)->getHwInstDesc()->mnemonic;
+                }
+            }
+        }
+
+        EXPECT_GT(stinkyInsts, 0) << "gfx1250: " << c.name
+                                  << " with immediate lane select failed to lower";
+        if (stinkyInsts > 0) {
+            EXPECT_EQ(actualMnemonic, c.expectedMnemonic)
+                << c.name << ": Expected mnemonic '" << c.expectedMnemonic << "', got '"
+                << actualMnemonic << "'";
+            std::cout << "  ? " << c.name << " lowered with immediate lane select"
+                      << " (mnemonic: " << actualMnemonic << ")\n";
         }
     }
 }

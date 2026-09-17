@@ -210,6 +210,24 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->CONFLICT_FREE_V_STORE = CONFLICT_FREE_V_STORE;
     ctx->K_SINGLE_BUF = spec->use_k_single_buffer;
     const bool K_SLICED_RING = spec->use_k_sliced_ring;
+    /* The sliced-K ring is carried in the spec but not emitted by this engine.
+     * Python's __post_init__ accepts it and the Python builder emits it; this
+     * twin has the ring's shape and none of its schedule -- K_lds is sized as
+     * [ring_depth, T, k_slice_hd] below, but no slice DMA is ever issued and the
+     * QK body still reads K_lds through the double-buffer index, so a ring spec
+     * would lower to a kernel reading slices nothing staged. Reject rather than
+     * emit that, the same contract the gfx950 twin applies to its unported
+     * V-double-buffer family. Replace this with the real emit when the schedule
+     * is ported; the geometry fields it needs are already carried. */
+    if(K_SLICED_RING)
+    {
+        b->status = ROCKE_ERR_NOTIMPL;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "use_k_sliced_ring: the gfx942 C twin does not emit the sliced-K "
+                 "ring schedule (not yet ported)");
+        return false;
+    }
     ctx->K_SLICED_RING = K_SLICED_RING;
     ctx->K_SLICED_LDSSEQ = spec->use_k_sliced_ldsseq;
     ctx->USE_IGLP_OPT = spec->use_iglp_opt;
@@ -450,8 +468,12 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->P_LDS_DTYPE = P_LDS_DTYPE;
 
     const int Q_BYTES = BLOCK_M * HD * 2;
-    const int K_SLICE_HD = 32;
-    const int K_SLICE_SLOTS = 3;
+    /* Ring geometry comes from the spec (Python: K_SLICE_HD = spec.k_slice_hd,
+     * K_SLICE_SLOTS = RING_DEPTH = spec.ring_depth). Both used to be pinned here
+     * at the shipped values, which silently ignored a spec that asked for any
+     * other geometry. */
+    const int K_SLICE_HD = spec->k_slice_hd;
+    const int K_SLICE_SLOTS = spec->ring_depth;
     const bool K_SLICED_ACTIVE = K_SLICED_RING && USE_MFMA_32X32X8 && ctx->TRANSPOSED_QK_32X32;
     const int K_LDS_ELEM_BYTES = rocke_type_eq(K_LDS_DTYPE, rocke_fp8e4m3()) ? 1 : 2;
     const int K_BUF_BYTES = (K_SLICED_ACTIVE ? (T * K_SLICE_HD) : (T * HD)) * K_LDS_ELEM_BYTES;

@@ -31,6 +31,8 @@ import threading
 import time
 import warnings
 
+import rocisa
+
 from pathlib import Path
 from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 
@@ -38,21 +40,25 @@ from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, se
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
 
-from .ParseArguments import parseArguments
+from .ParseArguments import parseArguments, BUNDLED_KNOWN_BUGS
 from .KnownBugs import (
     KnownBugKey,
     is_known_bug,
     load_known_bugs,
     normalize_logic_relative_path,
+    load_bundled_known_bugs,
 )
 from .ValidChipId import _validateChipId
+from .ValidCorpusConsistency import check_corpus_invariants, report_corpus_invariant_violations
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
 from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
 from .HandleCustomKernel import handleCustomKernel, hasCustomKernel
+
 
 
 class Check(NamedTuple):
@@ -66,6 +72,7 @@ def _runChecks(
     check: Check,
     known_bugs: FrozenSet[KnownBugKey],
     files: List[Path],
+    rocIsaData=None,
 ) -> Tuple[int, int, int, int, int]:
     """
     Run checks on the given logic files.
@@ -75,6 +82,8 @@ def _runChecks(
         isaInfoMap: Map of IsaVersion to IsaInfo.
         check: Object containing flags for checking.
         files: List of logic files to check.
+        rocIsaData: Capabilities snapshot from the parent's rocIsa singleton, or
+            None to leave this process's singleton as it is.
 
     Returns:
         Tuple of (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
@@ -86,6 +95,13 @@ def _runChecks(
         whose solution now passes validation (a landed fix; the entry can be
         removed).
     """
+    # ParallelMap2 hands a worker globalParameters and nothing else, so the rocIsa
+    # singleton in this process has never been init'd and every capability lookup
+    # would read a default. Validators that ask the assembly backend what a solution
+    # emits need the parent's capabilities to answer the same way the emitter will.
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+
     keep, total, known_bug_skips, chip_id_failures = 0, 0, 0, 0
     stale_known_bugs = 0
     for file in files:
@@ -207,6 +223,13 @@ def _setup():
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
+
+    archs = args.Architecture.split(";")
+    if "all" not in archs:
+        files = [f for f in files if archMatch(load_logic_gfx_arch(f), archs)]
+        if len(files) == 0:
+            print1(f"No files found in {logicPath} for architectures: {', '.join(archs)}")
+            exit(1)
     print2(f"Found {len(files)} files")
 
     isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, str(cxxCompiler))
@@ -242,8 +265,37 @@ def main():
     reset_reported_failures()
     jobs, isaInfoMap, logicPath, files, check, args = _setup()
 
+    # Cross-file invariants (sibling DeviceNames, gfx1250v0-overlay
+    # consistency) run only when --check-all is given, and only over the
+    # already --architecture-filtered `files` -- the same scope the
+    # per-solution validators below use -- so a build for one architecture
+    # can't be failed by unrelated data in another. `files` excludes
+    # Experimental logic the same way _runChecks()'s own per-file loop does.
+    corpus_files = [f for f in files if "Experimental" not in f.parts]
+    corpus_violations = (
+        check_corpus_invariants(
+            logicPath,
+            corpus_files,
+            args.Architecture.split(";"),
+            overlay_required=args.RequireGfx1250v0Overlay,
+        )
+        if check.All
+        else []
+    )
+    report_corpus_invariant_violations(corpus_violations)
+    if corpus_violations:
+        # These are unconditional hard failures with no known-bugs escape
+        # hatch (see module docstring), so fail fast here rather than
+        # spending the (expensive) per-solution loop's time first.
+        print(f"Error: Corpus invariants: {len(corpus_violations)} violations", file=sys.stderr)
+        exit(1)
+
     try:
-        known_bugs = load_known_bugs(args.KnownBugs)
+        known_bugs = (
+            load_bundled_known_bugs()
+            if args.KnownBugs is BUNDLED_KNOWN_BUGS
+            else load_known_bugs(args.KnownBugs)
+        )
     except (ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
         exit(1)
@@ -255,7 +307,10 @@ def main():
         files[i : i + batchSize] for i in range(0, len(files), batchSize)
     )
 
-    fn = functools.partial(_runChecks, logicPath, isaInfoMap, check, known_bugs)
+    fn = functools.partial(
+        _runChecks, logicPath, isaInfoMap, check, known_bugs,
+        rocIsaData=rocisa.rocIsa.getInstance().getData(),
+    )
     keep, total = 0, 0
     known_bug_skips = 0
     chip_id_failures = 0
@@ -297,7 +352,6 @@ def main():
             f"Stale known-bugs  {stale_known_bugs} entries now pass validation "
             "(remove them from the known-bugs YAML)"
         )
-
     strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
     if rejects > 0 or chip_id_failures > 0 or strict_stale:
         exit(1)

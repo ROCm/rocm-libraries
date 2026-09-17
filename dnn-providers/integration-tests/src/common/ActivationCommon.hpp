@@ -166,7 +166,9 @@ inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
     return cases;
 }
 
-inline std::vector<ActivTestCase> createFwdActivationFullCases()
+// The ReLU parameterisations MIOpen can represent: standard, clipped, clamped and leaky.
+// Shared by the fused-activation and standalone-activation case lists below.
+inline std::vector<ActivTestCase> createFwdReluCases()
 {
     using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
@@ -211,6 +213,33 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
                        std::nullopt, // eluAlpha
                        std::nullopt // softplusBeta
     );
+
+    return cases;
+}
+
+// Activation cases for an activation fused onto a producer op (batchnorm, conv).
+inline std::vector<ActivTestCase> createFwdActivationFullCases()
+{
+    return createFwdReluCases();
+}
+
+// Activation cases for a standalone unary activation node.
+//
+// NOTE: SIGMOID_FWD and TANH_FWD belong here rather than in createFwdReluCases() because the
+// fused batchnorm path declines them (MiopenBatchnormApplicabilityChecks.cpp,
+// checkBatchnormActivationModeSupported), so widening the shared list would turn them into
+// permanent skips in the batchnorm suites.
+inline std::vector<ActivTestCase> createFwdUnaryActivationCases()
+{
+    using PM = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+    auto cases = createFwdReluCases();
+
+    // Sigmoid
+    cases.emplace_back(PM::SIGMOID_FWD);
+
+    // Tanh
+    cases.emplace_back(PM::TANH_FWD);
 
     return cases;
 }

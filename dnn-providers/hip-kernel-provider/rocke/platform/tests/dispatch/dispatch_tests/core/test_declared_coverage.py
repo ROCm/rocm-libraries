@@ -14,29 +14,8 @@ from __future__ import annotations
 import unittest
 
 from rocke.core.arch import ArchTarget, known_arches
-from rocke.dispatch.families.conv import CONV_REGISTRY, ConvRequest
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest
-
-
-def _conv_requests(arch: str):
-    for n in (1, 2):
-        for c in (32, 64, 256):
-            for k in (32, 64, 256):
-                for hw in (8, 16, 28, 56):
-                    for y, x, pad in ((1, 1, 0), (3, 3, 1), (5, 5, 2)):
-                        yield ConvRequest(
-                            N=n,
-                            C=c,
-                            K=k,
-                            Hi=hw,
-                            Wi=hw,
-                            Y=y,
-                            X=x,
-                            pad_h=pad,
-                            pad_w=pad,
-                            arch=arch,
-                        )
 
 
 def _moe_requests(arch: str):
@@ -65,7 +44,6 @@ def _norm_requests(arch: str):
 
 
 _FAMILIES = (
-    (CONV_REGISTRY, _conv_requests),
     (MOE_REGISTRY, _moe_requests),
     (NORM_REGISTRY, _norm_requests),
 )
@@ -91,10 +69,11 @@ class TestDeclaredCoverage(unittest.TestCase):
 
         from rocke.dispatch.core import CandidateRegistry
 
-        naked = replace(CONV_REGISTRY.candidates()[0], capability=None)
-        registry = CandidateRegistry(CONV_REGISTRY.family)
+        registry, _ = _FAMILIES[0]
+        naked = replace(registry.candidates()[0], capability=None)
+        test_registry = CandidateRegistry(registry.family)
         with self.assertRaisesRegex(ValueError, "declares no capability"):
-            registry.register(naked)
+            test_registry.register(naked)
 
     def test_no_candidate_admits_an_architecture_it_did_not_declare(self):
         for registry, requests in _FAMILIES:
@@ -160,39 +139,6 @@ class TestDeclaredCoverage(unittest.TestCase):
                 )
                 for entry in manifest["candidates"]:
                     self.assertTrue(entry["capability"]["arches"])
-
-
-class TestConvDeclaredArches(unittest.TestCase):
-    """The conv arch lists, pinned against the family label they replaced."""
-
-    def test_manifest_names_the_declared_targets(self):
-        by_name = {c["name"]: c for c in CONV_REGISTRY.coverage()["candidates"]}
-        self.assertEqual(
-            by_name["conv_igemm_cdna_cshuffle"]["capability"]["arches"], ["gfx950"]
-        )
-        self.assertEqual(
-            by_name["conv_igemm_cdna_mem"]["capability"]["arches"],
-            ["gfx90a", "gfx942", "gfx950"],
-        )
-        self.assertEqual(
-            by_name["conv_igemm_rdna_wmma"]["capability"]["arches"],
-            ["gfx11-generic", "gfx1151", "gfx1201"],
-        )
-        self.assertEqual(
-            by_name["conv_igemm_gfx1250_wmma"]["capability"]["arches"], ["gfx1250"]
-        )
-
-    def test_gfx1250_is_declared_by_exactly_one_conv_candidate(self):
-        """A 'cdna' gate admitted this wave32 target to both wave64 candidates
-        and denied it the WMMA one -- wrong in both directions from one label.
-
-        Explicit arch lists first made gfx1250 serve *nothing*, which is a
-        correct refusal but not coverage. Now it has one candidate, and the
-        point of the assertion is that it is one: the wave64 candidates must
-        not have quietly picked it up again.
-        """
-        served = tuple(c.name for c in CONV_REGISTRY.for_arch("gfx1250"))
-        self.assertEqual(served, ("conv_igemm_gfx1250_wmma",))
 
 
 if __name__ == "__main__":

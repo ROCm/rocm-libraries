@@ -1450,6 +1450,7 @@
     'NonVolatileC',
     'NonVolatileD',
     'NonVolatileE',
+    'NonVolatileGate',
     'NonVolatileMXSA',
     'NonVolatileMXSB',
     'NonVolatileMetadata',
@@ -1489,6 +1490,8 @@
     'SwapGlobalReadOrder',
     'TDMInst',
     'TDMIterateMode',
+    'TDMLoadWaveSync',
+    'TDMPlusLdsBuf',
     'TDMSplit',
     'TailloopInNll',
     'TemporalHint',
@@ -1497,6 +1500,7 @@
     'TemporalHintC',
     'TemporalHintD',
     'TemporalHintE',
+    'TemporalHintGate',
     'TemporalHintMXSA',
     'TemporalHintMXSB',
     'TemporalHintMetadata',
@@ -2155,7 +2159,7 @@
         2,
         3,
       ]),
-      'len': 40,
+      'len': 64,
       'type': 'list',
     }),
     'MbskPrefetchMethod': dict({
@@ -2325,6 +2329,14 @@
       'type': 'list',
     }),
     'NonVolatileE': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileGate': dict({
       'head': list([
         0,
         1,
@@ -2657,6 +2669,23 @@
       'len': 5,
       'type': 'list',
     }),
+    'TDMLoadWaveSync': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMPlusLdsBuf': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'TDMSplit': dict({
       'head': list([
         False,
@@ -2719,6 +2748,15 @@
       'type': 'list',
     }),
     'TemporalHintE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintGate': dict({
       'head': list([
         0,
         1,

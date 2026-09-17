@@ -50,7 +50,7 @@ _LAYOUT_WORD = {"r": "row", "c": "col"}
 
 # --- Bridge shared helpers (canonical superset; byte-identical across bridges) ---
 # Supported GPU architectures for the bridge (single source of truth).
-_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
+_SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
 # Single source of truth for the preshuffle B-shuffle permutation used by the
 # bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
@@ -65,6 +65,14 @@ _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
 BRIDGE_PERMUTE_N = False
 
 
+try:
+    # Reuse the single canonical amd-smi bridge instead of re-implementing it.
+    from dispatcher_common import _detect_gpu_arch_via_amd_smi
+except Exception:  # noqa: BLE001 - standalone use without dispatcher_common on path
+    def _detect_gpu_arch_via_amd_smi() -> Optional[str]:
+        return None
+
+
 @functools.lru_cache(maxsize=1)
 def _get_arch() -> str:
     """Detect the GPU architecture from rocminfo and validate it.
@@ -74,20 +82,21 @@ def _get_arch() -> str:
     default to a specific architecture -- and ``ValueError`` when the detected
     arch is not one this bridge supports.
     """
-    detected: Optional[str] = None
-    try:
-        out = subprocess.check_output(
-            ["rocminfo"], stderr=subprocess.DEVNULL, text=True
-        )
-        for line in out.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("Name:") and "gfx" in stripped:
-                name = stripped.split(":", 1)[1].strip()
-                if name.startswith("gfx"):
-                    detected = name
-                    break
-    except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
-        detected = None
+    detected: Optional[str] = _detect_gpu_arch_via_amd_smi()
+    if detected is None:
+        try:
+            out = subprocess.check_output(
+                ["rocminfo"], stderr=subprocess.DEVNULL, text=True
+            )
+            for line in out.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("Name:") and "gfx" in stripped:
+                    name = stripped.split(":", 1)[1].strip()
+                    if name.startswith("gfx"):
+                        detected = name
+                        break
+        except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
+            detected = None
 
     if detected is None:
         raise RuntimeError(
@@ -959,6 +968,33 @@ def _bf8_u8_to_fp32(u8: np.ndarray) -> np.ndarray:
     return _fnuz_decode_table(5, 2)[u8.astype(np.intp)]
 
 
+def _fp32_to_fp8_ocp_u8(x):
+    """Encode fp32 -> fp8 E4M3 **OCP** (gfx950/gfx12xx) bit pattern (uint8)."""
+    import ml_dtypes
+    return np.ascontiguousarray(x, dtype=np.float32).astype(ml_dtypes.float8_e4m3fn).view(np.uint8)
+
+
+def _fp32_to_bf8_ocp_u8(x):
+    """Encode fp32 -> bf8 E5M2 **OCP** (gfx950/gfx12xx) bit pattern (uint8)."""
+    import ml_dtypes
+    return np.ascontiguousarray(x, dtype=np.float32).astype(ml_dtypes.float8_e5m2).view(np.uint8)
+
+
+_OCP_FP8_CACHE = {}
+
+
+def _use_ocp_fp8():
+    """True on archs whose device fp8_t is OCP (gfx950/MI350, gfx12xx/RDNA) rather
+    than the FNUZ encoding used by gfx942/MI300. Detected once via rocminfo."""
+    if "v" not in _OCP_FP8_CACHE:
+        try:
+            a = _get_arch()
+        except Exception:
+            a = ""
+        _OCP_FP8_CACHE["v"] = a.startswith("gfx12") or a == "gfx950"
+    return _OCP_FP8_CACHE["v"]
+
+
 # Output (C) element dtype for an A/B element dtype, mirroring the codegen's
 # CommonTypeMappings.get_output_dtype: fp8/bf8 accumulate into fp16, int8 into
 # int32, everything else stores in its own dtype.
@@ -1038,11 +1074,13 @@ class GpuGemmRunner:
             A_h = _fp32_to_bf16_u16(A_lay)
             B_h = _fp32_to_bf16_u16(B_lay)
         elif dtype == "fp8":
-            A_h = _fp32_to_fp8_u8(A_lay)
-            B_h = _fp32_to_fp8_u8(B_lay)
+            _enc = _fp32_to_fp8_ocp_u8 if _use_ocp_fp8() else _fp32_to_fp8_u8
+            A_h = _enc(A_lay)
+            B_h = _enc(B_lay)
         elif dtype == "bf8":
-            A_h = _fp32_to_bf8_u8(A_lay)
-            B_h = _fp32_to_bf8_u8(B_lay)
+            _enc = _fp32_to_bf8_ocp_u8 if _use_ocp_fp8() else _fp32_to_bf8_u8
+            A_h = _enc(A_lay)
+            B_h = _enc(B_lay)
         elif dtype == "int8":
             A_h = np.ascontiguousarray(A_lay, dtype=np.int8)
             B_h = np.ascontiguousarray(B_lay, dtype=np.int8)
@@ -2095,6 +2133,23 @@ def _is_power_of_two(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
 
 
+def _cshuffle_store_ok(
+    m_repeat: int, n_repeat: int, warp_tile_m: int, warp_tile_n: int
+) -> bool:
+    """Return False for the one CShuffle-store combination that is numerically
+    wrong (issue #9684): an ODD per-wave repeat (>1) paired with a 32-wide warp
+    tile in that dimension. GPU-verified on gfx942 -- e.g. tile_m=192 / wave_m=2
+    / warp_tile_m=32 (MRepeat=3) returns garbage, while every other non-power-of-
+    two repeat (incl. MRepeat=3 with warp_tile_m=16, and even repeats like 6/12)
+    is correct. Only relevant for the CShuffle epilogue; the default epilogue is
+    exempt."""
+
+    def _dim_bad(repeat: int, warp_tile: int) -> bool:
+        return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
+    return not (_dim_bad(m_repeat, warp_tile_m) or _dim_bad(n_repeat, warp_tile_n))
+
+
 # --- Warp-configuration gate (parity with Old-TE) --------------------------
 # Old-TE's gemm_validation_utils.validate_warp_configuration restricts the
 # warps-per-block triple (wave_m/n/k) to WARP_SUPPORTED_COMBINATIONS[arch].
@@ -2104,6 +2159,7 @@ _WARP_SUPPORTED_COMBINATIONS_FALLBACK = {
     "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
     "gfx950": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
+    "gfx1250": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1], [2, 1, 1], [1, 2, 2], [4, 1, 1], [1, 4, 1], [2, 2, 1]],
     "gfx1201": [[2, 4, 1], [1, 8, 1], [8, 1, 1], [4, 2, 1]],
 }
 
@@ -2365,6 +2421,14 @@ def expand_sweep(
         # Parity gate: only emit warps-per-block triples Old-TE allows
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
         if not _warp_config_supported(wm, wn, wk, arch):
+            continue
+        # gfx1250 correctness gate (ROCm/rocm-libraries#11161): the compv3
+        # intrawave pipeline is hand-scheduled for MFMA/CDNA (wave64) and
+        # miscompiles for 8-warp blocks (2x4x1 / 4x2x1) on gfx1250 (WMMA/wave32),
+        # producing wrong results (on-device max_rel 0.14-0.87 vs an fp32 CPU
+        # reference; <=4-warp compv3 and all compv4/mem/interwave kernels are
+        # bit-accurate). Gate it off until the pipeline is ported to wave32.
+        if arch == "gfx1250" and pipe == "compv3" and sched == "intrawave" and wm * wn == 8:
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(
             tm // m_div, tn // n_div, wtm, wtn

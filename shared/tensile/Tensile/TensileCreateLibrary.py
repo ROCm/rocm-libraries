@@ -1472,7 +1472,9 @@ def TensileCreateLibrary():
     tPrint(3, HR)
     tPrint(3, "")
 
-    assignGlobalParameters(args)
+    # Library generation does not benchmark assembly kernels, so a GPU-less
+    # host (e.g. CI) is expected; suppress the "no ISA detected" warning.
+    assignGlobalParameters(args, warnOnMissingIsa=False)
 
     supportedArchs = [
         gfxName(arch)
