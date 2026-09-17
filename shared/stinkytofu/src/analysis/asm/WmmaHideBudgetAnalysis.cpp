@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <limits>
 
 #include "../../transforms/asm/dag/RegionDAG.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -40,7 +41,7 @@ namespace stinkytofu {
 // policy.
 RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                                        const std::vector<WmmaHideBudgetBarrierInfo>& barriers,
-                                       int wmmaHideBudgetBase) {
+                                       int wmmaHideBudgetBase, int dsReadPerWmmaCap) {
     RegionHideBudget budget;
     budget.barriers = barriers;
     budget.issueBudgetByWmmaIndex = !barriers.empty();
@@ -133,6 +134,45 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
                              << " wmmaNeeded=" << info.dsLoadWmmaNeeded << " begin=0"
                              << " end=" << end << " dsLoadCount=" << dsLoads
                              << " perWindow=" << perWindow << " remainder=" << remainder << "\n");
+    }
+
+    // Step 3.5: snapshot the ds_load-only portion of issueBudget attributed by
+    // Steps 2/3 above (before Step 4 mixes in non-ds work), then spread any
+    // ds_load with no barrier relationship at all evenly across every window
+    // PLUS one virtual tail slot (the region segment after the last WMMA,
+    // which has no window entry since there's no WMMA left to hold back
+    // there). Floored at 1 per slot whenever any free ds_load remains: a hard
+    // 0 here could strand a load some other, unmodeled constraint (e.g. a
+    // WMMA-src-overlap hazard) forces into exactly that slot. Each slot's free
+    // share (only the free share -- never the barrier-attributed snapshot
+    // above) is also ceilinged at dsReadPerWmmaCap, so the
+    // dagFeatures.dsReadPerWmma / StinkyTofuDsReadPerWmma tuning knob still
+    // bounds how many *unconstrained* ds_loads a window can take.
+    for (WmmaWindowBudget& window : budget.windows) window.dsLoadBudget = window.issueBudget;
+    {
+        int attributedDsLoads = 0;
+        for (const WmmaWindowBudget& window : budget.windows)
+            attributedDsLoads += window.dsLoadBudget;
+        const int freeDsLoads = std::max(0, budget.dsLoadInstructionCount - attributedDsLoads);
+        const int slots = budget.numWindows() + 1;  // +1 = virtual tail slot
+        const int perSlot = freeDsLoads / slots;
+        const int remainder = freeDsLoads % slots;
+        const int cap = dsReadPerWmmaCap > 0 ? dsReadPerWmmaCap : std::numeric_limits<int>::max();
+        for (int i = 0; i < budget.numWindows(); ++i) {
+            int share = perSlot + (i < remainder ? 1 : 0);
+            if (freeDsLoads > 0) share = std::max(share, 1);
+            share = std::min(share, cap);
+            budget.windows[static_cast<size_t>(i)].dsLoadBudget += share;
+        }
+        int tailShare = perSlot + (budget.numWindows() < remainder ? 1 : 0);
+        if (freeDsLoads > 0) tailShare = std::max(tailShare, 1);
+        tailShare = std::min(tailShare, cap);
+        budget.dsLoadTailBudget += tailShare;
+        PASS_DEBUG(std::cerr << "[WmmaHideBudgetAnalysis free ds spread] dsLoadInstructionCount="
+                             << budget.dsLoadInstructionCount << " attributedDsLoads="
+                             << attributedDsLoads << " freeDsLoads=" << freeDsLoads
+                             << " slots=" << slots << " dsReadPerWmmaCap=" << dsReadPerWmmaCap
+                             << " tailShare=" << tailShare << "\n");
     }
 
     // Step 4: place remaining non-DS-load instructions in the first 50% of WMMA
