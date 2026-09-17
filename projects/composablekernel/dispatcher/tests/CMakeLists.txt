@@ -39,6 +39,16 @@ if(CK_DISPATCHER_HOST_TESTS_ONLY)
         set_tests_properties(${test_name} PROPERTIES
             LABELS "dispatcher;host;cpu")
     endforeach()
+    add_test(
+        NAME test_grouped_conv_codegen
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+            -s ${CMAKE_CURRENT_SOURCE_DIR}
+            -p test_grouped_conv_codegen.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(test_grouped_conv_codegen PROPERTIES
+        LABELS "dispatcher;host;cpu;python"
+        TIMEOUT 120
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts")
     return()
 endif()
 
