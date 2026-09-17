@@ -1006,6 +1006,20 @@ tuning knob).
 **Risk**: medium — new pipeline code, but follows an existing, working
 ck_tile GEMM pattern closely rather than inventing from scratch.
 
+**Status: Implemented and validated on real gfx1250 hardware (A0 stepping) for the
+GEMM pipeline layer (bf16, non-cluster-launch). New pipeline
+`GemmPipelineAgBgCrCompAsyncTDMHybrid` + policy
+`GemmPipelineAgBgCrCompAsyncTDMHybridDefaultPolicy` pass a dedicated gtest
+(`test_ck_tile_gemm_pipeline_comp_async_tdm_hybrid_wmma`, 7/7 cases, correctness
+checked against `ck_tile::reference_gemm`). Perf measured against both donor
+pipelines alone: at this task's only validated tile shape (64x64x32 block /
+16x16x32 warp tile), the hybrid does **not** show a win — it trails
+`GemmPipelineAgBgCrCompAsync` alone by ~1-25% and roughly tracks
+`GemmPipelineAgBgCrCompTDMV1` alone. Conv-fwd/conv-bwd-weight wiring (this task's
+ultimate goal) is **not done** — see "Implementation results (this session,
+continued)" below for exact evidence, the likely perf-regression cause, and what
+remains.**
+
 ### Problem / opportunity
 
 ck_tile already has a compute-optimized **8-wave** GEMM pipeline,
@@ -1107,6 +1121,244 @@ blocks, not a port of a single existing pipeline.
    production instance file — do the same here (a new numbered example
    under `example/ck_tile/` or `example/`, whichever matches where the
    target conv-fwd WMMA pipeline actually lives per step 2's finding).
+
+### Investigation findings (this session) — step 1 resolved, hybrid mechanism identified
+
+**Step 1 (gate) — resolved: literal "8 waves" is gfx950/MFMA/wave64-only,
+hard-blocked, not a config knob.** Exact blocker:
+`GemmPipelineAgBgCrCompAsyncEightWavesPolicy`
+(`include/ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_waves_policy.hpp:104-107`):
+```cpp
+static constexpr index_t warp_size = get_warp_size();
+static constexpr index_t warp_num  = BlockSize / warp_size;
+static_assert(warp_size == 64, "Wrong!");
+```
+This isn't a superficial guard — the entire A/B DRAM tile distribution and
+XOR-swizzled LDS descriptor math in that file (`MakeADramTileDistribution`,
+`MakeBDramTileDistribution`, `MakeABLdsBlockDescriptor_`, `SwizzleFactor`,
+lines 128-304) is algebraically derived from `warp_size=64`-specific lane
+partitioning, and `NWarps == 2` is separately hard-asserted for the
+ping-pong design (line 102). Confirmed via `test/ck_tile/gemm/CMakeLists.txt:57-62`:
+`test_ck_tile_gemm_pipeline_comp_async_eight_waves` is registered only
+under `if(GPU_TARGETS MATCHES "gfx95")` — this pipeline has never been
+built, let alone validated, for gfx1250/WMMA/wave32. Re-deriving the
+wave32 lane-partition algebra for this specific pipeline is out of scope
+for this session and is what plan step 1 above correctly warned about.
+
+**However, the doc's premise still holds via a different, lower-risk
+route**: gfx1250 already has two *other*, independently-proven building
+blocks that are exactly "the two separately-proven building blocks" the
+Problem section describes — just not badged "8 waves":
+- `GemmPipelineAgBgCrCompAsync` (global-load-async for **both** operands),
+  `include/ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp`.
+- `GemmPipelineAgBgCrCompTDMV1`/`V2` (TDM for both operands),
+  `include/ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_tdm_v1.hpp` / `_v2.hpp`.
+
+Both are registered **specifically for gfx1250** in
+`test/ck_tile/gemm/CMakeLists.txt:127-132`
+(`test_ck_tile_gemm_pipeline_comp_async_wmma`,
+`test_ck_tile_gemm_pipeline_tdm_wmma`, gated `if(GPU_TARGETS MATCHES
+"gfx125")`), each numerically verified against a CPU reference by the
+existing `TestCkTileGemmPipelineWmmaBase`/`TestCkTileGemmPipeline` gtest
+harness (`test/ck_tile/gemm/test_gemm_pipeline_util.hpp`,
+`test_gemm_pipeline_wmma_base.hpp`). This is materially better evidence
+than the gfx950 "8 waves" precedent: these two are proven **on this exact
+hardware**, not by analogy.
+
+**Mechanism-level plan for the hybrid, verified by direct code reading
+(not yet implemented):**
+1. New pipeline = a clone of `GemmPipelineAgBgCrCompTDMV1`'s loop
+   structure (keep B on TDM **unchanged**: `Base::GlobalPrefetchTDM`,
+   `tdm_config_b`, `s_wait_tensorcnt_barrier`), with every
+   `Base::GlobalPrefetchTDM(tdm_config_a, a_copy_lds_windows[i],
+   a_copy_dram_window, step)` call (4 call sites in the non-scaled
+   `RunPipelineLoop`: `gemm_pipeline_ag_bg_cr_comp_tdm_v1.hpp:351-360,371-378,457-464,524-531`)
+   replaced by `Base::GlobalPrefetchAsync(a_copy_lds_windows[i],
+   a_copy_dram_window, step)` (from the shared
+   `GemmPipelineAgBgCrImplBase::GlobalPrefetchAsync`,
+   `gemm_pipeline_ag_bg_cr_base.hpp:78-84` — already shared infra, not new).
+2. Synchronization: TDM's `s_wait_tensorcnt_barrier<2>()` (waiting on 2
+   pending TDM ops = A+B) becomes, once A no longer uses TDM,
+   `s_wait_tensorcnt<1>()` (B's TDM completion only, no barrier) followed
+   by `block_sync_lds_direct_load()` (A's async-copy completion +
+   barrier) — both primitives already exist
+   (`include/ck_tile/core/arch/arch.hpp:1413-1438`); sequencing the
+   barrier-carrying call last avoids a duplicate barrier.
+3. **For bf16 specifically (this doc's dtype), the A-operand LDS/DRAM
+   layout does not need any new swizzle code.** XOR-swizzle in
+   `GemmPipelineAgBgCrCompAsyncDefaultPolicy` is gated to
+   fp8/bf8-only (`IsSupportedXorSwizzleDataType`,
+   `gemm_pipeline_ag_bg_cr_comp_async_default_policy.hpp:41-61`), and its
+   `MakeALdsBlockDescriptor` explicitly falls back to the plain
+   `UniversalGemmBasePolicy::MakeALdsBlockDescriptor` on gfx125
+   regardless of dtype (`gemm_pipeline_ag_bg_cr_comp_async_default_policy.hpp:289-292`).
+   `MakeAsyncLoadADramWindow` is a no-op passthrough when
+   `!UseXorSwizzle` (`:467-481`). So for bf16 the hybrid policy needs to
+   **override exactly 3 methods** on top of inheriting
+   `GemmPipelineAgBgCrCompTDMDefaultPolicy` (which keeps all of B's TDM
+   machinery, `GetBlockGemm`, `GetPipelineSubTileNum`, cluster-launch,
+   `is_a_load_tr`/`is_b_load_tr` for free — these are already
+   operand-decoupled: `GetBlockGemm`'s `a_wg_attr_num_access`/
+   `b_wg_attr_num_access` derivation,
+   `gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp:505-556`, depends
+   only on each operand's own `is_a_load_tr`/`is_b_load_tr`, never the
+   other operand's load mechanism):
+   - `MakeADramTileDistribution<Problem>()` → forward to
+     `Base::template MakeADramTileDistribution<Problem>()` (bypass TDM's
+     own coarse, hardware-descriptor-oriented override — TDM's A/B DRAM
+     distributions are deliberately coarse/warp-group-level, "the tile is
+     divided into same parts"
+     (`gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp:61-67`) because
+     the TDM hardware unit does per-lane addressing internally; this is
+     **not** compatible with `async_load_tile`, which needs the
+     conventional per-lane distribution `UniversalGemmBasePolicy` provides).
+   - `MakeALdsBlockDescriptor<Problem>()` → forward to
+     `Base::template MakeALdsBlockDescriptor<Problem>()` (same reasoning;
+     matches exactly what `GemmPipelineAgBgCrCompAsyncDefaultPolicy` itself
+     resolves to on gfx125 for bf16).
+   - `GetVectorSizeA<Problem, bool>()` → forward to
+     `Base::template GetVectorSizeA<Problem>()` (TDM's own override
+     hardcodes `1` with the comment "TDM handles vectorization
+     internally" — meaningless once A is async-loaded).
+4. **Correctness trap identified, must not be skipped**:
+   `UniversalGemmBasePolicy<Derived>::GetSmemSize()/GetSmemSizeA()`
+   (`gemm_universal_pipeline_ag_bg_cr_policy.hpp:1094-1123`) calls back
+   into `Derived::template MakeALdsBlockDescriptor<Problem>()` where
+   `Derived` is the CRTP parameter **fixed at the point
+   `GemmPipelineAgBgCrCompTDMDefaultPolicy` itself was written**
+   (`Derived = GemmPipelineAgBgCrCompTDMDefaultPolicy<...>`), not
+   whatever subclass later inherits from it. A hybrid policy built by
+   plain inheritance would therefore silently size shared memory from
+   **TDM's** A-descriptor while the pipeline's actual `GetABLdsTensorViews`
+   call (which goes through the pipeline's own `Policy` template
+   parameter, correctly resolving to the hybrid override) uses a
+   *different* A-descriptor — a latent smem-size/layout mismatch that
+   would not necessarily fail to compile. Fix: explicitly override
+   `GetSmemSize`/`GetSmemSizeA` in the hybrid policy too, computed from
+   the hybrid's own `MakeALdsBlockDescriptor`, rather than relying on the
+   inherited CRTP-bound version. Any other `Derived::` callback inside
+   `UniversalGemmBasePolicy` that touches A (e.g. `ATileAccessPattern` at
+   `gemm_universal_pipeline_ag_bg_cr_policy.hpp:162`) needs the same
+   audit-and-override treatment before this is safe to compile and trust.
+
+### Implementation results (this session, continued) — pipeline built, tested, benchmarked on hardware
+
+The blueprint above (clone TDM v1's loop, swap A onto async) was **not** what got
+built. Building it surfaced a shape mismatch the blueprint missed: TDM v1's loop is
+K-subtiled (`sub_tile_num` from `GetPipelineSubTileNum`, `WindowSlideMode`-based
+window sliding) while `GemmPipelineAgBgCrCompAsync`'s loop is a plain double-buffered
+ping-pong (one `block_gemm()` call per iteration, no subtiling). Grafting async loads
+onto TDM's subtile machinery would have meant reinventing subtile-aware async
+bookkeeping; instead the hybrid **inherits Async's ping-pong loop shape unchanged**
+(`BaseGemmPipelineAgBgCrCompAsync` reused as-is for `PrefetchStages`/`TailNumber`) and
+replaces only B's `GlobalPrefetchAsync` calls with `GlobalPrefetchTDM`, matching the
+doc's original intent (A async, B TDM) via the lower-risk donor.
+
+**Files added**:
+- `include/ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async_tdm_hybrid_policy.hpp`
+  — `GemmPipelineAgBgCrCompAsyncTDMHybridDefaultPolicy`, a fresh CRTP leaf extending
+  `UniversalGemmBasePolicy<Self>` directly (not inheriting either donor policy, for
+  exactly the `GetSmemSize` CRTP-trap reason identified above). Overrides only
+  `MakeBDramTileDistribution`/`MakeBLdsBlockDescriptor` (copied verbatim from
+  `GemmPipelineAgBgCrCompTDMDefaultPolicy`) and `GetBlockGemm`
+  (`sub_tile_num` hardcoded to `1`, no K-subtiling). A's methods are not overridden —
+  `UniversalGemmBasePolicy`'s own generic implementation is used unchanged, which is
+  bit-for-bit what `GemmPipelineAgBgCrCompAsyncDefaultPolicy` itself resolves to for
+  bf16 on gfx125.
+- `include/ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async_tdm_hybrid.hpp`
+  — `GemmPipelineAgBgCrCompAsyncTDMHybrid`, adapted from
+  `GemmPipelineAgBgCrCompAsync`. B's window/load/sync call sites were replaced
+  end-to-end: DRAM+LDS windows built via the shared `Base::GetBWindows` helper (the
+  same one `GemmPipelineAgBgCrCompTDMV1` itself uses) instead of Async's manual
+  `MakeAsyncLoadBDramWindow`-wrapped construction; `Base::GlobalPrefetchAsync(...)`
+  calls for B replaced with `Base::GlobalPrefetchTDM(tdm_config_b, ...)`; a `tdm_config_b`
+  is built once per kernel invocation exactly as `GemmPipelineAgBgCrCompTDMV1` does
+  (padding config from `Policy::GetLdsPaddingConfig<Problem, false>()`,
+  `workgroup_mask` left at its default 0 since cluster launch/multicast is out of
+  scope — `UseClusterLaunch` is hardcoded `false`).
+- Registered in `include/ck_tile/ops/gemm.hpp` (umbrella), a new
+  `GemmPipelineType::CompAsyncTDMHybrid` enum value +
+  `GemmPipelineTypeSelector`/`PipelineDefaultParams`/`DoubleSmemBuffer`/split-K-exempt
+  wiring in `test/ck_tile/gemm/test_gemm_pipeline_util.hpp`, a
+  `KernelTypesCompAsyncTDMHybridWmma` config (same Row/Col/Row bf16 64x64x32/16x16x32
+  shape as the existing `KernelTypesCompAsyncWmma`/`KernelTypesCompTDMWmma`) in
+  `test_gemm_pipeline_kernel_types.hpp`, and a new gtest
+  `test/ck_tile/gemm/test_gemm_pipeline_comp_async_tdm_hybrid_wmma.cpp`, built via a
+  `gfx125`-gated `add_gtest_executable` in `test/ck_tile/gemm/CMakeLists.txt` (mirroring
+  the existing TDM/Async wmma test registration exactly).
+
+**Synchronization, resolved as designed but with one addition found only once
+building**: `asynccnt` (A's counter) is a single hardware counter that transitively
+drains *all* outstanding async ops when waited on once, so
+`GemmPipelineAgBgCrCompAsync`'s own loop only calls `block_sync_lds_direct_load()` at
+two of its four LDS-buffer read points and relies on that transitivity for the other
+two. `tensorcnt` (B's TDM counter) is independent and does **not** get drained by
+that same wait, so the hybrid adds a standalone `s_wait_tensorcnt<0>()` at the two
+read points Async's own code leaves unguarded (both "read window1" points, hot-loop
+"ping" and the `TailNumber::Three`/`Two` tail blocks), on top of a combined
+`s_wait_tensorcnt<0>() + block_sync_lds_direct_load()` at the two points Async already
+guards. See the pipeline header's own comment block for the full reasoning.
+
+**Correctness: verified.** `test_ck_tile_gemm_pipeline_comp_async_tdm_hybrid_wmma`
+(7 cases: `SmallM`, `SingleTile`, `MidLargeM`, `PaddK`, `Regular`, `LargeMatrix`,
+`NotSupportedArgument`) built and run on the real gfx1250 GPU present in this
+environment (`rocminfo` reports `gfx1250`, A0/revision-0 stepping) — **7/7 PASSED**,
+each checked against `ck_tile::reference_gemm` with dtype-appropriate rtol/atol.
+`MidLargeM`/`LargeMatrix` exercise the hot loop (multiple `TailNumber` values);
+`PaddK` exercises the boundary-padding path. Rebuilt and re-ran the two pre-existing
+donor tests (`test_ck_tile_gemm_pipeline_comp_async_wmma`: 7/7 still PASSED;
+`test_ck_tile_gemm_pipeline_tdm_wmma`: all cases SKIPPED on this hardware, confirmed
+pre-existing or this exact A0/revision-0 stepping — its own `SetUp()` unconditionally
+skips every `CompTDMV1`/`CompTDMV2` case when `get_device_revision() == 0`, unrelated
+to any change made here) to confirm the shared `test_gemm_pipeline_util.hpp` edits
+(new enum value, `DoubleSmemBuffer`/k-batch conditions) introduced no regression.
+
+**Perf: measured, mixed result — no win at the one validated tile shape.** A
+standalone benchmark (not checked in; instantiates `GemmKernel` directly the same way
+`invoke_gemm` does, `M=N=4096`, `stream_config` GPU timing, 20 repeats/3 warmup) at
+the 64x64x32 block / 16x16x32 warp tile compared all three pipelines:
+
+```text
+K        TDM-only(ms)   Async-only(ms) Hybrid(ms)     Hyb/TDM    Hyb/Async
+128      0.0201         0.0140         0.0158         0.789      1.133
+256      0.0273         0.0204         0.0240         0.879      1.180
+512      0.0428         0.0396         0.0400         0.937      1.012
+1024     0.0727         0.0577         0.0721         0.992      1.251
+2048     0.1216         0.1028         0.1244         1.023      1.210
+4096     0.2286         0.2007         0.2402         1.051      1.197
+8192     0.4779         0.4063         0.4985         1.043      1.227
+```
+
+The hybrid tracks `GemmPipelineAgBgCrCompTDMV1` alone reasonably closely (0.79-1.05x)
+but is consistently **1-25% slower than `GemmPipelineAgBgCrCompAsync` alone** across
+every K depth tested, including K=8192 — i.e. deeper K does not reveal a latency-hiding
+win here; if anything the gap widens slightly at K=1024+. This directly contradicts
+the task's premise ("large potential upside... hiding load latency behind compute")
+at this shape. Most likely cause, not yet isolated: `HotLoopScheduler()`'s
+`__builtin_amdgcn_sched_group_barrier` sequence in `GemmPipelineAgBgCrCompAsync`
+interleaves *both* operands' `VMEM_READ`/buffer-load instructions against MFMA; the
+hybrid's version (this file) only has real buffer-loads for A (B is TDM, a different
+instruction class the scheduler hint was not adapted to describe), so it schedules a
+narrower interleave window than Async-alone gets for free. A secondary candidate: at
+64x64x32 tile / 4 waves, B's TDM load may simply have less other-work to hide behind
+than A's larger, well-tuned async copy, so replacing it doesn't help and the extra
+`s_wait_tensorcnt` calls at four read points (vs. two) add pure overhead. Neither has
+been isolated by disabling the other; both remain open.
+
+**Revised remaining work** (this task's stated end goal, conv-fwd/conv-bwd-weight
+wiring, is still not done): (1) isolate the perf regression — re-profile with
+`HotLoopScheduler()` reduced to a no-op sched_barrier to see if the hint itself is the
+cause; try a larger tile/warp-count shape (this session validated only the one
+64x64x32/16x16x32 config the existing donor tests use) since the doc's own rigor note
+expected deep-K/large-tile shapes to show the most benefit; (2) if a shape or
+scheduler-hint fix restores a real win over `GemmPipelineAgBgCrCompAsync` alone, only
+then proceed to conv-fwd wiring (`include/ck_tile/ops/grouped_convolution/`, GEMM
+-pipeline-templated via `grouped_convolution_forward_kernel.hpp`) and the bwd-weight
+transform pipeline, re-running the 29-shape `miopen_wrw_shapes.txt` sweep plus Task 4's
+depthwise shapes; (3) if no shape/tuning recovers a win, this task's premise should be
+considered falsified for gfx1250 at practical GEMM-conv tile sizes and closed as
+"implemented, hardware-validated for correctness, benchmarked, net negative" rather
+than pursued further into conv wiring.
 
 ### Validation recipe
 
