@@ -605,6 +605,35 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
                 const auto k_batch_max = math::integer_divide_ceil(gemmK, KPerBlock);
                 k_batch_               = std::min(k_batch_, k_batch_max);
 
+                // Joint model: the occupancy-driven k_batch_ above chronically
+                // overshoots when the (M,N,G) grid is small *because* the single
+                // M- or N-tile itself is smaller than one MPerBlock/NPerBlock (a
+                // padding-waste-dominated shape, e.g. a narrow-C bwd-weight GEMM).
+                // Splitting such an already-tiny output tile's reduction into
+                // thousands of atomic-add slices adds pure overhead with no
+                // compensating parallelism gain: empirically (gfx1250, this tile
+                // config), the best k_batch for such a tile sits near
+                // 2x this kernel's max-occupancy-per-CU almost independent of
+                // gemmK or grid_size (a single reduction tile's useful split
+                // count doesn't grow with how many *other* (M,N,G) tiles exist).
+                // Tighten the cap to that in this regime only. Shapes where the
+                // grid is small for a legitimate reason (M and N already fill
+                // whole tiles, e.g. a deep-K 1x1 conv) are left on the existing,
+                // looser gemmK-derived cap above - an earlier attempt to tighten
+                // unconditionally (via a gemmK/(MinIters*KPerBlock) cap) hit two
+                // separate regressions: it regressed a large-gemmK, no-padding-
+                // waste shape (-26.6%, reported by a prior session), and, when
+                // scaled purely off gemmK, also regressed small-gemmK
+                // padding-waste shapes whose *existing* cap was already at or
+                // below the true optimum (observed directly here).
+                constexpr ck::index_t SmallGridThreshold = 16;
+                if(grid_size <= SmallGridThreshold && (gemmM < MPerBlock || gemmN < NPerBlock))
+                {
+                    const ck::index_t padding_waste_k_batch_max =
+                        2 * active_workgroups_per_cu.max_occupancy_;
+                    k_batch_ = clamp_gemm_k_batch(std::min(k_batch_, padding_waste_k_batch_max));
+                }
+
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
                     std::cout << "[SPLIT-K AUTODEDUCE] k_batch max value: " << k_batch_max
