@@ -120,8 +120,21 @@ namespace
         setOption(args, "compute-input-type-B", rocisa::DataType::Float8);
         setOption(args, "f32-xdl-math-op", rocisa::DataType::Float);
         setOption(args, "activation-compute-type", rocisa::DataType::Float);
-        setOption(args, "mx-a-block", 32);
-        setOption(args, "mx-b-block", 32);
+        // Deliberately 0 here (not 32): these only control whether
+        // ClientProblemFactory calls setMXScaleA/B on the *internal dummy*
+        // problem it builds for sizing purposes (see ClientProblemFactory.cpp),
+        // which is unrelated to the `problem` object this test passes directly
+        // into referenceNeedsPerSolutionRecompute(). When non-zero here, the
+        // DataInitialization ctor's storage-geometry computation for the
+        // swizzled MX-scale tensor indexes problem.freeIndicesA()[0] /
+        // freeIndicesB()[0] on that dummy problem without a bounds check; for
+        // the minimal synthetic problem-size/identifier used here those
+        // indices can be empty, which segfaults (only reachable on real
+        // hardware, so it stays hidden behind GTEST_SKIP() on any other arch).
+        // m_mxScaleFormat (checked by referenceNeedsPerSolutionRecompute) is
+        // read directly from "mx-scale-format" below, independent of these.
+        setOption(args, "mx-a-block", 0);
+        setOption(args, "mx-b-block", 0);
         setOption(args, "mx-a-type", rocisa::DataType::E8);
         setOption(args, "mx-b-type", rocisa::DataType::E8);
         setOption(args, "mx-scale-format", mxScaleFormat);
