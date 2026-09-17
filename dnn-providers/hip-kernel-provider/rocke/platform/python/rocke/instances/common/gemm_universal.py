@@ -197,9 +197,15 @@ class TraitSpec:
     # ticks exactly twice per K-tile (A and B) regardless of tile shape.
     # gfx1250 only, and mutually exclusive with ``direct_to_lds``.
     tdm: bool = False
-    # Number of K-tiles the TDM path keeps in flight; ``tdm_depth`` LDS buffers
-    # plus one being consumed. Depth 1 is the unpipelined ``s_wait_tensorcnt(0)``
-    # form. Only meaningful when ``tdm`` is set.
+    # Size of the TDM LDS ring, counted in buffers. Depth 1 is the unpipelined
+    # issue/wait/compute form and depth 2 ping-pongs, both of which drain
+    # TENSORcnt to zero every K-tile because nothing else is outstanding at the
+    # wait. Depth >= 3 keeps ``depth - 2`` further fills in flight *across* that
+    # wait, which is the whole point of the extra stages; see
+    # ``_emit_kloop_tdm_ring``. Each stage costs another full A/B LDS region, so
+    # this buys latency hiding with occupancy: on gfx1250 the 320 KiB cap still
+    # admits depth 4 at the widest tile, but any ring past half the cap gives up
+    # the second co-resident workgroup. Only meaningful when ``tdm`` is set.
     tdm_depth: int = 1
     # MoE active-tile early-exit. When True (only honored in
     # ``batched=True`` mode), the kernel takes two extra args
@@ -476,6 +482,39 @@ def _tdm_pipelined(trait: "TraitSpec") -> bool:
     return bool(trait.tdm) and trait.tdm_depth >= 2
 
 
+# The deepest TDM ring the K-loop will emit. Not a hardware bound --
+# ``s_wait_tensorcnt`` takes a u16 count -- but every stage costs a whole extra
+# A/B LDS region, so depth 5 already overflows gfx1250's 320 KiB at the 256-wide
+# tiles that win on every shape swept so far, and at narrower tiles the fills it
+# adds are past the point where more of them in flight changes the wait.
+_TDM_MAX_DEPTH = 4
+
+
+def _tdm_ring_depth(trait: "TraitSpec") -> int:
+    """Ring size when TDM needs the generalized modular ring, else 0.
+
+    Depths 1 and 2 keep their original emission and so return 0 here: the deep
+    ring is a separate K-loop branch precisely so that it cannot reshape the
+    depth-2 form both tuned shapes currently ship. Only depth >= 3 needs a
+    runtime ring index, because only there is the write slot neither the slot
+    being read nor the single other half of a ping-pong.
+    """
+    return trait.tdm_depth if (bool(trait.tdm) and trait.tdm_depth >= 3) else 0
+
+
+def _ab_lds_buffers(spec: UniversalGemmSpec, arch: str) -> int:
+    """How many A/B LDS buffers the emitter allocates for ``spec``.
+
+    Shared by :func:`is_valid_spec` and :func:`build_universal_gemm` for the
+    same reason :func:`_ab_lds_plan` is shared: a gate that charges a different
+    number of buffers than the emitter spends either rejects specs that build
+    fine or admits ones that overflow LDS. The TDM ring term is Python-only,
+    which matches the C++ engine's standing lack of any TDM path.
+    """
+    _, _, two_buf = _ab_lds_plan(spec, arch)
+    return _tdm_ring_depth(spec.trait) or (2 if two_buf else 1)
+
+
 _ELEM_BYTES = {"f16": 2, "fp16": 2, "bf16": 2, "fp8": 1, "bf8": 1, "f32": 4, "fp32": 4}
 
 # Direct-to-LDS copies a fixed 16 B (4 dwords) per lane per pass, i.e. 8 halves
@@ -620,10 +659,16 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                     return False, f"tdm cannot encode lds_k_pad: {exc}"
             elif row_bytes % 4 or row_bytes < 8:
                 return False, f"tdm needs a dword-multiple tile row (got {row_bytes}B)"
-            # Depth counts LDS buffers: 1 is unpipelined, 2 ping-pongs. Deeper
-            # rings would need a modular parity the K-loop does not carry yet.
-            if spec.trait.tdm_depth not in (1, 2):
-                return False, f"tdm_depth must be 1 or 2 (got {spec.trait.tdm_depth})"
+            # Depth counts LDS buffers: 1 is unpipelined, 2 ping-pongs, and 3+
+            # take the modular ring in ``_emit_kloop_tdm_ring``. Each stage
+            # costs another A/B region, which the LDS budget below charges via
+            # ``_ab_lds_buffers`` -- so a ring too deep for the tile is rejected
+            # there rather than here.
+            if not 1 <= spec.trait.tdm_depth <= _TDM_MAX_DEPTH:
+                return False, (
+                    f"tdm_depth must be in 1..{_TDM_MAX_DEPTH} "
+                    f"(got {spec.trait.tdm_depth})"
+                )
     if spec.trait.tdm_depth != 1 and not spec.trait.tdm:
         return False, "tdm_depth is only meaningful with tdm=True"
 
@@ -661,8 +706,20 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # the emitter avoids both spurious rejections (over-reserving 2x AB
     # for a single-buffered compv4+cshuffle) and under-reserving. Both
     # sites share :func:`_ab_lds_plan` to stay in lock-step.
-    ab_single, _, _ab_dbl = _ab_lds_plan(spec, arch)
-    ab_bytes = ab_single * (2 if _ab_dbl else 1)
+    # ``_ab_lds_buffers`` is 1 or 2 for every path the C++ engine can express,
+    # and ``tdm_depth`` for a deep TDM ring.
+    #
+    # Note that on gfx1250 the 320 KiB cap is *not* what binds a deep ring:
+    # four A/B regions of a 256x256x64 pad-8 tile are 288 KiB and pass here.
+    # What binds is occupancy — past half the cap a workgroup can no longer be
+    # co-resident with a second one, which is the ``db_fits_2wg`` threshold
+    # ``_ab_lds_plan`` applies to the compv4 double buffer. A deep ring is
+    # deliberately *not* held to that threshold: trading the second workgroup
+    # for in-flight fills is the experiment, and the tuned TDM configs already
+    # run at one wave per EU. So this gate only refuses rings that cannot be
+    # allocated at all, and ranking the occupancy trade is left to the sweep.
+    ab_single, _, _ = _ab_lds_plan(spec, arch)
+    ab_bytes = ab_single * _ab_lds_buffers(spec, arch)
     c_bytes = t.tile_m * t.tile_n * 2 if spec.trait.epilogue == "cshuffle" else 0
     bytes_lds = ab_bytes + c_bytes
     if not target.fits_lds(bytes_lds):
@@ -1253,9 +1310,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # AB LDS double-buffer plan, shared with the validity gate via
     # :func:`_ab_lds_plan` so the reserved/used budget stays in lock-step.
     _, _db, _two_buf = _ab_lds_plan(spec, arch)
-    # depth-N prefetch ring needs (depth+1) AB buffers (only in the unrolled
-    # fixed-K path); otherwise the usual 2 (ping-pong) or 1 (single-buffer).
-    if _pf_depth > 1 and _unroll_k > 0:
+    # Ring size, and it must stay equal to what ``_ab_lds_buffers`` charged the
+    # validity gate. A deep TDM ring (``tdm_depth >= 3``) takes precedence over
+    # the env-gated unrolled experiment below: it is a spec-level request whose
+    # LDS the gate has already budgeted, whereas the experiment is invisible to
+    # the gate. Otherwise, the experiment's (depth+1) ring in the unrolled
+    # fixed-K path, else the usual 2 (ping-pong) or 1 (single-buffer).
+    _tdm_ring = _tdm_ring_depth(spec.trait)
+    if _tdm_ring:
+        _nbuf = _tdm_ring
+    elif _pf_depth > 1 and _unroll_k > 0:
         _nbuf = _pf_depth + 1
     else:
         _nbuf = 2 if _two_buf else 1
@@ -2247,6 +2311,100 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         nonlocal _for_results
         _for_results = for_op.results
 
+    def _emit_kloop_tdm_ring() -> None:
+        """TDM K-loop over a ``tdm_depth``-buffer LDS ring with a partial wait.
+
+        The generalization of :func:`_emit_kloop_prefetch`'s ping-pong to a ring
+        of ``D = tdm_depth >= 3`` buffers. Body order and barrier count are
+        unchanged; what changes is that ``D - 1`` fills are in flight rather than
+        one, so the per-tile wait can retire only the oldest and leave the rest
+        streaming. That partial wait is the lever — the extra buffers merely make
+        it legal::
+
+            prologue:  issue tiles 0 .. D-2      -> ring slots 0 .. D-2
+            for tile i in [0, trip):
+                s_wait_tensorcnt(D-2 sets)       ; the oldest fill has landed
+                LDS barrier                      ; and is visible workgroup-wide
+                issue tile i+D-1                 -> ring slot (i+D-1) % D
+                WMMA tile i                      <- ring slot i % D
+
+        Three invariants carry the correctness argument.
+
+        *The wait count is a constant.* At tile ``i`` the prologue and the body
+        have together issued ``(D-1) + i`` descriptor sets, of which tiles
+        ``0..i-1`` are already consumed, so permitting ``D-2`` to remain
+        outstanding retires exactly through tile ``i``. TENSORcnt retires in
+        order, which is what makes a count sound where a drain was needed
+        before. The figure is independent of ``i``, so there is no tail peel.
+
+        *Every iteration issues, including past the end.* The look-ahead origin
+        is clamped to the last in-bounds tile, so a fill is always a real
+        transfer and therefore always ticks TENSORcnt. Running off the end into
+        a clipped zero-extent descriptor would instead make that tick depend on
+        hardware behaviour, and a wait one set too shallow reads LDS before the
+        fill lands and returns quietly wrong results rather than hanging. The
+        redundant re-fill lands in a slot that no iteration goes on to read.
+
+        *One barrier still suffices.* The slot written at tile ``i`` is
+        ``(i+D-1) % D``, which is ``(i-1) % D`` — the slot read at tile ``i-1``,
+        and the barrier at the top of tile ``i`` is what separates the two. It is
+        never the slot being read now, since ``D-1`` is not a multiple of ``D``.
+        """
+        nonlocal _for_results
+        D = spec.trait.tdm_depth
+        # Descriptor sets per tile *per issuing wave*. Above one wave, wave 0
+        # issues A and wave 1 issues B (see ``emit_load_phase``), so each issuing
+        # wave sees one descriptor per tile rather than two, and waiting on two
+        # per tile would wait a whole tile too shallow. Waves that issue nothing
+        # hold an empty counter and reach the data through the barrier, so the
+        # issuing waves' count is the one that governs.
+        per_tile = 1 if _tdm_waves > 1 else 2
+        allowed = (D - 2) * per_tile
+        ahead_k = (D - 1) * block_k
+        last_origin = b.smax(k_lo, b.sub(_k_upper, c_block_k))
+
+        # Prologue: fill ring slots 0 .. D-2. Static parities, so these LDS
+        # offsets fold to constants.
+        for j in range(D - 1):
+            emit_load_phase(
+                A_smem,
+                B_smem,
+                b.smin(b.add(k_lo, b.const_i32(j * block_k)), last_origin),
+                lds_parity=j,
+            )
+
+        c_ring = b.const_i32(D)
+        c_ahead = b.const_i32(D - 1)
+        c_one = b.const_i32(1)
+        loop_args = [("ring", c0)] + list(accs)
+        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, loop_args, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            ring = iter_vars[0]
+            acc_iter = iter_vars[1:]
+            b.s_wait_tensorcnt(allowed)
+            b.sync_lds_only()
+            emit_load_phase(
+                A_smem,
+                B_smem,
+                b.smin(b.add(k0, b.const_i32(ahead_k)), last_origin),
+                lds_parity=b.mod(b.add(ring, c_ahead), c_ring),
+            )
+            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=ring)
+            b.scf_yield(b.mod(b.add(ring, c_one), c_ring), *new_accs)
+        # The per-tile wait is partial by construction, so the loop ends with
+        # the final iterations' look-ahead fills still in flight -- mover writes
+        # aimed at ring slots inside the A/B pool. Nothing downstream waits on
+        # TENSORcnt: the epilogue's barriers drain LDS and VMEM but not the
+        # mover, and under ``cshuffle`` the smem packer aliases the C staging
+        # tile onto those same bytes (IR liveness sees A/B die at the loop's
+        # last read, which is not when the hardware write lands). Draining here
+        # keeps the ring self-contained, so a late fill can reach neither the
+        # staged C tile nor, under a persistent tile loop, the next tile's
+        # prologue fills. The fills being waited on are the clamped redundant
+        # re-fills no iteration reads, so this costs no real transfer.
+        b.s_wait_tensorcnt(0)
+        _for_results = for_op.results[1:]
+
     def _emit_kloop_prefetch() -> None:
         """Software-pipelined K-loop with DTLA ping-pong.
 
@@ -2291,6 +2449,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             return
 
         nonlocal _for_results
+
+        # A deep TDM ring is its own loop shape. It is a separate branch rather
+        # than a generalization of the code below so that depths 1 and 2 -- the
+        # form both tuned shapes currently ship -- keep emitting exactly what
+        # they did before this knob existed.
+        if _tdm_ring:
+            _emit_kloop_tdm_ring()
+            return
 
         # Fully-unrolled fixed-K variant (ROCKE_EXP_UNROLL_K): no scf.for
         # backedge; Python-unroll the K-tiles with static (compile-time) parity

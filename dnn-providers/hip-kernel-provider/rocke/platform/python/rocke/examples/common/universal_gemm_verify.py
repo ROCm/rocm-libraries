@@ -89,9 +89,10 @@ def main() -> int:
         "--tdm-depth",
         type=int,
         default=1,
-        choices=(1, 2),
+        choices=(1, 2, 3, 4),
         help="TDM LDS buffers: 1 issues and waits per tile, 2 ping-pongs so "
-        "the next tile's transfer overlaps the current tile's WMMAs",
+        "the next tile's transfer overlaps the current tile's WMMAs, and 3+ "
+        "runs a deeper ring with a partial wait",
     )
     p.add_argument(
         "--cshuffle-no-alias",
