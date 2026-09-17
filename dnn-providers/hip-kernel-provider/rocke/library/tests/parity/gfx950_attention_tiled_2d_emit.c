@@ -861,7 +861,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         break;
 
     /* fp16 + sinks combo (D64/b32/GQA-8): shipping spec for the fp16-sink combo
-     * path. Mirrors case 42 with dtype=fp16 + use_sinks; fp16 cannot set
+     * path -- exactly what _tiled_spec_from_problem emits, incl.
+     * use_transposed_mask_limit + skip_legacy_qreg. fp16 cannot set
      * use_fast_paged_kv_desc (bf16-only), so it stays off. */
     case 54:
         s->head_size = 64;
@@ -878,7 +879,36 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_qk_32x32 = true;
         s->use_transposed_scalar_state = true;
         s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
         s->use_transposed_half_local_pv = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+
+    /* bf16 + sinks combo (D64/b32/GQA-8): shipping spec for the bf16-sink combo
+     * path. Same as case 54 but dtype=bf16, which additionally enables
+     * use_fast_paged_kv_desc (bf16-only). */
+    case 55:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_fast_paged_kv_desc = true;
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
         s->tile_size = 64;
