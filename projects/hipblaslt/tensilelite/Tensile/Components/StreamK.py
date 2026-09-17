@@ -21,7 +21,7 @@
 ################################################################################
 
 from rocisa.enum import CacheScope
-from rocisa.code import Module, Label
+from rocisa.code import Module, Label, RegSet
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GLOBALModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister, DSModifiers, MemTokenData
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
@@ -1419,6 +1419,15 @@ class StreamK(Component):
             # Deferred block
             partialsModule = Module("Partials_DeferredBlock")
             partialsModule.add(partialsDeferredLabel)
+            # This block names its staging registers "ValuC+<absolute vgpr>" (see the
+            # UseSubtileImpl arm of startVgprValuOffset below), so it is only correct
+            # while vgprValuC is 0.  It is built here but emitted after the post-loop
+            # code, which re-points vgprValuC at a freshly checked out base; without
+            # pinning, every operand shifts up by that base.  On tiles whose D
+            # accumulators spilled from the agpr pool into the vgpr pool the shifted
+            # window lands on a live accumulator.
+            partialsModule.add(RegSet("v", "vgprValuC", 0))
+            writer.states.deferredPartialsValuCPinned = True
             for edge in edges:
                 sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
                 if writer.isStreamKConstantsToVgprEnabled(kernel, "StreamKIdx"):
@@ -1946,8 +1955,14 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
+                        # UseSubtileImpl pins vgprValuC to 0 for this block, so the
+                        # holder value is the absolute register; the regular path
+                        # keeps the assembler macro's base.
                         startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset))
+                        holder = ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset
+                        if kernel.get("UseSubtileImpl"):
+                            writer.assertNotSpilledDTile(holder, 1, "writePartials accvgpr read")
+                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), holder))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -2015,14 +2030,12 @@ class StreamK(Component):
             element = batchElements[elementIdx]
             addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
             addr = addrCalc.addrDVgpr
-            # For UseSubtileImpl, vgprValuC is remapped; add the base offset so the
-            # WS store reads from the correct accumulator VGPRs.  For the regular path
-            # (non-subtile), startVgprValu is already accounted for by the vgprValuC
-            # assembler macro, so no offset is needed (matches rebase behaviour).
-            if kernel.get("UseSubtileImpl"):
-                sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
-            else:
-                sumIdx = ss.elementSumIdx[elementIdx]
+            # elementSumIdx is an absolute vgpr index (it comes from vgprPool
+            # checkOut).  This value is rendered as a raw register by
+            # chooseGlobalWrite, so it must not be biased by any ValuC base.
+            sumIdx = ss.elementSumIdx[elementIdx]
+            writer.assertNotSpilledDTile(sumIdx, gwvw * (writer.states.bpeCinternal // writer.states.bpr),
+                                         "writePartials WS store")
             storeWidth = gwvw  # pitch must match store/load width gwvw, not StoreVectorWidth (differ on source kernels)
             # storeWidth = 2
             increment = (kernel["WavefrontSize"] * WaveNum) * storeWidth * writer.states.bpeCinternal

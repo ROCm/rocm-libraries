@@ -306,6 +306,10 @@ class StateValues:
   totalAgprs: int                        = 0
   maxLimitAgprs: int                     = 0
   totalMixedAgprs: int                   = 0
+  # [lo, hi) arch-vgpr ranges holding D accumulator tiles that did not fit in the
+  # agpr file (subtile kernels with MIWaveTile0*MIWaveTile1 > agprs/4).  These are
+  # live from the MFMA loop through the epilogue, so no store path may use them.
+  subtileSpilledDRanges: list            = field(default_factory=list)
   totalVgprs: int                        = 0
   totalSgprs: int                        = 0
   lastValuAB: int                        = 0
@@ -564,6 +568,21 @@ class ExternClasses:
 ################################################################################
 class KernelWriter(metaclass=abc.ABCMeta):
   #__metaclass__=abc.ABCMeta
+
+  ##############################################################################
+  # Spilled D accumulator guard
+  ##############################################################################
+  def assertNotSpilledDTile(self, lo, numRegs, what):
+    """Fail generation if [lo, lo+numRegs) overlaps a D accumulator tile that
+    spilled into the arch vgpr pool.  Those registers are live from the MFMA
+    loop through the epilogue, so a store path that targets them silently
+    corrupts one 16x16 output block per wave."""
+    hi = lo + numRegs
+    for (a, b) in self.states.subtileSpilledDRanges:
+      if not (hi <= a or lo >= b):
+        raise RuntimeError(
+            "Kernel %s: %s targets v[%u:%u), which overlaps spilled D accumulator "
+            "tile v[%u:%u)." % (self.states.kernelName, what, lo, hi, a, b))
 
   ##############################################################################
   # Init
@@ -5804,6 +5823,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if hasDeferredPartials:
         module.appendModule(self.states.deferredPartialsModule)
         self.states.deferredPartialsModule = None
+        # writePartials pins vgprValuC to 0 for the duration of its block.
+        if getattr(self.states, "deferredPartialsValuCPinned", False):
+          module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
+          self.states.deferredPartialsValuCPinned = False
       if hasDeferredGSU0:
         module.appendModule(deferredGSU0)
       if hasDeferredActivation:

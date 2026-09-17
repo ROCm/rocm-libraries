@@ -717,6 +717,10 @@ class TileInfo:
       if i % numMMATilesPerReg != 0:
         continue
       vstart = pool.checkOutAligned(numDword, numDword, tag="allocVgprTileRegisters_legacy_vstart")
+      if isDTile and pool is writer.vgprPool:
+        # D tile spilled out of the agpr file into arch vgprs; record it so the
+        # store paths can assert they never target a live accumulator.
+        writer.states.subtileSpilledDRanges.append((vstart, vstart + numDword))
       for k in range(numDword):
         self.vgprTiles[-1].append(vstart + k)
 
