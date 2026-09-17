@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "id": "f1d50001-0001-4a00-9000-000000000001",
+  "name": "hipkernel:FlydslRmsNorm",
+  "graph_match": { "native": "hipkernel.flydsl_rmsnorm.graph_match" },
+  "heuristic": "f1d50001-0002-4a00-9000-000000000002",
+  "metadata": "f1d50001-0003-4a00-9000-000000000003",
+  "knobs": [],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

@@ -472,6 +472,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # there name this target -- a dependency cannot be added to a target that does not yet
     # exist.
     add_subdirectory(tools/uhd_model_gen)
+    # The flyDSL POC skipped descriptor-packaging, because its selection path uses a
+    # compiled-in native pack (IngestorPacks.cpp + FlydslNative.cpp) and it wanted to
+    # avoid rocm_kpack's Python packer. That skip is not carried onto this branch: the
+    # rocKE attention descriptors are staged and packed here, and a compiled-in pack does
+    # not need packaging disabled in order to work.
     add_subdirectory(descriptor-packaging)
 endif()
 

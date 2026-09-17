@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "id": "f1d5b160-0006-4a00-9000-000000000006",
+  "name": "hipkernel:flydsl_rmsnorm (bf16 real)",
+  "matchers": [
+    "f1d5b160-0005-4a00-9000-000000000005"
+  ],
+  "engine": "f1d5b160-0001-4a00-9000-000000000001",
+  "dispatch": "f1d5b160-0004-4a00-9000-000000000004",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "f1d5b160-0007-4a00-9000-000000000007",
+      "name": "flydsl_rmsnorm.bf16_n4096",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "RmsNorm.cpp",
+        "entry_point": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "N": 4096,
+        "dtype": "bf16",
+        "hsaco": "rmsnorm_real_n4096_bf16_gfx950.hsaco",
+        "symbol": "rmsnorm_kernel_0",
+        "block_threads": 256,
+        "abi": "real2d"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1d5b160-0008-4a00-9000-000000000008",
+      "name": "flydsl_rmsnorm.bf16_n8192",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "RmsNorm.cpp",
+        "entry_point": "rmsnorm_kernel_0"
+      },
+      "metadata": {
+        "N": 8192,
+        "dtype": "bf16",
+        "hsaco": "rmsnorm_real_n8192_bf16_gfx950.hsaco",
+        "symbol": "rmsnorm_kernel_0",
+        "block_threads": 256,
+        "abi": "real2d"
+      },
+      "priority": 0
+    }
+  ]
+}

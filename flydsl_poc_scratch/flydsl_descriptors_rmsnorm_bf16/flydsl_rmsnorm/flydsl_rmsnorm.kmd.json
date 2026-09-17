@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "f1d5b160-0003-4a00-9000-000000000003",
+  "name": "flydsl rmsnorm variant fields (bf16 real)",
+  "fields": [
+    { "name": "N", "type": "int" },
+    { "name": "dtype", "type": "string" },
+    { "name": "hsaco", "type": "string" },
+    { "name": "symbol", "type": "string" },
+    { "name": "block_threads", "type": "int" },
+    { "name": "abi", "type": "string" }
+  ]
+}

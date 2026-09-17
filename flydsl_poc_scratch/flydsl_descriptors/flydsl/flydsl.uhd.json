@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f1d50000-0002-4a00-9000-000000000002",
+  "name": "flydsl selector",
+  "kind": "native",
+  "payload": "hipkernel.flydsl.score"
+}

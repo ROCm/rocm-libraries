@@ -17,6 +17,20 @@ const std::vector<IngestorPack>& ingestorPacks()
         // No kpack archive: its kernels are embedded_source, so there is no module to
         // drop and nothing for a reset to do.
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, false, nullptr},
+        // THROWAWAY POC. Its dispatch raw-loads a build-time flyDSL->HSACO code object
+        // (hipModuleLoadData), never touching buildIngestorKernelCode/kpack, so there is
+        // no module cache to reset -- same {false, nullptr} shape as ConvFwd above.
+        {"hipkernel:Flydsl", &registerFlydslSymbols, false, nullptr},
+        // THROWAWAY POC. Family variant of the above: one flyDSL->HSACO per hidden size N,
+        // raw-loaded (hipModuleLoadData) by the dispatch from the matched instance's baked
+        // N. No kpack, no module cache -- same {false, nullptr} shape as Flydsl above.
+        {"hipkernel:FlydslRmsNorm", &registerFlydslRmsNormSymbols, false, nullptr},
+        // THROWAWAY POC (M3). Family of flyDSL flash-attention HSACOs (one per
+        // num_heads/head_dim/causal/dtype tuple), raw-loaded (hipModuleLoadData) by the
+        // dispatch from the matched instance. Its own graph_match symbol => its own
+        // StateManager, so a nullopt decline empties only ITS catalog, never the
+        // dense/tiled/asm SDPA engines it competes with. No kpack, no module cache.
+        {"hipkernel:FlydslAttention", &registerFlydslAttentionSymbols, false, nullptr},
         // Packaged/kpack: its kernels are lowered rocKE builders resolved out of the
         // per-arch .kpack archive, so it owns a module cache the reset sweep must
         // reach. TestIngestorPacksModuleCacheOwnership asserts `ownsModuleCache` and

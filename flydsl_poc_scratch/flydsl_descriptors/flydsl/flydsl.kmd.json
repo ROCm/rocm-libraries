@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "f1d50000-0003-4a00-9000-000000000003",
+  "name": "flydsl variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

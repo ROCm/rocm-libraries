@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "f1d50000-0001-4a00-9000-000000000001",
+  "name": "hipkernel:Flydsl",
+  "graph_match": { "native": "hipkernel.flydsl.graph_match" },
+  "heuristic": "f1d50000-0002-4a00-9000-000000000002",
+  "metadata": "f1d50000-0003-4a00-9000-000000000003",
+  "knobs": [
+    "block_size"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

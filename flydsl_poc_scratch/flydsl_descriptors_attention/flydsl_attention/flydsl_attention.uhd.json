@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f1d5b1a7-0002-4a00-9000-000000000002",
+  "name": "flydsl attention selector (bf16)",
+  "kind": "native",
+  "payload": "hipkernel.flydsl_attention.score"
+}

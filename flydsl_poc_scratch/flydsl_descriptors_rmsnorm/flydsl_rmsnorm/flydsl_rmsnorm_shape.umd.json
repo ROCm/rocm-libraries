@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f1d50001-0005-4a00-9000-000000000005",
+  "name": "kernel hidden size N matches the graph's hidden size",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.flydsl_rmsnorm.kernel_match"
+}
