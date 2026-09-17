@@ -30,6 +30,12 @@ if(HIPBLASLT_ENABLE_TUNING_CACHE)
     )
 endif()
 
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
+    )
+endif()
+
 # NOTE: secure_env_gtest.cpp (ROCM-26729) intentionally includes the header-only
 # rocblaslt_secure_env.hpp by relative path rather than via a target include
 # directory. Adding the internal rocblaslt/src/include dir to hipblaslt-test
