@@ -129,8 +129,8 @@ struct FmhaKernelKey
             << algorithm.use_trload << "_bpc" << unsigned(algorithm.block_per_cu) << "_wg"
             << unsigned(algorithm.num_wave_groups) << "_ms" << unsigned(algorithm.max_splits_log2)
             << "_mq" << algorithm.max_seq_len_q << "_aq" << algorithm.hdim_q_alignment << "_av"
-            << algorithm.hdim_v_alignment << "_r" << algorithm.selection_rank << "_rc"
-            << signature.receipt;
+            << algorithm.hdim_v_alignment << "_r" << algorithm.selection_rank << "_sc"
+            << signature.has_logits_soft_cap << "_rc" << signature.receipt;
         return oss.str();
     }
 
