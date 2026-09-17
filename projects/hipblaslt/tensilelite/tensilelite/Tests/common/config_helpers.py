@@ -216,7 +216,7 @@ def findAvailableArchs(gpu_targets=None):
     if gpu_targets:
         return [t.strip() for t in gpu_targets.split(";") if t.strip()]
 
-    from tensilelite.Tests.gpu_detection import get_available_archs
+    from gpu_detection import get_available_archs
     return get_available_archs()
 
 
