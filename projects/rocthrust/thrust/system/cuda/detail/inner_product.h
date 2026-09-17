@@ -36,7 +36,8 @@
 #  pragma system_header
 #endif // no system header
 
-#if _CCCL_HAS_CUDA_COMPILER()
+#if _CCCL_HAS_CUDA_COMPILER
+#  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/iterator/zip_iterator.h>

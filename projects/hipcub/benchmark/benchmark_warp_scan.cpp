@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,14 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
 
-// HIP
 #include <hipcub/warp/warp_scan.hpp>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
-#endif
+constexpr unsigned int Trials = 100;
 
 enum class scan_type
 {
@@ -36,15 +33,18 @@ enum class scan_type
     broadcast
 };
 
-template<class Runner, class T, unsigned int BlockSize, unsigned int WarpSize, unsigned int Trials>
-__global__ __launch_bounds__(BlockSize) void kernel(const T* input, T* output, const T init)
+template<class Runner, class T, unsigned int BlockSize, unsigned int WarpSize>
+__global__ __launch_bounds__(BlockSize)
+void kernel(const T* input, T* output, const T init)
 {
-    Runner::template run<T, WarpSize, Trials>(input, output, init);
+    Runner::template run<T, WarpSize>(input, output, init);
 }
 
 struct inclusive_scan
 {
-    template<class T, unsigned int WarpSize, unsigned int Trials>
+    static constexpr const char* name = "inclusive_scan";
+
+    template<class T, unsigned int WarpSize>
     __device__
     static auto run(const T* input, T* output, const T init)
         -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -56,8 +56,8 @@ struct inclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = benchmark_utils::plus{};
-        _CCCL_PRAGMA_NOUNROLL()
+        auto                                     scan_op = hipcub::Sum();
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).InclusiveScan(value, value, scan_op);
@@ -66,7 +66,7 @@ struct inclusive_scan
         output[i] = value;
     }
 
-    template<class T, unsigned int WarpSize, unsigned int Trials>
+    template<class T, unsigned int WarpSize>
     __device__
     static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
         -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -75,7 +75,9 @@ struct inclusive_scan
 
 struct exclusive_scan
 {
-    template<class T, unsigned int WarpSize, unsigned int Trials>
+    static constexpr const char* name = "exclusive_scan";
+
+    template<class T, unsigned int WarpSize>
     __device__
     static auto run(const T* input, T* output, const T init)
         -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -85,8 +87,8 @@ struct exclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = benchmark_utils::plus{};
-        _CCCL_PRAGMA_NOUNROLL()
+        auto                                     scan_op = hipcub::Sum();
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
@@ -94,7 +96,7 @@ struct exclusive_scan
 
         output[i] = value;
     }
-    template<class T, unsigned int WarpSize, unsigned int Trials>
+    template<class T, unsigned int WarpSize>
         __device__
     static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
         -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
@@ -103,7 +105,9 @@ struct exclusive_scan
 
 struct broadcast
 {
-    template<class T, unsigned int WarpSize, unsigned int Trials>
+    static constexpr const char* name = "broadcast";
+
+    template<class T, unsigned int WarpSize>
     __device__
     static auto run(const T* input, T* output, const T init)
         -> std::enable_if_t<(benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>
@@ -118,7 +122,7 @@ struct broadcast
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        _CCCL_PRAGMA_NOUNROLL()
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             value = wscan_t(storage).Broadcast(value, src_lane);
@@ -127,7 +131,7 @@ struct broadcast
         output[i] = value;
     }
 
-    template<class T, unsigned int WarpSize, unsigned int Trials>
+    template<class T, unsigned int WarpSize>
     __device__
     static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
         -> std::enable_if_t<!(benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>
@@ -135,63 +139,61 @@ struct broadcast
     {}
 };
 
-template<class Benchmark,
-         class T,
-         unsigned int BlockSize,
-         unsigned int WarpSize,
-         unsigned int Trials = 100>
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+template<class Benchmark, class T, unsigned int BlockSize, unsigned int WarpSize>
+class warp_scan_benchmark : public primbench::benchmark_interface
 {
-    // Make sure size is a multiple of BlockSize
-    size = BlockSize * ((size + BlockSize - 1) / BlockSize);
-    // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
-    T*             d_input;
-    T*             d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    for(auto _ : state)
+    primbench::json meta() const override
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, WarpSize, Trials>),
-                           dim3(size / BlockSize),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output,
-                           input[0]);
-        HIP_CHECK(hipPeekAtLastError());
+        return primbench::json{}
+            .add("algo", "warp_scan")
+            .add("subalgo", Benchmark::name)
+            .add("data_type", primbench::name<T>())
+            .add("block_size", BlockSize)
+            .add("warp_size", WarpSize)
+            .add("lvl", "warp");
+    }
+
+    void run(primbench::state& state) override
+    {
+        const size_t input_items = state.size;
+        const auto&  stream      = state.stream;
+
+        const size_t items = BlockSize * ((input_items + BlockSize - 1) / BlockSize);
+
+        std::vector<T> input(items, 1.0f);
+
+        T* d_input;
+        T* d_output;
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(T)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.set_items(items * Trials);
+        state.add_writes<T>(items * Trials);
 
-        state.SetIterationTime(elapsed_seconds.count());
+        state.run(
+            [&]
+            {
+                hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, WarpSize>),
+                                   dim3(items / BlockSize),
+                                   dim3(BlockSize),
+                                   0,
+                                   stream,
+                                   d_input,
+                                   d_output,
+                                   input[0]);
+            });
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T) * Trials);
-    state.SetItemsProcessed(state.iterations() * size * Trials);
+};
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
-
-#define CREATE_BENCHMARK_IMPL(T, BS, WS, OP)                                              \
-    benchmark::RegisterBenchmark(std::string("warp_scan<data_type:" #T ",block_size:" #BS \
-                                             ",warp_size:" #WS ">.sub_algorithm_name:"    \
-                                             + method_name)                               \
-                                     .c_str(),                                            \
-                                 &run_benchmark<OP, T, BS, WS>,                           \
-                                 stream,                                                  \
-                                 size)
+#define CREATE_BENCHMARK_IMPL(T, BS, WS, OP) executor.queue<warp_scan_benchmark<OP, T, BS, WS>>()
 
 #define CREATE_BENCHMARK(T, BS, WS) CREATE_BENCHMARK_IMPL(T, BS, WS, Benchmark)
 
-// clang-format off
 #if HIPCUB_WARP_THREADS_MACRO == 32
     #define BENCHMARK_TYPE(type)         \
         CREATE_BENCHMARK(type, 60, 15),  \
@@ -222,92 +224,43 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
         CREATE_BENCHMARK(type, 128, 64), \
         CREATE_BENCHMARK(type, 256, 64)
 #endif
-// clang-format on
 
 template<typename Benchmark>
-auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string&                            method_name,
-                    hipStream_t                                   stream,
-                    size_t size) -> std::enable_if_t<std::is_same_v<Benchmark, inclusive_scan>
-                                                     || std::is_same_v<Benchmark, exclusive_scan>>
+auto add_benchmarks(primbench::executor& executor)
+    -> std::enable_if_t<std::is_same_v<Benchmark, inclusive_scan>
+                        || std::is_same_v<Benchmark, exclusive_scan>>
 {
-    using custom_double2    = benchmark_utils::custom_type<double, double>;
-    using custom_int_double = benchmark_utils::custom_type<int, double>;
-
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks
-        = {BENCHMARK_TYPE(int),
-           BENCHMARK_TYPE(float),
-           BENCHMARK_TYPE(double),
-           BENCHMARK_TYPE(int8_t),
-           BENCHMARK_TYPE(custom_double2),
-           BENCHMARK_TYPE(custom_int_double)};
-    benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
+    BENCHMARK_TYPE(int);
+    BENCHMARK_TYPE(float);
+    BENCHMARK_TYPE(double);
+    BENCHMARK_TYPE(int8_t);
+    BENCHMARK_TYPE(custom_double2);
+    BENCHMARK_TYPE(custom_int_double);
 }
 
 template<typename Benchmark>
-auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string&                            method_name,
-                    hipStream_t                                   stream,
-                    size_t size) -> std::enable_if_t<std::is_same_v<Benchmark, broadcast>>
+auto add_benchmarks(primbench::executor& executor)
+    -> std::enable_if_t<std::is_same_v<Benchmark, broadcast>>
 {
-    using custom_double2    = benchmark_utils::custom_type<double, double>;
-    using custom_int_double = benchmark_utils::custom_type<int, double>;
-
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks
-        = {BENCHMARK_TYPE_P2(int),
-           BENCHMARK_TYPE_P2(float),
-           BENCHMARK_TYPE_P2(double),
-           BENCHMARK_TYPE_P2(int8_t),
-           BENCHMARK_TYPE_P2(custom_double2),
-           BENCHMARK_TYPE_P2(custom_int_double)};
-    benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
+    BENCHMARK_TYPE_P2(int);
+    BENCHMARK_TYPE_P2(float);
+    BENCHMARK_TYPE_P2(double);
+    BENCHMARK_TYPE_P2(int8_t);
+    BENCHMARK_TYPE_P2(custom_double2);
+    BENCHMARK_TYPE_P2(custom_int_double);
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+    primbench::settings settings;
+    settings.size                 = 32 * primbench::MiB; // In items
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
+    primbench::executor executor(argc, argv, settings);
 
-    std::cout << "benchmark_warp_scan" << std::endl;
+    add_benchmarks<inclusive_scan>(executor);
+    add_benchmarks<exclusive_scan>(executor);
+    add_benchmarks<broadcast>(executor);
 
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<inclusive_scan>(benchmarks, "inclusive_scan", stream, size);
-    add_benchmarks<exclusive_scan>(benchmarks, "exclusive_scan", stream, size);
-    add_benchmarks<broadcast>(benchmarks, "broadcast", stream, size);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

@@ -194,23 +194,11 @@ Preconditioners
 .. doxygenclass:: rocalution::AS
    :members:
 
-.. figure:: ../data/AS.png
-   :alt: 4 block additive schwarz
-   :align: center
-
-   Example of a 4 block-decomposed matrix - Additive Schwarz with overlapping preconditioner (left) and Restricted Additive Schwarz preconditioner (right).
-
 .. doxygenclass:: rocalution::RAS
    :members:
 
 .. doxygenclass:: rocalution::BlockJacobi
    :members:
-
-.. figure:: ../data/BJ.png
-   :alt: 4 block jacobi
-   :align: center
-
-   Example of a 4 block-decomposed matrix - Block-Jacobi preconditioner.
 
 .. doxygenclass:: rocalution::BlockPreconditioner
    :members:

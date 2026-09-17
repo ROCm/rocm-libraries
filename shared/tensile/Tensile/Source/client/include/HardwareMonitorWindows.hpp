@@ -53,7 +53,7 @@ namespace Tensile
         {
         public:
             /** Translates the Hip device index into the corresponding device index for
-   * ROCm-SMI. */
+   * amd-smi. */
             using clock = std::chrono::steady_clock;
 
             // Monitor at the maximum possible rate.

@@ -17,15 +17,26 @@
 # An emitter that does not yet accept a mode arg is exercised in its default
 # (.ll) mode for L3 and reported as MODE_UNSUPPORTED for L2/L1 -- so this runner
 # already works against the current emitters and gains L2/L1 coverage family by
-# family as emitters are extended.
+# family as emitters are extended. MODE_UNSUPPORTED is also the one gate-passing
+# status that means "not compared" (see GATE_PASS below), which is admissible
+# only because the gating L3/ll lane cannot produce it.
 #
-# Classification per (family, config):
+# Two levels, and the words are not interchangeable: a VERDICT classifies one
+# (family, config); a STATUS rolls a family's verdicts up, and the gate rules on
+# statuses. Hence DRIFT_VERDICTS below -- a set of verdicts, none of them named
+# DRIFT, that force the family status DRIFT.
+#
+# Verdict per (family, config):
 #   IDENTICAL          both non-empty, sha equal
 #   MISMATCH           both non-empty, sha differ              (drift)
 #   BOTH_REJECTED      both empty + positive rc, not end-of-range (parity-faithful)
 #   ASYMMETRIC         one empty / rc disagree                 (drift)
 #   CRASH              either side died on a signal (rc < 0)   (drift)
 #   END                both report "unknown config" (range end; stops the family)
+#
+# Per-family statuses, and which of them the gate lets exit zero, are the
+# GATE_PASS / GATE_FAIL maps below; the rule over them is gate_verdict(), unit-
+# tested host-only in test_gate_verdict.py next to this file.
 #
 # Build output goes to /tmp (repo tree is slow NFS). No git operations.
 
@@ -37,6 +48,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
@@ -202,6 +214,13 @@ def run_py(name, idx, mode, src_dir=None):
     if src_dir is None:
         src_dir = PARITY
     env = dict(os.environ)
+    # The C emitters build their IR natively and so have no Python authoring
+    # stack to record; letting location capture through here would give the
+    # reference side debug metadata the other side cannot have, and report drift
+    # for two kernels that lowered identically. The engines' debug emission is
+    # compared where the comparison is meaningful -- one kernel, both lowerers --
+    # by tests/core/test_debug_info.py under ROCKE_BACKEND=both.
+    env.pop("ROCKE_DEBUG_LOC", None)  # ir.LOC_CAPTURE_ENV
     roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(PARITY)]
     if SHIM_DIR:
         roots.insert(0, str(SHIM_DIR))
@@ -250,6 +269,48 @@ def classify(cr, co, ce, pr, po, pe):
             return "BOTH_REJECTED", None
         return "ASYMMETRIC", None
     return "ASYMMETRIC", (sh(co) if co else None, sh(po) if po else None)
+
+
+# Per-config verdicts that force the family to DRIFT: the engines disagreed, or
+# one of them misbehaved outright (CRASH is either side dying, CANON_ERROR is the
+# canonicalizer refusing the text). STRUCT_DRIFT/CANON_ERROR/CANON_EQUAL come
+# from the canonical re-triage in run_family, not from classify().
+DRIFT_VERDICTS = ("MISMATCH", "ASYMMETRIC", "STRUCT_DRIFT", "CANON_ERROR", "CRASH")
+
+
+class FamilyStatus(NamedTuple):
+    """A family's rolled-up status plus the counts that justify it."""
+
+    status: str
+    nbad: int
+    ncanon: int
+
+
+def family_status(configs, range_drift):
+    """Roll a family's per-config verdicts up into one status.
+
+    Most-specific first. RANGE_DRIFT outranks the two benign statuses because a
+    family whose engines disagree about how many configs exist has not been
+    fully compared, however clean the configs it did compare were. The last two
+    are the vacuous passes: ALL_REJECTED sampled configs but byte-compared none
+    of them, and NO_CONFIGS sampled nothing at all. Neither may read as GREEN.
+    """
+    nbad = sum(1 for c in configs if c["verdict"] in DRIFT_VERDICTS)
+    ncanon = sum(1 for c in configs if c["verdict"] == "CANON_EQUAL")
+    nrejected = sum(1 for c in configs if c["verdict"] == "BOTH_REJECTED")
+    if nbad:
+        status = "DRIFT"
+    elif range_drift is not None:
+        status = "RANGE_DRIFT"
+    elif ncanon:
+        status = "CANON_ONLY"  # benign: differs only in SSA-id numbering
+    elif not configs:
+        status = "NO_CONFIGS"
+    elif nrejected == len(configs):
+        status = "ALL_REJECTED"
+    else:
+        status = "GREEN"
+    return FamilyStatus(status, nbad, ncanon)
 
 
 def run_family(name, archive, mode, canonical=False, src_dir=None):
@@ -315,21 +376,7 @@ def run_family(name, archive, mode, canonical=False, src_dir=None):
                 "p_rc": pr,
             }
         )
-    nbad = sum(
-        1
-        for c in configs
-        if c["verdict"]
-        in ("MISMATCH", "ASYMMETRIC", "STRUCT_DRIFT", "CANON_ERROR", "CRASH")
-    )
-    ncanon = sum(1 for c in configs if c["verdict"] == "CANON_EQUAL")
-    if nbad:
-        status = "DRIFT"
-    elif ncanon:
-        status = "CANON_ONLY"  # benign: differs only in SSA-id numbering
-    else:
-        status = "GREEN"
-    if range_drift is not None and status == "GREEN":
-        status = "RANGE_DRIFT"
+    status, nbad, ncanon = family_status(configs, range_drift)
     return {
         "family": name,
         "status": status,
@@ -339,6 +386,92 @@ def run_family(name, archive, mode, canonical=False, src_dir=None):
         "range_drift": range_drift,
         "configs": configs,
     }
+
+
+# ---- gate verdict ---------------------------------------------------------
+# Every status run_family can return is named in exactly one of these two maps,
+# plus NO_FAMILIES, which gate_verdict raises for the run as a whole.
+# A status in NEITHER map fails the gate (see gate_verdict), so a status added
+# later fails loudly until someone classifies it. The gate must never widen by
+# omission: a one-status "fail if DRIFT" rule passes every other way the run can
+# go wrong, including the ways that have not been invented yet.
+#
+# Only the keys are consulted. Both maps' values are prose for the reader; the
+# failing ones are also printed as the gate's reason.
+GATE_PASS = {
+    "GREEN": "every sampled config agreed -- identical bytes, or both engines "
+    "rejected the spec",
+    "CANON_ONLY": "differs only in incidental SSA-id numbering",
+    # ll mode -- the gating mode -- never yields this; only the non-gating
+    # ir/verify modes can, where an emitter that predates the mode arg is a
+    # known coverage gap rather than a parity failure.
+    "MODE_UNSUPPORTED": "emitter does not accept this mode yet",
+}
+GATE_FAIL = {
+    "DRIFT": "configs diverge between the engines",
+    "RANGE_DRIFT": "the engines disagree about how many configs exist",
+    "NO_CONFIGS": "the family enumerated zero configs",
+    "ALL_REJECTED": "every sampled config was rejected, so no bytes were compared",
+    "COMPILE_FAIL": "the C++ emitter did not build, so nothing was compared",
+    "NO_FAMILIES": "the run discovered no families to compare",
+}
+
+
+class GateFailure(NamedTuple):
+    """One family the gate refuses to pass, and why."""
+
+    family: str
+    status: str
+    reason: str
+
+
+def _gate_detail(r):
+    """Evidence for a failing family, from whichever fields its record carries.
+
+    A dashboard read back from ``--json`` is complete, but a caller may hand in
+    a partial record. Missing evidence yields no clause: a gate that guesses
+    which engine truncated prints a confident falsehood.
+    """
+    status = r.get("status")
+    if status == "DRIFT" and r.get("n") is not None and r.get("bad") is not None:
+        return f" ({r['bad']} of {r['n']} configs)"
+    if status == "RANGE_DRIFT":
+        rd = r.get("range_drift") or {}
+        if "c_end" in rd:
+            return f" (config {rd.get('idx')}: {'C++' if rd['c_end'] else 'Python'} ended first)"
+    return ""
+
+
+def gate_verdict(results):
+    """The pass/fail rule over a dashboard.
+
+    Returns ``(exit_code, failures)``, a list of :class:`GateFailure`. Pure over
+    ``results`` -- no archive, no subprocess, no filesystem -- so the rule itself
+    is testable on synthetic dashboards without a build.
+
+    An empty dashboard fails. A run that compared no families is the whole-run
+    form of NO_CONFIGS, and the gate's GREEN line would be claiming byte
+    identity over nothing.
+    """
+    if not results:
+        return 1, [GateFailure("<none>", "NO_FAMILIES", GATE_FAIL["NO_FAMILIES"])]
+    failures = []
+    for r in results:
+        family = r.get("family", "<unnamed>")
+        status = r.get("status")
+        if status in GATE_FAIL:
+            failures.append(
+                GateFailure(family, status, GATE_FAIL[status] + _gate_detail(r))
+            )
+        elif status not in GATE_PASS:
+            failures.append(
+                GateFailure(
+                    family,
+                    str(status),
+                    "unrecognized status -- classify it in GATE_PASS or GATE_FAIL",
+                )
+            )
+    return (1 if failures else 0), failures
 
 
 def main():
@@ -382,7 +515,9 @@ def main():
         "--check-golden",
         action="store_true",
         help="re-run and fail on any config whose reference sha "
-        "differs from (or is missing in) the golden file.",
+        "differs from (or is missing in) the golden file. This is the "
+        "anchor check only -- its exit code answers 'does output match the "
+        "blessed shas', not the parity question the default run gates on.",
     )
     args = ap.parse_args()
 
@@ -414,18 +549,12 @@ def main():
         results.append(r)
         tag = r["status"]
         extra = ""
-        if tag in ("GREEN", "DRIFT", "CANON_ONLY"):
+        if r.get("n") is not None:
             extra = f"  configs={r['n']} bad={r['bad']} canon={r.get('canon', 0)}"
         print(f"  {tag:16s} {name}{extra}")
         if tag == "DRIFT":
             for c in r["configs"]:
-                if c["verdict"] in (
-                    "MISMATCH",
-                    "ASYMMETRIC",
-                    "STRUCT_DRIFT",
-                    "CANON_ERROR",
-                    "CRASH",
-                ):
+                if c["verdict"] in DRIFT_VERDICTS:
                     print(
                         f"        cfg[{c['idx']}] {c['verdict']} c_rc={c['c_rc']} p_rc={c['p_rc']}"
                     )
@@ -438,12 +567,11 @@ def main():
     print("\n=== SUMMARY (mode={}) ===".format(args.mode))
     for k in sorted(by):
         print(f"  {k:16s} {by[k]}")
-    drift = [r["family"] for r in results if r["status"] == "DRIFT"]
-    cfail = [r["family"] for r in results if r["status"] == "COMPILE_FAIL"]
-    if drift:
-        print("  DRIFT families:", ", ".join(drift))
-    if cfail:
-        print("  COMPILE_FAIL families:", ", ".join(cfail))
+    exit_code, failures = gate_verdict(results)
+    if failures:
+        print("\n=== GATE FAILURES ===")
+        for family, status, reason in failures:
+            print(f"  {status:16s} {family}: {reason}")
     print(f"\ndashboard: {args.json}")
 
     # ---- L5 golden anchor -------------------------------------------------
@@ -461,12 +589,14 @@ def main():
         # A C-vs-Python DRIFT family is reported as a caveat (e.g. the known
         # pre-existing gfx950_attention_tiled_2d_fastkv_regp ir drift) but does
         # not invalidate the reference shas being blessed.
-        if drift:
+        if failures:
             print(
-                "\nNOTE: recording golden with C-vs-Python DRIFT present in: "
-                + ", ".join(drift)
-                + "\n  The golden anchors the Python "
-                "reference shas, which remain well-defined for these families."
+                "\nNOTE: recording golden from a run the gate would fail: "
+                + ", ".join(f"{f.family} ({f.status})" for f in failures)
+                + "\n  The golden anchors the Python reference shas, which "
+                "remain well-defined. But a family that ended early or compared "
+                "nothing blesses FEWER configs than a clean run would, and the "
+                "missing ones return later as NEW (unblessed), not as MISSING."
             )
         store[key] = cur
         nblessed = sum(len(v) for v in cur.values())
@@ -518,8 +648,7 @@ def main():
         print("GOLDEN OK")
         return 0
 
-    # exit nonzero if any drift (compile-fail tracked separately, not a parity fail)
-    return 1 if drift else 0
+    return exit_code
 
 
 if __name__ == "__main__":

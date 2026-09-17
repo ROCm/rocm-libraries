@@ -24,12 +24,21 @@
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
 
+# These labels help distinguish which subteams are responsible for reviews for changes made in rocKE
+
 "rocke-lib: attention":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*attention*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*fmha*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*sdpa*'
   - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/attention/**/*'
+
+# This label serves to distiguish work being done in RocKE platform, for the reviewing team and internal tools
+
+"rocke: platform":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/platform/**/*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/style/**/*'
 
 "project: hipdnn-integration-tests":
 - changed-files:
@@ -176,3 +185,21 @@ github actions:
     - .github/scripts/**/*
     - .github/*.json
     - .github/*.yml
+
+# These labels help distinguish which subteams are responsible for reviews for changes made in CK, in both legacy CK and ck_tile
+
+"ck: convolution":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/composablekernel/**/*{conv[!e],2col,column}*'
+    - 'projects/composablekernel/**/*{conv[!e],2col,column}*/**'
+    - 'projects/composablekernel/**/*conv'
+    - 'projects/composablekernel/**/*conv/**'
+
+# This label covers attention and mixture-of-experts work
+
+"ck: attention-moe":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/composablekernel/**/*{mha,attention,attn,softmax_gemm,moe,topk}*'
+    - 'projects/composablekernel/**/*{mha,attention,attn,softmax_gemm,moe,topk}*/**'

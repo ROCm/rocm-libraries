@@ -26,7 +26,7 @@ from __future__ import print_function
 import os
 import sys
 import argparse
-from Tensile.Utilities.ConditionalImports import yamlLoader, yamlDumper
+from Tensile.Utilities.ConditionalImports import SafeLoader, yamlDumper
 
 HR = "################################################################################"
 
@@ -66,7 +66,7 @@ class LibraryLogic:
         stream = open(filename, "r")
       except IOError:
         printExit("Cannot open file: %s" % filename )
-      data = yaml.load(stream, yamlLoader)
+      data = yaml.load(stream, SafeLoader)
 
       if isinstance(data, list):
 

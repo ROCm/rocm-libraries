@@ -32,7 +32,7 @@ Required environment:
 
 - ROCm 7.x with `libamd_comgr` and `libamdhip64` discoverable by the dynamic linker.
 - Python 3.12 with `torch` built for ROCm.
-- AMDGPU device visible to HIP (e.g. MI300X, MI325X, MI350X, MI355X for the gfx950 default ISA). gfx942 plus the RDNA targets gfx1151 / gfx1201 are also supported.
+- AMDGPU device visible to HIP (a `gfx950` part for the default ISA). `gfx942` plus the RDNA targets `gfx1151` / `gfx1201` are also supported.
 
 Verify quickly:
 
@@ -50,7 +50,7 @@ PY
 ## Static Unit Tests
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library \
   python tests/test_rocke.py
 ```
 
@@ -82,7 +82,7 @@ when the C++ test binaries are built), use `python tests/run_all.py`.
 
 The example generators that build HSACO + manifest and verify against a
 reference live under `python/rocke/examples/` (run them as modules, e.g.
-`python -m rocke.examples.common.bake_off_implicit_gemm`); see the next
+`python -m builders.common.bake_off_implicit_gemm`); see the next
 section.
 
 ## Manual Build + Verify One Instance
@@ -92,8 +92,8 @@ cd <rocke/platform>
 
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=python python \
-    -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=python:../library python \
+    -m builders.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
 ls "$OUT_DIR"
@@ -253,6 +253,10 @@ Reports MFMA delta, vector store delta, VGPR delta, LDS delta — the runbook-re
 - Pointer arg sized wrong: `gemm_args_signature()` is `ptr (8) ptr (8) ptr (8) i32 (4) i32 (4) i32 (4)`. Mismatched pack order fails.
 - Stride passed in bytes vs elements (or vice versa).
 - Pointer not aligned to declared `align=N`.
+- To get the *authoring line* that emitted the faulting instruction, plus the
+  workgroup and lane, run it under rocgdb — see
+  [`debugging_rocgdb.md`](./debugging_rocgdb.md). Turn on
+  `set amdgpu precise-memory on` first or the reported location is wrong.
 
 ### "Slow but correct"
 
@@ -274,11 +278,11 @@ A two-minute smoke for a clean clone:
 ```bash
 cd <rocke/platform>
 export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPATH=python
+export PYTHONPATH=python:../library
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 python tests/test_rocke.py                             # unit (most no-GPU; ~20 need a GPU)
-python -m rocke.examples.common.bake_off_implicit_gemm \
+python -m builders.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
 python -m rocke.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify

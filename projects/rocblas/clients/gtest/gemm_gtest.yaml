@@ -2471,6 +2471,14 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range_small
 
+- name: gemm_gemv
+  category: pre_checkin
+  function:
+    - gemm: *half_single_double_precisions_complex_real
+  matrix_size: *gemm_ex_gemv_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range_small
+
 - name: gemm_small
   category: quick
   function:

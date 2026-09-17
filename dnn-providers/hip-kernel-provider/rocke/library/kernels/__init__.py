@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""SDPA/MHA kernel definitions (migrated from ``rocke.instances``).
+"""Kernel definitions migrated from ``rocke.instances`` (SDPA/MHA and conv).
 
 Relative imports below resolve within this ``kernels`` package (``common/`` and
 ``gfx*/`` mirror the former ``instances`` substructure). Platform primitives are
@@ -35,10 +35,14 @@ from .gfx950.attention_tiled_2d import (  # noqa: F401
     UnifiedAttention2DTiledSpec,
 )
 
-# Dense flash-attention prefill (gfx950-only): productized CK-1 persistent kernel.
-# See ``kernels/gfx950/attention_dense.py``.
+# Dense flash-attention prefill. ``AttentionDenseSpec`` remains the historical
+# gfx950 alias; new cross-arch code should use the explicit concrete type.
+from .common.attention_dense_spec import (  # noqa: F401
+    AttentionDenseSpec as AttentionDenseBaseSpec,
+)
 from .gfx950.attention_dense import (  # noqa: F401
     AttentionDenseSpec,
+    Gfx950AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
     attention_dense_signature,
@@ -46,6 +50,12 @@ from .gfx950.attention_dense import (  # noqa: F401
     run_attention_dense_torch,
     supports_attention_dense,
 )
+
+# gfx942 dense flash-attention prefill. Exposed under its own arch module
+# alias to avoid shadowing the gfx950 exports above (same symbol names). Reach it via
+# ``kernels.attention_dense_gfx942`` or ``from kernels.gfx942 import attention_dense``;
+# dispatch selects it opt-in via spec_id="gfx942_attention_dense".
+from .gfx942 import attention_dense as attention_dense_gfx942  # noqa: F401
 
 
 def build_unified_attention_2d_tiled(spec, *, arch: str = "gfx950"):
@@ -163,4 +173,65 @@ from .common.sparse_attention import (  # noqa: F401
     jenga_sparse_attention_signature,
     vsa_sparse_attention_grid,
     vsa_sparse_attention_signature,
+)
+
+# ---------------------------------------------------------------------------
+# Convolution kernel public surface (migrated from rocke.instances)
+# ---------------------------------------------------------------------------
+from .common._conv_implicit_gemm_common import (  # noqa: F401
+    ConvProblem,
+    ConvDataSpec,
+    ConvAccumulatorEpilogue,
+)
+from .common.conv_implicit_gemm import (  # noqa: F401
+    ImplicitGemmConvSpec,
+    build_implicit_gemm_conv,
+)
+from .common.conv_implicit_gemm_wgrad import (  # noqa: F401
+    WgradConvSpec,
+    build_implicit_gemm_conv_wgrad,
+    is_valid_wgrad_spec,
+)
+from .common.conv_implicit_gemm_dgrad import (  # noqa: F401
+    DgradConvSpec,
+    SubGemmParams,
+    build_implicit_gemm_conv_dgrad,
+    compute_tilde,
+    enumerate_sub_gemms,
+    is_valid_dgrad_spec,
+    pack_sub_gemm_buffer,
+)
+from .common.conv_direct_grouped import (  # noqa: F401
+    DirectConvProblem,
+    DirectConv4cSpec,
+    DirectConv16cSpec,
+    build_direct_conv_4c,
+    build_direct_conv_16c,
+)
+from .common.img2col import (  # noqa: F401
+    Img2ColSpec,
+    build_img2col,
+    img2col_grid,
+    img2col_signature,
+    is_valid_spec as is_valid_img2col_spec,
+)
+from .common.deep_fused_conv_pool import (  # noqa: F401
+    FusedConvPoolProblem,
+    DeepFusedConvPoolSpec,
+    build_deep_fused_conv_pool,
+    deep_fused_conv_pool_grid,
+    deep_fused_conv_pool_signature,
+    is_valid_spec as is_valid_deep_fused_conv_pool_spec,
+)
+from .gfx950.deep_fused_conv_pool import (  # noqa: F401
+    Gfx950DeepFusedConvPoolSpec,
+    make_deep_fused_conv_pool_spec as make_gfx950_deep_fused_conv_pool_spec,
+)
+from .gfx1151.deep_fused_conv_pool import (  # noqa: F401
+    Gfx1151DeepFusedConvPoolSpec,
+    make_deep_fused_conv_pool_spec as make_gfx1151_deep_fused_conv_pool_spec,
+)
+from .gfx1201.deep_fused_conv_pool import (  # noqa: F401
+    Gfx1201DeepFusedConvPoolSpec,
+    make_deep_fused_conv_pool_spec as make_gfx1201_deep_fused_conv_pool_spec,
 )

@@ -14,7 +14,6 @@ OUTPUT_IMAGES*
 OUTPUT_PERFORMANCE*
 QA_RESULTS*
 OUTPUT_VOXEL*
-doxygen_output*
 .cache
 
 # documentation artifacts

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,20 +17,22 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/device_vector.h>
-#include <thrust/iterator/zip_iterator.h>
-#include <thrust/remove.h>
-#include <thrust/sort.h>
-#include <thrust/transform.h>
-#include <thrust/zip_function.h>
+#if !defined(THRUST_LEGACY_GCC)
 
-#include <iostream>
+#  include <thrust/device_vector.h>
+#  include <thrust/iterator/zip_iterator.h>
+#  include <thrust/remove.h>
+#  include <thrust/sort.h>
+#  include <thrust/transform.h>
+#  include <thrust/zip_function.h>
 
-#include <unittest/unittest.h>
+#  include <iostream>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
+#  include <unittest/unittest.h>
+
+#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#    include <iterator>
+#  endif
 
 using namespace unittest;
 
@@ -54,9 +56,9 @@ struct TestZipFunctionCtor
   {
     ASSERT_EQUAL(thrust::zip_function<SumThree>()(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
     ASSERT_EQUAL(thrust::zip_function<SumThree>(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#ifdef __cpp_deduction_guides
+#  ifdef __cpp_deduction_guides
     ASSERT_EQUAL(thrust::zip_function(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#endif // __cpp_deduction_guides
+#  endif // __cpp_deduction_guides
   }
 };
 SimpleUnitTest<TestZipFunctionCtor, type_list<int>> TestZipFunctionCtorInstance;
@@ -81,20 +83,19 @@ struct TestZipFunctionTransform
     device_vector<T> d_result_zip(n);
 
     // Tuple base case
-
-    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
-                      h_result_tuple.begin(),
-                      SumThreeTuple{});
+    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+              h_result_tuple.begin(),
+              SumThreeTuple{});
     // Zip Function
-    thrust::transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
-                      make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
-                      h_result_zip.begin(),
-                      make_zip_function(SumThree{}));
-    thrust::transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
-                      make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
-                      d_result_zip.begin(),
-                      make_zip_function(SumThree{}));
+    transform(make_zip_iterator(h_data0.begin(), h_data1.begin(), h_data2.begin()),
+              make_zip_iterator(h_data0.end(), h_data1.end(), h_data2.end()),
+              h_result_zip.begin(),
+              make_zip_function(SumThree{}));
+    transform(make_zip_iterator(d_data0.begin(), d_data1.begin(), d_data2.begin()),
+              make_zip_iterator(d_data0.end(), d_data1.end(), d_data2.end()),
+              d_result_zip.begin(),
+              make_zip_function(SumThree{}));
 
     ASSERT_EQUAL(h_result_tuple, h_result_zip);
     ASSERT_EQUAL(h_result_tuple, d_result_zip);
@@ -196,3 +197,4 @@ struct TestNestedZipFunction2
   }
 };
 SimpleUnitTest<TestNestedZipFunction2, type_list<int, float>> TestNestedZipFunctionInstance2;
+#endif // !THRUST_LEGACY_GCC

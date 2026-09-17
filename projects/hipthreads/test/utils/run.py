@@ -14,15 +14,71 @@ program's error code.
 """
 
 import argparse
+import hashlib
 import os
 import platform
+import signal
 import subprocess
+import tempfile
+
+# Windows path-length handling.
+#
+# lit derives the per-test execution directory (%t.d) from the test's path in the
+# build tree. On CI the workspace prefix alone is ~140 characters, and this suite
+# keeps libc++'s deep directory layout (.../thread.mutex.requirements/
+# thread.mutex.requirements.mutex/thread.mutex.class/Output/lock.pass.cpp.dir/t.tmp.d),
+# which pushes ~100 of the tests past Windows' MAX_PATH. Two separate limits bite:
+#
+#   * CreateDirectoryW refuses paths of 248 (MAX_PATH - 12) characters or more, so
+#     cmd.exe's mkdir couldn't create the directory in the first place.
+#   * CreateProcessW's lpCurrentDirectory is capped at MAX_PATH and is NOT covered by
+#     the long-path opt-in (registry LongPathsEnabled + a longPathAware manifest cover
+#     CreateDirectoryW/SetCurrentDirectoryW, but not process creation), so a deep cwd
+#     fails with WinError 267 "The directory name is invalid" however the machine is
+#     configured. See ROCm/rocm-libraries#10851.
+#
+# So we create the directory through the \\?\ extended-length form, which does honor
+# long paths, and when the path is too long to serve as a cwd we run the test in a
+# short scratch directory instead. Nothing in this suite reads or writes files relative
+# to the cwd, so that substitution is invisible to the tests.
+MAX_PATH = 260
+
+
+def extended_path(path):
+    """Return the \\\\?\\-prefixed form of a path, which bypasses MAX_PATH."""
+    path = os.path.abspath(path)
+    if path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):  # UNC share
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
+def prepare_execdir(execdir):
+    """Create the execution directory and return a path usable as a child's cwd."""
+    if platform.system() != "Windows":
+        os.makedirs(execdir, exist_ok=True)
+        return execdir
+
+    os.makedirs(extended_path(execdir), exist_ok=True)
+    # Stay under the directory limit rather than the (larger) file one, so that a test
+    # creating a file in its cwd keeps working too.
+    if len(execdir) < MAX_PATH - 12:
+        return execdir
+
+    # Too deep to hand to CreateProcessW: run in a short directory under TEMP instead,
+    # named after a hash of the real one so concurrent tests still get distinct cwds.
+    digest = hashlib.sha1(execdir.encode("utf-8")).hexdigest()[:16]
+    short_execdir = os.path.join(tempfile.gettempdir(), "hipthreads-test", digest)
+    os.makedirs(short_execdir, exist_ok=True)
+    return short_execdir
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--execdir", type=str, required=True)
     parser.add_argument("--codesign_identity", type=str, required=False, default=None)
+    parser.add_argument("--dll-dir", type=str, required=False, default=None)
     parser.add_argument("--env", type=str, nargs="*", required=False, default=[])
     parser.add_argument(
         "--prepend_env", type=str, nargs="*", required=False, default=[]
@@ -45,12 +101,42 @@ def main():
             codesign = ["codesign", "-f", "-s", args.codesign_identity, exe]
             subprocess.check_call(codesign, env={})
 
+    # On Windows, put the ROCm runtime dir ahead of System32 in the DLL search
+    # order so the test loads the artifact's HIP runtime and not a driver-installed
+    # amdhip64_7.dll that would otherwise shadow it (System32 is searched before
+    # PATH). SetDllDirectoryW applies to this process and the child we spawn below,
+    # without copying DLLs into the artifact. See TheRock#7132.
+    if args.dll_dir and platform.system() == "Windows":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+        kernel32.SetDllDirectoryW.restype = ctypes.c_bool
+        if not kernel32.SetDllDirectoryW(args.dll_dir):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    # Create the execution directory (lit no longer does it: cmd.exe's mkdir can't
+    # create the deep ones) and get a path we may actually use as the child's cwd.
+    execdir = prepare_execdir(args.execdir)
+
+    # CreateProcessW parses the module name out of the command line and caps *that* at
+    # MAX_PATH too, so a deep t.tmp.exe still wouldn't launch once the cwd is short.
+    # Passing it explicitly (lpApplicationName) in \\?\ form lifts the cap; argv[0] as
+    # the test sees it is unchanged. On Linux this stays None.
+    executable = None
+    if (
+        platform.system() == "Windows"
+        and os.path.isabs(commandLine[0])
+        and len(commandLine[0]) >= MAX_PATH
+    ):
+        executable = extended_path(commandLine[0])
+
     # Extract environment variables into a dictionary
     env = {k: v for (k, v) in map(lambda s: s.split("=", 1), args.env)}
 
     # Set environment variables where we prepend the given value to the
     # existing environment variable.
-    for (k, v) in map(lambda s: s.split("=", 1), args.prepend_env):
+    for k, v in map(lambda s: s.split("=", 1), args.prepend_env):
         if k in os.environ:
             v = v + os.pathsep + os.environ[k]
         env[k] = v
@@ -69,44 +155,81 @@ def main():
     # A hipThreads test can hang (e.g. a hip::wthread whose persistent scheduler
     # never reaches the state join() waits for). Without a timeout, one hung test
     # would block the whole lit run until the CI job's global timeout, cancelling
-    # every later test. So we run the child in its own process group and kill the
-    # entire group if it exceeds HIPTHREADS_TEST_TIMEOUT seconds (default 30, 0 to
-    # disable). Using killpg to kill the whole process group (not just the
-    # immediate child like the timeout command) is required in case a test
-    # launches a sub-process. A timed-out test returns non-zero, which lit records
-    # as a normal FAIL/XFAIL instead of a hang.
+    # every later test. So we run the child in its own process group and tear that
+    # whole group down if it exceeds HIPTHREADS_TEST_TIMEOUT seconds (default 30, 0
+    # to disable). Killing the group rather than just the immediate child (as the
+    # timeout command would) is required in case a test launches a sub-process; the
+    # two platforms spell the group and the kill differently, see below. A timed-out
+    # test returns non-zero, which lit records as a normal FAIL/XFAIL instead of a
+    # hang.
     try:
         timeout = float(os.environ.get("HIPTHREADS_TEST_TIMEOUT", "30"))
     except ValueError:
         timeout = 30.0
 
-    if not timeout or platform.system() == "Windows":
-        # No timeout requested, or process-group semantics below are POSIX-only.
-        return subprocess.call(commandLine, cwd=args.execdir, env=env, shell=False)
-
-    proc = subprocess.Popen(
-        commandLine, cwd=args.execdir, env=env, shell=False, start_new_session=True
-    )
-    try:
-        return proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        import signal
-
-        # Graduated shutdown - send SIGTERM to request graceful shutdown and give
-        # it 5 seconds to gracefully shut down before forcefully killing it with
-        # SIGKILL.
-        pgid = os.getpgid(proc.pid)
-        os.killpg(pgid, signal.SIGTERM)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(pgid, signal.SIGKILL)
-            proc.wait()
-        print(
-            f"run.py: command timed out after {timeout:g}s and was killed: "
-            f"{' '.join(commandLine)}"
+    if not timeout:
+        # No timeout requested.
+        return subprocess.call(
+            commandLine, executable=executable, cwd=execdir, env=env, shell=False
         )
-        return 124
+
+    timed_out_msg = (
+        f"run.py: command timed out after {timeout:g}s and was killed: "
+        f"{' '.join(commandLine)}"
+    )
+
+    if platform.system() == "Windows":
+        # Windows has no POSIX process groups. Spawn in a new process group so we
+        # can deliver CTRL_BREAK for a graceful shutdown, then force-kill the whole
+        # tree with taskkill /T (a test may launch sub-processes).
+        proc = subprocess.Popen(
+            commandLine,
+            executable=executable,
+            cwd=execdir,
+            env=env,
+            shell=False,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+        try:
+            return proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Graduated shutdown - request a graceful break and give it 5 seconds
+            # before forcefully killing the whole process tree.
+            try:
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+                proc.wait(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True,
+                )
+                proc.wait()
+            print(timed_out_msg)
+            return 124
+    else:
+        proc = subprocess.Popen(
+            commandLine,
+            executable=executable,
+            cwd=execdir,
+            env=env,
+            shell=False,
+            start_new_session=True,
+        )
+        try:
+            return proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Graduated shutdown - send SIGTERM to request graceful shutdown and
+            # give it 5 seconds to gracefully shut down before forcefully killing
+            # it with SIGKILL.
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGKILL)
+                proc.wait()
+            print(timed_out_msg)
+            return 124
 
 
 if __name__ == "__main__":

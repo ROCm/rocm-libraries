@@ -1,0 +1,9 @@
+{
+  "version": "0.1",
+  "id": "kmd-copy",
+  "name": "Copy metadata",
+  "fields": [
+    { "name": "dtype", "type": "string" },
+    { "name": "block_size", "type": "int" }
+  ]
+}

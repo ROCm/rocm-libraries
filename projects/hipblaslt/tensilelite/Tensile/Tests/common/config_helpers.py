@@ -38,6 +38,9 @@ from Tensile.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
+# Safe either way; bandit's B506 check only recognises the SafeLoader/CSafeLoader spelling,
+# so the call sites using this name carry a bare nosec marker. Never spell that marker out
+# with its leading hash here, or bandit parses this comment too (SEC-00404).
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
 except AttributeError:
@@ -115,7 +118,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, DEFAULT_YAML_LOADER)
+            doc = yaml.load(f, DEFAULT_YAML_LOADER)  # nosec B506
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks
@@ -147,6 +150,23 @@ def configMarks(filepath, rootDir, availableArchs):
         ArchSkip = "skip-%s" % arch
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
+
+    # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
+    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+        marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
+
+    # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
+    # fails under FFM emulation only. Turn it into an xfail only when running 
+    # under FFM — keyed on the emulator's HSA_MODEL_MEMFILE backing plus the 
+    # gfx1250 arch — so it never fires on HW or on other emulators/arches, 
+    # where the test must still run.
+    if (
+        os.environ.get("HSA_MODEL_MEMFILE")
+        and "gfx1250" in availableArchs
+        and markNamed("ffm_fail") in marks
+    ):
+        marks.append(pytest.mark.xfail)
 
     validate = True
     validateAll = False

@@ -22,9 +22,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -47,15 +49,10 @@
 #include <algorithm>
 #endif
 
-#include <hipcub/libcxx.hpp>
-
-#include _HIPCUB_LIBCXX_INCLUDE(cmath)
-#include _HIPCUB_STD_INCLUDE(limits)
-
 // test_utils.hpp should only be included by this header.
 // The following definition is used as guard in test_utils.hpp
 // Including test_utils.hpp by itself will cause a compile error.
-#define TEST_UTILS_INCLUDE_GUARD
+#define TEST_UTILS_INCLUDE_GAURD
 #include "test_utils.hpp"
 
 #if defined(__clang__)

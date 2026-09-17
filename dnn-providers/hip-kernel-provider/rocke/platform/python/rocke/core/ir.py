@@ -24,9 +24,10 @@ Design constraints:
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
-
 
 # ----------------------------- Types --------------------------------------
 
@@ -84,7 +85,51 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_16x16x96_fp6": "acc6",
     "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
+    "wmma_scale_f32_16x16x128_fp8_fp8": "mxacc",
+    "wmma_scale16_f32_16x16x128_fp8_fp8": "mxacc",
 }
+
+
+def _check_u16(op: str, field: str, value: int) -> int:
+    """Range-check an immediate the intrinsic declares as ``i16``.
+
+    LLVM truncates a too-wide immediate silently (``i16 70000`` becomes
+    ``i16 4464``), which turns an out-of-range wait count into a *wrong* wait
+    count with no diagnostic. Raise instead; masking here would be equally
+    silent.
+    """
+    v = int(value)
+    if not 0 <= v <= 0xFFFF:
+        raise ValueError(f"{op} {field} must fit an unsigned i16 (0..65535), got {v}")
+    return v
+
+
+def _check_u32(op: str, field: str, value: int) -> int:
+    """Range-check an immediate carried by an LLVM ``i32``."""
+    v = int(value)
+    if not 0 <= v <= 0xFFFFFFFF:
+        raise ValueError(
+            f"{op} {field} must fit an unsigned i32 (0..4294967295), got {v}"
+        )
+    return v
+
+
+def _check_i32(op: str, field: str, value: int) -> int:
+    """Range-check a signed byte offset carried by an LLVM ``i32``."""
+    v = int(value)
+    if not -(1 << 31) <= v < (1 << 31):
+        raise ValueError(
+            f"{op} {field} must fit a signed i32 (-2147483648..2147483647), got {v}"
+        )
+    return v
+
+
+def _check_cachepolicy(op: str, value: int) -> int:
+    """Validate the gfx12+ five-bit cache-policy immediate."""
+    v = int(value)
+    if not 0 <= v <= 0x1F:
+        raise ValueError(f"{op} cachepolicy must be in 0..31, got {v}")
+    return v
 
 
 def _mma_c_frag_len(op_id: str) -> int:
@@ -233,11 +278,209 @@ class KernelDef:
         return int(self.attrs.get("max_workgroup_size", 256))
 
 
+# -------------------------- source locations ------------------------------
+
+# Opt-in only. Capturing a Python frame per op costs real time on dispatch
+# sweeps that build thousands of kernels, and populating ``Op.loc`` makes the
+# lowering emit debug metadata, which changes the emitted ``.ll`` bytes. Both
+# are unwanted by default, so this stays off unless a caller asks for it.
+LOC_CAPTURE_ENV = "ROCKE_DEBUG_LOC"
+
+# Frames inside ``core/`` are the builder machinery itself (this file, the
+# helpers it calls, the isa backends), never the code that asked for an op.
+_CORE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CORE_PREFIX = _CORE_DIR + os.sep
+
+# The rest of the rocke package -- ``helpers/``, ``instances/`` -- is authoring
+# code: a shipped kernel is written there, so those frames are exactly the ones
+# worth showing. Classified before the site-packages rule below, because an
+# installed rocke lives in site-packages and would otherwise be mistaken for the
+# harness that launched the build, ending the walk before it captured anything.
+# That is what keeps a kernel's locations the same whether rocke is imported
+# from a checkout or from a wheel.
+_ROCKE_PREFIX = os.path.dirname(_CORE_DIR) + os.sep
+
+# Where the authoring stack stops being the user's. Above the outermost
+# interesting frame sits whatever launched the build -- runpy, unittest, a test
+# runner in site-packages -- and none of it emitted any GPU instruction.
+_STDLIB_DIR = os.path.dirname(os.path.abspath(os.__file__))
+
+# A kernel built through several layers of helpers is ~8 frames deep; the cap is
+# only there so a pathological recursion cannot produce unbounded metadata.
+_MAX_LOC_FRAMES = 16
+
+_ABSPATH: Dict[str, str] = {}
+_FRAME_ROLE: Dict[str, str] = {}  # abs path -> "core" | "runner" | "user"
+_CODE_POSITIONS: Dict[Any, List[Any]] = {}
+
+# Frames are joined innermost-first; each is "<abs path>:<line>:<column>:<func>".
+# Packing the whole chain into the existing ``Op.loc`` string keeps the IR schema
+# and the ``@loc`` serialization format unchanged, so it still round-trips to the
+# C++ engine untouched. Backslash and semicolon in a path are escaped so they
+# cannot be mistaken for the frame separator; see ``join_loc`` / ``split_loc``.
+LOC_FRAME_SEP = ";"
+
+
+def join_loc(frame_texts: Sequence[str]) -> str:
+    """Join unescaped ``path:line:col:func`` frames with ``;``.
+
+    ``\\`` and ``;`` in a path are escaped (``\\\\``, ``\\;``) so ``split_loc``
+    can recover them. A frame with neither character is stored unchanged.
+    """
+
+    return LOC_FRAME_SEP.join(
+        t.replace("\\", "\\\\").replace(";", "\\;") for t in frame_texts
+    )
+
+
+def split_loc(loc: str) -> List[str]:
+    """Split an ``Op.loc`` on unescaped ``;`` and unescape each frame.
+
+    A loc written without escaping (no ``;`` in any path) is unchanged, so
+    hand-assigned ``file:line`` strings and Windows ``C:\\...`` paths still
+    parse. ``\\\\`` and ``\\;`` are the only escapes; any other backslash is
+    kept as a literal.
+    """
+
+    parts: List[str] = []
+    buf: List[str] = []
+    i = 0
+    n = len(loc)
+    while i < n:
+        ch = loc[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = loc[i + 1]
+            if nxt in "\\;":
+                buf.append(nxt)
+            else:
+                buf.append(ch)
+                buf.append(nxt)
+            i += 2
+            continue
+        if ch == ";":
+            parts.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    parts.append("".join(buf))
+    return parts
+
+
+def loc_capture_default() -> bool:
+    """Whether ``IRBuilder`` captures source locations unless told otherwise."""
+
+    return os.environ.get(LOC_CAPTURE_ENV, "") not in ("", "0")
+
+
+def _abspath(filename: str) -> str:
+    cached = _ABSPATH.get(filename)
+    if cached is None:
+        cached = os.path.abspath(filename)
+        _ABSPATH[filename] = cached
+    return cached
+
+
+def _path_has_dir_component(path: str, name: str) -> bool:
+    """True if ``name`` is a directory component of ``path``, not a substring.
+
+    Splits only on this host's separators (``os.sep`` and ``os.altsep``), so a
+    POSIX filename that happens to contain a backslash is not cut into
+    components, and a native Windows path is.
+    """
+
+    seps = [os.sep]
+    if os.altsep:
+        seps.append(os.altsep)
+    parts = [path]
+    for sep in seps:
+        parts = [p for part in parts for p in part.split(sep) if p]
+    return name in parts
+
+
+def _frame_role(filename: str) -> str:
+    cached = _FRAME_ROLE.get(filename)
+    if cached is None:
+        if filename.startswith("<"):  # <frozen importlib...>, <string>, ...
+            cached = "runner"
+        else:
+            path = _abspath(filename)
+            if path.startswith(_CORE_PREFIX):
+                cached = "core"
+            elif path.startswith(_ROCKE_PREFIX):
+                cached = "user"
+            elif (
+                path.startswith(_STDLIB_DIR + os.sep)
+                or _path_has_dir_component(path, "site-packages")
+                or _path_has_dir_component(path, "dist-packages")
+            ):
+                cached = "runner"
+            else:
+                cached = "user"
+        _FRAME_ROLE[filename] = cached
+    return cached
+
+
+def _frame_column(frame: Any) -> int:
+    """1-based column of the bytecode currently executing in ``frame``, or 0.
+
+    Several ops routinely share one Python line here (``b.add(b.mul(x, y), z)``
+    is three), so the column is what tells them apart.
+    """
+
+    code = frame.f_code
+    positions = _CODE_POSITIONS.get(code)
+    if positions is None:
+        # co_positions() is 3.11+; without it every op on a line collapses.
+        getter = getattr(code, "co_positions", None)
+        positions = list(getter()) if getter is not None else []
+        _CODE_POSITIONS[code] = positions
+    if not positions:
+        return 0
+    index = frame.f_lasti // 2  # instructions are 2 bytes wide
+    if not 0 <= index < len(positions):
+        return 0
+    col = positions[index][2]
+    # co_positions is 0-based and may be None; DWARF columns are 1-based.
+    return col + 1 if col is not None else 0
+
+
+def current_source_loc() -> Optional[str]:
+    """Return the authoring call stack as ``"file:line:col:func"`` frames.
+
+    Innermost first, joined by ``;``. The innermost frame is what actually asked
+    for the op -- often a one-line ``helpers/`` emitter -- and the frames above
+    it are the call sites that lead there, which is what makes a hot line
+    interpretable: 60 instructions on one ``global_load_f16`` line say nothing
+    until you can see which phase of the kernel asked for them. The lowering
+    turns the chain into DWARF inlining scopes.
+
+    Paths are absolutized so a kernel built via a relative path still yields
+    locations a trace viewer can resolve later.
+    """
+
+    frames: List[str] = []
+    frame = sys._getframe()
+    while frame is not None and len(frames) < _MAX_LOC_FRAMES:
+        filename = frame.f_code.co_filename
+        role = _frame_role(filename)
+        if role == "runner":
+            break
+        if role == "user":
+            frames.append(
+                f"{_abspath(filename)}:{frame.f_lineno}"
+                f":{_frame_column(frame)}:{frame.f_code.co_name}"
+            )
+        frame = frame.f_back
+    return join_loc(frames) if frames else None
+
+
 # ----------------------------- Builder -----------------------------------
 
 
 class IRBuilder:
-    def __init__(self, kernel_name: str) -> None:
+    def __init__(self, kernel_name: str, *, capture_loc: Optional[bool] = None) -> None:
         self._counter = 0
         self._region_stack: List[Region] = []
         self._params: List[Param] = []
@@ -247,6 +490,14 @@ class IRBuilder:
             params=self._params,
             body=Region("entry"),
         )
+        self._capture_loc = (
+            loc_capture_default() if capture_loc is None else bool(capture_loc)
+        )
+        if self._capture_loc:
+            # Carried on the kernel (not on the lowerer) so it survives
+            # serialization to the C++ engine and so a kernel built with
+            # locations lowers with debug info no matter which backend runs it.
+            self.kernel.attrs["debug_info"] = True
         self._region_stack.append(self.kernel.body)
 
     # ----- naming -----
@@ -258,6 +509,11 @@ class IRBuilder:
     # ----- region management -----
 
     def _emit(self, op: Op) -> None:
+        # Every op reaches a region through here, including the control-flow ops
+        # that build their Op directly rather than going through _op, so this is
+        # the one place a location has to be stamped.
+        if self._capture_loc and op.loc is None:
+            op.loc = current_source_loc()
         self._region_stack[-1].ops.append(op)
 
     def push_region(self, region: Region) -> None:
@@ -1707,6 +1963,38 @@ class IRBuilder:
         """gfx1250 (gfx1250) BF8 K=64 WMMA. Thin wrapper over :meth:`mma`."""
         return self.mma("wmma_gfx1250_f32_16x16x64_bf8_bf8", a, b, c)
 
+    def wmma_scale_f32_16x16x128_fp8_fp8(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+    ) -> Value:
+        """gfx1250 native SCALE FP8 WMMA with packed E8M0 scale operands.
+
+        A and B are ``<16 x i32>`` fragments (64 FP8 bytes per lane), C is
+        ``<8 x f32>``, and each scale operand is one i32 packing four E8M0
+        bytes for the instruction's four K=32 scale blocks.
+        """
+        return self.mma("wmma_scale_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
+
+    def wmma_scale16_f32_16x16x128_fp8_fp8(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+    ) -> Value:
+        """gfx1250 native SCALE16 FP8 WMMA with eight packed E8M0 scales.
+
+        The matrix and accumulator fragments match
+        :meth:`wmma_scale_f32_16x16x128_fp8_fp8`; each scale operand is i64
+        because SCALE16 carries eight K=16 E8M0 scale bytes.
+        """
+        return self.mma("wmma_scale16_f32_16x16x128_fp8_fp8", a, b, c, a_scale, b_scale)
+
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)
 
@@ -1895,6 +2183,37 @@ class IRBuilder:
             result_name_hint=result_name_hint,
         )
         return list(op.results)
+
+    def _gfx1250_scalar_control(self, mnemonic: str, imm: int) -> None:
+        """Emit a gfx1250-only raw-u16 scalar control through ``tile.inline_asm``."""
+        value = _check_u16(mnemonic, "imm", imm)
+        self._op(
+            "tile.inline_asm",
+            attrs={
+                "template": f"{mnemonic} {value}",
+                "constraints": "",
+                "sideeffect": True,
+                "convergent": False,
+                "required_arch": "gfx1250",
+                "required_llvm_flavor": "llvm23",
+            },
+        )
+
+    def s_delay_alu(self, imm: int) -> None:
+        """Emit gfx1250 ``s_delay_alu`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_delay_alu", imm)
+
+    def s_wait_alu(self, imm: int) -> None:
+        """Emit gfx1250 ``s_wait_alu`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_wait_alu", imm)
+
+    def s_clause(self, imm: int) -> None:
+        """Emit gfx1250 ``s_clause`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_clause", imm)
+
+    def s_wait_xcnt(self, imm: int) -> None:
+        """Emit gfx1250 ``s_wait_xcnt`` with its raw unsigned 16-bit encoding."""
+        self._gfx1250_scalar_control("s_wait_xcnt", imm)
 
     def mfma_scale_f32_16x16x128_f8f6f4(
         self,
@@ -2220,6 +2539,234 @@ class IRBuilder:
             result_name_hint="sw",
         ).result
 
+    def ds_swizzle(self, data: Value, offset: int) -> Value:
+        """``llvm.amdgcn.ds.swizzle`` with a raw offset immediate.
+
+        For XOR-butterfly softmax reductions prefer :meth:`ds_swizzle_xor`,
+        which encodes the SWAP-mode offset. This primitive exposes the full
+        ``ds_swizzle_b32`` immediate space for future relayout kernels.
+        """
+        if data.type.name != "i32":
+            raise ValueError("ds_swizzle requires i32 data")
+        return self._op(
+            "tile.ds_swizzle",
+            [data],
+            [I32],
+            attrs={"offset": int(offset) & 0xFFFFFFFF},
+            result_name_hint="dssw",
+        ).result
+
+    def mov_dpp8(self, data: Value, sel: int) -> Value:
+        """``llvm.amdgcn.mov.dpp8`` — 8-lane DPP gather within a row.
+
+        ``sel`` is a 24-bit lane-select immediate (high 8 bits must be zero).
+        Supports ``i32`` and ``f32`` operands.
+        """
+        if data.type.name not in ("i32", "f32"):
+            raise ValueError("mov_dpp8 requires i32 or f32 data")
+        if not (0 <= int(sel) <= 0xFFFFFF):
+            raise ValueError(f"mov_dpp8 sel must fit in 24 bits, got {sel}")
+        return self._op(
+            "tile.mov_dpp8",
+            [data],
+            [data.type],
+            attrs={"sel": int(sel) & 0xFFFFFF},
+            result_name_hint="dpp8",
+        ).result
+
+    def wave_reduce(
+        self,
+        v: Value,
+        reduce_op: str,
+        *,
+        strategy: int = 0,
+    ) -> Value:
+        """``llvm.amdgcn.wave.reduce.*`` — single-instruction wave reduction.
+
+        ``reduce_op`` is one of ``fmax``, ``fadd``, ``add``, ``max``, ``min``
+        (typed by ``v``: ``f32`` for float ops, ``i32`` for integer ops).
+        ``strategy`` selects the lowering path (0=default, 1=iterative, 2=DPP).
+        """
+        ty = v.type.name
+        allowed = {
+            "f32": ("fmax", "fadd"),
+            "i32": ("add", "max", "min"),
+        }
+        if ty not in allowed or reduce_op not in allowed[ty]:
+            raise ValueError(
+                f"wave_reduce unsupported pair reduce_op={reduce_op!r} type={ty!r}"
+            )
+        return self._op(
+            "tile.wave_reduce",
+            [v],
+            [v.type],
+            attrs={"reduce_op": reduce_op, "strategy": int(strategy)},
+            result_name_hint="wred",
+        ).result
+
+    def readlane(self, v: Value, lane: Value) -> Value:
+        """``llvm.amdgcn.readlane`` — read ``lane``'s value (uniform lane index)."""
+        if v.type.name not in ("i32", "f32"):
+            raise ValueError("readlane supports i32 or f32")
+        if lane.type.name != "i32":
+            raise ValueError("readlane lane index must be i32")
+        return self._op(
+            "tile.readlane",
+            [v, lane],
+            [v.type],
+            result_name_hint="rlane",
+        ).result
+
+    def writelane(self, uniform_val: Value, lane: Value, passthrough: Value) -> Value:
+        """``llvm.amdgcn.writelane`` — write ``uniform_val`` into ``lane``.
+
+        ``uniform_val`` and ``lane`` must be uniform across the wave; other
+        lanes receive ``passthrough``.
+        """
+        if uniform_val.type.name not in ("i32", "f32"):
+            raise ValueError("writelane supports i32 or f32")
+        if passthrough.type != uniform_val.type:
+            raise ValueError("writelane passthrough must match uniform_val type")
+        if lane.type.name != "i32":
+            raise ValueError("writelane lane index must be i32")
+        return self._op(
+            "tile.writelane",
+            [uniform_val, lane, passthrough],
+            [uniform_val.type],
+            result_name_hint="wlane",
+        ).result
+
+    def permlane16(
+        self,
+        old: Value,
+        src0: Value,
+        src1: Value,
+        src2: Value,
+        *,
+        fi: bool = False,
+        bound_ctrl: bool = False,
+    ) -> Value:
+        """``llvm.amdgcn.permlane16`` — gfx10+ 16-lane permute network."""
+        for op in (old, src0, src1, src2):
+            if op.type.name != "i32":
+                raise ValueError("permlane16 requires i32 operands")
+        return self._op(
+            "tile.permlane16",
+            [old, src0, src1, src2],
+            [I32],
+            attrs={"fi": bool(fi), "bound_ctrl": bool(bound_ctrl)},
+            result_name_hint="pl16",
+        ).result
+
+    def permlane64(self, src: Value) -> Value:
+        """``llvm.amdgcn.permlane64`` — gfx11 wave64 half-lane relayout."""
+        if src.type.name != "i32":
+            raise ValueError("permlane64 requires i32 operand")
+        return self._op(
+            "tile.permlane64",
+            [src],
+            [I32],
+            result_name_hint="pl64",
+        ).result
+
+    def alignbyte(self, a: Value, b: Value, shift: Value) -> Value:
+        """``llvm.amdgcn.alignbyte`` — byte-align/shift two i32 sources."""
+        for op in (a, b, shift):
+            if op.type.name != "i32":
+                raise ValueError("alignbyte requires i32 operands")
+        return self._op(
+            "tile.alignbyte",
+            [a, b, shift],
+            [I32],
+            result_name_hint="algn",
+        ).result
+
+    def s_wqm(self, mask: Value) -> Value:
+        """``llvm.amdgcn.s.wqm`` — whole-quad-mode bitmask (uniform input)."""
+        if mask.type.name not in ("i32", "i64"):
+            raise ValueError("s_wqm requires i32 or i64 mask")
+        return self._op(
+            "tile.s_wqm",
+            [mask],
+            [mask.type],
+            result_name_hint="wqm",
+        ).result
+
+    def av_load_b128(self, ptr: Value) -> Value:
+        """``llvm.amdgcn.av.load.b128`` — agent-scope 128-bit vector load."""
+        return self._op(
+            "tile.av_load_b128",
+            [ptr],
+            [VectorType(I32, 4)],
+            result_name_hint="avld",
+        ).result
+
+    def av_store_b128(self, ptr: Value, data: Value) -> None:
+        """``llvm.amdgcn.av.store.b128`` — agent-scope 128-bit vector store."""
+        if (
+            not isinstance(data.type, VectorType)
+            or data.type.count != 4
+            or data.type.elem != I32
+        ):
+            raise ValueError("av_store_b128 requires <4 x i32> data")
+        self._op("tile.av_store_b128", [ptr, data])
+
+    def s_alloc_vgpr(self, count: int) -> Value:
+        """``llvm.amdgcn.s.alloc.vgpr`` — dynamic VGPR allocation (gfx12+)."""
+        if count <= 0:
+            raise ValueError("s_alloc_vgpr count must be positive")
+        return self._op(
+            "tile.s_alloc_vgpr",
+            [],
+            [I32],
+            attrs={"count": int(count)},
+            result_name_hint="valloc",
+        ).result
+
+    def asyncmark(self) -> None:
+        """``llvm.amdgcn.asyncmark`` — tag a point in the async LDS stream."""
+        self._op("tile.asyncmark")
+
+    def wait_asyncmark(self, n: int = 0) -> None:
+        """``llvm.amdgcn.wait.asyncmark`` — wait for the Nth prior asyncmark."""
+        self._op(
+            "tile.wait_asyncmark",
+            attrs={"n": _check_u16("wait_asyncmark", "n", n)},
+        )
+
+    def s_wait_event(self, imm: int = 0) -> None:
+        """``llvm.amdgcn.s.wait.event`` — block on an export/event bitmask."""
+        self._op(
+            "tile.s_wait_event",
+            attrs={"imm": _check_u16("s_wait_event", "imm", imm)},
+        )
+
+    def s_prefetch_inst(self, ptr: Value, length: Value) -> None:
+        """``llvm.amdgcn.s.prefetch.inst`` — instruction-cache prefetch."""
+        self._op("tile.s_prefetch_inst", [ptr, length])
+
+    def buffer_load_lds_async(
+        self,
+        rsrc: Value,
+        lds_ptr: Value,
+        voffset: Value,
+        soffset: Value,
+        dwords: int,
+        coherency: int = 0,
+    ) -> None:
+        """LLVM 23 async-marker variant of :meth:`async_buffer_load_lds`."""
+        if dwords not in (1, 3, 4):
+            raise ValueError(
+                f"buffer_load_lds_async dwords must be 1, 3, or 4 (got {dwords})"
+            )
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
+        self._op(
+            "tile.buffer_load_lds_async",
+            [rsrc, lds_ptr, voffset, soffset],
+            attrs={"dwords": int(dwords), "aux": int(coherency)},
+        )
+
     def mov_dpp(
         self,
         data: Value,
@@ -2297,6 +2844,64 @@ class IRBuilder:
             attrs={"xor_mask": int(xor_mask)},
             result_name_hint="dppx",
         ).result
+
+    def quad_perm(self, data: Value, perm) -> Value:
+        """Intra-quad ``v_mov_b32_dpp`` permutation on the VALU.
+
+        Lane ``4q + i`` reads ``data`` from lane ``4q + perm[i]``.
+        ``perm`` is encoded in the low eight bits of the DPP control word.
+
+        **Wave size.** The mapping is wave-size-independent: the same
+        control word applies within every four-lane group, and four
+        divides both 32 and 64, so a lane never addresses outside its own
+        quad. Wave size changes only the *number* of quads (8 in wave32,
+        16 in wave64), never the permutation a quad performs. Contrast
+        :meth:`warp_shuffle_xor`, whose ``lane_xor = 32`` partner is a
+        real lane in wave64 and does not exist in wave32.
+
+        That is a property of the quad, not a claim about every target:
+        the op still requires DPP-capable hardware. Base-DPP
+        ``quad_perm`` is available on CDNA, where the RDNA-only
+        ``row_xmask`` of :meth:`dpp_xor` is not.
+
+        The op carries no lane targeting -- the control word is broadcast
+        to every quad in the wave, with row and bank masks fixed at
+        ``15, 15`` (all enabled) by the lowerers. Selecting a subset of
+        quads is the caller's job.
+        """
+        perm = list(perm)
+        if len(perm) != 4 or any(not (0 <= p <= 3) for p in perm):
+            raise ValueError(f"quad_perm perm must be 4 values in 0..3, got {perm}")
+        if data.type.name != "i32":
+            raise ValueError("quad_perm requires i32 data")
+        ctrl = perm[0] | (perm[1] << 2) | (perm[2] << 4) | (perm[3] << 6)
+        return self._op(
+            "tile.quad_perm",
+            [data],
+            [I32],
+            attrs={"ctrl": int(ctrl)},
+            result_name_hint="qperm",
+        ).result
+
+    def warp_shuffle_xor_quad(self, v: Value, xor_mask: int) -> Value:
+        """XOR shuffle within a four-lane quad.
+
+        Masks 1 and 2 stay inside the quad and use :meth:`quad_perm`. Larger
+        masks require :meth:`warp_shuffle_xor`, which uses ``ds_swizzle``.
+        """
+        if xor_mask == 1:
+            perm = [1, 0, 3, 2]
+        elif xor_mask == 2:
+            perm = [2, 3, 0, 1]
+        else:
+            raise ValueError(
+                f"warp_shuffle_xor_quad supports xor_mask 1 or 2, got {xor_mask}"
+            )
+        if v.type.name == "f32":
+            return self.bitcast(self.quad_perm(self.bitcast(v, I32), perm), F32)
+        if v.type.name == "i32":
+            return self.quad_perm(v, perm)
+        raise ValueError(f"warp_shuffle_xor_quad: unsupported type {v.type.name}")
 
     def ds_bpermute_b64(self, addr: Value, data: Value) -> Value:
         """Packed 64-bit ``ds_bpermute`` — single LDS op for paired
@@ -2596,7 +3201,10 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 4)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
-            result_name_hint="tr16",
+            # "dtr" prefix (not "tr...digits") so the fresh-name counter can never
+            # collide with an arith.trunc result ("tr"+id): e.g. trunc id 16631
+            # and tr16 id 631 both stringify to "tr16631".
+            result_name_hint="dtr16",
         ).result
 
     def ds_read_tr16_b128(
@@ -2621,7 +3229,7 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 8)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
-            result_name_hint="tr16w",
+            result_name_hint="dtr16w",
         ).result
 
     def ds_read_tr_b8(
@@ -2646,7 +3254,7 @@ class IRBuilder:
             [smem, *indices],
             [VectorType(dtype, 8)],
             attrs={"dtype": dtype.name},
-            result_name_hint="tr8",
+            result_name_hint="dtr8",
         ).result
 
     # ----- LDS pointer arithmetic (for per-wave async-LDS bases) -----
@@ -2738,6 +3346,50 @@ class IRBuilder:
         """
         self._op("tile.s_barrier_bare")
 
+    # ---- exec-mask manipulation (wavelet pipeline, MFMA targets) ----
+
+    def exec_and_saveexec(self, load_mask: Value) -> Value:
+        """``s_and_saveexec_b64 dst, load_mask``: exec = exec & load_mask; returns old exec.
+
+        Used to restrict exec to load-wave lanes at the start of the wavelet
+        exec-mask split. The returned i64 SGPR pair holds the old exec (all
+        active lanes before the split) — pass it to :meth:`exec_or` at the end
+        to restore the full workgroup exec.
+        """
+        return self._op(
+            "tile.exec_and_saveexec", [load_mask], [I64], result_name_hint="exec_save"
+        ).result
+
+    def exec_xor(self, saved_exec: Value) -> Value:
+        """``s_xor_b64 dst, exec, saved_exec``: returns the complement lanes.
+
+        After :meth:`exec_and_saveexec` restricts exec to load waves,
+        ``s_xor_b64 dst, exec, saved`` produces the math-wave mask
+        (old_exec ^ load_exec = math_exec).
+        """
+        return self._op(
+            "tile.exec_xor", [saved_exec], [I64], result_name_hint="exec_compl"
+        ).result
+
+    def exec_or_saveexec(self, compl: Value) -> Value:
+        """``s_or_saveexec_b64 dst, compl``: exec |= compl; returns old exec.
+
+        Widens exec back to all lanes and then switches to math-wave lanes:
+        after this call, exec = old | compl = all lanes, and ``dst`` holds
+        the previous (load-only) exec so a subsequent ``s_xor_b64 exec``
+        can flip to math-only lanes.
+        """
+        return self._op(
+            "tile.exec_or_saveexec", [compl], [I64], result_name_hint="exec_tmp"
+        ).result
+
+    def exec_or(self, saved_exec: Value) -> None:
+        """``s_or_b64 exec, exec, saved_exec``: restore exec to all lanes (void).
+
+        Call at the end of the wavelet exec-mask split to undo the restriction.
+        """
+        self._op("tile.exec_or", [saved_exec])
+
     def sync_half_block(self, half_selector: Value) -> None:
         """Half-block barrier: only the waves where ``half_selector``
         is non-zero participate in the workgroup barrier.
@@ -2822,7 +3474,86 @@ class IRBuilder:
         On non-gfx1250 backends this is a no-op (the counter does not exist);
         callers must only emit it on the gfx1250 async-to-LDS path.
         """
-        self._op("tile.s_wait_asynccnt", attrs={"n": int(n)})
+        self._op(
+            "tile.s_wait_asynccnt",
+            attrs={"n": _check_u16("s_wait_asynccnt", "n", n)},
+        )
+
+    def s_wait_tensorcnt(self, n: int = 0) -> None:
+        """Wait until at most ``n`` gfx1250 tensor operations remain outstanding."""
+        self._op(
+            "tile.s_wait_tensorcnt",
+            attrs={"n": _check_u16("s_wait_tensorcnt", "n", n)},
+        )
+
+    def s_barrier_signal(self, barrier_type: int) -> None:
+        """Signal the gfx1250 non-named split barrier selected by ``barrier_type``."""
+        self._op(
+            "tile.s_barrier_signal",
+            attrs={
+                "barrier_type": _check_u32(
+                    "s_barrier_signal", "barrier_type", barrier_type
+                )
+            },
+        )
+
+    def s_barrier_wait(self, barrier_type: int) -> None:
+        """Wait on a gfx1250 non-named split barrier."""
+        self._op(
+            "tile.s_barrier_wait",
+            attrs={
+                "barrier_type": _check_u16(
+                    "s_barrier_wait", "barrier_type", barrier_type
+                )
+            },
+        )
+
+    def _check_local_ptr(self, op: str, ptr: Value) -> None:
+        ty = ptr.type
+        if ty is I64:
+            return
+        if isinstance(ty, PtrType) and ty.space == "local":
+            return
+        raise TypeError(
+            f"{op} local pointer must be i64 from smem_addr_of or ptr<...,local>, got {ty}"
+        )
+
+    def _check_i32_value(self, op: str, field: str, value: Value) -> None:
+        if value.type is not I32:
+            raise TypeError(f"{op} {field} must be i32, got {value.type}")
+
+    def s_barrier_init(self, barrier: Value, member_count: Value) -> None:
+        """Initialize a gfx1250 named barrier in LDS."""
+        self._check_local_ptr("s_barrier_init", barrier)
+        self._check_i32_value("s_barrier_init", "member_count", member_count)
+        self._op("tile.s_barrier_init", [barrier, member_count])
+
+    def s_barrier_signal_var(self, barrier: Value, member_count: Value) -> None:
+        """Signal a gfx1250 named barrier, optionally replacing its member count."""
+        self._check_local_ptr("s_barrier_signal_var", barrier)
+        self._check_i32_value("s_barrier_signal_var", "member_count", member_count)
+        self._op("tile.s_barrier_signal_var", [barrier, member_count])
+
+    def s_barrier_join(self, barrier: Value) -> None:
+        """Join the gfx1250 named barrier stored at ``barrier``."""
+        self._check_local_ptr("s_barrier_join", barrier)
+        self._op("tile.s_barrier_join", [barrier])
+
+    def s_wakeup_barrier(self, barrier: Value) -> None:
+        """Wake waves waiting on the gfx1250 named barrier at ``barrier``."""
+        self._check_local_ptr("s_wakeup_barrier", barrier)
+        self._op("tile.s_wakeup_barrier", [barrier])
+
+    def s_barrier_leave(self, barrier_type: int) -> None:
+        """Leave a gfx1250 non-named barrier."""
+        self._op(
+            "tile.s_barrier_leave",
+            attrs={
+                "barrier_type": _check_u16(
+                    "s_barrier_leave", "barrier_type", barrier_type
+                )
+            },
+        )
 
     def global_load_async_to_lds(
         self,
@@ -2849,9 +3580,9 @@ class IRBuilder:
         the gfx12 cachepolicy immediate (bits[0:2]=th, bits[3:4]=scope); 0 is
         the default, 2 (``CACHE_STREAM``/SLC) suits one-shot streaming loads.
         """
-        if width_bytes not in (4, 8, 16):
+        if width_bytes not in (1, 4, 8, 16):
             raise ValueError(
-                f"global_load_async_to_lds width_bytes must be 4, 8, or 16 "
+                f"global_load_async_to_lds width_bytes must be 1, 4, 8, or 16 "
                 f"(got {width_bytes})"
             )
         if coherency not in (0, 1, 2, 3):
@@ -2864,6 +3595,116 @@ class IRBuilder:
                 "cpol": int(coherency),
                 "offset_bytes": int(offset_bytes),
             },
+        )
+
+    def global_store_async_from_lds(
+        self,
+        dst_ptr: Value,
+        lds_ptr: Value,
+        *,
+        width_bytes: int,
+        offset_bytes: int = 0,
+        cachepolicy: int = 0,
+    ) -> None:
+        """Issue a gfx1250 asynchronous LDS-to-global store."""
+        if width_bytes not in (1, 4, 8, 16):
+            raise ValueError(
+                "global_store_async_from_lds width_bytes must be 1, 4, 8, or 16 "
+                f"(got {width_bytes})"
+            )
+        if not isinstance(dst_ptr.type, PtrType) or dst_ptr.type.space != "global":
+            raise TypeError(
+                "global_store_async_from_lds dst_ptr must be a global pointer, "
+                f"got {dst_ptr.type}"
+            )
+        self._check_local_ptr("global_store_async_from_lds", lds_ptr)
+        self._op(
+            "tile.global_store_async_from_lds",
+            [dst_ptr, lds_ptr],
+            attrs={
+                "width_bytes": int(width_bytes),
+                "offset_bytes": _check_i32(
+                    "global_store_async_from_lds", "offset_bytes", offset_bytes
+                ),
+                "cachepolicy": _check_cachepolicy(
+                    "global_store_async_from_lds", cachepolicy
+                ),
+            },
+        )
+
+    def global_load_tr16_b128(self, src_ptr: Value, *, dtype: Type = F16) -> Value:
+        """Load one gfx1250 transposed 128-bit global-memory fragment."""
+        if dtype not in (F16, BF16, I16):
+            raise TypeError(
+                f"global_load_tr16_b128 dtype must be f16/bf16/i16, got {dtype}"
+            )
+        if not isinstance(src_ptr.type, PtrType) or src_ptr.type.space != "global":
+            raise TypeError(
+                f"global_load_tr16_b128 src_ptr must be a global pointer, got {src_ptr.type}"
+            )
+        return self._op(
+            "tile.global_load_tr16_b128",
+            [src_ptr],
+            [VectorType(dtype, 8)],
+            attrs={"dtype": dtype.name},
+            result_name_hint="gtr",
+        ).result
+
+    def _check_tensor_descriptor_group(
+        self, op: str, field: str, value: Value, lanes: int
+    ) -> None:
+        ty = value.type
+        if not isinstance(ty, VectorType) or ty.elem is not I32 or ty.count != lanes:
+            raise TypeError(f"{op} {field} must be vec<i32x{lanes}>, got {ty}")
+
+    def _tensor_lds_transfer(
+        self,
+        op_name: str,
+        d0: Value,
+        d1: Value,
+        d2: Value,
+        d3: Value,
+        d4: Value,
+        cachepolicy: int,
+    ) -> None:
+        groups = ((d0, 4), (d1, 8), (d2, 4), (d3, 4), (d4, 8))
+        short_name = op_name.removeprefix("tile.")
+        for index, (value, lanes) in enumerate(groups):
+            self._check_tensor_descriptor_group(short_name, f"d{index}", value, lanes)
+        self._op(
+            op_name,
+            [d0, d1, d2, d3, d4],
+            attrs={"cachepolicy": _check_cachepolicy(short_name, cachepolicy)},
+        )
+
+    def tensor_load_to_lds(
+        self,
+        d0: Value,
+        d1: Value,
+        d2: Value,
+        d3: Value,
+        d4: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """Issue the low-level gfx1250 TDM tensor load using five D# groups."""
+        self._tensor_lds_transfer(
+            "tile.tensor_load_to_lds", d0, d1, d2, d3, d4, cachepolicy
+        )
+
+    def tensor_store_from_lds(
+        self,
+        d0: Value,
+        d1: Value,
+        d2: Value,
+        d3: Value,
+        d4: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """Issue the low-level gfx1250 TDM tensor store using five D# groups."""
+        self._tensor_lds_transfer(
+            "tile.tensor_store_from_lds", d0, d1, d2, d3, d4, cachepolicy
         )
 
     def iglp_opt(self, level: int = 0) -> None:
@@ -3570,6 +4411,31 @@ class IRBuilder:
         self._emit(op)
         return _IfBuilder(self, op, then_r)
 
+    def scf_if_else(self, cond: Value):
+        """Runtime if/else branch (converging control flow).
+
+        Both the ``then`` and ``else`` regions converge at the same join
+        block, which is the key property that prevents LLVM's
+        ``simplifycfg`` from removing ``s_barrier`` / ``s_waitcnt`` calls
+        placed inside either branch.  Use this instead of two consecutive
+        ``scf_if`` calls when barriers must survive optimization.
+
+        Usage::
+
+            with b.scf_if_else(cond) as (then_ctx, else_ctx):
+                with then_ctx:
+                    # code executed when cond is true
+                    b.sync()
+                with else_ctx:
+                    # code executed when cond is false
+                    b.sync()
+        """
+        then_r = Region("then")
+        else_r = Region("else")
+        op = Op(name="scf.if_else", operands=[cond], regions=[then_r, else_r])
+        self._emit(op)
+        return _IfElseBuilder(self, op, then_r, else_r)
+
 
 PURE_OP_NAMES = {
     "arith.constant",
@@ -3667,6 +4533,17 @@ PURE_OP_NAMES = {
     "arith.cvt_scalef32_pk_bf8_f32",
     "tile.ds_read_tr_b8",
     "tile.ds_swizzle_xor",
+    "tile.ds_swizzle",
+    "tile.mov_dpp8",
+    "tile.quad_perm",
+    "tile.wave_reduce",
+    "tile.readlane",
+    "tile.writelane",
+    "tile.permlane16",
+    "tile.permlane64",
+    "tile.alignbyte",
+    "tile.s_wqm",
+    "tile.av_load_b128",
     "tile.dpp_xor",
     "tile.permlane32_swap",
     "tile.perm_b32",
@@ -3720,3 +4597,51 @@ class _IfBuilder:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self._parent.pop_region()
+
+
+class _ThenCtx:
+    def __init__(self, parent: IRBuilder, region: Region) -> None:
+        self._parent = parent
+        self._region = region
+
+    def __enter__(self) -> "_ThenCtx":
+        self._parent.push_region(self._region)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._parent.pop_region()
+
+
+class _ElseCtx:
+    def __init__(self, parent: IRBuilder, region: Region) -> None:
+        self._parent = parent
+        self._region = region
+
+    def __enter__(self) -> "_ElseCtx":
+        self._parent.push_region(self._region)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._parent.pop_region()
+
+
+class _IfElseBuilder:
+    """Context manager returned by ``IRBuilder.scf_if_else``."""
+
+    def __init__(
+        self,
+        parent: IRBuilder,
+        op: Op,
+        then_region: Region,
+        else_region: Region,
+    ) -> None:
+        self._parent = parent
+        self.op = op
+        self._then_ctx = _ThenCtx(parent, then_region)
+        self._else_ctx = _ElseCtx(parent, else_region)
+
+    def __enter__(self):
+        return self._then_ctx, self._else_ctx
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        pass  # regions were already popped by their own context managers

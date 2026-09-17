@@ -1,0 +1,81 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "unset",
+  "is_override_shape_enabled": false,
+  "name": "LayernormTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "forward_phase": 1,
+      "inputs": {
+        "bias_tensor_uid": 1,
+        "epsilon_tensor_uid": 2,
+        "scale_tensor_uid": 3,
+        "x_tensor_uid": 4
+      },
+      "name": "Layernorm_0",
+      "normalized_dim_count": "${case.attributes.normalized_dim_count}",
+      "outputs": {
+        "inv_variance_tensor_uid": null,
+        "mean_tensor_uid": null,
+        "y_tensor_uid": 0
+      },
+      "type": "LayernormAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "Layernorm_0::Y",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "bias",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "epsilon",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "value": 9.999999747378752e-06,
+      "value_type": "Float32Value",
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "alignment": 16,
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "is_runtime_pass_by_value": false,
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    }
+  ]
+}

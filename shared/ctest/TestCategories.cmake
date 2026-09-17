@@ -13,7 +13,7 @@ function(_parse_test_category_optional_args)
         ARG
         "USE_RTEST_DRIVER"
         "INSTALL_TEST_FILE;RESOURCE_GROUP;TEST_NAME_PREFIX;INSTALL_EXECUTABLE"
-        "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS;ENVIRONMENT"
+        "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS;ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
 
@@ -45,6 +45,8 @@ function(_parse_test_category_optional_args)
     set(_TEST_CATEGORY_INSTALL_COMMAND_ARGS "${ARG_INSTALL_COMMAND_ARGS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_ADDITIONAL_LABELS "${ARG_ADDITIONAL_LABELS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_ENVIRONMENT "${ARG_ENVIRONMENT}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_ENVIRONMENT_MODIFICATION "${ARG_ENVIRONMENT_MODIFICATION}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_FIXTURES_REQUIRED "${ARG_FIXTURES_REQUIRED}" PARENT_SCOPE)
 endfunction()
 
 # Appends parser args for generated GTest category suites.
@@ -74,6 +76,12 @@ function(_build_test_category_parser_args out_var)
     endforeach()
     foreach(extra_env_kv IN LISTS _TEST_CATEGORY_ENVIRONMENT)
         list(APPEND extra_args "--environment" "${extra_env_kv}")
+    endforeach()
+    foreach(extra_env_mod IN LISTS _TEST_CATEGORY_ENVIRONMENT_MODIFICATION)
+        list(APPEND extra_args "--environment-modification" "${extra_env_mod}")
+    endforeach()
+    foreach(fixture IN LISTS _TEST_CATEGORY_FIXTURES_REQUIRED)
+        list(APPEND extra_args "--fixtures-required" "${fixture}")
     endforeach()
     if(_TEST_CATEGORY_USE_RTEST_DRIVER)
         list(APPEND extra_args "--use-rtest-driver")

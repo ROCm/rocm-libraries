@@ -18,14 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
-
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -45,17 +37,17 @@ public:
       , m_end(end)
   {}
 
-  THRUST_HOST_DEVICE index_type begin() const
+  THRUST_HOST_DEVICE index_type begin(void) const
   {
     return m_begin;
   }
 
-  THRUST_HOST_DEVICE index_type end() const
+  THRUST_HOST_DEVICE index_type end(void) const
   {
     return m_end;
   }
 
-  THRUST_HOST_DEVICE index_type size() const
+  THRUST_HOST_DEVICE index_type size(void) const
   {
     return m_end - m_begin;
   }
@@ -104,7 +96,7 @@ public:
     }
   }
 
-  THRUST_HOST_DEVICE index_type size() const
+  THRUST_HOST_DEVICE index_type size(void) const
   {
     return m_intervals;
   }

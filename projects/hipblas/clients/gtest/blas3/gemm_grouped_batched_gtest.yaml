@@ -1,0 +1,42 @@
+---
+include: hipblas_common.yaml
+
+Definitions:
+  - &transA_transB_small
+    - { transA: N, transB: N }
+
+  - &small_grouped_matrix
+    - { M: 32, N: 32, K: 32, lda: 32, ldb: 32, ldc: 32 }
+
+Tests:
+  # stride_x is group_count; each group g uses M+g, N+g, K+g and batch_count+g problems
+
+- name: gemm_grouped_batched_bad_arg
+  category: quick
+  function:
+    - gemm_grouped_batched_bad_arg: *single_double_precisions
+  stride_x: 2 # group_count
+  batch_count: 2
+  transA: N
+  transB: N
+  M: 32
+  N: 32
+  K: 32
+  lda: 32
+  ldb: 32
+  ldc: 32
+  alpha: 1
+  beta: 0
+  api: [ FORTRAN, FORTRAN_64 ]
+
+- name: gemm_grouped_batched
+  category: pre_checkin
+  function:
+    - gemm_grouped_batched: *single_double_precisions
+  stride_x: [ 1, 2 ] # group_count
+  transA_transB: *transA_transB_small
+  matrix_size: *small_grouped_matrix
+  alpha: 1
+  beta: 0
+  batch_count: 2
+  api: [ C, C_64, FORTRAN_64 ]

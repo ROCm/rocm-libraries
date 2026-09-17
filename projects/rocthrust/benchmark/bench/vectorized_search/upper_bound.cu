@@ -27,7 +27,7 @@
  ******************************************************************************/
 
 // Benchmark utils
-#include "../../bench_utils/bench_utils.hpp"
+#include "bench_utils.hpp"
 
 // rocThrust
 #include <thrust/binary_search.h>
@@ -35,135 +35,75 @@
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 
-// Google Benchmark
-#include <benchmark/benchmark.h>
-
-// STL
-#include <cstddef>
-#include <string>
-#include <vector>
-
-struct upper_bound
+template <typename T>
+struct vectorized_search_benchmark : public primbench::benchmark_interface
 {
-  template <typename T, typename Policy>
-  float64_t
-  run(thrust::device_vector<T>& data, thrust::device_vector<T>& result, const std::size_t elements, Policy policy)
+  vectorized_search_benchmark(size_t items, const size_t needles_ratio)
+      : m_items(items)
+      , needles_ratio(needles_ratio)
+  {}
+
+  primbench::json meta() const override
   {
-    thrust::upper_bound(
-      policy, data.begin(), data.begin() + elements, data.begin() + elements, data.end(), result.begin());
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    thrust::upper_bound(
-      policy, data.begin(), data.begin() + elements, data.begin() + elements, data.end(), result.begin());
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return primbench::json{}
+      .add("algo", "vectorized_search")
+      .add("subalgo", "upper_bound")
+      .add("input_type", primbench::name<T>())
+      .add("elements", m_items)
+      .add("needles_ratio", needles_ratio);
   }
+
+  void run(primbench::state& state) override
+  {
+    bench_utils::caching_allocator_t alloc{};
+    thrust::detail::device_t policy{};
+
+    const auto needles = needles_ratio * static_cast<std::size_t>(static_cast<double>(m_items) / 100.0);
+
+    thrust::device_vector<T> data = bench_utils::generate(m_items + needles, state.seed);
+    thrust::device_vector<bool> result(needles);
+    thrust::sort(data.begin(), data.begin() + m_items);
+
+    state.set_items(needles);
+    state.add_reads<T>(needles);
+
+    state.run([&] {
+      thrust::upper_bound(
+        policy(alloc).on(state.stream),
+        data.begin(),
+        data.begin() + m_items,
+        data.begin() + m_items,
+        data.end(),
+        result.begin());
+    });
+  }
+
+private:
+  size_t m_items;
+  const size_t needles_ratio;
 };
 
-template <class Benchmark, class T>
-void run_benchmark(
-  benchmark::State& state, const std::size_t elements, const std::string seed_type, const std::size_t needles_ratio)
-{
-  // Benchmark object
-  Benchmark benchmark{};
-
-  // GPU times
-  std::vector<double> gpu_times;
-
-  // Generate input
-  const auto needles = needles_ratio * static_cast<std::size_t>(static_cast<double>(elements) / 100.0);
-
-  thrust::device_vector<T> data = bench_utils::generate(elements + needles, seed_type);
-  thrust::device_vector<T> result(needles);
-  thrust::sort(data.begin(), data.begin() + elements);
-
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-
-  for (auto _ : state)
-  {
-    float64_t duration = benchmark.template run<T>(data, result, elements, policy(alloc));
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-
-  state.SetBytesProcessed(state.iterations() * needles * sizeof(T));
-  state.SetItemsProcessed(state.iterations() * needles);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BENCHMARK(T, Elements, NeedlesRatio)                                                                \
-  benchmark::RegisterBenchmark(                                                                                    \
-    bench_utils::bench_naming::format_name("{algo:merge,subalgo:" + name + ",input_type:" #T + ",elements:"        \
-                                           + bench_utils::format_pow2(Elements) + ",needles_ratio:" #NeedlesRatio) \
-      .c_str(),                                                                                                    \
-    run_benchmark<Benchmark, T>,                                                                                   \
-    Elements,                                                                                                      \
-    seed_type,                                                                                                     \
-    NeedlesRatio)
-
-#define BENCHMARK_ELEMENTS(type, elements)            \
-  bs.push_back(CREATE_BENCHMARK(type, elements, 1));  \
-  bs.push_back(CREATE_BENCHMARK(type, elements, 25)); \
-  bs.push_back(CREATE_BENCHMARK(type, elements, 50));
-
-#define BENCHMARK_TYPE(type)                                               \
-  for (size_t size : bench_utils::sizes)                                   \
-  {                                                                        \
-    if (sizeof(type) * size <= bench_utils::system.devProp.totalGlobalMem) \
-    {                                                                      \
-      BENCHMARK_ELEMENTS(type, size)                                       \
-    }                                                                      \
-  }
-
-template <class Benchmark>
-void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
-{
-  std::vector<benchmark::Benchmark*> bs;
-  BENCHMARK_TYPE(int8_t)
-  BENCHMARK_TYPE(int16_t)
-  BENCHMARK_TYPE(int32_t)
-  BENCHMARK_TYPE(int64_t)
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
+#define QUEUE(T, N)                                     \
+  for (size_t size : bench_utils::sizes(2 * sizeof(T))) \
+    executor.queue<vectorized_search_benchmark<T>>(size, N);
 
 int main(int argc, char* argv[])
 {
-  cli::Parser parser(argc, argv);
-  parser.set_optional<std::string>("name_format", "name_format", "human", "either: json,human,txt");
-  parser.set_optional<std::string>("seed", "seed", "random", bench_utils::get_seed_message());
-  parser.run_and_exit_if_error();
+  primbench::settings settings;
+  settings.size                 = 1; // bench_utils::sizes() calculates it later.
+  settings.min_gpu_ms_per_batch = 200;
+  settings.batch_window_size    = 3;
+  primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-  // Parse argv
-  benchmark::Initialize(&argc, argv);
-  bench_utils::bench_naming::set_format(parser.get<std::string>("name_format")); /* either: json,human,txt */
-  const std::string seed_type = parser.get<std::string>("seed");
+  const size_t needles[] = {1, 25, 50};
 
-  // Benchmark info
-  bench_utils::add_common_benchmark_info();
-  benchmark::AddCustomContext("seed", seed_type);
-
-  // Add benchmark
-  std::vector<benchmark::Benchmark*> benchmarks;
-  add_benchmarks<upper_bound>("upper_bound", benchmarks, seed_type);
-
-  // Use manual timing
-  for (auto& b : benchmarks)
+  for (size_t n : needles)
   {
-    b->UseManualTime();
-    b->Unit(benchmark::kMicrosecond);
-    b->MinTime(0.4); // in seconds
+    QUEUE(int8_t, n)
+    QUEUE(int16_t, n)
+    QUEUE(int32_t, n)
+    QUEUE(int64_t, n)
   }
 
-  // Run benchmarks
-  benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
-
-  // Finish
-  benchmark::Shutdown();
-  return 0;
+  executor.run();
 }

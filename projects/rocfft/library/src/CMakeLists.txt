@@ -144,6 +144,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
      ${CMAKE_SOURCE_DIR}/shared/hip_object_wrapper.h
+     ${CMAKE_SOURCE_DIR}/library/src/include/rtc_generator.h
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_kernel.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_kernel.cpp
      ${CMAKE_SOURCE_DIR}/library/src/rtc_test_harness_helper.cpp
@@ -260,7 +261,6 @@ set( rocfft_source
   tree_node_real.cpp
   fuse_shim.cpp
   assignment_policy.cpp
-  callback_map.cpp
   node_factory.cpp
   enum_printer.cpp
   rtc_exports.cpp
@@ -305,6 +305,7 @@ add_library( rocfft-rtc-gen OBJECT
   rtc_chirp_gen.cpp
   rtc_test_harness.cpp
   load_store_ops_gen.cpp
+  ${CMAKE_SOURCE_DIR}/shared/sha256.c
 )
 # caching of generation/compilation
 add_library( rocfft-rtc-cache OBJECT
@@ -361,9 +362,6 @@ foreach( target
     POSITION_INDEPENDENT_CODE ON
   )
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options( ${target} PRIVATE -Og )
-  endif()
   target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} hiprtc::hiprtc )
   rocfft_add_coverage_flags( ${target} )
   target_link_directories( ${target} PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
@@ -494,9 +492,6 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     endif()
 
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options(${target} PRIVATE -Og)
-  endif()
 endforeach()
 
 rocfft_link_internal_lib( rocfft generator )
@@ -576,6 +571,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT amdgcnspirv )
 
   # On Windows, to run rocfft_aot_helper we need to be able to find
   # the hiprtc and HIP runtime DLLs.  So add those dirs to the PATH

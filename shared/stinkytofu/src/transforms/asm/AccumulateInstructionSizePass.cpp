@@ -78,7 +78,7 @@ int64_t accumulateInstructionSize(BasicBlock& bb,
         count++;
         // TODO: check if the cost cycles is correct
         int cost;
-        if (isMFMA(inst) || isWMMA(inst)) {
+        if (isMatrixInstruction(inst)) {
             cost = inst.latencyCycles;
         } else {
             cost = inst.issueCycles;
@@ -96,7 +96,8 @@ int64_t accumulateInstructionSize(BasicBlock& bb,
                 *debugOut << "+" << literalExtra << "(literal)=" << instBytes << " bytes";
             else
                 *debugOut << " bytes";
-            *debugOut << ", total=" << totalBytes << " bytes";
+            *debugOut << ", total=" << (baseByteOffset + totalBytes)
+                      << " bytes, totalBytes in BB=" << totalBytes << " bytes";
             *debugOut << ", opcode=" << inst.getUnifiedOpcode() << " (isa=" << inst.getISAOpcode()
                       << ")] ";
             inst.dump(*debugOut);
@@ -312,6 +313,12 @@ std::unique_ptr<Pass> createAccumulateInstructionSizePass(const std::string& deb
         p->setDebugOutputPath(debugOutputPath);
         p->setDebug(true);
     }
+    return p;
+}
+
+std::unique_ptr<Pass> createAccumulateInstructionSizePassWithDebug() {
+    auto p = std::make_unique<AccumulateInstructionSizePass>();
+    p->setDebug(true);
     return p;
 }
 

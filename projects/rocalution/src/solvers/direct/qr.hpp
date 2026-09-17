@@ -32,10 +32,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class QR
-  * \brief QR Decomposition
-  * \details
-  * The QR Decomposition decomposes a given matrix into \f$A = QR\f$, such that \f$Q\f$
-  * is an orthogonal matrix and \f$R\f$ an upper triangular matrix.
+  * \brief QR decomposition direct solver.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

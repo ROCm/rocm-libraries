@@ -772,10 +772,8 @@ namespace hipsparse
             return CUSPARSE_SPMV_CSR_ALG2;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return CUSPARSE_SPMV_SELL_ALG1;
-#ifdef HIPSPARSE_WITH_SPMV_BSR
         case HIPSPARSE_SPMV_BSR_ALG1:
             return CUSPARSE_SPMV_BSR_ALG1;
-#endif
         default:
             throw "Non existant hipsparseSpMVAlg_t";
         }
@@ -1046,6 +1044,23 @@ namespace hipsparse
             return CUSPARSE_SPGEMM_DEFAULT;
         default:
             throw "Non existant cusparseSpGEMMAlg_t";
+        }
+    }
+#endif
+
+    // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+    // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+    // clang-format off
+#if(defined(HIPSPARSE_WITH_SPGEAM) && CUDART_VERSION >= 13030)
+    // clang-format on
+    inline cusparseSpGEAMAlg_t hipSpGEAMAlgToCudaSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPGEAM_ALG1:
+            return CUSPARSE_SPGEAM_ALG1;
+        default:
+            throw "Non existant cusparseSpGEAMAlg_t";
         }
     }
 #endif

@@ -1,0 +1,39 @@
+# Integration test configuration for ASM_SDPA_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# The common suite's ToleranceResolver maps both SdpaAttributes and
+# SdpaBackwardAttributes to tol::sdpa::getToleranceFwd<T>() (tight, tuned for
+# forward). SDPA backward gradients (dQ/dK/dV) accumulate more numerical error
+# than the forward pass and need the provider-local backward tolerance instead
+# — ported verbatim from the deleted provider-local
+# asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp (bf16: 5e-1, fp16: 2.5e-1).
+[[tolerance_overrides]]
+filters = ["*IntegrationGpuSdpaBwdBfp16*"]
+atol = 5e-1
+rtol = 5e-1
+
+[[tolerance_overrides]]
+filters = ["*IntegrationGpuSdpaBwdFp16*"]
+atol = 2.5e-1
+rtol = 2.5e-1

@@ -34,11 +34,7 @@ namespace rocalution
 {
     /** \ingroup solver_module
   * \class SAAMG
-  * \brief Smoothed Aggregation Algebraic MultiGrid Method
-  * \details
-  * The Smoothed Aggregation Algebraic MultiGrid method is based on smoothed
-  * aggregation based interpolation scheme.
-  * \cite vanek
+  * \brief Smoothed Aggregation Algebraic MultiGrid method.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

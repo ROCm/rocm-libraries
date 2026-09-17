@@ -574,20 +574,17 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
 
 
 class TestDeviceQueryParsing(unittest.TestCase):
-    """Field extraction for the HIP device queries, pinned without a GPU.
-
-    Uses a synthetic hipDeviceProp_t buffer so the parsing is deterministic: the
-    marketing ``name`` is the char[256] at offset 0; ``gcnArchName`` carries the gfx
-    token further in and may carry ``:sramecc+:xnack-`` feature suffixes to strip.
-    """
+    """Read named HIP property fields without a GPU."""
 
     @staticmethod
-    def _props(name: bytes, gcn_arch: bytes | None) -> bytes:
-        buf = bytearray(4096)
-        buf[0 : len(name)] = name  # name[256] at offset 0, NUL-terminated
+    def _props(name: bytes, gcn_arch: bytes | None):
+        from rocke.runtime._hip_device_properties import HipDevicePropR0600
+
+        props = HipDevicePropR0600()
+        props.name = name
         if gcn_arch is not None:
-            buf[256 : 256 + len(gcn_arch)] = gcn_arch
-        return bytes(buf)
+            props.gcnArchName = gcn_arch
+        return props
 
     def test_arch_strips_feature_flags(self):
         import unittest.mock as mock
@@ -605,7 +602,7 @@ class TestDeviceQueryParsing(unittest.TestCase):
         with mock.patch.object(hip_module, "_device_props", return_value=raw):
             self.assertEqual(hip_module.get_device_arch(0), "gfx00a")
 
-    def test_name_read_from_offset_zero_to_nul(self):
+    def test_name_read_from_name_field(self):
         import unittest.mock as mock
         from rocke.runtime import hip_module
 
@@ -613,7 +610,7 @@ class TestDeviceQueryParsing(unittest.TestCase):
         with mock.patch.object(hip_module, "_device_props", return_value=raw):
             self.assertEqual(hip_module.get_device_name(0), "Marketing Name")
 
-    def test_no_gfx_token_yields_none_arch(self):
+    def test_empty_target_yields_none_arch(self):
         import unittest.mock as mock
         from rocke.runtime import hip_module
 
@@ -633,8 +630,10 @@ class TestDeviceQueryParsing(unittest.TestCase):
 class TestArchitecturalIsolation(unittest.TestCase):
     """Review-rule gates from the design doc."""
 
+    # Sources are UTF-8 whatever the host locale is: reading them with the
+    # Windows default (cp1252) fails on the non-ASCII a few modules carry.
     def _read(self, rel):
-        return (_ROCKE_ROOT / rel).read_text()
+        return (_ROCKE_ROOT / rel).read_text(encoding="utf-8")
 
     def test_core_arch_no_dispatcher_import(self):
         # Catch real imports of dispatcher, not the word in docstrings/comments.
@@ -643,20 +642,23 @@ class TestArchitecturalIsolation(unittest.TestCase):
         pat = re.compile(r"^\s*(from|import)\s+\S*dispatcher", re.MULTILINE)
         for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py"):
             self.assertIsNone(
-                pat.search(p.read_text()), f"{p} must not import from dispatcher/"
+                pat.search(p.read_text(encoding="utf-8")),
+                f"{p} must not import from dispatcher/",
             )
 
     def test_core_arch_no_pipeline_vocabulary(self):
         # Pipeline/scheduler names are instance-side policy, never in core/arch.
         blob = "\n".join(
-            p.read_text() for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
+            p.read_text(encoding="utf-8")
+            for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
         )
         for tok in ("compv4", "compv3", "intrawave", "interwave", "qr_ks_vs"):
             self.assertNotIn(tok, blob, f"pipeline token {tok!r} leaked into core/arch")
 
     def test_core_arch_no_llvm_intrinsic_text(self):
         blob = "\n".join(
-            p.read_text() for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
+            p.read_text(encoding="utf-8")
+            for p in (_ROCKE_ROOT / "core" / "arch").rglob("*.py")
         )
         self.assertNotIn(
             "llvm.amdgcn", blob, "core/arch must not contain intrinsic text"
@@ -667,7 +669,8 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
     """Drift guard: assert rocke's hardcoded datalayout matches the toolchain.
 
     The LLVM IR datalayout is LLVM-version-keyed (not gfx-keyed): ROCm 7.2
-    ships ``p8:128:128:128:48``, while 7.0/7.1 shipped ``p8:128:128``. The
+    ships ``p8:128:128:128:48`` (llvm22), ROCm 7.13+ ships the same layout
+    under llvm23, while 7.0/7.1 shipped ``p8:128:128`` (llvm20). The
     difference is auto-upgraded away when compiling textual IR through comgr,
     so a wrong-but-well-formed hardcoded string compiles fine — but relying
     on that parser leniency is fragile across ingestion paths.
@@ -709,6 +712,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.ir import F32, KernelDef, Param, PtrType, Region
         from rocke.core.isa.backend import wired_arches
         from rocke.core.lower_llvm import (
+            LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
             _detect_llvm_flavor,
             _flavor_for_rocm,
@@ -736,6 +740,19 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
         )
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        if detected_flavor == LLVM_FLAVOR_LLVM23:
+            # Drift proven on LLVM 23 (ROCm 7.13+): its datalayout is the llvm22
+            # one with the ELF symbol-mangling spec `m:e` inserted after the
+            # leading endianness field, and identical otherwise. Pin that exact
+            # relationship (derived from the llvm22 constant, not a second copy)
+            # so a stray edit to either constant is caught here, not only by the
+            # toolchain diff below.
+            self.assertEqual(
+                rocke_dl,
+                _datalayout_for_flavor("llvm22").replace("e-", "e-m:e-", 1),
+                "llvm23 datalayout must be the llvm22 layout plus the m:e "
+                "symbol-mangling spec",
+            )
 
         # Test across all wired arches to confirm datalayout really is gfx-invariant
         # (the assumption the flavor split rests on).

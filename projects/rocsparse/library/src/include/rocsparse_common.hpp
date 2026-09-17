@@ -24,8 +24,8 @@
 
 #pragma once
 
+#include "rocsparse-config.h"
 #include "rocsparse-types.h"
-#include "rocsparse-version.h"
 #ifdef WIN32
 #include <intrin.h>
 #endif
@@ -60,6 +60,12 @@
 
 namespace rocsparse
 {
+    template <typename J>
+    static uint16_t get_batch_grid_size(J batch_count)
+    {
+        return (batch_count > 65535) ? 65535 : batch_count;
+    }
+
     // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
     template <uint32_t N>
     struct log2_pow2
@@ -2807,39 +2813,30 @@ namespace rocsparse
     __device__ __forceinline__ double assign_ilu0_boost_value(const double& value,
                                                               const double& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const double abs_value = rocsparse::abs(value);
         const double abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.0) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ float assign_ilu0_boost_value(const float& value,
                                                              const float& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the sign of the original pivot,
         // i.e. copysign(|boost_value|, value). Using the magnitude guarantees a
         // negative boost can never swap the pivot sign (preserving inertia).
         const float abs_value = rocsparse::abs(value);
         const float abs_boost = rocsparse::abs(boost_value);
         return (abs_value > 0.f) ? (abs_boost * (value / abs_value)) : abs_boost;
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex assign_ilu0_boost_value(
         const rocsparse_float_complex& value, const rocsparse_float_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2848,16 +2845,12 @@ namespace rocsparse
         return (abs_value > static_cast<float>(0))
                    ? (static_cast<rocsparse_float_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_float_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex assign_ilu0_boost_value(
         const rocsparse_double_complex& value, const rocsparse_double_complex& boost_value)
     {
-#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
         // Apply the boost magnitude (>= 0) along the phase of the original pivot:
         // |boost_value| * value / |value|. Using the magnitude guarantees the
         // pivot direction (and hence inertia) cannot be swapped by the boost.
@@ -2866,9 +2859,5 @@ namespace rocsparse
         return (abs_value > static_cast<double>(0))
                    ? (static_cast<rocsparse_double_complex>(abs_boost) * (value / abs_value))
                    : static_cast<rocsparse_double_complex>(abs_boost);
-#else
-        return boost_value;
-#endif
     }
-
 }

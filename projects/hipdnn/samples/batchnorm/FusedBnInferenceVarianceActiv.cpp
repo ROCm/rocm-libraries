@@ -30,7 +30,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "Running batch normalization inference with variance + ReLU activation graph "
               << inputType << " [" << layout << "]"
-              << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
+              << (config.cpuValidation ? " (with CPU validation)" : "")
+              << (config.useRuntimePassByValue ? " [runtime-pass-by-value]" : "") << "...\n";
 
     // Input dimensions
     const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
@@ -51,9 +52,25 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto mean = createTensor({1, c, 1, 1}, computeType);
     auto variance = createTensor({1, c, 1, 1}, computeType);
 
-    // Epsilon is a tensor for the variance extension
+    // Epsilon is a pass-by-value scalar, not a device buffer.
+    // Compile-time constant: value is baked into the op-graph at build() and requires no
+    // variant-pack entry at execute(). Works with any plugin version.
+    // Runtime pass-by-value (--runtime-pass-by-value): value is supplied as a host pointer in the
+    // variant pack at execute(), allowing it to vary across executions without rebuilding the
+    // graph. Requires plugin SDK >= 1.2.0.
+    constexpr auto EPSILON = utilities::BATCHNORM_DEFAULT_EPSILON;
     auto epsilon = std::make_shared<graph::TensorAttributes>();
-    epsilon->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
+    epsilon->set_dim({1}).set_stride({1}).set_data_type(getDataTypeEnumFromType<double>());
+    if(config.useRuntimePassByValue)
+    {
+        // No baked value; the value is supplied as a host pointer in the variant pack at
+        // execute() instead.
+        epsilon->set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilon->set_compile_time_constant(EPSILON);
+    }
 
     // Step 1: Batchnorm Inference with Variance
     auto bnAttributes = graph::BatchnormInferenceAttributesVarianceExt();
@@ -100,6 +117,17 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[variance->get_uid()] = varianceTensor.memory().deviceData();
     variantPack[activatedY->get_uid()] = activatedYTensor.memory().deviceData();
 
+    // Runtime pass-by-value tensors are supplied as host pointers in the variant pack.
+    // Compile-time constants are baked at build() and must NOT appear here.
+    // Using the same default here keeps output numerically identical to the compile-time path,
+    // so CPU validation passes regardless of which mode is active. In a real application this
+    // value could differ per execution without rebuilding the graph.
+    double epsilonVal = EPSILON;
+    if(config.useRuntimePassByValue)
+    {
+        variantPack[epsilon->get_uid()] = &epsilonVal;
+    }
+
     int64_t workspaceSize = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
     const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
@@ -107,25 +135,28 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
     activatedYTensor.memory().markDeviceModified();
+
     auto activatedYHostPtr = activatedYTensor.memory().hostData();
 
-    bool validationPassed = true;
-
-    if(config.cpuValidation)
-    {
+    auto runCpuValidation = [&]() -> bool {
         std::cout << "Running CPU reference validation using CpuReferenceGraphExecutor...\n";
 
         // Create reference tensor
         utilities::Tensor<OutputType> activatedYRefTensor(activatedY->get_dim(), layout);
 
         // Build variant pack for CPU execution (using host pointers)
-        const std::unordered_map<int64_t, void*> cpuVariantPack{
+        std::unordered_map<int64_t, void*> cpuVariantPack{
             {x->get_uid(), xTensor.memory().hostData()},
             {scale->get_uid(), scaleTensor.memory().hostData()},
             {bias->get_uid(), biasTensor.memory().hostData()},
             {mean->get_uid(), meanTensor.memory().hostData()},
             {variance->get_uid(), varianceTensor.memory().hostData()},
             {activatedY->get_uid(), activatedYRefTensor.memory().hostData()}};
+
+        if(config.useRuntimePassByValue)
+        {
+            cpuVariantPack[epsilon->get_uid()] = &epsilonVal;
+        }
 
         // Execute on CPU using graph executor
         auto [serializedGraph, serErr] = graph->to_binary();
@@ -144,22 +175,50 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             tolerance, tolerance);
 
         std::cout << "CPU reference validation:\n";
-        const bool yValid
-            = hipdnn_test_sdk::utilities::validateAndReport<OutputType>(std::cout,
-                                                                        "activated_y",
-                                                                        yValidator,
-                                                                        activatedYRefTensor,
-                                                                        activatedYTensor,
-                                                                        tolerance,
-                                                                        tolerance);
+        return hipdnn_test_sdk::utilities::validateAndReport<OutputType>(std::cout,
+                                                                         "activated_y",
+                                                                         yValidator,
+                                                                         activatedYRefTensor,
+                                                                         activatedYTensor,
+                                                                         tolerance,
+                                                                         tolerance);
+    };
 
-        validationPassed = yValid;
+    bool validationPassed = true;
+
+    if(config.cpuValidation)
+    {
+        validationPassed = runCpuValidation();
     }
 
     std::cout << "First 10 activated_y values: ";
     for(int i = 0; i < 10; ++i)
     {
         std::cout << static_cast<float>(activatedYHostPtr[i]) << " ";
+    }
+
+    // Demonstrate that the graph can be re-executed with a different scalar value without
+    // rebuilding. The variant pack already holds a pointer to epsilonVal, so updating the
+    // value in-place is all that is needed.
+    if(config.useRuntimePassByValue)
+    {
+        std::cout << "\nRe-executing with epsilon = 1.0 (no rebuild required)...\n";
+        epsilonVal = 1.0;
+        HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
+        activatedYTensor.memory().markDeviceModified();
+        activatedYHostPtr = activatedYTensor.memory().hostData();
+
+        std::cout << "First 10 activated_y values (epsilon = 1.0): ";
+        for(int i = 0; i < 10; ++i)
+        {
+            std::cout << static_cast<float>(activatedYHostPtr[i]) << " ";
+        }
+
+        if(config.cpuValidation)
+        {
+            std::cout << "\nRe-validating against CPU reference with the updated scalar value...\n";
+            validationPassed = runCpuValidation() && validationPassed;
+        }
     }
 
     std::cout << "\nBatch normalization inference with variance + activation graph execution "
@@ -175,7 +234,7 @@ int main(int argc, char* argv[])
     {
         RETURN_SUCCESS_IF_NO_DEVICE();
 
-        auto config = parseCommandLineArgs(argc, argv);
+        auto config = parseCommandLineArgs(argc, argv, SampleType::BN_WITH_PASS_BY_VALUE);
 
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);

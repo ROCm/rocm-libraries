@@ -27,8 +27,33 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 using namespace stinkytofu;
+
+// Lifts the extracted region to attached SSA and leaves it attached, standing in
+// for any inner pipeline that reasons about SSA.
+class LiftAndLeaveAttachedPass : public Pass {
+   public:
+    static char ID;
+
+    PassID getPassID() const override {
+        return &ID;
+    }
+
+    const char* getName() const override {
+        return "LiftAndLeaveAttachedPass";
+    }
+
+    PreservedAnalyses run(Function& func, PassContext& /*ctx*/, AnalysisManager& /*AM*/) override {
+        Expected<LiftAttachedSSAResult> lifted = liftAsmRegistersToAttachedSSA(func);
+        lifted_ = lifted.hasValue();
+        return PreservedAnalyses::none();
+    }
+
+    bool lifted_ = false;
+};
+char LiftAndLeaveAttachedPass::ID = 0;
 
 // A simple counting pass: counts StinkyInstructions in the Function.
 class CountingPass : public Pass {
@@ -160,6 +185,48 @@ TEST_F(ScopeAdaptorTest, SingleRegionExtractAndSpliceBack) {
     EXPECT_EQ(module->getFunction().size(), 1u);
     // Group range should still be valid
     EXPECT_TRUE(module->findGroupRange("group0").has_value());
+}
+
+// Attached SSA must not survive splice-back. The values belong to an SSAArena
+// owned by the temporary Function, which is destroyed once the region has been
+// moved back into the kernel, so an instruction that kept its SSA would be left
+// holding freed values -- an assert in a debug build and a use-after-free in
+// StinkyOpOperand's destructor otherwise. ScopeAdaptor detaches so that no inner
+// pipeline has to remember to.
+TEST_F(ScopeAdaptorTest, SpliceBackLeavesNoAttachedSSA) {
+    auto module = createModuleWithGroups();
+    const int totalBefore = countInstructions(module->getFunction());
+
+    auto outerPM = createOuterPM();
+    PassManager innerPM;
+    auto lift = std::make_unique<LiftAndLeaveAttachedPass>();
+    LiftAndLeaveAttachedPass* liftRaw = lift.get();
+    innerPM.addPass(std::move(lift));
+    outerPM.addPass(createKernelToRegionPassAdaptor(*module, "group0", std::move(innerPM)));
+    outerPM.run(module->getFunction());
+
+    // The test is only meaningful if the region actually lifted.
+    ASSERT_TRUE(liftRaw->lifted_);
+    EXPECT_FALSE(module->getFunction().hasAttachedSSA());
+    EXPECT_EQ(countInstructions(module->getFunction()), totalBefore);
+}
+
+// Same invariant for the whole-kernel mode, which splices through a different path.
+TEST_F(ScopeAdaptorTest, WholeKernelSpliceBackLeavesNoAttachedSSA) {
+    auto module = createModuleWithGroups();
+    const int totalBefore = countInstructions(module->getFunction());
+
+    auto outerPM = createOuterPM();
+    PassManager innerPM;
+    auto lift = std::make_unique<LiftAndLeaveAttachedPass>();
+    LiftAndLeaveAttachedPass* liftRaw = lift.get();
+    innerPM.addPass(std::move(lift));
+    outerPM.addPass(createKernelPassAdaptor(*module, std::move(innerPM)));
+    outerPM.run(module->getFunction());
+
+    ASSERT_TRUE(liftRaw->lifted_);
+    EXPECT_FALSE(module->getFunction().hasAttachedSSA());
+    EXPECT_EQ(countInstructions(module->getFunction()), totalBefore);
 }
 
 // Verify that setGroupRange is called correctly during single-region splice-back.

@@ -291,7 +291,7 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
     ASSERT_NE(opNode, nullptr) << "Expected a ResampleFwdNode";
 
     ASSERT_TRUE(opNode->attributes.get_generate_index().has_value());
-    EXPECT_EQ(opNode->attributes.get_generate_index().value(), true);
+    EXPECT_TRUE(opNode->attributes.get_generate_index().value());
 
     // Verify tensor dims and strides
     auto tensorMap = liftedGraph->getTensorsByUid();

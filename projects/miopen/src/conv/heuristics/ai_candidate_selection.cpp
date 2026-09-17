@@ -34,6 +34,7 @@
 #include <nlohmann/json.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/logger.hpp>
 #include <miopen/stringutils.hpp>
 #include <algorithm>
 #include <vector>
@@ -45,6 +46,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <cmath>
+#include <sstream>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
@@ -390,11 +392,82 @@ float FeatureAt(const std::map<std::string, float>& features, const std::string&
 }
 
 // True when this model targets 2D convolutions, per the spatial_dim constant in its metadata.
-// Feature engineering (input + kernel-config) is 2D-only; 3D models use raw features.
 bool IsTwoDimensional(const CandidateSelectionMetadata& metadata)
 {
     const auto spatial_dim = metadata.GetInputConstant("spatial_dim");
     return spatial_dim.has_value() && *spatial_dim == "2";
+}
+
+bool IsThreeDimensional(const CandidateSelectionMetadata& metadata)
+{
+    const auto spatial_dim = metadata.GetInputConstant("spatial_dim");
+    return spatial_dim.has_value() && *spatial_dim == "3";
+}
+
+bool UsesEngineeredInputFeatures(const CandidateSelectionMetadata& metadata)
+{
+    return IsTwoDimensional(metadata) || IsThreeDimensional(metadata);
+}
+
+bool IsCandidateSelectionCategoricalOneHot(const std::string& name)
+{
+    return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
+           name == "precision";
+}
+
+bool ShouldSkipCandidateSelectionRawInput(const CandidateSelectionMetadata& metadata,
+                                          const std::string& name)
+{
+    if(metadata.GetInputConstant(name).has_value())
+        return true;
+    if(IsCandidateSelectionCategoricalOneHot(name))
+        return true;
+    // Direction drives derived GEMM assignment only; never part of the raw passthrough block.
+    if(name == "direction")
+        return true;
+    return false;
+}
+
+float CandidateSelectionRawFeatureValue(const std::string& name,
+                                        const std::map<std::string, float>& features_by_name,
+                                        bool is_fwd)
+{
+    if(name == "in_channels")
+        return is_fwd ? FeatureAt(features_by_name, "in_channels")
+                      : FeatureAt(features_by_name, "out_channels");
+    if(name == "in_d")
+        return is_fwd ? FeatureAt(features_by_name, "in_d") : FeatureAt(features_by_name, "out_d");
+    if(name == "in_h")
+        return is_fwd ? FeatureAt(features_by_name, "in_h") : FeatureAt(features_by_name, "out_h");
+    if(name == "in_w")
+        return is_fwd ? FeatureAt(features_by_name, "in_w") : FeatureAt(features_by_name, "out_w");
+    if(name == "out_channels")
+        return is_fwd ? FeatureAt(features_by_name, "out_channels")
+                      : FeatureAt(features_by_name, "in_channels");
+    if(name == "out_d")
+        return is_fwd ? FeatureAt(features_by_name, "out_d") : FeatureAt(features_by_name, "in_d");
+    if(name == "out_h")
+        return is_fwd ? FeatureAt(features_by_name, "out_h") : FeatureAt(features_by_name, "in_h");
+    if(name == "out_w")
+        return is_fwd ? FeatureAt(features_by_name, "out_w") : FeatureAt(features_by_name, "in_w");
+    return FeatureAt(features_by_name, name);
+}
+
+std::vector<float>
+ExtractCandidateSelectionRawInput(const std::map<std::string, float>& features_by_name,
+                                  const CandidateSelectionMetadata& metadata)
+{
+    const float direction_code = FeatureAt(features_by_name, "direction");
+    const bool is_fwd          = direction_code == 0.0f;
+
+    std::vector<float> raw;
+    for(const auto& feature_name : metadata.input_params())
+    {
+        if(ShouldSkipCandidateSelectionRawInput(metadata, feature_name))
+            continue;
+        raw.push_back(CandidateSelectionRawFeatureValue(feature_name, features_by_name, is_fwd));
+    }
+    return raw;
 }
 
 } // namespace
@@ -404,11 +477,11 @@ std::vector<float>
 EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& features_by_name,
                                         const CandidateSelectionMetadata& metadata)
 {
-    // Callers gate this 2D-only path via IsTwoDimensional(metadata); no runtime spatial_dim check
-    // here so a model whose feature map omits/differs on spatial_dim still engineers correctly.
-    MIOPEN_LOG_I2("Using engineered 2d features for Candidate Selection");
+    const bool is_3d = IsThreeDimensional(metadata);
+    MIOPEN_LOG_I2("Using engineered " << (is_3d ? "3" : "2")
+                                      << "d features for Candidate Selection");
 
-    // Shares the derived-feature math with ExtractTunaNetND2dFeatures (ai_heuristics.cpp) via
+    // Shares the derived-feature math with ExtractTunaNetNDFeatures (ai_heuristics.cpp) via
     // common::EngineeredConvFeatures; only the input source and the omitted direction one-hot
     // differ.
     const float direction_code = FeatureAt(features_by_name, "direction");
@@ -431,7 +504,18 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
         is_fwd ? FeatureAt(features_by_name, "out_w") : FeatureAt(features_by_name, "in_w"));
     const std::size_t K_h = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_h"));
     const std::size_t K_w = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_w"));
-    std::size_t groups    = static_cast<std::size_t>(FeatureAt(features_by_name, "group_count"));
+    std::size_t D_in      = 1;
+    std::size_t D_out     = 1;
+    std::size_t K_d       = 1;
+    if(is_3d)
+    {
+        D_in  = static_cast<std::size_t>(is_fwd ? FeatureAt(features_by_name, "in_d")
+                                               : FeatureAt(features_by_name, "out_d"));
+        D_out = static_cast<std::size_t>(is_fwd ? FeatureAt(features_by_name, "out_d")
+                                                : FeatureAt(features_by_name, "in_d"));
+        K_d   = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_d"));
+    }
+    std::size_t groups = static_cast<std::size_t>(FeatureAt(features_by_name, "group_count"));
     // CU count the model was trained with, for the hardware-aware derived features.
     const std::size_t num_cu = metadata.GetNumCu();
 
@@ -479,7 +563,7 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     }
     const auto precision =
         common::OneHot(static_cast<long long>(precision_index), precision_class_count);
-    // Direction one-hot is present in ExtractTunaNetND2dFeatures but omitted here because
+    // Direction one-hot is present in ExtractTunaNetNDFeatures but omitted here because
     // CandidateSelection metadata holds direction as a constant input.
 
     std::vector<float> engineered;
@@ -487,26 +571,18 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
         for(const auto bit : *one_hot)
             engineered.push_back(static_cast<float>(bit));
 
-    // Raw passthrough features.
-    const std::vector<float> raw_tail = {
-        static_cast<float>(C_in),
-        static_cast<float>(H_in),
-        static_cast<float>(W_in),
-        static_cast<float>(C_out),
-        static_cast<float>(H_out),
-        static_cast<float>(W_out),
-        static_cast<float>(K_h),
-        static_cast<float>(K_w),
-        FeatureAt(features_by_name, "pad_h"),
-        FeatureAt(features_by_name, "pad_w"),
-        FeatureAt(features_by_name, "conv_stride_h"),
-        FeatureAt(features_by_name, "conv_stride_w"),
-        FeatureAt(features_by_name, "dilation_h"),
-        FeatureAt(features_by_name, "dilation_w"),
-        FeatureAt(features_by_name, "batchsize"),
-        FeatureAt(features_by_name, "group_count"),
-    };
-    engineered.insert(engineered.end(), raw_tail.begin(), raw_tail.end());
+    // Raw numerics follow metadata input_params order; constants and categoricals are handled
+    // separately. Parameters removed during training (e.g. dilation_* for MI355_3d) are absent
+    // from input_params and are not appended here.
+    std::size_t raw_count = 0;
+    for(const auto& feature_name : metadata.input_params())
+    {
+        if(ShouldSkipCandidateSelectionRawInput(metadata, feature_name))
+            continue;
+        engineered.push_back(
+            CandidateSelectionRawFeatureValue(feature_name, features_by_name, is_fwd));
+        ++raw_count;
+    }
 
     // Derived feature block (shared with the TunaNet path). Dimensions above are normalized to the
     // forward (driver) convention; the GEMM assignment is selected by the actual direction. The
@@ -514,12 +590,29 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
     const auto gemm_dir = direction_code == 0.0f   ? common::ConvDirection::Forward
                           : direction_code == 1.0f ? common::ConvDirection::BackwardData
                                                    : common::ConvDirection::BackwardWeights;
-    const auto derived  = common::EngineeredConvFeatures(
-        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    const auto derived =
+        is_3d ? common::EngineeredConvFeatures(N,
+                                               C_in,
+                                               C_out,
+                                               H_in,
+                                               W_in,
+                                               H_out,
+                                               W_out,
+                                               K_h,
+                                               K_w,
+                                               groups,
+                                               num_cu,
+                                               gemm_dir,
+                                               3,
+                                               D_in,
+                                               D_out,
+                                               K_d)
+              : common::EngineeredConvFeatures(
+                    N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
     const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +
-                                      precision.size() + raw_tail.size() + derived.size();
+                                      precision.size() + raw_count + derived.size();
     if(engineered.size() != expected_size)
     {
         MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: expected " +
@@ -531,6 +624,51 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
 }
 
 namespace {
+
+std::string JoinFloats(const std::vector<float>& values)
+{
+    std::ostringstream ss;
+    for(std::size_t i = 0; i < values.size(); ++i)
+    {
+        if(i > 0)
+            ss << ", ";
+        ss << values[i];
+    }
+    return ss.str();
+}
+
+const char* CandidateKernelLabel(std::size_t index,
+                                 const std::vector<std::string>* candidate_kernel_names)
+{
+    if(candidate_kernel_names != nullptr && index < candidate_kernel_names->size())
+        return candidate_kernel_names->at(index).c_str();
+    return "";
+}
+
+void LogConfigEncoderBlock(std::size_t index,
+                           const std::vector<std::string>* candidate_kernel_names,
+                           const std::vector<float>& raw_active,
+                           const std::vector<float>* engineered = nullptr)
+{
+    if(!miopen::IsLogging(miopen::LoggingLevel::Info2))
+        return;
+
+    MIOPEN_LOG_I2("ConfigEncoder candidate "
+                  << index << " " << CandidateKernelLabel(index, candidate_kernel_names));
+    MIOPEN_LOG_I2("ConfigEncoder RAW: [" << JoinFloats(raw_active) << "]");
+    if(engineered != nullptr)
+        MIOPEN_LOG_I2("ConfigEncoder features: [" << JoinFloats(*engineered) << "]");
+}
+
+void LogInputEncoderBlock(const std::vector<float>& raw_active,
+                          const std::vector<float>& engineered)
+{
+    if(!miopen::IsLogging(miopen::LoggingLevel::Info2))
+        return;
+
+    MIOPEN_LOG_I2("InputEncoder RAW: [" << JoinFloats(raw_active) << "]");
+    MIOPEN_LOG_I2("InputEncoder features: [" << JoinFloats(engineered) << "]");
+}
 
 std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& metadata)
 {
@@ -656,13 +794,37 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
     }
 
     // 3. Derived features (ConvKernConfigPreprocessor.compute_derived_features).
-    constexpr float kEps = 1e-8f;
+    //
+    // Each derived feature is a function of one or more raw config params. When any of a feature's
+    // input params is missing (the suffix isn't in this solver's active_params, so get_param
+    // returns missing_token) the whole feature is emitted as the missing sentinel instead of being
+    // computed from a substituted value. This lets the model recognize "this derived quantity does
+    // not apply to this candidate" rather than seeing a plausible-but-fabricated number. The
+    // safe_param values below only keep the arithmetic finite for the present-input case; whenever
+    // an input is missing the computed value is discarded in favor of the sentinel.
+    //
+    // The sentinel is missing_token itself (== -1 today), so missing raw params and missing derived
+    // features share one representation. NOTE: -1 is a valid out-of-band marker only because every
+    // derived feature here is naturally non-negative (products/ratios of non-negative params, log1p
+    // of non-negatives); a future derived feature that can be negative would need a different
+    // scheme.
+    constexpr float kEps        = 1e-8f;
+    const float kMissingDerived = missing_token;
 
     const auto get_param = [&](const std::string& suffix) {
         return GetRawConfigParamBySuffix(raw_config_features, active_params, suffix, missing_token);
     };
+    // Mirror ConvKernConfigPreprocessor: a param is missing iff it equals the token (NaN is not
+    // treated as missing here, matching both safe_param and the Python `== nantoken` check).
+    const auto is_missing = [&](const std::string& suffix) {
+        return get_param(suffix) == missing_token;
+    };
     const auto safe_param = [&](const std::string& suffix) {
         return SafeConfigValueForDerived(get_param(suffix), missing_token);
+    };
+    // Push a derived feature: the missing sentinel if any input param is absent, else the value.
+    const auto emit = [&](bool any_missing, float value) {
+        engineered.push_back(any_missing ? kMissingDerived : value);
     };
 
     const float block_size  = safe_param("BlockSize");
@@ -671,30 +833,42 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
     const float k_per_block = safe_param("KPerBlock");
     const float m_per_xdl   = safe_param("MPerXDL");
     const float n_per_xdl   = safe_param("NPerXDL");
-    // MXdlPerWave / NXdlPerWave use the raw value (not the missing->1 clamp the others use), to
-    // match the trained feature definitions: a missing value stays as the missing token here.
-    const float m_xdl_wave  = get_param("MXdlPerWave");
-    const float n_xdl_wave  = get_param("NXdlPerWave");
+    const float m_xdl_wave  = safe_param("MXdlPerWave");
+    const float n_xdl_wave  = safe_param("NXdlPerWave");
     const float a_block_vec = safe_param("ABlockTransferSrcScalarPerVector");
     const float b_block_vec = safe_param("BBlockTransferSrcScalarPerVector");
 
+    const bool block_size_missing  = is_missing("BlockSize");
+    const bool m_per_block_missing = is_missing("MPerBlock");
+    const bool n_per_block_missing = is_missing("NPerBlock");
+    const bool k_per_block_missing = is_missing("KPerBlock");
+    const bool m_per_xdl_missing   = is_missing("MPerXDL");
+    const bool n_per_xdl_missing   = is_missing("NPerXDL");
+    const bool m_xdl_wave_missing  = is_missing("MXdlPerWave");
+    const bool n_xdl_wave_missing  = is_missing("NXdlPerWave");
+    const bool a_block_vec_missing = is_missing("ABlockTransferSrcScalarPerVector");
+    const bool b_block_vec_missing = is_missing("BBlockTransferSrcScalarPerVector");
+
     // Block-level work distribution.
-    engineered.push_back((m_per_block * n_per_block) / (block_size + kEps));
-    engineered.push_back(m_per_block / (n_per_block + kEps));
-    engineered.push_back(std::log1pf(block_size));
+    emit(m_per_block_missing || n_per_block_missing || block_size_missing,
+         (m_per_block * n_per_block) / (block_size + kEps));
+    emit(m_per_block_missing || n_per_block_missing, m_per_block / (n_per_block + kEps));
+    emit(block_size_missing, std::log1pf(block_size));
 
     // XDL utilization.
-    engineered.push_back(m_xdl_wave * n_xdl_wave);
-    engineered.push_back((m_per_xdl * m_xdl_wave) / (m_per_block + kEps));
-    engineered.push_back((n_per_xdl * n_xdl_wave) / (n_per_block + kEps));
-    engineered.push_back(block_size / 64.0f);
+    emit(m_xdl_wave_missing || n_xdl_wave_missing, m_xdl_wave * n_xdl_wave);
+    emit(m_per_xdl_missing || m_xdl_wave_missing || m_per_block_missing,
+         (m_per_xdl * m_xdl_wave) / (m_per_block + kEps));
+    emit(n_per_xdl_missing || n_xdl_wave_missing || n_per_block_missing,
+         (n_per_xdl * n_xdl_wave) / (n_per_block + kEps));
+    emit(block_size_missing, block_size / 64.0f);
 
     // Memory transfer efficiency.
-    engineered.push_back(a_block_vec / (b_block_vec + kEps));
-    engineered.push_back(a_block_vec + b_block_vec);
+    emit(a_block_vec_missing || b_block_vec_missing, a_block_vec / (b_block_vec + kEps));
+    emit(a_block_vec_missing || b_block_vec_missing, a_block_vec + b_block_vec);
 
     // K-dimension.
-    engineered.push_back(std::log1pf(k_per_block));
+    emit(k_per_block_missing, std::log1pf(k_per_block));
 
     if(engineered.size() != expected_output_dim)
     {
@@ -756,13 +930,14 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
         }
     }
 
-    // Feature engineering is a 2D-only path: the 2D models expect the engineered input vector,
-    // while the 3D models still consume the raw (filtered) features as-is. The per-model
-    // dimensionality is declared by the spatial_dim constant in the metadata.
-    if(IsTwoDimensional(metadata_))
+    // Engineered input path for 2D/3D models (spatial_dim constant in metadata). Other models
+    // consume the raw filtered features as-is.
+    if(UsesEngineeredInputFeatures(metadata_))
     {
+        const auto raw_active = ExtractCandidateSelectionRawInput(features, metadata_);
         const auto engineered_features =
             EngineerCandidateSelectionInputFeatures(features, metadata_);
+        LogInputEncoderBlock(raw_active, engineered_features);
         return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
     }
     return EncodeInputFeaturesWithFdeep(filtered_features, arch_, solver_);
@@ -770,12 +945,16 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
 
 MIOPEN_INTERNALS_EXPORT
 std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
-    const std::vector<std::vector<float>>& encoded_candidates) const
+    const std::vector<std::vector<float>>& encoded_candidates,
+    const std::vector<std::string>* candidate_kernel_names) const
 {
-    // 2D-only feature engineering (see EncodeInputFeatures). 3D models consume the raw
-    // metadata-ordered encoded candidates directly.
-    if(!IsTwoDimensional(metadata_))
+    // Engineered kernel-config path for 2D/3D models (see EncodeInputFeatures).
+    if(!UsesEngineeredInputFeatures(metadata_))
+    {
+        for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
+            LogConfigEncoderBlock(i, candidate_kernel_names, encoded_candidates[i]);
         return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
+    }
 
     // active_params and the output dim are metadata-derived (candidate-independent), so derive them
     // once here rather than per candidate inside the loop.
@@ -785,10 +964,13 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
 
     std::vector<std::vector<float>> engineered_candidates;
     engineered_candidates.reserve(encoded_candidates.size());
-    for(const auto& candidate : encoded_candidates)
+    for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
     {
-        engineered_candidates.push_back(EngineerKernelConfigFeaturesImpl(
-            candidate, metadata_, active_params, expected_output_dim));
+        const auto& raw_active = encoded_candidates[i];
+        auto engineered        = EngineerKernelConfigFeaturesImpl(
+            raw_active, metadata_, active_params, expected_output_dim);
+        LogConfigEncoderBlock(i, candidate_kernel_names, raw_active, &engineered);
+        engineered_candidates.push_back(std::move(engineered));
     }
     return EncodeKernelConfigsWithFdeep(engineered_candidates, arch_, solver_);
 }
@@ -819,6 +1001,7 @@ std::vector<std::pair<int, float>> CandidateSelectionModel::SelectBestCandidateI
         float score = std::inner_product(
             encoded_configs[i].begin(), encoded_configs[i].end(), encoded_features.begin(), 0.0f);
         scored_candidates.emplace_back(static_cast<int>(i), score);
+        MIOPEN_LOG_I2("ConfigEncoder score: candidate " << i << " = " << score);
     }
 
     // Check if all scores are NaN (all candidates unsupported)
@@ -1363,7 +1546,14 @@ ModelSelectBestCandidate(const std::string& arch,
                 << "]";
             MIOPEN_LOG_I2(encoded_features_log.str());
         }
-        const auto& encoded_configs = model.EncodeKernelConfigs(encoded_candidates);
+
+        std::vector<std::string> candidate_kernel_names;
+        candidate_kernel_names.reserve(expanded_params.size());
+        for(const auto& candidate : expanded_params)
+            candidate_kernel_names.push_back(candidate.empty() ? std::string{} : candidate.front());
+
+        const auto& encoded_configs =
+            model.EncodeKernelConfigs(encoded_candidates, &candidate_kernel_names);
         {
             std::ostringstream encoded_configs_log;
             encoded_configs_log << "Encoded configs: [";
@@ -1381,7 +1571,20 @@ ModelSelectBestCandidate(const std::string& arch,
         // Get all candidates sorted by score (best to worst)
         auto scored_candidates =
             model.SelectBestCandidateIndices(encoded_features, encoded_configs);
-        ;
+
+        if(miopen::IsLogging(miopen::LoggingLevel::Info2))
+        {
+            for(const auto& [candidate_idx, score] : scored_candidates)
+            {
+                const char* kernel_name =
+                    (candidate_idx >= 0 &&
+                     static_cast<std::size_t>(candidate_idx) < candidate_kernel_names.size())
+                        ? candidate_kernel_names[static_cast<std::size_t>(candidate_idx)].c_str()
+                        : "";
+                MIOPEN_LOG_I2("ConfigEncoder ranked: candidate "
+                              << candidate_idx << " " << kernel_name << " score=" << score);
+            }
+        }
 
         CandidateSelectionResult result;
         result.kernel_indices.reserve(scored_candidates.size());

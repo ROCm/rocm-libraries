@@ -28,9 +28,23 @@ function(get_hipcub_test_target TEST_SOURCES TEST_TARGET)
   set(TEST_TARGET ${TEST_TARGET} PARENT_SCOPE)
 endfunction()
 
+function(set_build_coverage TEST_TARGET)
+  if(BUILD_CODE_COVERAGE)
+    target_compile_options(${TEST_TARGET} PRIVATE
+      -w
+      -fprofile-instr-generate
+      -fcoverage-mapping
+    )
+    target_link_options(${TEST_TARGET} PRIVATE
+      -fprofile-instr-generate
+    )
+  endif()
+endfunction()
+
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   get_hipcub_test_target(${TEST_SOURCES} TEST_TARGET)
   add_hipcub_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  set_build_coverage(${TEST_TARGET})
   # Re-propagate DLLS_COPIED from add_hipcub_test_internal's scope to our
   # caller (file scope). PARENT_SCOPE only propagates one level, so without
   # this relay the guard resets on every call and each test target gets
@@ -211,6 +225,7 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
   endif()
 
   add_hipcub_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
+  set_build_coverage(${TEST_TARGET})
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
   # Re-propagate DLLS_COPIED (see comment in add_hipcub_test).
   if(DEFINED DLLS_COPIED)
@@ -257,10 +272,12 @@ add_hipcub_test_parallel("hipcub.DeviceSegmentedRadixSort" test_hipcub_device_se
 add_hipcub_test("hipcub.DeviceSegmentedReduce" test_hipcub_device_segmented_reduce.cpp)
 add_hipcub_test_parallel("hipcub.DeviceSegmentedSort" test_hipcub_device_segmented_sort.cpp.in)
 add_hipcub_test("hipcub.DeviceSelect" test_hipcub_device_select.cpp)
+add_hipcub_test("hipcub.DeviceSpmv" test_hipcub_device_spmv.cpp)
 add_hipcub_test("hipcub.DeviceTransform" test_hipcub_device_transform.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
 add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)
 add_hipcub_test("hipcub.UtilPtx" test_hipcub_util_ptx.cpp)
+add_hipcub_test("hipcub.UtilDevice" test_hipcub_util_device.cpp)
 add_hipcub_test("hipcub.Vector" test_hipcub_vector.cpp)
 add_hipcub_test("hipcub.WarpExchange" test_hipcub_warp_exchange.cpp)
 add_hipcub_test("hipcub.WarpLoad" test_hipcub_warp_load.cpp)

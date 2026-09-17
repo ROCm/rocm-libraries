@@ -3,20 +3,30 @@
 
 #pragma once
 
-#include <functional>
 #include <ostream>
 #include <variant>
 
 #include "GpuConvolutionFwdSignatureKey.hpp"
-#include "GpuPointwiseDummySignatureKey.hpp"
+#include "GpuLayernormBwdSignatureKey.hpp"
+#include "GpuLayernormFwdSignatureKey.hpp"
+#include "GpuPointwiseSignatureKey.hpp"
+#include "GpuRMSNormSignatureKey.hpp"
+#include "GpuReductionSignatureKey.hpp"
+#include "GpuSdpaFwdSignatureKey.hpp"
 
 namespace hipdnn_integration_tests::gpu_graph_executor::detail
 {
 
 // Variant of all GPU plan signature key types.
 // Add new signature key types here as GPU plans are implemented.
-using GpuPlanRegistrySignatureKey
-    = std::variant<GpuPointwiseDummySignatureKey, GpuConvolutionFwdSignatureKey>;
+using GpuPlanRegistrySignatureKey = std::variant<GpuConvolutionFwdSignatureKey,
+                                                 GpuLayernormFwdSignatureKey,
+                                                 GpuLayernormBwdSignatureKey,
+                                                 GpuSdpaFwdSignatureKey,
+                                                 GpuPointwiseSignatureKey,
+                                                 GpuReductionSignatureKey,
+                                                 GpuRMSNormFwdSignatureKey,
+                                                 GpuRMSNormBwdSignatureKey>;
 
 struct GpuPlanRegistrySignatureKeyHash
 {
