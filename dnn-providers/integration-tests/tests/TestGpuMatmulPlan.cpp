@@ -129,15 +129,14 @@ template <typename AType, typename BType, typename CType, typename ComputeType>
 void runPlanExecuteVsCpuRef(const std::vector<int64_t>& aDims,
                             const std::vector<int64_t>& bDims,
                             const std::vector<int64_t>& cDims,
+                            const std::vector<int64_t>& aStrides,
+                            const std::vector<int64_t>& bStrides,
+                            const std::vector<int64_t>& cStrides,
                             float tolerance)
 {
     constexpr int64_t A_UID = 1;
     constexpr int64_t B_UID = 2;
     constexpr int64_t C_UID = 3;
-
-    const auto aStrides = generateStrides(aDims);
-    const auto bStrides = generateStrides(bDims);
-    const auto cStrides = generateStrides(cDims);
 
     auto aDataType = nativeTypeToDataType<AType>();
     auto bDataType = nativeTypeToDataType<BType>();
@@ -193,65 +192,214 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& aDims,
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
     cpuC.markHostModified();
 
-    const auto* gpuCData = static_cast<const CType*>(gpuC.rawHostData());
-    const auto* cpuCData = static_cast<const CType*>(cpuC.rawHostData());
-    for(size_t i = 0; i < cpuC.elementCount(); ++i)
-    {
-        EXPECT_NEAR(static_cast<float>(gpuCData[i]), static_cast<float>(cpuCData[i]), tolerance)
-            << "Mismatch in C at index " << i;
-    }
+    // Despite a comment claiming otherwise, `const T* hostData() const` cannot automatically migrate memory from the device to the host and requires a call to the non-const `T* hostData()`. Unfortunately, `iterateAlongDimensions` only provides const indices, so we need to manually call the non-const hostData to migrate the data from device to host and make it available for comparison via the const hostData
+    gpuC.memory().hostData();
+
+    iterateAlongDimensions(gpuC.dims(), [&](const std::vector<int64_t>& indices) {
+        EXPECT_NEAR(static_cast<float>(gpuC.getHostValue(indices)),
+                    static_cast<float>(cpuC.getHostValue(indices)),
+                    tolerance)
+            << "Mismatch in C at indices " << vecToString(indices);
+    });
 }
 
 // ====================
 // Plan execution tests
 // ====================
 
-TEST(TestGpuMatmulPlanFp32, ExecutePlan)
+TEST(TestGpuMatmulPlanPureFp32, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<float, float, float, float>(
-        {2, 4, 8, 6}, {2, 4, 6, 9}, {2, 4, 8, 9}, matmul::getTolerance<float>());
+    runPlanExecuteVsCpuRef<float, float, float, float>({2, 4, 8, 6},
+                                                       {2, 4, 6, 9},
+                                                       {2, 4, 8, 9},
+                                                       generateStrides({2, 4, 8, 6}),
+                                                       generateStrides({2, 4, 6, 9}),
+                                                       generateStrides({2, 4, 8, 9}),
+                                                       matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanFp16, ExecutePlan)
+TEST(TestGpuMatmulPlanPureFp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<half, half, half, float>(
-        {2, 4, 8, 6}, {2, 4, 6, 9}, {2, 4, 8, 9}, matmul::getTolerance<half>());
+    runPlanExecuteVsCpuRef<half, half, half, float>({2, 4, 8, 6},
+                                                    {2, 4, 6, 9},
+                                                    {2, 4, 8, 9},
+                                                    generateStrides({2, 4, 8, 6}),
+                                                    generateStrides({2, 4, 6, 9}),
+                                                    generateStrides({2, 4, 8, 9}),
+                                                    matmul::getTolerance<half>());
 }
 
-TEST(TestGpuMatmulPlanBfp16, ExecutePlan)
+TEST(TestGpuMatmulPlanPureBfp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>(
-        {2, 4, 8, 6}, {2, 4, 6, 9}, {2, 4, 8, 9}, matmul::getTolerance<bfloat16>());
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>({2, 4, 8, 6},
+                                                                {2, 4, 6, 9},
+                                                                {2, 4, 8, 9},
+                                                                generateStrides({2, 4, 8, 6}),
+                                                                generateStrides({2, 4, 6, 9}),
+                                                                generateStrides({2, 4, 8, 9}),
+                                                                matmul::getTolerance<bfloat16>());
 }
 
-TEST(TestGpuMatmulPlanFp32, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<float, float, float, float>(
-        {3, 4, 8, 6}, {9, 2, 6, 9}, {9, 4, 8, 9}, matmul::getTolerance<float>());
+    runPlanExecuteVsCpuRef<half, half, float, float>({2, 4, 8, 6},
+                                                     {2, 4, 6, 9},
+                                                     {2, 4, 8, 9},
+                                                     generateStrides({2, 4, 8, 6}),
+                                                     generateStrides({2, 4, 6, 9}),
+                                                     generateStrides({2, 4, 8, 9}),
+                                                     matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanFp16, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlan)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<half, half, half, float>(
-        {3, 4, 8, 6}, {9, 2, 6, 9}, {9, 4, 8, 9}, matmul::getTolerance<half>());
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, float, float>({2, 4, 8, 6},
+                                                             {2, 4, 6, 9},
+                                                             {2, 4, 8, 9},
+                                                             generateStrides({2, 4, 8, 6}),
+                                                             generateStrides({2, 4, 6, 9}),
+                                                             generateStrides({2, 4, 8, 9}),
+                                                             matmul::getTolerance<float>());
 }
 
-TEST(TestGpuMatmulPlanBfp16, ExecutePlanBroadcast)
+TEST(TestGpuMatmulPlanPureFp32, ExecutePlanBroadcast)
 {
     SKIP_IF_NO_DEVICES();
 
-    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>(
-        {3, 4, 8, 6}, {9, 2, 6, 9}, {9, 4, 8, 9}, matmul::getTolerance<bfloat16>());
+    runPlanExecuteVsCpuRef<float, float, float, float>({3, 4, 8, 6},
+                                                       {9, 2, 6, 9},
+                                                       {9, 4, 8, 9},
+                                                       generateStrides({3, 4, 8, 6}),
+                                                       generateStrides({9, 2, 6, 9}),
+                                                       generateStrides({9, 4, 8, 9}),
+                                                       matmul::getTolerance<float>());
+}
+
+TEST(TestGpuMatmulPlanPureFp16, ExecutePlanBroadcast)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<half, half, half, float>({3, 4, 8, 6},
+                                                    {9, 2, 6, 9},
+                                                    {9, 4, 8, 9},
+                                                    generateStrides({3, 4, 8, 6}),
+                                                    generateStrides({9, 2, 6, 9}),
+                                                    generateStrides({9, 4, 8, 9}),
+                                                    matmul::getTolerance<half>());
+}
+
+TEST(TestGpuMatmulPlanPureBfp16, ExecutePlanBroadcast)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>({3, 4, 8, 6},
+                                                                {9, 2, 6, 9},
+                                                                {9, 4, 8, 9},
+                                                                generateStrides({3, 4, 8, 6}),
+                                                                generateStrides({9, 2, 6, 9}),
+                                                                generateStrides({9, 4, 8, 9}),
+                                                                matmul::getTolerance<bfloat16>());
+}
+
+TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlanBroadcast)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<half, half, float, float>({3, 4, 8, 6},
+                                                     {9, 2, 6, 9},
+                                                     {9, 4, 8, 9},
+                                                     generateStrides({3, 4, 8, 6}),
+                                                     generateStrides({9, 2, 6, 9}),
+                                                     generateStrides({9, 4, 8, 9}),
+                                                     matmul::getTolerance<float>());
+}
+
+TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlanBroadcast)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, float, float>({3, 4, 8, 6},
+                                                             {9, 2, 6, 9},
+                                                             {9, 4, 8, 9},
+                                                             generateStrides({3, 4, 8, 6}),
+                                                             generateStrides({9, 2, 6, 9}),
+                                                             generateStrides({9, 4, 8, 9}),
+                                                             matmul::getTolerance<float>());
+}
+
+TEST(TestGpuMatmulPlanPureFp32, ExecutePlanUnpacked)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<float, float, float, float>({3, 4, 8, 6},
+                                                       {9, 2, 6, 9},
+                                                       {9, 4, 8, 9},
+                                                       {10, 1, 100, 1000},
+                                                       {1, 9, 18, 256},
+                                                       {750, 150, 1, 15},
+                                                       matmul::getTolerance<float>());
+}
+
+TEST(TestGpuMatmulPlanPureFp16, ExecutePlanUnpacked)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<half, half, half, float>({3, 4, 8, 6},
+                                                    {9, 2, 6, 9},
+                                                    {9, 4, 8, 9},
+                                                    {10, 1, 100, 1000},
+                                                    {1, 9, 18, 256},
+                                                    {750, 150, 1, 15},
+                                                    matmul::getTolerance<half>());
+}
+
+TEST(TestGpuMatmulPlanPureBfp16, ExecutePlanUnpacked)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, bfloat16, float>({3, 4, 8, 6},
+                                                                {9, 2, 6, 9},
+                                                                {9, 4, 8, 9},
+                                                                {10, 1, 100, 1000},
+                                                                {1, 9, 18, 256},
+                                                                {750, 150, 1, 15},
+                                                                matmul::getTolerance<bfloat16>());
+}
+
+TEST(TestGpuMatmulPlanUpcastFp16, ExecutePlanUnpacked)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<half, half, float, float>({3, 4, 8, 6},
+                                                     {9, 2, 6, 9},
+                                                     {9, 4, 8, 9},
+                                                     {10, 1, 100, 1000},
+                                                     {1, 9, 18, 256},
+                                                     {750, 150, 1, 15},
+                                                     matmul::getTolerance<float>());
+}
+
+TEST(TestGpuMatmulPlanUpcastBfp16, ExecutePlanUnpacked)
+{
+    SKIP_IF_NO_DEVICES();
+
+    runPlanExecuteVsCpuRef<bfloat16, bfloat16, float, float>({3, 4, 8, 6},
+                                                             {9, 2, 6, 9},
+                                                             {9, 4, 8, 9},
+                                                             {10, 1, 100, 1000},
+                                                             {1, 9, 18, 256},
+                                                             {750, 150, 1, 15},
+                                                             matmul::getTolerance<float>());
 }
 
 // ============================================================================
