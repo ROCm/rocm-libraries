@@ -26,8 +26,8 @@ import pytest
 
 from rocisa.enum import DataTypeEnum
 
-from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Utilities import getMiInputType
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Utilities import getMiInputType
 
 
 def _build_kernel(*, enable_f32_xdl_math_op=False, use_f32x_emulation=False,
