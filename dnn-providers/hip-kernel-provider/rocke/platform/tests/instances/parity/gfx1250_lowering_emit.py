@@ -268,6 +268,12 @@ CONFIGS.extend(
 )
 
 
+# Homogeneous BF8 belongs to the eight-bit example contract.
+CONFIGS.extend(
+    (_wmma_scaled("bf8", "bf8", mode), "gfx1250") for mode in ("scale", "scale16")
+)
+
+
 def _spec(idx: int):
     """Config selector: the (builder, arch) pair the shared driver expects."""
     if not 0 <= idx < len(CONFIGS):

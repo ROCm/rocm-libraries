@@ -14,5 +14,5 @@ SCALED_WMMA_OPS = {
     for mode in ("wmma_scale", "wmma_scale16")
     for a, fa in MATRIX_FORMATS.items()
     for b, fb in MATRIX_FORMATS.items()
-    if a == b and a in ("fp8", "fp6", "bf6")
+    if a == b and a in ("fp8", "bf8", "fp6", "bf6")
 }

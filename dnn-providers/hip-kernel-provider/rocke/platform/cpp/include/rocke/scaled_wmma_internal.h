@@ -41,7 +41,7 @@ static inline bool rocke_wmma_scaled_formats(const char* op_id, bool* scale16, i
     }
     *a = rocke_wmma_matrix_format(da);
     *b = rocke_wmma_matrix_format(db);
-    return (*a == 0 || *a == 2 || *a == 3) && *a == *b;
+    return (*a >= 0 && *a <= 3) && *a == *b;
 }
 
 #endif

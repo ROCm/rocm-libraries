@@ -26,10 +26,14 @@ def make_spec(args) -> BlockScaledGemmSpec:
 def main(argv: list[str] | None = None) -> int:
     parser = argument_parser(__doc__)
     parser.add_argument(
-        "--dtype", choices=("fp6", "bf6", "fp6e2m3", "fp6e3m2"), default="fp6"
+        "--dtype", choices=("fp6", "bf6", "both", "fp6e2m3", "fp6e3m2"), default="both"
     )
     args = parser.parse_args(argv)
-    return verify(make_spec(args), args)
+    dtypes = ("fp6", "bf6") if args.dtype == "both" else (args.dtype,)
+    for dtype in dtypes:
+        args.dtype = dtype
+        verify(make_spec(args), args)
+    return 0
 
 
 if __name__ == "__main__":

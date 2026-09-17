@@ -148,9 +148,19 @@ static void build_wmma_scale(rocke_ir_builder_t* b)
     wmma_scaled(b, false, "wmma_scale_f32_16x16x128_fp8_fp8");
 }
 
+static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "wmma_scale_f32_16x16x128_bf8_bf8");
+}
+
 static void build_wmma_scale16(rocke_ir_builder_t* b)
 {
     wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_fp8_fp8");
+}
+
+static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "wmma_scale16_f32_16x16x128_bf8_bf8");
 }
 
 static void build_wmma_scale_fp4(rocke_ir_builder_t* b) {}
@@ -373,6 +383,8 @@ static const config_t CONFIGS[] = {
     {NULL, "gfx1250", "wmma_scale_f32_16x16x128_bf6_bf6", false},
     {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_fp6_fp6", true},
     {NULL, "gfx1250", "wmma_scale16_f32_16x16x128_bf6_bf6", true},
+    {build_wmma_scale_bf8, "gfx1250"},
+    {build_wmma_scale16_bf8, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

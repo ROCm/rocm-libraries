@@ -9,7 +9,7 @@ import pytest
     "dtype,matrix_path,route,m,n,k,case,count",
     [
         (dtype, *case)
-        for dtype in ("fp8e4m3",)
+        for dtype in ("fp8", "bf8")
         for case in [
             ("wmma_scale", "comgr", 16, 16, 128, "all", 8),
             ("wmma_scale16", "comgr", 16, 16, 128, "all", 12),
@@ -19,7 +19,7 @@ import pytest
             ("wmma_scale16", "hip", 32, 48, 256, "mixed", 1),
             ("wmma", "comgr", 16, 16, 128, "mixed", 1),
         ]
-        if dtype != "fp4" or case[0] != "wmma"
+        if dtype == "fp8" or case[0] != "wmma"
     ],
 )
 def test_numeric(numeric_case, dtype, matrix_path, route, m, n, k, case, count):
