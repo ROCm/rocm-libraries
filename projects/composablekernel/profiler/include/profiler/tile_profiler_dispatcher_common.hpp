@@ -12,6 +12,7 @@
 #include <string>
 #include <tuple>
 
+#include "ck_tile/dispatcher/grouped_conv_invocation.hpp"
 #include "ck_tile/dispatcher/grouped_conv_registry.hpp"
 #include "ck_tile/dispatcher/grouped_conv_problem.hpp"
 #include "ck_tile/dispatcher/register_all_grouped_conv_kernels.hpp"
@@ -39,9 +40,9 @@ constexpr const char* get_layout_string()
 {
     constexpr auto layout = SIGNATURE.input.config.layout;
     if constexpr(layout == ckb::TensorLayout::NHWGC)
-        return "nhwgc";
+        return "nhwgc_gkyxc_nhwgk";
     else if constexpr(layout == ckb::TensorLayout::NDHWGC)
-        return "ndhwgc";
+        return "ndhwgc_gkzyxc_ndhwgk";
     else if constexpr(layout == ckb::TensorLayout::NGCHW)
         return "ngchw";
     else
@@ -72,13 +73,20 @@ inline ck_tile::dispatcher::GroupedConvProblem args_to_problem(
     ck_tile::dispatcher::GroupedConvProblem problem;
 
     problem.N       = conv_param.N_;
-    problem.C       = conv_param.C_;
-    problem.K       = conv_param.K_;
+    problem.C       = conv_param.C_ * conv_param.G_;
+    problem.K       = conv_param.K_ * conv_param.G_;
     problem.G       = conv_param.G_;
     problem.op      = op;
     problem.split_k = split_k;
 
     constexpr int ndim = SIGNATURE.spatial_dim;
+
+    problem.dtype_in     = get_dtype_string<SIGNATURE>();
+    problem.dtype_wei    = problem.dtype_in;
+    problem.dtype_out    = problem.dtype_in;
+    problem.layout       = get_layout_string<SIGNATURE>();
+    problem.ndim_spatial = ndim;
+    problem.arch         = get_runtime_arch_name();
 
     if constexpr(ndim == 2)
     {
@@ -90,7 +98,10 @@ inline ck_tile::dispatcher::GroupedConvProblem args_to_problem(
             1, conv_param.output_spatial_lengths_[0], conv_param.output_spatial_lengths_[1]};
         problem.stride = {
             1, conv_param.conv_filter_strides_[0], conv_param.conv_filter_strides_[1]};
-        problem.padding  = {0, conv_param.input_left_pads_[0], conv_param.input_left_pads_[1]};
+        problem.padding_left = {
+            0, conv_param.input_left_pads_[0], conv_param.input_left_pads_[1]};
+        problem.padding_right = {
+            0, conv_param.input_right_pads_[0], conv_param.input_right_pads_[1]};
         problem.dilation = {
             1, conv_param.conv_filter_dilations_[0], conv_param.conv_filter_dilations_[1]};
     }
@@ -108,9 +119,12 @@ inline ck_tile::dispatcher::GroupedConvProblem args_to_problem(
         problem.stride         = {conv_param.conv_filter_strides_[0],
                                   conv_param.conv_filter_strides_[1],
                                   conv_param.conv_filter_strides_[2]};
-        problem.padding        = {conv_param.input_left_pads_[0],
+        problem.padding_left   = {conv_param.input_left_pads_[0],
                                   conv_param.input_left_pads_[1],
                                   conv_param.input_left_pads_[2]};
+        problem.padding_right  = {conv_param.input_right_pads_[0],
+                                  conv_param.input_right_pads_[1],
+                                  conv_param.input_right_pads_[2]};
         problem.dilation       = {conv_param.conv_filter_dilations_[0],
                                   conv_param.conv_filter_dilations_[1],
                                   conv_param.conv_filter_dilations_[2]};
@@ -119,21 +133,26 @@ inline ck_tile::dispatcher::GroupedConvProblem args_to_problem(
     return problem;
 }
 
-/// Set up the thread-local dispatch buffer context for kernel execution.
+/// Set up the dispatch context for kernel execution.
 inline void setup_dispatch_context(const void* input_ptr,
                                    const void* weight_ptr,
                                    void* output_ptr,
                                    const ck_tile::stream_config& s_conf,
                                    int split_k = 1)
 {
-    auto& ctx        = ck_tile::dispatcher::g_conv_dispatch_buffers;
-    ctx.input_ptr    = input_ptr;
-    ctx.weight_ptr   = weight_ptr;
-    ctx.output_ptr   = output_ptr;
-    ctx.warmup       = s_conf.cold_niters_;
-    ctx.repeat       = s_conf.nrepeat_;
-    ctx.benchmarking = s_conf.time_kernel_;
-    ctx.split_k      = split_k;
+    int device = 0;
+    ck_tile::hip_check_error(hipGetDevice(&device));
+
+    auto& inv          = ck_tile::dispatcher::mutable_conv_invocation_context();
+    inv.input_ptr      = input_ptr;
+    inv.weight_ptr     = weight_ptr;
+    inv.output_ptr     = output_ptr;
+    inv.device_ordinal = device;
+    inv.k_batch        = split_k;
+    inv.arch_provider  = {};
+    inv.benchmarking   = s_conf.time_kernel_;
+    inv.warmup         = s_conf.cold_niters_;
+    inv.repeat         = s_conf.nrepeat_;
 }
 
 /// Run a single dispatcher kernel with warmup/dummy-run handling.
@@ -156,7 +175,7 @@ run_kernel_with_warmup(const ck_tile::dispatcher::GroupedConvKernelInstance* ker
         avg_time     = kernel->run(problem, nullptr);
         is_supported = true;
     }
-    catch(const std::runtime_error& e)
+    catch(const std::exception& e)
     {
         std::cerr << "[Exception] " << op_name << " : " << e.what() << std::endl;
         ck_tile::hip_check_error(hipDeviceSynchronize());
@@ -170,7 +189,7 @@ run_kernel_with_warmup(const ck_tile::dispatcher::GroupedConvKernelInstance* ker
         {
             avg_time = kernel->run(problem, nullptr);
         }
-        catch(const std::runtime_error& e)
+        catch(const std::exception& e)
         {
             std::cerr << "[Exception] " << op_name << " : " << e.what() << std::endl;
             ck_tile::hip_check_error(hipDeviceSynchronize());
