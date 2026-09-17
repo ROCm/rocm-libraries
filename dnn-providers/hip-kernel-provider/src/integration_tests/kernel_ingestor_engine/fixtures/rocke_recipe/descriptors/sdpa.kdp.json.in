@@ -7,9 +7,7 @@
   ],
   "engine": "ad33f966-8519-4938-a200-5d43e817f1bf",
   "dispatch": "5374d08e-7108-4b73-b8ec-2104c409cfc3",
-  "arch": [
-    "gfx950"
-  ],
+  "arch": [],
   "kernelDescriptors": [
     {
       "version": "1.0",

@@ -4,6 +4,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,8 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <map>
 #include <mutex>
+#include <set>
+#include <vector>
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -30,8 +33,7 @@ void check(bool condition, const std::string& message)
 
 std::optional<BoundTokens> matchGraph(const MatchContext& context)
 {
-    if(context.graph.nodeCount() != 1
-       || !archSupports({"gfx950"}, context.deviceProperties.gcnArchName))
+    if(context.graph.nodeCount() != 1)
         return std::nullopt;
     const auto& node = context.graph.getNodeWrapper(0);
     if(node.attributesType() != data::NodeAttributes::SdpaAttributes
@@ -89,6 +91,9 @@ std::optional<BoundTokens> matchGraph(const MatchContext& context)
     }
     BoundTokens bound;
     bound["S"] = sequence;
+    bound["batch"] = int64_t{1};
+    bound["seqlen_q"] = sequence;
+    bound["seqlen_kv"] = sequence;
     for(size_t i = 0; i < 4; ++i)
         bound[std::array<const char*, 4>{"q_ptr", "k_ptr", "v_ptr", "o_ptr"}[i]] = uids[i];
     return bound;
@@ -149,6 +154,8 @@ struct PreparedSdpa : PreparedDispatch
 {
     BoundTokens bindings;
     compilation::RockeRecipe recipe;
+    std::vector<unsigned char> scalarArgs;
+    std::map<std::string, size_t> pointerOffsets;
     PreparedSdpa(const BoundTokens& bound,
                  const KernelDefinition& kernel,
                  const MatchContext& context)
@@ -158,6 +165,48 @@ struct PreparedSdpa : PreparedDispatch
                  context.deviceProperties.gcnArchName,
                  boundInt(bound, "S"))
     {
+        const auto* plan = recipe.plan();
+        const size_t size = rocke_launch_plan_kernarg_size(plan);
+        scalarArgs.resize(size, 0);
+        std::set<std::string> names;
+        std::vector<bool> occupied(size, false);
+        for(int i = 0; i < rocke_launch_plan_num_args(plan); ++i)
+        {
+            const auto* arg = rocke_launch_plan_arg(plan, i);
+            check(arg && arg->name && arg->offset <= size && arg->size <= size - arg->offset,
+                  "invalid recipe argument layout");
+            const std::string name(arg->name);
+            check(names.insert(name).second, "duplicate SDPA argument");
+            for(size_t j = arg->offset; j < arg->offset + arg->size; ++j)
+            {
+                check(!occupied[j], "overlapping SDPA arguments");
+                occupied[j] = true;
+            }
+            if(name == "q_ptr" || name == "k_ptr" || name == "v_ptr" || name == "o_ptr")
+            {
+                check(arg->kind == ROCKE_ARG_POINTER && arg->size == sizeof(void*),
+                      "invalid SDPA pointer argument");
+                pointerOffsets.emplace(name, arg->offset);
+            }
+            else if(name == "scale")
+            {
+                check(arg->kind == ROCKE_ARG_F32 && arg->size == sizeof(float),
+                      "invalid SDPA scale argument");
+                const float scale = 1.0f / std::sqrt(128.0f);
+                std::memcpy(scalarArgs.data() + arg->offset, &scale, sizeof(scale));
+            }
+            else
+            {
+                check((name == "batch" || name == "seqlen_q" || name == "seqlen_kv")
+                          && arg->kind == ROCKE_ARG_I32 && arg->size == sizeof(int32_t),
+                      "unknown SDPA scalar argument");
+                // The graph matcher bounds these dimensions to [1, 1024].
+                const auto value = static_cast<int32_t>(boundInt(bound, name));
+                std::memcpy(scalarArgs.data() + arg->offset, &value, sizeof(value));
+            }
+        }
+        check(pointerOffsets.size() == 4 && names.count("scale") == 1,
+              "missing required SDPA argument");
     }
 };
 class Handler : public IKernelDispatchHandler<Handle>
@@ -186,7 +235,6 @@ public:
                 void*) const override
     {
         const auto& state = dynamic_cast<const PreparedSdpa&>(prepared);
-        const auto* plan = state.recipe.plan();
         const size_t bytes = static_cast<size_t>(boundInt(state.bindings, "S")) * 4 * 128 * 2;
         std::map<std::string, void*> pointers;
         std::array<uintptr_t, 4> starts{};
@@ -204,28 +252,12 @@ public:
             starts[n++] = address;
             pointers.emplace(name, buffer.ptr);
         }
-        size_t size = rocke_launch_plan_kernarg_size(plan);
-        std::vector<unsigned char> args(size, 0);
-        const float scale = 1.0f / std::sqrt(128.0f);
-        for(int i = 0; i < rocke_launch_plan_num_args(plan); ++i)
+        auto args = state.scalarArgs;
+        size_t size = args.size();
+        for(const auto& [name, offset] : state.pointerOffsets)
         {
-            const auto* arg = rocke_launch_plan_arg(plan, i);
-            check(arg && arg->name && arg->offset <= size && arg->size <= size - arg->offset,
-                  "invalid recipe argument layout");
-            if(arg->kind == ROCKE_ARG_POINTER)
-            {
-                const auto it = pointers.find(arg->name);
-                check(it != pointers.end() && arg->size == sizeof(void*),
-                      "unknown SDPA pointer argument");
-                std::memcpy(args.data() + arg->offset, &it->second, sizeof(void*));
-            }
-            else
-            {
-                check(std::string(arg->name) == "scale" && arg->kind == ROCKE_ARG_F32
-                          && arg->size == sizeof(float),
-                      "unknown SDPA scalar argument");
-                std::memcpy(args.data() + arg->offset, &scale, sizeof(float));
-            }
+            const auto pointer = pointers.at(name);
+            std::memcpy(args.data() + offset, &pointer, sizeof(pointer));
         }
         void* extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
                          args.data(),

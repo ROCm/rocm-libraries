@@ -16,7 +16,7 @@ compilation happen at runtime.
 | Property | Value |
 | --- | --- |
 | Engine | `hipkernel:RockeSdpaExample` |
-| Device | gfx950 |
+| Devices | gfx942 and gfx950, selected at build time |
 | Operation | One causal forward self-attention node, inference |
 | Types | BF16 Q/K/V/O, FLOAT graph compute |
 | Dimensions | B=1, Hq=Hkv=4, D=128, Sq=Skv=S |
@@ -30,6 +30,18 @@ Statistics, dropout, bias, ragged/paged inputs, and other optional SDPA features
 are outside this fixture. Q/K/V/O must have 16-byte alignment and nonoverlapping
 storage. The graph matcher checks supported semantics and layout; candidate
 admission checks the recipe's explicit guard before compilation.
+
+The build uses `GPU_TARGETS`, falling back to `AMDGPU_TARGETS`. The opt-in
+example requires an explicit supported target list; unsupported targets fail
+configuration. Each target is rolled independently into the same CBOR bundle,
+indexed by logical recipe key and architecture. The generated descriptor lists
+exactly those targets. Runtime selection uses the current device; it does not
+require a different engine or provider build for each architecture.
+
+Launch geometry and ABI are checked against each builder's helpers for every
+admitted shape. The native dispatcher binds Q/K/V/O and scale by name and type,
+plus graph-derived batch and sequence scalars when present in the recipe ABI.
+Unknown arguments are rejected during preparation.
 
 The producer records S=512 and 1024 and verifies held-out S=768. A preferred
 candidate has a guard admitting only S=512; the second candidate admits all three
@@ -99,6 +111,8 @@ cmake -S "$SDPA_SOURCE/dnn-providers/hip-kernel-provider" \
   -DPython3_EXECUTABLE="$SDPA_WORK/venv/bin/python" \
   -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
   -DHIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE=ON \
+  '-DGPU_TARGETS=gfx942;gfx950' \
+  -DHIPKERNELPROVIDER_ROCKE_RECIPE_LLVM_FLAVOR=llvm23 \
   -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON -DENABLE_ASM_SDPA_ENGINE=OFF \
   -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF -DBUILD_TESTING=OFF \
   -DROCKE_INSTALL_PYTHON_PACKAGE=OFF -DROCKE_INSTALL_TESTS=OFF \
@@ -112,10 +126,12 @@ export ROCKE_LLVM_FLAVOR=llvm23 HIPDNN_LOG_LEVEL=info
 env -u PYTHONPATH -u PYTHONHOME -u HIPDNN_DESCRIPTOR_DIR \
   -u HIPDNN_DESCRIPTOR_RUNTIME_DIR \
   "$SDPA_WORK/install/bin/test_frontend_sdpa" \
-  "$SDPA_WORK/install/lib/hipdnn_plugins/engines"
+  "$SDPA_WORK/install/lib/hipdnn_plugins/engines" gfx950
 ```
 
-Run the final command on gfx950. This manual opt-in test is not registered in
+Run the final command on gfx950, or pass `gfx942` on that device using the same
+installed tree. The last argument checks the allocated GPU architecture.
+This manual opt-in test is not registered in
 CTest and does not silently skip on an unsupported device. It reports three
 selected-engine checks, three `rocKE recipe compiled` events, six numerical
 results, and `frontend_result: PASS`. The compiled key ends in `_short` for
@@ -128,24 +144,31 @@ UIDs, misaligned/overlapping buffers, unsupported sequence lengths, dtype,
 layout, head size, and mask. On Linux it also checks that `libpython` is absent
 from the process mappings.
 
-For a native checkpoint independent of hipDNN, run `produce_sdpa.py OUTPUT` with
+For a native checkpoint independent of hipDNN, run
+`produce_sdpa.py OUTPUT --arches gfx942 gfx950 --llvm-flavor llvm23` with
 the same venv and `ROCKE_BACKEND=python ROCKE_LLVM_FLAVOR=llvm23`. Configure this
 directory's standalone CMake project with
 `-DROCKE_PLATFORM="$SDPA_SOURCE/dnn-providers/hip-kernel-provider/rocke/platform"`.
-Run `test_native_sdpa OUTPUT --compile-only` for byte-identical LLVM comparison
-and COMGR, or `--gpu` to add GPU numerical execution. The producer's reference
+Run `test_native_sdpa OUTPUT --compile-only gfx942` and then with `gfx950` for
+byte-identical LLVM comparison and COMGR, or use `--gpu` on the matching device
+to add GPU numerical execution. References are under `OUTPUT/<arch>/`.
+Run `python test_producer.py` with the same authoring environment for bundle
+selection and regeneration checks. The producer's reference
 LLVM and manifest are test evidence; only CBOR and JSON descriptors are installed
 as this example's kernel inputs.
 
 ## Validation and follow-up
 
-The native checkpoint passed three LLVM comparisons and COMGR compilations.
-Native and frontend GPU checks each passed six numerical executions. A relocated
+Historical gfx950 validation of the original spike passed three LLVM comparisons
+and COMGR compilations, and six numerical executions in each consumer. A relocated
 frontend payload containing native binaries, JSON and CBOR also passed, without
 Python, reference LLVM, or precompiled HSACO in that payload. Fresh processes
 rejected missing CBOR, malformed CBOR and missing entries before compilation.
 The two focused SDK test suites passed 134 tests with AddressSanitizer enabled.
 A fresh feature-disabled provider build passed without a new COMGR dependency.
+Those historical results do not validate later builder ABI changes or gfx942.
+Acceptance for the multi-target integration requires fresh native and frontend
+numerical checks on both devices using the same installed bundle.
 
 This is a bounded integration spike, not production SDPA coverage. Follow-up work
 includes general graph-to-recipe bindings, symbolic guard authoring, more SDPA

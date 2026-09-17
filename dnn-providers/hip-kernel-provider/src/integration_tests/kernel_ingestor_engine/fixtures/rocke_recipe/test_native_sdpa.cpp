@@ -171,7 +171,7 @@ static Bytes compile(const std::string& llvm, const std::string& target)
 struct Request
 {
     long dimension;
-    std::string target = "gfx950";
+    std::string target;
 };
 using LaunchPlan = std::unique_ptr<rocke_launch_plan_t, decltype(&rocke_launch_plan_free)>;
 struct Specialization
@@ -181,16 +181,18 @@ struct Specialization
     unsigned lds = 0;
     std::string llvm;
     Bytes code;
+    int32_t sequence = 0;
 };
 static Specialization specialize(const Bytes& bundle, const Request& request)
 {
     rocke_recipe_spec_int_t ints[] = {{"S", request.dimension}};
     char error[1024]{};
     rocke_guard_verdict_t verdict = ROCKE_GUARD_ABSENT;
+    const auto arch = request.target.substr(0, request.target.find(':'));
     auto status = rocke_bundle_check_guard_cbor(bundle.data(),
                                                 bundle.size(),
                                                 "sdpa_dense_bf16_d128_causal",
-                                                request.target.c_str(),
+                                                arch.c_str(),
                                                 ints,
                                                 1,
                                                 nullptr,
@@ -202,11 +204,12 @@ static Specialization specialize(const Bytes& bundle, const Request& request)
     require(status == ROCKE_OK, std::string("admission error: ") + error);
     require(verdict == ROCKE_GUARD_ADMITTED, std::string("configuration refused: ") + error);
     Specialization out;
+    out.sequence = static_cast<int32_t>(request.dimension);
     rocke_launch_plan_t* raw_plan = nullptr;
     status = rocke_bundle_plan_launch_cbor(bundle.data(),
                                            bundle.size(),
                                            "sdpa_dense_bf16_d128_causal",
-                                           request.target.c_str(),
+                                           arch.c_str(),
                                            ints,
                                            1,
                                            nullptr,
@@ -222,7 +225,7 @@ static Specialization specialize(const Bytes& bundle, const Request& request)
     status = rocke_online_bundle_cbor_to_llvm(bundle.data(),
                                               bundle.size(),
                                               "sdpa_dense_bf16_d128_causal",
-                                              request.target.c_str(),
+                                              arch.c_str(),
                                               ints,
                                               1,
                                               nullptr,
@@ -287,12 +290,21 @@ struct Prepared
                 require(arg->size == sizeof(void*), "unexpected pointer width");
                 std::memcpy(args.data() + arg->offset, &buffer->second, arg->size);
             }
-            else
+            else if(std::string(arg->name) == "scale")
             {
                 require(std::string(arg->name) == "scale" && arg->kind == ROCKE_ARG_F32
                             && arg->size == sizeof(scale),
                         "unbound scalar argument");
                 std::memcpy(args.data() + arg->offset, &scale, arg->size);
+            }
+            else
+            {
+                const std::string name(arg->name);
+                require((name == "batch" || name == "seqlen_q" || name == "seqlen_kv")
+                            && arg->kind == ROCKE_ARG_I32 && arg->size == sizeof(int32_t),
+                        "unbound scalar argument");
+                const int32_t value = name == "batch" ? 1 : spec.sequence;
+                std::memcpy(args.data() + arg->offset, &value, sizeof(value));
             }
         }
         void* extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
@@ -445,25 +457,47 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 3, "usage: test_native_sdpa ARTIFACT_DIR --compile-only|--gpu");
+        require(argc == 4,
+                "usage: test_native_sdpa ARTIFACT_DIR --compile-only|--gpu EXPECTED_ARCH");
         const bool gpu = std::string(argv[2]) == "--gpu";
         require(gpu || std::string(argv[2]) == "--compile-only", "unknown mode");
         const fs::path root(argv[1]);
         auto bundle = read_bytes(root / "sdpa_dense.cbor");
+        const std::string arch(argv[3]);
+        std::string target = arch;
         if(gpu)
         {
             hip_check(hipSetDevice(0));
             hipDeviceProp_t props{};
             hip_check(hipGetDeviceProperties(&props, 0));
-            require(std::string(props.gcnArchName).starts_with("gfx950"), "requires gfx950");
+            target = props.gcnArchName;
+            require(target.substr(0, target.find(':')) == arch, "unexpected GPU architecture");
             std::cout << "{\"device_arch\":\"" << props.gcnArchName << "\"}\n";
         }
+        // An absent target must fail admission before LLVM/COMGR, even when
+        // the same logical recipe key exists for other targets in the bundle.
+        char error[1024]{};
+        rocke_recipe_spec_int_t input{"S", 512};
+        rocke_guard_verdict_t verdict = ROCKE_GUARD_ABSENT;
+        const auto missing = rocke_bundle_check_guard_cbor(bundle.data(),
+                                                           bundle.size(),
+                                                           "sdpa_dense_bf16_d128_causal",
+                                                           "gfx000",
+                                                           &input,
+                                                           1,
+                                                           nullptr,
+                                                           0,
+                                                           0,
+                                                           &verdict,
+                                                           error,
+                                                           sizeof(error));
+        require(missing == ROCKE_ERR_KEY && compile_count == 0, "missing target accepted");
         for(int refused : {0, 513, 1280})
         {
             bool rejected = false;
             try
             {
-                specialize(bundle, Request{refused});
+                specialize(bundle, Request{refused, target});
             }
             catch(const std::runtime_error& error)
             {
@@ -473,18 +507,30 @@ int main(int argc, char** argv)
         }
         for(int sequence : {512, 768, 1024})
         {
-            auto spec = specialize(bundle, Request{sequence});
-            write_bytes(root / ("native-" + std::to_string(sequence) + ".ll"),
+            auto spec = specialize(bundle, Request{sequence, target});
+            const auto targetRoot = root / arch;
+            write_bytes(targetRoot / ("native-" + std::to_string(sequence) + ".ll"),
                         spec.llvm.data(),
                         spec.llvm.size());
-            require(spec.llvm
-                        == read_text(root / ("reference-" + std::to_string(sequence) + ".ll")),
-                    "LLVM byte mismatch at S=" + std::to_string(sequence));
-            require(spec.grid.x == static_cast<unsigned>(sequence / 256) && spec.grid.y == 4
-                        && spec.grid.z == 1 && spec.block.x == 512 && spec.block.y == 1
-                        && spec.block.z == 1,
-                    "unexpected launch geometry");
-            write_bytes(root / ("native-" + std::to_string(sequence) + ".hsaco"),
+            require(
+                spec.llvm
+                    == read_text(targetRoot / ("reference-" + std::to_string(sequence) + ".ll")),
+                "LLVM byte mismatch at S=" + std::to_string(sequence));
+            std::ifstream geometry(targetRoot
+                                   / ("reference-" + std::to_string(sequence) + ".launch"));
+            for(auto actual : {spec.grid.x,
+                               spec.grid.y,
+                               spec.grid.z,
+                               spec.block.x,
+                               spec.block.y,
+                               spec.block.z,
+                               spec.lds})
+            {
+                unsigned expected = 0;
+                require(static_cast<bool>(geometry >> expected) && actual == expected,
+                        "unexpected launch geometry");
+            }
+            write_bytes(targetRoot / ("native-" + std::to_string(sequence) + ".hsaco"),
                         reinterpret_cast<const char*>(spec.code.data()),
                         spec.code.size());
             std::cout << "{\"S\":" << sequence

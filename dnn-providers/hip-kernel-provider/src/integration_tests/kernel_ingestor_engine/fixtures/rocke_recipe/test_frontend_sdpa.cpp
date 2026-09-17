@@ -273,13 +273,15 @@ int main(int argc, char** argv)
 {
     try
     {
-        require(argc == 2, "usage: test_frontend_sdpa PLUGIN_DIRECTORY");
+        require(argc == 3, "usage: test_frontend_sdpa PLUGIN_DIRECTORY EXPECTED_ARCH");
         const char* paths[] = {argv[1]};
         dnn_check(hipdnnSetEnginePluginPaths_ext(1, paths, HIPDNN_PLUGIN_LOADING_ABSOLUTE));
         hip_check(hipSetDevice(0));
         hipDeviceProp_t props{};
         hip_check(hipGetDeviceProperties(&props, 0));
-        require(std::string(props.gcnArchName).starts_with("gfx950"), "test requires gfx950");
+        const std::string target(props.gcnArchName);
+        require(target.substr(0, target.find(':')) == argv[2], "unexpected GPU architecture");
+        std::cout << "{\"device_arch\":\"" << target << "\"}\n";
         for(int sequence : {512, 768, 1024})
         {
             PreparedFrontend prepared(sequence, sequence * 10);
