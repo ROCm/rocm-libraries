@@ -33,3 +33,35 @@ def test_scale_example_contract(a, b, sa, sb):
     assert "@llvm.amdgcn.wmma.scale16" in lower_kernel_to_llvm(
         build_block_scaled_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
     )
+
+
+@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp8e4m3", "bf8e5m2"])
+@pytest.mark.parametrize("operand", ["a", "b"])
+def test_scale_formats_gemm_cli_accepts_eight_bit_names(monkeypatch, dtype, operand):
+    from rocke.examples.gfx1250.gemm import scale_formats_gemm as example
+
+    calls = []
+
+    def verify(spec, args):
+        calls.append(spec)
+        llvm = lower_kernel_to_llvm(
+            build_block_scaled_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
+        )
+        assert "@llvm.amdgcn.wmma.scale" in llvm
+        return 0
+
+    monkeypatch.setattr(example, "verify", verify)
+    argv = [
+        "--dtype-a",
+        "fp4",
+        "--dtype-b",
+        "fp4",
+        "--scale-dtype-a",
+        "e8m0",
+        "--scale-dtype-b",
+        "e8m0",
+    ]
+    argv += [f"--dtype-{operand}", dtype]
+    assert example.main(argv) == 0
+    assert len(calls) == 1
+    assert getattr(calls[0], f"dtype_{operand}") == dtype
