@@ -119,9 +119,19 @@ int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
-    /* split_k <= 1: plain store, always deterministic.
-     * split_k > 1 + two_stage: workspace-reduce path, deterministic.
-     * split_k > 1 without two_stage: atomic adds, non-deterministic. */
+    /* split_k == 1 (and the -1 auto sentinel, which only ever resolves to >= 1):
+     *   plain store, always deterministic.
+     * split_k > 1 + two_stage (or force_deterministic, which the builder
+     *   promotes to two_stage at split_k > 1): workspace-reduce, deterministic.
+     * split_k > 1 without either: atomic adds, non-deterministic.
+     * split_k == 0 is the RUNTIME-degree encoding: the degree rides a kernel
+     *   argument and the epilogue is always packed atomics. It can never be
+     *   promoted to two-stage -- both effective_two_stage_v and the builder's
+     *   promotion require sk > 1 -- so it is never deterministic, and
+     *   force_deterministic cannot make it so. Treating 0 as "<= 1" here would
+     *   tell a host that an atomic kernel produces reproducible dW. */
+    if(s->split_k == 0)
+        return false;
     return (s->split_k <= 1) || s->two_stage || s->force_deterministic;
 }
 
@@ -239,8 +249,18 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
         n_flags++;
     }
 
+    /* Tag the EFFECTIVE two-stage flag, not the raw field.  The builder promotes
+     * force_deterministic to two-stage at split_k > 1 into a local
+     * (effective_two_stage) without writing back to spec->two_stage, so naming
+     * off s->two_stage would emit a two-stage body -- which carries an extra
+     * `ws` workspace pointer parameter and needs a Stage-2 reduce launch --
+     * under a symbol identical to the split-K atomic kernel built from the same
+     * spec with force_deterministic=false.  That is both an ABI collision for a
+     * cache keyed on the kernel name (same hazard the lds_k_pad comment above
+     * describes) and a byte-identity break against Python, which promotes by
+     * rewriting the spec before the IRBuilder is named. */
     flag_names[n_flags] = "twostage";
-    flag_on[n_flags] = s->two_stage ? 1 : 0;
+    flag_on[n_flags] = (s->two_stage || (s->force_deterministic && s->split_k > 1)) ? 1 : 0;
     n_flags++;
 
     return rocke_kernel_name_join(
@@ -374,10 +394,15 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
     }
 
-    /* For bf16/fp16 output with split_k atomics the default epilogue emits
-     * zero-fill packed atomics at the scattered MFMA layout; cshuffle is
-     * required.  This does NOT apply to split_k==1 (direct store, no atomics)
-     * or two_stage=true (workspace-store epilogue, also no atomics).
+    /* For bf16/fp16 output the *packed atomic* store emits zero-fill pairs at
+     * the scattered MFMA layout, so it needs cshuffle's contiguous pairs.  This
+     * is an atomic-epilogue constraint only, and there are two ways to not be
+     * on it: at split_k == 1 the epilogue is a direct store, and under
+     * two_stage (or force_deterministic with split_k > 1) it is a
+     * workspace store.  Neither emits packed atomics, so the default epilogue
+     * is fine for both.  Guarding on sk rather than on dtype alone keeps the
+     * non-atomic 16-bit output path reachable -- it is the only one WMMA wgrad
+     * can use, since WMMA rejects cshuffle.
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
     if(sk > 1 || sk == 0)
     {
@@ -442,16 +467,35 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * but it has no arch to check against. Without this an older target builds
      * cleanly and emits ds_read_tr16_b64, which only exists on CDNA4.
      * Mirrors Python _LDS_K_OUTER_ARCH in conv_implicit_gemm_wgrad.py. */
-    if(s->lds_k_outer && (!arch || strcmp(arch, ROCKE_WGRAD_LDS_K_OUTER_ARCH) != 0))
+    if(s->lds_k_outer)
     {
-        if(reason && reason_cap)
-            snprintf(reason,
-                     reason_cap,
-                     "lds_k_outer requires %s (ds_read_tr16_b64 is a CDNA4 "
-                     "transpose read); got %s",
-                     ROCKE_WGRAD_LDS_K_OUTER_ARCH,
-                     arch ? arch : "(null)");
-        return false;
+        /* Two regimes: gfx950 wave64 (ds_read_b64_tr_b16) and gfx1250 wave32
+         * (ds_load_tr16_b128). The arch and the wave must agree, since the lane
+         * mapping is derived per wave size. Mirrors _LDS_K_OUTER_ARCH_WAVE. */
+        const bool ko_950 = (arch && strcmp(arch, "gfx950") == 0);
+        const bool ko_1250 = (arch && strcmp(arch, "gfx1250") == 0);
+        if(!ko_950 && !ko_1250)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer requires gfx950 or gfx1250 (the LDS transpose "
+                         "read); got %s",
+                         arch ? arch : "(null)");
+            return false;
+        }
+        const int ko_wave = ko_950 ? 64 : 32;
+        if(s->wave_size != ko_wave)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on %s requires wave_size=%d; got %d",
+                         arch,
+                         ko_wave,
+                         s->wave_size);
+            return false;
+        }
     }
 
     if(s->async_dma && !s->lds_k_outer)
@@ -538,14 +582,30 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          s->warp_tile_n);
             return false;
         }
-        if(s->wave_size != 64)
+        if(s->wave_size != 64 && s->wave_size != 32)
         {
             if(reason && reason_cap)
                 snprintf(reason,
                          reason_cap,
-                         "lds_k_outer requires wave_size=64 (ds_read_b64_tr_b16 is a "
-                         "wave64 instruction); got %d",
+                         "lds_k_outer requires wave_size 64 (ds_read_b64_tr_b16) or "
+                         "32 (ds_load_tr16_b128); got %d",
                          s->wave_size);
+            return false;
+        }
+        /* One atom in the wave32 regime: gfx1250 WMMA 16x16x32, whose A/B
+         * fragment is 16 per lane and whose B lane map is col = lane % 16,
+         * k = (lane / 16) * 16 + i. Nothing else is derived. */
+        if(s->wave_size == 32
+           && (s->warp_tile_m != 16 || s->warp_tile_n != 16 || s->warp_tile_k != 32))
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "lds_k_outer on wave32 supports only the 16x16x32 atom "
+                         "(got %dx%dx%d)",
+                         s->warp_tile_m,
+                         s->warp_tile_n,
+                         s->warp_tile_k);
             return false;
         }
     }
@@ -1918,8 +1978,14 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b_sh[0] = ctx->block_k;
             b_sh[1] = ctx->block_n + kpad;
         }
-        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem");
-        ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem");
+        /* Element type must follow the operand dtype, exactly as Python does with
+         * ir_dtype_a / ir_dtype_b. Hardcoding f16 typed the LDS pool and every
+         * tile store `half` for a bf16 kernel, diverging from Python -- invisible
+         * until now because no wgrad parity config used bf16 A/B operands. */
+        const rocke_type_t* ir_dtype_a = rocke_conv_tr_elem_dtype(spec->dtype_a);
+        const rocke_type_t* ir_dtype_b = rocke_conv_tr_elem_dtype(spec->dtype_b);
+        ctx->A_smem = rocke_b_smem_alloc(b, ir_dtype_a, a_sh, 2, "A_smem");
+        ctx->B_smem = rocke_b_smem_alloc(b, ir_dtype_b, b_sh, 2, "B_smem");
         /* Only async_dma and unroll_k reach a K-loop that alternates buffers:
          * async_dma takes the SoftwarePipeline branch and unroll_k hand-rolls a
          * ping-pong.  "compv4" alone shares the plain single-buffer loop with
@@ -1929,8 +1995,8 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->double_buffer = spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
-            ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_sh, 2, "A_smem2");
-            ctx->B_smem2 = rocke_b_smem_alloc(b, rocke_f16(), b_sh, 2, "B_smem2");
+            ctx->A_smem2 = rocke_b_smem_alloc(b, ir_dtype_a, a_sh, 2, "A_smem2");
+            ctx->B_smem2 = rocke_b_smem_alloc(b, ir_dtype_b, b_sh, 2, "B_smem2");
         }
         else
         {
@@ -2308,12 +2374,20 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
      *   make_buffer_resource(dY/X/dW) then schedule.emit_prologue(b). */
     rocke_schedule_policy_emit_prologue(&ctx.schedule, b);
 
+    /* Element type for the transpose read. Mirrors Python's
+     *   _smem_dtype = BF16 if a_dtype == bf16 else F32 if fp32 else None
+     *   tr_dtype    = _smem_dtype if not None else F16
+     * Type selection only -- emits no IR, so it is unconditional. Leaving this
+     * NULL lets rocke_b_ds_read_tr16_b128 default to f16, which on gfx1250
+     * (where the opcode is element-typed) would emit .v8f16 for a bf16 kernel. */
+    ctx.tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
+
     /* K-outer transpose-read lane constants. Python emits these immediately
      * after schedule.emit_prologue() and before the k-loop (the intervening
      * closures emit no IR), so they must be materialised here to keep the SSA
      * numbering byte-identical. Emitted only on the K-outer path: an
      * unconditional emission would add ops to every existing config. */
-    if(ctx.lds_k_outer)
+    if(ctx.lds_k_outer && spec->wave_size == 64)
     {
         /* Python: b.mul(b.mod(lane, b.const_i32(4)), b.const_i32(4)) -- evaluated
          * strictly left-to-right. C argument order is unspecified, so sequence
