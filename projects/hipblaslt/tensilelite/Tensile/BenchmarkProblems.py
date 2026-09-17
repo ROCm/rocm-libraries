@@ -37,7 +37,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
+from Tensile import SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
@@ -236,7 +236,7 @@ def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, s
         wavefrontSize = solution["WavefrontSize"]
 
         if len(mi) == 9:
-            miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap)
+            miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap, solution.get("SourceSwap", False))
             solution.update(miParams)
         elif len(mi) == 0:
             solution["EnableMatrixInstruction"] = False
@@ -297,7 +297,7 @@ def _getCustomKernelSolutionObj(
         assembler: Assembler,
         debugConfig: DebugConfig,
         isaInfoMap: Dict[IsaVersion, IsaInfo],
-        directory=CUSTOM_KERNEL_PATH
+        directory=None
     ):
     """Creates the Solution object for a custom kernel"""
     sol = getCustomKernelConfig(kernelName, internalSupportParams, directory)
@@ -309,7 +309,7 @@ def _getCustomKernelSolutionObj(
     workgroup = sol.get("WorkGroup", None)
 
     if len(mi) == 9:
-        miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap)
+        miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap, sol.get("SourceSwap", False))
         sol.update(miParams)
     elif len(mi) == 0:
         sol["EnableMatrixInstruction"] = False
@@ -612,7 +612,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
     keyPathPrefix = f"BenchmarkProblems[{outerBenchmarkIdx}][{1 + problemSizeGroupIdx}]"
     benchmarkProcess = BenchmarkProcess(
         problemTypeConfig, problemSizeGroupConfig, debugConfig.printIndexAssignmentInfo,
-        keyPathPrefix=keyPathPrefix, srcFile=configPath,
+        keyPathPrefix=keyPathPrefix, srcFile=configPath, gfxName=gfxName,
     )
 
     enableTileSelection = benchmarkProcess.problemType["TileAwareSelection"]

@@ -271,7 +271,6 @@ inv build --architecture gfx1100 --clean
 
 * `TENSILELITE_BUILD_PARALLEL_LEVEL` Number of CPU cores to use for building device libraries (will use nproc if unset)
 * `TENSILELITE_KEEP_BUILD_TMP` OFF CACHE STRING Keep temporary build directory for device libraries (default: see below)
-* `TENSILELITE_LIBRARY_FORMAT` Format of master solution library files (msgpack or yaml) (default: see below)
 * `TENSILELITE_ASM_DEBUG` Keep debug information for built code objects (default: see below)
 * `TENSILELITE_LOGIC_FILTER` Cutomsized logic filter, default is *, i.e. all logics (default: see below)
 * `TENSILELITE_NO_COMPRESS` Do not compress device code object files (default: see below)
@@ -296,6 +295,10 @@ You can find more information at the following links:
 
 * [hipblaslt-test](clients/gtest/README.md)
 * [hipblaslt-bench](clients/benchmarks/README.md)
+
+For the full testing strategy (what gates a pull request, what does not, and why), see
+[TESTING.md](TESTING.md); TensileLite's own testing strategy is documented separately in
+[tensilelite/TESTING.md](tensilelite/TESTING.md).
 
 ## Documentation
 

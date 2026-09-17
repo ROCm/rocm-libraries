@@ -36,7 +36,7 @@ import pytest
 
 from kernels.gfx942.attention_dense import (
     AttentionDenseSpec,
-    Gfx942DenseTuning,
+    Gfx942AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
     build_attention_dense,
@@ -44,6 +44,7 @@ from kernels.gfx942.attention_dense import (
     run_attention_dense_torch,
     supports_attention_dense,
     _BLOCK_M,
+    _DEFAULT_LDS_ROW_PAD,
     _k_group_pad_active,
     _k_group_stride,
     _use_exp2_fast,
@@ -57,12 +58,15 @@ from kernels.gfx942.attention_dense import (
 # moment the kernel's tile changed.
 _EXPECTED_WORKGROUP_SIZE = (_BLOCK_M // 32) * 64  # 8 wave64s = 512 threads
 
-# The shipped tuning. Constructed from the class default rather than restated field
-# by field, so it cannot drift from what dispatch actually builds.
-_DEFAULT_TUNING = Gfx942DenseTuning()
+# The gfx942-private knobs: the fields Gfx942AttentionDenseSpec adds on top of the
+# shared spec. Discovered by reflection rather than restated, so it cannot go stale
+# when a knob is added or removed.
+_PRIVATE_FIELDS = set(Gfx942AttentionDenseSpec.__dataclass_fields__) - set(
+    AttentionDenseSpec.__dataclass_fields__
+)
 
 
-def _spec(**kw) -> AttentionDenseSpec:
+def _spec(**kw) -> Gfx942AttentionDenseSpec:
     base = dict(
         batch=1,
         seqlen_q=2048,
@@ -75,7 +79,7 @@ def _spec(**kw) -> AttentionDenseSpec:
         block_n=64,
     )
     base.update(kw)
-    return AttentionDenseSpec(**base)
+    return Gfx942AttentionDenseSpec(**base)
 
 
 def _lower(kd) -> str:
@@ -90,7 +94,7 @@ def _lower(kd) -> str:
     )
 
 
-def _ir_body_sha(spec, tuning=_DEFAULT_TUNING) -> str:
+def _ir_body_sha(spec) -> str:
     """SHA of the lowered IR with the kernel SYMBOL normalised out.
 
     The symbol appears in the ``define``, in the ``@smem_pool.<name>`` global and in
@@ -100,7 +104,7 @@ def _ir_body_sha(spec, tuning=_DEFAULT_TUNING) -> str:
     justify. Same idiom as the out-of-tree ``ir_body_probe`` that proved the P0->gfx942
     identifier rename codegen-neutral.
     """
-    kd = build_attention_dense(spec, arch="gfx942", tuning=tuning)
+    kd = build_attention_dense(spec, arch="gfx942")
     body = _lower(kd).replace(kd.name, "KERNEL")
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
@@ -218,6 +222,7 @@ _SPEC_PERTURBATIONS = {
     "paged": (),  # unbuildable (not yet supported)
     "block_size": (),  # unbuildable (paged-only, paged not supported)
     "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
+    "block_m": (128, 512),
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),
     "lds_k_group_pad": (0, 16),
@@ -229,16 +234,20 @@ _SPEC_PERTURBATIONS = {
     "use_sinks": (),  # unbuildable (not yet supported)
 }
 
-_TUNING_PERTURBATIONS = {
-    "block_m": (128, 512),
+# The gfx942-private half of the same table: fields Gfx942AttentionDenseSpec adds on
+# top of the shared spec. Split from _SPEC_PERTURBATIONS only so the completeness
+# check below can name which half a missing field belongs to; both halves are applied
+# to the SAME object, since there is one spec and one builder signature.
+_PRIVATE_PERTURBATIONS = {
     "lds_row_pad": (0, 16),
     "v_row_pad": (0, 64),
     "use_cfvst": (False, True),
     "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
-    "waves_per_eu": (4, 3),
     "iglp": (True, False),
 }
+
+_PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 
 # Base configurations the perturbations are applied to, one field at a time. Chosen
 # so every structurally distinct arm of the builder is a base: cfvst on (fp16 D128),
@@ -263,48 +272,44 @@ _INJECTIVITY_BASES = {
 
 
 def _injectivity_field_ids():
-    """(kind, field) for every field of BOTH dataclasses, by reflection.
+    """One case per field of the gfx942 spec, by reflection.
 
     Reflection at COLLECTION time is what makes this suite self-extending: a field
-    added to either dataclass immediately becomes its own pytest case, and (having no
+    added to the dataclass immediately becomes its own pytest case, and (having no
     perturbation entry) fails the completeness test below until it is given one.
     """
     return [
-        pytest.param("spec", f, id=f"spec.{f}")
-        for f in AttentionDenseSpec.__dataclass_fields__
-    ] + [
-        pytest.param("tuning", f, id=f"tuning.{f}")
-        for f in Gfx942DenseTuning.__dataclass_fields__
+        pytest.param(f, id=f"private.{f}" if f in _PRIVATE_FIELDS else f"spec.{f}")
+        for f in Gfx942AttentionDenseSpec.__dataclass_fields__
     ]
 
 
-def _perturbation_table(kind: str) -> dict:
-    return _SPEC_PERTURBATIONS if kind == "spec" else _TUNING_PERTURBATIONS
-
-
 def test_perturbation_table_covers_every_dataclass_field():
-    """Anti-staleness gate. Reflection finds the fields; this asserts the tables know
-    them all, so ADDING a field to either dataclass fails here with a clear message
-    instead of silently going uncovered -- which is exactly how ``batch`` and then
+    """Anti-staleness gate. Reflection finds the fields; this asserts the table knows
+    them all, so ADDING a field to the spec fails here with a clear message instead of
+    silently going uncovered -- which is exactly how ``batch`` and then
     ``waves_per_eu`` each shipped a launcher-cache collision."""
-    for kind, cls in (
-        ("spec", AttentionDenseSpec),
-        ("tuning", Gfx942DenseTuning),
-    ):
-        declared = set(cls.__dataclass_fields__)
-        tabled = set(_perturbation_table(kind))
-        assert declared == tabled, (
-            f"{cls.__name__}: perturbation table is out of sync with the dataclass "
-            f"(missing {sorted(declared - tabled)}, stale {sorted(tabled - declared)})"
-            " -- every field must be given a second LEGAL value (or an empty tuple "
-            "plus an entry in _UNBUILDABLE_SPEC_FIELDS) so the name-injectivity "
-            "property below actually covers it"
-        )
+    declared = set(Gfx942AttentionDenseSpec.__dataclass_fields__)
+    tabled = set(_PERTURBATIONS)
+    assert declared == tabled, (
+        "Gfx942AttentionDenseSpec: perturbation table is out of sync with the "
+        f"dataclass (missing {sorted(declared - tabled)}, "
+        f"stale {sorted(tabled - declared)})"
+        " -- every field must be given a second LEGAL value (or an empty tuple "
+        "plus an entry in _UNBUILDABLE_SPEC_FIELDS) so the name-injectivity "
+        "property below actually covers it"
+    )
+    # The split into halves must also stay honest, so a knob promoted from private to
+    # shared (or vice versa) does not sit unnoticed in the wrong table.
+    assert set(_PRIVATE_PERTURBATIONS) == _PRIVATE_FIELDS, (
+        "_PRIVATE_PERTURBATIONS does not match the fields Gfx942AttentionDenseSpec "
+        f"adds on top of AttentionDenseSpec: {sorted(_PRIVATE_FIELDS)}"
+    )
 
 
-@pytest.mark.parametrize("kind, field", _injectivity_field_ids())
-def test_kernel_name_covers_every_baked_parameter(kind, field):
-    """IR body differs => kernel name differs, for EVERY field of both dataclasses.
+@pytest.mark.parametrize("field", _injectivity_field_ids())
+def test_kernel_name_covers_every_baked_parameter(field):
+    """IR body differs => kernel name differs, for EVERY field of the spec.
 
     One-directional on purpose. The dangerous direction is IR-differs / name-identical:
     ``_DENSE_LAUNCHER_CACHE`` is keyed on the name and would serve the first-compiled
@@ -326,74 +331,68 @@ def test_kernel_name_covers_every_baked_parameter(kind, field):
     otherwise the name change alone would make the IR differ and the implication
     would hold vacuously.
     """
-    candidates = _perturbation_table(kind)[field]
+    candidates = _PERTURBATIONS[field]
     tried = 0
     ir_moved = 0
     violations = []
     for base_id, base_kw in _INJECTIVITY_BASES.items():
         base_spec = _spec(**base_kw)
-        base_tuning = _DEFAULT_TUNING
-        ok, why = supports_attention_dense(base_spec, arch="gfx942", tuning=base_tuning)
+        ok, why = supports_attention_dense(base_spec, arch="gfx942")
         assert ok, f"base {base_id} must be in scope: {why}"
-        base_name = gfx942_kernel_name(base_spec, base_tuning)
-        base_sha = _ir_body_sha(base_spec, base_tuning)
-        current = getattr(base_spec if kind == "spec" else base_tuning, field)
+        base_name = gfx942_kernel_name(base_spec)
+        base_sha = _ir_body_sha(base_spec)
+        current = getattr(base_spec, field)
         for value in candidates:
             if value == current:
                 continue
             try:
-                if kind == "spec":
-                    alt_spec = dataclasses.replace(base_spec, **{field: value})
-                    alt_tuning = base_tuning
-                else:
-                    alt_spec = base_spec
-                    alt_tuning = dataclasses.replace(base_tuning, **{field: value})
+                alt_spec = dataclasses.replace(base_spec, **{field: value})
             except (ValueError, ZeroDivisionError):
                 continue  # the dataclass validator rejected it: not a legal value
-            ok, _ = supports_attention_dense(alt_spec, arch="gfx942", tuning=alt_tuning)
+            ok, _ = supports_attention_dense(alt_spec, arch="gfx942")
             if not ok:
                 continue  # out of scope for this base; another base may accept it
             tried += 1
-            alt_name = gfx942_kernel_name(alt_spec, alt_tuning)
-            alt_sha = _ir_body_sha(alt_spec, alt_tuning)
+            alt_name = gfx942_kernel_name(alt_spec)
+            alt_sha = _ir_body_sha(alt_spec)
             if alt_sha != base_sha:
                 ir_moved += 1
                 if alt_name == base_name:
-                    violations.append(f"{base_id}: {kind}.{field}={value!r}")
+                    violations.append(f"{base_id}: {field}={value!r}")
     assert not violations, (
-        f"{kind}.{field} changes the emitted IR but NOT the kernel name at "
+        f"{field} changes the emitted IR but NOT the kernel name at "
         f"{violations} -- two distinct binaries would share one _DENSE_LAUNCHER_CACHE "
         f"key and the second launch would be served the first one's HSACO. Tag the "
-        f"field in gfx942_kernel_name (spec fields: via _tuning_name_tags' sibling "
-        f"logic or the shared kernel_name; tuning fields: in _tuning_name_tags)"
+        f"field in gfx942_kernel_name (shared fields: via the shared kernel_name or "
+        f"its sibling logic; gfx942-private fields: in _tuning_name_tags)"
     )
     # Anti-vacuity, per field: the property above is trivially true for a field that
     # was never legally perturbed, so require that each field is either declared
     # unbuildable or actually exercised somewhere.
-    if field in _UNBUILDABLE_SPEC_FIELDS and kind == "spec":
+    if field in _UNBUILDABLE_SPEC_FIELDS:
         assert tried == 0, (
-            f"spec.{field} is listed in _UNBUILDABLE_SPEC_FIELDS but a perturbation "
+            f"{field} is listed in _UNBUILDABLE_SPEC_FIELDS but a perturbation "
             f"was accepted -- if it is now supported, give it real candidates and "
             f"drop it from that set"
         )
         return
     assert tried, (
-        f"{kind}.{field}: no candidate in {candidates!r} was accepted by "
+        f"{field}: no candidate in {candidates!r} was accepted by "
         f"supports_attention_dense at ANY base, so the injectivity property was not "
         f"exercised for this field at all. Add a legal second value."
     )
     # ... and that it actually reaches codegen somewhere, unless it is a documented
     # name-only field. A field that never moves IR anywhere is either dead in this
     # builder (say so here) or the perturbations are too weak to reach it.
-    if kind == "spec" and field in _NAME_ONLY_SPEC_FIELDS:
+    if field in _NAME_ONLY_SPEC_FIELDS:
         assert ir_moved == 0, (
-            f"spec.{field} is documented in _NAME_ONLY_SPEC_FIELDS as never reaching "
+            f"{field} is documented in _NAME_ONLY_SPEC_FIELDS as never reaching "
             f"gfx942 codegen, but it moved the IR in {ir_moved} case(s) -- it is now "
             f"a live lever; remove it from that set"
         )
         return
     assert ir_moved, (
-        f"{kind}.{field}: {tried} legal perturbation(s) were built and NONE changed "
+        f"{field}: {tried} legal perturbation(s) were built and NONE changed "
         f"the emitted IR. Either the field is dead in this builder (add it to "
         f"_NAME_ONLY_SPEC_FIELDS with a reason) or the candidates are too weak"
     )
@@ -464,15 +463,14 @@ def test_supports_rejects_over_budget_lds():
     """block_n=128 at D128/bf16 needs 2*128*(128+8)*2 = 69632 B > the 64 KB gfx942 LDS.
     Without this gate it reaches comgr and dies with an opaque CODEGEN abort.
 
-    The pad is passed EXPLICITLY rather than inherited from the default tuning: the
-    arithmetic above is what makes this spec over-budget, and at ``lds_row_pad=0`` the
-    same spec lands on exactly 65536 B -- which is NOT ``> capacity``, so the gate
+    The pad is set EXPLICITLY on the spec rather than inherited from the field default:
+    the arithmetic above is what makes this spec over-budget, and at ``lds_row_pad=0``
+    the same spec lands on exactly 65536 B -- which is NOT ``> capacity``, so the gate
     flips to ACCEPT and this test's premise would silently invert into a tautology.
     The pad=0 boundary is pinned deliberately in the test below.
     """
-    tuning = dataclasses.replace(_DEFAULT_TUNING, lds_row_pad=8)
-    spec = _spec(block_n=128, head_size=128, dtype="bf16")
-    ok, why = supports_attention_dense(spec, arch="gfx942", tuning=tuning)
+    spec = _spec(block_n=128, head_size=128, dtype="bf16", lds_row_pad=8)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
     assert not ok and "LDS" in why
     # the arithmetic the rejection rests on, spelled out so a capacity/pad change is loud
     assert "69632" in why, why
@@ -493,14 +491,13 @@ def test_lds_budget_boundary_is_accepted_at_exactly_capacity():
 
     from kernels.gfx942.attention_dense import _lds_bytes
 
-    tuning = dataclasses.replace(_DEFAULT_TUNING, lds_row_pad=0)
-    spec = _spec(block_n=128, head_size=128, dtype="bf16")
+    spec = _spec(block_n=128, head_size=128, dtype="bf16", lds_row_pad=0)
     capacity = attention_lds_capacity_bytes("gfx942")
-    assert _lds_bytes(spec, tuning) == capacity, "premise: exactly at capacity"
-    ok, why = supports_attention_dense(spec, arch="gfx942", tuning=tuning)
+    assert _lds_bytes(spec) == capacity, "premise: exactly at capacity"
+    ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, f"a footprint of exactly {capacity} B must be accepted: {why}"
     # supports() => build() must hold at the boundary too.
-    assert build_attention_dense(spec, arch="gfx942", tuning=tuning) is not None
+    assert build_attention_dense(spec, arch="gfx942") is not None
 
 
 def test_supports_accepts_lds_budget_that_fits():
@@ -542,12 +539,67 @@ def test_dataclass_rejects_out_of_scope_headsize():
         _spec(head_size=256)
 
 
+def test_dataclass_rejects_nondividing_block_m():
+    """A partial query tile would read and write Q/O out of bounds.
+
+    block_m=320 is otherwise wave-aligned, divisible by block_n, and within the
+    workgroup limit; seqlen_q=2048 not being divisible by it is the rejecting
+    condition this case preserves.
+    """
+    with pytest.raises(ValueError, match=r"multiple of block_m=320"):
+        _spec(seqlen_q=2048, block_m=320)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (("wide_lds_dma", True), ("lds_v_row_pad", 32)),
+)
+def test_gfx942_type_rejects_gfx950_only_fields(field, value):
+    with pytest.raises(TypeError, match=field):
+        _spec(**{field: value})
+
+
+@pytest.mark.parametrize("decode", ("gqa_pair", "gqa_pair_2phase"))
+def test_gfx942_type_rejects_gfx950_only_decodes(decode):
+    with pytest.raises(ValueError, match="persist_decode"):
+        _spec(persist_decode=decode)
+
+
+def test_gfx942_support_rejects_concrete_gfx950_spec():
+    from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+    gfx950_spec = Gfx950AttentionDenseSpec(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=128,
+        num_kv_heads=8,
+        head_size=128,
+    )
+    ok, why = supports_attention_dense(gfx950_spec, arch="gfx942")
+    assert not ok
+    assert "cannot promote" in why
+
+
+def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
+    spec = _spec(
+        seqlen_q=9728,
+        seqlen_kv=9728,
+        persistent=True,
+        num_persistent=304,
+        persist_decode="auto",
+    )
+    assert spec.resolved_persist_decode == "hkv_major"
+    assert "hkvmaj" in spec.kernel_name()
+    assert "gqapair" not in spec.kernel_name()
+
+
 # --------------------------------------------------------------------------- #
 # the contract: supports is the single gate
 # --------------------------------------------------------------------------- #
 
-# Tuning fields deliberately left ungated. Recorded rather than assumed so that
-# adding a gate (or forgetting one) is a visible, reviewed decision.
+# Fields deliberately left ungated. Recorded rather than assumed so that adding a
+# gate (or forgetting one) is a visible, reviewed decision.
 #   use_exp2_fast: numerically safe in both directions here (both softmax args are
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
@@ -555,77 +607,68 @@ def test_dataclass_rejects_out_of_scope_headsize():
 #     runtime instruction and is legal on every config.
 _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "iglp"})
 
-# Rows are ``(spec kwargs, tuning kwargs)``. The tuning half is NOT optional
-# decoration: supports_attention_dense validates the Gfx942DenseTuning struct too, so
-# the contract "supports => build" has to be exercised on the knobs a sweep harness
-# will actually turn. Every tuning field gets at least two rows -- its default (or a
-# second accepted value) and one that must land in the REJECTED region -- so a new
-# gate, or a gate that silently stops firing, shows up here. The two fields with no
-# rejected region by design, and why, are recorded once at
-# _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION above.
+# Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
+# and one builder signature, so the shared and gfx942-private knobs go in the same
+# dict. The private half is NOT optional decoration: supports_attention_dense
+# validates those fields too, so the contract "supports => build" has to be exercised
+# on the knobs a sweep harness will actually turn. Every private field gets at least
+# two rows -- its default (or a second accepted value) and one that must land in the
+# REJECTED region -- so a new gate, or a gate that silently stops firing, shows up
+# here. The two fields with no rejected region by design, and why, are recorded once
+# at _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION above.
+#
+# Rows must be CONSTRUCTIBLE: a value the dataclass validator rejects in
+# ``__post_init__`` (e.g. waves_per_eu=0) raises before supports() is ever called, so
+# it belongs in a direct-construction test, not in this grid.
 _CONTRACT_GRID = [
-    (dict(), dict()),
-    (dict(dtype="fp16"), dict()),
-    (dict(head_size=64), dict()),
-    (dict(causal=False), dict()),
-    (dict(num_query_heads=40, num_kv_heads=8), dict()),
-    (dict(block_n=32), dict()),
-    (dict(block_n=96, seqlen_kv=1536), dict()),
-    (dict(block_n=128), dict()),
-    (dict(block_n=128, head_size=64), dict()),
-    (dict(block_n=512, seqlen_kv=2048), dict()),
-    (dict(persistent=True, num_persistent=228), dict()),
-    (dict(varlen=True), dict()),
-    (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), dict()),
-    (dict(sliding_window=64), dict()),
-    (dict(batch=4), dict()),
-    (dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8), dict()),
-    # --- tuning: block_m ---
-    (dict(), dict(block_m=_BLOCK_M)),  # the default, spelled out
-    (dict(), dict(block_m=128)),  # accepted: halves the query tile
-    (dict(), dict(block_m=48)),  # REJECTED: not a multiple of 32 (wave floor)
-    (dict(), dict(block_m=1024)),  # REJECTED: 2048-thread CTA > the 1024 max
-    # REJECTED: 2048 % 320 != 0, so the last query tile runs past seqlen_q and Q/O
-    # (plain global_load_vN, no bounds check) read and write out of bounds. 320 is a
-    # multiple of 32 and of block_n and fits a 640-thread CTA, so this row reaches
-    # the seqlen check rather than tripping an earlier one.
-    (dict(seqlen_q=2048), dict(block_m=320)),
-    # --- tuning: lds_row_pad / v_row_pad (the pad-value sweep surface) ---
-    (dict(), dict(lds_row_pad=0)),  # accepted: the unpadded A/B arm
-    (dict(), dict(lds_row_pad=2)),  # REJECTED: not a multiple of 4 elements
-    (dict(), dict(v_row_pad=16)),  # accepted
-    (dict(), dict(v_row_pad=-4)),  # REJECTED: negative
-    # --- tuning: use_cfvst (the one tri-state with a rejected direction) ---
-    (dict(dtype="fp16"), dict(use_cfvst=False)),  # accepted: OFF is always legal
-    (dict(head_size=64), dict(use_cfvst=True)),  # REJECTED: policy says off at D64
-    (dict(dtype="bf16", head_size=128), dict(use_cfvst=True)),  # REJECTED: spills
-    # --- tuning: use_v_swizzle (independent of the pad; cfvst-gated) ---
-    (dict(dtype="fp16"), dict(use_v_swizzle=False)),  # accepted: OFF is always legal
-    (dict(head_size=64), dict(use_v_swizzle=True)),  # REJECTED: no V^T path at D64
-    # --- tuning: use_exp2_fast (no rejected region -- see the comment above) ---
-    (dict(), dict(use_exp2_fast=False)),
-    (dict(), dict(use_exp2_fast=True)),  # accepted: policy is True for every config
-    # --- tuning: waves_per_eu ---
-    (dict(), dict(waves_per_eu=4)),  # accepted
-    (dict(), dict(waves_per_eu=0)),  # REJECTED: must resolve positive
-    # --- tuning: iglp (no rejected region -- see the comment above) ---
-    (dict(), dict(iglp=False)),
-    (dict(dtype="fp16"), dict(iglp=True)),
+    dict(),
+    dict(dtype="fp16"),
+    dict(head_size=64),
+    dict(causal=False),
+    dict(num_query_heads=40, num_kv_heads=8),
+    dict(block_n=32),
+    dict(block_n=96, seqlen_kv=1536),
+    dict(block_n=128),
+    dict(block_n=128, head_size=64),
+    dict(block_n=512, seqlen_kv=2048),
+    dict(persistent=True, num_persistent=228),
+    dict(varlen=True),
+    dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
+    dict(sliding_window=64),
+    dict(batch=4),
+    dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8),
+    dict(waves_per_eu=4),
+    # --- shared tile geometry: block_m ---
+    dict(block_m=_BLOCK_M),  # the default, spelled out
+    dict(block_m=128),  # accepted: halves the query tile
+    # 1920 keeps this row constructible under the shared spec's exact tiling
+    # check; gfx942 support then rejects the 48-row non-wave-aligned geometry.
+    dict(block_m=48, seqlen_q=1920, seqlen_kv=1920),
+    dict(block_m=1024),  # REJECTED: 2048-thread CTA > the 1024 max
+    # --- private: lds_row_pad / v_row_pad (the pad-value sweep surface) ---
+    dict(lds_row_pad=0),  # accepted: the unpadded A/B arm
+    dict(lds_row_pad=2),  # REJECTED: not a multiple of 4 elements
+    dict(v_row_pad=16),  # accepted
+    dict(v_row_pad=-4),  # REJECTED: negative
+    # --- private: use_cfvst (the one tri-state with a rejected direction) ---
+    dict(dtype="fp16", use_cfvst=False),  # accepted: OFF is always legal
+    dict(head_size=64, use_cfvst=True),  # REJECTED: policy says off at D64
+    dict(dtype="bf16", head_size=128, use_cfvst=True),  # REJECTED: spills
+    # --- private: use_v_swizzle (independent of the pad; cfvst-gated) ---
+    dict(dtype="fp16", use_v_swizzle=False),  # accepted: OFF is always legal
+    dict(head_size=64, use_v_swizzle=True),  # REJECTED: no V^T path at D64
+    # --- private: use_exp2_fast (no rejected region -- see the comment above) ---
+    dict(use_exp2_fast=False),
+    dict(use_exp2_fast=True),  # accepted: policy is True for every config
+    # --- private: iglp (no rejected region -- see the comment above) ---
+    dict(iglp=False),
+    dict(dtype="fp16", iglp=True),
 ]
 
 
 def _grid_id(row) -> str:
     """Value-bearing id: keys alone collide (several block_n / block_m cases)."""
-    spec_kw, tuning_kw = row
-    parts = [f"{k}{v}" for k, v in sorted(spec_kw.items())]
-    parts += [f"t.{k}{v}" for k, v in sorted(tuning_kw.items())]
-    return "-".join(parts) or "base"
-
-
-def _grid_row(row):
-    """Materialise one grid row into ``(spec, tuning)``."""
-    spec_kw, tuning_kw = row
-    return _spec(**spec_kw), dataclasses.replace(_DEFAULT_TUNING, **tuning_kw)
+    return "-".join(f"{k}{v}" for k, v in sorted(row.items())) or "base"
 
 
 def test_contract_grid_exercises_both_sides():
@@ -633,14 +676,14 @@ def test_contract_grid_exercises_both_sides():
     test below would still pass on every case.
 
     The thresholds are expressed as a FRACTION of the grid, not as the frozen
-    ``>= 6`` this started as: the grid grows every time a spec or tuning field is
-    added, and a fixed floor stops being a real vacuity check the moment it is a
-    small fraction of the rows. Absolute floors are kept underneath so a shrinking
-    grid cannot weaken the guard either.
+    ``>= 6`` this started as: the grid grows every time a field is added, and a fixed
+    floor stops being a real vacuity check the moment it is a small fraction of the
+    rows. Absolute floors are kept underneath so a shrinking grid cannot weaken the
+    guard either.
     """
     verdicts = [
-        supports_attention_dense(spec, arch="gfx942", tuning=tuning)[0]
-        for spec, tuning in map(_grid_row, _CONTRACT_GRID)
+        supports_attention_dense(_spec(**row), arch="gfx942")[0]
+        for row in _CONTRACT_GRID
     ]
     accepted = [_grid_id(r) for r, v in zip(_CONTRACT_GRID, verdicts) if v]
     rejected = [_grid_id(r) for r, v in zip(_CONTRACT_GRID, verdicts) if not v]
@@ -656,24 +699,22 @@ def test_contract_grid_exercises_both_sides():
 
 
 def test_contract_grid_covers_every_tuning_field_on_both_sides():
-    """Every :class:`Gfx942DenseTuning` field must appear in the grid, and -- unless
-    it is documented as having no rejected region -- on BOTH sides of the gate.
+    """Every gfx942-private spec field must appear in the grid, and -- unless it is
+    documented as having no rejected region -- on BOTH sides of the gate.
 
     Reflection over ``__dataclass_fields__`` again, for the same reason as the
-    injectivity table: a knob added to the struct without a supports() gate (or with
+    injectivity table: a knob added to the spec without a supports() gate (or with
     a gate nobody exercised) is exactly the dispatch fall-through hole that function
     exists to close, and a hand-written list of field names would not notice.
     """
     accepted_fields, rejected_fields = set(), set()
     for row in _CONTRACT_GRID:
-        _, tuning_kw = row
-        spec, tuning = _grid_row(row)
-        ok, _ = supports_attention_dense(spec, arch="gfx942", tuning=tuning)
-        (accepted_fields if ok else rejected_fields).update(tuning_kw)
-    declared = set(Gfx942DenseTuning.__dataclass_fields__)
+        ok, _ = supports_attention_dense(_spec(**row), arch="gfx942")
+        (accepted_fields if ok else rejected_fields).update(set(row) & _PRIVATE_FIELDS)
+    declared = set(_PRIVATE_FIELDS)
     missing = declared - (accepted_fields | rejected_fields)
     assert not missing, (
-        f"Gfx942DenseTuning fields absent from _CONTRACT_GRID: {sorted(missing)} -- "
+        f"gfx942-private spec fields absent from _CONTRACT_GRID: {sorted(missing)} -- "
         f"add at least two rows per field (the default and one value that must be "
         f"REJECTED), or document it in _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION"
     )
@@ -700,21 +741,21 @@ def test_supports_true_implies_build_succeeds(row):
     """The load-bearing invariant. If ``supports`` says yes, ``build`` must not
     raise; if it says no, ``build`` must raise rather than emit a kernel.
 
-    Exercised over the tuning struct as well as the spec: ``supports`` validates both,
-    so a knob that only the BUILDER rejects reopens the dispatch fall-through hole
-    this contract closes."""
-    spec, tuning = _grid_row(row)
-    ok, why = supports_attention_dense(spec, arch="gfx942", tuning=tuning)
+    Exercised over the gfx942-private knobs as well as the shared ones: ``supports``
+    validates the whole spec, so a knob that only the BUILDER rejects reopens the
+    dispatch fall-through hole this contract closes."""
+    spec = _spec(**row)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
     if ok:
-        kd = build_attention_dense(spec, arch="gfx942", tuning=tuning)
+        kd = build_attention_dense(spec, arch="gfx942")
         assert kd is not None
         # ...and the emitted symbol must be the name the launcher cache will key on
-        # for this (spec, tuning) -- otherwise the sweep point compiles under one
-        # identity and is looked up under another.
-        assert kd.name == gfx942_kernel_name(spec, tuning)
+        # for this spec -- otherwise the sweep point compiles under one identity and
+        # is looked up under another.
+        assert kd.name == gfx942_kernel_name(spec)
     else:
         with pytest.raises(ValueError, match="unsupported"):
-            build_attention_dense(spec, arch="gfx942", tuning=tuning)
+            build_attention_dense(spec, arch="gfx942")
         assert why
 
 
@@ -788,8 +829,18 @@ def test_supports_rejects_non_positive_extents(kw, marker):
 
 def test_supports_returns_rather_than_raises_for_block_n_zero():
     """__post_init__ evaluates `seqlen_kv % block_n` before validating block_n > 0,
-    so block_n=0 raises ZeroDivisionError -- which must not escape a (bool, str) API."""
-    base = AttentionDenseSpec(
+    so block_n=0 raises ZeroDivisionError -- which must not escape a (bool, str) API.
+
+    Built as the gfx942 subclass, not the base, on purpose: ``supports`` promotes a
+    base spec via ``_as_gfx942_spec``, which reconstructs it and therefore re-runs
+    ``__post_init__``. That re-run is a no-op for any spec that legitimately exists
+    (it already passed the same validator once), so the only thing it would catch
+    here is this test's own ``object.__setattr__`` smuggling -- masking the
+    defensive gate further down in ``supports`` that this test exists to pin.
+    Constructing the subclass makes the promotion an isinstance short-circuit and
+    keeps the smuggled value reaching the gate.
+    """
+    base = Gfx942AttentionDenseSpec(
         batch=1,
         seqlen_q=2048,
         seqlen_kv=2048,
@@ -967,14 +1018,14 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
 
     off = _lower(
         build_attention_dense(
-            spec, arch="gfx942", tuning=Gfx942DenseTuning(use_v_swizzle=False)
+            dataclasses.replace(spec, use_v_swizzle=False), arch="gfx942"
         )
     )
     assert _swz_masks(off) == [], (block_n, _swz_masks(off))
     assert _xors(off) < _xors(on)
 
 
-def test_default_tuning_v_row_pad_resolves_through_policy():
+def test_default_v_row_pad_resolves_through_policy():
     """The shipped default leaves ``v_row_pad=None`` and resolves through the policy,
     derived from (head_size, dtype, block_n): fp16-D128 -> a pow2 (>=64) V_LDROW at any
     width (swizzle on), 8 otherwise; an explicit override still wins. Guards that
@@ -982,14 +1033,14 @@ def test_default_tuning_v_row_pad_resolves_through_policy():
     fp16_d128 = _spec(head_size=128, dtype="fp16")  # block_n=64 default
     fp16_d128_bn32 = _spec(head_size=128, dtype="fp16", block_n=32)
     bf16_d128 = _spec(head_size=128, dtype="bf16")
-    assert _DEFAULT_TUNING.v_row_pad is None
-    assert _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128) == 0  # V_LDROW=64, swizzle on
-    assert _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128_bn32) == 32  # V_LDROW=64 too
-    assert _DEFAULT_TUNING.resolved_v_row_pad(bf16_d128) == 8
-    assert (
-        dataclasses.replace(_DEFAULT_TUNING, v_row_pad=16).resolved_v_row_pad(fp16_d128)
-        == 16
-    )
+    # Tri-state: the shipped default is None ("resolve through the policy"), so a
+    # harness that omits the field tracks whatever ships instead of freezing a value.
+    assert Gfx942AttentionDenseSpec.__dataclass_fields__["v_row_pad"].default is None
+    assert fp16_d128.v_row_pad is None
+    assert fp16_d128.resolved_v_row_pad() == 0  # V_LDROW=64, swizzle on
+    assert fp16_d128_bn32.resolved_v_row_pad() == 32  # V_LDROW=64 too
+    assert bf16_d128.resolved_v_row_pad() == 8
+    assert dataclasses.replace(fp16_d128, v_row_pad=16).resolved_v_row_pad() == 16
 
 
 @pytest.mark.parametrize(
@@ -1002,20 +1053,19 @@ def test_softmax_emits_the_gated_exp2_intrinsic(head_size, dtype, use_exp2_fast)
 
     exp2_fast lowers to ``math.exp2_fast`` (llvm.amdgcn.exp2.f32 -> one v_exp_f32);
     plain exp2 lowers to ``math.exp2`` (llvm.exp2.f32, guarded range reduction). The
-    softmax path must emit exactly one family, matching the resolved tuning. This is
-    parametrized on the tuning rather than the policy: the policy is now True for
+    softmax path must emit exactly one family, matching the resolved value. This is
+    parametrized on the spec field rather than the policy: the policy is now True for
     every config, so branching on it would make the plain-exp2 arm dead and leave
     ``b.exp2`` untested -- yet ``use_exp2_fast=False`` is still an accepted, swept
     override. Forcing both values keeps both codegen arms pinned. Each config is
     isolated, so a failure is reported even if an earlier one regresses.
     """
-    spec = _spec(head_size=head_size, dtype=dtype)
-    tuning = Gfx942DenseTuning(use_exp2_fast=use_exp2_fast)
-    kernel = build_attention_dense(spec, arch="gfx942", tuning=tuning)
+    spec = _spec(head_size=head_size, dtype=dtype, use_exp2_fast=use_exp2_fast)
+    kernel = build_attention_dense(spec, arch="gfx942")
     names = [n for op in kernel.body.ops for n in _walk_op_names(op)]
     has_fast = "math.exp2_fast" in names
     has_plain = "math.exp2" in names
-    if tuning.resolved_use_exp2_fast(spec):
+    if spec.resolved_use_exp2_fast():
         assert has_fast and not has_plain, (
             f"{dtype} D{head_size}: tuning says exp2_fast but IR has "
             f"fast={has_fast} plain={has_plain}"
@@ -1106,7 +1156,7 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
     assert gfx942_kernel_name(spec).endswith("_gfx942_b1_wpe4")
 
 
-def test_dispatch_applies_gfx942_waves_per_eu_tuning_and_leaves_gfx950_alone():
+def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
 
     The tune lives in gfx942's OWN ``_dense_spec`` (``dispatch/attention/gfx942.py``),
@@ -1284,13 +1334,13 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
 
 
 # --------------------------------------------------------------------------- #
-# Gfx942DenseTuning.iglp -- the never-before-executed codegen branch
+# Gfx942AttentionDenseSpec.iglp -- the never-before-executed codegen branch
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("dtype, d", [("fp16", 128), ("bf16", 128), ("bf16", 64)])
 def test_iglp_true_builds_lowers_and_emits_the_intrinsic(dtype, d):
     """The ``iglp=True`` arm must actually BUILD, LOWER and emit the intrinsic.
 
-    Until this test existed the True arm of ``if tuning.iglp:`` had never been
+    Until this test existed the True arm of ``if spec.iglp:`` had never been
     executed by anything -- it was a module constant nobody flipped. It is now a
     user-settable knob, and shipping a never-executed codegen branch as a knob is the
     highest silent-wrong-answer risk in the struct: a knob that quietly emits nothing
@@ -1306,15 +1356,14 @@ def test_iglp_true_builds_lowers_and_emits_the_intrinsic(dtype, d):
     Run on the cfvst path (fp16 D128, the only one with in-loop ds_write traffic to
     interleave) and on two naive-V configs, since the emission is unconditional.
     """
-    spec = _spec(head_size=d, dtype=dtype)
-    off = dataclasses.replace(_DEFAULT_TUNING, iglp=False)
-    on = dataclasses.replace(_DEFAULT_TUNING, iglp=True)
+    off = _spec(head_size=d, dtype=dtype, iglp=False)
+    on = _spec(head_size=d, dtype=dtype, iglp=True)
 
-    ok, why = supports_attention_dense(spec, arch="gfx942", tuning=on)
+    ok, why = supports_attention_dense(on, arch="gfx942")
     assert ok, f"iglp=True must be in scope: {why}"
 
-    kd_on = build_attention_dense(spec, arch="gfx942", tuning=on)
-    kd_off = build_attention_dense(spec, arch="gfx942", tuning=off)
+    kd_on = build_attention_dense(on, arch="gfx942")
+    kd_off = build_attention_dense(off, arch="gfx942")
     ir_on = _lower(kd_on)
     ir_off = _lower(kd_off)
 
@@ -1326,9 +1375,9 @@ def test_iglp_true_builds_lowers_and_emits_the_intrinsic(dtype, d):
 
     # identity: name AND body must both move, together.
     assert kd_on.name != kd_off.name
-    assert kd_on.name == gfx942_kernel_name(spec, on)
+    assert kd_on.name == gfx942_kernel_name(on)
     assert kd_on.name.endswith("_iglp1")
-    assert _ir_body_sha(spec, on) != _ir_body_sha(spec, off)
+    assert _ir_body_sha(on) != _ir_body_sha(off)
 
 
 # --------------------------------------------------------------------------- #

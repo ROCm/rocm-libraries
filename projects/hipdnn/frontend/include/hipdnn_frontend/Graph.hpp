@@ -1186,7 +1186,17 @@ private:
             std::vector<int64_t> missingUids;
             for(const auto& tensor : allTensors)
             {
-                if(tensor && tensor->has_uid() && !tensor->get_is_virtual())
+                // A scalar carrying a baked value - compile-time constant or
+                // runtime-with-default - reaches the provider through the
+                // op-graph flatbuffer, not the variantPack (RFC 0016 §2.2), so
+                // demanding an entry for it rejects packs execute() accepts.
+                // A runtime user-supplied scalar carries no value and *is*
+                // variant-pack delivered as a host pointer, so it stays
+                // required; get_is_pass_by_value() covers both and is too
+                // coarse to discriminate here.
+                if(tensor && tensor->has_uid() && !tensor->get_is_virtual()
+                   && !tensor->get_has_compile_time_constant()
+                   && !tensor->get_pass_by_value().has_value())
                 {
                     if(variantPack.find(tensor->get_uid()) == variantPack.end())
                     {
