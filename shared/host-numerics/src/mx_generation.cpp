@@ -179,11 +179,16 @@ std::optional<uint8_t> explicitScaleRaw(const MxGenerationInvocation& problem) {
     throw std::invalid_argument("Invalid MX scale generation mode.");
 }
 
-double generatedValue(const MxGenerationInvocation& problem, size_t row, size_t column,
-                      size_t logicalIndex) {
+double generatedValue(const detail::PreparedNumericalGenerator& generator, const Shape& shape,
+                      size_t row, size_t column, size_t logicalIndex) {
     const std::array<size_t, 2> indices{row, column};
-    return detail::generatedNumericalValue(problem.data.recipe(), indices, problem.shape,
-                                           logicalIndex, problem.dataType);
+    return generator(indices, shape, logicalIndex);
+}
+
+size_t generationRecipeIndex(const MxGenerationInvocation& problem, size_t row, size_t column) {
+    return problem.data.recipe().indexOrder() == IndexOrder::FirstDimensionFastest
+               ? row + column * problem.shape[0]
+               : column + row * problem.shape[1];
 }
 
 std::vector<double> decodedDataValues(ScalarType dataType) {
@@ -233,6 +238,8 @@ void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlockin
     const size_t rows = problem.shape[0];
     const size_t leadingDimension =
         problem.leadingDimension == 0 ? rows : static_cast<size_t>(problem.leadingDimension);
+    const detail::PreparedRawGenerator generator =
+        detail::prepareRawGenerator(problem.data.recipe(), problem.dataType);
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(threadCount)
@@ -252,16 +259,13 @@ void generateUnbounded(const MxGenerationInvocation& problem, const ScaleBlockin
         for (size_t offset = 0; offset < blocking.blockElementCount(block); ++offset) {
             const auto [row, column] = blocking.dataCoordinates(block, freeCoordinate, offset);
             const std::array<size_t, 2> indices{row, column};
-            const size_t recipeIndex =
-                problem.shape.linearIndex(indices, problem.data.recipe().indexOrder());
+            const size_t recipeIndex = generationRecipeIndex(problem, row, column);
             const size_t logicalIndex = row + column * rows;
             const size_t physicalIndex = row + column * leadingDimension;
             const uint16_t dataBits = scalarTypeInfo(problem.dataType).storageBits;
             const uint8_t dataMask = static_cast<uint8_t>((uint16_t{1} << dataBits) - 1U);
             const uint8_t dataRaw =
-                static_cast<uint8_t>(detail::generatedRawValue(
-                    problem.data.recipe(), indices, problem.shape, recipeIndex, problem.dataType)) &
-                dataMask;
+                static_cast<uint8_t>(generator(indices, problem.shape, recipeIndex)) & dataMask;
             dataRawValues[physicalIndex] = dataRaw;
             scaleIndexValues[logicalIndex] = static_cast<uint32_t>(scaleIndex);
             referenceValues[logicalIndex] = static_cast<float>(dataValues[dataRaw] * scaleValue);
@@ -284,6 +288,8 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
                    : finiteNonzeroScaleCandidates(problem.scaleType);
     const std::vector<double> dataValues = decodedDataValues(problem.dataType);
     const double maximumDataValue = detail::typeMaximum(problem.dataType);
+    const detail::PreparedNumericalGenerator generator =
+        detail::prepareNumericalGenerator(problem.data.recipe(), problem.dataType);
 
     auto generateRange = [&](size_t firstScaleIndex, size_t endScaleIndex) {
         std::vector<double> blockValues(
@@ -299,10 +305,9 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
                 for (size_t offset = 0; offset < blockElementCount; ++offset) {
                     const auto [row, column] =
                         blocking.dataCoordinates(block, freeCoordinate, offset);
-                    const std::array<size_t, 2> indices{row, column};
-                    const size_t recipeIndex =
-                        problem.shape.linearIndex(indices, problem.data.recipe().indexOrder());
-                    const double value = generatedValue(problem, row, column, recipeIndex);
+                    const size_t recipeIndex = generationRecipeIndex(problem, row, column);
+                    const double value =
+                        generatedValue(generator, problem.shape, row, column, recipeIndex);
                     blockValues[offset] = value;
                     hasNaN = hasNaN || std::isnan(value);
                     if (std::isfinite(value))
@@ -334,13 +339,14 @@ void generateQuantized(const MxGenerationInvocation& problem, const ScaleBlockin
                 const auto [row, column] = blocking.dataCoordinates(block, freeCoordinate, offset);
                 const size_t logicalIndex = row + column * rows;
                 const size_t physicalIndex = row + column * leadingDimension;
-                const std::array<size_t, 2> indices{row, column};
-                const size_t recipeIndex =
-                    problem.shape.linearIndex(indices, problem.data.recipe().indexOrder());
-                const double sourceValue =
-                    fixedScale || problem.scale == MxScaleGenerationMode::RandomFinite
-                        ? generatedValue(problem, row, column, recipeIndex)
-                        : blockValues[offset];
+                double sourceValue;
+                if (fixedScale || problem.scale == MxScaleGenerationMode::RandomFinite) {
+                    const size_t recipeIndex = generationRecipeIndex(problem, row, column);
+                    sourceValue =
+                        generatedValue(generator, problem.shape, row, column, recipeIndex);
+                } else {
+                    sourceValue = blockValues[offset];
+                }
                 const double scaledValue =
                     sourceValue == 0.0 ? sourceValue : sourceValue / scaleValue;
                 uint8_t dataRaw = dataRawForValue(problem.dataType, scaledValue);

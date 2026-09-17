@@ -7,8 +7,14 @@
 #include <cstdint>
 #include <roc/host_numerics/generation.hpp>
 
+#include "generation_primitives.hpp"
+
 namespace roc::host_numerics::detail {
-double indexedUniformUnit(uint64_t seed, uint64_t domain, uint64_t index);
+inline double indexedUniformUnit(uint64_t seed, uint64_t domain, uint64_t index) {
+    constexpr double inverseTwoTo53 = 1.0 / 9007199254740992.0;
+    const uint64_t mantissa = counterRandom(seed, domain, index) >> 11;
+    return (static_cast<double>(mantissa) + 0.5) * inverseTwoTo53;
+}
 ScalarType generationComponentType(ScalarType type);
 double typeMaximum(ScalarType requestedType);
 double typeLowest(ScalarType requestedType);

@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -20,6 +21,7 @@ using namespace roc::host_numerics;
 
 struct Options {
     ScalarType type;
+    std::string recipe;
     size_t rows;
     size_t columns;
     size_t batches;
@@ -36,34 +38,51 @@ size_t parseSize(const char* text, const char* name) {
 }
 
 ScalarType parseType(std::string_view name) {
-    if (name == "f32") return ScalarType::Float32;
-    if (name == "f16") return ScalarType::Float16;
-    if (name == "bf16") return ScalarType::BFloat16;
-    if (name == "f8") return ScalarType::Float8E4M3;
-    if (name == "bf8") return ScalarType::Float8E5M2;
-    if (name == "i8") return ScalarType::Int8;
-    if (name == "c64") return ScalarType::ComplexFloat32;
-    if (name == "c128") return ScalarType::ComplexFloat64;
-    throw std::invalid_argument("Type must be f32, f16, bf16, f8, bf8, i8, c64, or c128.");
+    for (size_t index = 0; index < scalarTypeCount; ++index) {
+        const ScalarType type = static_cast<ScalarType>(index);
+        if (name == scalarTypeName(type)) return type;
+    }
+    throw std::invalid_argument("Unknown scalar type.");
 }
 
 Options parseOptions(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--help") {
         std::cout << "Usage: host-numerics-generation-benchmark "
-                     "<f32|f16|bf16|f8|bf8|i8|c64|c128> <rows> <columns> <batches> "
-                     "<warmups> <iterations>\n";
+                     "<scalar-type> "
+                     "<zero|constant|uniform-integer|uniform-real|normal|sine|serial> "
+                     "<rows> <columns> <batches> <warmups> <iterations>\n";
         std::exit(0);
     }
-    if (argc != 7) throw std::invalid_argument("Use --help for benchmark arguments.");
+    if (argc != 8) throw std::invalid_argument("Use --help for benchmark arguments.");
 
     return {
         .type = parseType(argv[1]),
-        .rows = parseSize(argv[2], "rows"),
-        .columns = parseSize(argv[3], "columns"),
-        .batches = parseSize(argv[4], "batches"),
-        .warmups = parseSize(argv[5], "warmup count"),
-        .iterations = parseSize(argv[6], "iteration count"),
+        .recipe = argv[2],
+        .rows = parseSize(argv[3], "rows"),
+        .columns = parseSize(argv[4], "columns"),
+        .batches = parseSize(argv[5], "batches"),
+        .warmups = parseSize(argv[6], "warmup count"),
+        .iterations = parseSize(argv[7], "iteration count"),
     };
+}
+
+GenerationRecipe generationRecipe(std::string_view name) {
+    using Component = GenerationRecipe::Component;
+    Component component = [&] {
+        if (name == "zero") return GenerationRecipe::zero();
+        if (name == "constant") return GenerationRecipe::constant({.value = 0.25});
+        if (name == "uniform-integer")
+            return GenerationRecipe::uniformInteger({.lower = -2, .upper = 2});
+        if (name == "uniform-real")
+            return GenerationRecipe::uniformReal({.lower = -0.5, .upper = 0.5});
+        if (name == "normal") return GenerationRecipe::normal({});
+        if (name == "sine") return GenerationRecipe::sine();
+        if (name == "serial") return GenerationRecipe::serialIndex();
+        throw std::invalid_argument(
+            "Recipe must be zero, constant, uniform-integer, uniform-real, normal, sine, or "
+            "serial.");
+    }();
+    return GenerationRecipe::realOnly(std::move(component), {.seed = 17});
 }
 
 double median(std::vector<double> values) {
@@ -81,9 +100,10 @@ int main(int argc, char** argv) {
 
         const Shape shape{options.rows, options.columns, options.batches};
         const Layout layout = Layout::contiguousFirstDimensionFastest(shape);
-        Tensor output = Tensor::allocateUninitialized(options.type, layout);
-        const GenerationRecipe recipe = GenerationRecipe::realOnly(
-            GenerationRecipe::uniformReal({.lower = -0.5, .upper = 0.5}), {.seed = 17});
+        Tensor output = scalarTypeInfo(options.type).isPacked()
+                            ? Tensor(options.type, layout)
+                            : Tensor::allocateUninitialized(options.type, layout);
+        const GenerationRecipe recipe = generationRecipe(options.recipe);
 
         for (size_t iteration = 0; iteration < options.warmups; ++iteration)
             generate(output, recipe);
@@ -109,9 +129,10 @@ int main(int argc, char** argv) {
                     shape.coordinates(index, IndexOrder::FirstDimensionFastest));
         }
         std::cout << std::setprecision(10) << "type=" << scalarTypeName(options.type)
-                  << ",rows=" << options.rows << ",columns=" << options.columns
-                  << ",batches=" << options.batches << ",bytes=" << bytes
-                  << ",warmups=" << options.warmups << ",iterations=" << options.iterations
+                  << ",recipe=" << options.recipe << ",rows=" << options.rows
+                  << ",columns=" << options.columns << ",batches=" << options.batches
+                  << ",bytes=" << bytes << ",warmups=" << options.warmups
+                  << ",iterations=" << options.iterations
                   << ",min_ms=" << *std::ranges::min_element(milliseconds)
                   << ",median_ms=" << medianMs << ",mean_ms=" << meanMs
                   << ",gigabytes_per_second=" << static_cast<double>(bytes) / (medianMs * 1.0e6)
