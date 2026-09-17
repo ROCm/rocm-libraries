@@ -6,6 +6,7 @@ import subprocess
 import sys
 import pytest
 
+
 @pytest.mark.parametrize("route", ["comgr", "hip"])
 @pytest.mark.parametrize("dtype_c", ["bf16", "fp16"])
 @pytest.mark.parametrize("m,n,k", [(16, 16, 128), (32, 48, 256)])
