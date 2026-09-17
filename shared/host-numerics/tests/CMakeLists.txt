@@ -286,6 +286,16 @@ if(HOST_NUMERICS_BUILD_BENCHMARKS)
     )
 
     add_executable(
+        host-numerics-generation-benchmark
+        generation_benchmark.cpp
+    )
+    target_link_libraries(
+        host-numerics-generation-benchmark
+        PRIVATE
+            roc::host-numerics
+    )
+
+    add_executable(
         host-numerics-gemm-benchmark
         gemm_benchmark.cpp
     )
