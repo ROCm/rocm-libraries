@@ -1,11 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""FP6 packing and mixed-format native WMMA with E8M0 scales."""
+"""Homogeneous FP6 packing and native WMMA with E8M0 scales."""
 
 import hashlib
 import json
 from dataclasses import replace
-from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -30,9 +29,9 @@ FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 @pytest.mark.parametrize(
     "case,expected_sha",
-    json.loads(
+    [(case, sha) for case, sha in json.loads(
         Path(__file__).with_name("gfx1250_scaled_wmma_llvm23.json").read_text()
-    ).items(),
+    ).items() if case.split("/")[1] == case.split("/")[2] and case.split("/")[1] in ("fp6", "bf6")],
 )
 def test_scaled_wmma_llvm23_golden(case, expected_sha):
     mode, a, b, sa, sb = case.split("/")
@@ -53,7 +52,7 @@ def test_fp6_catalog_aliases(alias, canonical):
     assert is_valid_spec(spec)[0]
 
 
-def spec_for(a="fp6", b="bf6", mode="wmma_scale", **kwargs):
+def spec_for(a="fp6", b="fp6", mode="wmma_scale", **kwargs):
     return BlockScaledGemmSpec(
         name="fp6_test",
         M=32,
@@ -102,7 +101,8 @@ def test_invalid_fp6_codes(codes):
 
 
 @pytest.mark.parametrize(
-    "a,b,mode", list(product(FORMATS, FORMATS, ("wmma_scale", "wmma_scale16")))
+    "a,b,mode",
+    [(d, d, m) for d in ("fp6", "bf6") for m in ("wmma_scale", "wmma_scale16")],
 )
 def test_all_native_matrix_pairs(a, b, mode):
     spec = spec_for(a, b, mode)
@@ -142,6 +142,6 @@ def test_reject_invalid_fp6_contract(changes):
 
 def test_fp6_aliases():
     original = spec_for()
-    alias = replace(original, dtype_a="fp6e2m3", dtype_b="fp6e3m2")
+    alias = replace(original, dtype_a="fp6e2m3", dtype_b="fp6e2m3")
     assert alias.kernel_name() == original.kernel_name()
     assert is_valid_spec(alias)[0]

@@ -15,11 +15,9 @@ IR's `KernelDef.params`. Body locals are named after IR SSA values
 
 from __future__ import annotations
 
-
 from typing import List, Optional
 
-from .scaled_wmma import SCALED_WMMA_OPS
-
+from .arch.wmma_scale import gfx1250_scaled_wmma
 from .ir import (
     KernelDef,
     Op,
@@ -534,8 +532,8 @@ class _Lowerer:
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
         op_id = op.attrs["op_id"]
-        if op_id in SCALED_WMMA_OPS:
-            self._emit_wmma_gfx1250_scaled(op, op_id=op_id)
+        if gfx1250_scaled_wmma(op_id) is not None:
+            self._emit_wmma_gfx1250_scaled(op)
             return
         legacy = Op(
             name=f"tile.{op_id}",
@@ -659,16 +657,16 @@ class _Lowerer:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
     def _op_tile_wmma_scale_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=False)
+        self._emit_wmma_gfx1250_scaled(op)
 
     def _op_tile_wmma_scale_f32_16x16x128_fp4_fp4(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=False, fmt=4)
+        self._emit_wmma_gfx1250_scaled(op)
 
     def _op_tile_wmma_scale16_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=True)
+        self._emit_wmma_gfx1250_scaled(op)
 
     def _op_tile_wmma_scale16_f32_16x16x128_fp4_fp4(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=True, fmt=4)
+        self._emit_wmma_gfx1250_scaled(op)
 
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
@@ -681,20 +679,17 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
         )
 
-    def _emit_wmma_gfx1250_scaled(
-        self, op: Op, *, scale16: bool = False, fmt: int = 0, op_id: str | None = None
-    ) -> None:
-        if op_id is None:
-            mode = "wmma_scale16" if scale16 else "wmma_scale"
-            dtype = "fp4" if fmt == 4 else "fp8"
-            op_id = f"{mode}_f32_16x16x128_{dtype}_{dtype}"
-        scale16, fmt_a, fmt_b = SCALED_WMMA_OPS[op_id]
-
+    def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:
+        spec = gfx1250_scaled_wmma(op.attrs.get("op_id", op.name))
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        op_id = spec.op_id
+        fmt_a, fmt_b = spec.matrix_format, spec.matrix_format_b
         self._require_wmma_arch(op_id)
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
             "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
-            if scale16
+            if spec.scale16
             else "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4"
         )
         self._emit(

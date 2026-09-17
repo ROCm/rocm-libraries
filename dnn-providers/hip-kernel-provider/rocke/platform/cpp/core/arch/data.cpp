@@ -61,6 +61,8 @@ static const rocke_ati_dtype_alias_t k_dtype_aliases[] = {
     {"fp6e3m2", "bf6"},
     {"bf8", "bf8e5m2"},
     {"bf8e5m2", "bf8e5m2"},
+    {"fp4", "fp4"},
+    {"fp4e2m1", "fp4"},
     {"iu8", "iu8"},
     {"iu4", "iu4"},
     {"i8", "i8"},
@@ -1102,8 +1104,7 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
- * NOTE: fp4/fp6 dtypes are not in _DTYPE_ALIASES, so normalize_dtype passes them
- * through as the lowercased spelling "fp4"/"fp6" (Python identity fallthrough).
+ * FP4 E2M1 spellings normalize to "fp4"; "fp6" passes through unchanged.
  */
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */

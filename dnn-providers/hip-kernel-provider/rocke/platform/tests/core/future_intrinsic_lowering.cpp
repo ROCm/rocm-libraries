@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -585,6 +586,25 @@ void case_gfx1250_scaled_wmma()
          "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4",
          "i64"},
     };
+
+    const rocke_arch_target_t* arch = rocke_arch_target_from_gfx("gfx1250");
+    char scratch[32];
+    if(strcmp(rocke_normalize_dtype(" FP4E2M1 ", scratch, sizeof(scratch)), "fp4") != 0)
+    {
+        fail("fp4e2m1 must normalize to fp4", __LINE__);
+    }
+    for(const Variant& v : variants)
+    {
+        const char* family = v.scale16 ? "wmma_scale16" : "wmma_scale";
+        if(!arch
+           || !rocke_mma_catalog_has_shape(
+               &arch->mma, family, "fp4e2m1", "fp4", "fp32", 16, 16, 128)
+           || !rocke_mma_catalog_has_shape(
+               &arch->mma, family, "fp4", "fp4e2m1", "fp32", 16, 16, 128))
+        {
+            fail("fp4e2m1 must select the packed FP4 atom for either operand", __LINE__);
+        }
+    }
 
     for(int fmt : {0, 4})
     {

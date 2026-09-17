@@ -25,7 +25,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/lower_llvm_internal.h"
-#include "rocke/scaled_wmma_internal.h"
+#include "rocke/wmma_scale_internal.h"
 
 namespace ckc
 {
@@ -36,7 +36,7 @@ namespace ckc
 static void _op_tile_wmma_f32_16x16x16_f16(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_wmma_f32_16x16x16_bf16(rocke_lower_t* L, const rocke_op_t* op);
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id);
-static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, const char* op_id);
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op);
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op);
@@ -135,9 +135,9 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
          * reject (Python ISABackend.emit_wmma raises NotImplementedError). The
          * gfx12-specific op_ids ("wmma_gfx12_*") can only occur on RDNA4. */
     }
-    else if(strncmp(op_id, "wmma_scale", 10) == 0)
+    else if(rocke_gfx1250_scaled_wmma(op_id))
     {
-        _emit_wmma_scale(L, op, op_id);
+        _emit_wmma_scale(L, op);
     }
     else if(strncmp(op_id, "wmma_", 5) == 0)
     {
@@ -173,7 +173,7 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
 /* gfx1250 native scaled FP8/FP4 WMMA. ROCm 7.13 introduced the LLVM 23 ABI:
  * matrix operands are <16 x i32>; SCALE carries four packed E8M0 bytes in
  * each i32 scale operand and SCALE16 carries eight in i64. */
-static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
+static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
 {
     const char* intrinsic;
     const char* decl_key;
@@ -184,16 +184,17 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, const char*
     {
         return;
     }
-    bool scale16;
-    int fmt_a, fmt_b;
-    if(!rocke_wmma_scaled_formats(op_id, &scale16, &fmt_a, &fmt_b))
+    const rocke_scaled_wmma_op_t* spec = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!spec)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unknown scaled WMMA atom '%s'", op_id);
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
     }
-    char name[160];
-    snprintf(name, sizeof(name), "tile.%s", op_id);
-    op_name = name;
-
+    const bool scale16 = spec->scales.block_k == 16;
+    const int fmt_a = spec->matrix_format;
+    const int fmt_b = spec->matrix_format_b;
+    char concrete_name[160];
+    snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
+    op_name = concrete_name;
     if(!L->backend || strcmp(L->backend->gfx, "gfx1250") != 0)
     {
         rocke_ll_fail(L,
@@ -216,7 +217,9 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op, const char*
             L, ROCKE_ERR_VALUE, "%s expects 5 operands, got %d", op_name, op->num_operands);
     }
 
-    scale_ty = scale16 ? "i64" : "i32";
+    char packed_type[8];
+    snprintf(packed_type, sizeof(packed_type), "i%d", rocke_e8m0_scale_word_bits(&spec->scales));
+    scale_ty = packed_type;
     if(strcmp(op->operands[3]->type->name, scale_ty) != 0
        || strcmp(op->operands[4]->type->name, scale_ty) != 0)
     {

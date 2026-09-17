@@ -23,7 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..scaled_wmma import SCALED_WMMA_OPS
+from .wmma_scale import SCALED_WMMA_OPS
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
@@ -44,6 +44,8 @@ _DTYPE_ALIASES = {
     "fp6e3m2": "bf6",
     "bf8": "bf8e5m2",
     "bf8e5m2": "bf8e5m2",
+    "fp4": "fp4",
+    "fp4e2m1": "fp4",
     # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
     # (signedness is an instruction operand, not the dtype); "i32" is the
     # integer accumulator. Scalar int spellings pass through for completeness.

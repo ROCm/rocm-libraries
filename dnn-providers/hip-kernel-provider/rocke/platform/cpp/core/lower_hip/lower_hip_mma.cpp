@@ -30,7 +30,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
-#include "rocke/scaled_wmma_internal.h"
+#include "rocke/wmma_scale_internal.h"
 
 #include <stdio.h> /* snprintf */
 #include <stdlib.h> /* atoi     */
@@ -76,16 +76,17 @@ static const char* h_elem_scalar(const rocke_type_t* t)
  * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
  * op.attrs), so a synthetic op aliasing the same operands/results/regions and
  * reusing the original attrs map reproduces the Python emission exactly. */
-static rocke_status_t
-    h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
+static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    bool scale16;
-    int fmt_a, fmt_b;
-    if(!rocke_wmma_scaled_formats(op_id, &scale16, &fmt_a, &fmt_b))
+    const rocke_scaled_wmma_op_t* spec = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!spec)
     {
-        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "unknown scaled WMMA atom '%s'", op_id);
+        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
     }
-
+    const char* op_id = spec->op_id;
+    const bool scale16 = spec->scales.block_k == 16;
+    const int fmt_a = spec->matrix_format;
+    const int fmt_b = spec->matrix_format_b;
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
     if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
@@ -131,9 +132,9 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
     }
-    if(strncmp(op_id, "wmma_scale", 10) == 0)
+    if(rocke_gfx1250_scaled_wmma(op_id))
     {
-        return h_emit_gfx1250_scaled_wmma(lw, op, op_id);
+        return h_emit_gfx1250_scaled_wmma(lw, op);
     }
     snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
     legacy_opcode = rocke_opcode_from_name(dotted);
