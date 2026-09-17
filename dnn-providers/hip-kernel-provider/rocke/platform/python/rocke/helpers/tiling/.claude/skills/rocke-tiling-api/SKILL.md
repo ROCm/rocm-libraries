@@ -144,15 +144,30 @@ single-owner.
 Settle the output location: propose `kernels/<kernel>/` (code + `docs/` + `docs/viz/` + `tmp/`) in one line
 and proceed unless the user objects. Only rocke-CORE changes touch the rocke source tree.
 
-**Round 1 — REQUIRED, never invented** (`AskUserQuestion`): goal (correctness / peak TFLOPS / a target /
-learning) · algorithm · ordered tensor descriptors (lengths, strides, dtype, memory space) · arch + wave size
-· **kernel name** · caller-side constraints (grid/launch convention, pointer/ABI shape, batch stride, fusion
-it must absorb, any fixed occupancy or LDS budget it shares). Required items are asked until answered.
+**Round 1 — REQUIRED, never invented.** `AskUserQuestion` takes at most FOUR questions per call, so this is
+two calls, not one:
+- **1a (the four that shape everything):** goal (correctness / peak TFLOPS / a target / learning) ·
+  algorithm · **ordered tensor descriptors** (lengths, strides, dtype, memory space) · arch + wave size.
+- **1b (two, and both are cheap to answer):** **kernel name** (names the output folder and every report) ·
+  **caller-side constraints** — grid/launch convention, pointer/ABI shape, batch stride, any fusion it must
+  absorb, any fixed occupancy or LDS budget it shares. "None" is a fine answer to the second; ask anyway,
+  because discovering a caller constraint at authoring time is the expensive place to discover it.
 
-**Round 2 — OPTIONAL levers**, offered once: layout style (canonical / interleaved / custom) · tiles · waves_m
-× waves_n · pipeline (named pattern or step list). "Skip, you decide" is a first-class answer. **Round-2
-answers are PROPOSALS subject to expert validation** — an expert may return one INVALID, which is a blocking
-issue.
+Required items are asked until answered — the two-round cap below is on the OPTIONAL levers, not on these.
+
+**Round 2 — OPTIONAL levers**, offered once: layout style · tiles · waves_m × waves_n · pipeline (named
+pattern or step list). "Skip, you decide" is a first-class answer. **Round-2 answers are PROPOSALS subject to
+expert validation** — an expert may return one INVALID, which is a blocking issue.
+
+**If the user has no preference on layout style, do not just name the three — give them the trade-off.** The
+MMA Expert owns the detailed comparison and the concrete encoding; surface the choice, then defer:
+- *canonical (basic):* direct hardware placement (label == position) — simplest, no derivation or relabel.
+  But it is locked to native placement, so a store- or coalesce-friendly layout can force strided or
+  cross-lane movement elsewhere in the chain.
+- *interleaved:* labels flow for wide coalesced load/store, LDS reuse, and a store-friendly derived C — at
+  the cost of a derivation (position ≠ label) plus a dtype-graded reorder, which is often free via a symmetry.
+- *custom:* the user supplies their own `make_tile_desc` encodings; the MMA Expert validates soundness and
+  vectorization before anything is built on them.
 
 Then dispatch the architect to **CLASSIFY**: GEMM-family → Tiling+MMA+LDS · non-MMA → Tiling+GPU · NOVEL →
 the architect offers to learn it *with the user* (derive data-movement, compute structure, tensor signature,
