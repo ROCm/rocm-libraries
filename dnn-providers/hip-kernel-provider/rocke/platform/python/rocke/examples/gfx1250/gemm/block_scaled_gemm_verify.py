@@ -410,7 +410,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--dtype",
         default="fp8e4m3",
-        choices=("fp8e4m3", "bf8e5m2", "fp4", "fp4e2m1", "fp6", "bf6", "fp6e2m3", "fp6e3m2"),
+        choices=(
+            "fp8e4m3",
+            "bf8e5m2",
+            "fp4",
+            "fp4e2m1",
+            "fp6",
+            "bf6",
+            "fp6e2m3",
+            "fp6e3m2",
+        ),
     )
     p.add_argument("--dtype-b", default=None)
     p.add_argument("--scale-dtype-a", default=None)

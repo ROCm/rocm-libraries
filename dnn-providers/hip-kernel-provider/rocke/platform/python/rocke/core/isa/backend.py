@@ -624,7 +624,12 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         intrinsic = f"llvm.amdgcn.wmma.{mode}.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
         scale_ty = spec.scales.llvm_type
         fmt_a, fmt_b = spec.matrix_format, spec.matrix_format_b
-        sa, sb = scale_formats(fmt_a, fmt_b, op.attrs.get("scale_dtype_a", "e8m0"), op.attrs.get("scale_dtype_b", "e8m0"))
+        sa, sb = scale_formats(
+            fmt_a,
+            fmt_b,
+            op.attrs.get("scale_dtype_a", "e8m0"),
+            op.attrs.get("scale_dtype_b", "e8m0"),
+        )
         a, b, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(

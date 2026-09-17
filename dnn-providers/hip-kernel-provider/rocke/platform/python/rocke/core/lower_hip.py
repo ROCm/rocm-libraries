@@ -686,7 +686,12 @@ class _Lowerer:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
         op_id = spec.op_id
         fmt_a, fmt_b = spec.matrix_format, spec.matrix_format_b
-        sa, sb = scale_formats(fmt_a, fmt_b, op.attrs.get("scale_dtype_a", "e8m0"), op.attrs.get("scale_dtype_b", "e8m0"))
+        sa, sb = scale_formats(
+            fmt_a,
+            fmt_b,
+            op.attrs.get("scale_dtype_a", "e8m0"),
+            op.attrs.get("scale_dtype_b", "e8m0"),
+        )
         self._require_wmma_arch(op_id)
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
