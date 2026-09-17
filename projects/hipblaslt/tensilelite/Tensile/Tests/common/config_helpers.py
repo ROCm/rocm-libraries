@@ -38,6 +38,9 @@ from Tensile.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
+# Safe either way; bandit's B506 check only recognises the SafeLoader/CSafeLoader spelling,
+# so the call sites using this name carry a bare nosec marker. Never spell that marker out
+# with its leading hash here, or bandit parses this comment too (SEC-00404).
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
 except AttributeError:
@@ -115,7 +118,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, DEFAULT_YAML_LOADER)
+            doc = yaml.load(f, DEFAULT_YAML_LOADER)  # nosec B506
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks
@@ -140,13 +143,36 @@ def configMarks(filepath, rootDir, availableArchs):
         marks.append(markNamed(arch_in_name.group(1)))
 
     # Architecture specific xfail marks
+    under_ffm = bool(os.environ.get("HSA_MODEL_MEMFILE"))
     for arch in availableArchs:
         ArchFail = "xfail-%s" % arch
         if markNamed(ArchFail) in marks:
-            marks.append(pytest.mark.xfail)
+            # xfail-<arch> encodes a real-hardware expectation. Under FFM the config
+            # often passes (no CheckASMCodeSize / emulated exec), which xfail_strict
+            # would turn into an XPASS failure. Skip the arch-xfail under FFM; a config
+            # that ALSO fails under emulation carries ffm_fail (handled below).
+            if not under_ffm:
+                marks.append(pytest.mark.xfail)
         ArchSkip = "skip-%s" % arch
         if markNamed(ArchSkip) in marks:
             marks.append(pytest.mark.skip)
+
+    # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
+    rocisa_backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+    if rocisa_backend == "stinkytofu" and markNamed("skip-stinkytofu") in marks:
+        marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
+
+    # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
+    # fails under FFM emulation only. Turn it into an xfail only when running 
+    # under FFM — keyed on the emulator's HSA_MODEL_MEMFILE backing plus the 
+    # gfx1250 arch — so it never fires on HW or on other emulators/arches, 
+    # where the test must still run.
+    if (
+        os.environ.get("HSA_MODEL_MEMFILE")
+        and "gfx1250" in availableArchs
+        and markNamed("ffm_fail") in marks
+    ):
+        marks.append(pytest.mark.xfail)
 
     validate = True
     validateAll = False
@@ -194,7 +220,8 @@ def findAvailableArchs(gpu_targets=None):
         List of architecture strings (e.g. ["gfx942"]).
     """
     if gpu_targets:
-        return [t.strip() for t in gpu_targets.split(";") if t.strip()]
+        # Strip a trailing version suffix so architecture marks match the base gfx target.
+        return [re.sub(r"v\d+$", "", t.strip()) for t in gpu_targets.split(";") if t.strip()]
 
     from Tensile.Tests.gpu_detection import get_available_archs
     return get_available_archs()

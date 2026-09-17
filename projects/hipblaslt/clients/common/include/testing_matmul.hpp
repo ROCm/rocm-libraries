@@ -2413,6 +2413,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &dyn,
                     sizeof(dyn)));
             }
+            int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+            if(uso >= 0)
+            {
+                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                    matmul[0][i],
+                    HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                    &uso,
+                    sizeof(uso)));
+            }
         }
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
@@ -3775,6 +3784,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                         &dyn,
                         sizeof(dyn)));
                 }
+                int32_t uso = hipblaslt_bench_options::uniform_summation_order();
+                if(uso >= 0)
+                {
+                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                        matmul[b][i],
+                        HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                        &uso,
+                        sizeof(uso)));
+                }
             }
 
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
@@ -3857,45 +3875,30 @@ void testing_matmul_with_bias(const Arguments& arg,
     // as batch_count for reusing existing GroupedGEMM code for General Batched GEMM
     batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY ? gemm_count = arg.batch_count : gemm_count;
     // C to Cpp API for GG
-    std::vector<std::vector<void*>> da(block_count, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> db(block_count, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> dc(block_count, std::vector<void*>(gemm_count));
-    std::vector<std::vector<void*>> dd(block_count, std::vector<void*>(gemm_count));
-
-    std::vector<std::vector<uint64_t*>> da1(block_count, std::vector<uint64_t*>(gemm_count));
-    std::vector<std::vector<uint64_t*>> db1(block_count, std::vector<uint64_t*>(gemm_count));
-    std::vector<std::vector<uint64_t*>> dc1(block_count, std::vector<uint64_t*>(gemm_count));
-    std::vector<std::vector<uint64_t*>> dd1(block_count, std::vector<uint64_t*>(gemm_count));
+    const auto groupedGemmBlockCount = do_grouped_gemm ? block_count : 0;
+    std::vector<std::vector<void*>> da(groupedGemmBlockCount, std::vector<void*>(gemm_count));
+    std::vector<std::vector<void*>> db(groupedGemmBlockCount, std::vector<void*>(gemm_count));
+    std::vector<std::vector<void*>> dc(groupedGemmBlockCount, std::vector<void*>(gemm_count));
+    std::vector<std::vector<void*>> dd(groupedGemmBlockCount, std::vector<void*>(gemm_count)); 
 
     std::vector<uint64_t*> dda, ddb, ddc, ddd;
-    std::vector<uint64_t*> hha, hhb, hhc, hhd;
-
-    for(int i = 0; i < block_count; i++)
+    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        uint64_t* ptr = nullptr;
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        dda.push_back(ptr);
+        for(int i = 0; i < block_count; i++)
+        {
+            uint64_t* ptr = nullptr;
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            dda.push_back(ptr);
 
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hha.push_back(ptr);
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            ddb.push_back(ptr);
 
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        ddb.push_back(ptr);
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            ddc.push_back(ptr);
 
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hhb.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        ddc.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hhc.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        ddd.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hhd.push_back(ptr);
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            ddd.push_back(ptr);
+        }
     }
 
     for(int32_t b = 0; b < block_count; b++)
@@ -4047,37 +4050,30 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
     }
-    else
+    else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
-        {
-            for(int32_t b = 0; b < block_count; b++)
-            {
-                da1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dA[gemmIdx].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA));
-                db1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dB[gemmIdx].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB));
-                dc1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (dC[gemmIdx].as<char>()) + b * size_C[0] * realDataTypeSize(To));
-                dd1[b][gemmIdx] = reinterpret_cast<uint64_t*>(
-                    (*dDp)[gemmIdx].as<char>() + b * size_D[0] * realDataTypeSize(To));
-            }
-        }
-    }
-
-    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
-    {
-        //Copy The pointer arrays to Device [General Batched GEMM]
+        std::vector<uint64_t*> da1(gemm_count), db1(gemm_count), dc1(gemm_count), dd1(gemm_count);
         for(int32_t b = 0; b < block_count; b++)
         {
+            for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+            {
+                da1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (dA[gemmIdx].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA));
+                db1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (dB[gemmIdx].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB));
+                dc1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (dC[gemmIdx].as<char>()) + b * size_C[0] * realDataTypeSize(To));
+                dd1[gemmIdx] = reinterpret_cast<uint64_t*>(
+                    (*dDp)[gemmIdx].as<char>() + b * size_D[0] * realDataTypeSize(To));
+            }
             CHECK_HIP_ERROR(hipMemcpy(
-                dda[b], da1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                dda[b], da1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddb[b], db1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddb[b], db1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddc[b], dc1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddc[b], dc1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemcpy(
-                ddd[b], dd1[b].data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
+                ddd[b], dd1.data(), gemm_count * sizeof(uint64_t*), hipMemcpyHostToDevice));
         }
     }
 
@@ -6267,16 +6263,15 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     //Freeing the device memory allocated for the General Batched GEMM Pointer Arrays
-    for(int i = 0; i < block_count; i++)
+    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        CHECK_HIP_ERROR(hipFree(dda[i]));
-        CHECK_HIP_ERROR(hipFree(ddb[i]));
-        CHECK_HIP_ERROR(hipFree(ddc[i]));
-        CHECK_HIP_ERROR(hipFree(ddd[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hha[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hhb[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hhc[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hhd[i]));
+        for(int i = 0; i < block_count; i++)
+        {
+            CHECK_HIP_ERROR(hipFree(dda[i]));
+            CHECK_HIP_ERROR(hipFree(ddb[i]));
+            CHECK_HIP_ERROR(hipFree(ddc[i]));
+            CHECK_HIP_ERROR(hipFree(ddd[i]));
+        }
     }
 
     if(dWorkspace != nullptr)

@@ -139,6 +139,26 @@ namespace rocsparse_ut
         }
     };
 
+    // ----- device -> host readback ------------------------------------------
+    // Copies `count` elements from a device pointer into a host vector so tests
+    // can assert on the *numerical output* of a routine (not just its status).
+    template <typename T>
+    std::vector<T> to_host(const T* device_ptr, size_t count)
+    {
+        std::vector<T> host(count);
+        if(count > 0 && device_ptr != nullptr)
+        {
+            (void)hipMemcpy(host.data(), device_ptr, count * sizeof(T), hipMemcpyDeviceToHost);
+        }
+        return host;
+    }
+
+    template <typename T>
+    std::vector<T> to_host(const device_vector<T>& d)
+    {
+        return to_host<T>(d.ptr, d.n);
+    }
+
     // ----- fixture owning a handle ------------------------------------------
     class HandleTest : public ::testing::Test
     {
@@ -154,4 +174,111 @@ namespace rocsparse_ut
                 EXPECT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
         }
     };
+
+    // ========================================================================
+    // Device test-kernel harness (shared by the internal-routine device tests)
+    // ========================================================================
+    //
+    // rocSPARSE's device building blocks (block/warp collectives, shuffles,
+    // segmented reductions, ...) are ROCSPARSE_DEVICE_ILF functions declared in
+    // library/src/include/rocsparse_common.hpp and the level-* device headers.
+    // They are meant to be *called from inside a kernel*, so a unit test cannot
+    // call them directly from the host. The proven pattern (see
+    // unit_test_device_level1.cpp) is:
+    //
+    //   1. Write a thin __global__ wrapper in your test TU that calls the
+    //      internal device function and stores its result into a device buffer.
+    //   2. Launch that wrapper on ONE block (or ONE warp) with tiny inputs.
+    //   3. Read the result back with rocsparse_ut::to_host and assert on it.
+    //
+    // The helpers below remove the launch/synchronize boilerplate. They are
+    // header-only and only compiled when the including TU is built as HIP device
+    // code (the rocsparse-unit-test-device target); on the host-only
+    // rocsparse-unit-test target only the runtime warp-size accessor is defined.
+    //
+    // ------------------------------------------------------------------------
+    // Warp-size accessors
+    // ------------------------------------------------------------------------
+    // rocSPARSE's warp collectives are templated on the wavefront size (32 or
+    // 64). Tests must NOT hard-code or skip a wavefront: they instantiate the
+    // building block for BOTH 32 and 64 (so the wave64 instantiation is compiled
+    // and validated by CI's wave64 parts, gfx94x/gfx950) and, at run time,
+    // launch the instantiation matching the active device (see
+    // launch_warp_by_size / device_warp_size below).
+    //
+    // `device_warp_size()` (below) is the runtime wavefront size of the active
+    // device and is the value tests dispatch on.
+
+    // Runtime wavefront size of the active HIP device (32 on gfx1201, 64 on
+    // wave64 parts). Returns 0 if the device cannot be queried.
+    inline int device_warp_size()
+    {
+        int             dev   = 0;
+        hipDeviceProp_t props = {};
+        if(hipGetDevice(&dev) != hipSuccess)
+            return 0;
+        if(hipGetDeviceProperties(&props, dev) != hipSuccess)
+            return 0;
+        return props.warpSize;
+    }
+
+#ifdef __HIPCC__
+    // ------------------------------------------------------------------------
+    // Single-block / single-warp launch helpers
+    // ------------------------------------------------------------------------
+    // Launch `kernel` (a __global__ wrapper, or any callable usable with
+    // hipLaunchKernelGGL) on exactly ONE block of `block_dim` threads, forward
+    // `args...`, then hipDeviceSynchronize(). Returns the first non-success
+    // hipError_t (launch error or sync error), else hipSuccess. Pair with
+    // rocsparse_ut::to_host to read results back.
+    //
+    // Usage (inside a device test TU):
+    //
+    //   __global__ void k_reduce(const float* in, float* out)
+    //   { *out = rocsparse::blockreduce_sum<256>(threadIdx.x, in[threadIdx.x]); }
+    //
+    //   rocsparse_ut::device_vector<float> d_in(host_in), d_out(size_t{1});
+    //   ASSERT_EQ(rocsparse_ut::launch_single_block(k_reduce, 256, d_in.ptr, d_out.ptr),
+    //             hipSuccess);
+    //   EXPECT_FLOAT_EQ(rocsparse_ut::to_host(d_out)[0], expected);
+    template <typename Kernel, typename... Args>
+    hipError_t launch_single_block(Kernel kernel, unsigned int block_dim, Args... args)
+    {
+        hipLaunchKernelGGL(kernel, dim3(1), dim3(block_dim), 0, 0, args...);
+        const hipError_t launch = hipGetLastError();
+        if(launch != hipSuccess)
+            return launch;
+        return hipDeviceSynchronize();
+    }
+
+    // Launch `kernel` on exactly ONE warp (block of device_warp_size() threads).
+    // Convenient for warp-collective wrappers (wfreduce_*, shfl_*, ...).
+    template <typename Kernel, typename... Args>
+    hipError_t launch_single_warp(Kernel kernel, Args... args)
+    {
+        const int ws = device_warp_size();
+        return launch_single_block(kernel, static_cast<unsigned int>(ws > 0 ? ws : 32), args...);
+    }
+
+    // ------------------------------------------------------------------------
+    // Runtime wavefront-size dispatch for warp collectives
+    // ------------------------------------------------------------------------
+    // `k32` and `k64` are the WFSIZE==32 and WFSIZE==64 instantiations of a
+    // warp-collective __global__ wrapper. BOTH are referenced here, so both are
+    // compiled: CI's wave64 parts (gfx94x/gfx950) compile AND run the 64-lane
+    // path, this wave32 card compiles both and runs the 32-lane path. At run
+    // time we launch exactly one wavefront of the *device's* width and dispatch
+    // to the matching instantiation -- no wavefront is skipped. Returns
+    // hipErrorInvalidValue if the device reports an unsupported wavefront size.
+    template <typename Kernel32, typename Kernel64, typename... Args>
+    hipError_t launch_warp_by_size(Kernel32 k32, Kernel64 k64, Args... args)
+    {
+        const int ws = device_warp_size();
+        if(ws == 64)
+            return launch_single_block(k64, 64u, args...);
+        if(ws == 32)
+            return launch_single_block(k32, 32u, args...);
+        return hipErrorInvalidValue;
+    }
+#endif // __HIPCC__
 } // namespace rocsparse_ut

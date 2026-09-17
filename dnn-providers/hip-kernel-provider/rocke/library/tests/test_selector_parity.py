@@ -39,24 +39,16 @@ from kernels import UnifiedAttentionProblem
 
 
 def _patch_arch(arch: str):
-    """Pin _resolve_attention_arch in every module that imports it by name."""
-    patches = [mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)]
-    if getattr(_asb, "_resolve_attention_arch", None) is not None:
-        patches.append(
-            mock.patch.object(_asb, "_resolve_attention_arch", return_value=arch)
-        )
+    """Pin ``_resolve_attention_arch`` on the module that defines it.
 
-    class _Multi:
-        def __enter__(self):
-            for p in patches:
-                p.start()
-            return self
-
-        def __exit__(self, *exc):
-            for p in reversed(patches):
-                p.stop()
-
-    return _Multi()
+    That is sufficient because the spec builder reaches the resolver through its
+    ``attention_unified`` module handle -- a bound import there would freeze the
+    reference and silently leave the builder on the real device arch, so these
+    cases would test the host, not ``arch``. That invariant is pinned, statically
+    and behaviourally, by ``test_arch_binding_guard.py``; it is not re-asserted
+    here.
+    """
+    return mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)
 
 
 def _spec(problem: UnifiedAttentionProblem, arch: str = "gfx950") -> dict:

@@ -135,6 +135,7 @@ def load_config(path: Path) -> OperationConfig:
                 frontend_inverse_converter=df.get("frontend_inverse_converter", ""),
                 enum_def=enum_def,
                 mode_sentinel=mode_sentinel,
+                mode_converter_optional=df.get("mode_converter_optional"),
                 frontend_sentinel_only=df.get("frontend_sentinel_only", False),
             )
         )

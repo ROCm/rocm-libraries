@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,7 @@ std::string bluestein_single_rtc_kernel_name(const BluesteinSingleSpecs& specs)
     kernel_name += "_dim";
     kernel_name += std::to_string(specs.dim);
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
 
     if(specs.placement == rocfft_placement_inplace)
@@ -73,13 +74,13 @@ std::string bluestein_single_rtc(const std::string& kernel_name, const Bluestein
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
+    src += rtc_precision_type_decl(specs.precision);
+    src += rtc_kint_type_decl(specs.itype);
+    src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
     src += callback_h;
 
     src += butterfly_constant_h;
     append_radix_h(src, specs.factors);
-    src += rtc_precision_type_decl(specs.precision);
-
-    src += rtc_const_cbtype_decl(specs.cbtype);
 
     src += "static const unsigned int dim = " + std::to_string(specs.dim) + ";\n";
 
@@ -103,8 +104,8 @@ std::string bluestein_single_rtc(const std::string& kernel_name, const Bluestein
 
     Variable lds{"lds", "__shared__ scalar_type", false, false, transforms_per_block * lengthBlue};
 
-    func.body += CallbackLoadDeclaration("scalar_type", "cbtype");
-    func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
+    func.body += CallbackLoadDeclaration{};
+    func.body += CallbackStoreDeclaration{};
 
     func.body += Declaration{lds};
     func.body += Assign{bluestein.a, bluestein.buf_temp};
@@ -130,7 +131,7 @@ std::string bluestein_single_rtc(const std::string& kernel_name, const Bluestein
             func = make_planar(func, "X");
     }
 
-    func = make_callback_realcomplex(func, specs.cbtype);
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     src += func.render();
 
@@ -159,6 +160,7 @@ std::string bluestein_multi_rtc_kernel_name(const BluesteinMultiSpecs& specs)
         throw std::runtime_error("invalid bluestein rtc scheme");
     }
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
     kernel_name += rtc_array_type_name(specs.outArrayType);
@@ -222,6 +224,8 @@ static std::string bluestein_multi_chirp_rtc(const std::string&         kernel_n
         {Assign{output[tx], CallExpr{"scalar_type", {Literal{"0.0"}, Literal{"0.0"}}}},
          Assign{output[tx + M], CallExpr{"scalar_type", {Literal{"0.0"}, Literal{"0.0"}}}}}};
 
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
+
     auto src = func.render();
     write_standalone_test_harness(func, src);
     return src;
@@ -234,11 +238,10 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     src += rocfft_complex_h;
     src += common_h;
     src += device_enum_h;
-    src += callback_h;
-
     src += rtc_precision_type_decl(specs.precision);
-
-    src += rtc_const_cbtype_decl(specs.cbtype);
+    src += rtc_kint_type_decl(specs.itype);
+    src += load_store_decls(specs.loadOps, specs.storeOps, specs.cbtype);
+    src += callback_h;
 
     // chirp looks different from the other kernels
     if(specs.scheme == CS_KERNEL_CHIRP)
@@ -255,9 +258,9 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     Variable input{"input", "scalar_type", true, true};
     Variable output{"output", "scalar_type", true, true};
     Variable dim{"dim", "const size_t"};
-    Variable lengths{"lengths", "const size_t", true, true};
-    Variable stride_in{"stride_in", "const size_t", true, true};
-    Variable stride_out{"stride_out", "const size_t", true, true};
+    Variable lengths{"lengths", "const integer_type", true, true};
+    Variable stride_in{"stride_in", "const integer_type", true, true};
+    Variable stride_out{"stride_out", "const integer_type", true, true};
     Variable scale_factor{"scale_factor", "const real_type_t<scalar_type>"};
 
     Function func{kernel_name};
@@ -318,8 +321,8 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
     func.body += Declaration{iIdx, tx * stride_in[0]};
     func.body += Declaration{oIdx, tx * stride_out[0]};
 
-    func.body += CallbackLoadDeclaration("scalar_type", "cbtype");
-    func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
+    func.body += CallbackLoadDeclaration{};
+    func.body += CallbackStoreDeclaration{};
 
     switch(specs.scheme)
     {
@@ -391,6 +394,8 @@ std::string bluestein_multi_rtc(const std::string& kernel_name, const BluesteinM
         func = make_planar(func, "input");
     if(array_type_is_planar(specs.outArrayType))
         func = make_planar(func, "output");
+
+    func = make_callback_realcomplex(func, specs.cbtype, specs.loadOps, specs.storeOps);
 
     src += func.render();
     write_standalone_test_harness(func, src);

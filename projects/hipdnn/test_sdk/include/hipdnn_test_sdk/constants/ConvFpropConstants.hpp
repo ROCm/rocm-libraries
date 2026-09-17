@@ -41,4 +41,8 @@ constexpr int64_t K_FPROP_TENSOR_Y2_UID = 1005;
 constexpr std::array<int64_t, 4> K_FPROP_TENSOR_Y2_DIMS = {1, 128, 32, 32};
 constexpr std::array<int64_t, 4> K_FPROP_TENSOR_Y2_STRIDES = {131072, 1024, 32, 1};
 
+constexpr int64_t K_FPROP_TENSOR_RAGGED_OFFSET_UID = 2000;
+constexpr std::array<int64_t, 4> K_FPROP_TENSOR_RAGGED_OFFSET_DIMS = {2, 1, 1, 1};
+constexpr std::array<int64_t, 4> K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES = {1, 1, 1, 1};
+
 } // namespace hipdnn_tests::constants

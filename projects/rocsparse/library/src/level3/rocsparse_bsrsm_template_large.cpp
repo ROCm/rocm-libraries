@@ -237,7 +237,7 @@ namespace rocsparse
         const int         wfSize        = handle->wavefront_size;
 
         // gfx908 A0/1
-        if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+        if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
         {
             switch(fill_mode)
             {

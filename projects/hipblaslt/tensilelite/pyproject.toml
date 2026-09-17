@@ -83,7 +83,7 @@ dependencies = [
     "orjson",
     "yappi",
     "setuptools",
-    "nanobind",
+    "nanobind>=2.0,!=3.0.0",  # see rocisa/pyproject.toml for why 3.0.0 is excluded
     "cmake",
     "invoke",
     "filelock",
@@ -136,13 +136,14 @@ rocisa = { workspace = true }
 members = ["rocisa"]
 
 # Mutation testing (mutmut 3.x) — slice-1 pilot.
-# See the Mutation testing section of
-# Tensile/Tests/unit/characterization/README.md (full plan archived in the
-# internal TensileLiteQualityTools repo, evidence-archive/).
+# See projects/hipblaslt/skills/tensilelite-mutation-rerun/SKILL.md for the
+# optional workflow.
 # mutmut 3.x copies `source_paths` into a `mutants/` dir and runs the selected
 # tests there, so the WHOLE Tensile package is copied (for imports to resolve)
 # while `only_mutate` restricts which files are actually mutated to the slice.
-# `also_copy` must include pytest.ini (markers + config; not auto-copied).
+# `also_copy` must include pytest.ini (markers + config) and characterization
+# fixtures. mutmut caches the initial non-Python source copy, so snapshots must
+# be refreshed explicitly for the copied test tree to match the source suite.
 [tool.mutmut]
 source_paths = ["Tensile"]
 only_mutate = [
@@ -150,6 +151,8 @@ only_mutate = [
     "Tensile/Common/Utilities.py",
     "Tensile/Common/Types.py",
     "Tensile/Common/ValidParameters.py",
+    "Tensile/SolutionStructs/Naming.py",
+    "Tensile/SolutionStructs/Utilities.py",
     "Tensile/TensileLogic/ValidChipId.py",
     "Tensile/TensileLogic/ValidMatrixInstruction.py",
     "Tensile/TensileLogic/ValidWorkGroup.py",
@@ -165,10 +168,12 @@ pytest_add_cli_args_test_selection = [
     "Tensile/Tests/unit/characterization/CommonTypes",
     "Tensile/Tests/unit/characterization/CommonUtilities",
     "Tensile/Tests/unit/characterization/DataType",
+    "Tensile/Tests/unit/characterization/Naming",
+    "Tensile/Tests/unit/characterization/SolutionStructsUtils",
     "Tensile/Tests/unit/characterization/TensileLogic",
     "Tensile/Tests/unit/characterization/ValidParameters"
 ]
-also_copy = ["pytest.ini"]
+also_copy = ["pytest.ini", "Tensile/Tests/unit/characterization"]
 # mutate_only_covered_lines MUST stay false here: when true, mutmut runs an
 # in-process coverage gather whose _unload_modules_not_in() pops `rocisa` from
 # sys.modules; the later "Running stats" phase re-imports rocisa in the SAME
@@ -178,5 +183,17 @@ also_copy = ["pytest.ini"]
 # later, pre-import rocisa at interpreter startup (e.g. a sitecustomize.py on the
 # path) so the unload snapshot keeps it loaded. Verified in-container 2026-06-07.
 mutate_only_covered_lines = false
-# max_stack_depth = 8  # report's stack-depth control (keeps broad char tests from
-                       # being "the relevant test" for everything); tune after the pilot.
+# Timeout deadline = (baseline_test_time + timeout_constant) * timeout_multiplier,
+# enforced as a WALL-CLOCK limit (SIGXCPU from a checker thread). The baseline is
+# measured once on a lightly loaded box, so when the run self-contends (mutmut
+# defaults max_children to os.cpu_count() -> 128 workers here) or a neighbouring
+# container adds load, per-mutant wall time inflates past the fixed deadline and
+# healthy mutants are miscounted as timeouts. Raising the multiplier gives margin;
+# always pair with `mutmut run --max-children 32` to bound self-contention so the
+# measurement is reproducible regardless of host load. A slice-2 run at host load
+# 35 produced 178 spurious timeouts under the defaults. Verified 2026-07-22.
+timeout_multiplier = 30.0
+# max_stack_depth is intentionally unset. It controls mutmut's dynamic
+# test-to-function association rather than source slicing. Measure candidate
+# values against the full unit-test candidate set before enabling one; a value
+# that is too low can exclude valid deeper characterization tests.

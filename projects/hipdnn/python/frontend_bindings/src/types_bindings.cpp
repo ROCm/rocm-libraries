@@ -93,6 +93,52 @@ void typesBindings(nb::module_& m)
         .value("TANH_BWD", PointwiseMode::TANH_BWD)
         .value("TANH_FWD", PointwiseMode::TANH_FWD);
 
+    nb::enum_<ReductionMode>(m, "ReductionMode")
+        .value("NOT_SET", ReductionMode::NOT_SET)
+        .value("ADD", ReductionMode::ADD)
+        .value("MUL", ReductionMode::MUL)
+        .value("MIN", ReductionMode::MIN)
+        .value("MAX", ReductionMode::MAX)
+        .value("AMAX", ReductionMode::AMAX)
+        .value("AVG", ReductionMode::AVG)
+        .value("NORM1", ReductionMode::NORM1)
+        .value("NORM2", ReductionMode::NORM2)
+        .value("MUL_NO_ZEROS", ReductionMode::MUL_NO_ZEROS);
+
+    nb::enum_<ResampleMode>(m, "ResampleMode")
+        .value("NOT_SET", ResampleMode::NOT_SET)
+        .value("MAXPOOL", ResampleMode::MAXPOOL)
+        .value("AVGPOOL_EXCLUDE_PADDING", ResampleMode::AVGPOOL_EXCLUDE_PADDING)
+        .value("AVGPOOL_INCLUDE_PADDING", ResampleMode::AVGPOOL_INCLUDE_PADDING)
+        .value("BILINEAR", ResampleMode::BILINEAR)
+        .value("NEAREST", ResampleMode::NEAREST);
+
+    nb::enum_<PaddingMode>(m, "PaddingMode")
+        .value("NOT_SET", PaddingMode::NOT_SET)
+        .value("NEG_INF_PAD", PaddingMode::NEG_INF_PAD)
+        .value("ZERO_PAD", PaddingMode::ZERO_PAD)
+        .value("EDGE_VAL_PAD", PaddingMode::EDGE_VAL_PAD);
+
+    nb::enum_<DiagonalAlignment>(m, "DiagonalAlignment")
+        .value("TOP_LEFT", DiagonalAlignment::TOP_LEFT)
+        .value("BOTTOM_RIGHT", DiagonalAlignment::BOTTOM_RIGHT);
+
+    nb::enum_<AttentionImplementation>(m, "AttentionImplementation")
+        .value("AUTO", AttentionImplementation::AUTO)
+        .value("COMPOSITE", AttentionImplementation::COMPOSITE)
+        .value("UNIFIED", AttentionImplementation::UNIFIED);
+
+    nb::enum_<MoeGroupedMatmulMode>(m, "MoeGroupedMatmulMode")
+        .value("NOT_SET", MoeGroupedMatmulMode::NOT_SET)
+        .value("NONE", MoeGroupedMatmulMode::NONE)
+        .value("GATHER", MoeGroupedMatmulMode::GATHER)
+        .value("SCATTER", MoeGroupedMatmulMode::SCATTER);
+
+    nb::enum_<NormFwdPhase>(m, "NormFwdPhase")
+        .value("NOT_SET", NormFwdPhase::NOT_SET)
+        .value("INFERENCE", NormFwdPhase::INFERENCE)
+        .value("TRAINING", NormFwdPhase::TRAINING);
+
     // Bind HeuristicMode enum
     nb::enum_<HeuristicMode>(m, "HeuristicMode").value("FALLBACK", HeuristicMode::FALLBACK);
 
@@ -109,6 +155,13 @@ void typesBindings(nb::module_& m)
     nb::enum_<BuildPlanPolicy>(m, "BuildPlanPolicy")
         .value("HEURISTICS_CHOICE", BuildPlanPolicy::HEURISTICS_CHOICE)
         .value("ALL", BuildPlanPolicy::ALL);
+
+    // Bind KnobValueType enum
+    nb::enum_<KnobValueType>(m, "KnobValueType")
+        .value("NOT_SET", KnobValueType::NOT_SET)
+        .value("INT64", KnobValueType::INT64)
+        .value("FLOAT64", KnobValueType::FLOAT64)
+        .value("STRING", KnobValueType::STRING);
 
     // Bind ErrorCode enum
     nb::enum_<ErrorCode>(m, "ErrorCode")

@@ -61,7 +61,6 @@ rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          ha
     hipStream_t stream = handle->stream;
 
     const int64_t mb = (m + ell_block_size - 1) / ell_block_size;
-    const int64_t nb = (n + ell_block_size - 1) / ell_block_size;
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_nnz_kernel<256>),
                                        dim3(mb),

@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Sequence, Tuple
 
+from rocke.core.arch import ArchTarget
 from rocke.dispatch.core import (
     CandidateRegistry,
     DispatchResult,
@@ -47,7 +48,6 @@ from .common import (
     _resolve_num_cus,
     _selector_matches,
 )
-from .gfx950 import dense_spec_for_request
 
 _FAMILY = FAMILY
 
@@ -58,6 +58,31 @@ for _module in (generic, gfx942, gfx950, gfx1250):
 
 def attention_candidates() -> Tuple[KernelCandidate, ...]:
     return ATTENTION_REGISTRY.candidates()
+
+
+def dense_spec_for_request(req: AttentionRequest):
+    """Return the concrete dense spec selected by an explicit ``req.arch``."""
+    if not isinstance(req, AttentionRequest):
+        raise TypeError(f"expected AttentionRequest, got {type(req).__name__}")
+    arch = req.arch.strip() if isinstance(req.arch, str) else ""
+    if not arch:
+        raise ValueError("attention dense dispatch requires an explicit arch")
+    try:
+        gfx = ArchTarget.from_gfx(arch).gfx
+    except KeyError as exc:
+        raise ValueError(f"unsupported attention dense arch {arch!r}") from exc
+
+    factories = {
+        "gfx942": gfx942.dense_spec_for_request,
+        "gfx950": gfx950.dense_spec_for_request,
+    }
+    try:
+        factory = factories[gfx]
+    except KeyError as exc:
+        raise ValueError(
+            f"attention dense has no spec factory for arch {gfx!r}"
+        ) from exc
+    return factory(req)
 
 
 def _kernel_id(
@@ -92,6 +117,20 @@ def attention_sweep_space(req: OperatorRequest) -> Sequence[AttentionSpec]:
     return tuple(specs)
 
 
+def priority_ranker(
+    request: OperatorRequest, candidates: Sequence[KernelCandidate]
+) -> Sequence[KernelCandidate]:
+    """Default engine-level ranker: honor registered ``(priority, name)`` order.
+
+    ``CandidateRegistry.supported`` already returns candidates sorted ascending by
+    ``(priority, name)``, so this is an identity pass -- the explicit default that
+    ``dispatch_attention`` applies when no ranker is supplied. It exists as a named
+    seam: a heuristic ranker (engine-level selection driven by problem metadata)
+    is a drop-in replacement that reorders these same candidates best-first.
+    """
+    return candidates
+
+
 def dispatch_attention(
     req: AttentionRequest, *, ranker: Ranker | None = None
 ) -> DispatchResult:
@@ -100,8 +139,11 @@ def dispatch_attention(
     Returns the 2D-tiled or 3D split-KV path (a pure function of the problem),
     gated by the native-backend coverage predicate. The CTA geometry is left to
     the instance builder (see :mod:`.common` -- deferred from parity).
+
+    ``ranker`` is the engine-level selection seam; when omitted, the registered
+    priority order is used via :func:`priority_ranker` (behavior-preserving).
     """
-    candidate = ATTENTION_REGISTRY.select(req, ranker=ranker)
+    candidate = ATTENTION_REGISTRY.select(req, ranker=ranker or priority_ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
     # Standalone kernels (gfx1250 WMMA) return their builder's spec, which has
@@ -139,4 +181,5 @@ __all__ = [
     "attention_sweep_space",
     "dense_spec_for_request",
     "dispatch_attention",
+    "priority_ranker",
 ]

@@ -616,6 +616,22 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma_32x32x8 = true;
         s->use_transposed_qk_32x32 = true;
         break;
+    case 50:
+        /* gpt-oss sink prefill: register_pv WITH sinks (full-causal cohort) */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 2;
+        s->block_m_per_warp = 16;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->use_register_pv = true;
+        break;
     default:
         return -1;
     }
