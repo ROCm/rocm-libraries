@@ -131,6 +131,30 @@ add_test(
 set_tests_properties(${FMHA_FWD_TUNE_CONFIG_PY_TEST}
     PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
+# Python integration test for the receipt-4 (PyTorch) deterministic fmha_bwd
+# instances.
+#
+# Receipt 4 used to carry `cond &= deterministic == "f"`, which dropped every
+# deterministic backward instance from codegen, so PyTorch shipped only the
+# atomicAdd dq accumulation and `use_deterministic_algorithms` had no instance
+# to dispatch to. This test drives the real `generate.py` and asserts:
+#   1. Only receipt 4 lost the filter; receipts 3 and 801 still carry it.
+#   2. Receipt 4 emits deterministic instances at all.
+#   3. Every non-deterministic instance has exactly one deterministic twin and
+#      vice versa -- no missing twins, no orphans.
+#   4. The change is purely additive: it reconstructs the pre-change generator
+#      in a temp tree and requires the old blob set to be a strict subset of
+#      the new one, with receipts 3 and 801 byte-identical.
+# Pure Python, no GPU required.
+set(FMHA_BWD_RECEIPT4_DET_PY_TEST test_ck_tile_fmha_bwd_receipt4_deterministic)
+add_test(
+    NAME ${FMHA_BWD_RECEIPT4_DET_PY_TEST}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_bwd_receipt4_deterministic.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(${FMHA_BWD_RECEIPT4_DET_PY_TEST}
+    PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+
 # Umbrella target to build and run all ck_tile fmha tests
 # Usage: ninja ck_tile_fmha_tests
 add_custom_target(ck_tile_fmha_tests
