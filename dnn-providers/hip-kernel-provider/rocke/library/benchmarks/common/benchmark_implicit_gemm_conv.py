@@ -77,7 +77,16 @@ _EPILOGUES = ("default", "cshuffle")
 # _PIPELINES there. "mem" is the neutral one: no scheduling hints.
 _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
-_SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
+#
+# The ladder has to reach well past the CU count. When the per-group GEMM is
+# small enough to fit one M x N tile, the tile grid is 1 x 1 and split-K is the
+# *only* source of parallelism, so the degree is what decides how much of the
+# machine is used -- a ladder topping out at 128 pins such a shape to at most
+# 128 workgroups regardless of how many CUs the part has. Thin-K wgrad shapes
+# (large N*Ho*Wo reducing onto a small kpg x Y*X*cpg output) land exactly there.
+# Degrees above the grid-z limit are clamped per-shape by the builders, so
+# listing large values costs nothing on shapes that cannot use them.
+_SPLIT_K_AUTO = (1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1687,6 +1696,43 @@ def _build_dgrad_one(args_tuple):
     return combo, spec, resolved_split_k, kernel
 
 
+class _KernelRef:
+    """Name-only stand-in for a compiled-away ``KernelDef``.
+
+    Phase 3 looks kernels up in the artifact map by ``.name`` and never touches
+    the IR again, so keeping the object graph alive past compilation is pure
+    memory cost. ``__slots__`` keeps the replacement to a couple of words.
+    """
+
+    __slots__ = ("name",)
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def _worker_pool(max_workers: int):
+    """A ProcessPoolExecutor whose workers do NOT inherit this process's heap.
+
+    The default start method on Linux is fork, so every worker gets a
+    copy-on-write image of the parent -- and the parent here is holding the
+    retained IR for every valid combo (the two-stage leg keeps two kernel
+    objects per combo). CPython's refcounting writes to the object headers it
+    touches, which privatises those pages, so N workers cost roughly N times
+    the parent's resident set and the run is OOM-killed mid-compile.
+
+    forkserver forks each worker from a small snapshot taken before that heap
+    existed, so workers receive only what is explicitly pickled to them.
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    try:
+        ctx = multiprocessing.get_context("forkserver")
+    except ValueError:  # platform without forkserver
+        ctx = multiprocessing.get_context("spawn")
+    return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+
+
 def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
     """Run *worker_fn* over *work* items in parallel, returning non-None results.
 
@@ -1702,7 +1748,7 @@ def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
     max_workers = os.cpu_count() if jobs == 0 else jobs
     results = []
     n_killed = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with _worker_pool(max_workers) as pool:
         futures = {pool.submit(worker_fn, item): i for i, item in enumerate(work)}
         done = 0
         total = len(work)
@@ -1766,7 +1812,7 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
         flush=True,
     )
 
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with _worker_pool(max_workers) as pool:
         futures = {pool.submit(_compile_one, item): item[0].name for item in work}
         done = 0
         for fut in as_completed(futures):
@@ -2222,7 +2268,19 @@ def _run_wgrad_sweep(
             return (args.split_k,)
         if async_dma or pipeline == "basic":
             return _SPLIT_K_AUTO
-        return (0,)
+        # Fixed degrees first, then the runtime-degree variant.
+        #
+        # Returning only (0,) here used to make --split-k 0 a near no-op for any
+        # shape that takes the two-stage deterministic path: Stage 2 needs a
+        # compile-time slice count, so _build_wgrad_two_stage_one rejects a
+        # runtime degree, and the deterministic leg silently collapsed to just
+        # the basic/async pipelines. An odd-cpg (depthwise) shape therefore swept
+        # thousands of tile combinations against a handful of degrees on two
+        # pipelines. Sweeping the ladder on every pipeline is the only way the
+        # deterministic leg sees the same degrees the atomic leg does; 0 is kept
+        # last because the runtime kernel is a genuinely different variant worth
+        # measuring on the atomic leg.
+        return _SPLIT_K_AUTO + (0,)
 
     # async_dma is a swept axis rather than a flag: unlike lds_k_outer it is not
     # deducible from (arch, spec). It removes the register staging of the tile,
@@ -2329,6 +2387,22 @@ def _run_wgrad_sweep(
         _all_2s_kernels, compile_kernel, arch, jobs
     )
     n_built += len(artifact_map_2s)
+
+    # Release the in-memory IR now that every kernel is compiled.
+    #
+    # Phase 3 only ever reads `kernel.name`, but `pending`/`pending_2s` hold the
+    # whole KernelDef object graph for every valid combo -- and the two-stage leg
+    # holds two of them per combo. On a sweep with thousands of valid combos that
+    # is tens of GB in this process, which is then inherited by every compile
+    # worker; the run gets OOM-killed mid-compile with its children reparented to
+    # init and still resident. Swapping in a name-only stand-in lets it all be
+    # collected before Phase 3 allocates device buffers.
+    del _all_2s_kernels
+    pending = [(c, s, r, _KernelRef(k.name)) for c, s, r, k in pending]
+    pending_2s = [
+        (c, s, r, _KernelRef(k1.name), _KernelRef(k2.name))
+        for c, s, r, k1, k2 in pending_2s
+    ]
 
     # ---------------------------------------------------------------------------
     # Phase 3 – GPU run: load modules and time each kernel serially.
