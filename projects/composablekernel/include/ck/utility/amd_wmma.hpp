@@ -1312,7 +1312,7 @@ struct intrin_wmma_scale_f32_16x16x128_f8f6f4<16,
             "v_wmma_scale_f32_16x16x128_f8f6f4");
 
         // keep int32_t for backward compatibility
-#if defined(__gfx1250__)
+#if defined(__gfx125__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(
                 wmma_impl::MxTypeSelector<TypeA>::value, // OPSEL
@@ -1371,7 +1371,7 @@ struct intrin_wmma_scale16_f32_16x16x128_f8f6f4<16,
             "unsupported matrix/scale format combination for "
             "v_wmma_scale16_f32_16x16x128_f8f6f4");
 
-#if defined(__gfx1250__)
+#if defined(__gfx125__)
         reg_c.template AsType<float8_t>()(Number<0>{}) =
             __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(
                 wmma_impl::MxTypeSelector<TypeA>::value, // OPSEL

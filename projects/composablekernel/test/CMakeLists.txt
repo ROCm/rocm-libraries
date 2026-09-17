@@ -126,7 +126,6 @@ set(REGRESSION_TESTS
 set(KNOWN_FAILING_TESTS
     test_ck_tile_mx_scale
     test_ck_tile_mx_gemm_pipeline_tdm_wmma
-    test_gemm_blockscale_wp_fp8
     test_fp6
     test_bf6
     test_mx_fp4
