@@ -311,13 +311,22 @@ if(BUILD_BENCHMARK AND NOT ONLY_INSTALL AND NOT HIPCUB_SWAP_TO_LEGACY_AND_IGNORE
 endif()
 
 # Package
-if(HIP_COMPILER STREQUAL "clang")
-  rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
-  rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
-  set(CPACK_DEBIAN_PACKAGE_REPLACES "cub-hip")
-  set(CPACK_RPM_PACKAGE_OBSOLETES "cub-hip")
-else()
-  rocm_package_add_dependencies(DEPENDS "hip-dev >= 4.4")
+# NOTE(hipccl3): the rocprim-dev/rocprim-devel cross-dependency below only
+# makes sense when hipcub is packaged standalone. When nested under the
+# hipccl3 superbuild, rocprim's headers are bundled into the same package, so
+# there's no separate rocprim-dev package to depend on - skip it, matching
+# the same CMAKE_CURRENT_SOURCE_DIR/CMAKE_SOURCE_DIR top-level check rocprim's
+# own CMakeLists.txt already uses (ROCPRIM_PROJECT_IS_TOP_LEVEL) for the same
+# purpose.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  if(HIP_COMPILER STREQUAL "clang")
+    rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
+    rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
+    set(CPACK_DEBIAN_PACKAGE_REPLACES "cub-hip")
+    set(CPACK_RPM_PACKAGE_OBSOLETES "cub-hip")
+  else()
+    rocm_package_add_dependencies(DEPENDS "hip-dev >= 4.4")
+  endif()
 endif()
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_RPM_PACKAGE_LICENSE "BSD")
@@ -327,20 +336,29 @@ set(CPACK_RPM_PACKAGE_LICENSE "BSD")
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
-if(HIP_COMPILER STREQUAL "clang")
-  rocm_create_package(
-    NAME hipcub
-    DESCRIPTION "hipCUB (rocPRIM backend)"
-    MAINTAINER "hipcub-maintainer@amd.com"
-    HEADER_ONLY
-  )
-else()
-  rocm_create_package(
-    NAME hipcub_nvcc
-    DESCRIPTION "hipCUB (CUB backend)"
-    MAINTAINER "hipcub-maintainer@amd.com"
-    HEADER_ONLY
-  )
+# NOTE(hipccl3): only create this project's own package when built
+# standalone. When nested under the hipccl3 superbuild, hipccl3's root
+# CMakeLists.txt declares one unified rocm_create_package() call covering
+# rocprim+hipcub+rocthrust together instead - calling rocm_create_package()
+# (which triggers include(CPack)) more than once in the same configure isn't
+# well-defined, and rocthrust's own equivalent call further down would
+# otherwise silently win over this one.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  if(HIP_COMPILER STREQUAL "clang")
+    rocm_create_package(
+      NAME hipcub
+      DESCRIPTION "hipCUB (rocPRIM backend)"
+      MAINTAINER "hipcub-maintainer@amd.com"
+      HEADER_ONLY
+    )
+  else()
+    rocm_create_package(
+      NAME hipcub_nvcc
+      DESCRIPTION "hipCUB (CUB backend)"
+      MAINTAINER "hipcub-maintainer@amd.com"
+      HEADER_ONLY
+    )
+  endif()
 endif()
 
 # Print configuration summary

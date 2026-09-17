@@ -300,8 +300,17 @@ set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 # Package
 set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
 
-rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
-rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
+# NOTE(hipccl3): the rocprim-dev/rocprim-devel cross-dependency below only
+# makes sense when rocthrust is packaged standalone. When nested under the
+# hipccl3 superbuild, rocprim's headers are bundled into the same package, so
+# there's no separate rocprim-dev package to depend on - skip it, matching
+# the same CMAKE_CURRENT_SOURCE_DIR/CMAKE_SOURCE_DIR top-level check rocprim's
+# own CMakeLists.txt already uses (ROCPRIM_PROJECT_IS_TOP_LEVEL) for the same
+# purpose.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
+  rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
+endif()
 set(CPACK_DEBIAN_PACKAGE_CONFLICTS "hip-thrust, thrust")
 set(CPACK_RPM_PACKAGE_CONFLICTS "hip-thrust, thrust")
 set(CPACK_DEBIAN_DEVEL_PACKAGE_PROVIDES "hipstdpar")
@@ -316,12 +325,18 @@ set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0")
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
-rocm_create_package(
-  NAME rocthrust
-  DESCRIPTION "rocThrust is a ROCm port of the Thrust library, written in HIP"
-  MAINTAINER "rocthrust-maintainer@amd.com"
-  HEADER_ONLY
-)
+# NOTE(hipccl3): only create this project's own package when built
+# standalone. When nested under the hipccl3 superbuild, hipccl3's root
+# CMakeLists.txt declares one unified rocm_create_package() call covering
+# rocprim+hipcub+rocthrust together instead.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  rocm_create_package(
+    NAME rocthrust
+    DESCRIPTION "rocThrust is a ROCm port of the Thrust library, written in HIP"
+    MAINTAINER "rocthrust-maintainer@amd.com"
+    HEADER_ONLY
+  )
+endif()
 
 # Print configuration summary
 include(cmake/Summary.cmake)

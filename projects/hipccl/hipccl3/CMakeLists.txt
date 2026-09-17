@@ -119,3 +119,49 @@ if(HIPCCL_BUILD_LIBHIPCXX)
     )
     add_subdirectory(libhipcxx)
 endif()
+
+# --- Unified packaging ---
+# NOTE(hipccl3): mirrors NVIDIA CCCL's single cuda-cccl package (no separate
+# libcub/libthrust/libcudacxx system packages) - one hipccl package instead of
+# three (rocprim-dev, hipcub-dev, rocthrust-dev).
+#
+# rocprim's own CMakeLists.txt already skips its packaging block when nested
+# (ROCPRIM_PROJECT_IS_TOP_LEVEL, based on the same CMAKE_CURRENT_SOURCE_DIR/
+# CMAKE_SOURCE_DIR check used below). hipcub's and rocthrust's own
+# CMakeLists.txt did NOT have that guard - each unconditionally called
+# rocm_create_package() (which triggers include(CPack)) regardless of
+# nesting, so building all three together in one configure meant whichever
+# ran last (rocthrust) silently won and hipcub's package definition was
+# discarded. Both have been given the same top-level guard, matching
+# rocprim's existing pattern, and their internal rocprim-dev/rocprim-devel
+# cross-dependency declarations are skipped too, since rocprim's headers are
+# now bundled into this same package rather than being a separate one.
+#
+# This block re-declares the one dependency that's real (HIP runtime,
+# previously declared only by rocprim's own now-skipped block) and creates
+# the single combined package.
+#
+# NOT YET DONE / needs real review before treating this as more than a
+# starting point:
+#  - License aggregation (MIT + BSD-3-Clause + Apache-2.0, see ./LICENSE) is a
+#    best-effort placeholder, not a verified legal/compliance declaration.
+#  - libhipcxx isn't part of this package yet (not wired into the build at
+#    all - see HIPCCL_BUILD_LIBHIPCXX above).
+#  - Maintainer email is a placeholder, not a real assigned address/alias.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(HIP_RUNTIME_MINIMUM 4.5.0)
+    rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_MINIMUM}")
+    rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
+    rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
+
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
+    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
+
+    rocm_create_package(
+        NAME hipccl
+        DESCRIPTION "hipCCL: unified rocPRIM, hipCUB, and rocThrust package"
+        MAINTAINER "hipccl-maintainer@amd.com"
+        HEADER_ONLY
+    )
+endif()
