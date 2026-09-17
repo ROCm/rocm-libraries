@@ -236,8 +236,7 @@ jobs:
             --artifact-group gfx125X-dcgpu \
             --blas --tests \
             --run-github-repo "$BUILD_REPO" \
-            --output-dir "$ROCM" \
-            --flatten 2>&1 | tee fetch.log
+            --output-dir "$ROCM" 2>&1 | tee fetch.log
           RC=${PIPESTATUS[0]}
           set -e
           if [ "$RC" -ne 0 ]; then
