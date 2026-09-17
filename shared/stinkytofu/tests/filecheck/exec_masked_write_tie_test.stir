@@ -22,9 +22,11 @@
 # CHECK-LABEL: @exec_masked_write_tie
 # CHECK: ^entry:
 #
-# The temporary is pushed to v0 so the preserved value can keep v1.
-# CHECK-NEXT: v0 = "st.v_add_f32"(v20, v21)
-# CHECK-NEXT: v1 = "st.v_add_f32"(v22, v23)
+# The temporary is pushed to v0 so the preserved value can keep v1. The sources
+# are live-ins above the dispatch line, so they are undefined and compact down
+# from v20-v23; only the destinations carry the tie this test is about.
+# CHECK-NEXT: v0 = "st.v_add_f32"(v0, v1)
+# CHECK-NEXT: v1 = "st.v_add_f32"(v2, v3)
 # CHECK-NEXT: v0 = "st.v_add_f32"(v0, v0)
 #
 # The masked write lands on v1, and carries the appended read of it. The
