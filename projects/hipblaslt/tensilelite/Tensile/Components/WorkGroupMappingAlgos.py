@@ -395,6 +395,12 @@ def DefaultWGM(writer, kernel, sgprWGM):
 # tensor dimension is the long one:
 #   TALL: WorkGroup0 (M-tiles) is a 7-bit index (128), WorkGroup1 (N-tiles) 4-bit (16)
 #   WIDE: WorkGroup0 (M-tiles) is a 4-bit index (16),  WorkGroup1 (N-tiles) 7-bit (128)
+# Sub-band depth of the slab walk: how many tiles of the partitioned dimension an
+# XCD holds while it sweeps the shared dimension. Same value as the WGM lineage
+# on users/sebvince/WGMBit_noSTB (commit d237c02450), which this branch does not
+# carry; StreamK.skSlabDecodeRef imports it from here.
+_SLABWALK_GROUP = 4
+
 _BITSWIZZLE_TALL_WG0 = 128
 _BITSWIZZLE_TALL_WG1 = 16
 _BITSWIZZLE_WIDE_WG0 = 16

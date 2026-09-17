@@ -94,6 +94,141 @@ def _emitWorkItemMailbox(writer, module, vLocalAddress, vWaveWorkItemIdx, skipLa
         module.add(VReadfirstlaneB32(dst=sgpr(sWorkItemIdx), src=vgpr(vWaveWorkItemIdx),
                                      comment="Read work item index from vgpr"))
         module.add(SBarrier(comment="mailbox index visible to all waves"))
+# The sub-band depth G of the slab walk and the round-robin dispatch width are
+# shared with the non-StreamK WGM path; import rather than re-declare so the two
+# decodes cannot drift apart.
+from .WorkGroupMappingAlgos import _SLABWALK_GROUP
+
+# Workgroups reach XCDs round-robin, so for the 1-D StreamK grid the launch id's
+# low 3 bits are the physical XCD rank. Under StreamK 3 + StreamKForceDPOnly a
+# workgroup w executes tiles w, w+skGrid, w+2*skGrid, ..., so tileID % 8 == XCD
+# for every tile as long as skGrid % 8 == 0 (pin it with
+# TENSILE_STREAMK_FIXED_GRID=256; see skSlabDecodeRef's docstring).
+_SK_NUM_XCD = 8
+
+
+def skSlabDecodeRef(tileID, nwg0, nwg1, numXCD=_SK_NUM_XCD, group=_SLABWALK_GROUP):
+    """Pure-Python twin of the slab decode emitted by ``StreamK.skIndexToWG``.
+
+    Maps a StreamK tile id to the (WorkGroup0, WorkGroup1) tile coordinate so
+    that the tiles an XCD executes form the FlyDSL walk: each XCD owns a
+    contiguous slab of the partitioned ("long") dimension crossed with the whole
+    shared ("short") dimension, and walks that slab as ``group``-deep sub-bands
+    each swept across the shared dimension. With 32 workgroups resident per XCD
+    that gives the 4-deep x 8-wide resident window, i.e. 4 + 8 = 12 distinct
+    operand panels per generation.
+
+    The wrinkle this decode exists for: the round-robin forces every XCD to
+    receive exactly ``T/8`` tiles, and ``T/8`` need not be a whole number of
+    long-rows. On the 16 x 103 grid (MT256x320 at M=4096 N=32768) each XCD gets
+    206 tiles = 12.875 rows of 16, so no rectangle fits. The decode therefore
+    splits into
+
+      * a rectangular region -- ``rowsQ = L/8`` whole long-rows per XCD, walked
+        exactly as the committed ``_bitSwizzleTall``/``_bitSwizzleWide`` do; and
+      * a tail over the ``L - 8*rowsQ`` residual long-rows, split by *columns*,
+        ``cols = Sh/8`` shared-dim columns per XCD.
+
+    The tail closes exactly because ``rem = Q - rowsQ*Sh = cols*(L - 8*rowsQ)``
+    whenever ``Sh % 8 == 0``. On 16 x 103: 12 whole n-rows per XCD (192 tiles)
+    plus 2 m-columns of the 7 residual n-rows (14 tiles) = 206.
+
+    Measured with the panel-traffic model (generation = 32 consecutive dispatch
+    indices on one XCD; panels = distinct short-dim + distinct long-dim tiles):
+
+      ==========  ==========  ====================================
+      grid        panels/WG   note
+      ==========  ==========  ====================================
+      16 x 128    0.3750      bit-identical to ``_bitSwizzleWide``
+      128 x 16    0.3750      bit-identical to ``_bitSwizzleTall``
+      16 x 103    0.3932      vs 0.5680 for the row-major decode
+      32 x 103    0.3762      vs 0.3762 row-major -- no regression
+      ==========  ==========  ====================================
+
+    Returns ``None`` when the grid is outside the decode's guards, which is
+    exactly when the emitter branches to the retained row-major body:
+
+      * ``T % numXCD == 0``    -- else ``tileID % 8`` is not the XCD;
+      * ``Sh % numXCD == 0``   -- else the column tail does not close;
+      * ``rowsQ % group == 0`` -- else the last sub-band is partial and
+        ``long_local`` runs past ``rowsQ-1``, breaking bijectivity.
+
+    ``rowsQ >= group`` follows from the first two guards (Sh >= 8 and L >= Sh
+    give rowsQ >= 1, and rowsQ % 4 == 0 then gives rowsQ >= 4), so the emitter
+    does not test it; this reference does, because callers may pass any shape.
+
+    Assumes batchCount == 1; the emitter guards that at runtime.
+    """
+    T = nwg0 * nwg1
+    if numXCD <= 0 or T % numXCD:
+        return None
+    # Partitioned dim = the larger extent, so the slab is as deep as possible.
+    if nwg1 >= nwg0:
+        L, Sh, axisN = nwg1, nwg0, True
+    else:
+        L, Sh, axisN = nwg0, nwg1, False
+    if Sh % numXCD:
+        return None
+    rowsQ = L // numXCD                  # == (T//numXCD)//Sh, exactly
+    if rowsQ == 0 or rowsQ % group:
+        return None
+    cols  = Sh // numXCD
+    nfull = rowsQ * Sh                   # first dispatch index of the tail
+    k, j  = tileID % numXCD, tileID // numXCD
+    if j < nfull:
+        band, r = divmod(j, group * Sh)
+        lng  = rowsQ * k + group * band + (r % group)
+        shrt = r // group
+    else:
+        u    = j - nfull
+        lng  = rowsQ * numXCD + u // cols
+        shrt = cols * k + u % cols
+    return (shrt, lng) if axisN else (lng, shrt)
+
+
+def skSlabDecodeReason(kernel, writer=None):
+    """Why ``skIndexToWG`` does or does not emit the slab decode.
+
+    Returns ``None`` when the decode is emitted, else a short string naming the
+    solution parameter that blocked it. The decode replaces only the row-major
+    ``tileID -> (wg0, wg1)`` step; everything downstream (the WGM stage in
+    ``KernelWriterAssembly.graWorkGroup``) then re-reads WorkGroup0/1 as if they
+    were still launch ids, so any WGM algo that is not a no-op would remap the
+    tile coordinates and silently scramble the slab layout while still producing
+    numerically correct results. Rather than assert, we decline to emit: an
+    unsafe solution keeps today's decode and today's performance.
+
+    ``WorkGroupMapping == 1`` is what makes the trailing ``DefaultWGM`` the
+    six-instruction no-op that writes nothing. Note this is a *solution*
+    parameter check: ``TENSILE_FIXED_WGM`` can still override the WGM kernarg at
+    runtime and would break the layout, so do not set it while measuring.
+    """
+    archCaps = getattr(getattr(writer, "states", None), "archCaps", None) or {}
+    if archCaps.get("NumXCD", _SK_NUM_XCD) != _SK_NUM_XCD:
+        # The decode assumes the round-robin spreads tile ids over exactly
+        # _SK_NUM_XCD XCDs (tileID % 8 == XCD). On a part with a different XCD
+        # count that identity is false and the slab layout is meaningless -- and
+        # on a single-XCD part it is actively worse than the row-major decode
+        # (16x128 at 64 resident WGs: 0.3125 -> 0.5312). Decline rather than
+        # regress: an unsupported part keeps today's decode.
+        return "NumXCD != %u" % _SK_NUM_XCD
+    if kernel["StreamK"] != 3:
+        return "StreamK != 3"
+    if not kernel["StreamKForceDPOnly"]:
+        return "StreamKForceDPOnly == 0"
+    if kernel["StreamKAtomic"]:
+        return "StreamKAtomic != 0"
+    if kernel["StreamKXCCMapping"]:
+        return "StreamKXCCMapping != 0 (rewrites WorkGroup0 before StreamKIdx)"
+    if kernel["SpaceFillingAlgo"]:
+        return "SpaceFillingAlgo is set (WGM stage would remap the tiles)"
+    if kernel.get("WGMBitSwizzle"):
+        return "WGMBitSwizzle is set (WGM stage would remap the tiles)"
+    if kernel["WorkGroupMapping"] != 1:
+        return "WorkGroupMapping != 1 (DefaultWGM would remap the tiles)"
+    if kernel["WorkGroupMappingXCC"] != 1:
+        return "WorkGroupMappingXCC != 1 (wgmXCC would rewrite WorkGroup0)"
+    return None
 
 
 class XCCMapping(Component):
@@ -789,6 +924,205 @@ class StreamK(Component):
     def skIndexToWG(self, writer, kernel, sTmp):
         # Note: There's one unused sgpr passed with sTmp.
         module = Module("StreamK skIndexToWG")
+
+        reason = skSlabDecodeReason(kernel, writer)
+        if reason is None:
+            labelLegacy = Label(label=writer.labels.getNameInc("SKSlabLegacy"),
+                                comment="grid outside the slab decode's guards")
+            labelEnd    = Label(label=writer.labels.getNameInc("SKSlabEnd"), comment="")
+            module.add(self.skSlabDecode(writer, kernel, sTmp, labelLegacy, labelEnd))
+            module.add(labelLegacy)
+            module.add(self.skIndexToWGRowMajor(writer, kernel, sTmp))
+            module.add(labelEnd)
+            return module
+
+        module.addComment0("slab decode not emitted: %s" % reason)
+        module.add(self.skIndexToWGRowMajor(writer, kernel, sTmp))
+        return module
+
+    def skSlabDecode(self, writer, kernel, sTileID, labelLegacy, labelEnd):
+        """Map the StreamK tile id to a tile coordinate with the FlyDSL slab walk.
+
+        Emitted in place of the row-major decode only for the parameter set
+        ``skSlabDecodeReason`` admits; ``labelLegacy`` is the retained row-major
+        body, branched to when a runtime guard fails.
+
+        The emitted arithmetic is ``skSlabDecodeRef`` instruction for
+        instruction; that function's docstring carries the derivation and the
+        measured panel traffic. Structure::
+
+            guards   batchCount == 1, T % 8 == 0, Sh % 8 == 0, rowsQ % G == 0
+            k, j     = tileID % 8, tileID / 8
+            j < nfull   band, r = divmod(j, G*Sh)
+                        long  = rowsQ*k + G*band + (r % G) ; short = r / G
+            else        u = j - nfull
+                        long  = 8*rowsQ + u/cols ; short = cols*k + u % cols
+
+        Cost, counted off the rendered module: the rectangular path plus the
+        writeback is 49 instructions with **one**
+        ``scalarUInt24DivideAndRemainder`` (16 of those 49); the row-major body
+        it replaces is 41 instructions with **two**
+        ``scalarUInt32DivideAndRemainder``. So the hot path is one divide
+        cheaper than what it replaces. The tail path (under 7% of tiles on the
+        target grid) costs one divide too.
+
+        Everything except the divmod is loop-invariant across the persistent
+        loop -- k included, since the tile id advances by skGrid, a multiple of
+        8. It is deliberately NOT hoisted into persistent SGPRs: these kernels
+        sit near the register ceiling, and 33 SALU ops against a 56-iteration K
+        loop is not worth a permanent register.
+        """
+        G     = _SLABWALK_GROUP
+        logG  = log2(G)
+        NX    = _SK_NUM_XCD
+        logNX = log2(NX)
+        module = Module("StreamK skSlabDecode")
+        module.addComment0("Map StreamK tile index to wg0/1/2 with the XCD slab walk")
+
+        labelTail  = Label(label=writer.labels.getNameInc("SKSlabTail"),
+                           comment="residual long-rows, split by shared-dim columns")
+        labelWrite = Label(label=writer.labels.getNameInc("SKSlabWriteback"), comment="")
+
+        # Six temporaries, heavily aliased along their live ranges, because these
+        # kernels sit near the SGPR ceiling and the row-major body this replaces
+        # asked for none at all. The aliases:
+        #
+        #   sK      guard scratch until k is taken -- every guard is a
+        #           compute/compare/branch triple that leaves nothing behind.
+        #   sSh     Sh, then G*Sh (the main divisor) or cols (the tail divisor);
+        #           Sh itself is not wanted again on either path.
+        #   sL      L -> nfull -> band -> short (main), or L -> nfull -> short (tail).
+        #   sJ      j -> long. j is the divide's dividend, and the divide writes
+        #           its qReg/rReg only in the closing readfirstlane pair.
+        #   sR      the divide remainder; in the tail, u and then scratch.
+        #
+        # Deliberately NOT aliased: a divide's divisor against its own qReg/rReg.
+        # That would be safe against today's expansion of
+        # scalarUInt24DivideAndRemainder but silently wrong if it is ever
+        # rescheduled, and the unit test treats the divide as atomic so it could
+        # not catch the regression.
+        #
+        # The partitioned axis is not kept in a register either: the writeback
+        # re-runs the one-instruction `nwg1 >= nwg0` compare, which is a register
+        # and an instruction cheaper than a flag plus a second compare.
+        #
+        # If a kernel ever does overflow on this block, the next lever is the
+        # caller's sTmp+1..sTmp+3 -- scratch at every call site, already clobbered
+        # by the row-major body -- which would take the request down to three.
+        with writer.allocTmpSgpr(6, tag="SKSlabDecode_tmpSgpr") as tmpSgprInfo:
+            sK     = tmpSgprInfo.idx       # guard scratch, then XCD = tileID % 8
+            sJ     = tmpSgprInfo.idx + 1   # dispatch index within that XCD
+            sSh    = tmpSgprInfo.idx + 2   # tiles on the shared dimension
+            sRowsQ = tmpSgprInfo.idx + 3   # whole long-rows each XCD owns
+            sL     = tmpSgprInfo.idx + 4   # tiles on the partitioned dimension
+            sR     = tmpSgprInfo.idx + 5   # divide remainder; in the tail, u
+            sNfull = sL                    # rowsQ*Sh, once L is dead
+            sBand  = sL                    # divide quotient, once nfull is dead
+            sShort = sL                    # shared-dim tile, once band is dead
+            sLong  = sJ                    # partitioned-dim tile, once j is dead
+            sDiv   = sSh                   # divisor, once Sh is dead
+
+            numBatch = kernel["ProblemType"]["NumIndicesC"] - kernel["ProblemType"]["NumIndicesFree"]
+            if numBatch:
+                module.addComment0("guard: batchCount == 1 (the decode has no batch term)")
+                for i in range(numBatch):
+                    batchIdx = kernel["ProblemType"]["NumIndicesFree"] + i
+                    module.add(SCmpEQU32(src0=sgpr("SizesFree+%u" % batchIdx), src1=1,
+                                         comment="batch dim %u == 1 ?" % i))
+                    module.add(SCBranchSCC0(labelName=labelLegacy.getLabelName(),
+                                            comment="no -> row-major decode"))
+
+            module.addComment0("guard: totalTiles %% %u == 0, else tileID %% %u is not the XCD" % (NX, NX))
+            module.add(SMulI32(dst=sgpr(sK), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"),
+                               comment="T = nwg0 * nwg1"))
+            module.add(SAndB32(dst=sgpr(sK), src0=sgpr(sK), src1=hex(NX - 1)))
+            module.add(SCmpEQU32(src0=sgpr(sK), src1=0))
+            module.add(SCBranchSCC0(labelName=labelLegacy.getLabelName(), comment="no -> row-major decode"))
+
+            module.addComment0("partitioned dim L = the larger extent, shared dim Sh = the other")
+            module.add(SCmpGeU32(src0=sgpr("NumWorkGroups1"), src1=sgpr("NumWorkGroups0"), comment="nwg1 >= nwg0 ?"))
+            module.add(SCSelectB32(dst=sgpr(sL),  src0=sgpr("NumWorkGroups1"), src1=sgpr("NumWorkGroups0"), comment="L"))
+            module.add(SCSelectB32(dst=sgpr(sSh), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Sh"))
+
+            module.addComment0("guard: Sh %% %u == 0, else the column tail does not close" % NX)
+            module.add(SAndB32(dst=sgpr(sK), src0=sgpr(sSh), src1=hex(NX - 1)))
+            module.add(SCmpEQU32(src0=sgpr(sK), src1=0))
+            module.add(SCBranchSCC0(labelName=labelLegacy.getLabelName(), comment="no -> row-major decode"))
+
+            # rowsQ >= G follows: Sh % 8 == 0 gives Sh >= 8, L >= Sh gives
+            # rowsQ >= 1, and rowsQ % G == 0 then gives rowsQ >= G. So the walk
+            # can never be handed a zero-deep slab, and no extra test is needed.
+            module.addComment0("rowsQ = L/%u ; guard rowsQ %% %u == 0 so every sub-band is full" % (NX, G))
+            module.add(SLShiftRightB32(dst=sgpr(sRowsQ), shiftHex=hex(logNX), src=sgpr(sL), comment="rowsQ"))
+            module.add(SAndB32(dst=sgpr(sK), src0=sgpr(sRowsQ), src1=hex(G - 1)))
+            module.add(SCmpEQU32(src0=sgpr(sK), src1=0))
+            module.add(SCBranchSCC0(labelName=labelLegacy.getLabelName(), comment="no -> row-major decode"))
+
+            module.addComment0("k = tileID %% %u (XCD), j = tileID / %u (index within the XCD)" % (NX, NX))
+            module.add(SAndB32(dst=sgpr(sK), src0=sgpr(sTileID), src1=hex(NX - 1), comment="XCD"))
+            module.add(SLShiftRightB32(dst=sgpr(sJ), shiftHex=hex(logNX), src=sgpr(sTileID), comment="j"))
+
+            tmpVgpr    = writer.vgprPool.checkOutAligned(4, 2, tag="SKSlabDecode_tmpVgpr")
+            tmpVgprRes = ContinuousRegister(tmpVgpr, 4)
+
+            module.addComment0("nfull = rowsQ*Sh : first dispatch index of the residual-row tail")
+            module.add(SMulI32(dst=sgpr(sNfull), src0=sgpr(sRowsQ), src1=sgpr(sSh), comment="nfull"))
+            module.add(SCmpLtU32(src0=sgpr(sJ), src1=sgpr(sNfull), comment="j < nfull ?"))
+            module.add(SCBranchSCC0(labelName=labelTail.getLabelName(), comment="no -> residual-row tail"))
+
+            module.addComment0("rectangular region: band, r = divmod(j, G*Sh) with G = %u" % G)
+            module.add(SLShiftLeftB32(dst=sgpr(sDiv), shiftHex=hex(logG), src=sgpr(sSh), comment="G*Sh"))
+            module.add(scalarUInt24DivideAndRemainder(qReg=sBand, dReg=sJ, divReg=sDiv, rReg=sR,
+                                                      tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"],
+                                                      doRemainder=True))
+            module.addComment0("long = rowsQ*k + G*band + (r % G) ; short = r / G")
+            module.add(SMulI32(dst=sgpr(sLong), src0=sgpr(sRowsQ), src1=sgpr(sK), comment="rowsQ*k"))
+            module.add(SLShiftLeftB32(dst=sgpr(sBand), shiftHex=hex(logG), src=sgpr(sBand), comment="G*band"))
+            module.add(SAddU32(dst=sgpr(sLong), src0=sgpr(sLong), src1=sgpr(sBand)))
+            module.add(SAndB32(dst=sgpr(sBand), src0=sgpr(sR), src1=hex(G - 1), comment="r % G"))
+            module.add(SAddU32(dst=sgpr(sLong), src0=sgpr(sLong), src1=sgpr(sBand)))
+            module.add(SLShiftRightB32(dst=sgpr(sShort), shiftHex=hex(logG), src=sgpr(sR), comment="short"))
+            module.add(SBranch(labelName=labelWrite.getLabelName()))
+
+            module.add(labelTail)
+            # u must come out of sJ/sNfull before either is reused: the divide
+            # writes its quotient over j and its remainder over nfull.
+            module.addComment0("tail: u = j - nfull ; long = %u*rowsQ + u/cols ; short = cols*k + u %% cols" % NX)
+            module.add(SSubU32(dst=sgpr(sR), src0=sgpr(sJ), src1=sgpr(sNfull), comment="u"))
+            module.add(SLShiftRightB32(dst=sgpr(sDiv), shiftHex=hex(logNX), src=sgpr(sSh), comment="cols = Sh/%u" % NX))
+            module.add(scalarUInt24DivideAndRemainder(qReg=sLong, dReg=sR, divReg=sDiv, rReg=sShort,
+                                                      tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"],
+                                                      doRemainder=True))
+            module.add(SLShiftLeftB32(dst=sgpr(sR), shiftHex=hex(logNX), src=sgpr(sRowsQ), comment="%u*rowsQ" % NX))
+            module.add(SAddU32(dst=sgpr(sLong), src0=sgpr(sLong), src1=sgpr(sR)))
+            module.add(SMulI32(dst=sgpr(sR), src0=sgpr(sDiv), src1=sgpr(sK), comment="cols*k"))
+            module.add(SAddU32(dst=sgpr(sShort), src0=sgpr(sShort), src1=sgpr(sR)))
+
+            module.add(labelWrite)
+            writer.vgprPool.checkIn(tmpVgpr)
+            tmpVgprRes = None
+            module.addComment0("write the tile coordinate back; batchCount == 1 by the guard")
+            module.add(SMovB32(dst=sgpr("WorkGroup2"), src=hex(0), comment="WorkGroup2 = 0"))
+            if kernel["SpaceFillingAlgo"]:
+                # Unreachable today: skSlabDecodeReason declines to emit the decode
+                # when SpaceFillingAlgo is set. Kept so the two paths stay in step
+                # if that guard is ever relaxed.
+                module.add(SMovB32(dst=sgpr("StreamKTileID"), src=sgpr(sTileID), comment=""))
+            module.add(SCmpGeU32(src0=sgpr("NumWorkGroups1"), src1=sgpr("NumWorkGroups0"),
+                                 comment="nwg1 >= nwg0 ? (re-derive the partitioned axis)"))
+            module.add(SCSelectB32(dst=sgpr("WorkGroup0"), src0=sgpr(sShort), src1=sgpr(sLong)))
+            module.add(SCSelectB32(dst=sgpr("WorkGroup1"), src0=sgpr(sLong),  src1=sgpr(sShort)))
+            module.add(SBranch(labelName=labelEnd.getLabelName(), comment="skip the row-major decode"))
+
+        module.addSpaceLine()
+        return module
+
+    def skIndexToWGRowMajor(self, writer, kernel, sTmp):
+        """The original row-major tileID -> (wg0, wg1) decode, unchanged.
+
+        Retained as the fallback body of ``skIndexToWG`` for every mode and grid
+        the slab decode does not admit."""
+        module = Module("StreamK skIndexToWGRowMajor")
 
         # Map StreamK tile index to wg0/1
         module.addComment0("Map StreamK tile index to wg0/1/2")
