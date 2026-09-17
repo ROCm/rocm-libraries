@@ -1,10 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <exception>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -12,8 +10,6 @@
 
 #include "detail/generation_primitives.hpp"
 #include "detail/generation_recipe_access.hpp"
-#include "detail/generation_values.hpp"
-#include "detail/threading.hpp"
 
 namespace roc::host_numerics {
 namespace {
@@ -22,75 +18,12 @@ void validateIntegerInterval(const UniformIntegerGenerationParameters& parameter
         throw std::invalid_argument("Generation lower bound exceeds upper bound.");
 }
 
-#ifdef _OPENMP
-void incrementLastDimensionFast(std::vector<size_t>& indices, const Shape& shape) {
-    for (size_t dimension = shape.rank(); dimension > 0; --dimension) {
-        const size_t index = dimension - 1;
-        if (++indices[index] < shape[index]) return;
-        indices[index] = 0;
-    }
-}
-#endif
-
-void generateSerial(Tensor destination, const GenerationRecipe& recipe) {
-    detail::forEachIndex(destination.shape(), [&](std::span<const size_t> indices, size_t) {
-        const size_t logicalIndex = destination.shape().linearIndex(indices, recipe.indexOrder());
-        detail::generateElement(destination, recipe, indices, logicalIndex);
-    });
-}
-
-void generateParallel(Tensor destination, const GenerationRecipe& recipe, int threadCount) {
-#ifdef _OPENMP
-    std::exception_ptr error;
-    const size_t elementCount = destination.shape().elementCount();
-#pragma omp parallel num_threads(threadCount)
-    {
-        try {
-            const size_t threadIndex = static_cast<size_t>(omp_get_thread_num());
-            const size_t actualThreadCount = static_cast<size_t>(omp_get_num_threads());
-            const size_t baseCount = elementCount / actualThreadCount;
-            const size_t remainder = elementCount % actualThreadCount;
-            const size_t first = threadIndex * baseCount + std::min(threadIndex, remainder);
-            const size_t count = baseCount + static_cast<size_t>(threadIndex < remainder);
-            const size_t end = first + count;
-            if (first != end) {
-                std::vector<size_t> indices =
-                    destination.shape().coordinates(first, IndexOrder::LastDimensionFastest);
-                for (size_t traversalIndex = first; traversalIndex < end; ++traversalIndex) {
-                    const size_t logicalIndex =
-                        destination.shape().linearIndex(indices, recipe.indexOrder());
-                    detail::generateElement(destination, recipe, indices, logicalIndex);
-                    incrementLastDimensionFast(indices, destination.shape());
-                }
-            }
-        } catch (...) {
-#pragma omp critical(roc_host_numerics_generation_error)
-            {
-                if (!error) error = std::current_exception();
-            }
-        }
-    }
-    if (error) std::rethrow_exception(error);
-#else
-    (void)threadCount;
-    generateSerial(destination, recipe);
-#endif
-}
 }  // namespace
 
 GenerationRecipe::Component::Component(Pattern pattern) : pattern_(std::move(pattern)) {}
 
 bool GenerationRecipe::Component::isRaw() const {
-    return std::visit(
-        [](const auto& pattern) {
-            using Pattern = std::remove_cvref_t<decltype(pattern)>;
-            return std::is_same_v<Pattern, RawConstantPattern> ||
-                   std::is_same_v<Pattern, UniformRawIntegerPattern> ||
-                   std::is_same_v<Pattern, UniformFiniteEncodedValuePattern> ||
-                   std::is_same_v<Pattern, RandomRawBitsPattern> ||
-                   std::is_same_v<Pattern, RawSerialDimensionPattern>;
-        },
-        pattern_);
+    return detail::isRawGenerationComponent(*this);
 }
 
 GenerationRecipe::Component GenerationRecipe::Component::withAbsoluteTransform() const {
@@ -373,14 +306,7 @@ GenerationRecipe GenerationRecipe::withIndexOrder(IndexOrder order) const {
 }
 
 void generate(Tensor destination, const GenerationRecipe& recipe) {
-    const size_t elementCount = destination.shape().elementCount();
-    const int threadCount = detail::hasProvablyIndependentElements(destination)
-                                ? detail::operationThreadCount(elementCount)
-                                : 1;
-    if (threadCount == 1)
-        generateSerial(destination, recipe);
-    else
-        generateParallel(destination, recipe, threadCount);
+    detail::generateTensor(std::move(destination), recipe);
 }
 
 Tensor generate(ScalarType type, Layout layout, const GenerationRecipe& recipe) {
