@@ -61,6 +61,20 @@ void testIndexedGeneration() {
                 "Whole-tensor and elementwise generation encodings differ.");
     }
 
+    const Shape traversalShape{3, 4, 2};
+    const Layout traversalLayout = Layout::contiguousFirstDimensionFastest(traversalShape);
+    Tensor whole(ScalarType::Float32, traversalLayout);
+    Tensor elementwise(ScalarType::Float32, traversalLayout);
+    const GenerationRecipe traversalRecipe = GenerationRecipe::realOnly(
+        GenerationRecipe::uniformReal({.lower = -2.0, .upper = 3.0}), {.seed = 0xabcdef});
+    generate(whole, traversalRecipe);
+    for (size_t index = 0; index < whole.elementCount(); ++index)
+        generateAt(elementwise, index, traversalRecipe);
+    require(
+        std::equal(whole.rawEncodedBackingStorage().begin(), whole.rawEncodedBackingStorage().end(),
+                   elementwise.rawEncodedBackingStorage().begin()),
+        "Bulk generation changed first-dimension-fast values.");
+
     Tensor affine(ScalarType::Float32, Shape{2, 3, 2});
     generate(affine,
              GenerationRecipe::realOnly(
