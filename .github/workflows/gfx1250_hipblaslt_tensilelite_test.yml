@@ -207,7 +207,9 @@ jobs:
           repository: ROCm/TheRock
           ref: ${{ steps.ci-env.outputs.therock-ref }}
           path: TheRock
-          sparse-checkout: build_tools
+          sparse-checkout: |
+            build_tools
+            cmake
           sparse-checkout-cone-mode: true
 
       - name: Set up Python
