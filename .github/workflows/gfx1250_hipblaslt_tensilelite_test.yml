@@ -10,8 +10,8 @@
 #   - workflow_dispatch: manually test a specific build by run-id.
 #
 
-name: gfx1250 TensileLite + hipBLASLt Tests
-run-name: gfx1250 HW - ${{ github.event.workflow_run.head_branch || github.ref_name }} @ ${{ github.event.workflow_run.head_sha || github.sha }}
+name: gfx1250 HW hipBLASLt + TensileLite Tests
+run-name: ${{ github.event.workflow_run.head_branch || github.ref_name }} @ ${{ github.event.workflow_run.head_sha || github.sha }}
 
 on:
   # SCRATCH ONLY (DO NOT MERGE): self-trigger on push to validate the job body pre-merge.
@@ -38,10 +38,6 @@ on:
         description: "Run the TensileLite common tests"
         type: boolean
         default: true
-      tensilelite_markers:
-        description: "pytest -m marker expression for TensileLite common tests"
-        type: string
-        default: "common"
       tensilelite_pytest_k:
         description: "pytest -k expression for TensileLite common tests"
         type: string
@@ -226,7 +222,7 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35170097210' }}  # SCRATCH: #12178 build w/ #12086 (xfails + gfx942 fix in artifact)
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35170097210' }}  # SCRATCH: #12178 build (xfails + gfx942 fix in artifact)
           BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -263,32 +259,9 @@ jobs:
           ldconfig
           echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
           echo "::group::Artifact layout"
-          ls -la "$ROCM" || true
           echo "Key binaries:"
           find "$ROCM" -type f \( -name hipblaslt-test -o -name tensilelite-client \) 2>/dev/null || true
           echo "::endgroup::"
-
-      - name: GPU / ROCm diagnostics (DEBUG — remove before merge)
-        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' }}
-        run: |
-          set +e
-          HTB="$(find "$ROCM" -type f -name hipblaslt-test | head -1)"
-          echo "::group::libhsa the test binary loads + artifact HSA"
-          ldd "$HTB" 2>&1 | grep -iE "hsa|amdhip64|=> not found"
-          find "$ROCM" -name 'libhsa-runtime64.so*' 2>/dev/null
-          echo "::endgroup::"
-          echo "::group::host amdgpu driver + KFD devices (from container)"
-          cat /sys/module/amdgpu/version 2>/dev/null || echo "amdgpu sysfs version not visible"
-          ls -l /dev/kfd /dev/dri/render* 2>/dev/null; id
-          echo "::endgroup::"
-          echo "::group::compute-affecting env"
-          env | grep -iE "^HSA_|^HIP_|^ROCR_|XNACK|^LD_LIBRARY_PATH" | sort
-          echo "::endgroup::"
-          echo "::group::verbose sanity GEMM (expected vs actual)"
-          HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
-          "$HTB" --gtest_filter='*special_fp_64x64_f16*' 2>&1 | tail -50
-          echo "::endgroup::"
-          true
 
       - name: Run hipBLASLt tests
         timeout-minutes: 120
@@ -303,7 +276,6 @@ jobs:
             echo "::error::hipblaslt-test not found in the fetched artifact"; exit 1
           fi
           echo "Using: $HIPBLASLT_TEST"
-          ldd "$HIPBLASLT_TEST" 2>&1 | grep -iE "hipblaslt|=> not found" || true
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
           HIPBLASLT_TEST_TIMEOUT=3600 \
@@ -316,7 +288,6 @@ jobs:
         timeout-minutes: 240
         if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
         env:
-          TL_MARKERS: ${{ inputs.tensilelite_markers || 'common' }}
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
           TL_WORKERS: ${{ inputs.pytest_workers || '1' }}
         run: |
@@ -324,48 +295,24 @@ jobs:
           mkdir -p tensilelite_test_results
           export PYTHONPATH="$ROCM/share/hipblaslt/tensilelite:${PYTHONPATH:-}"
           cd "$ROCM/share/hipblaslt/tensilelite"
-          echo "::group::tensilelite-client linkage + rocisa import"
-          ldd "$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" 2>&1 \
-            | grep -iE "hipblaslt|rocblas|=> not found" || true
+          echo "::group::rocisa import"
           python3 -c "import rocisa; print('rocisa import OK')" 2>&1 \
             || echo "::warning::rocisa import failed from the artifact PYTHONPATH"
           echo "::endgroup::"
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
-          echo "::group::asic-revision detection"
-          echo "hipcc: $(command -v hipcc || echo MISSING)"
-          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/tmp/rev_err.log || echo gfx1250v0)"
-          echo "-- detection stderr --"; cat /tmp/rev_err.log 2>/dev/null || true
-          echo "TensileLite gpu-target: $TL_TARGET"
-          echo "artifact amdclang++: $("$ROCM/bin/amdclang++" --version 2>&1 | head -1)"
-          echo "::endgroup::"
-          CLIENT="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client"
-          echo "::group::libomp diagnosis"
-          find "$ROCM" -name 'libomp.so*'
-          readelf -d "$CLIENT" 2>/dev/null | grep -E 'NEEDED|RPATH|RUNPATH'
-          ldd "$CLIENT" 2>&1 | grep -iE 'omp|=> not found'
-          ldconfig -p | grep -i omp || echo "libomp NOT in ld cache"
-          echo "::endgroup::"
-          # Lever #2:HIP device compiles
-          # through ccache. clang '-x assembler' is cacheable (verified). Guarded
-          # so a missing ccache never turns the launcher into a broken command.
-          # Intra-run cache only: the container is ephemeral and this CI has no
-          # actions/cache layer, so hits come from duplicate kernels within a run.
-          echo "::group::ccache setup"
+          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/dev/null || echo gfx1250v0)"
+          # HIP device compiles through ccache.
+          # Guarded: a missing ccache must never become a broken 'ccache <compiler>' call.
           if ! command -v ccache >/dev/null 2>&1; then
-            apt-get update -qq && apt-get install -y -qq ccache \
-              || echo "::warning::ccache install failed; running without kernel-assembly caching"
+            apt-get update -qq && apt-get install -y -qq ccache || echo "::warning::ccache unavailable; no kernel-assembly caching"
           fi
           if command -v ccache >/dev/null 2>&1; then
             export CCACHE_DIR=/tmp/tl-ccache CCACHE_MAXSIZE=5G
             export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
             ccache -z >/dev/null 2>&1 || true
-            echo "$(ccache --version | head -1); CCACHE_DIR=$CCACHE_DIR"
-          else
-            echo "ccache unavailable — proceeding without kernel-assembly caching"
           fi
-          echo "::endgroup::"
           pytest -p no:cacheprovider Tensile/Tests/common \
             -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
@@ -373,11 +320,6 @@ jobs:
             --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,$TL_TARGET \
             --junitxml="$GITHUB_WORKSPACE/tensilelite_test_results/common_test.xml" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
-          TL_RC=${PIPESTATUS[0]}
-          echo "::group::ccache stats (hit rate = kernel-assembly reuse this run)"
-          command -v ccache >/dev/null 2>&1 && ccache -s || echo "no ccache"
-          echo "::endgroup::"
-          exit "$TL_RC"
 
       - name: Upload test results
         if: always()
