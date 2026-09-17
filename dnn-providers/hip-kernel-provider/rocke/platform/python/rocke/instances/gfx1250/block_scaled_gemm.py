@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
+from ...core.arch.wmma_scale import gfx1250_scaled_wmma
 from ...core.ir import (
     BF16,
     F16,
@@ -40,6 +41,7 @@ _LOWBIT_DTYPES = {
     "bf6",
     "fp6e3m2",
     "fp4",
+    "fp4e2m1",
 }
 _OUTPUT_DTYPES = {"fp16", "f16", "bf16"}
 _SCALE_DTYPES = {"fp16", "f16", "fp32", "f32"}
@@ -75,7 +77,7 @@ def _canon_lowbit(dtype: str) -> str:
         return "fp6"
     if dtype in ("bf6", "fp6e3m2"):
         return "bf6"
-    if dtype == "fp4":
+    if dtype in ("fp4", "fp4e2m1"):
         return "fp4"
     raise ValueError(f"expected fp8/bf8/fp6/bf6/fp4 low-bit dtype, got {dtype!r}")
 
@@ -211,7 +213,11 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
             )
         except ValueError as e:
             return False, str(e)
-        required_block_k = 16 if matrix_path == "wmma_scale16" else 32
+        scale_op = gfx1250_scaled_wmma(
+            f"{matrix_path}_f32_16x16x128_{_canon_lowbit(spec.dtype_a)}_{_canon_lowbit(spec.dtype_b)}"
+        )
+        assert scale_op is not None
+        required_block_k = scale_op.scales.block_k
         if spec.block_k != required_block_k:
             return False, (
                 f"{matrix_path} requires block_k={required_block_k} scale groups "
@@ -283,7 +289,7 @@ def block_scaled_gemm_grid(spec: BlockScaledGemmSpec) -> Tuple[int, int, int]:
 
 
 def _storage_type(dtype: str) -> Type:
-    if dtype in ("fp4", "fp6", "bf6", "fp6e2m3", "fp6e3m2"):
+    if dtype in ("fp4", "fp4e2m1", "fp6", "bf6", "fp6e2m3", "fp6e3m2"):
         return I8
     if dtype in ("fp16", "f16"):
         return F16
@@ -336,6 +342,7 @@ def build_block_scaled_gemm(
         if native_scale
         else _wmma_op_id(spec.dtype_a, spec.dtype_b)
     )
+    scale_op = gfx1250_scaled_wmma(op_id)
     atom_k = _WMMA_SCALE_K if native_scale else _WMMA_K
     frag_words = 16 if native_scale else _ACC
     a_frag_ty = VectorType(I32, frag_words)
@@ -460,9 +467,12 @@ def build_block_scaled_gemm(
         return ir.bitcast(packed, a_frag_ty)
 
     def _pack_strided_scales(ptr, row_or_col, call_idx, *, for_b):
-        count = 8 if matrix_path == "wmma_scale16" else 4
-        word_ty = I64 if count == 8 else I32
-        packed = ir.const_i64(0) if count == 8 else ir.const_i32(0)
+        assert scale_op is not None
+        packing = scale_op.scales
+        count = packing.count
+        word_ty = I64 if packing.word_bits == 64 else I32
+        word_const = ir.const_i64 if packing.word_bits == 64 else ir.const_i32
+        packed = word_const(0)
         scale_groups = spec.K // spec.block_k
         for j in range(count):
             scale_group = call_idx * count + j
@@ -475,7 +485,7 @@ def build_block_scaled_gemm(
                 )
             byte = ir.global_load(ptr, idx, I8, align=1)
             widened = ir.zext(byte, word_ty)
-            shift = ir.const_i64(j * 8) if count == 8 else ir.const_i32(j * 8)
+            shift = word_const(j * packing.element_bits)
             shifted = ir.shl(widened, shift)
             packed = ir.lor(packed, shifted)
         return packed
