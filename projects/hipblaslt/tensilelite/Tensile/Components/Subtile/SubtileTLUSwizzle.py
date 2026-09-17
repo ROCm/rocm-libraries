@@ -52,8 +52,8 @@ class TLUColScatter:
                      carries col_group[gdBit]
 
     With 8B inter-load padding the phases then cover complementary halves of the
-    even bank pairs.  Verified against the bank model for stackM in {8,16}; all
-    fields derive from N = stackM.
+    even bank pairs.  Derived for stackM in {8,16}; all fields come from
+    N = stackM.
     """
     N: int                    # loads per strip (= stackM)
     cpc: int                  # chunks per K-column (= N/2 for fp4 b128)
@@ -109,8 +109,8 @@ def _buildColScatter(stackM: int, instM: int, instK: int, bpe: float,
                          readStrideBytes=readStrideBytes, mTileBytes=mTileBytes)
 
 
-# Keyed by stack size subtileShape[0]. Values verified against the bank model
-# (1-way, bijective, reconstructs A). Unlisted stacks -> no swizzle yet.
+# Keyed by stack size subtileShape[0]. Each entry is intended to be 1-way,
+# bijective and to reconstruct A. Unlisted stacks -> no swizzle yet.
 _SWIZZLE_BY_STACK = {
     # 2x1 fp4: chunk[6] ^= chunk[5], 8B pad per 64-chunk (1024B) load-block.
     2: TLUSwizzle(xorFromBit=5, xorToBit=6, padBytes=8, blockChunkBits=6),
@@ -146,7 +146,7 @@ def _stackOf(tileInfo) -> Optional[int]:
 def selectTLUSwizzle(tileInfo) -> Optional[TLUSwizzle]:
     """Return the TLUSwizzle for this tile's stack, or None if unsupported.
 
-    Guarded to the fp4 (bpe 0.5) TLU stacks the bank model covers; anything
+    Guarded to the fp4 (bpe 0.5) TLU stacks with a derived layout; anything
     else returns None so the emit paths keep their baseline addressing.
     """
     if _sharedStrip(tileInfo):
