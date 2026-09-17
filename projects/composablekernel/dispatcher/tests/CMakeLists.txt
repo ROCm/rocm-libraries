@@ -148,6 +148,14 @@ add_test(
 )
 
 set_tests_properties(dispatcher_test_dispatcher_common PROPERTIES
+# Architecture-aware LDS staging budget regression test
+add_test(
+    NAME dispatcher_test_lds_capacity_arch_aware
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_lds_capacity_arch_aware.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_lds_capacity_arch_aware PROPERTIES
     LABELS "dispatcher;python;validation"
     TIMEOUT 60
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"

@@ -444,9 +444,16 @@ defaultInternalSupportParams = {
     # but WGM is not.
     "SupportCustomWGM": True,
     "SupportCustomStaggerU": True,
-    # Kernel distributes Stream-K extra iters within each tile when
-    # skGrid % skTiles == 0. Default False so older/custom kernels do not
-    # claim the capability; newly generated StreamK 3 / SK5 set it True.
+    # Pure CAPABILITY, never policy: "this kernel's assembly contains BOTH
+    # Stream-K K-split mappings (the historical global 'first-E' mapping and the
+    # per-tile extra-iters mapping) and honors bit 29 of MagicShiftItersPerTile
+    # as the runtime selector, so the host may set that bit."
+    # It does NOT mean per-tile extra-iters is in use: whether the mapping is
+    # actually taken is decided at runtime by the host, which sets bit 29 iff
+    # this capability is true AND uniform summation order is requested.
+    # Default False so older/custom kernels -- whose asm has only one mapping
+    # and ignores bit 29 -- do not claim it; newly generated StreamK 3 / SK5
+    # set it True in Solution.py.
     "SupportStreamKPerTileExtraIters": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
@@ -550,6 +557,7 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporal": [-1]},
     {"TemporalHint": [-1]},
     {"TemporalHintE": [0]},
+    {"TemporalHintGate": [0]},
     {"TemporalHintD": [0]},
     {"TemporalHintC": [0]},
     {"TemporalHintA": [0]},
@@ -560,6 +568,7 @@ defaultBenchmarkCommonParameters = [
     {"TemporalHintMetadata": [0]},
     {"NonVolatile": [-1]},
     {"NonVolatileE": [0]},
+    {"NonVolatileGate": [0]},
     {"NonVolatileD": [0]},
     {"NonVolatileC": [0]},
     {"NonVolatileA": [0]},
@@ -831,6 +840,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
