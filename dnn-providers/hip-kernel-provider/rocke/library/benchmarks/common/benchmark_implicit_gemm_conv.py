@@ -77,7 +77,16 @@ _EPILOGUES = ("default", "cshuffle")
 # _PIPELINES there. "mem" is the neutral one: no scheduling hints.
 _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
-_SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
+#
+# The ladder has to reach well past the CU count. When the per-group GEMM is
+# small enough to fit one M x N tile, the tile grid is 1 x 1 and split-K is the
+# *only* source of parallelism, so the degree is what decides how much of the
+# machine is used -- a ladder topping out at 128 pins such a shape to at most
+# 128 workgroups regardless of how many CUs the part has. Thin-K wgrad shapes
+# (large N*Ho*Wo reducing onto a small kpg x Y*X*cpg output) land exactly there.
+# Degrees above the grid-z limit are clamped per-shape by the builders, so
+# listing large values costs nothing on shapes that cannot use them.
+_SPLIT_K_AUTO = (1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1773,6 +1782,23 @@ def _build_and_compile_dgrad_one(args_tuple):
     return combo, spec, resolved_split_k, artifact
 
 
+def _worker_pool(max_workers: int):
+    """A ProcessPoolExecutor whose workers do NOT inherit this process's heap.
+
+    Uses forkserver so workers start from a clean snapshot rather than a
+    copy-on-write fork of the parent. This avoids CPython refcount writes
+    privatising shared pages and keeps per-worker RSS low.
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    try:
+        ctx = multiprocessing.get_context("forkserver")
+    except ValueError:  # platform without forkserver
+        ctx = multiprocessing.get_context("spawn")
+    return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+
+
 def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
     """Run *worker_fn* over *work* items in parallel, returning non-None results.
 
@@ -1788,7 +1814,7 @@ def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
     max_workers = os.cpu_count() if jobs == 0 else jobs
     results = []
     n_killed = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with _worker_pool(max_workers) as pool:
         futures = {pool.submit(worker_fn, item): i for i, item in enumerate(work)}
         done = 0
         total = len(work)
@@ -1852,7 +1878,7 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
         flush=True,
     )
 
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with _worker_pool(max_workers) as pool:
         futures = {pool.submit(_compile_one, item): item[0].name for item in work}
         done = 0
         for fut in as_completed(futures):
@@ -2308,7 +2334,19 @@ def _run_wgrad_sweep(
             return (args.split_k,)
         if async_dma or pipeline == "basic":
             return _SPLIT_K_AUTO
-        return (0,)
+        # Fixed degrees first, then the runtime-degree variant.
+        #
+        # Returning only (0,) here used to make --split-k 0 a near no-op for any
+        # shape that takes the two-stage deterministic path: Stage 2 needs a
+        # compile-time slice count, so _build_wgrad_two_stage_one rejects a
+        # runtime degree, and the deterministic leg silently collapsed to just
+        # the basic/async pipelines. An odd-cpg (depthwise) shape therefore swept
+        # thousands of tile combinations against a handful of degrees on two
+        # pipelines. Sweeping the ladder on every pipeline is the only way the
+        # deterministic leg sees the same degrees the atomic leg does; 0 is kept
+        # last because the runtime kernel is a genuinely different variant worth
+        # measuring on the atomic leg.
+        return _SPLIT_K_AUTO + (0,)
 
     # async_dma is a swept axis rather than a flag: unlike lds_k_outer it is not
     # deducible from (arch, spec). It removes the register staging of the tile,
