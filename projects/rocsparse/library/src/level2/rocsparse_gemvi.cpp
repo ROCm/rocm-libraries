@@ -121,12 +121,9 @@ namespace rocsparse
 
         int blocks_per_cu = 0;
         if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-                &blocks_per_cu,
-                gemvi_kernel_part1<BLOCKSIZE, WFSIZE, UNROLL, I, T>,
-                BLOCKSIZE,
-                0)
-                != hipSuccess
-            || blocks_per_cu < 1)
+               &blocks_per_cu, gemvi_kernel_part1<BLOCKSIZE, WFSIZE, UNROLL, I, T>, BLOCKSIZE, 0)
+               != hipSuccess
+           || blocks_per_cu < 1)
         {
             // LCOV_EXCL_START
             // Fall back to the device's resident thread capacity.
@@ -174,7 +171,7 @@ namespace rocsparse
             = gemvi_use_single_wavefront<WFSIZE>(nnz)
                   ? gemvi_part1_grid_y<WFSIZE, WFSIZE, gemvi_part1_unroll, T>(handle, m, nnz)
                   : gemvi_part1_grid_y<gemvi_part1_blocksize, WFSIZE, gemvi_part1_unroll, T>(
-                      handle, m, nnz);
+                        handle, m, nnz);
 
         return grid_y > 1 ? sizeof(T) * static_cast<size_t>(WFSIZE)
                                 * static_cast<size_t>(gemvi_part1_grid_x<WFSIZE>(m))
