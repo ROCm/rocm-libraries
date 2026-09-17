@@ -512,10 +512,12 @@ def default_scenarios() -> List[Scenario]:
             use_sinks=True,
             num_blocks=512,
         ),
-        # fp16 SWA-sink correctness — both tuned gates (Gate 1 combo, Gate 2 wpe3)
-        # exclude sliding_window, so these fall to the untuned path. The purpose
-        # is to confirm the fp16 SWA+sinks path is numerically correct, not to
-        # exercise a tuned gate. sliding_window=512 is ≥ block_size for both
+        # fp16 SWA-sink correctness. The two gates differ on sliding_window:
+        # Gate 1 (`_enable_combo_2d`) does NOT exclude it, so `gate1_swa` still
+        # rides the widened combo (with its SW-specific settings); Gate 2's wpe3
+        # predicate checks `sliding_window == 0`, so `gate2_swa` falls to the
+        # untuned path. Either way the purpose is to confirm the fp16 SWA+sinks
+        # path is numerically correct. sliding_window=512 is ≥ block_size for both
         # cohorts and is a realistic short-context window.
         Scenario(
             name="fp16_d64_sinks_gate1_swa",

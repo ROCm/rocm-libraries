@@ -2378,13 +2378,29 @@ def cases():
             use_alibi=True,
         ),
     )
-    # fp16 + sinks combo: the only fp16 path that enables _enable_combo_2d
+    # fp16 + sinks COMBO: the transposed-32x32 combo spec `_enable_combo_2d`
+    # admits for fp16+sinks. The combo knobs are passed explicitly so the golden
+    # hashes the real combo kernel (matching emit parity idx54), not a plain 2D
+    # spec. fp16 cannot set use_fast_paged_kv_desc (bf16-only).
+    _sink_combo_kw = dict(
+        num_seqs=2,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+    )
     add(
         "attention",
-        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks",
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks_combo",
         "gfx950",
         build_attention_2d(
-            "irhash_attn_950_2d_fp16_d64_sink",
+            "irhash_attn_950_2d_fp16_d64_sink_combo",
             "gfx950",
             head_size=64,
             block_size=32,
@@ -2392,6 +2408,25 @@ def cases():
             num_kv_heads=8,
             dtype="fp16",
             use_sinks=True,
+            **_sink_combo_kw,
+        ),
+    )
+    # bf16 + sinks COMBO twin (adds use_fast_paged_kv_desc, bf16-only).
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16_d64_sink_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=True,
+            use_fast_paged_kv_desc=True,
+            **_sink_combo_kw,
         ),
     )
     add(

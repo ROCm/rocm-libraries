@@ -1646,8 +1646,9 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     """
     if not problem.use_fp8:
         return False
-    # The 32x32 combo reads bf16 K from LDS, so it MUST use the sync-dequant
-    # loader (bf16 K_lds), not this in-LDS-fp8 path. Never combine them.
+    # The 32x32 combo reads K from LDS at the working dtype (bf16/fp16), so it
+    # MUST use the sync-dequant loader (working-dtype K_lds), not this in-LDS-fp8
+    # path. Never combine them.
     if _enable_combo_2d(problem):
         return False
     if not _fp8_qk_loader_fits(problem):
@@ -2509,10 +2510,10 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
             return False
     elif problem.dtype != "bf16":
         return False
-    # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
-    # into K_lds/V_lds (k_scale folded in) -- exactly what the 32x32 combo
-    # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
-    # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
+    # FP8 KV is supported via the *sync-dequant* loader, which writes the working
+    # dtype (bf16/fp16) into K_lds/V_lds (k_scale folded in) -- exactly what the
+    # 32x32 combo reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
+    # in-LDS-fp8 mode (incompatible with the working-dtype 32x32 reads) never fires.
     # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
     if problem.head_size != 64 or problem.block_size != 32:
         return False
