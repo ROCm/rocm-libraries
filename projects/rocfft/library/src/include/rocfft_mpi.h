@@ -28,8 +28,15 @@
 #endif
 
 #include "../../../shared/array_predicate.h"
+#include "../../../shared/rocfft_complex.h"
 #include "rocfft/rocfft.h"
+#include <cstdint>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 class MPI_Comm_wrapper_t
 {
