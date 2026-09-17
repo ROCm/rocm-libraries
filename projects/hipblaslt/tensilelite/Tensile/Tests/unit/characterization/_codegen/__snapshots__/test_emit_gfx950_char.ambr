@@ -82,6 +82,15 @@
       ]),
     }),
     dict({
+      'file': 'MX_Subtile_TLU1_NN.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bljk_F4SS_MXAE8B32_MXBE8B32_BH_UserArgbe9O1_QOOFg8FOav53nwqbNW_lCLf_G3PxJ4wl5NtfM=',
+          'err': 0,
+        }),
+      ]),
+    }),
+    dict({
       'file': 'SB.yaml',
       'kernels': list([
         dict({
