@@ -265,6 +265,31 @@ jobs:
           find "$ROCM" -type f \( -name hipblaslt-test -o -name tensilelite-client \) 2>/dev/null || true
           echo "::endgroup::"
 
+      - name: GPU / ROCm diagnostics (DEBUG — remove before merge)
+        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' }}
+        run: |
+          set +e
+          HTB="$(find "$ROCM" -type f -name hipblaslt-test | head -1)"
+          echo "::group::rocminfo (device + ISA + xnack)"
+          "$ROCM/bin/rocminfo" 2>&1 | grep -iE "Name:|gfx|xnack|Uuid" | head -40 || echo "rocminfo not in artifact / failed"
+          echo "::endgroup::"
+          echo "::group::libhsa the test binary loads + artifact HSA"
+          ldd "$HTB" 2>&1 | grep -iE "hsa|amdhip64|=> not found"
+          find "$ROCM" -name 'libhsa-runtime64.so*' 2>/dev/null
+          echo "::endgroup::"
+          echo "::group::host amdgpu driver + KFD devices (from container)"
+          cat /sys/module/amdgpu/version 2>/dev/null || echo "amdgpu sysfs version not visible"
+          ls -l /dev/kfd /dev/dri/render* 2>/dev/null; id
+          echo "::endgroup::"
+          echo "::group::compute-affecting env"
+          env | grep -iE "^HSA_|^HIP_|^ROCR_|XNACK|^LD_LIBRARY_PATH" | sort
+          echo "::endgroup::"
+          echo "::group::verbose sanity GEMM (expected vs actual)"
+          HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
+          "$HTB" --gtest_filter='*special_fp_64x64_f16*' 2>&1 | tail -50
+          echo "::endgroup::"
+          true
+
       - name: Run hipBLASLt tests
         timeout-minutes: 120
         if: ${{ steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_hipblaslt == 'true' }}
