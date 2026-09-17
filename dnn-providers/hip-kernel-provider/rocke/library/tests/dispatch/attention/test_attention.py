@@ -19,7 +19,7 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # is listed here, so a widening like fp8 can never silently reach a path that
 # does not implement it.
 EXPECTED_FEATURES = {
-    "attention_gfx942_dense": {"causal"},
+    "attention_gfx942_dense": {"causal", "sliding_window"},
     "attention_gfx950_dense": {"causal", "sinks", "sliding_window"},
     "attention_d256_decode": {"causal"},
     "attention_gfx1250_wmma": {"causal"},

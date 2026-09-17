@@ -194,6 +194,11 @@ def _cases():
         "attention_dense_gfx942/dispatch_swa_d128_bf16_w128": mk_dispatch(
             sliding_window=128
         ),
+        # D64 SWA: structurally distinct builder arm (packed 2-rows/DMA + K row-group
+        # pad + wpe=4 tune). Numeric coverage is in _SWA_COHORT
+        "attention_dense_gfx942/swa_d64_bf16_w128": mk(
+            head_size=64, sliding_window=128
+        ),
     }
 
 

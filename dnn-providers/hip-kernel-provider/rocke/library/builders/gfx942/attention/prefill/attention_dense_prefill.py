@@ -42,12 +42,13 @@ These helpers (:func:`add_dense_tuning_args`, :func:`dense_request`,
 :func:`describe_dense_spec`) are the SINGLE copy — the live benchmark imports them
 from here rather than keeping a second, drifting resolver.
 
-NOTE: ``--sw`` (sliding window, P1+) still builds a spec that
-``supports_attention_dense`` rejects, so ``run`` raises a ``ValueError`` naming the
-reason. ``--persistent`` is NOT in that category any more: the persistent grid
-ships and dispatch turns it on automatically for large-Sq prefill. ``--bn`` must
-divide the 256-row query tile and keep ``K_lds+V_lds`` inside the 64 KB gfx942 LDS
--- ``--bn 128`` exceeds it at D128 and is rejected (it fits at D64).
+NOTE: ``--sw`` (sliding window) now builds a supported spec (KV-loop prune + window
+mask); only the degenerate shape whose last query block's window starts past
+``seqlen_kv`` is rejected (zero-trip KV loop -> NaN). ``--persistent`` is NOT a
+deferred mode either: the persistent grid ships and dispatch turns it on
+automatically for large-Sq prefill. ``--bn`` must divide the 256-row query tile and
+keep ``K_lds+V_lds`` inside the 64 KB gfx942 LDS -- ``--bn 128`` exceeds it at D128
+and is rejected (it fits at D64).
 
 Usage:
     python attention_dense_prefill.py                 # parity + bench, dispatch spec
@@ -182,7 +183,8 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
         dest="sliding_window",
         type=int,
         default=None,
-        help="sliding_window (0=off; multiple of block_n). P1+: currently rejected",
+        help="sliding_window (0=off; multiple of block_n). Supported: KV-loop "
+        "prune + window mask.",
     )
 
 
@@ -197,12 +199,14 @@ def dense_request(
     head_size: int,
     causal: bool,
     dtype: str,
+    sliding_window: int = 0,
 ) -> AttentionRequest:
     """The :class:`AttentionRequest` a production caller would submit.
 
     Shape comes from the caller; the three persistent knobs come from the CLI when
     explicitly passed and otherwise keep the request defaults, so dispatch applies
-    its own gfx942 normalization to them.
+    its own gfx942 normalization to them. ``sliding_window`` is a request property
+    (0 = full causal), so dispatch ships the SWA-pruned spec.
     """
     req_kwargs = {}
     if getattr(args, "persistent", None) is not None:
@@ -222,6 +226,7 @@ def dense_request(
         arch=_ARCH,
         mask_type=1 if causal else 0,
         dtype=str(dtype).lower(),
+        sliding_window=int(sliding_window),
         # Opt-in selector: this is the candidate whose spec we are measuring.
         algorithm="attention_dense",
         spec_id="gfx942_attention_dense",
