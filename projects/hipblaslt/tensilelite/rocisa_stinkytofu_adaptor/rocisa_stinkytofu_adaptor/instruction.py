@@ -12,7 +12,7 @@ from copy import deepcopy as _deepcopy
 from typing import Any, Dict, List, Optional
 
 from ._dummy import make_dummy_class, make_dummy_func
-from .enum import InstType
+from .enum import DelayALUSkip, DelayALUType, InstType
 
 _P = "rocisa.instruction"
 
@@ -952,60 +952,6 @@ def _make_no_operand_class(class_name: str, mnemonic: str):
         "__doc__": f"``{mnemonic}`` shim with stinkytofu left-path bridge.",
         "__init__": __init__,
         "__slots__": (),
-        "getParams": getParams,
-        "getDstParams": getDstParams,
-        "getSrcParams": getSrcParams,
-        "toString": toString,
-        "to_stinky_logical": to_stinky_logical,
-        "__deepcopy__": __deepcopy__,
-    })
-    cls.__qualname__ = class_name
-    cls.__module__ = __name__
-    return cls
-
-
-def _make_imm_no_dest_class(class_name: str, mnemonic: str, param_name: str = "simm16"):
-    """Factory for 1-imm, no-dest instructions: SSleep, SSetPrior, SDelayAlu, etc."""
-
-    def __init__(self, value: int = 0, comment: str = "", **kw):
-        _ = kw
-        Instruction.__init__(self, InstType.INST_NOTYPE, comment)
-        self._imm_value = int(value)
-        self.setInst(mnemonic)
-
-    def getParams(self):
-        return [self._imm_value]
-
-    def getDstParams(self):
-        return []
-
-    def getSrcParams(self):
-        return [self._imm_value]
-
-    def toString(self) -> str:
-        kstr = self.instStr + " " + _input_to_str(self._imm_value)
-        return self.formatWithComment(kstr)
-
-    def to_stinky_logical(self) -> Any:
-        import stinkytofu as _st  # noqa: WPS433
-
-        factory = getattr(_st, class_name)
-        return factory(_to_stinky_register(self._imm_value), self.comment)
-
-    def __deepcopy__(self, memo):
-        if id(self) in memo:
-            return memo[id(self)]
-        dup = object.__new__(type(self))
-        memo[id(self)] = dup
-        Instruction.__init__(dup, InstType.INST_NOTYPE, self.comment)
-        dup._imm_value = self._imm_value
-        dup.setInst(mnemonic)
-        return dup
-
-    cls = type(class_name, (Instruction,), {
-        "__doc__": f"``{mnemonic} {{imm}}`` shim with stinkytofu left-path bridge.",
-        "__init__": __init__,
-        "__slots__": ("_imm_value",),
         "getParams": getParams,
         "getDstParams": getDstParams,
         "getSrcParams": getSrcParams,
@@ -2299,7 +2245,41 @@ SSExtI16toI32 = _make_scalar_unary_class("SSExtI16toI32", "s_sext_i32_i16", Inst
 # SOrSaveExecB32 — real class (see Scalar ALU section above)
 # SOrSaveExecB64 — real class (see Scalar ALU section above)
 # logicalIR: SSetPrior
-SSetPrior = _make_imm_no_dest_class("SSetPrior", "s_setprio")
+class SSetPrior(Instruction):
+    """``s_setprio prior`` shim matching ``rocisa::SSetPrior``."""
+
+    __slots__ = ("prior",)
+
+    def __init__(self, prior: int, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.prior = int(prior)
+        self.setInst("s_setprio")
+
+    def getParams(self):
+        return [self.prior]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.prior]
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr + " " + str(self.prior))
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SSetPrior(_to_stinky_register(self.prior), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SSetPrior(prior=self.prior, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
 # SBarrier — real class (see SBarrier section above)
 # logicalIR: SDcacheWb
 SDcacheWb = _make_no_operand_class("SDcacheWb", "s_dcache_wb")
@@ -2380,9 +2360,112 @@ class SEndpgm(Instruction):
 
 
 # logicalIR: SSleep
-SSleep = _make_imm_no_dest_class("SSleep", "s_sleep")
+class SSleep(Instruction):
+    """``s_sleep simm16`` shim matching ``rocisa::SSleep``."""
+
+    __slots__ = ("simm16",)
+
+    def __init__(self, simm16: int, comment: str = ""):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.simm16 = int(simm16)
+        self.setInst("s_sleep")
+
+    def getParams(self):
+        return [self.simm16]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.simm16]
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.instStr + " " + str(self.simm16))
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SSleep(_to_stinky_register(self.simm16), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SSleep(simm16=self.simm16, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
 # logicalIR: SSetVgprMsb
-SSetVgprMsb = _make_imm_no_dest_class("SSetVgprMsb", "s_set_vgpr_msb")
+class SSetVgprMsb(Instruction):
+    """``s_set_vgpr_msb`` shim matching ``rocisa::SSetVgprMsb``.
+
+    Two construction shapes, same packing as common.hpp:
+      * ``SSetVgprMsb(simm16, comment="")``
+      * ``SSetVgprMsb(msbSrc0, msbSrc1, msbSrc2, msbDst, comment="")``
+        encodes ``(dst << 6) + (src2 << 4) + (src1 << 2) + src0``.
+    """
+
+    __slots__ = ("simm16",)
+
+    def __init__(self, *args, **kwargs):
+        comment = str(kwargs.pop("comment", ""))
+        packed = ("msbSrc0", "msbSrc1", "msbSrc2", "msbDst")
+        if all(k in kwargs for k in packed):
+            msb_src0 = int(kwargs.pop("msbSrc0"))
+            msb_src1 = int(kwargs.pop("msbSrc1"))
+            msb_src2 = int(kwargs.pop("msbSrc2"))
+            msb_dst = int(kwargs.pop("msbDst"))
+            simm16 = (msb_dst << 6) + (msb_src2 << 4) + (msb_src1 << 2) + msb_src0
+        elif "simm16" in kwargs:
+            simm16 = int(kwargs.pop("simm16"))
+        elif len(args) >= 4 and not isinstance(args[1], str):
+            msb_src0, msb_src1, msb_src2, msb_dst = (int(args[i]) for i in range(4))
+            if len(args) >= 5:
+                comment = str(args[4])
+            simm16 = (msb_dst << 6) + (msb_src2 << 4) + (msb_src1 << 2) + msb_src0
+        elif len(args) >= 1:
+            simm16 = int(args[0])
+            if len(args) >= 2:
+                comment = str(args[1])
+        else:
+            raise TypeError(
+                "SSetVgprMsb requires simm16 or msbSrc0, msbSrc1, msbSrc2, msbDst"
+            )
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"SSetVgprMsb got unexpected keyword(s): {unexpected}")
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.simm16 = simm16
+        self.setInst("s_set_vgpr_msb")
+
+    def getParams(self):
+        return [self.simm16]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return [self.simm16]
+
+    def toString(self) -> str:
+        from .base import setVgprMsb  # noqa: WPS433
+
+        setVgprMsb(self.simm16)
+        return self.formatWithComment(self.instStr + " " + str(self.simm16))
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SSetVgprMsb(_to_stinky_register(self.simm16), self.comment)
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SSetVgprMsb(simm16=self.simm16, comment=self.comment)
+        memo[id(self)] = dup
+        return dup
+
+
 # SGetRegB32 — real class (see Scalar Control section above)
 # SSetRegB32 — real class (see Scalar Control section above)
 # SSetRegIMM32B32 — real class (see Scalar Control section above)
@@ -2853,21 +2936,130 @@ class SWaitAlu(Instruction):
         )
         memo[id(self)] = dup
         return dup
+
+
+def _delay_alu_dep_str(alu_type: Any, cnt: int) -> str:
+    """Mirror ``rocisa::toString(DelayALUType, int)`` (enum.hpp)."""
+    if not cnt:
+        return "NO_DEP"
+    t = int(alu_type)
+    if t == int(DelayALUType.VALU) or t == int(DelayALUType.TRANS):
+        return f"{DelayALUType(t).name}_DEP_{cnt}"
+    if t == int(DelayALUType.SALU):
+        return f"SALU_CYCLE_{cnt}"
+    return ""
+
+
+def _delay_alu_skip_str(skip_cnt: Any) -> str:
+    """Mirror ``rocisa::toString(DelayALUSkip)`` (enum.hpp)."""
+    try:
+        return DelayALUSkip(int(skip_cnt)).name
+    except ValueError:
+        return ""
+
+
 # logicalIR: SDelayAlu
-SDelayAlu = _make_imm_no_dest_class("SDelayAlu", "s_delay_alu")
+class SDelayAlu(Instruction):
+    """``s_delay_alu`` shim matching ``rocisa::SDelayAlu``.
+
+    Operand is the gfx12+ ``instid0`` / ``instskip`` / ``instid1`` encoding,
+    not a single integer immediate. stinkytofu's Python SDelayAlu binding
+    currently asserts on SDelayAluData, so ``to_stinky_logical`` still
+    emits an SNop placeholder restored by ``code._postprocess_delay_alu_placeholder``.
+    """
+
+    __slots__ = ("instid0type", "instid0cnt", "instskipCnt", "instid1type", "instid1cnt")
+
+    def __init__(
+        self,
+        instid0type: Any,
+        instid0cnt: int,
+        instskipCnt: Optional[int] = None,
+        instid1type: Any = None,
+        instid1cnt: Optional[int] = None,
+        comment: str = "",
+    ):
+        super().__init__(InstType.INST_NOTYPE, comment)
+        self.instid0type = int(instid0type)
+        self.instid0cnt = int(instid0cnt)
+        self.instskipCnt = None if instskipCnt is None else int(instskipCnt)
+        self.instid1type = None if instid1type is None else int(instid1type)
+        self.instid1cnt = None if instid1cnt is None else int(instid1cnt)
+        self.setInst("s_delay_alu")
+
+    def hasInstID1(self) -> bool:
+        return (
+            self.instskipCnt is not None
+            or self.instid1type is not None
+            or self.instid1cnt is not None
+        )
+
+    def setInstID1(self, instskipCnt: int, instid1type: Any, instid1cnt: int) -> bool:
+        if self.hasInstID1():
+            return False
+        self.instskipCnt = int(instskipCnt)
+        self.instid1type = int(instid1type)
+        self.instid1cnt = int(instid1cnt)
+        return True
+
+    def getParams(self):
+        if self.hasInstID1():
+            return [
+                self.instid0type,
+                self.instid0cnt,
+                -1 if self.instskipCnt is None else self.instskipCnt,
+                int(DelayALUType.OTHER) if self.instid1type is None else self.instid1type,
+                -1 if self.instid1cnt is None else self.instid1cnt,
+            ]
+        return [self.instid0type, self.instid0cnt]
+
+    def getDstParams(self):
+        return []
+
+    def getSrcParams(self):
+        return []
+
+    def _operand_text(self) -> str:
+        result = "instid0(" + _delay_alu_dep_str(self.instid0type, self.instid0cnt) + ")"
+        if not self.hasInstID1():
+            return result
+        result += " | instskip(" + _delay_alu_skip_str(
+            0 if self.instskipCnt is None else self.instskipCnt
+        ) + ")"
+        id1_type = (
+            int(DelayALUType.OTHER) if self.instid1type is None else self.instid1type
+        )
+        id1_cnt = 0 if self.instid1cnt is None else self.instid1cnt
+        result += " | instid1(" + _delay_alu_dep_str(id1_type, id1_cnt) + ")"
+        return result
+
+    def toString(self) -> str:
+        from .base import getAsmCaps  # noqa: WPS433
+
+        if not getAsmCaps().get("s_delay_alu", 0):
+            return ""
+        return self.formatWithComment(self.instStr + " " + self._operand_text())
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+
+        return _st.SNop(_st.Register(0), "DELAY_ALU:" + self._operand_text())
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        dup = SDelayAlu(
+            self.instid0type,
+            self.instid0cnt,
+            self.instskipCnt,
+            self.instid1type,
+            self.instid1cnt,
+            self.comment,
+        )
+        memo[id(self)] = dup
+        return dup
 
 
-def _sdelayalu_to_stinky_logical(self) -> Any:
-    """SNop placeholder workaround for stinkytofu SDelayAluData assertion bug."""
-    import stinkytofu as _st  # noqa: WPS433
-
-    # The raw immediate encodes the full s_delay_alu operand; emit it verbatim
-    # so post-processing can restore the original instruction text.
-    alu_text = _input_to_str(self._imm_value)
-    return _st.SNop(_st.Register(0), "DELAY_ALU:" + alu_text)
-
-
-SDelayAlu.to_stinky_logical = _sdelayalu_to_stinky_logical
 # logicalIR: VAddF16
 VAddF16 = _make_scalar_alu_class("VAddF16", "v_add_f16", InstType.INST_F16)
 # VAddF32 — real class (see Vector ALU section above)

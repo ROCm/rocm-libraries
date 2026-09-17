@@ -231,15 +231,6 @@ _ALU_DEP_MAX = {
     _DELAY_OTHER: 0,
 }
 
-_DELAY_TYPE_NAME = {
-    _DELAY_VALU: "VALU",
-    _DELAY_TRANS: "TRANS",
-    _DELAY_SALU: "SALU",
-}
-
-_SKIP_MAX = 5
-
-
 def _delay_alu_type(inst: _inst.Instruction) -> int:
     pre = inst.preStr()
     if pre.startswith("v_s_"):
@@ -281,100 +272,6 @@ def _get_dst_src_regs(inst: _inst.Instruction):
     return dsts, srcs
 
 
-def _format_dep_str(alu_type: int, cnt: int) -> str:
-    if cnt == 0:
-        return "NO_DEP"
-    name = _DELAY_TYPE_NAME.get(alu_type)
-    if name is None:
-        return ""
-    if alu_type == _DELAY_SALU:
-        return f"SALU_CYCLE_{cnt}"
-    return f"{name}_DEP_{cnt}"
-
-
-def _make_delay_alu_inst(instid0type: int, instid0cnt: int) -> _inst.Instruction:
-    """Create an SDelayAlu instruction with the proper formatted immediate."""
-    dep_str = _format_dep_str(instid0type, instid0cnt)
-    from .instruction import SDelayAlu as _SDelayAlu  # noqa: WPS433
-
-    # The SDelayAlu class stores a raw integer. We need the instruction to
-    # render as "s_delay_alu instid0(VALU_DEP_N)" in toString().
-    # Override: build a minimal Instruction that renders correctly.
-    inst = _SDelayAluFormatted(instid0type, instid0cnt)
-    return inst
-
-
-class _SDelayAluFormatted(_inst.Instruction):
-    """SDelayAlu with human-readable encoding matching native rocisa output."""
-
-    __slots__ = ("instid0type", "instid0cnt", "instskipCnt",
-                 "instid1type", "instid1cnt")
-
-    def __init__(self, instid0type: int, instid0cnt: int, comment: str = ""):
-        super().__init__(_inst.InstType.INST_NOTYPE, comment)
-        self.instid0type = instid0type
-        self.instid0cnt = instid0cnt
-        self.instskipCnt = None
-        self.instid1type = None
-        self.instid1cnt = None
-        self.setInst("s_delay_alu")
-
-    def hasInstID1(self) -> bool:
-        return (self.instskipCnt is not None or self.instid1type is not None
-                or self.instid1cnt is not None)
-
-    def setInstID1(self, skip_cnt: int, instid1type: int, instid1cnt: int) -> bool:
-        if self.hasInstID1():
-            return False
-        self.instskipCnt = skip_cnt
-        self.instid1type = instid1type
-        self.instid1cnt = instid1cnt
-        return True
-
-    def getParams(self):
-        return []
-
-    def getDstParams(self):
-        return []
-
-    def getSrcParams(self):
-        return []
-
-    def toString(self) -> str:
-        result = " instid0(" + _format_dep_str(self.instid0type, self.instid0cnt) + ")"
-        if not self.hasInstID1():
-            return self.formatWithComment(self.instStr + result)
-        _SKIP_NAMES = {0: "SAME", 1: "NEXT", 2: "SKIP_1", 3: "SKIP_2",
-                       4: "SKIP_3", 5: "SKIP_4"}
-        result += " | instskip(" + _SKIP_NAMES.get(self.instskipCnt, "") + ")"
-        result += " | instid1(" + _format_dep_str(self.instid1type, self.instid1cnt) + ")"
-        return self.formatWithComment(self.instStr + result)
-
-    def to_stinky_logical(self):
-        import stinkytofu as _st  # noqa: WPS433
-
-        # stinkytofu's Python SDelayAlu binding triggers an assertion failure
-        # (SDelayAluData not initialized) during emission.  Work around by
-        # emitting an SNop(0) placeholder whose comment carries the original
-        # s_delay_alu text; post-processing restores it.
-        alu_text = "instid0(" + _format_dep_str(self.instid0type, self.instid0cnt) + ")"
-        if self.hasInstID1():
-            _SKIP_NAMES = {0: "SAME", 1: "NEXT", 2: "SKIP_1", 3: "SKIP_2",
-                           4: "SKIP_3", 5: "SKIP_4"}
-            alu_text += " | instskip(" + _SKIP_NAMES.get(self.instskipCnt, "") + ")"
-            alu_text += " | instid1(" + _format_dep_str(self.instid1type, self.instid1cnt) + ")"
-        return _st.SNop(_st.Register(0), "DELAY_ALU:" + alu_text)
-
-    def __deepcopy__(self, memo):
-        if id(self) in memo:
-            return memo[id(self)]
-        dup = _SDelayAluFormatted(self.instid0type, self.instid0cnt, self.comment)
-        if self.hasInstID1():
-            dup.setInstID1(self.instskipCnt, self.instid1type, self.instid1cnt)
-        memo[id(self)] = dup
-        return dup
-
-
 def _is_valu_writes_sgpr(inst: _inst.Instruction) -> bool:
     """True if inst is a VALU that writes an SGPR (e.g. v_cmp_*, v_readfirstlane)."""
     pre = inst.preStr()
@@ -403,7 +300,7 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
     inst_idx_delay_info: Dict[int, Tuple[int, int, int]] = {}  # idx -> (type, type_count, total)
     delay_type_counts: Dict[int, int] = {_DELAY_VALU: 0, _DELAY_TRANS: 0,
                                           _DELAY_SALU: 0, _DELAY_OTHER: 0}
-    dep_idxs: Dict[int, _SDelayAluFormatted] = {}
+    dep_idxs: Dict[int, _inst.SDelayAlu] = {}
     total_count = 0
 
     for i, item in enumerate(items):
@@ -440,7 +337,7 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
             inst_cnt = delay_type_counts[dep_alu_type] - dep_type_count
             max_dep = _ALU_DEP_MAX.get(dep_alu_type, 0)
             if inst_cnt <= max_dep:
-                dep_idxs[i] = _SDelayAluFormatted(dep_alu_type, inst_cnt)
+                dep_idxs[i] = _inst.SDelayAlu(dep_alu_type, inst_cnt)
 
         for dst in dsts:
             last_dst_inst_idx[dst] = i
@@ -453,11 +350,15 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
 def insert_delay_alu(module: _code.Module) -> None:
     """Mirror ``rocisa::insertDelayAlu`` (insert_delay_alu.cpp).
 
-    Inserts ``_SDelayAluFormatted`` instructions into the Module tree.
+    Inserts ``SDelayAlu`` instructions into the Module tree.
     These are later converted to SNop placeholders during stinkytofu lowering
-    (see ``_SDelayAluFormatted.to_stinky_logical``), then restored to real
+    (see ``SDelayAlu.to_stinky_logical``), then restored to real
     ``s_delay_alu`` text by ``_postprocess_delay_alu_placeholder`` in code.py.
     """
+    from .base import getAsmCaps  # noqa: WPS433
+
+    if not getAsmCaps().get("s_delay_alu", 0):
+        return
     _insert_delay_alu_recursive(module)
 
 
