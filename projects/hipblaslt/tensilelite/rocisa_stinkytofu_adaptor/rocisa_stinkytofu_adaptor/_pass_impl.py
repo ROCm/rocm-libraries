@@ -685,6 +685,13 @@ def _expand_macro_body(
         elif isinstance(item, _inst.Instruction):
             if branch[-1]:
                 output.append(_clone_and_substitute(item, params))
+        elif isinstance(item, _code.TextBlock):
+            # Macro::addComment0 bodies carry comments (CustomSchedule annotates
+            # MAINLOOP this way); they are inert but worth keeping in the asm.
+            if branch[-1]:
+                output.append(
+                    _code.TextBlock(_substitute_string_param(item.text, params))
+                )
         else:
             raise AssertionError(
                 "macroToInstruction: unexpected item type in macro body: "
