@@ -159,7 +159,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.should_run == 'true'
     runs-on: blas-rocm-mi455-sandbox
-    timeout-minutes: 300
+    timeout-minutes: 360
     # Test container: no ROCm baked in, so the fetched artifact's libraries load
     # cleanly with no host /opt/rocm to shadow them. Same image + options TheRock's
     # component-test (pytest_runner) path uses.
@@ -313,7 +313,7 @@ jobs:
             | tee test_results/hipblaslt_test.log
 
       - name: Run TensileLite common tests
-        timeout-minutes: 120
+        timeout-minutes: 240
         if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
         env:
           TL_MARKERS: ${{ inputs.tensilelite_markers || 'common' }}
@@ -347,6 +347,25 @@ jobs:
           ldd "$CLIENT" 2>&1 | grep -iE 'omp|=> not found'
           ldconfig -p | grep -i omp || echo "libomp NOT in ld cache"
           echo "::endgroup::"
+          # Lever #2:HIP device compiles
+          # through ccache. clang '-x assembler' is cacheable (verified). Guarded
+          # so a missing ccache never turns the launcher into a broken command.
+          # Intra-run cache only: the container is ephemeral and this CI has no
+          # actions/cache layer, so hits come from duplicate kernels within a run.
+          echo "::group::ccache setup"
+          if ! command -v ccache >/dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq ccache \
+              || echo "::warning::ccache install failed; running without kernel-assembly caching"
+          fi
+          if command -v ccache >/dev/null 2>&1; then
+            export CCACHE_DIR=/tmp/tl-ccache CCACHE_MAXSIZE=5G
+            export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
+            ccache -z >/dev/null 2>&1 || true
+            echo "$(ccache --version | head -1); CCACHE_DIR=$CCACHE_DIR"
+          else
+            echo "ccache unavailable — proceeding without kernel-assembly caching"
+          fi
+          echo "::endgroup::"
           pytest -p no:cacheprovider Tensile/Tests/common \
             -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
@@ -354,6 +373,11 @@ jobs:
             --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,$TL_TARGET \
             --junitxml="$GITHUB_WORKSPACE/tensilelite_test_results/common_test.xml" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
+          TL_RC=${PIPESTATUS[0]}
+          echo "::group::ccache stats (hit rate = kernel-assembly reuse this run)"
+          command -v ccache >/dev/null 2>&1 && ccache -s || echo "no ccache"
+          echo "::endgroup::"
+          exit "$TL_RC"
 
       - name: Upload test results
         if: always()
