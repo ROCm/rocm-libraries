@@ -752,6 +752,100 @@
         "format_version": 1,
         "reference_source": "Hackweek:ConvBias, authoring run 20260916T175821Z-db1d"
       }
+    },
+    {
+      "id": "2_3_4_4_chwn",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3,
+              4,
+              4
+            ],
+            "strides": [
+              1,
+              32,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3,
+              4,
+              4
+            ],
+            "strides": [
+              1,
+              32,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              3,
+              4,
+              4
+            ],
+            "strides": [
+              1,
+              32,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              3,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              2,
+              3,
+              4,
+              4
+            ],
+            "strides": [
+              1,
+              32,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "reference_source": "Hackweek:ConvBias, generalize run 20260917T003211Z-4cf7"
+      }
     }
   ]
 }

@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -968,6 +969,75 @@ std::string dtypeTagFor(const KernelDefinition& kernel)
                                                        + "'");
 }
 
+/// The tensor KernelCompileOptions derives its macros from -- a rank-4, packed-NCHW
+/// stand-in rather than the graph's own x.
+///
+/// KernelCompileOptions' constructor emits HIP_PLUGIN_USE_FP32/FP16/BFP16 and
+/// HIP_PLUGIN_LAYOUT_NHWC from whatever tensor it is handed, and it derives the layout one
+/// through core::utils::isChannelLastLayout(), which is a total function on neither axis it
+/// reads: it is defined for rank 4 and rank 5 only, and at each of those for exactly two
+/// stride orders. Every other shape THROWS. That throw is what made this engine's rank-3
+/// admission unservable -- the matcher accepted the graph, and then every one of the three
+/// candidate kernels failed to build a plan with "Tensor must be 4D or 5D for layout
+/// detection. Got 3D tensor.", which reaches the caller as a plan-finalize INTERNAL_ERROR.
+/// The same throw also closed rank 4 and rank 5 to every stride order but two, against a
+/// matcher that documents and enforces no layout requirement at all.
+///
+/// The fix is to stop asking, because this kernel never wanted the answer.
+/// ConvBiasFusedFwd.cpp reads none of those eight macros: its element type arrives as
+/// HKP_CONV_BIAS_TYPE, resolved from the candidate's own dtype metadata by dtypeTagFor()
+/// below, and its layout arrives as twenty runtime stride arguments taken from the graph.
+/// So passing the graph's x here was never a use of the derived value, only a coupling to
+/// the deriving function's domain. This stand-in carries the one dtype the matcher admits,
+/// which is exactly the dtype the graph's tensors were required to have, and an
+/// unambiguously NCHW stride order -- so the macros come out well-formed, consistent with
+/// the graph, and unread.
+///
+/// Static rather than rebuilt per prepare(): it depends on nothing but SUPPORTED_DATA_TYPE.
+/// The buffer must outlive every KernelCompileOptions built from it, and prepare() is
+/// called on any thread, so it is a function-local static initialised once.
+const data_objects::TensorAttributes* layoutProbeStandIn()
+{
+    static const flatbuffers::DetachedBuffer s_buffer = [] {
+        flatbuffers::FlatBufferBuilder builder;
+        // Extents above 1 and strictly descending strides so the stride order is a strict
+        // ordering rather than a tie the probe would have to break: this is NCHW and
+        // nothing else.
+        const std::vector<int64_t> dims = {2, 2, 2, 2};
+        const std::vector<int64_t> strides = {8, 4, 2, 1};
+        builder.Finish(data_objects::CreateTensorAttributesDirect(
+            builder, /*uid=*/0, /*name=*/nullptr, SUPPORTED_DATA_TYPE, &strides, &dims));
+        return builder.Release();
+    }();
+    return flatbuffers::GetRoot<data_objects::TensorAttributes>(s_buffer.data());
+}
+
+/// The symbol a graph of two spatial axes launches: the entry point whose 37-argument
+/// parameter list the authoring contract froze. Serves rank 3 and rank 4.
+constexpr const char* THREE_SPATIAL_ENTRY_POINT = "ConvBiasFusedFwd3d";
+
+/// True when the canonical depth slot carries the identity everywhere it can appear, so
+/// dropping its ten arguments changes nothing.
+///
+/// Canonicalisation right-aligns a graph's real spatial axes, so a rank-3 or rank-4 graph
+/// arrives with slot 0 degenerate and a rank-5 graph does not. This asks the geometry rather
+/// than remembering the rank, deliberately: the ten depth arguments are exactly what the
+/// 37-argument entry point cannot carry, so the question that decides which symbol to launch
+/// is "is every one of them the identity", not "what was the rank". The two agree for every
+/// admitted graph, and where they could differ -- a rank-5 graph whose depth axis is
+/// genuinely trivial -- this predicate is the safe one: it drops only what provably
+/// contributes nothing.
+///
+/// prepare() and launch() both call this on the same stored geometry, so the symbol resolved
+/// and the argument list pushed cannot disagree.
+bool hasDegenerateDepthSlot(const ConvBiasGeometry& geometry)
+{
+    return geometry.outSpatial[0] == 1 && geometry.xSpatial[0] == 1 && geometry.filter[0] == 1
+           && geometry.padding[0] == 0 && geometry.stride[0] == 1 && geometry.dilation[0] == 1
+           && geometry.xStrides[2] == 0 && geometry.wStrides[2] == 0
+           && geometry.biasStrides[2] == 0 && geometry.outStrides[2] == 0;
+}
+
 /**
  * @brief The native dispatch behind this pack's UDD: sizes and launches the fused
  *        conv+bias kernel. Everything graph- and kernel-derived resolves once at
@@ -1032,8 +1102,11 @@ public:
                 "kernel '" + toString(kernel.kernelId) + "' declares a zero block_size");
         }
 
-        const auto& xTensor = *findTensor(context, binding.x);
-        compilation::KernelCompileOptions options(&xTensor, context.deviceProperties.gcnArchName);
+        // Not the graph's x: see layoutProbeStandIn() for why this kernel must not be asked
+        // to have a detectable layout, and why a rank-3 graph could not build a plan while
+        // it was.
+        compilation::KernelCompileOptions options(layoutProbeStandIn(),
+                                                  context.deviceProperties.gcnArchName);
         // The two macros ConvBiasFusedFwd.cpp guards with #error. Both handler-supplied
         // rather than descriptor-bound: they are read out of this candidate's metadata and
         // validated before becoming flags, and the descriptor substituter does literal
@@ -1050,6 +1123,17 @@ public:
         // instead of throwing at plan-build time.
         auto code
             = buildIngestorKernelCode(_kernelCompiler, _kpackLoader, context, kernel, options);
+
+        // The descriptor's entry_point is ConvBiasFusedFwd, the two-spatial-axis symbol, and
+        // that is what buildIngestorKernelCode() has already resolved. A rank-5 graph needs
+        // the other symbol in the same compiled program: its depth axis is ten arguments
+        // ConvBiasFusedFwd's frozen parameter list has nowhere to put, so it is a different
+        // entry point rather than a wider one. Re-resolving from `code.program` is why this
+        // costs no second compile and no second descriptor.
+        if(!hasDegenerateDepthSlot(plan->geometry))
+        {
+            code.kernel = code.program->getKernel(THREE_SPATIAL_ENTRY_POINT);
+        }
 
         const auto gridSize = static_cast<unsigned int>(
             (plan->geometry.total + static_cast<int64_t>(blockSize) - 1)
@@ -1085,9 +1169,6 @@ public:
         const auto out
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.out, deviceBuffers, numDeviceBuffers);
 
-        // 47 arguments, in the order kernels/ConvBiasFusedFwd.cpp declares them: four
-        // pointers, then 23 int32_t extents and conv parameters, then 20 int64_t strides.
-        //
         // Neither arity nor order is diagnosed anywhere downstream -- hipRTC compiles the
         // kernel, getKernel() resolves it, and hipModuleLaunchKernel reads one pointer per
         // parameter the KERNEL declared. A short list reads whatever is next in memory and
@@ -1096,10 +1177,65 @@ public:
         // variadic pushes exactly what it is given, so a plain `int` where the kernel
         // declares int64_t would misalign every argument after it.
         //
-        // Every one of these is canonical five-axis already. The rank of the graph that
-        // produced them is not passed and is not needed: describeConvBias() resolved it
-        // into degenerate slot values, so a rank-3 launch differs from a rank-5 one only in
-        // the numbers below.
+        // Which of the two lists to push is decided by the same predicate prepare() used to
+        // decide which symbol to resolve, called on the same stored geometry. That is what
+        // keeps the symbol and the arguments in step; they are two halves of one ABI and
+        // nothing downstream would report them disagreeing.
+        if(hasDegenerateDepthSlot(geometry))
+        {
+            // 37 arguments, in the order kernels/ConvBiasFusedFwd.cpp declares them for
+            // ConvBiasFusedFwd: four pointers, then 17 int32_t extents and conv parameters,
+            // then 16 int64_t strides. This is the parameter list the authoring contract
+            // froze, and it is transcribed here unchanged.
+            //
+            // The depth slot is dropped, not passed as 1: it is index 0 of every canonical
+            // spatial array and index 2 of every canonical stride array, and the predicate
+            // above has just established that each is the identity. The entry point supplies
+            // those same identity values itself.
+            preparedConvBias.kernel().launch(handle.getStream(),
+                                             x.ptr,
+                                             w.ptr,
+                                             bias.ptr,
+                                             out.ptr,
+                                             geometry.outN,
+                                             geometry.outC,
+                                             geometry.outSpatial[1],
+                                             geometry.outSpatial[2],
+                                             geometry.convK,
+                                             geometry.xC,
+                                             geometry.wC,
+                                             geometry.xSpatial[1],
+                                             geometry.xSpatial[2],
+                                             geometry.filter[1],
+                                             geometry.filter[2],
+                                             geometry.padding[1],
+                                             geometry.padding[2],
+                                             geometry.stride[1],
+                                             geometry.stride[2],
+                                             geometry.dilation[1],
+                                             geometry.dilation[2],
+                                             geometry.xStrides[0],
+                                             geometry.xStrides[1],
+                                             geometry.xStrides[3],
+                                             geometry.xStrides[4],
+                                             geometry.wStrides[0],
+                                             geometry.wStrides[1],
+                                             geometry.wStrides[3],
+                                             geometry.wStrides[4],
+                                             geometry.biasStrides[0],
+                                             geometry.biasStrides[1],
+                                             geometry.biasStrides[3],
+                                             geometry.biasStrides[4],
+                                             geometry.outStrides[0],
+                                             geometry.outStrides[1],
+                                             geometry.outStrides[3],
+                                             geometry.outStrides[4]);
+            return;
+        }
+
+        // 47 arguments, in the order kernels/ConvBiasFusedFwd.cpp declares them for
+        // ConvBiasFusedFwd3d: four pointers, then 23 int32_t extents and conv parameters,
+        // then 20 int64_t strides. Reached only by a graph whose depth axis is real.
         preparedConvBias.kernel().launch(handle.getStream(),
                                          x.ptr,
                                          w.ptr,

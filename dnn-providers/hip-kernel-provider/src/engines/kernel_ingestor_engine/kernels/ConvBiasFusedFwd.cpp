@@ -96,11 +96,16 @@ using HkpConvBiasElement = HKP_CB_CAT(HKP_CONV_BIAS_TYPE);
 ///
 /// A rank-3 or rank-4 graph reaches this same body with its unused leading spatial slots
 /// made degenerate by the caller -- see the RANK note at the top of this file. The caller
-/// is what decides which slots those are; this kernel has no notion of the graph's rank.
+/// is what decides which slots those are; this body has no notion of the graph's rank.
+///
+/// __device__ and not itself an entry point: the two entry points below are the launch ABI,
+/// and they differ only in how many spatial axes they spell. Keeping the arithmetic here,
+/// in one place, is what makes "rank 4 and rank 5 compute the same thing" a property of the
+/// source rather than a claim about two hand-kept-in-sync copies.
 ///
 /// The grid is sized from the shape by the caller, so the last block is partially
-/// populated and this kernel owns its own bounds check.
-extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
+/// populated and this body owns its own bounds check.
+__device__ __forceinline__ void convBiasFusedBody(
     const HkpConvBiasElement* __restrict__ x,
     const HkpConvBiasElement* __restrict__ w,
     const HkpConvBiasElement* __restrict__ bias,
@@ -252,4 +257,215 @@ extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
 
     out[outIndex]
         = static_cast<HkpConvBiasElement>(convolved + static_cast<float>(bias[biasIndex]));
+}
+
+/// The two-spatial-axis entry point: the launch ABI for a rank-3 or rank-4 graph.
+///
+/// This parameter list is the one the authoring contract froze -- four pointers, then
+/// 17 int32_t extents and convolution parameters, then 16 int64_t strides, 37 in all -- and
+/// it is spelled here unchanged. The caller transcribes it positionally and nothing
+/// downstream diagnoses a mismatch, so this declaration and the handler's argument list are
+/// a seam that is checked by reading, not by the compiler.
+///
+/// A rank-3 graph reaches this same entry point with its H slot made degenerate by the
+/// caller: outP 1, filtR 1, padH 0, strideH 1, dilationH 1, and every tensor's H stride 0.
+/// Right-aligning the real spatial axes is what allows that -- W stays the fastest-varying
+/// axis at rank 3 and rank 4 alike, so there is no per-rank branch anywhere below.
+///
+/// The D slot is supplied degenerate here rather than by the caller, because at these ranks
+/// there is no depth axis to describe: extent 1, filter 1, pad 0, stride 1, dilation 1 and
+/// a zero stride on every tensor. That is exact, not approximate -- the depth loop runs once
+/// at t == 0, the mapped coordinate 0*1 + 0*1 - 0 == 0 lies inside [0, 1), and every offset
+/// it contributes is a multiple of zero.
+extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd(
+    const HkpConvBiasElement* __restrict__ x,
+    const HkpConvBiasElement* __restrict__ w,
+    const HkpConvBiasElement* __restrict__ bias,
+    HkpConvBiasElement* __restrict__ out,
+    int32_t outN,
+    int32_t outC,
+    int32_t outP,
+    int32_t outQ,
+    int32_t convK,
+    int32_t xC,
+    int32_t wC,
+    int32_t xH,
+    int32_t xW,
+    int32_t filtR,
+    int32_t filtS,
+    int32_t padH,
+    int32_t padW,
+    int32_t strideH,
+    int32_t strideW,
+    int32_t dilationH,
+    int32_t dilationW,
+    int64_t xStrideN,
+    int64_t xStrideC,
+    int64_t xStrideH,
+    int64_t xStrideW,
+    int64_t wStrideK,
+    int64_t wStrideC,
+    int64_t wStrideR,
+    int64_t wStrideS,
+    int64_t biasStrideN,
+    int64_t biasStrideC,
+    int64_t biasStrideH,
+    int64_t biasStrideW,
+    int64_t outStrideN,
+    int64_t outStrideC,
+    int64_t outStrideH,
+    int64_t outStrideW)
+{
+    convBiasFusedBody(x,
+                      w,
+                      bias,
+                      out,
+                      outN,
+                      outC,
+                      /*outD=*/1,
+                      outP,
+                      outQ,
+                      convK,
+                      xC,
+                      wC,
+                      /*xD=*/1,
+                      xH,
+                      xW,
+                      /*filtT=*/1,
+                      filtR,
+                      filtS,
+                      /*padD=*/0,
+                      padH,
+                      padW,
+                      /*strideD=*/1,
+                      strideH,
+                      strideW,
+                      /*dilationD=*/1,
+                      dilationH,
+                      dilationW,
+                      xStrideN,
+                      xStrideC,
+                      /*xStrideD=*/0,
+                      xStrideH,
+                      xStrideW,
+                      wStrideK,
+                      wStrideC,
+                      /*wStrideT=*/0,
+                      wStrideR,
+                      wStrideS,
+                      biasStrideN,
+                      biasStrideC,
+                      /*biasStrideD=*/0,
+                      biasStrideH,
+                      biasStrideW,
+                      outStrideN,
+                      outStrideC,
+                      /*outStrideD=*/0,
+                      outStrideH,
+                      outStrideW);
+}
+
+/// The three-spatial-axis entry point: the launch ABI for a rank-5 graph.
+///
+/// Separate from ConvBiasFusedFwd rather than replacing it because a depth axis cannot be
+/// folded into 37 arguments: outD, xD, filtT, padD, strideD, dilationD and four D strides
+/// have nowhere to go. Widening the frozen entry point would have been an ABI change to a
+/// signature other code transcribes positionally, so rank 5 gets its own symbol and rank 3
+/// and 4 keep the one they were authored with.
+extern "C" __global__ HKP_CONV_BIAS_LAUNCH_BOUNDS void ConvBiasFusedFwd3d(
+    const HkpConvBiasElement* __restrict__ x,
+    const HkpConvBiasElement* __restrict__ w,
+    const HkpConvBiasElement* __restrict__ bias,
+    HkpConvBiasElement* __restrict__ out,
+    int32_t outN,
+    int32_t outC,
+    int32_t outD,
+    int32_t outP,
+    int32_t outQ,
+    int32_t convK,
+    int32_t xC,
+    int32_t wC,
+    int32_t xD,
+    int32_t xH,
+    int32_t xW,
+    int32_t filtT,
+    int32_t filtR,
+    int32_t filtS,
+    int32_t padD,
+    int32_t padH,
+    int32_t padW,
+    int32_t strideD,
+    int32_t strideH,
+    int32_t strideW,
+    int32_t dilationD,
+    int32_t dilationH,
+    int32_t dilationW,
+    int64_t xStrideN,
+    int64_t xStrideC,
+    int64_t xStrideD,
+    int64_t xStrideH,
+    int64_t xStrideW,
+    int64_t wStrideK,
+    int64_t wStrideC,
+    int64_t wStrideT,
+    int64_t wStrideR,
+    int64_t wStrideS,
+    int64_t biasStrideN,
+    int64_t biasStrideC,
+    int64_t biasStrideD,
+    int64_t biasStrideH,
+    int64_t biasStrideW,
+    int64_t outStrideN,
+    int64_t outStrideC,
+    int64_t outStrideD,
+    int64_t outStrideH,
+    int64_t outStrideW)
+{
+    convBiasFusedBody(x,
+                      w,
+                      bias,
+                      out,
+                      outN,
+                      outC,
+                      outD,
+                      outP,
+                      outQ,
+                      convK,
+                      xC,
+                      wC,
+                      xD,
+                      xH,
+                      xW,
+                      filtT,
+                      filtR,
+                      filtS,
+                      padD,
+                      padH,
+                      padW,
+                      strideD,
+                      strideH,
+                      strideW,
+                      dilationD,
+                      dilationH,
+                      dilationW,
+                      xStrideN,
+                      xStrideC,
+                      xStrideD,
+                      xStrideH,
+                      xStrideW,
+                      wStrideK,
+                      wStrideC,
+                      wStrideT,
+                      wStrideR,
+                      wStrideS,
+                      biasStrideN,
+                      biasStrideC,
+                      biasStrideD,
+                      biasStrideH,
+                      biasStrideW,
+                      outStrideN,
+                      outStrideC,
+                      outStrideD,
+                      outStrideH,
+                      outStrideW);
 }
