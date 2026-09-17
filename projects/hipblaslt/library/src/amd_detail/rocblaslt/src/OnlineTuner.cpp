@@ -400,7 +400,10 @@ namespace rocblaslt
         // Nothing to compare against, so the problem is born resolved with no
         // winner and every later call takes the read-only path.
         if(count < 2)
+        {
             state.m_resolved = true;
+            publishResolution(problemKey, state);
+        }
         else
             state.m_pending.reserve(static_cast<size_t>(inFlightCap(state)));
 
@@ -504,6 +507,8 @@ namespace rocblaslt
         state.m_winner   = winner;
         state.m_resolved = true;
 
+        publishResolution(problemKey, state);
+
         if(m_verbose)
         {
             const size_t samples = winnerIndex < 0 ? 0 : state.m_samples[winnerIndex].size();
@@ -521,6 +526,36 @@ namespace rocblaslt
                 << "\n";
             std::cerr << msg.str();
         }
+    }
+
+    /**
+     * @brief Make a resolved problem visible to the lock-free lookup.
+     *
+     * Called only where a problem becomes resolved -- resolve(), and the
+     * single-candidate case in registerProblem() -- both of which run under the
+     * write lock, so the entry is fully built before anything can see it. The
+     * release store is what orders those writes ahead of the pointer, pairing
+     * with the acquire load in resolution().
+     *
+     * Entries are kept alive for the life of the tuner rather than recycled,
+     * because a reader holding one takes no lock and so cannot be waited for.
+     * Once the pool is full, resolved problems keep working and simply keep
+     * taking the locked path.
+     */
+    void OnlineTuner::publishResolution(size_t problemKey, const ProblemState& state)
+    {
+        if(m_resolutionPool.size() >= c_resolutionSlots)
+            return;
+
+        auto entry      = std::make_unique<Resolution>();
+        entry->m_key    = problemKey;
+        entry->m_winner = state.m_winner;
+
+        const Resolution* published = entry.get();
+        m_resolutionPool.push_back(std::move(entry));
+
+        m_resolutions[problemKey & (c_resolutionSlots - 1)].store(published,
+                                                                  std::memory_order_release);
     }
 
     bool OnlineTuner::acquireEvents(hipEvent_t& start, hipEvent_t& stop)

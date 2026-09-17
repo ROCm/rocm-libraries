@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime_api.h>
+#include <memory>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -96,6 +98,47 @@ namespace rocblaslt
             Min    = 1
         };
 
+        /**
+     * @brief Everything a problem still needs once its winner is pinned.
+     *
+     * Published once, while the write lock is held, and read from then on
+     * without taking anything: the key and the winner never change afterwards,
+     * so the release store that publishes the pointer and the acquire load that
+     * finds it are the whole synchronisation.
+     *
+     * position() is the exception and is only a hint -- where the caller found
+     * the winner in the list it was offered last time. Callers check it against
+     * the list in hand before acting on it, so a wrong value costs one trip down
+     * the full path and can never change which kernel is chosen. Nothing is
+     * ordered against it, hence relaxed.
+     */
+        class Resolution
+        {
+            friend class OnlineTuner;
+
+        public:
+            /// The pinned solution index, or -1 if exploration measured nothing.
+            int winner() const
+            {
+                return m_winner;
+            }
+
+            int position() const
+            {
+                return m_position.load(std::memory_order_relaxed);
+            }
+
+            void setPosition(int position) const
+            {
+                m_position.store(position, std::memory_order_relaxed);
+            }
+
+        private:
+            size_t                   m_key    = 0;
+            int                      m_winner = -1;
+            mutable std::atomic<int> m_position{-1};
+        };
+
         static OnlineTuner& getInstance()
         {
             static OnlineTuner gInstance;
@@ -154,6 +197,28 @@ namespace rocblaslt
         }
 
         /**
+     * @brief The pinned winner for a problem, or nullptr while it is still
+     * being explored.
+     *
+     * One acquire load and one compare, taking no lock and doing no work that
+     * grows with topK(). A caller holding a Resolution already has its answer,
+     * so it can skip the candidate filtering and the search that dominate the
+     * per-call cost of a problem there is nothing left to learn about.
+     *
+     * The table is direct-mapped over the key and a colliding key evicts, so
+     * nullptr is not an answer -- it only means the caller must go through
+     * selectCandidate() and take the lock, which is what every call did before.
+     * Nothing here can be wrong, only absent.
+     */
+        const Resolution* resolution(size_t problemKey) const
+        {
+            const Resolution* entry = m_resolutions[problemKey & (c_resolutionSlots - 1)].load(
+                std::memory_order_acquire);
+
+            return entry && entry->m_key == problemKey ? entry : nullptr;
+        }
+
+        /**
      * @brief Pick which of the ranked candidates should run next.
      *
      * Registers the problem's candidate list on first sight. Returns the
@@ -188,6 +253,13 @@ namespace rocblaslt
             if(!m_enabled)
                 return;
 
+            // A resolved problem has nothing outstanding and can never acquire
+            // any: resolve() only runs with m_pending empty, and beginMeasurement
+            // refuses every launch afterwards. So this is the same early return
+            // harvestPendingImpl() makes, reached without the lock.
+            if(resolution(problemKey))
+                return;
+
             harvestPendingImpl(problemKey);
         }
 
@@ -206,6 +278,13 @@ namespace rocblaslt
                               hipEvent_t& stop)
         {
             if(!m_enabled)
+                return false;
+
+            // measurableCandidate() refuses every launch once the problem is
+            // resolved, so this returns what the locked path would. A resolved
+            // problem was registered to get here, so skipping that path cannot
+            // swallow the miss event either.
+            if(resolution(problemKey))
                 return false;
 
             return beginMeasurementImpl(problemKey, solutionIndex, start, stop);
@@ -279,6 +358,7 @@ namespace rocblaslt
         int  visitBudget(const ProblemState& state) const;
         float score(const std::vector<float>& samples) const;
         void  resolve(size_t problemKey, ProblemState& state);
+        void  publishResolution(size_t problemKey, const ProblemState& state);
         bool  acquireEvents(hipEvent_t& start, hipEvent_t& stop);
         void  recycleEvents(hipEvent_t start, hipEvent_t stop);
         void  retireEvents(hipEvent_t start, hipEvent_t stop);
@@ -294,5 +374,19 @@ namespace rocblaslt
         std::unordered_map<size_t, ProblemState> m_problems;
         std::vector<EventPair>                   m_pairs;
         std::shared_timed_mutex                  m_mutex;
+
+        // The resolved table is deliberately not the problem map: it is fixed
+        // in size and never rehashes, which is what lets resolution() follow a
+        // published entry with no lock at all. The entries themselves outlive
+        // the process, so a reader can never be handed a dangling one.
+        //
+        // A power of two so the index is a mask, and far larger than the number
+        // of distinct problems a process is expected to see; overshooting only
+        // costs the table's own footprint, while a collision costs one problem
+        // the locked path it used to take anyway.
+        static constexpr size_t c_resolutionSlots = 4096;
+
+        std::vector<std::unique_ptr<Resolution>> m_resolutionPool;
+        std::atomic<const Resolution*>           m_resolutions[c_resolutionSlots] = {};
     };
 } // namespace rocblaslt

@@ -4910,7 +4910,8 @@ inline void promoteOnlineTuningCandidate(
     std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
     const TensileLite::ContractionProblemGemm&                      tensile_prob,
     const TensileLite::Hardware&                                    hardware,
-    const OnlineTuningEqualityBlock&                                equality)
+    const OnlineTuningEqualityBlock&                                equality,
+    size_t                                                          problemKey)
 {
     std::vector<int>     rankedSolutionIndices;
     std::vector<size_t>  rankedPositions;
@@ -4936,16 +4937,61 @@ inline void promoteOnlineTuningCandidate(
         rankedPositions.push_back(i);
     }
 
-    // The measurement hook keys on this same identity.
-    const size_t problemKey = onlineTuningProblemKey(tensile_prob);
-
-    const int promote = rocblaslt::OnlineTuner::getInstance().selectCandidate(
-        problemKey, rankedSolutionIndices, equalitySourced);
+    auto&     tuner   = rocblaslt::OnlineTuner::getInstance();
+    const int promote = tuner.selectCandidate(problemKey, rankedSolutionIndices, equalitySourced);
     if(promote < 0)
         return;
 
-    const auto picked = solutions.begin() + rankedPositions[promote];
+    const size_t position = rankedPositions[promote];
+
+    // The call that resolves a problem is the last one to hold its ranking, so
+    // it is also the one that can tell the fast path where the winner sits.
+    if(const auto* resolved = tuner.resolution(problemKey))
+        resolved->setPosition(static_cast<int>(position));
+
+    const auto picked = solutions.begin() + position;
     std::rotate(solutions.begin(), picked, picked + 1);
+}
+
+// Front the pinned winner of an already-resolved problem, doing nothing that
+// grows with topK(): the recorded position names it outright, and the caller's
+// workspace is the only thing about it that can have changed since.
+//
+// Returns false when the recording does not describe this list, which leaves
+// the full path to answer and to record. That is not an edge case to tolerate
+// but the mechanism that keeps the choice honest: one problem key can cover
+// more than one ranking, so the winner is only ever fronted where it has been
+// seen, never asserted into a list it was not ranked in.
+inline bool promoteResolvedOnlineTuningWinner(
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+    const TensileLite::ContractionProblemGemm&                      tensile_prob,
+    const TensileLite::Hardware&                                    hardware,
+    const rocblaslt::OnlineTuner::Resolution&                       resolved)
+{
+    const int winner = resolved.winner();
+
+    // Resolved without pinning anything, because there was never more than one
+    // candidate to compare. The caller's own ranking is the answer.
+    if(winner < 0)
+        return true;
+
+    const int position = resolved.position();
+
+    if(position < 0 || position >= static_cast<int>(solutions.size())
+       || solutions[position]->index != winner)
+        return false;
+
+    // The filter the full path runs over every candidate, run over the one that
+    // matters. A caller whose workspace cannot cover the winner gets its ranking
+    // untouched, which is what withholding the winner from the tuner amounts to.
+    if(solutions[position]->requiredWorkspaceSize(tensile_prob, hardware)
+       > tensile_prob.workspaceSize())
+        return true;
+
+    const auto picked = solutions.begin() + position;
+    std::rotate(solutions.begin(), picked, picked + 1);
+
+    return true;
 }
 
 template <typename T>
@@ -4968,6 +5014,17 @@ inline auto getSolutions(
     auto&      tuner        = rocblaslt::OnlineTuner::getInstance();
     const bool onlineTuning = tuner.enabled();
 
+    // Both hooks key on this, so computing it once here is what lets a resolved
+    // problem be recognised -- a masked index and a compare, no lock -- before
+    // any of the work that scales with topK() has been started.
+    //
+    // Reserved slots are spliced into the ranking on every call, so a run using
+    // them stays on the full path and the list its callers see is unchanged.
+    const size_t problemKey = onlineTuning ? onlineTuningProblemKey(tensile_prob) : 0;
+
+    const rocblaslt::OnlineTuner::Resolution* resolved
+        = onlineTuning && tuner.equalitySlots() == 0 ? tuner.resolution(problemKey) : nullptr;
+
     // Exploration rotates through the top K, and the caller may well have asked
     // for one. CachingLibrary grows its entry in place on the deeper request, so
     // only the first lookup of a problem pays for it.
@@ -4981,17 +5038,17 @@ inline auto getSolutions(
 
     if(onlineTuning)
     {
-        OnlineTuningEqualityBlock equality;
+        if(!resolved
+           || !promoteResolvedOnlineTuningWinner(solutions, tensile_prob, *hardware, *resolved))
+        {
+            OnlineTuningEqualityBlock equality;
 
-        if(tuner.equalitySlots() > 0)
-            equality = reserveOnlineTuningEqualitySlots(solutions,
-                                                        library,
-                                                        tensile_prob,
-                                                        *hardware,
-                                                        tuner,
-                                                        onlineTuningProblemKey(tensile_prob));
+            if(tuner.equalitySlots() > 0)
+                equality = reserveOnlineTuningEqualitySlots(
+                    solutions, library, tensile_prob, *hardware, tuner, problemKey);
 
-        promoteOnlineTuningCandidate(solutions, tensile_prob, *hardware, equality);
+            promoteOnlineTuningCandidate(solutions, tensile_prob, *hardware, equality, problemKey);
+        }
 
         // The extra candidates were for the tuner, not for the caller.
         if(solutions.size() > static_cast<size_t>(requestedAlgoCount))
