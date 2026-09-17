@@ -23,6 +23,40 @@ void testExhaustiveBinaryFormat(ScalarType type) {
     }
 }
 
+void testEveryBinaryFormatRoundingBoundary(ScalarType type, uint32_t maximumPositiveRaw,
+                                           uint32_t signMask, bool hasSignedZero = true) {
+    for (uint32_t upperRaw = 1; upperRaw <= maximumPositiveRaw; ++upperRaw) {
+        const uint32_t lowerRaw = upperRaw - 1U;
+        const float lower = expectedBinaryDecode(type, lowerRaw);
+        const float upper = expectedBinaryDecode(type, upperRaw);
+        const float midpoint =
+            static_cast<float>((static_cast<double>(lower) + static_cast<double>(upper)) * 0.5);
+        const uint32_t midpointRaw = (lowerRaw & 1U) == 0 ? lowerRaw : upperRaw;
+
+        require(encodeRaw(type, std::nextafter(midpoint, lower)) == lowerRaw,
+                "Binary format value below a rounding boundary encoded incorrectly.");
+        require(encodeRaw(type, midpoint) == midpointRaw,
+                "Binary format midpoint did not round to even.");
+        require(encodeRaw(type, std::nextafter(midpoint, upper)) == upperRaw,
+                "Binary format value above a rounding boundary encoded incorrectly.");
+
+        if (signMask != 0) {
+            const uint32_t negativeLowerRaw =
+                lowerRaw == 0 && !hasSignedZero ? 0 : signMask | lowerRaw;
+            require(encodeRaw(type, -std::nextafter(midpoint, lower)) == negativeLowerRaw,
+                    "Negative binary format value below a rounding boundary encoded "
+                    "incorrectly.");
+            const uint32_t negativeMidpointRaw =
+                midpointRaw == 0 && !hasSignedZero ? 0 : signMask | midpointRaw;
+            require(encodeRaw(type, -midpoint) == negativeMidpointRaw,
+                    "Negative binary format midpoint did not round to even.");
+            require(encodeRaw(type, -std::nextafter(midpoint, upper)) == (signMask | upperRaw),
+                    "Negative binary format value above a rounding boundary encoded "
+                    "incorrectly.");
+        }
+    }
+}
+
 void testScalarEncodings() {
     using namespace roc::host_numerics;
     const int64_t exactInteger = 9'007'199'254'740'993;
@@ -148,6 +182,16 @@ void testScalarEncodings() {
     testExhaustiveBinaryFormat(ScalarType::E5M3);
     testExhaustiveBinaryFormat(ScalarType::E4M3);
 
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float4E2M1, 0x07, 0x08);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float6E2M3, 0x1f, 0x20);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float6E3M2, 0x1f, 0x20);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E4M3, 0x7e, 0x80);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E5M2, 0x7b, 0x80);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E4M3Fnuz, 0x7f, 0x80, false);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::Float8E5M2Fnuz, 0x7f, 0x80, false);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::E5M3, 0xfe, 0);
+    testEveryBinaryFormatRoundingBoundary(ScalarType::E4M3, 0x7e, 0);
+
     require(encodeRaw(ScalarType::Float8E4M3, 1.0625f) == 0x38,
             "FP8 E4M3 lower-even midpoint rounding mismatch.");
     require(encodeRaw(ScalarType::Float8E4M3, 1.1875f) == 0x3a,
@@ -203,6 +247,19 @@ void testScalarEncodings() {
         const Tensor value = tensorFromRaw(ScalarType::E8M0, raw);
         require(encodeRaw(ScalarType::E8M0, value.loadAs<float>({0})) == raw,
                 "E8M0 finite round-trip mismatch.");
+    }
+    for (uint32_t lowerRaw = 0; lowerRaw < 0xfeU; ++lowerRaw) {
+        const float lower = std::ldexp(1.0f, static_cast<int>(lowerRaw) - 127);
+        const float upper = std::ldexp(1.0f, static_cast<int>(lowerRaw) - 126);
+        const float midpoint =
+            static_cast<float>((static_cast<double>(lower) + static_cast<double>(upper)) * 0.5);
+        require(encodeRaw(ScalarType::E8M0, std::nextafter(midpoint, lower)) == lowerRaw,
+                "E8M0 value below a rounding boundary encoded incorrectly.");
+        require(encodeRaw(ScalarType::E8M0, midpoint) ==
+                    ((lowerRaw & 1U) == 0 ? lowerRaw : lowerRaw + 1U),
+                "E8M0 midpoint did not round to an even code.");
+        require(encodeRaw(ScalarType::E8M0, std::nextafter(midpoint, upper)) == lowerRaw + 1U,
+                "E8M0 value above a rounding boundary encoded incorrectly.");
     }
     require(encodeRaw(ScalarType::E8M0, 0.0f) == 0, "E8M0 zero saturation mismatch.");
 

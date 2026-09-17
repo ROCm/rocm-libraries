@@ -61,6 +61,33 @@ void testIndexedGeneration() {
                 "Whole-tensor and elementwise generation encodings differ.");
     }
 
+    Tensor packedRawWhole(ScalarType::Float6E3M2, Shape{13});
+    Tensor packedRawElementwise(ScalarType::Float6E3M2, Shape{13});
+    const GenerationRecipe packedRawRecipe = GenerationRecipe::realOnly(
+        GenerationRecipe::uniformFiniteEncodedValue(), {.seed = 0x87654321});
+    generate(packedRawWhole, packedRawRecipe);
+    for (size_t index = 0; index < packedRawWhole.elementCount(); ++index)
+        generateAt(packedRawElementwise, index, packedRawRecipe);
+    require(std::equal(packedRawWhole.rawEncodedBackingStorage().begin(),
+                       packedRawWhole.rawEncodedBackingStorage().end(),
+                       packedRawElementwise.rawEncodedBackingStorage().begin(),
+                       packedRawElementwise.rawEncodedBackingStorage().end()),
+            "Whole-tensor and elementwise packed raw generation encodings differ.");
+
+    std::vector<std::byte> packedStorage(4, std::byte{0});
+    packedStorage.back() = std::byte{0xc0};
+    Tensor packedConstant = Tensor::takeOwnershipOfEncodedBackingStorage(
+        ScalarType::Float6E2M3, Layout::contiguousLastDimensionFastest(Shape{5}),
+        std::move(packedStorage));
+    generate(packedConstant,
+             GenerationRecipe::realOnly(GenerationRecipe::constant({.value = 1.0})));
+    for (size_t index = 0; index < packedConstant.elementCount(); ++index)
+        require(packedConstant.loadAs<float>({index}) == 1.0f,
+                "Packed constant generation produced an incorrect value.");
+    require((std::to_integer<uint8_t>(packedConstant.rawEncodedBackingStorage().back()) & 0xc0U) ==
+                0xc0U,
+            "Packed constant generation modified tail padding bits.");
+
     const Shape traversalShape{3, 4, 2};
     const Layout traversalLayout = Layout::contiguousFirstDimensionFastest(traversalShape);
     Tensor whole(ScalarType::Float32, traversalLayout);
@@ -104,6 +131,18 @@ void testIndexedGeneration() {
                        fourThreads.rawEncodedBackingStorage().begin(),
                        fourThreads.rawEncodedBackingStorage().end()),
             "Ordinary generation changed with OpenMP thread count.");
+
+    Tensor packedOneThread(ScalarType::Float6E3M2, Shape{8192});
+    Tensor packedFourThreads(ScalarType::Float6E3M2, Shape{8192});
+    omp_set_num_threads(1);
+    generate(packedOneThread, parallelRecipe);
+    omp_set_num_threads(4);
+    generate(packedFourThreads, parallelRecipe);
+    require(std::equal(packedOneThread.rawEncodedBackingStorage().begin(),
+                       packedOneThread.rawEncodedBackingStorage().end(),
+                       packedFourThreads.rawEncodedBackingStorage().begin(),
+                       packedFourThreads.rawEncodedBackingStorage().end()),
+            "Packed generation changed with OpenMP thread count.");
 
     Tensor aliased(ScalarType::Float32, Layout(Shape{8192}, {0}));
     generate(aliased, GenerationRecipe::realOnly(GenerationRecipe::serialIndex()));

@@ -9,6 +9,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <roc/host_numerics/generation.hpp>
@@ -378,15 +379,6 @@ struct GenerationRecipeAccess {
     using ComplexWriter = void (*)(std::span<std::byte>, ptrdiff_t, std::complex<double>);
     using RawWriter = void (*)(std::span<std::byte>, ptrdiff_t, uint64_t);
 
-    struct PreparedNumericalComponent {
-        const Component* component;
-        const void* pattern;
-        uint64_t domain;
-        double (*value)(const Component&, const void*, uint64_t, uint64_t, std::span<const size_t>,
-                        const Shape&, size_t, ScalarType);
-        bool usesCoordinates;
-    };
-
     static NumericalWriter numericalWriter(ScalarType type) {
         return visitScalarType(type, []<typename Tag>() -> NumericalWriter {
             return [](std::span<std::byte> storage, ptrdiff_t offset, double value) {
@@ -433,37 +425,93 @@ struct GenerationRecipeAccess {
                component.alternatingSign_.has_value();
     }
 
-    static PreparedNumericalComponent prepareNumericalComponent(
-        const GenerationRecipe::BoundComponent& bound) {
+    template <typename Pattern>
+    static constexpr bool isConstantPattern =
+        std::is_same_v<Pattern, Component::ZeroPattern> ||
+        std::is_same_v<Pattern, Component::ConstantPattern> ||
+        std::is_same_v<Pattern, Component::TypeMaximumPattern> ||
+        std::is_same_v<Pattern, Component::TypeLowestPattern> ||
+        std::is_same_v<Pattern, Component::TypeDenormalMinimumPattern> ||
+        std::is_same_v<Pattern, Component::TypeDenormalMaximumPattern> ||
+        std::is_same_v<Pattern, Component::TypeNaNPattern> ||
+        std::is_same_v<Pattern, Component::TypeInfinityPattern> ||
+        std::is_same_v<Pattern, Component::TypeNegativeInfinityPattern> ||
+        std::is_same_v<Pattern, Component::TypeNegativeZeroPattern>;
+
+    template <typename Pattern>
+    static bool isUnmodifiedComponent(const Component& component) {
+        return !usesCoordinates<Pattern>(component) &&
+               component.unaryTransform_ == Component::UnaryTransform::None &&
+               component.affineValue_.scale == 1.0 && component.affineValue_.offset == 0.0;
+    }
+
+    template <typename Pattern>
+    static double preparedBaseValue(const Component&, const void* erasedPattern, uint64_t seed,
+                                    uint64_t domain, std::span<const size_t> indices,
+                                    const Shape& shape, size_t logicalIndex,
+                                    ScalarType destinationType) {
+        return baseGenerationValueKnown(*static_cast<const Pattern*>(erasedPattern), seed, domain,
+                                        indices, shape, logicalIndex, destinationType);
+    }
+
+    template <typename Pattern>
+    static double preparedModifiedValue(const Component& component, const void* erasedPattern,
+                                        uint64_t seed, uint64_t domain,
+                                        std::span<const size_t> indices, const Shape& shape,
+                                        size_t logicalIndex, ScalarType destinationType) {
+        return generationValueKnown(component, *static_cast<const Pattern*>(erasedPattern), seed,
+                                    domain, indices, shape, logicalIndex, destinationType);
+    }
+
+    template <typename Pattern>
+    static uint64_t preparedRawValue(const void* erasedPattern, uint64_t seed, uint64_t domain,
+                                     std::span<const size_t> indices, const Shape& shape,
+                                     size_t logicalIndex, ScalarType destinationType) {
+        return rawGenerationValueKnown(*static_cast<const Pattern*>(erasedPattern), seed, domain,
+                                       indices, shape, logicalIndex, destinationType);
+    }
+
+    static PreparedNumericalGenerator prepareNumericalComponent(
+        const GenerationRecipe::BoundComponent& bound, uint64_t seed, ScalarType destinationType) {
         if (bound.component.isRaw())
             throw std::invalid_argument("Raw generation does not support complex output.");
         return std::visit(
             [&](const auto& pattern) {
                 using Pattern = std::remove_cvref_t<decltype(pattern)>;
-                return PreparedNumericalComponent{
+                return PreparedNumericalGenerator{
                     .component = &bound.component,
                     .pattern = &pattern,
+                    .seed = seed,
                     .domain = randomDomain(bound),
-                    .value =
-                        [](const Component& component, const void* erasedPattern, uint64_t seed,
-                           uint64_t domain, std::span<const size_t> indices, const Shape& shape,
-                           size_t logicalIndex, ScalarType destinationType) {
-                            return generationValueKnown(
-                                component, *static_cast<const Pattern*>(erasedPattern), seed,
-                                domain, indices, shape, logicalIndex, destinationType);
-                        },
+                    .destinationType = destinationType,
+                    .value = isUnmodifiedComponent<Pattern>(bound.component)
+                                 ? preparedBaseValue<Pattern>
+                                 : preparedModifiedValue<Pattern>,
                     .usesCoordinates = usesCoordinates<Pattern>(bound.component),
+                    .isConstant =
+                        isConstantPattern<Pattern> && !usesCoordinates<Pattern>(bound.component),
                 };
             },
             bound.component.pattern_);
     }
 
-    static double generatedPreparedValue(const PreparedNumericalComponent& component,
-                                         const GenerationRecipe& recipe,
-                                         std::span<const size_t> indices, const Shape& shape,
-                                         size_t logicalIndex, ScalarType destinationType) {
-        return component.value(*component.component, component.pattern, recipe.settings_.seed,
-                               component.domain, indices, shape, logicalIndex, destinationType);
+    static PreparedRawGenerator prepareRawComponent(const GenerationRecipe::BoundComponent& bound,
+                                                    uint64_t seed, ScalarType destinationType) {
+        if (!bound.component.isRaw())
+            throw std::invalid_argument("Numerical generation recipe does not produce raw bits.");
+        return std::visit(
+            [&](const auto& pattern) {
+                using Pattern = std::remove_cvref_t<decltype(pattern)>;
+                return PreparedRawGenerator{
+                    .pattern = &pattern,
+                    .seed = seed,
+                    .domain = randomDomain(bound),
+                    .destinationType = destinationType,
+                    .value = preparedRawValue<Pattern>,
+                    .usesCoordinates = usesCoordinates<Pattern>(bound.component),
+                };
+            },
+            bound.component.pattern_);
     }
 
     static bool isContiguous(const Layout& layout, IndexOrder order) {
@@ -504,6 +552,56 @@ struct GenerationRecipeAccess {
             for (size_t dimension = shape.rank(); dimension > 0; --dimension)
                 if (incrementDimension(dimension - 1)) return;
         }
+    }
+
+    template <typename WriteFirst>
+    static bool fillContiguous(Tensor destination, IndexOrder order, WriteFirst&& writeFirst) {
+        const uint16_t storageBits = scalarTypeInfo(destination.type()).storageBits;
+        if (!isContiguous(destination.layout(), order)) return false;
+
+        const size_t elementCount = destination.elementCount();
+        if (elementCount == 0) return true;
+        const auto storage = destination.rawEncodedBackingStorage();
+        if (storageBits % 8 != 0) {
+            if (destination.layout().offset() != 0) return false;
+            const size_t elementsPerGroup = scalarElementGroupSize(destination.type());
+            const size_t bytesPerGroup = elementsPerGroup * storageBits / 8;
+            const size_t fullGroupCount = elementCount / elementsPerGroup;
+            if (fullGroupCount == 0) {
+                for (size_t logicalIndex = 0; logicalIndex < elementCount; ++logicalIndex)
+                    writeFirst(storage, static_cast<ptrdiff_t>(logicalIndex));
+                return true;
+            }
+
+            for (size_t logicalIndex = 0; logicalIndex < elementsPerGroup; ++logicalIndex)
+                writeFirst(storage, static_cast<ptrdiff_t>(logicalIndex));
+            const size_t fullGroupBytes = fullGroupCount * bytesPerGroup;
+            size_t initializedBytes = bytesPerGroup;
+            while (initializedBytes < fullGroupBytes) {
+                const size_t copyBytes =
+                    std::min(initializedBytes, fullGroupBytes - initializedBytes);
+                std::memcpy(storage.data() + initializedBytes, storage.data(), copyBytes);
+                initializedBytes += copyBytes;
+            }
+            for (size_t logicalIndex = fullGroupCount * elementsPerGroup;
+                 logicalIndex < elementCount; ++logicalIndex)
+                writeFirst(storage, static_cast<ptrdiff_t>(logicalIndex));
+            return true;
+        }
+
+        const size_t elementBytes = storageBits / 8;
+        const size_t byteOffset = static_cast<size_t>(destination.layout().offset()) * elementBytes;
+        const size_t byteCount = elementCount * elementBytes;
+        writeFirst(storage, destination.layout().offset());
+
+        size_t initializedBytes = elementBytes;
+        while (initializedBytes < byteCount) {
+            const size_t copyBytes = std::min(initializedBytes, byteCount - initializedBytes);
+            std::memcpy(storage.data() + byteOffset + initializedBytes, storage.data() + byteOffset,
+                        copyBytes);
+            initializedBytes += copyBytes;
+        }
+        return true;
     }
 
     template <typename Function>
@@ -566,6 +664,126 @@ struct GenerationRecipeAccess {
         runRange(0, elementCount);
     }
 
+    template <typename Tag>
+    static auto encodeGeneratedInteger(auto value) {
+        constexpr ScalarCategory category = scalarTypeInfo(Tag::type).category;
+        static_assert(category == ScalarCategory::Boolean ||
+                      category == ScalarCategory::SignedInteger ||
+                      category == ScalarCategory::UnsignedInteger);
+        if constexpr (category == ScalarCategory::Boolean) {
+            return static_cast<uint8_t>(value != 0);
+        } else if constexpr (Tag::type == ScalarType::Int4) {
+            return static_cast<uint32_t>(value) & 0xfU;
+        } else if constexpr (category == ScalarCategory::SignedInteger) {
+            using Storage = typename Tag::Storage;
+            using Unsigned = std::make_unsigned_t<Storage>;
+            return std::bit_cast<Storage>(static_cast<Unsigned>(value));
+        } else {
+            return static_cast<typename Tag::Storage>(value);
+        }
+    }
+
+    template <typename Tag, typename Pattern>
+    static auto generatedEncodedValue(const Pattern& pattern, const GenerationRecipe& recipe,
+                                      const GenerationRecipe::BoundComponent& bound,
+                                      const Shape& shape, size_t logicalIndex,
+                                      ScalarType destinationType) {
+        constexpr ScalarCategory category = scalarTypeInfo(Tag::type).category;
+        constexpr bool integerDestination = category == ScalarCategory::Boolean ||
+                                            category == ScalarCategory::SignedInteger ||
+                                            category == ScalarCategory::UnsignedInteger;
+        if constexpr (integerDestination &&
+                      std::is_same_v<Pattern, Component::UniformIntegerPattern>) {
+            return encodeGeneratedInteger<Tag>(
+                indexedUniformInteger(recipe.settings_.seed, randomDomain(bound), logicalIndex,
+                                      pattern.parameters.lower, pattern.parameters.upper));
+        } else if constexpr (integerDestination &&
+                             std::is_same_v<Pattern, Component::SerialIndexPattern>) {
+            return encodeGeneratedInteger<Tag>(logicalIndex);
+        } else {
+            return encodeScalarValueKnown<Tag>(
+                baseGenerationValueKnown(pattern, recipe.settings_.seed, randomDomain(bound), {},
+                                         shape, logicalIndex, destinationType));
+        }
+    }
+
+    template <typename EncodedValue>
+    static bool generateContiguousPacked(Tensor destination, IndexOrder order,
+                                         bool valueUsesCoordinates, EncodedValue&& encodedValue) {
+        const uint16_t bits = scalarTypeInfo(destination.type()).storageBits;
+        if (bits >= 8 || valueUsesCoordinates || destination.layout().offset() != 0 ||
+            !isContiguous(destination.layout(), order))
+            return false;
+
+        const size_t elementsPerGroup = scalarElementGroupSize(destination.type());
+        const size_t bytesPerGroup = elementsPerGroup * bits / 8;
+        const size_t elementCount = destination.elementCount();
+        const size_t fullGroupCount = elementCount / elementsPerGroup;
+        const uint32_t valueMask = (uint32_t{1} << bits) - 1U;
+        const auto storage = destination.rawEncodedBackingStorage();
+
+        forEachParallelIndex(fullGroupCount, elementCount, true, 4096, [&](size_t groupIndex) {
+            uint32_t packed = 0;
+            const size_t firstElement = groupIndex * elementsPerGroup;
+            for (size_t element = 0; element < elementsPerGroup; ++element)
+                packed |= (static_cast<uint32_t>(encodedValue(firstElement + element)) & valueMask)
+                          << (element * bits);
+            for (size_t byte = 0; byte < bytesPerGroup; ++byte)
+                storage[groupIndex * bytesPerGroup + byte] =
+                    static_cast<std::byte>((packed >> (byte * 8)) & 0xffU);
+        });
+
+        for (size_t logicalIndex = fullGroupCount * elementsPerGroup; logicalIndex < elementCount;
+             ++logicalIndex)
+            writePackedBits(storage, logicalIndex * bits, bits,
+                            static_cast<uint32_t>(encodedValue(logicalIndex)));
+        return true;
+    }
+
+    template <typename Tag, typename Pattern>
+    static bool generateContiguousNumericalType(Tensor destination, const GenerationRecipe& recipe,
+                                                const GenerationRecipe::BoundComponent& bound,
+                                                const Pattern& pattern) {
+        using Storage = typename Tag::Storage;
+        if (!isUnmodifiedComponent<Pattern>(bound.component) ||
+            !isContiguous(destination.layout(), recipe.settings_.indexOrder))
+            return false;
+
+        if constexpr (std::is_void_v<Storage>) {
+            return generateContiguousPacked(
+                destination, recipe.settings_.indexOrder, false, [&](size_t logicalIndex) {
+                    return generatedEncodedValue<Tag>(pattern, recipe, bound, destination.shape(),
+                                                      logicalIndex, destination.type());
+                });
+        } else {
+            const auto storage = destination.rawEncodedBackingStorage();
+            const size_t byteOffset =
+                static_cast<size_t>(destination.layout().offset()) * sizeof(Storage);
+            if (reinterpret_cast<uintptr_t>(storage.data() + byteOffset) % alignof(Storage) != 0)
+                return false;
+            auto* output = reinterpret_cast<Storage*>(storage.data() + byteOffset);
+            forEachParallelIndex(destination.elementCount(), destination.elementCount(), true, 4096,
+                                 [&](size_t logicalIndex) {
+                                     output[logicalIndex] = generatedEncodedValue<Tag>(
+                                         pattern, recipe, bound, destination.shape(), logicalIndex,
+                                         destination.type());
+                                 });
+            return true;
+        }
+    }
+
+    template <typename Pattern>
+    static bool generateCommonNumericalType(Tensor destination, const GenerationRecipe& recipe,
+                                            const GenerationRecipe::BoundComponent& bound,
+                                            const Pattern& pattern) {
+        return visitScalarType(destination.type(), [&]<typename Tag>() {
+            if constexpr (scalarTypeInfo(Tag::type).category == ScalarCategory::Complex)
+                return false;
+            else
+                return generateContiguousNumericalType<Tag>(destination, recipe, bound, pattern);
+        });
+    }
+
     static void generateNonComplex(Tensor destination, const GenerationRecipe& recipe,
                                    const GenerationRecipe::BoundComponent& bound) {
         const auto storage = destination.rawEncodedBackingStorage();
@@ -574,6 +792,22 @@ struct GenerationRecipeAccess {
                 using Pattern = std::remove_cvref_t<decltype(pattern)>;
                 if constexpr (isRawPattern<Pattern>) {
                     const RawWriter write = rawWriter(destination.type());
+                    if constexpr (std::is_same_v<Pattern, Component::RawConstantPattern>) {
+                        if (fillContiguous(
+                                destination, recipe.settings_.indexOrder,
+                                [&](std::span<std::byte> destinationStorage, ptrdiff_t offset) {
+                                    write(destinationStorage, offset, pattern.parameters.bits);
+                                }))
+                            return;
+                    }
+                    if (generateContiguousPacked(
+                            destination, recipe.settings_.indexOrder,
+                            usesCoordinates<Pattern>(bound.component), [&](size_t logicalIndex) {
+                                return rawGenerationValueKnown(
+                                    pattern, recipe.settings_.seed, randomDomain(bound), {},
+                                    destination.shape(), logicalIndex, destination.type());
+                            }))
+                        return;
                     forEachGenerationElement(
                         destination, recipe.settings_.indexOrder,
                         usesCoordinates<Pattern>(bound.component),
@@ -586,6 +820,20 @@ struct GenerationRecipeAccess {
                         });
                 } else {
                     const NumericalWriter write = numericalWriter(destination.type());
+                    if constexpr (isConstantPattern<Pattern>) {
+                        if (!usesCoordinates<Pattern>(bound.component) &&
+                            fillContiguous(
+                                destination, recipe.settings_.indexOrder,
+                                [&](std::span<std::byte> destinationStorage, ptrdiff_t offset) {
+                                    write(destinationStorage, offset,
+                                          generationValueKnown(
+                                              bound.component, pattern, recipe.settings_.seed,
+                                              randomDomain(bound), {}, destination.shape(), 0,
+                                              destination.type()));
+                                }))
+                            return;
+                    }
+                    if (generateCommonNumericalType(destination, recipe, bound, pattern)) return;
                     forEachGenerationElement(
                         destination, recipe.settings_.indexOrder,
                         usesCoordinates<Pattern>(bound.component),
@@ -602,6 +850,52 @@ struct GenerationRecipeAccess {
             bound.component.pattern_);
     }
 
+    enum class ComplexGenerationKind { RealOnly, Replicated, Cartesian };
+
+    template <typename Storage>
+    static bool generateContiguousComplexValues(Tensor destination, const GenerationRecipe& recipe,
+                                                const PreparedNumericalGenerator& real,
+                                                const PreparedNumericalGenerator* imaginary,
+                                                ComplexGenerationKind kind) {
+        if (!isContiguous(destination.layout(), recipe.settings_.indexOrder)) return false;
+        const auto storage = destination.rawEncodedBackingStorage();
+        const size_t byteOffset =
+            static_cast<size_t>(destination.layout().offset()) * sizeof(Storage);
+        if (reinterpret_cast<uintptr_t>(storage.data() + byteOffset) % alignof(Storage) != 0)
+            return false;
+        auto* output = reinterpret_cast<Storage*>(storage.data() + byteOffset);
+        const bool usesCoordinates =
+            real.usesCoordinates || (imaginary != nullptr && imaginary->usesCoordinates);
+        forEachGenerationElement(
+            destination, recipe.settings_.indexOrder, usesCoordinates,
+            [&](std::span<const size_t> indices, size_t logicalIndex, ptrdiff_t) {
+                const double realValue = real(indices, destination.shape(), logicalIndex);
+                const double imaginaryValue =
+                    kind == ComplexGenerationKind::RealOnly ? 0.0
+                    : kind == ComplexGenerationKind::Replicated
+                        ? realValue
+                        : (*imaginary)(indices, destination.shape(), logicalIndex);
+                output[logicalIndex] = Storage(realValue, imaginaryValue);
+            });
+        return true;
+    }
+
+    static bool generateCommonComplexType(Tensor destination, const GenerationRecipe& recipe,
+                                          const PreparedNumericalGenerator& real,
+                                          const PreparedNumericalGenerator* imaginary,
+                                          ComplexGenerationKind kind) {
+        switch (destination.type()) {
+            case ScalarType::ComplexFloat32:
+                return generateContiguousComplexValues<std::complex<float>>(destination, recipe,
+                                                                            real, imaginary, kind);
+            case ScalarType::ComplexFloat64:
+                return generateContiguousComplexValues<std::complex<double>>(destination, recipe,
+                                                                             real, imaginary, kind);
+            default:
+                return false;
+        }
+    }
+
     static void generateComplex(Tensor destination, const GenerationRecipe& recipe) {
         const auto storage = destination.rawEncodedBackingStorage();
         const ComplexWriter write = complexWriter(destination.type());
@@ -609,44 +903,73 @@ struct GenerationRecipeAccess {
             [&](const auto& policy) {
                 using Policy = std::remove_cvref_t<decltype(policy)>;
                 if constexpr (std::is_same_v<Policy, GenerationRecipe::RealOnlyPolicy>) {
-                    const PreparedNumericalComponent real = prepareNumericalComponent(policy.real);
+                    const PreparedNumericalGenerator real = prepareNumericalComponent(
+                        policy.real, recipe.settings_.seed, destination.type());
+                    if (real.isConstant &&
+                        fillContiguous(
+                            destination, recipe.settings_.indexOrder,
+                            [&](std::span<std::byte> destinationStorage, ptrdiff_t offset) {
+                                write(destinationStorage, offset,
+                                      {real({}, destination.shape(), 0), 0.0});
+                            }))
+                        return;
+                    if (generateCommonComplexType(destination, recipe, real, nullptr,
+                                                  ComplexGenerationKind::RealOnly))
+                        return;
                     forEachGenerationElement(
                         destination, recipe.settings_.indexOrder, real.usesCoordinates,
                         [&](std::span<const size_t> indices, size_t logicalIndex,
                             ptrdiff_t offset) {
-                            const double value =
-                                generatedPreparedValue(real, recipe, indices, destination.shape(),
-                                                       logicalIndex, destination.type());
+                            const double value = real(indices, destination.shape(), logicalIndex);
                             write(storage, offset, {value, 0.0});
                         });
                 } else if constexpr (std::is_same_v<Policy, GenerationRecipe::ReplicatedPolicy>) {
-                    const PreparedNumericalComponent value =
-                        prepareNumericalComponent(policy.value);
+                    const PreparedNumericalGenerator value = prepareNumericalComponent(
+                        policy.value, recipe.settings_.seed, destination.type());
+                    if (value.isConstant &&
+                        fillContiguous(
+                            destination, recipe.settings_.indexOrder,
+                            [&](std::span<std::byte> destinationStorage, ptrdiff_t offset) {
+                                const double component = value({}, destination.shape(), 0);
+                                write(destinationStorage, offset, {component, component});
+                            }))
+                        return;
+                    if (generateCommonComplexType(destination, recipe, value, nullptr,
+                                                  ComplexGenerationKind::Replicated))
+                        return;
                     forEachGenerationElement(
                         destination, recipe.settings_.indexOrder, value.usesCoordinates,
                         [&](std::span<const size_t> indices, size_t logicalIndex,
                             ptrdiff_t offset) {
                             const double component =
-                                generatedPreparedValue(value, recipe, indices, destination.shape(),
-                                                       logicalIndex, destination.type());
+                                value(indices, destination.shape(), logicalIndex);
                             write(storage, offset, {component, component});
                         });
                 } else {
-                    const PreparedNumericalComponent real = prepareNumericalComponent(policy.real);
-                    const PreparedNumericalComponent imaginary =
-                        prepareNumericalComponent(policy.imaginary);
+                    const PreparedNumericalGenerator real = prepareNumericalComponent(
+                        policy.real, recipe.settings_.seed, destination.type());
+                    const PreparedNumericalGenerator imaginary = prepareNumericalComponent(
+                        policy.imaginary, recipe.settings_.seed, destination.type());
+                    if (real.isConstant && imaginary.isConstant &&
+                        fillContiguous(
+                            destination, recipe.settings_.indexOrder,
+                            [&](std::span<std::byte> destinationStorage, ptrdiff_t offset) {
+                                write(destinationStorage, offset,
+                                      {real({}, destination.shape(), 0),
+                                       imaginary({}, destination.shape(), 0)});
+                            }))
+                        return;
+                    if (generateCommonComplexType(destination, recipe, real, &imaginary,
+                                                  ComplexGenerationKind::Cartesian))
+                        return;
                     forEachGenerationElement(
                         destination, recipe.settings_.indexOrder,
                         real.usesCoordinates || imaginary.usesCoordinates,
                         [&](std::span<const size_t> indices, size_t logicalIndex,
                             ptrdiff_t offset) {
-                            write(
-                                storage, offset,
-                                {generatedPreparedValue(real, recipe, indices, destination.shape(),
-                                                        logicalIndex, destination.type()),
-                                 generatedPreparedValue(imaginary, recipe, indices,
-                                                        destination.shape(), logicalIndex,
-                                                        destination.type())});
+                            write(storage, offset,
+                                  {real(indices, destination.shape(), logicalIndex),
+                                   imaginary(indices, destination.shape(), logicalIndex)});
                         });
                 }
             },
@@ -664,6 +987,18 @@ struct GenerationRecipeAccess {
 
 bool isRawGenerationComponent(const GenerationRecipe::Component& component) {
     return GenerationRecipeAccess::isRawComponent(component);
+}
+
+PreparedNumericalGenerator prepareNumericalGenerator(const GenerationRecipe& recipe,
+                                                     ScalarType destinationType) {
+    return GenerationRecipeAccess::prepareNumericalComponent(
+        GenerationRecipeAccess::realComponent(recipe), recipe.seed(), destinationType);
+}
+
+PreparedRawGenerator prepareRawGenerator(const GenerationRecipe& recipe,
+                                         ScalarType destinationType) {
+    return GenerationRecipeAccess::prepareRawComponent(
+        GenerationRecipeAccess::realComponent(recipe), recipe.seed(), destinationType);
 }
 
 double generatedNumericalValue(const GenerationRecipe& recipe, std::span<const size_t> indices,
