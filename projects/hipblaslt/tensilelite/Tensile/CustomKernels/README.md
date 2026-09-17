@@ -19,6 +19,7 @@ external manifest.
 | `tensile/`    | Kernels emitted by Tensile's own assembly writer. |
 | `aiter/`      | External: AITER-sourced GEMM kernels.             |
 | `ck/`         | External: Composable Kernel-sourced kernels.     |
+| `rocblas/`    | External: rocBLAS wvSpltK skinny-GEMM kernels.   |
 | `rocroller/`  | External: rocRoller-sourced kernels.              |
 | `wave/`       | External: Wave (handwritten) kernels.             |
 | `triton/`     | External: Triton-compiled GEMM kernels.           |

@@ -156,6 +156,7 @@ namespace TensileLite
         case CustomGridSize::StreamKWithBatch: return "StreamKWithBatch";
         case CustomGridSize::StreamKNoBatch:   return "StreamKNoBatch";
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
+        case CustomGridSize::ComputeUnits:     return "ComputeUnits";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -175,6 +176,7 @@ namespace TensileLite
             {"StreamKWithBatch", CustomGridSize::StreamKWithBatch},
             {"StreamKNoBatch",   CustomGridSize::StreamKNoBatch},
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
+            {"ComputeUnits",     CustomGridSize::ComputeUnits},
         };
 
         auto it = lookup.find(str);
@@ -2910,6 +2912,9 @@ namespace TensileLite
                 case CustomGridSize::StreamKNoBatch:
                     dim = sk.grid;
                     break;
+                case CustomGridSize::ComputeUnits:
+                    dim = static_cast<size_t>(std::max(1, pAMDGPU->computeUnitCount));
+                    break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
                     break;
@@ -3144,6 +3149,11 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::Beta:
                     rv.args.append("beta", inputs.beta, problem.betaType());
+                    break;
+                case CustomArgSemantic::ComputeUnits:
+                    rv.args.appendCustomType("ComputeUnits",
+                                             std::max(1, pAMDGPU->computeUnitCount),
+                                             arg.type);
                     break;
                 case CustomArgSemantic::SplitK:
                 {

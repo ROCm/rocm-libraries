@@ -487,6 +487,8 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertFree0SizeEqual":
+            return cls("SizeEqual", index=0, value=value) if value > 0 else None
 
         if key.endswith('Multiple'):
             if value == 1:
