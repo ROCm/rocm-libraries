@@ -73,7 +73,7 @@ def test_add_common_arguments_global_parameters_accumulate():
 def _args(**over):
     base = dict(
         RuntimeLanguage=None, CodeObjectVersion=None, debug=False,
-        client_lock=None, prebuilt_client=None, MXScaleFormat=0, global_parameters=[],
+        client_lock=None, MXScaleFormat=0, global_parameters=[],
     )
     base.update(over)
     return SimpleNamespace(**base)
@@ -83,7 +83,7 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     monkeypatch.delenv("PyTestBuildArchNames", raising=False)
     args = _args(
         RuntimeLanguage="HIP", CodeObjectVersion="5", debug=True,
-        client_lock="/lock", prebuilt_client="/client", MXScaleFormat=1,
+        client_lock="/lock", MXScaleFormat=1,
         global_parameters=[("K", "V")],
     )
     rv = M.argUpdatedGlobalParameters(args)
@@ -91,7 +91,6 @@ def test_arg_updated_global_parameters_all_overrides(monkeypatch):
     assert rv["CodeObjectVersion"] == "5"
     assert rv["CMakeBuildType"] == "Debug"
     assert rv["ClientExecutionLockPath"] == "/lock"
-    assert rv["PrebuiltClient"] == "/client"
     assert rv["MXScaleFormat"] == 1
     assert rv["K"] == "V"
 
@@ -265,12 +264,5 @@ def test_main_calls_tensile(monkeypatch):
     monkeypatch.setattr(M.sys, "argv", ["prog", "cfg.yaml", "out"])
     calls = []
     monkeypatch.setattr(M, "tensilelite", lambda argv: calls.append(argv))
-    assert M.main() == 0
-    assert calls == [["cfg.yaml", "out"]]
-
-def test_main_forwards_explicit_argv(monkeypatch):
-    calls = []
-    monkeypatch.setattr(M, "tensilelite", lambda argv: calls.append(argv))
-
-    assert M.main(["cfg.yaml", "out"]) == 0
+    M.main()
     assert calls == [["cfg.yaml", "out"]]

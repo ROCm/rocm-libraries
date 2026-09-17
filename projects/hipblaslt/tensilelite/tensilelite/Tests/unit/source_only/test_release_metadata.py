@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
+import os
 import runpy
+import subprocess
+import sys
 
 import pytest
 
@@ -32,6 +35,29 @@ def test_distribution_version_rejects_invalid_base_version():
 
     with pytest.raises(RuntimeError, match="ROCm Python package builds require"):
         metadata["distribution_version"]("not-a-release")
+
+
+def test_tox_package_bootstrap_reads_the_selected_rocm_identity(tmp_path):
+    root = tmp_path / "rocm"
+    (root / ".info").mkdir(parents=True)
+    (root / ".info" / "version").write_text("7.2.4\n", encoding="utf-8")
+    environment = dict(
+        os.environ,
+        TOX_ENV_NAME="unit",
+        ROCM_PATH=str(root),
+    )
+    environment.pop("TENSILELITE_ROCM_VERSION", None)
+
+    result = subprocess.run(
+        [sys.executable, "setup.py", "--version"],
+        cwd=_SOURCE_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "5.0.0+rocm7.2.4"
 
 
 @pytest.mark.parametrize("value", ["5.0", "5.0.0.dev1", "v5.0.0", ""])

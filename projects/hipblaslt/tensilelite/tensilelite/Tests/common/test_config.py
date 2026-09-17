@@ -75,20 +75,19 @@ def _call_helper_in_subprocess(
 ) -> None:
     """Call module.func(config, output_dir, artifact_dir, tensile_args) in a subprocess.
 
-    Each phase runs in a clean interpreter so TensileLite's global state from the
-    build phase cannot bleed into the run phase (uninstalled checkout case).
-    PYTHONPATH is forwarded from sys.path so the child can import tensilelite.
+    Each phase runs in a clean interpreter so TensileLiteLite's global state from
+    the build phase cannot bleed into the run phase. Only the test-helper
+    directory is inserted; the product package must already be installed.
     """
     script = (
         f"import sys; sys.path.insert(0, {repr(_COMMON_DIR)}); "
         f"from {module} import {func}; "
         f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
     )
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
     subprocess.run(
         [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
         check=True,
-        env=env,
+        env=os.environ.copy(),
     )
 
 
