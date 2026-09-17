@@ -85,6 +85,26 @@ def launcher_for(spec: GdnDecodeSpec, arch: str = _ARCH) -> KernelLauncher:
     return launcher
 
 
+def _gate_input(spec: GdnDecodeSpec, rnd, batch: int, hv: int, dk: int):
+    """The `a` tensor, whose meaning depends on the gate mode.
+
+    * GDN: one raw logit per head, `[B, 1, HV]`.
+    * KDA, fuse_gate=True: one raw logit per K channel, `[B, 1, HV, DK]`; the
+      kernel turns it into a decay.
+    * KDA, fuse_gate=False: the natural-log-domain decay itself. Forced
+      non-positive so `exp(a)` lands in (0, 1] -- a positive value would
+      amplify the state every step rather than fade it, which the fused path
+      cannot produce and so is not worth generating.
+
+    Draws exactly one tensor in every mode, so callers can keep this at a fixed
+    position in the input dict and leave the random stream undisturbed.
+    """
+    if spec.gate_kind != "kda":
+        return rnd(batch, 1, hv)
+    g = rnd(batch, 1, hv, dk, scale=0.5)
+    return g if spec.fuse_gate else -g.abs()
+
+
 def make_inputs(
     spec: GdnDecodeSpec,
     batch: int,
@@ -128,9 +148,18 @@ def make_inputs(
         "query": rnd(batch, 1, hk, dk),
         "key": rnd(batch, 1, hk, dk),
         "value": rnd(batch, 1, hv, dv),
-        "a": rnd(batch, 1, hv),
+        # `a` stays at this position in the dict so the GDN draw order -- and
+        # therefore every seeded GDN input ever recorded -- is bit-for-bit
+        # unchanged. See _gate_input for what it holds in each mode.
+        "a": _gate_input(spec, rnd, batch, hv, dk),
         "b": rnd(batch, 1, hv),
-        "dt_bias": rnd(hv),
+        # f32 for KDA: the gate is evaluated in f32 and KDA prefill already
+        # declares this tensor f32, so the two families share one contract.
+        "dt_bias": (
+            torch.randn(hv, dk, device=device, generator=gen, dtype=torch.float32) * 0.1
+            if spec.gate_kind == "kda"
+            else rnd(hv)
+        ),
         "A_log": torch.randn(hv, device=device, generator=gen, dtype=torch.float32),
         "read_indices": torch.arange(batch, device=device, dtype=torch.int32),
         "write_indices": (
@@ -140,6 +169,21 @@ def make_inputs(
         ),
         "state": rnd(depth, hv, dv, dk, dtype=state_dtype, scale=0.01),
     }
+
+
+def precompute_kda_log_decay(spec: GdnDecodeSpec, inp) -> torch.Tensor:
+    """Natural-log decay for the benchmark-only precomputed KDA mode.
+
+    The fp32 oracle deliberately does not call this helper: benchmark
+    preparation and the correctness reference must not share formula code, or
+    the same bug can make both arms agree.
+    """
+    if spec.gate_kind != "kda" or not spec.fuse_gate:
+        raise ValueError("precompute_kda_log_decay requires fused KDA raw logits")
+    inner = torch.exp(inp["A_log"].float())[None, :, None] * (
+        inp["a"][:, 0].float() + inp["dt_bias"].float()
+    )
+    return spec.lower_bound * torch.sigmoid(inner)
 
 
 def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -165,13 +209,35 @@ def ref_fp32(spec: GdnDecodeSpec, inp) -> Tuple[torch.Tensor, torch.Tensor]:
         # l2norm off: the kernel scales q by 1/sqrt(dk) and leaves k raw.
         q = q * scale
 
-    x = inp["a"][:, 0].float() + inp["dt_bias"].float()  # [B, HV]
-    softplus = torch.where(x > SOFTPLUS_THRESHOLD, x, torch.log1p(torch.exp(x)))
-    decay = torch.exp(-torch.exp(inp["A_log"].float()) * softplus)
+    if spec.gate_kind == "kda":
+        if spec.fuse_gate:
+            # Per-channel gate, bounded in (lower_bound, 0) before the exp.
+            #   log_decay[d] = lower_bound * sigmoid(exp(A_log[h]) * (g[d] + dt_bias[h,d]))
+            inner = torch.exp(inp["A_log"].float())[None, :, None] * (
+                inp["a"][:, 0].float() + inp["dt_bias"].float()
+            )
+            decay = torch.exp(spec.lower_bound * torch.sigmoid(inner))  # [B, HV, DK]
+        else:
+            # `a` already carries natural-log-domain decay; only the exp remains.
+            # A_log and dt_bias are unread here -- the caller folded them in.
+            # This mirrors the competitor recurrence-only kernel, which likewise
+            # applies exp(gk) in-kernel and nothing else, which is what makes the
+            # two timeable at one work boundary.
+            decay = torch.exp(inp["a"][:, 0].float())  # [B, HV, DK]
+    else:
+        # Scalar gate, unbounded below.
+        #   log_decay = -exp(A_log[h]) * softplus(a + dt_bias[h])
+        x = inp["a"][:, 0].float() + inp["dt_bias"].float()  # [B, HV]
+        softplus = torch.where(x > SOFTPLUS_THRESHOLD, x, torch.log1p(torch.exp(x)))
+        decay = torch.exp(-torch.exp(inp["A_log"].float()) * softplus)  # [B, HV]
     beta = torch.sigmoid(inp["b"][:, 0].float())
 
     state = inp["state"].float()[inp["read_indices"].long()]  # [B, HV, DV, DK]
-    s = state * decay[..., None, None]
+    # The decay multiplies S from the right, so a per-channel gate scales
+    # columns (the DK axis) and a scalar gate scales the whole matrix.
+    s = state * (
+        decay[..., None, :] if spec.gate_kind == "kda" else decay[..., None, None]
+    )
 
     sk = (s @ k[..., None]).squeeze(-1)  # [B, HV, DV]
     sq = (s @ q[..., None]).squeeze(-1)
@@ -202,6 +268,39 @@ def _validate_decode_inputs(
     (default on; a hot re-prepare loop whose indices are already known good may
     pass ``False``).
     """
+    if spec.gate_kind == "kda":
+        # The emitter indexes these buffers from compile-time B/HV/DK extents:
+        # unlike the scalar GDN ABI, a legacy-sized allocation is too short and
+        # the vector loads would read beyond it. Metadata checks are sync-free,
+        # so they always run even when index-value validation is disabled.
+        a = inp["a"]
+        want_a = (batch, 1, spec.num_v_heads, spec.head_k_dim)
+        if tuple(a.shape) != want_a:
+            raise ValueError(f"KDA a shape {tuple(a.shape)} != {want_a}")
+        want_a_dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[spec.dtype]
+        if a.dtype != want_a_dtype:
+            raise ValueError(f"KDA a dtype {a.dtype} != {want_a_dtype}")
+        if not a.is_contiguous():
+            raise ValueError("KDA a must be contiguous")
+
+        dt_bias = inp["dt_bias"]
+        want_dt_bias = (spec.num_v_heads, spec.head_k_dim)
+        if tuple(dt_bias.shape) != want_dt_bias:
+            raise ValueError(
+                f"KDA dt_bias shape {tuple(dt_bias.shape)} != {want_dt_bias}"
+            )
+        if dt_bias.dtype != torch.float32:
+            raise ValueError(f"KDA dt_bias dtype {dt_bias.dtype} != torch.float32")
+        if not dt_bias.is_contiguous():
+            raise ValueError("KDA dt_bias must be contiguous")
+
+        device = inp["query"].device
+        for name, tensor in (("a", a), ("dt_bias", dt_bias)):
+            if tensor.device != device:
+                raise ValueError(
+                    f"KDA {name} device {tensor.device} != query device {device}"
+                )
+
     state = inp["state"]
     if state.ndim != 4:
         raise ValueError(f"state must be [pool, HV, DV, DK]; got {tuple(state.shape)}")
@@ -222,10 +321,11 @@ def _validate_decode_inputs(
             raise ValueError(f"{name} must be int32; got {idx.dtype}")
         if tuple(idx.shape) != (batch,):
             raise ValueError(f"{name} must be [batch={batch}]; got {tuple(idx.shape)}")
-    # The other seven tensors are addressed from SPEC constants, never from
+    # The remaining buffers are addressed from SPEC constants, never from
     # their own shapes, and the kernel emits no buffer descriptor -- there is
-    # no `num_records` to clamp an over-reach. These checks are the only thing
-    # standing between a mis-shaped input and an out-of-bounds read.
+    # no `num_records` to clamp an over-reach. Gate buffers differ by mode:
+    # KDA's widened `a` / f32 `dt_bias` were validated above; rechecking them
+    # here against GDN's scalar shapes would reject every valid KDA launch.
     hk, hv = spec.num_k_heads, spec.num_v_heads
     dk, dv = spec.head_k_dim, spec.head_v_dim
     io_dt = _TORCH_DT[spec.dtype]
@@ -233,18 +333,19 @@ def _validate_decode_inputs(
         "query": (batch, 1, hk, dk),
         "key": (batch, 1, hk, dk),
         "value": (batch, 1, hv, dv),
-        "a": (batch, 1, hv),
         "b": (batch, 1, hv),
-        "dt_bias": (hv,),
         "A_log": (hv,),
     }
+    if spec.gate_kind == "gdn":
+        want_shapes.update({"a": (batch, 1, hv), "dt_bias": (hv,)})
     for name, want_shape in want_shapes.items():
         t = inp[name]
         if tuple(t.shape) != want_shape:
             raise ValueError(
                 f"{name} must be {want_shape} for this spec; got {tuple(t.shape)}"
             )
-        # A_log is read as f32 by the gate; the rest carry the I/O dtype.
+        # A_log is always f32. GDN's remaining gate buffers carry the I/O
+        # dtype; KDA's f32 dt_bias was checked in its mode-specific block.
         want_t = torch.float32 if name == "A_log" else io_dt
         if t.dtype is not want_t:
             raise ValueError(f"{name} dtype {t.dtype} != {want_t} for this spec")

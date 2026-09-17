@@ -51,7 +51,7 @@ def _cases():
     Covers the default spec, the reference path, and every tile the dispatcher
     can select, so a change to any shipped configuration is visible.
     """
-    from dispatch.gdn.gfx950 import _TUNED_TILES
+    from dispatch.gdn.gfx950 import _TUNED_TILES_GDN, _TUNED_TILES_KDA
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
@@ -62,9 +62,25 @@ def _cases():
         "default": build(),
         "simple": build(simple=True),
         "no_l2norm": build(use_qk_l2norm=False),
+        # KDA gate kind. Pinned for the same reason the GDN cases are: the
+        # per-channel gate is emitted code, and a refactor that changed it
+        # without breaking it would pass every other test in the tree.
+        "kda_default": build(gate_kind="kda"),
+        "kda_simple": build(gate_kind="kda", simple=True),
+        "kda_raw_gate": build(gate_kind="kda", fuse_gate=False),
     }
-    for _, tile, spec_id in _TUNED_TILES:
+    # Each gate kind has its own tuned table, so each is pinned against its own
+    # tiles. Pinning KDA against GDN's tiles would cover a configuration the
+    # dispatcher can never select.
+    for _, tile, spec_id in _TUNED_TILES_GDN:
         cases[f"tuned_{spec_id}"] = build(
+            num_warps=tile[0],
+            warp_threads_k=tile[1],
+            blocks_per_v_dim=tile[2],
+        )
+    for _, tile, spec_id in _TUNED_TILES_KDA:
+        cases[f"tuned_{spec_id}"] = build(
+            gate_kind="kda",
             num_warps=tile[0],
             warp_threads_k=tile[1],
             blocks_per_v_dim=tile[2],
@@ -137,6 +153,54 @@ def test_every_shipped_configuration_is_recorded():
         pytest.skip(f"no gdn_decode golden recorded for llvm flavor {flavor!r}")
     missing = sorted(set(_cases()) - set(recorded["cases"]))
     assert not missing, f"configurations with no golden entry: {missing}"
+
+
+def test_gate_kind_actually_moves_the_ir():
+    """A mutation check: the golden gate must be able to detect this change.
+
+    "Golden untouched" only means something if the golden *could* have moved.
+    Flipping gate_kind changes emitted code, so it must change both the IR hash
+    and the kernel name -- otherwise the KDA cases above are pinning nothing and
+    two different kernels would share one compile-cache entry.
+    """
+    import dataclasses as _dc
+
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
+
+    flavor = _current_flavor()
+    gdn = GdnDecodeSpec()
+    kda = _dc.replace(gdn, gate_kind="kda")
+
+    gdn_sha, _ = _sha_for(lambda: build_gdn_decode(gdn, arch=_ARCH), flavor)
+    kda_sha, _ = _sha_for(lambda: build_gdn_decode(kda, arch=_ARCH), flavor)
+
+    assert gdn_sha != kda_sha, "gate_kind did not change the emitted IR"
+    assert gdn.kernel_name() != kda.kernel_name(), "gate_kind did not change the name"
+
+
+def test_gdn_cases_carry_no_kda_marker():
+    """Every pre-existing GDN entry must stay a GDN entry.
+
+    Guards the additive claim from the fixture side: if a GDN case id ever
+    starts resolving to a KDA spec, the "GDN goldens unchanged" evidence is
+    quietly measuring the wrong kernel.
+
+    KDA appears in an id two ways -- as a prefix for the hand-written cases
+    (``kda_default``) and as an infix for the tuned ones (``tuned_kda_w128``,
+    which inherits its gate kind from the spec id in the KDA table) -- so the
+    split is on containment, not prefix.
+    """
+    from kernels.gfx950.gdn_decode import GdnDecodeSpec
+
+    assert GdnDecodeSpec().gate_kind == "gdn"
+    ids = list(_cases())
+    gdn_ids = [cid for cid in ids if "kda" not in cid]
+    kda_ids = [cid for cid in ids if "kda" in cid]
+
+    # The original GDN set: default, simple, no_l2norm + one per GDN tuned tile.
+    assert len(gdn_ids) >= 7, f"expected the original GDN case set, got {gdn_ids}"
+    assert kda_ids, "the KDA gate kind is unpinned"
+    assert not set(gdn_ids) & set(kda_ids)
 
 
 if __name__ == "__main__":

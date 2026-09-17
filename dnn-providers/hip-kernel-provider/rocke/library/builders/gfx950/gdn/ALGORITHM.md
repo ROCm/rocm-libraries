@@ -1,7 +1,8 @@
-# Gated DeltaNet (GDN) — algorithm and design
+# GDN/KDA gated-delta decode and prefill — algorithm and design
 
-> **Scope.** The GDN operator family on gfx950: a dedicated single-token **decode** kernel and a
-> chunkwise **prefill** forward that ships as a mode of the existing KDA chunkwise kernel.
+> **Scope.** The shared gated-delta family on gfx950: a single-token **decode**
+> emitter that serves GDN and KDA, plus chunkwise **prefill** kernels where GDN
+> ships as a mode of the existing KDA implementation.
 > This document specifies *what* the kernels compute and *why they are shaped the way they are*.
 > It is a specification, not a tuning history, and it carries **no measurements** — latency is
 > recorded in the internal perf repository per repository compliance.
@@ -275,23 +276,27 @@ serving infrastructure.
 
 ---
 
-## 4. Decode kernel
+## 4. Decode kernel shared by GDN and KDA
 
 ### 4.1 Tensor contract
 
-All tensors are contiguous row-major.
+All tensors are contiguous row-major. `gate_kind` changes the extent and type
+of the gate inputs, not the recurrent-state layout or the rest of the ABI:
 
-| Tensor | Shape | Type | Direction |
+| Tensor | GDN shape/type | KDA shape/type | Direction |
 | --- | --- | --- | --- |
-| `query`, `key` | `[B, 1, num_k_heads, head_k_dim]` | `dtype` | in |
-| `value`, `out` | `[B, 1, num_v_heads, head_v_dim]` | `dtype` | in / out |
-| `a`, `b` | `[B, 1, num_v_heads]` | `dtype` | in |
-| `dt_bias` | `[num_v_heads]` | `dtype` | in |
-| `A_log` | `[num_v_heads]` | `f32` | in |
-| `read_indices`, `write_indices` | `[B]` | `i32` | in |
-| `state` | `[pool, num_v_heads, head_v_dim, head_k_dim]` | `state_dtype` | in-place |
+| `query`, `key` | `[B, 1, num_k_heads, head_k_dim]`, `dtype` | same | in |
+| `value`, `out` | `[B, 1, num_v_heads, head_v_dim]`, `dtype` | same | in / out |
+| `a` | `[B, 1, num_v_heads]`, `dtype` | `[B, 1, num_v_heads, head_k_dim]`, `dtype` | in |
+| `b` | `[B, 1, num_v_heads]`, `dtype` | same | in |
+| `dt_bias` | `[num_v_heads]`, `dtype` | `[num_v_heads, head_k_dim]`, `f32` | in |
+| `A_log` | `[num_v_heads]`, `f32` | same | in |
+| `read_indices`, `write_indices` | `[B]`, `i32` | same | in |
+| `state` | `[pool, num_v_heads, head_v_dim, head_k_dim]`, `state_dtype` | same | in-place |
 
 The launch also passes a trailing `batch_size` `i32` scalar (not a tensor).
+`prepare()` validates the gate-kind-dependent shapes, dtypes, devices and
+contiguity before launch, in addition to the state-pool checks in §4.5.
 
 ### 4.2 Parallel decomposition
 
@@ -370,28 +375,34 @@ without going through `prepare()` gets neither this host validation nor a device
 production launch path must call `prepare()`, or replicate its shape and index-range checks,
 before launch.
 
-### 4.6 Tile selection by batch
+### 4.6 Tile selection
 
-`(num_warps, warp_threads_k, blocks_per_v_dim)` is chosen from a batch-banded table:
+GDN and KDA use the same legal tile space but separate tuned tables because the
+per-channel KDA gate adds loads and registers that the scalar GDN gate does not.
 
-| Band | batch | `num_warps` | `warp_threads_k` | `blocks_per_v_dim` |
-| --- | --- | --- | --- | --- |
-| `b4` | ≤ 4 | 4 | 16 | 8 |
-| `b32` | ≤ 32 | 2 | 8 | 2 |
-| `b128` | ≤ 128 | 1 | 8 | 1 |
-| `b_large` | > 128 | 8 | 16 | 1 |
+GDN keeps its original batch-keyed table:
 
-The trend it encodes: **as batch grows, `BPV` is spent down — `8` at the smallest band to `1` by
-the `b128` band — because a larger natural grid needs less manufactured parallelism; only at the
-largest band (`b_large`), where `BPV` is already `1`, is the workgroup widened (to `num_warps = 8`)
-for throughput.** `num_warps` is therefore not monotone in batch — it falls `4 → 2 → 1` and then
-jumps to `8`, so the `b128` band is the narrowest workgroup.
+| Band | Batch | `(num_warps, warp_threads_k, blocks_per_v_dim)` |
+| --- | --- | --- |
+| `b4` | `≤ 4` | `(4, 16, 8)` |
+| `b32` | `≤ 32` | `(2, 8, 2)` |
+| `b128` | `≤ 128` | `(1, 8, 1)` |
+| `b_large` | larger | `(8, 16, 1)` |
 
-The bands are deliberately coarse. Adjacent legal configurations sit within run-to-run variation of
-each other, so a finer table would encode noise rather than signal. The table was produced by an
-exhaustive sweep of all 54 legal tile configurations, correctness-gated at every point. Only the
-four batch anchors `1 / 16 / 64 / 256` were measured; the band edges between them are
-interpolated, chosen to place each anchor inside its own band rather than on a boundary.
+KDA keys its table on `work = batch × num_v_heads`. Tensor-parallel sharding
+changes `num_v_heads` per rank, so two launches with the same batch can expose
+different amounts of GPU work:
+
+| Band | Work | `(num_warps, warp_threads_k, blocks_per_v_dim)` |
+| --- | --- | --- |
+| `kda_w128` | `≤ 128` | `(4, 16, 4)` |
+| `kda_w512` | `≤ 512` | `(1, 16, 4)` |
+| `kda_w_large` | larger | `(2, 16, 1)` |
+
+`BPV` manufactures workgroups when the natural grid is too small. Both tables
+come from exhaustive sweeps of the legal tile space with each candidate
+correctness-gated before timing. Band edges between measured anchors are
+interpolation; exact measurements live in the protected performance record.
 
 ### 4.7 The reference path
 
@@ -548,33 +559,40 @@ unaffected.
 
 ---
 
-## 6. Reuse in the other direction: KDA on GDN
+## 6. Reuse in both directions
 
-The piggy-back is **not symmetric**, and the asymmetry is worth stating precisely because it is easy
-to assume otherwise.
+**GDN prefill on KDA — shared and shipped.** General subsumes special: KDA's
+prefill kernel has a slot for a `DK`-wide decay, and a broadcast scalar is a
+legal occupant of that slot (§2.2).
 
-**GDN prefill on KDA — free, and shipped.** General subsumes special: KDA's kernel has a slot for a
-`DK`-wide decay, and a broadcast scalar is a legal occupant of that slot (§2.2).
+**KDA decode on GDN — shared and shipped.** This direction required extending
+the decode emitter: its original GDN gate produced one scalar decay per head,
+while KDA needs `DK` distinct per-channel decays. `GdnDecodeSpec.gate_kind`
+selects the gate at build time:
 
-**KDA decode on GDN — a real kernel change.** A GDN-only decode kernel has *one scalar slot* per
-head; there is nowhere to put `DK` distinct decays. The general case cannot be expressed as an input
-to the special machine.
+```text
+gdn: log_decay[h]   = -exp(A_log[h]) * softplus(a[h] + dt_bias[h])
+kda: log_decay[h,d] = lower_bound * sigmoid(exp(A_log[h]) * (a[h,d] + dt_bias[h,d]))
+decay               = exp(log_decay)
+```
 
-What does transfer, and it is most of the kernel: KDA has **no decode kernel at all**, and the GDN
-decode kernel is a ready chassis for one — the single-token structure, the paged state pool with
-read/write indices and the negative-index skip, the batch-banded tile table, and the `BPV`
-parallelism split. The change required is confined to the fade: `s = decay * S[row]` becomes an
-element-wise multiply by a per-channel vector instead of a broadcast scalar. The probe, the delta,
-the readout and the rank-1 write are untouched, as is the reduction structure.
+Only gate production and the fade differ. The probe, delta, readout, rank-1
+write, cross-lane reduction, paged state pool, negative-index skip and
+`blocks_per_v_dim` split are the same emitter code. In the warp-tiled path a
+lane loads the decay for its K-channel slice once and reuses it for every state
+row it owns.
 
-On the prefill side, some machinery now benefits both families and some was inherited rather than
-added for GDN. The chunkwise **raw-prep fused path** and the `value_splits` **knob**
-(`KdaChunkScanSpec.value_splits`, `_RAW_VALUE_SPLITS = (1, 2, 4, 8)`) are pre-existing KDA work that
-GDN mode reuses. What GDN added and now genuinely shares is the **hoisted dispatch core**
-(`rocke.dispatch.core`, re-exported by the KDA dispatch). The **GQA gather** and the `value_splits`
-**selection table** are GDN-only today — the gather is gated to `gate_kind="gdn"`, and KDA dispatch
-builds its scan spec without a tuned `value_splits` table. Unlocking either for KDA is a scope
-decision, not a rewrite.
+`fuse_gate=True` is the dispatched production path. `fuse_gate=False` accepts
+precomputed natural-log decay and is validated but not dispatched; it exposes
+recurrence-only cost for controlled measurement.
+
+On the prefill side, some machinery benefits both families and some was
+inherited rather than added for GDN. The chunkwise **raw-prep fused path** and
+the `value_splits` **knob** (`KdaChunkScanSpec.value_splits`,
+`_RAW_VALUE_SPLITS = (1, 2, 4, 8)`) are pre-existing KDA work that GDN mode
+reuses. What GDN added and now genuinely shares is the **hoisted dispatch
+core** (`rocke.dispatch.core`, re-exported by the KDA dispatch). The **GQA
+gather** and the `value_splits` **selection table** remain GDN-prefill-only.
 
 ---
 
@@ -615,7 +633,6 @@ Widening the range needs nested chunking or per-token rescaling.
 3. Extending the supported decay range.
 4. Scan-side parallelism beyond the current `value_splits` cap, or a shorter serial chain — the scan
    is the critical path at small `BH` (§5.4).
-5. KDA decode on the GDN chassis, or a single decode kernel generalised over both gates (§6).
-6. Host-struct consolidation of the GDN and KDA request lineage.
-7. Machine-checked byte-identity for the cross-engine surfaces this family touches — currently
+5. Host-struct consolidation of the GDN and KDA request lineage.
+6. Machine-checked byte-identity for the cross-engine surfaces this family touches — currently
    reasoned and Python-verified.

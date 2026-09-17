@@ -20,8 +20,14 @@ from dispatch.gdn import (
     dispatch_gdn_decode,
     gdn_candidates,
     gdn_sweep_space,
+    request_errors,
 )
-from dispatch.gdn.gfx950 import ARCH, TUNED_SPEC_IDS, tile_for_batch
+from dispatch.gdn.gfx950 import (
+    ARCH,
+    TUNED_SPEC_IDS,
+    tile_for_batch,
+    tile_for_work,
+)
 from kernels.gfx950.gdn_decode import (
     gdn_decode_grid,
     gdn_decode_signature,
@@ -67,14 +73,9 @@ class TestTunedSelection(unittest.TestCase):
             (129, (8, 16, 1)),
         ):
             with self.subTest(batch=batch):
-                self.assertEqual(_TILE(dispatch_gdn_decode(_req(batch)).spec), expected)
-
-    def test_tile_for_batch_agrees_with_dispatch(self):
-        for batch in (1, 2, 5, 17, 63, 100, 200, 4096):
-            with self.subTest(batch=batch):
-                self.assertEqual(
-                    _TILE(dispatch_gdn_decode(_req(batch)).spec), tile_for_batch(batch)
-                )
+                spec = dispatch_gdn_decode(_req(batch)).spec
+                self.assertEqual(_TILE(spec), expected)
+                self.assertEqual(_TILE(spec), tile_for_batch(batch))
 
     def test_selected_spec_is_always_buildable(self):
         for batch in (1, 4, 5, 16, 33, 64, 129, 256, 8192):
@@ -114,6 +115,42 @@ class TestRequestRejection(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatch_gdn_decode(_req(8, dtype="fp8"))
 
+    def test_kda_d128_is_admitted(self):
+        result = dispatch_gdn_decode(
+            _req(
+                1,
+                gate_kind="kda",
+                num_k_heads=32,
+                num_v_heads=32,
+                head_k_dim=128,
+                head_v_dim=128,
+            )
+        )
+        self.assertEqual(result.spec.gate_kind, "kda")
+        self.assertEqual((result.spec.head_k_dim, result.spec.head_v_dim), (128, 128))
+
+    def test_kda_non_d128_is_loudly_scoped_out(self):
+        for head_k_dim, head_v_dim in ((64, 128), (128, 64)):
+            with self.subTest(head_k_dim=head_k_dim, head_v_dim=head_v_dim):
+                with self.assertRaises(ValueError) as ctx:
+                    dispatch_gdn_decode(
+                        _req(
+                            1,
+                            gate_kind="kda",
+                            num_k_heads=32,
+                            num_v_heads=32,
+                            head_k_dim=head_k_dim,
+                            head_v_dim=head_v_dim,
+                        )
+                    )
+                self.assertIn("NOT_YET_IMPLEMENTED", str(ctx.exception))
+                self.assertIn("128", str(ctx.exception))
+
+    def test_gdn_d64_remains_supported(self):
+        result = dispatch_gdn_decode(_req(1, head_k_dim=64))
+        self.assertEqual(result.spec.gate_kind, "gdn")
+        self.assertEqual(result.spec.head_k_dim, 64)
+
 
 class TestSpecIdPin(unittest.TestCase):
     def test_pin_overrides_the_tuning_table(self):
@@ -123,11 +160,29 @@ class TestSpecIdPin(unittest.TestCase):
         self.assertEqual(result.candidate.spec_id, "b4")
         self.assertEqual(_TILE(result.spec), (4, 16, 8))
 
-    def test_every_pin_is_reachable_at_any_batch(self):
+    def test_every_pin_is_reachable_with_its_own_gate_kind(self):
+        # Each tuned tile belongs to exactly one gate kind's table, so a pin is
+        # reachable from a request of that kind and only that kind.
         for spec_id in TUNED_SPEC_IDS:
-            with self.subTest(spec_id=spec_id):
-                got = dispatch_gdn_decode(_req(64, spec_id=spec_id))
+            gate_kind = "kda" if spec_id.startswith("kda_") else "gdn"
+            with self.subTest(spec_id=spec_id, gate_kind=gate_kind):
+                got = dispatch_gdn_decode(
+                    GdnDecodeRequest(
+                        batch=64, arch=ARCH, spec_id=spec_id, gate_kind=gate_kind
+                    )
+                )
                 self.assertEqual(got.candidate.spec_id, spec_id)
+                self.assertEqual(got.spec.gate_kind, gate_kind)
+
+    def test_a_pin_cannot_cross_gate_kinds(self):
+        # Serving a KDA pin to a GDN request would hand it a tile tuned for a
+        # different kernel. That must fail loudly, not silently fall back.
+        with self.assertRaises(ValueError):
+            dispatch_gdn_decode(
+                GdnDecodeRequest(
+                    batch=64, arch=ARCH, spec_id="kda_w128", gate_kind="gdn"
+                )
+            )
 
     def test_algorithm_pin_is_honoured_and_an_unknown_one_is_rejected(self):
         # The `algorithm` pin is a separate selector from `spec_id` above, and
@@ -263,3 +318,129 @@ class TestDispatchResultContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGateKindWiring(unittest.TestCase):
+    """The request carries gate_kind through to the spec, GDN by default."""
+
+    def test_request_defaults_to_the_gdn_gate(self):
+        self.assertEqual(_req(1).gate_kind, "gdn")
+        self.assertEqual(dispatch_gdn_decode(_req(1)).spec.gate_kind, "gdn")
+
+    def test_kda_request_selects_a_kda_spec(self):
+        req = GdnDecodeRequest(batch=4, arch=ARCH, gate_kind="kda")
+        spec = dispatch_gdn_decode(req).spec
+        self.assertEqual(spec.gate_kind, "kda")
+        self.assertIn("kda", spec.kernel_name())
+
+    def test_gate_kind_reaches_the_compile_key(self):
+        # Two requests differing only in gate_kind select different kernels, so
+        # they must not collapse onto one compile-cache entry.
+        gdn = dispatch_gdn_decode(GdnDecodeRequest(batch=4, arch=ARCH))
+        kda = dispatch_gdn_decode(GdnDecodeRequest(batch=4, arch=ARCH, gate_kind="kda"))
+        self.assertNotEqual(gdn.kernel_id.compile_key, kda.kernel_id.compile_key)
+
+    def test_unknown_gate_kind_is_rejected(self):
+        errors = request_errors(GdnDecodeRequest(batch=1, arch=ARCH, gate_kind="mamba"))
+        self.assertTrue(any("gate_kind" in e for e in errors), errors)
+
+
+class TestWorkKeyedTable(unittest.TestCase):
+    """The new KDA table is keyed on work = batch * num_v_heads."""
+
+    def test_equal_work_selects_the_same_kda_tile(self):
+        self.assertEqual(tile_for_work(8 * 32, "kda"), tile_for_work(32 * 8, "kda"))
+        self.assertEqual(tile_for_work(1 * 32, "kda"), tile_for_work(4 * 8, "kda"))
+
+    def test_kda_dispatch_uses_work_not_batch(self):
+        full = dispatch_gdn_decode(
+            GdnDecodeRequest(
+                batch=4,
+                arch=ARCH,
+                gate_kind="kda",
+                num_k_heads=32,
+                num_v_heads=32,
+            )
+        ).spec
+        sharded = dispatch_gdn_decode(
+            GdnDecodeRequest(
+                batch=4,
+                arch=ARCH,
+                gate_kind="kda",
+                num_k_heads=8,
+                num_v_heads=8,
+            )
+        ).spec
+        self.assertEqual(_TILE(full), tile_for_work(4 * 32, "kda"))
+        self.assertEqual(_TILE(sharded), tile_for_work(4 * 8, "kda"))
+
+    def test_tile_for_work_agrees_with_kda_dispatch(self):
+        for batch in (1, 8, 32, 128):
+            with self.subTest(batch=batch):
+                spec = dispatch_gdn_decode(
+                    GdnDecodeRequest(
+                        batch=batch,
+                        arch=ARCH,
+                        gate_kind="kda",
+                        num_k_heads=32,
+                        num_v_heads=32,
+                    )
+                ).spec
+                self.assertEqual(
+                    _TILE(spec),
+                    tile_for_work(batch * spec.num_v_heads, "kda"),
+                )
+
+    def test_kda_table_is_total_over_work(self):
+        for work in (1, 4, 5, 128, 129, 4096, 4097, 10**6):
+            self.assertIsNotNone(tile_for_work(work, "kda"))
+
+
+class TestGdnSelectionIsFrozen(unittest.TestCase):
+    """GDN stays batch-keyed; only the new KDA mode is work-keyed.
+
+    Re-keying GDN on ``batch * num_v_heads`` reroutes every sharded-head
+    deployment even though this PR measured only the new KDA gate. Pin the
+    original GDN selector across head counts, not only the Hv=32 case where the
+    old and new keys happen to be algebraically equivalent.
+    """
+
+    # The original shipped GDN table, keyed on batch.
+    _ORIGINAL = (
+        (4, (4, 16, 8)),
+        (32, (2, 8, 2)),
+        (128, (1, 8, 1)),
+        (None, (8, 16, 1)),
+    )
+
+    def _original_tile(self, batch):
+        for max_batch, tile in self._ORIGINAL:
+            if max_batch is None or batch <= max_batch:
+                return tile
+        raise AssertionError("unreachable")
+
+    def test_gdn_selection_matches_original_table_across_head_counts(self):
+        for num_v_heads in (4, 8, 16, 32, 64):
+            for batch in (1, 4, 5, 16, 32, 33, 64, 128, 129, 256):
+                with self.subTest(num_v_heads=num_v_heads, batch=batch):
+                    result = dispatch_gdn_decode(
+                        GdnDecodeRequest(
+                            batch=batch,
+                            arch=ARCH,
+                            num_k_heads=max(1, num_v_heads // 2),
+                            num_v_heads=num_v_heads,
+                        )
+                    )
+                    self.assertEqual(_TILE(result.spec), self._original_tile(batch))
+                    self.assertEqual(tile_for_batch(batch), self._original_tile(batch))
+                    self.assertEqual(result.spec.gate_kind, "gdn")
+
+    def test_kda_tuning_cannot_reach_the_gdn_table(self):
+        from dispatch.gdn.gfx950 import _TUNED_TILES_GDN, _TUNED_TILES_KDA
+
+        gdn_tiles = {t for _, t, _ in _TUNED_TILES_GDN}
+        gdn_ids = {sid for _, _, sid in _TUNED_TILES_GDN}
+        kda_ids = {sid for _, _, sid in _TUNED_TILES_KDA}
+
+        self.assertEqual(gdn_tiles, {(4, 16, 8), (2, 8, 2), (1, 8, 1), (8, 16, 1)})
+        self.assertFalse(gdn_ids & kda_ids, "spec ids must not collide")

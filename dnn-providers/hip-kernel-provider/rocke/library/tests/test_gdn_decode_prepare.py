@@ -141,3 +141,77 @@ def test_non_contiguous_input_is_rejected():
     assert not inp["value"].is_contiguous()
     with pytest.raises(ValueError, match="contiguous"):
         prepare(spec, inp, batch)
+
+
+@pytest.mark.parametrize(
+    "key,mutate,match",
+    [
+        ("a", lambda x: x[..., :1], r"a shape"),
+        (
+            "a",
+            lambda x: x.transpose(-1, -2).contiguous().transpose(-1, -2),
+            r"a.*contiguous",
+        ),
+        ("dt_bias", lambda x: x[..., :1], r"dt_bias shape"),
+        ("dt_bias", lambda x: x.to(torch.bfloat16), r"dt_bias.*float32"),
+        (
+            "dt_bias",
+            lambda x: x.transpose(-1, -2).contiguous().transpose(-1, -2),
+            r"dt_bias.*contiguous",
+        ),
+    ],
+)
+def test_kda_gate_input_contract_is_rejected_before_launch(key, mutate, match):
+    """KDA widens the gate buffers; legacy/malformed allocations must not launch.
+
+    The emitter vector-loads ``a`` as ``[B,1,HV,DK]`` and ``dt_bias`` as f32
+    ``[HV,DK]`` using spec-derived offsets. A legacy GDN-shaped or strided
+    allocation is smaller/differently laid out than that compiled range.
+    """
+    import dataclasses as dc
+
+    spec = dc.replace(GdnDecodeSpec(), gate_kind="kda")
+    batch = 2
+    inp = make_inputs(spec, batch, device=DEVICE)
+    inp[key] = mutate(inp[key])
+
+    with pytest.raises(ValueError, match=match):
+        prepare(spec, inp, batch)
+
+
+@pytest.mark.parametrize("key", ["a", "dt_bias"])
+def test_kda_gate_inputs_must_match_query_device(key):
+    """The launch contract rejects gate buffers on a different device."""
+    import dataclasses as dc
+
+    spec = dc.replace(GdnDecodeSpec(), gate_kind="kda")
+    inp = make_inputs(spec, batch=2, device=DEVICE)
+    inp[key] = torch.empty_like(inp[key], device="meta")
+
+    with pytest.raises(ValueError, match=rf"{key} device"):
+        prepare(spec, inp, batch=2)
+
+
+def test_gdn_gate_input_contract_stays_scalar():
+    """The KDA checks must not reject the existing scalar GDN ABI."""
+    spec = GdnDecodeSpec()
+    inp = make_inputs(spec, batch=2, device=DEVICE)
+
+    assert tuple(inp["a"].shape) == (2, 1, spec.num_v_heads)
+    assert tuple(inp["dt_bias"].shape) == (spec.num_v_heads,)
+    prepare(spec, inp, batch=2)
+
+
+def test_valid_kda_gate_inputs_survive_generic_validation():
+    """Mode-specific KDA checks must prevent a second scalar-GDN recheck.
+
+    The rebase first admitted KDA's `[B,1,HV,DK]` ``a`` and `[HV,DK]`` f32
+    ``dt_bias``, then the generic loop rechecked both against GDN's scalar
+    shapes and rejected every normal KDA launch before the kernel ran.
+    """
+    import dataclasses as dc
+
+    spec = dc.replace(GdnDecodeSpec(), gate_kind="kda")
+    inp = make_inputs(spec, batch=2, device=DEVICE)
+
+    prepare(spec, inp, batch=2)
