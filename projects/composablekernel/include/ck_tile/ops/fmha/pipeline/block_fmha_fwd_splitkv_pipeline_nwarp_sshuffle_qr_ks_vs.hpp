@@ -295,7 +295,33 @@ struct BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS
                     auto lse_acc =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
 
-                    if(__builtin_isinf_sign(sink_v) >= 0 && i_split == 0)
+                    // The sink logit must enter the combined softmax denominator
+                    // exactly once. Split 0 owns it only while some split has work of
+                    // its own: if split 0's tile range is empty, the first non-empty
+                    // split seeds m/l with the sink instead, because it looks one
+                    // split back and sees an empty predecessor. Publishing a
+                    // sink-bearing lse_acc here as well would count exp(sink) twice.
+                    bool keeps_sink = (__builtin_isinf_sign(sink_v) >= 0) && i_split == 0;
+                    if(keeps_sink && 1 < num_splits)
+                    {
+                        // Re-query the range over the whole key axis (num_splits=1).
+                        const auto full_range = [&mask, &q_origin]() {
+                            if constexpr(kHasSink)
+                                return mask.GetSinkTileRangeAlongX(
+                                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, 1, 0);
+                            else
+                            {
+                                auto [start, end] = mask.GetTileRangeAlongX(
+                                    q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{}, 1, 0);
+                                return ck_tile::make_tuple(0, start, end);
+                            }
+                        }();
+                        // Keep the sink here only when no split at all has work.
+                        keeps_sink = (full_range.get(ck_tile::number<0>{}) <= 0 &&
+                                      full_range.get(ck_tile::number<2>{}) <=
+                                          full_range.get(ck_tile::number<1>{}));
+                    }
+                    if(keeps_sink)
                     {
                         set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                     }
