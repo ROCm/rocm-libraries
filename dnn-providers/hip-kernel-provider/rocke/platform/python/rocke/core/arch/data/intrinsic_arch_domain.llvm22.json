@@ -606,15 +606,18 @@
         "verified_on": "llvm22"
       },
       "gfx90a": {
-        "status": "ok",
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
         "verified_on": "llvm22"
       },
       "gfx942": {
-        "status": "ok",
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
         "verified_on": "llvm22"
       },
       "gfx950": {
-        "status": "ok",
+        "evidence": "Segmentation fault",
+        "status": "toolchain_crash",
         "verified_on": "llvm22"
       }
     },
