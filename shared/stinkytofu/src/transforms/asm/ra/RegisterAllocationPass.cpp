@@ -390,6 +390,11 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
 
     const SSALiveIntervals intervals = computeSSALiveIntervals(function);
     AsmTargetRegisters target = AsmTargetRegisters::forFunction(function);
+
+    // Before build(), which reads the stamp rather than work it out, and before
+    // destruction, which has no other way to learn it.
+    markUndefinedLiveIns(function, target);
+
     const AllocationConstraints constraints = AllocationConstraints::build(function, target, rules);
     const std::vector<Loop> loops = detectLoops(function);
 

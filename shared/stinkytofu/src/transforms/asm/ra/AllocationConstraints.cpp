@@ -309,6 +309,14 @@ bool dispatchFillsLiveIn(const std::optional<RegKey>& hint, uint32_t dispatchFil
     }
 }
 
+/// The register a value was lifted from, as recordValue() derives it, so the
+/// stamp and the hint a policy reads cannot disagree about which register.
+std::optional<RegKey> hintOf(const StinkySSAValue& value) {
+    if (!value.hasPhysicalBinding()) return std::nullopt;
+    const StinkySSAValue::PhysicalBinding& binding = value.physical();
+    return RegKey{binding.type, binding.idx, RegHalf::NONE};
+}
+
 std::string joinIds(const std::vector<SSAValueID>& ids) {
     std::ostringstream out;
     for (size_t i = 0; i < ids.size(); ++i) {
@@ -319,6 +327,26 @@ std::string joinIds(const std::vector<SSAValueID>& ids) {
 }
 
 }  // namespace
+
+void markUndefinedLiveIns(Function& function, const AsmTargetRegisters& target) {
+    if (!function.hasAttachedSSA()) return;
+
+    const uint32_t dispatchFilledSgprs = dispatchFilledSgprsOf(function);
+    const uint32_t dispatchFilledVgprs = dispatchFilledVgprsOf(target.arch());
+
+    for (BasicBlock& block : function) {
+        for (const SSABlockArgument& arg : block.ssaArguments()) {
+            // Incoming edges mean the program defines it. Without them only the
+            // dispatch could have: below its class's line it holds something
+            // real, so build() pins it. Above the line it holds nothing, so
+            // pinning buys nothing -- and for s[100:107] on a 106-register file
+            // it is impossible.
+            if (arg.value == nullptr || !arg.incoming.empty()) continue;
+            arg.value->setUndefined(
+                !dispatchFillsLiveIn(hintOf(*arg.value), dispatchFilledSgprs, dispatchFilledVgprs));
+        }
+    }
+}
 
 AllocationConstraints AllocationConstraints::build(const Function& function,
                                                    const AsmTargetRegisters& target,
@@ -337,9 +365,6 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
     }
 
     const RegClassSet& liftedClasses = function.ssaArena().liftedClasses();
-    const uint32_t dispatchFilledSgprs = dispatchFilledSgprsOf(function);
-    const uint32_t dispatchFilledVgprs = dispatchFilledVgprsOf(target.arch());
-
     const uint32_t wavefrontSize = wavefrontSizeOf(function);
 
     for (const BasicBlock& block : function) {
@@ -373,23 +398,16 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
 
         for (const SSABlockArgument& arg : block.ssaArguments()) {
             if (arg.value == nullptr) continue;
-            // No incoming edge means nothing in the function defines this value.
-            // Pinned where the dispatch filled the register it names, since it
-            // then arrives holding something that moving it would lose. Above
-            // that line nobody wrote it, so a pin would fix a block in place to
-            // preserve contents that do not exist -- and at s[100:107] on a
-            // 106-register file could not be honoured at all. Vectors reach
-            // that state in bulk: a kernel lifted mid-stream can name hundreds
-            // of VGPRs it never defines, and pinning them leaves the file too
-            // fragmented for an aligned tuple to fit anywhere.
+            // Nothing defines a value with no incoming edge, so it is pinned
+            // unless markUndefinedLiveIns() found it holds nothing. Read rather
+            // than re-derived: destruction reaches the same answer from less.
             if (arg.incoming.empty()) {
                 const SSAValueID id = arg.value->valueId();
                 if (id == kInvalidSSAValueID || id >= constraints.pinnedByValue_.size()) continue;
-                if (dispatchFillsLiveIn(constraints.hintByValue_[id], dispatchFilledSgprs,
-                                        dispatchFilledVgprs)) {
-                    constraints.pinnedByValue_[id] = true;
-                } else {
+                if (arg.value->isUndefined()) {
                     constraints.undefinedLiveIns_.push_back(id);
+                } else {
+                    constraints.pinnedByValue_[id] = true;
                 }
                 continue;
             }
@@ -399,6 +417,10 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
                 const StinkyOpOperand* use = incoming.use.get();
                 const StinkySSAValue* value = use == nullptr ? nullptr : use->value();
                 if (value == nullptr) continue;
+                // An undefined edge asks for nothing: the merge reads garbage
+                // along it whichever register it takes. Dropping the member
+                // leaves the result welded to the edges that do define it.
+                if (value->isUndefined()) continue;
                 set.members.push_back(value->valueId());
             }
             std::sort(set.members.begin(), set.members.end());
