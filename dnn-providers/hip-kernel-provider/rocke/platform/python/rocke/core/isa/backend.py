@@ -570,9 +570,14 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             return
         spec = _GFX1250_WMMA.get(op.name)
         if spec is None:
+            scaled_ops = [
+                f"tile.{atom.op_id}"
+                for atom in self.arch.mma.ops
+                if gfx1250_scaled_wmma(atom.op_id) is not None
+            ]
             raise NotImplementedError(
                 f"WMMA op {op.name!r} not yet wired for {self.arch.gfx}; "
-                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8) + sorted(_GFX1250_WMMA_SCALE)}"
+                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8) + sorted(scaled_ops)}"
             )
         decl_key, intrinsic, elt = spec
         a, b, c = op.operands
