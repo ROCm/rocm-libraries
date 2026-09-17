@@ -236,7 +236,11 @@ def main() -> int:
             status |= _run("on-GPU numeric", cmd, env, cwd=LIBRARY)
             # gfx950 fp8 KV-decode 3D numeric gate. The dense FMHA lane above is
             # fp16 2D only, so this covers the fp8 long-KV decode -> 3D split-KV
-            # cohort the routing gate re-routes. Self-skips (exit 0) off gfx950.
+            # cohort. Self-skips (exit 0) off gfx950. Only run it on an unscoped
+            # numeric pass: this driver has no --only support, so an --op scope
+            # (e.g. fmha_bwd) can neither select nor filter it, and pulling in a
+            # gfx950-only decode check under an unrelated operator's scope would
+            # defeat the scoping.
             decode3d = (
                 LIBRARY
                 / "builders"
@@ -245,9 +249,7 @@ def main() -> int:
                 / "decode"
                 / "fp8_decode_3d_verify.py"
             )
-            if decode3d.exists() and (
-                not op or any(k in op.lower() for k in ("attn", "fmha", "decode"))
-            ):
+            if decode3d.exists() and not op:
                 status |= _run(
                     "on-GPU numeric (gfx950 fp8 decode 3D)",
                     [sys.executable, str(decode3d)],

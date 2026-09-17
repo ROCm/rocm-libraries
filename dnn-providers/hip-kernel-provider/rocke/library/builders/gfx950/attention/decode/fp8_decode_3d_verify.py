@@ -2,17 +2,18 @@
 # SPDX-License-Identifier: MIT
 """Build + numeric-verify the gfx950 fp8 KV-dequant split-KV 3D decode attention.
 
-Numpy-only harness (no torch) for a gfx950 box: for each shape in the gpt-oss
-decode cohort it builds the split-KV segment + reduce kernels
+Numpy-only harness (no torch) for a gfx950 box: for each shape in the fp8 decode
+cohort it builds the split-KV segment + reduce kernels
 (``_tiled_3d_impl("gfx950")``) at the *shipped* config, launches both with an
 fp32 partials workspace, and compares the merged output against an independent
 numpy paged decode-attention reference (GQA, optional sinks, fp8 e4m3fn KV).
 
-This is the on-GPU numeric gate for the fp8-long-KV-decode 3D path + the gfx950
-``waves_per_eu=3`` tune: the cohort routes to the 3D kernels verified here (via
-the live-CU-count resolver, #10583), so a regression on them cannot ship green.
+This is the on-GPU numeric gate for the fp8-long-KV-decode 3D path: the cohort
+routes to the 3D kernels verified here via the live-CU-count resolver (#10583),
+using the current production waves_per_eu policy, so a regression on them cannot
+ship green.
 
-Cohort (gpt-oss decode): D64, 64/8 GQA, block_size=16, Sq=1, flash + sink,
+Cohort: D64, 64/8 GQA, block_size=16, Sq=1, flash + sink,
 kv_len in {2048, 8192}, batch in {1, 64}. e4m3fn is the gfx950-native (OCP) fp8
 dialect, so the format-vs-arch guard admits.
 
@@ -51,7 +52,7 @@ except Exception as e:  # pragma: no cover
     _BF16 = _FP8 = None
     _ML_DTYPES_ERR = e
 
-# gpt-oss decode cohort geometry.
+# fp8 decode cohort geometry.
 _HD = 64
 _NQH = 64
 _NKVH = 8

@@ -1,7 +1,7 @@
 """fp8 KV-dequant decode — rocKE vs AITER / Triton comparison harness.
 
 Ticket criterion 3: bench our fp8 (e4m3) decode against AITER and Triton *where
-a baseline exists*. Same gpt-oss decode workload as the baseline harness (D64,
+a baseline exists*. Same fp8 decode workload as the baseline harness (D64,
 64/8 GQA, Sq=1, flash + sink, kv_len {2048, 8192}, batch {1, 64}).
 
 Design:
@@ -17,7 +17,7 @@ Design:
     the run continues with whatever backends are available.
 
 Compliance: this file bakes in NO measured numbers. It PRINTS latency at
-runtime; those figures go to the protected Confluence page, never into the repo.
+runtime; this repository intentionally contains no latency values.
 
 Run (rocke .venv, on a gfx942 or gfx950 node):
     python fp8_decode_vs_baselines.py
@@ -30,7 +30,7 @@ import argparse
 import json
 import sys
 
-# gpt-oss decode workload: (batch, kv_len) x (flash, sink), D64 64/8 e4m3.
+# fp8 decode workload: (batch, kv_len) x (flash, sink), D64 64/8 e4m3.
 _BATCHES = (1, 64)
 _KV_LENS = (2048, 8192)
 _NHQ, _NHK, _HD, _BS = 64, 8, 64, 16

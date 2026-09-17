@@ -1,6 +1,6 @@
 {
   "meta": {
-    "model": "gpt-oss",
+    "cohort": "fp8_decode_d64_gqa8",
     "arch": "gfx950",
     "dtype": "bf16",
     "num_query_heads": 64,
@@ -9,7 +9,7 @@
     "block_size": 16,
     "use_fp8": true,
     "fp8_fnuz": false,
-    "note": "gpt-oss fp8 (e4m3fn OCP) KV-cache decode cohort; seqlen_q=1; flash + sink; the long-KV shapes route to the 3D split-KV path on gfx950. gfx942 (fnuz) would set fp8_fnuz=true."
+    "note": "fp8 (e4m3fn OCP) KV-cache decode cohort; D64, 64/8 GQA, seqlen_q=1, flash + sink; the long-KV shapes route to the 3D split-KV path on gfx950. gfx942 (fnuz) would set fp8_fnuz=true."
   },
   "shapes": [
     {"batch": 1,  "seqlen_q": 1, "seqlen_k": 2048, "label": "fp8_flash_b1_kv2048"},

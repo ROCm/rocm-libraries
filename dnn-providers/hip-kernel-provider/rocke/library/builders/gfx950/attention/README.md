@@ -929,8 +929,9 @@ scenario (paths relative to `library/`):
 |---|---|
 | Case study (coverage, and why there's no kernel change) | `builders/gfx950/attention/decode/README.md` |
 | On-GPU numeric gate (real launch, independent numpy ref, `run_checks --steps numeric`) | `builders/gfx950/attention/decode/fp8_decode_3d_verify.py` |
-| Benchmark scenario (cohort shapes) | `benchmarks/gfx950/attention/decode/gpt_oss_fp8_decode_shapes.json` (run via `benchmark_decode_live.py --shapes ...`) |
-| rocKE vs AITER / Triton comparison harness | `benchmarks/gfx950/attention/decode/fp8_decode_vs_baselines.py` |
+| Benchmark scenario (cohort shapes) | `benchmarks/gfx950/attention/decode/fp8_decode_d64_gqa8_shapes.json` (run via `benchmark_decode_live.py --shapes ...`) |
+| Cross-backend comparison harness | `benchmarks/gfx950/attention/decode/fp8_decode_vs_baselines.py` |
 
-Measurement conditions and numbers live on the protected Confluence page (per
-`platform/AGENTS.md` §Compliance), not in this repo.
+Measured conditions and numbers are intentionally omitted from this repository
+(per `platform/AGENTS.md` §Compliance); they are recorded only in the internal
+perf record.

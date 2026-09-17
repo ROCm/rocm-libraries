@@ -2,7 +2,7 @@
 
 The 3D split-KV fp8 decode seg kernel is VALU/softmax-bound; ISA inspection showed
 the split-KV partial-write overhead (vmem_store) is the one 3D-specific cost. This
-sweeps ``num_segments`` (the split count -- a free spec field) for the gpt-oss decode
+sweeps ``num_segments`` (the split count -- a free spec field) for the fp8 decode
 cohort to see whether a different split beats the shipped value the dispatcher derives
 from num_cus. Correctness-gated (numpy paged-decode reference), timed via HIP events.
 
@@ -10,7 +10,8 @@ Both variants are the same kernel family, so this is a pure latency/overhead A/B
 non-shipped split wins reproducibly, it justifies an fp8-decode num_segments override;
 if all splits are neutral, the cohort is confirmed at its floor.
 
-Measured latencies are for the local decision only -- Confluence, never the repo.
+Measured latencies are for the local decision only; this repository intentionally
+contains no latency values.
 
 Run (rocke .venv, gfx950 node):
     python fp8_decode_nseg_sweep.py

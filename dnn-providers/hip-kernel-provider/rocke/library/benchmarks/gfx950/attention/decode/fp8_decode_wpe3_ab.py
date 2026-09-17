@@ -1,17 +1,18 @@
 """waves_per_eu A/B for the fp8 decode cohort (post-#10583 -- routing is not ours).
 
-After dropping the redundant routing gate, this PR's only contribution is
-``waves_per_eu = 3`` on the gfx950 fp8 3D split-KV decode kernel. This A/B toggles
-ONLY waves_per_eu (3 = shipped, vs the LLVM-default ``None`` = baseline), both on
-the 3D path #10583 routes the cohort to, and records per-shape WINS AND LOSSES.
+This A/B evaluates a candidate occupancy tune -- ``waves_per_eu = 3`` -- on the
+gfx950 fp8 3D split-KV decode kernel. It toggles ONLY waves_per_eu (3 = candidate,
+vs the LLVM-default ``None`` = current production default), both on the 3D path
+#10583 routes the cohort to, and records per-shape WINS AND LOSSES. The candidate
+measured neutral and was NOT adopted; this harness is the evidence for that.
 
 waves_per_eu is a pure AMDGPU occupancy hint (kernel attribute), so both variants
 are numerically identical -- the only difference is latency / run-to-run variance.
 Because the launcher cache_key excludes waves_per_eu, the 3D kernel cache is
 cleared between the two builds so each compiles with the intended value.
 
-Measured latencies are for the local honest-loss verdict only -- they go to
-Confluence, never the repo.
+Measured latencies are for the local honest-loss verdict only; this repository
+intentionally contains no latency values.
 
 Run (rocke .venv, gfx950 node):
     python fp8_decode_wpe3_ab.py
