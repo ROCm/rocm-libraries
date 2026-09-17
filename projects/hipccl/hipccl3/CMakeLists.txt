@@ -165,3 +165,43 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
         HEADER_ONLY
     )
 endif()
+
+# --- Unified CMake package config (find_package(hipccl)) ---
+# NOTE(hipccl3): mirrors NVIDIA CCCL's find_package(CCCL COMPONENTS [Thrust]
+# [CUB] [libcudacxx]) entry point. This is a *separate* mechanism from the
+# CPack packaging above - it controls what `find_package(hipccl)` resolves to
+# (installed under ${CMAKE_INSTALL_LIBDIR}/cmake/hipccl/), not what `make
+# package` produces. rocprim/hipcub/rocthrust's own rocm_export_targets()
+# calls are untouched and keep installing their own independent
+# <name>-config.cmake files (lib/cmake/rocprim/, lib/cmake/hipcub/,
+# lib/cmake/rocthrust/) unconditionally, same as before - find_package(rocprim)
+# etc. keep working standalone, exactly like CCCL keeps find_package(Thrust)
+# etc. working. See cmake/package/hipccl-config.cmake.in for the delegation
+# logic (find_dependency() into each component's own config) and the
+# hipccl::hipccl umbrella target.
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    include(CMakePackageConfigHelpers)
+
+    set(HIPCCL_PACKAGE_CONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/hipccl")
+
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/package/hipccl-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
+        INSTALL_DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
+    )
+
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config-version.cmake"
+        VERSION "${HIPCCL_VERSION}"
+        COMPATIBILITY AnyNewerVersion
+        ARCH_INDEPENDENT
+    )
+
+    install(
+        FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config-version.cmake"
+        DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
+        COMPONENT devel
+    )
+endif()
