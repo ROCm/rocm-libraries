@@ -2606,11 +2606,12 @@ class GlobalWriteBatchWriter:
                                                  comment=f"fold: all 4 M-blocks valid? (MGuard > {tt0})"))
                   storeCodeModule.add(SCBranchSCC0(labelName=fbL.getLabelName(), comment="not all valid -> unfolded fallback"))
                   storeCodeModule.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
-                                        bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN))
+                                        bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
+                                        forceSlc=fusedA2APushPass))
                   storeCodeModule.add(SBranch(labelName=afterL.getLabelName(), comment="skip unfolded fallback"))
                   storeCodeModule.add(fbL)
-                  self._emitGuardedPairedNoRepack(storeCodeModule, prevSba0Idx, prevSba1Idx, prefixOffset, blockIdxN)
-                  self._emitGuardedPairedNoRepack(storeCodeModule, partnerElementIdx, elementIdx, prefixOffset, blockIdxN)
+                  self._emitGuardedPairedNoRepack(storeCodeModule, prevSba0Idx, prevSba1Idx, prefixOffset, blockIdxN, forceSlc=fusedA2APushPass)
+                  self._emitGuardedPairedNoRepack(storeCodeModule, partnerElementIdx, elementIdx, prefixOffset, blockIdxN, forceSlc=fusedA2APushPass)
                   storeCodeModule.add(afterL)
                 else:
                   # Fused full-tile path: register only pair P (batchB) gap B, between the two
@@ -2623,7 +2624,7 @@ class GlobalWriteBatchWriter:
                     wpB = _weavePairIdx      # batchB = pair P (gap B between the coalesced stores)
                   storeCodeModule.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
                                         bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
-                                        weavePairA=None, weavePairB=wpB))
+                                        weavePairA=None, weavePairB=wpB, forceSlc=fusedA2APushPass))
                 if skipLabel is not None:
                   storeCodeModule.add(skipLabel)
                 self.storesIssued += 1
@@ -2811,7 +2812,7 @@ class GlobalWriteBatchWriter:
     if peelInterior:
       maxTt0 = max(e[1] for e in self.batchElements)
       maxBlockIdxN = max(e[0] for e in self.batchElements)
-      interiorCode = self._buildSubtileInteriorStores()
+      interiorCode = self._buildSubtileInteriorStores(forceSlc=fusedA2APushPass)
       boundaryLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_boundary"),
                             "not fully interior -> guarded boundary store body")
       peelEndLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_end"),
@@ -4131,7 +4132,7 @@ class GlobalWriteBatchWriter:
     for q in sorted(groups.keys()):
       self._weaveEmitGroup(module, q)
 
-  def _buildSubtileInteriorStores(self) -> Module:
+  def _buildSubtileInteriorStores(self, forceSlc: bool = False) -> Module:
     """Lever 1 (SubtileBf16EpilogueOpt Stage2) — guard-free/mask-free interior store body.
 
     Re-emits the 16bit subtile stores for the current batch WITHOUT `_emitSubtileOobGuard`
@@ -4181,7 +4182,7 @@ class GlobalWriteBatchWriter:
     def commitPending(dscnt):
       nonlocal pending
       if pending is not None:
-        mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt))
+        mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt, forceSlc=forceSlc))
         pending = None
 
     def issuePaired(pairAddrCalc, sumIdx0, sumIdx1, tt0, blockIdxN):
@@ -4189,7 +4190,7 @@ class GlobalWriteBatchWriter:
       if usePermlane16:
         mod.add(self._emit16bitSubtilePairedStore(
           pairAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0,
-          blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+          blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
         return
       buf = pipeK % 2
       issueMod, globalOffset = self._emitPairedStoreIssue(packBuf[buf], addrBuf[buf],
@@ -4233,7 +4234,7 @@ class GlobalWriteBatchWriter:
           commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
-                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
       else:
         # sba=0 element: defer the SrdD row increment (as the guarded path does).
         if optInc and addrCalc.rowInc:
@@ -4246,7 +4247,7 @@ class GlobalWriteBatchWriter:
           commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
-                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
     # Drain the final pipelined group, then flush any deferred SRD increment.
     commitPending(dscnt=0)
     if pendingInc is not None:
@@ -4524,7 +4525,7 @@ class GlobalWriteBatchWriter:
   def _emit16bitSubtilePairedStoreRepack(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int,
                                          partnerSumIdx0: int, partnerSumIdx1: int, partnerAddrCalc,
                                          tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0,
-                                         weavePairA=None, weavePairB=None) -> Module:
+                                         weavePairA=None, weavePairB=None, forceSlc: bool = False) -> Module:
     """DPP store-repack (SubtileStoreCachelineFill) on the Phase1/Phase2 PLSIN path.
 
     Folds this paired store (batchA = sumIdx0/1 at addrCalc, m-rows 0-31) with the
@@ -4569,7 +4570,7 @@ class GlobalWriteBatchWriter:
 
     ntd = self.kernel["NonTemporalD"]
     isGlc = bool(ntd & 0x1)
-    isSlc = bool(ntd & 0x2)
+    isSlc = bool((ntd & 0x2) or forceSlc)   # forceSlc: FusedGemmA2A PUSH pass must bypass L2 -> HBM
     isNT  = bool(ntd & 0x4)
 
     vPack        = self.cvtVgprStruct.vgprBf16Temp    # +0..3  batchA packed/assembled dwords (2-aligned, cvt)
@@ -4769,7 +4770,7 @@ class GlobalWriteBatchWriter:
       "DPP repack must be barrier-free (no s_barrier in the MFMA-interleaved store)"
     return module
 
-  def _emitGuardedPairedNoRepack(self, storeCodeModule, sba0Idx: int, sba1Idx: int, prefixOffset: int, blockIdxN: int):
+  def _emitGuardedPairedNoRepack(self, storeCodeModule, sba0Idx: int, sba1Idx: int, prefixOffset: int, blockIdxN: int, forceSlc: bool = False):
     """Non-repack guarded paired store for one (sba=0, sba=1) pair — the DPP-fold
     fallback when not all 4 M-blocks are valid at runtime.  No N-group OOB guard here
     (the caller already emitted it for the fold); only the both-blocks-valid check +
@@ -4786,7 +4787,7 @@ class GlobalWriteBatchWriter:
       storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
                                      comment=f"fb-paired: both M-blocks valid? (MGuard > {tt0})"))
       storeCodeModule.add(SCBranchSCC0(labelName=fbL.getLabelName(), comment=f"only d0={tt0-1} valid -> scalar"))
-      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN))
+      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
       storeCodeModule.add(SBranch(labelName=afterL.getLabelName(), comment="skip scalar"))
       storeCodeModule.add(fbL)
       # Guard: sba=0 (M-block tt0-1) must be valid before writing the scalar orphan store.
@@ -4796,10 +4797,10 @@ class GlobalWriteBatchWriter:
       storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0 - 1,
                                      comment=f"fb-scalar: sba=0 valid? (MGuard > {tt0-1})"))
       storeCodeModule.add(SCBranchSCC0(labelName=afterL.getLabelName(), comment=f"sba=0 OOB -> skip scalar store"))
-      storeCodeModule.add(self._emit16bitSubtileScalarStore(addrCalc, sIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN))
+      storeCodeModule.add(self._emit16bitSubtileScalarStore(addrCalc, sIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
       storeCodeModule.add(afterL)
     else:
-      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN))
+      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
 
   # -------------------------------------------------------------------------
   # SubtileBpermutePipelining (quest): split the paired-store transpose into an
@@ -4850,7 +4851,7 @@ class GlobalWriteBatchWriter:
                          comment="adjusted D addr = addrDVgpr + lane_group*8"))
     return module, globalOffset
 
-  def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int, dscnt: int):
+  def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int, dscnt: int, forceSlc: bool = False):
     """COMMIT half of the pipelined paired store: wait for this group's ds_bpermute
     (leaving `dscnt` younger ds ops in flight), do the 2 permlane swaps, and emit the
     dwordx4 store.  `dscnt` = number of ds_bpermute from LATER groups still in flight
@@ -4858,7 +4859,7 @@ class GlobalWriteBatchWriter:
     module = Module("pairedStoreCommit")
     ntd = self.kernel["NonTemporalD"]
     isGlc = bool(ntd & 0x1)
-    isSlc = bool(ntd & 0x2)
+    isSlc = bool((ntd & 0x2) or forceSlc)   # forceSlc: FusedGemmA2A PUSH pass must bypass L2 -> HBM
     isNT  = bool(ntd & 0x4)
     module.add(SWaitCnt(dscnt=dscnt, comment=f"[pipeline] wait this group's ds_bpermute; {dscnt} younger ds in flight (tt0={tt0})"))
     module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")
