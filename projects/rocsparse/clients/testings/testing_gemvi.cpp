@@ -88,6 +88,10 @@ void testing_gemvi_bad_arg(const Arguments& arg)
     {
         auto tmp = trans;
         trans    = rocsparse_operation_transpose;
+        size_t buffer_size;
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_gemvi_buffer_size<T>(handle, trans, m, n, nnz, &buffer_size),
+            rocsparse_status_not_implemented);
         EXPECT_ROCSPARSE_STATUS(rocsparse_gemvi<T>(PARAMS), rocsparse_status_not_implemented);
         trans = tmp;
     }

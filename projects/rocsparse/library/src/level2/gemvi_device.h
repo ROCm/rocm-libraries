@@ -171,8 +171,8 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void
-        gemvi_device_part2(I m, int grid_y, T alpha, T beta, const T* __restrict__ workspace, T* y)
+    ROCSPARSE_DEVICE_ILF void gemvi_device_part2(
+        I m, int grid_y, T alpha, T beta, const T* __restrict__ workspace, T* __restrict__ y)
     {
         rocsparse_device_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0,
                                 "WFSIZE must be a power of two.");

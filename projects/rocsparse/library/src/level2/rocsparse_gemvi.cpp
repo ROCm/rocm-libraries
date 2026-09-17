@@ -119,38 +119,24 @@ namespace rocsparse
     {
         const hipDeviceProp_t& prop = handle->properties;
 
-        struct occupancy_cache
+        int blocks_per_cu = 0;
+        if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+                &blocks_per_cu,
+                gemvi_kernel_part1<BLOCKSIZE, WFSIZE, UNROLL, I, T>,
+                BLOCKSIZE,
+                0)
+                != hipSuccess
+            || blocks_per_cu < 1)
         {
-            int device        = -1;
-            int blocks_per_cu = 0;
-        };
-        static occupancy_cache cache;
-
-        int blocks_per_cu = cache.blocks_per_cu;
-        if(cache.device != handle->device)
-        {
-            blocks_per_cu = 0;
-            if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-                   &blocks_per_cu,
-                   gemvi_kernel_part1<BLOCKSIZE, WFSIZE, UNROLL, I, T>,
-                   BLOCKSIZE,
-                   0)
-                   != hipSuccess
-               || blocks_per_cu < 1)
+            // LCOV_EXCL_START
+            // Fall back to the device's resident thread capacity.
+            blocks_per_cu = 1;
+            if(prop.maxThreadsPerMultiProcessor > 0)
             {
-                // LCOV_EXCL_START
-                // Fall back to the device's resident thread capacity.
-                blocks_per_cu = 1;
-                if(prop.maxThreadsPerMultiProcessor > 0)
-                {
-                    blocks_per_cu = rocsparse::max(
-                        prop.maxThreadsPerMultiProcessor / static_cast<int>(BLOCKSIZE), 1);
-                }
-                // LCOV_EXCL_STOP
+                blocks_per_cu = rocsparse::max(
+                    prop.maxThreadsPerMultiProcessor / static_cast<int>(BLOCKSIZE), 1);
             }
-
-            cache.device        = handle->device;
-            cache.blocks_per_cu = blocks_per_cu;
+            // LCOV_EXCL_STOP
         }
 
         return rocsparse::max(prop.multiProcessorCount * blocks_per_cu, 1);
@@ -414,6 +400,8 @@ namespace rocsparse
 
         // Check operation mode
         ROCSPARSE_CHECKARG_ENUM(1, trans);
+        ROCSPARSE_CHECKARG(
+            1, trans, (trans != rocsparse_operation_none), rocsparse_status_not_implemented);
 
         // Check sizes
         ROCSPARSE_CHECKARG_SIZE(2, m);
