@@ -20,7 +20,7 @@ from config_harness import emit_kernels_from_config
 pytestmark = pytest.mark.unit
 
 _ARCH = "gfx950"
-_SEED = "Tensile/Tests/common/gemm/gfx950/dtl.yaml"
+_SEED = "tensilelite/Tests/common/gemm/gfx950/dtl.yaml"
 
 
 def test_seed_gfx950_dtl_emits_assembly():

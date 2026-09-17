@@ -20,7 +20,7 @@ from rocisa.code import Module
 from rocisa.container import sgpr
 from rocisa.instruction import SBarrier, SCBranchSCC1, SCmpEQU32
 
-from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
 
 
 def _mockWriter():
