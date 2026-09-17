@@ -461,18 +461,20 @@ class ToStinkyAsmPassImpl : public Pass {
             getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
                          passCtx.getGemmTileConfig().arch[2]);
 
+        bool hasVgprMsb = passCtx.getAsmCapsConfig().vgprMsbMode != VgprMsbMode::None;
+
         // Process all basic blocks
         for (BasicBlock& bb : func) {
             // Skip filtered basic blocks
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
-            lowerToAsm(bb, arch);
+            lowerToAsm(bb, arch, hasVgprMsb);
         }
         return PreservedAnalyses::none();
     }
 
    private:
-    void lowerToAsm(BasicBlock& bb, GfxArchID arch) {
+    void lowerToAsm(BasicBlock& bb, GfxArchID arch, bool hasVgprMsb) {
         // Builder used to legalize instructions that have no direct hardware
         // encoding on the target arch (e.g. ds_*_b192 on gfx1250).
         AsmIRBuilder irBuilder(bb, arch);
@@ -513,16 +515,21 @@ class ToStinkyAsmPassImpl : public Pass {
                     // legalizations below so, e.g., v_cmpx gets its EXEC dest first.
                     legalizeImplicitSpecialRegisters(asmInst, getWaveFrontSize(arch));
 
-                    // gfx1250 (and other RDNA) have no ds_*_b192 encoding. Match
-                    // rocisa's DSStoreB192/DSLoadB192::toString(), which always splits
-                    // into a b128 + b64 pair. The rocisa->stinky conversion path handles
-                    // this in ToStinkyTofuUtils::legalizeInstruction; the logical->asm
-                    // path (adaptor / PyLogicalModule) must do the same here. VGPR MSB
-                    // is materialized later by InsertVgprMsbPass, so pass hasVgprMsb=false.
+                    // gfx1250 (and other RDNA) have no ds_*_b192 / ds_store_b256
+                    // encoding. Match rocisa's DSStoreB192/DSLoadB192/DSStoreB256
+                    // ::toString(), which always splits into a b128 + b64/b128 pair.
+                    // The rocisa->stinky conversion path handles this in
+                    // ToStinkyTofuUtils::legalizeInstruction; the logical->asm path
+                    // (adaptor / PyLogicalModule) must do the same here. The second
+                    // half starts at idx+4, so it can land in the next VGPR MSB bank
+                    // even when the original operand did not; pass the arch cap so
+                    // that half gets its own -256*msb offset, matching native.
                     if (asmInst->getUnifiedOpcode() == GFX::ds_store_b192) {
-                        legalizeDSStoreB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSStoreB192(asmInst, irBuilder, arch, hasVgprMsb);
                     } else if (asmInst->getUnifiedOpcode() == GFX::ds_load_b192) {
-                        legalizeDSLoadB192(asmInst, irBuilder, arch, /*hasVgprMsb=*/false);
+                        legalizeDSLoadB192(asmInst, irBuilder, arch, hasVgprMsb);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::ds_store_b256) {
+                        legalizeDSStoreB256(asmInst, irBuilder, arch, hasVgprMsb);
                     } else if (asmInst->getUnifiedOpcode() == GFX::s_barrier) {
                         // gfx1250 has no plain s_barrier; it must split into
                         // s_barrier_signal -1 / s_barrier_wait -1. The rocisa->stinky
