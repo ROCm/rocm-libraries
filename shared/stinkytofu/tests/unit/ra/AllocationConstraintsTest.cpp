@@ -76,6 +76,23 @@ bool isUndefinedLiveIn(const AllocationConstraints& constraints, SSAValueID id) 
     return std::find(undefined.begin(), undefined.end(), id) != undefined.end();
 }
 
+/// entry branches two ways and v\p defined is written on one side only, so the
+/// merge at join takes it from the entry live-in on the other.
+const SSABlockArgument* mergeOfOneDefinedPath(Function& function, uint32_t defined) {
+    BasicBlock* entry = function.createBasicBlock("entry");
+    BasicBlock* left = function.createBasicBlock("left");
+    BasicBlock* right = function.createBasicBlock("right");
+    BasicBlock* join = function.createBasicBlock("join");
+    function.addEdge(entry, left);
+    function.addEdge(entry, right);
+    function.addEdge(left, join);
+    function.addEdge(right, join);
+    createVAddInBlock(left, kRaTestArch, defined, 20, 21);
+    createVAddInBlock(join, kRaTestArch, 6, defined, defined);
+    if (!liftForAllocation(function)) return nullptr;
+    return vgprArgumentFor(*join, defined);
+}
+
 /// s0-s31, what .amdhsa_user_sgpr_count 29 plus three workgroup ids fills.
 constexpr uint64_t kDispatchFills = 32;
 
@@ -196,6 +213,63 @@ TEST_F(AllocationConstraintsTest, VectorLiveInAboveV0IsUndefinedAndKeepsItsHint)
     EXPECT_FALSE(setup.constraints().isPinned(liveIn)) << setup.constraints().toString();
     EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), liveIn)) << setup.constraints().toString();
     EXPECT_EQ(setup.constraints().hintFor(liveIn), (RegKey{RegType::V, 300, RegHalf::NONE}));
+}
+
+TEST_F(AllocationConstraintsTest, AnUndefinedLiveInLeavesTheMergeItReaches) {
+    // Only one path writes v5, so the merge reads the entry live-in on the
+    // other. Nothing filled that register, so the merge reads garbage along
+    // that edge whichever colour it takes, and welding the two would spend its
+    // freedom for nothing. The computed edge keeps the weld it needs.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSABlockArgument* merge = mergeOfOneDefinedPath(*func, /*defined=*/5);
+    ASSERT_NE(merge, nullptr);
+    ASSERT_NE(merge->value, nullptr);
+    ASSERT_EQ(merge->incoming.size(), 2u);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+
+    size_t undefinedEdges = 0;
+    size_t definedEdges = 0;
+    for (const SSABlockIncoming& incoming : merge->incoming) {
+        const StinkySSAValue* value = incoming.use->value();
+        ASSERT_NE(value, nullptr);
+        if (value->isUndefined()) {
+            ++undefinedEdges;
+            EXPECT_FALSE(hasAffinity(setup.constraints(), value->valueId()))
+                << setup.constraints().toString();
+            EXPECT_TRUE(isUndefinedLiveIn(setup.constraints(), value->valueId()));
+        } else {
+            ++definedEdges;
+            EXPECT_TRUE(hasAffinity(setup.constraints(), value->valueId()))
+                << setup.constraints().toString();
+        }
+    }
+    EXPECT_EQ(undefinedEdges, 1u) << setup.constraints().toString();
+    EXPECT_EQ(definedEdges, 1u) << setup.constraints().toString();
+
+    // Welded to less, not unwelded: dropping a member must not dissolve the
+    // set that holds the real edge in place.
+    EXPECT_TRUE(hasAffinity(setup.constraints(), merge->value->valueId()))
+        << setup.constraints().toString();
+}
+
+TEST_F(AllocationConstraintsTest, ALiveInTheDispatchFilledStaysWeldedToItsMerge) {
+    // Same shape over v0, which the dispatch fills on a packed target. That
+    // edge carries the workitem id, so the merge must read it from the same
+    // register: the freedom above is what a filled register may not have.
+    ASSERT_TRUE(hasPackedWorkitemId(kRaTestArch)) << "this test needs a packed target";
+    const SSABlockArgument* merge = mergeOfOneDefinedPath(*func, /*defined=*/0);
+    ASSERT_NE(merge, nullptr);
+    ASSERT_EQ(merge->incoming.size(), 2u);
+
+    AllocationSetup setup(*func, RegClassSet::all());
+    for (const SSABlockIncoming& incoming : merge->incoming) {
+        const StinkySSAValue* value = incoming.use->value();
+        ASSERT_NE(value, nullptr);
+        EXPECT_FALSE(value->isUndefined()) << setup.constraints().toString();
+        EXPECT_TRUE(hasAffinity(setup.constraints(), value->valueId()))
+            << setup.constraints().toString();
+    }
 }
 
 TEST_F(AllocationConstraintsTest, AScalarLiveInIsUnaffectedByTheVectorLine) {
