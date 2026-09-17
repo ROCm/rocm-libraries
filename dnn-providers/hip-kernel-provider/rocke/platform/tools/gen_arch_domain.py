@@ -400,13 +400,23 @@ def _probe(clang: str, path: Path, arch: str, out: Path) -> tuple[str, str]:
     ROCm than the one rocke resolved (observed: a 7.1 bitcode set pulled into a
     probe, with datalayout-mismatch warnings). The probe must measure the
     compiler, not the device libraries.
+
+    `-O0` is also required, and for a subtler reason: at -O3 the IR pipeline can
+    delete the very call we are asking about, and a module with nothing left to
+    select links happily. llvm.amdgcn.permlane64 on gfx942 is the case that
+    found this -- a kernel argument is wave-uniform, permlane64 of a uniform
+    value folds to the identity, and LLVM 22's InstCombine folds it away. The
+    object contained no permlane64 at all, the link succeeded, and the probe
+    reported ok for a target where the instruction does not exist. Nine of the
+    149 keys are foldable this way. -O0 keeps the call alive to ISel, which is
+    the only place that can answer the question.
     """
     proc = subprocess.run(
         [
             clang,
             "-x",
             "ir",
-            "-O3",
+            "-O0",
             "-nogpulib",
             "-target",
             "amdgcn-amd-amdhsa",
