@@ -310,6 +310,14 @@ namespace rocisa
                 if(branch.back())
                     output.push_back(cloneAndSubstitute(instruction, params));
             }
+            else if(auto textBlock = std::dynamic_pointer_cast<TextBlock>(item))
+            {
+                // Macro::addComment0 bodies carry comments (CustomSchedule annotates
+                // MAINLOOP this way); they are inert but worth keeping in the asm.
+                if(branch.back())
+                    output.push_back(std::make_shared<TextBlock>(
+                        substituteStringParam(textBlock->text, params)));
+            }
             else
             {
                 assert(false && "macroToInstruction: unexpected item type in macro body");
