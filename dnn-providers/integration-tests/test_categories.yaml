@@ -76,7 +76,7 @@ test_categories:
   #     - "slow"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier minus the large-shape SDPA GPU-reference cases"
     test_patterns:
       - "*"
     exclude:
@@ -84,6 +84,24 @@ test_categories:
       - "Standard*"
       - "Comprehensive*"
       - "Full*"
+      # The three large-shape SDPA cases in tests/gpu-ref/
+      # TestGpuFpReferenceSdpa.cpp are unaffordable on the gfx1260 FFM
+      # simulator. The reference kernel recomputes QK^T per output element,
+      # so cost tracks B*H*Sq*Skv*D and these are the only cases above 1K
+      # elements per tensor - every other TestGpuSdpaFwdPlain case is
+      # [2,4,8,16]-sized and runs in ~0.1-0.3 s. Measured in rocm-npi-dev run
+      # 34879806110, job "FFM test | gfx1260 | hipdnn-integration-tests",
+      # for the fp32 instantiation alone:
+      #   RealisticHeadDim [1,4,128,128]  38.8 s
+      #   LongSequence     [1,2,256,64]   19.9 s
+      #   LargerShape      [2,8,512,128]  never finished - it was still
+      #                                   running when the 30 min step cap
+      #                                   killed the job after ~28 min
+      # The suite instantiates float/half/bfloat16, so the real cost is ~3x
+      # the above. Excluded for all three dtypes.
+      - "TestGpuSdpaFwdPlain/*.RealisticHeadDim"
+      - "TestGpuSdpaFwdPlain/*.LongSequence"
+      - "TestGpuSdpaFwdPlain/*.LargerShape"
     labels:
       - "ffm-quick"
       - "ffm-full"

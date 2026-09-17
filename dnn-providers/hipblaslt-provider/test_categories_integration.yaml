@@ -97,14 +97,15 @@ test_categories:
       - "all"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) quick tier: currently mirrors the quick tier's coverage, with a 2 hour timeout"
+    description: "Fast-feedback mechanism (FFM) quick tier: same coverage as the quick tier (quick-tier bundle sweeps plus always-built C++ tests), with a 2 hour timeout"
     test_patterns:
+      # Deliberately identical to the quick tier above: the FFM run used to
+      # carry only "Smoke/*", "Quick/*" and "TestCpu*GoldenReference*", which
+      # skipped every quick-tier bundle sweep and left FFM with no bundle
+      # signal at all.
+      - "quick_*"
       - "Smoke/*"
-      # Mirrors the quick tier: suites that carry an explicit tier prefix put
-      # their cheapest cases under "Quick/", so without this the ops that moved
-      # off "Smoke/" (layernorm) would drop out of fast feedback entirely.
       - "Quick/*"
-      - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
       - "ffm-quick"

@@ -77,11 +77,14 @@ test_categories:
       - "all"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) quick tier - currently mirrors the quick tier"
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier minus cases hipBLASLt cannot serve on the gfx1260 FFM simulator"
     test_patterns:
       - "*"
     exclude:
       - "Full*"
+      # hipBLASLt does not have FFM support for these tests yet.
+      - "TestGpuMatmulPlan.CreatesPlanWithHalfPrecision"
+      - "TestGpuMatmulPlan.CreatesPlanWithBFloat16"
     labels:
       - "ffm-quick"
       - "ffm-full"
