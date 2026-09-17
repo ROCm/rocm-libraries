@@ -306,7 +306,20 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                     }
                     if(keeps_sink)
                     {
-                        set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+                        // Mirror the main-path lse formula below for the state this
+                        // publishes (m = sink seed, l = 1). Under soft cap the
+                        // score already carries scale_s, so m is in final-logit
+                        // units and dividing by C_LOG2E leaves sink_v alone; the
+                        // static_assert above makes soft cap imply NO_BIAS, and
+                        // forbids it entirely when FAST_EXP2 is off.
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                        if constexpr(kHasLogitsSoftCap)
+                            set_tile(lse_acc, SMPLComputeDataType{sink_v});
+                        else
+                            set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
+#else
+                        set_tile(lse_acc, SMPLComputeDataType{sink_v});
+#endif
                     }
                     else
                     {
