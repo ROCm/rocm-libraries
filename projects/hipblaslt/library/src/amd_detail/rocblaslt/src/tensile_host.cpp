@@ -40,6 +40,8 @@
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
 
+#include <hipblaslt/hipblaslt-opt-in-features.h>
+
 #ifdef HIPBLASLT_USE_ROCROLLER
 #include "rocroller_host.hpp"
 #endif
@@ -49,6 +51,9 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+#include <Tensile/FusedA2AKernArg.hpp>
+#endif
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/PlaceholderLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -82,6 +87,28 @@
 #endif
 
 #define INTERNAL_HIPHOSTMEM_SIZE 32768
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// Declared in rocblaslt-auxiliary.h, and defined here because this is the only
+// translation unit that may name the constant it forwards. Reporting the
+// kernel's own number is what keeps the flag region defined in one place; the
+// callers that allocate it name no Tensile identifier and gain no Tensile
+// include, which is the arrangement tensile_host.hpp's contract asks for.
+size_t rocblaslt_device_comm_flag_block_bytes(void)
+{
+    return TensileLite::FUSED_A2A_FLAG_BLOCK_BYTES;
+}
+
+// The maximum world is the one piece of the communicator's geometry the host has
+// to declare for itself: it is public API, and it sizes the per-rank arrays in
+// the handle, so it cannot be fetched at runtime the way the block size above is.
+// That leaves two independent declarations of one number, which is what this
+// reconciles.
+static_assert(HIPBLASLT_DEVICE_COMM_MAX_WORLD == TensileLite::FUSED_A2A_MAX_RANKS,
+              "the communicator's maximum world and the kernarg ABI's rank slot count have "
+              "diverged: peer slots would be allocated for ranks the kernel cannot address, or "
+              "the kernel would scan slots the host never filled");
+#endif
 
 RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     trans_a,
                                                          hipblasOperation_t     trans_b,
@@ -5069,14 +5096,25 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
-        // Same predicate findTopSolutions uses: problem, task, StreamK
-        // dynamic-queue, and uniform summation order (Synchronizer pointer
-        // skipped at selection; launch still throws if it is missing).
-        if(!TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
-                                           task,
-                                           *hardware,
-                                           *solution,
-                                           tensile_prob))
+        // Under USO, the same predicate findTopSolutions uses: problem, task,
+        // StreamK dynamic-queue, uniform summation order (Synchronizer pointer
+        // is checked only at launch, which throws if it is missing). With USO
+        // off, selection must not widen: problemPredicate && taskPredicate only.
+        bool swMatch;
+        if(tensile_prob.getParams().uniformSummationOrder())
+        {
+            swMatch = TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
+                                                     task,
+                                                     *hardware,
+                                                     *solution,
+                                                     tensile_prob);
+        }
+        else
+        {
+            swMatch = (*solution->problemPredicate)(tensile_prob)
+                      && (*solution->taskPredicate)(task);
+        }
+        if(!swMatch)
         {
             if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
             {
@@ -5152,19 +5190,33 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             tensile_prob.gemms[i].setWorkspaceSize(algo->max_workspace_bytes);
             tensile_prob.gemms[i].setWorkspaceSizeGroupedGemm(problemWs);
             tensile_prob.gemms[i].setGroupedGemmCount(tensile_prob.gemms.size());
-            tensile_prob.gemms[i].setGroupedGemm(true);
+            // setGroupedGemm(true) feeds the grouped-GEMM branch of
+            // uniformSummationOrderSupported(), but it persists on the caller's
+            // problem, so guard it to leave USO-off selection unchanged.
+            if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+                tensile_prob.gemms[i].setGroupedGemm(true);
             // set this flag for SW predicate
             tensile_prob.gemms[i].setParams().setFallbackStatus(isCUFallback);
         }
         for(int i = 0; i < tensile_prob.gemms.size(); i++)
         {
             TensileLite::Task task(*hardware, tensile_prob.gemms[i], *solution);
-            if(!((*solution->hardwarePredicate)(*hardware)
-                 && TensileLite::softwarePredicate(TensileLite::SolutionLibrarySearchType::DEFAULT,
-                                                   task,
-                                                   *hardware,
-                                                   *solution,
-                                                   tensile_prob.gemms[i])))
+            // With uniform summation order off, the filter stays
+            // hardwarePredicate && problemPredicate, no taskPredicate.
+            bool match = (*solution->hardwarePredicate)(*hardware);
+            if(match)
+            {
+                if(tensile_prob.gemms[i].getParams().uniformSummationOrder())
+                    match = TensileLite::softwarePredicate(
+                        TensileLite::SolutionLibrarySearchType::DEFAULT,
+                        task,
+                        *hardware,
+                        *solution,
+                        tensile_prob.gemms[i]);
+                else
+                    match = (*solution->problemPredicate)(tensile_prob.gemms[i]);
+            }
+            if(!match)
             {
                 if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
                 {
@@ -5384,7 +5436,11 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
         {
             data->problem.gemms[i].setWorkspaceSize(workspaceBytes);
             data->problem.gemms[i].setGroupedGemmCount(data->problem.gemms.size());
-            data->problem.gemms[i].setGroupedGemm(true);
+            // setGroupedGemm(true) feeds the grouped-GEMM branch of
+            // uniformSummationOrderSupported(), but it persists on data->problem,
+            // so guard it to leave USO-off selection unchanged.
+            if(data->problem.gemms[i].getParams().uniformSummationOrder())
+                data->problem.gemms[i].setGroupedGemm(true);
         }
 
         auto solutions = library->findTopSolutionsGroupedGemm(

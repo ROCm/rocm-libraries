@@ -34,6 +34,7 @@
 #include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
+#include "../../../shared/ptrdiff.h"
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
@@ -665,7 +666,7 @@ public:
     size_t           twiddles_pp_size      = 0;
     void*            chirp                 = nullptr;
     size_t           chirp_size            = 0;
-    gpubuf_t<size_t> devKernArg;
+    KernelArgsBuffer devKernArg;
 
     hipDeviceProp_t deviceProp = {};
     function_pool   pool;
@@ -1037,20 +1038,94 @@ public:
     FMKey        GetKernelKey() const override;
 
     // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
-    virtual size_t GetU32KernelIndexLimit() const
+    size_t GetU32IntegerLimit() const
     {
 
         return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
                                                          : static_cast<size_t>(UINT32_MAX);
-    }
-    // Return the index type for this node's kernel.
-    // Overridden by nodes that use narrower index types
-    virtual IndexType GetKernelIndexType() const
+    };
+
+    // Return the integer type for this node's kernel.
+    KIntType GetKIntType() const
     {
-        return IndexType::U64;
-    }
+        auto idx_limit = GetU32IntegerLimit();
+
+        // The strides and dists also have to fit, not just the indices the
+        // kernel reaches.  A dist is packed into the argument buffer even
+        // when batch is 1, where it contributes nothing to the max index.
+        if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
+           || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit
+           || MaxKernelStride(io_data_label::INPUT) > idx_limit
+           || MaxKernelStride(io_data_label::OUTPUT) > idx_limit)
+        {
+            return KIntType::U64;
+        }
+        return KIntType::U32;
+    };
+
     // Max element index the kernel would compute for a given I/O side.
-    size_t       MaxKernelIndex(io_data_label io) const;
+    size_t MaxKernelIndex(io_data_label io) const
+    {
+        // Counted in scalar_type units; the complex-as-real x2 for r2c/c2r
+        // callbacks always happens in size_t in the wrapper.
+        // Offsets (iOffset/oOffset) are applied to base pointers before
+        // launch (see powX.cpp) and don't affect kernel index arithmetic.
+        const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
+        const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
+        const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
+
+        // compute_ptrdiff returns the buffer size (one-past-the-end).
+        auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
+
+        // Fused Bluestein kernels index the Bluestein work buffer in the same
+        // kernel, over the same lengths but with the Bluestein strides + dist.
+        // Whichever side reaches further decides the integer type.
+        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
+        if(fuseBlue == BFT_NONE || io_stride_blue.size() < io_length.size())
+            return ptrdiff;
+
+        const auto& io_dist_blue = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
+
+        return std::max(ptrdiff,
+                        compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1);
+    };
+
+    // Max stride or dist packed into the kernel argument buffer for a given
+    // I/O side.  Not bounded by MaxKernelIndex: an unused dist can be
+    // arbitrarily large.
+    size_t MaxKernelStride(io_data_label io) const
+    {
+        // These are the values KernelArgsBuffer::create packs into the stride
+        // array, so they must fit in the kernel's integer type regardless of
+        // how far the kernel actually indexes.
+        const auto& io_stride  = io == io_data_label::INPUT ? inStride : outStride;
+        const auto& io_dist    = io == io_data_label::INPUT ? iDist : oDist;
+        auto        max_stride = io_stride.empty() ? static_cast<size_t>(0)
+                                                   : *std::max_element(io_stride.begin(), io_stride.end());
+        max_stride             = std::max(max_stride, io_dist);
+
+        if(fuseBlue == BFT_NONE)
+            return max_stride;
+
+        // Fused Bluestein kernels also take the Bluestein lengths, and the
+        // higher-dimension Bluestein strides + dist, as integer_type.  See
+        // BluesteinData and RTCKernelStockham::get_launch_args.
+        max_stride = std::max({max_stride, lengthBlueN, lengthBlue});
+
+        // BFT_FWD_CHIRP passes zeros for the Bluestein strides and dist.
+        if(fuseBlue == BFT_FWD_CHIRP)
+            return max_stride;
+
+        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
+        const auto& io_dist_blue   = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
+
+        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by lengthBlue.
+        for(size_t i = 2; i < io_stride_blue.size() && i < 4; ++i)
+            max_stride = std::max(max_stride, io_stride_blue[i]);
+
+        return std::max(max_stride, io_dist_blue);
+    };
+
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };
@@ -1074,8 +1149,6 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    IndexType GetKernelIndexType() const override;
-
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override
