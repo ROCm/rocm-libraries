@@ -1,0 +1,46 @@
+{
+  "target": {
+    "arch": "gfx1250",
+    "isa": "amdgcn-amd-amdhsa--gfx1250",
+    "dtype": "bf16",
+    "layout": "RCR",
+    "wave_size": 32,
+    "warp_tile": [16, 16, 32]
+  },
+  "problem": {
+    "m": 4096,
+    "n": 4096,
+    "k": 4096
+  },
+  "tile_config": {
+    "tile_m": [64, 128, 256],
+    "tile_n": [64, 128, 256],
+    "tile_k": [32, 64, 128, 256],
+    "warp_m": [1, 2, 4, 8],
+    "warp_n": [1, 2, 4, 8]
+  },
+  "trait_config": {
+    "pipelines": ["mem", "wmma_v1"],
+    "schedulers": ["intrawave"],
+    "epilogues": ["default", "cshuffle"],
+    "waves_per_eu": [null, 1, 2, 4],
+    "lds_swizzle": [false],
+    "lds_k_pad": [0, 8, 24, 40, 56],
+    "direct_to_lds": [false, true],
+    "dtl_prefetch": [false, true],
+    "tdm": [true, false],
+    "tdm_depth": [1, 2, 3, 4]
+  },
+  "selection": {
+    "tile_finalists": 20,
+    "final_timed": 5,
+    "tolerance": 0.02
+  },
+  "benchmark": {
+    "workers": 64,
+    "warmup": 5,
+    "iters": 20,
+    "attempts": 1
+  },
+  "output_dir": "/home/jialuo12/OPT_Results/rocke_bf16_gfx1250_m4096_n4096_k4096_cluster"
+}

@@ -223,7 +223,7 @@ class TestGfx1250Gemm(unittest.TestCase):
             with self.subTest(lds_k_pad=pad):
                 ok, why = is_valid_spec(self._tdm_spec(lds_k_pad=pad), arch="gfx1250")
                 self.assertTrue(ok, why)
-        for depth in (1, 2):
+        for depth in (1, 2, 3, 4):
             with self.subTest(tdm_depth=depth):
                 ok, why = is_valid_spec(self._tdm_spec(depth=depth), arch="gfx1250")
                 self.assertTrue(ok, why)
@@ -235,7 +235,8 @@ class TestGfx1250Gemm(unittest.TestCase):
                 "alternative load paths",
             ),
             ("with lds_swizzle", self._tdm_spec(lds_swizzle=True), "lds_swizzle"),
-            ("depth 3", self._tdm_spec(depth=3), "tdm_depth must be 1 or 2"),
+            ("depth 5", self._tdm_spec(depth=5), "tdm_depth must be in 1..4"),
+            ("depth 0", self._tdm_spec(depth=0), "tdm_depth must be in 1..4"),
         ):
             with self.subTest(label):
                 ok, why = is_valid_spec(spec, arch="gfx1250")
@@ -268,7 +269,7 @@ class TestGfx1250Gemm(unittest.TestCase):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from rocke.instances.common.gemm_universal import build_universal_gemm
 
-        for depth in (1, 2):
+        for depth in (1, 2, 3, 4):
             with self.subTest(tdm_depth=depth):
                 ll = lower_kernel_to_llvm(
                     build_universal_gemm(
@@ -281,22 +282,63 @@ class TestGfx1250Gemm(unittest.TestCase):
                 # The mover writes LDS itself, so neither staged path appears.
                 self.assertNotIn("llvm.amdgcn.global.load.async.to.lds", ll)
                 self.assertNotIn("llvm.amdgcn.s.wait.asynccnt", ll)
-                # 128x(32+8) halves per operand, doubled when ping-ponging.
+                # 128x(32+8) halves per operand, one region per ring buffer.
                 self.assertIn(f"[{20480 * depth} x i8]", ll)
+
+    def test_wmma_tdm_deep_ring_waits_partially(self):
+        """Depth >= 3 must leave ``depth - 2`` fills in flight across the wait.
+
+        This is the whole lever: the extra LDS buffers only pay if the per-tile
+        wait stops draining TENSORcnt to zero. A deep ring that still emitted
+        ``s_wait_tensorcnt(0)`` would verify, run, and buy nothing, so the count
+        is asserted rather than inferred from a timer.
+
+        The count is per *issuing* wave, and this spec's 2x2 warp grid puts A on
+        wave 0 and B on wave 1, so one descriptor per tile per wave -- hence
+        ``depth - 2`` and not ``2 * (depth - 2)``. Waiting on the latter would be
+        a whole tile too shallow and would read LDS before the fill landed.
+        """
+        import re
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        for depth in (1, 2, 3, 4):
+            with self.subTest(tdm_depth=depth):
+                ll = lower_kernel_to_llvm(
+                    build_universal_gemm(
+                        self._tdm_spec(depth=depth), arch="gfx1250"
+                    ),
+                    arch="gfx1250",
+                )
+                counts = {
+                    int(n)
+                    for n in re.findall(r"wait\.tensorcnt\(i16 (\d+)\)", ll)
+                }
+                self.assertEqual(counts, {max(0, depth - 2)})
+                if depth >= 3:
+                    # One prologue fill per ring slot bar the one computed
+                    # first, plus the single look-ahead fill in the loop body,
+                    # for each of the two operands. The declare line is not a
+                    # call site, so match on the call prefix.
+                    issues = ll.count("call void @llvm.amdgcn.tensor.load.to.lds")
+                    self.assertEqual(issues, 2 * (depth - 1) + 2)
 
     def test_wmma_tdm_compiles_to_hsaco_per_depth(self):
         from rocke.helpers.compile import compile_kernel
         from rocke.instances.common.gemm_universal import build_universal_gemm
 
         blobs = {}
-        for depth in (1, 2):
+        for depth in (1, 2, 3, 4):
             artifact = compile_kernel(
                 build_universal_gemm(self._tdm_spec(depth=depth), arch="gfx1250"),
                 arch="gfx1250",
             )
             self.assertGreater(artifact.hsaco_bytes, 0)
             blobs[depth] = artifact.hsaco
-        self.assertNotEqual(blobs[1], blobs[2])
+        # Every depth is a distinct kernel; a ring that collapsed onto the
+        # ping-pong would otherwise pass every other assertion here.
+        self.assertEqual(len(set(blobs.values())), len(blobs))
 
     def test_tdm_is_enumerated_in_trait_sweep(self):
         import copy

@@ -20,6 +20,7 @@ import statistics
 import struct
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -33,7 +34,7 @@ from rocke.instances.common.gemm_universal import (
     is_valid_spec,
 )
 from rocke.helpers import compile_kernel
-from rocke.runtime.hip_module import Runtime
+from rocke.runtime.hip_module import HipError, Runtime
 from rocke.sweep import BuildRecord, build_all_instances
 
 DEFAULT_CONFIG = Path(__file__).with_name("bf16_gemm_sweep_config.json")
@@ -63,6 +64,7 @@ def _make_spec(
     tdm_depth: int = 1,
 ) -> UniversalGemmSpec:
     target = config["target"]
+    problem = config["problem"]
     warp_tile_m, warp_tile_n, warp_tile_k = target["warp_tile"]
     dtype = str(target["dtype"])
     return UniversalGemmSpec(
@@ -82,9 +84,12 @@ def _make_spec(
             pipeline=pipeline,  # type: ignore[arg-type]
             scheduler=scheduler,  # type: ignore[arg-type]
             epilogue=epilogue,  # type: ignore[arg-type]
-            pad_m=True,
-            pad_n=True,
-            pad_k=True,
+            # A guard is dead code when the tile grid lands exactly on the
+            # extent, and ``pad_n`` forfeits the cshuffle wide store, so each
+            # one follows the shape rather than being forced on.
+            pad_m=int(problem["m"]) % tile_m != 0,
+            pad_n=int(problem["n"]) % tile_n != 0,
+            pad_k=int(problem["k"]) % tile_k != 0,
             waves_per_eu=waves_per_eu,
             lds_swizzle=lds_swizzle,
             lds_k_pad=lds_k_pad,
@@ -386,17 +391,46 @@ def _time_function(
     return elapsed
 
 
-def benchmark_record(
-    problem: PreparedProblem,
-    record: BuildRecord,
-    *,
-    arch: str,
-    warmup: int,
-    iters: int,
-    attempts: int,
+# HIP error codes that latch onto the context instead of being returned once:
+# an illegal access (700), a device-side abort (710) and an unspecified launch
+# failure (719) all leave every later call in the process returning the same
+# code. Recovery needs a fresh process, which is what ``_benchmark_records``
+# provides by keeping the launch loop in a respawnable child.
+_STICKY_HIP_ERRORS = ("hipError(700)", "hipError(710)", "hipError(719)")
+
+# Exit code a benchmark worker uses to tell the parent "I hit a sticky error
+# and cannot run anything else"; distinct from a crash or a clean finish.
+_WORKER_FAULT_EXIT = 70
+_WORKER_RESULT_PREFIX = "ROCKE_SWEEP_WORKER_RESULT="
+
+# A worker that dies before timing anything is normally a faulting candidate,
+# but it is also what a broken environment looks like. Give up rather than
+# respawn once per remaining candidate.
+_MAX_BARREN_SPAWNS = 5
+
+
+def _is_device_fault(exc: BaseException) -> bool:
+    return isinstance(exc, HipError) and any(
+        code in str(exc) for code in _STICKY_HIP_ERRORS
+    )
+
+
+def _note_failure(result: Dict[str, Any], exc: BaseException) -> None:
+    """Fold ``exc`` into ``result`` without overwriting an earlier diagnosis."""
+    result.setdefault("error", f"{type(exc).__name__}: {exc}")
+    if _is_device_fault(exc):
+        result["device_fault"] = True
+
+
+def _result_header(
+    record: BuildRecord, spec: UniversalGemmSpec, *, arch: str
 ) -> Dict[str, Any]:
-    spec = _spec_from_dict(record.spec_dict)
-    result: Dict[str, Any] = {
+    """The build-side half of a result row, before any timing is attempted.
+
+    Split out so a candidate that takes its benchmark process down with it can
+    still be reported with the same shape as one that ran.
+    """
+    return {
         "id": _spec_identity(spec, arch=arch),
         "name": record.name,
         "spec": record.spec_dict,
@@ -414,6 +448,19 @@ def benchmark_record(
         "elf_meta": record.elf_meta,
         "verified": False,
     }
+
+
+def benchmark_record(
+    problem: PreparedProblem,
+    record: BuildRecord,
+    *,
+    arch: str,
+    warmup: int,
+    iters: int,
+    attempts: int,
+) -> Dict[str, Any]:
+    spec = _spec_from_dict(record.spec_dict)
+    result = _result_header(record, spec, arch=arch)
     if not record.ok:
         result["error"] = record.error or "build failed"
         return result
@@ -446,11 +493,23 @@ def benchmark_record(
             }
         )
     except Exception as exc:
-        result["error"] = f"{type(exc).__name__}: {exc}"
+        _note_failure(result, exc)
     finally:
-        problem.rt.wait_stream(0)
+        # A sticky error is re-raised by every later HIP call, so an unguarded
+        # drain here raises a *second* exception out of the ``finally`` and
+        # discards the first. That is why a faulting sweep used to die with a
+        # traceback through ``wait_stream`` that never named the candidate
+        # responsible. Cleanup is best-effort; the diagnosis stays in
+        # ``result`` so the caller can attribute and report the fault.
+        try:
+            problem.rt.wait_stream(0)
+        except Exception as exc:
+            _note_failure(result, exc)
         if module is not None:
-            module.unload()
+            try:
+                module.unload()
+            except Exception as exc:
+                _note_failure(result, exc)
     return result
 
 
@@ -678,8 +737,182 @@ def _run_worker(path: Path) -> int:
         )
     finally:
         problem.close()
-    print("ROCKE_SWEEP_WORKER_RESULT=" + json.dumps(result, sort_keys=True))
+    print(_WORKER_RESULT_PREFIX + json.dumps(result, sort_keys=True))
     return 0 if "median_ms" in result else 1
+
+
+def _run_worker_range(path: Path) -> int:
+    """Benchmark prebuilt records from ``start`` onwards, streaming results.
+
+    Every finished candidate is flushed to stdout as soon as it has a number,
+    so the parent keeps all of them even when a fault takes this process down
+    mid-flight. The first candidate with no line of its own is the culprit.
+    """
+    payload = json.loads(path.read_text())
+    records = [BuildRecord(**entry) for entry in payload["records"]]
+    problem = PreparedProblem.create(
+        tuple(int(x) for x in payload["shape"]),
+        int(payload["padded_n"]),
+        with_reference=False,
+        dtype=str(payload.get("dtype", "bf16")),
+    )
+    status = 0
+    try:
+        for index in range(int(payload["start"]), len(records)):
+            result = benchmark_record(
+                problem,
+                records[index],
+                arch=str(payload["arch"]),
+                warmup=int(payload["warmup"]),
+                iters=int(payload["iters"]),
+                attempts=int(payload.get("attempts", 1)),
+            )
+            print(
+                _WORKER_RESULT_PREFIX
+                + json.dumps({"index": index, "result": result}, sort_keys=True),
+                flush=True,
+            )
+            if result.get("device_fault"):
+                # The context is poisoned; nothing after this would be timed
+                # correctly. Hand back to the parent for a fresh process.
+                status = _WORKER_FAULT_EXIT
+                break
+    finally:
+        try:
+            problem.close()
+        except Exception:
+            pass
+    return status
+
+
+def _worker_env() -> Dict[str, str]:
+    """Child environment that can import ``rocke`` however the parent did."""
+    env = dict(os.environ)
+    roots = [p for p in sys.path if p]
+    existing = env.get("PYTHONPATH")
+    if existing:
+        roots.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(roots))
+    return env
+
+
+def _benchmark_records(
+    records: Sequence[BuildRecord],
+    *,
+    shape: Tuple[int, int, int],
+    padded_n: int,
+    arch: str,
+    warmup: int,
+    iters: int,
+    attempts: int,
+    dtype: str,
+) -> List[Dict[str, Any]]:
+    """Benchmark every record, surviving candidates that fault the device.
+
+    An illegal access latches onto the HIP context, so one bad candidate makes
+    every later launch in the same process fail too -- which is how a single
+    fault used to abort a whole stage and discard hundreds of good results.
+    The launch loop therefore runs in a child process: when a candidate
+    poisons the context, or takes the child down outright, the parent names
+    that candidate, respawns from the next index, and the stage still
+    finishes. Keeping the launches out of the parent also leaves the parent's
+    own context clean for the verification pass that follows.
+    """
+    results: List[Optional[Dict[str, Any]]] = [None] * len(records)
+    if not records:
+        return []
+    payload = {
+        "records": [asdict(record) for record in records],
+        "shape": list(shape),
+        "padded_n": padded_n,
+        "arch": arch,
+        "warmup": warmup,
+        "iters": iters,
+        "attempts": attempts,
+        "dtype": dtype,
+    }
+    env = _worker_env()
+    next_index = 0
+    barren_spawns = 0
+    with tempfile.TemporaryDirectory(prefix="rocke_sweep_") as tmp:
+        spec_path = Path(tmp) / "range.json"
+        while next_index < len(records):
+            payload["start"] = next_index
+            spec_path.write_text(json.dumps(payload))
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--worker-range",
+                    str(spec_path),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+            )
+            highest = next_index - 1
+            tail: List[str] = []
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                if not line.startswith(_WORKER_RESULT_PREFIX):
+                    sys.stderr.write(line)
+                    tail = (tail + [line.rstrip()])[-20:]
+                    continue
+                streamed = json.loads(line[len(_WORKER_RESULT_PREFIX) :])
+                index = int(streamed["index"])
+                results[index] = streamed["result"]
+                highest = max(highest, index)
+                _print_progress(index + 1, len(records), results)
+            code = proc.wait()
+
+            barren_spawns = 0 if highest >= next_index else barren_spawns + 1
+            if barren_spawns >= _MAX_BARREN_SPAWNS:
+                raise RuntimeError(
+                    f"benchmark worker produced no results in "
+                    f"{barren_spawns} consecutive attempts (exit {code}); "
+                    "last output:\n" + "\n".join(tail)
+                )
+
+            resume = highest + 1
+            if code == _WORKER_FAULT_EXIT and highest >= next_index:
+                print(
+                    f"  device fault on [{highest}] {records[highest].name}; "
+                    "restarting the benchmark worker",
+                    flush=True,
+                )
+            elif code != 0 and resume < len(records):
+                # The child died without reporting, so the candidate it had in
+                # flight is the one after the last streamed result.
+                victim = records[resume]
+                result = _result_header(
+                    victim, _spec_from_dict(victim.spec_dict), arch=arch
+                )
+                result["error"] = f"benchmark worker died (exit {code})"
+                result["device_fault"] = True
+                results[resume] = result
+                print(
+                    f"  benchmark worker died (exit {code}) on "
+                    f"[{resume}] {victim.name}; restarting past it",
+                    flush=True,
+                )
+                resume += 1
+            next_index = resume
+    return [result for result in results if result is not None]
+
+
+def _print_progress(
+    done: int, total: int, results: Sequence[Optional[Dict[str, Any]]]
+) -> None:
+    if done % 25 and done != total:
+        return
+    ranked = rank_results([r for r in results if r is not None])
+    best = (
+        f"{ranked[0]['median_ms']:.6f} ms, {ranked[0]['tflops']:.3f} TFLOP/s"
+        if ranked
+        else "none"
+    )
+    print(f"[{done}/{total}] best={best}", flush=True)
 
 
 def _build_and_benchmark(
@@ -695,6 +928,7 @@ def _build_and_benchmark(
     iters: int,
     attempts: int,
     dtype: str = "bf16",
+    with_reference: bool = True,
 ) -> Tuple[List[BuildRecord], List[Dict[str, Any]], PreparedProblem]:
     records = build_all_instances(
         specs,
@@ -703,30 +937,122 @@ def _build_and_benchmark(
         isa=isa,
         parallel=workers,
     )
-    problem = PreparedProblem.create(
-        shape, padded_n, with_reference=True, dtype=dtype
+    results = _benchmark_records(
+        records,
+        shape=shape,
+        padded_n=padded_n,
+        arch=arch,
+        warmup=warmup,
+        iters=iters,
+        attempts=attempts,
+        dtype=dtype,
     )
-    results = []
-    for index, record in enumerate(records, 1):
-        result = benchmark_record(
-            problem,
-            record,
-            arch=arch,
-            warmup=warmup,
-            iters=iters,
-            attempts=attempts,
+    faulted = [r for r in results if r.get("device_fault")]
+    if faulted:
+        print(
+            f"{len(faulted)} candidate(s) faulted the device and were skipped:",
+            flush=True,
         )
-        results.append(result)
-        if index % 25 == 0 or index == len(records):
-            ranked = rank_results(results)
-            best = (
-                f"{ranked[0]['median_ms']:.6f} ms, "
-                f"{ranked[0]['tflops']:.3f} TFLOP/s"
-                if ranked
-                else "none"
-            )
-            print(f"[{index}/{len(records)}] best={best}", flush=True)
+        for result in faulted:
+            print(f"  {result['name']}: {result['error']}", flush=True)
+    # Created after the launch loop, which ran entirely in child processes, so
+    # this context has never seen a faulting kernel and is safe to verify on.
+    problem = PreparedProblem.create(
+        shape, padded_n, with_reference=with_reference, dtype=dtype
+    )
     return records, results, problem
+
+
+def _csv(cast):
+    """A comma-separated list of ``cast``, for the list-valued config keys."""
+
+    def parse(text: str) -> List[Any]:
+        return [cast(part.strip()) for part in text.split(",") if part.strip()]
+
+    return parse
+
+
+def _opt_int(text: str) -> Optional[int]:
+    """``waves_per_eu`` accepts ``null`` to mean "leave it to the backend"."""
+    return None if text.lower() in ("null", "none") else int(text)
+
+
+def _flag(text: str) -> bool:
+    lowered = text.lower()
+    if lowered in ("true", "1", "yes", "on"):
+        return True
+    if lowered in ("false", "0", "no", "off"):
+        return False
+    raise argparse.ArgumentTypeError(f"expected a boolean, got {text!r}")
+
+
+# ``--config`` supplies the baseline and every entry here is a flag that
+# overrides one key in it, so a sweep can be driven entirely from the command
+# line without authoring a JSON file. Adding a knob is one line.
+_CONFIG_OVERRIDES: Tuple[Tuple[str, Tuple[str, ...], Any, str], ...] = (
+    ("--arch", ("target", "arch"), str, "target architecture"),
+    ("--isa", ("target", "isa"), str, "LLVM target triple"),
+    ("--dtype", ("target", "dtype"), str, "operand dtype: bf16 or fp16"),
+    ("--layout", ("target", "layout"), str, "operand layout, e.g. RCR"),
+    ("--wave-size", ("target", "wave_size"), int, "lanes per wave"),
+    ("--warp-tile", ("target", "warp_tile"), _csv(int), "MMA atom as m,n,k"),
+    ("--m", ("problem", "m"), int, "problem M extent"),
+    ("--n", ("problem", "n"), int, "problem N extent"),
+    ("--k", ("problem", "k"), int, "problem K extent"),
+    ("--tile-m", ("tile_config", "tile_m"), _csv(int), "block M tiles"),
+    ("--tile-n", ("tile_config", "tile_n"), _csv(int), "block N tiles"),
+    ("--tile-k", ("tile_config", "tile_k"), _csv(int), "block K tiles"),
+    ("--warp-m", ("tile_config", "warp_m"), _csv(int), "waves along M"),
+    ("--warp-n", ("tile_config", "warp_n"), _csv(int), "waves along N"),
+    ("--pipelines", ("trait_config", "pipelines"), _csv(str), "pipeline names"),
+    ("--schedulers", ("trait_config", "schedulers"), _csv(str), "scheduler names"),
+    ("--epilogues", ("trait_config", "epilogues"), _csv(str), "epilogue names"),
+    (
+        "--waves-per-eu",
+        ("trait_config", "waves_per_eu"),
+        _csv(_opt_int),
+        "occupancy hints; 'null' keeps the backend default",
+    ),
+    ("--lds-swizzle", ("trait_config", "lds_swizzle"), _csv(_flag), "LDS XOR swizzle"),
+    ("--lds-k-pad", ("trait_config", "lds_k_pad"), _csv(int), "LDS row pad elements"),
+    (
+        "--direct-to-lds",
+        ("trait_config", "direct_to_lds"),
+        _csv(_flag),
+        "DirectToLDS load path",
+    ),
+    (
+        "--dtl-prefetch",
+        ("trait_config", "dtl_prefetch"),
+        _csv(_flag),
+        "DirectToLDS prefetch ping-pong",
+    ),
+    ("--tdm", ("trait_config", "tdm"), _csv(_flag), "tensor-descriptor mover path"),
+    ("--tdm-depth", ("trait_config", "tdm_depth"), _csv(int), "TDM pipeline depth"),
+    ("--tile-finalists", ("selection", "tile_finalists"), int, "tiles kept after screening"),
+    ("--final-timed", ("selection", "final_timed"), int, "candidates re-timed out-of-process"),
+    ("--tolerance", ("selection", "tolerance"), float, "verification tolerance"),
+    ("--workers", ("benchmark", "workers"), int, "parallel build workers"),
+    ("--warmup", ("benchmark", "warmup"), int, "warmup launches per candidate"),
+    ("--iters", ("benchmark", "iters"), int, "timed launches per sample"),
+    ("--attempts", ("benchmark", "attempts"), int, "samples per candidate, median taken"),
+    ("--output-dir", ("output_dir",), str, "where results and the HSACO cache go"),
+)
+
+
+def _apply_overrides(config: Dict[str, Any], args: argparse.Namespace) -> List[str]:
+    """Write every supplied flag into ``config``; return what was changed."""
+    applied: List[str] = []
+    for flag, path, _kind, _help in _CONFIG_OVERRIDES:
+        value = getattr(args, flag.lstrip("-").replace("-", "_"))
+        if value is None:
+            continue
+        section = config
+        for key in path[:-1]:
+            section = section.setdefault(key, {})
+        section[path[-1]] = value
+        applied.append(f"{'.'.join(path)}={value}")
+    return applied
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -735,14 +1061,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--config",
         type=Path,
         default=DEFAULT_CONFIG,
-        help="JSON file containing stages, search spaces, and benchmark settings",
+        help="JSON file of stages, search spaces, and benchmark settings; every "
+        "key can be overridden by the flags below",
     )
+    for flag, path, kind, help_text in _CONFIG_OVERRIDES:
+        parser.add_argument(
+            flag,
+            type=kind,
+            default=None,
+            help=f"{help_text} [overrides {'.'.join(path)}]",
+        )
     parser.add_argument("--worker-record", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-range", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.worker_record:
         return _run_worker(args.worker_record)
+    if args.worker_range:
+        return _run_worker_range(args.worker_range)
 
     config = load_config(args.config)
+    overrides = _apply_overrides(config, args)
+    if overrides:
+        print("overrides: " + "  ".join(overrides), flush=True)
     target = config["target"]
     problem = config["problem"]
     selection = config["selection"]
@@ -761,6 +1101,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "layout": target["layout"],
         "shape": list(shape),
         "config": str(args.config.resolve()),
+        # The path alone cannot describe the run once flags override it, and
+        # the file itself keeps changing between runs, so store what was used.
+        "config_overrides": overrides,
+        "resolved_config": config,
     }
 
     if "tile" in stages:
@@ -835,6 +1179,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             iters=benchmark["iters"],
             attempts=benchmark["attempts"],
             dtype=dtype,
+            with_reference=False,
         )
         trait_problem.close()
         _write_results(output_dir, "trait", trait_results)

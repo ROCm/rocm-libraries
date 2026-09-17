@@ -1,0 +1,46 @@
+{
+  "target": {
+    "arch": "gfx1250",
+    "isa": "amdgcn-amd-amdhsa--gfx1250",
+    "dtype": "bf16",
+    "layout": "RCR",
+    "wave_size": 32,
+    "warp_tile": [16, 16, 32]
+  },
+  "problem": {
+    "m": 114688,
+    "n": 2048,
+    "k": 256
+  },
+  "tile_config": {
+    "tile_m": [64, 128, 256],
+    "tile_n": [64, 128, 256],
+    "tile_k": [32, 64, 128, 256],
+    "warp_m": [1, 2, 4, 8],
+    "warp_n": [1, 2, 4, 8]
+  },
+  "trait_config": {
+    "pipelines": ["mem"],
+    "schedulers": ["intrawave"],
+    "epilogues": ["cshuffle"],
+    "waves_per_eu": [1, 2, 4],
+    "lds_swizzle": [false],
+    "lds_k_pad": [8, 24, 0, 16],
+    "direct_to_lds": [false, true],
+    "dtl_prefetch": [false, true],
+    "tdm": [true, false],
+    "tdm_depth": [3,4,2]
+  },
+  "selection": {
+    "tile_finalists": 40,
+    "final_timed": 5,
+    "tolerance": 0.02
+  },
+  "benchmark": {
+    "workers": 8,
+    "warmup": 5,
+    "iters": 20,
+    "attempts": 1
+  },
+  "output_dir": "/home/jialuo12/OPT_Results/rocke_bf16_gfx1250_m114688_prefetch"
+}
