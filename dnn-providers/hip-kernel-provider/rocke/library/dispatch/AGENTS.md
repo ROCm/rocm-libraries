@@ -24,9 +24,16 @@ are consumed only by their own builder and never enter the C++ parity identity. 
 rule governs the exception: **any value the kernel bakes into its `kernel_name` must
 be resolved from the kernel's own policy function**, not pinned here — `gfx942.py`
 calls `kernels.gfx942.attention_dense._tuned_waves_per_eu` for exactly that reason.
-A number pinned in the factory drifts away from the policy, the name tag and the
-compiled binary then disagree, and the name-keyed launcher cache serves the wrong
-HSACO.
+A number pinned in the factory drifts away from the policy: the name tag comes from
+the spec while the body is built from the policy's value, so the symbol advertises a
+knob the binary does not have. In-process that is a misleading symbol plus redundant
+cache entries; under AOT packaging, where the symbol *is* the identity, it serves the
+wrong HSACO.
+
+The launcher cache itself is keyed by `attention_dense_cache_key`, not by the symbol
+name, so the name is not a backstop for this — on the gfx950 runtime-shape path the
+symbol carries no `sq`/`sk` tokens at all (batch and the seqlens are runtime kernel
+params). Correctness rests entirely on the key.
 
 ## Candidate registry — priority table
 
@@ -173,17 +180,28 @@ Migration is incremental — one cohort at a time.
    The dispatcher still decides only `(path, head_size, block_size)`, and the C++
    parity identity is unchanged (see the top of this doc).
 4. **Test** byte-identity + non-interference (see the
-   `test_gfx942_*_flash_spec_fn.py` tests), then GPU-verify the cohort's arch
-   (kernel name / latency unchanged vs pre-change).
+   `test_per_engine_spec_fns.py` -- table-driven, one entry per cohort), then
+   GPU-verify the cohort's arch (kernel name / built spec unchanged vs pre-change).
 
-Migrated so far:
+Migrated so far (all builder-layer spec_fns in
+`builders/common/attention_spec_builder.py`; `_tiled_spec_from_problem` and
+`_tiled_3d_spec_from_problem` are now clean arch dispatchers):
 - `_spec_gfx942_fp16_flash` — owned by `attention_gfx942_dense_pipe`.
-- `_spec_gfx942_bf16_flash` — ORPHAN (no dispatch candidate yet; currently routed
-  via the generic `unified_2d`). Needs a future `gfx942_bf16` engine.
+- `_spec_gfx942_bf16_flash` — ORPHAN (no dispatch candidate yet; routed via the
+  generic `unified_2d`). Needs a future `gfx942_bf16` engine.
+- `_spec_generic_2d_non_gfx950` — the non-flash 2D residual for EVERY non-gfx950
+  arch (gfx942, gfx1201, gfx1151, ...), built from the shared
+  `_base_2d_generic_fields` only. ORPHAN.
+- `_spec_gfx950_generic` — the shared `_base_2d_generic_fields` plus the
+  gfx950-only schedule tail + the D256 gfx950 fast-route override folded in (kept
+  behind the `_kau.` module handle for test-steering). The 2D `_spec_field_names`
+  guards are gone -- the per-arch split replaced them.
+- `_spec_generic_3d` — the shared gfx942/gfx950 3D split-KV fallthrough (one
+  function; the `_gfx942_3d_*` helpers self-gate, so no arch split).
 
-Remaining cohorts to migrate this way: gfx950 combo / single-batch schedule,
-gfx1250. The D256 override is a related but distinct single-sourcing case (see
-`_d256_gfx950_spec_overrides`).
+Remaining: gfx1250 (2D + 3D) -- still inline early-returns in both cascades,
+DEFERRED (no gfx1250 hardware to GPU-verify this pass). The `_kau.` D256
+indirection must be preserved by any code that touches the gfx950 override.
 
 ## Multi-engine benchmarking: `attention_sweep_space`
 

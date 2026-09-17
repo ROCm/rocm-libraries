@@ -239,3 +239,171 @@ TEST(TestPlatformUtils, UnsetEnvNoOpOnMissing)
 
     EXPECT_EQ(result, "");
 }
+
+// expandUser tests
+
+#if defined(__linux__)
+
+TEST(TestPlatformUtils, ExpandUserLeadingTildeExpandsToHome)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
+                                                                             "/home/testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("~/foo");
+
+    EXPECT_EQ(result, "/home/testuser/foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserBareTildeExpandsToHome)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
+                                                                             "/home/testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("~");
+
+    EXPECT_EQ(result, "/home/testuser");
+}
+
+TEST(TestPlatformUtils, ExpandUserEmbeddedTildeIsReturnedVerbatim)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
+                                                                             "/home/testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("/tmp/a~b");
+
+    EXPECT_EQ(result, "/tmp/a~b");
+}
+
+TEST(TestPlatformUtils, ExpandUserNamedUserIsNotExpanded)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
+                                                                             "/home/testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("~otheruser/foo");
+
+    EXPECT_EQ(result, "~otheruser/foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserUnsetHomeReturnsInputUnchanged)
+{
+    hipdnn_data_sdk::utilities::unsetEnv("HOME");
+
+    std::string result;
+    EXPECT_NO_THROW(result = hipdnn_data_sdk::utilities::expandUser("~/foo"));
+
+    EXPECT_EQ(result, "~/foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserEmptyHomeReturnsInputUnchanged)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME", "");
+
+    std::string result;
+    EXPECT_NO_THROW(result = hipdnn_data_sdk::utilities::expandUser("~/foo"));
+
+    EXPECT_EQ(result, "~/foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserNoLeadingTokenReturnsInputUnchanged)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
+                                                                             "/home/testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("relative/path");
+
+    EXPECT_EQ(result, "relative/path");
+}
+
+TEST(TestPlatformUtils, ExpandUserEmptyInputReturnsInputUnchanged)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("HOME",
+                                                                             "/home/testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("");
+
+    EXPECT_EQ(result, "");
+}
+
+#elif defined(_WIN32)
+
+TEST(TestPlatformUtils, ExpandUserLeadingTildeExpandsToUserProfile)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
+                                                                             "C:\\Users\\testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("~\\foo");
+
+    EXPECT_EQ(result, "C:\\Users\\testuser\\foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserLeadingUserProfileTokenExpands)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
+                                                                             "C:\\Users\\testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("%USERPROFILE%\\foo");
+
+    EXPECT_EQ(result, "C:\\Users\\testuser\\foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserEmbeddedTildeIsReturnedVerbatim)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
+                                                                             "C:\\Users\\testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("C:\\tmp\\a~b");
+
+    EXPECT_EQ(result, "C:\\tmp\\a~b");
+}
+
+TEST(TestPlatformUtils, ExpandUserNamedUserIsNotExpanded)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
+                                                                             "C:\\Users\\testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("~otheruser\\foo");
+
+    EXPECT_EQ(result, "~otheruser\\foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserUnsetUserProfileReturnsInputUnchanged)
+{
+    hipdnn_data_sdk::utilities::unsetEnv("USERPROFILE");
+
+    std::string result;
+    EXPECT_NO_THROW(result = hipdnn_data_sdk::utilities::expandUser("~\\foo"));
+
+    EXPECT_EQ(result, "~\\foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserEmptyUserProfileReturnsInputUnchanged)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE", "");
+
+    std::string result;
+    EXPECT_NO_THROW(result = hipdnn_data_sdk::utilities::expandUser("~\\foo"));
+
+    EXPECT_EQ(result, "~\\foo");
+}
+
+TEST(TestPlatformUtils, ExpandUserNoLeadingTokenReturnsInputUnchanged)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
+                                                                             "C:\\Users\\testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("relative\\path");
+
+    EXPECT_EQ(result, "relative\\path");
+}
+
+TEST(TestPlatformUtils, ExpandUserEmptyInputReturnsInputUnchanged)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter setter("USERPROFILE",
+                                                                             "C:\\Users\\testuser");
+
+    auto result = hipdnn_data_sdk::utilities::expandUser("");
+
+    EXPECT_EQ(result, "");
+}
+
+#endif // defined(__linux__) / defined(_WIN32)

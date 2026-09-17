@@ -22,9 +22,12 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cassert>
 #include <iosfwd>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "ReadyQueue.hpp"
@@ -42,6 +45,30 @@ struct RegionDAG {
     std::unordered_map<StinkyInstruction*, unsigned> instToId;
 };
 
+/// True if \p to is reachable from \p from by following \p graph's edges.
+/// Used to reject a hard scheduling constraint that would introduce a cycle
+/// before it is merged into the region's DAG.
+inline bool hasPath(const std::vector<std::unordered_set<unsigned>>& graph, unsigned from,
+                    unsigned to) {
+    if (from == to) return true;
+
+    std::vector<unsigned> pending{from};
+    std::vector<bool> visited(graph.size(), false);
+    visited[from] = true;
+    while (!pending.empty()) {
+        const unsigned current = pending.back();
+        pending.pop_back();
+        for (unsigned successor : graph[current]) {
+            if (successor == to) return true;
+            if (!visited[successor]) {
+                visited[successor] = true;
+                pending.push_back(successor);
+            }
+        }
+    }
+    return false;
+}
+
 /// Add a non-duplicate DAG edge and update the destination in-degree.
 inline void addEdgeById(DAGNode* from, DAGNode* to,
                         std::vector<std::unordered_set<unsigned>>& graph) {
@@ -57,8 +84,12 @@ RegionDAG buildRegisterDependencyDAG(const std::vector<StinkyInstruction*>& inst
 /// Same as above for an IRList region iterator pair.
 RegionDAG buildRegisterDependencyDAG(IRList::iterator regionStart, IRList::iterator regionEnd);
 
-/// Print each DAG node and its successor IDs.
-void dumpDAGGraph(const RegionDAG& dag, std::ostream& os);
+/// Print each DAG node and its successor IDs. \p hardConstraintEdges, if given, marks which
+/// edges are scheduler-policy links (not real register dependencies) merged into \p dag by
+/// the caller, so debug output can still tell the two apart even though they now share one
+/// graph.
+void dumpDAGGraph(const RegionDAG& dag, std::ostream& os,
+                  const std::set<std::pair<unsigned, unsigned>>& hardConstraintEdges = {});
 
 }  // namespace dag
 }  // namespace stinkytofu

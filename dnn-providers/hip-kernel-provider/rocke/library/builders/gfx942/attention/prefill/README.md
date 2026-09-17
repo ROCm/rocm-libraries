@@ -22,11 +22,12 @@ split matters when you build a spec by hand:
   `AttentionDenseSpec.lds_k_group_pad`, whose default is 8, so a directly-built D64
   spec already carries it — the `kpad8` token in the kernel name is what says so. Set
   the field to `0` to get the unpadded layout; that is also how the lever is A/B'd.
-- The gfx942-private knobs in `Gfx942DenseTuning` (`block_m`, the two LDS pads,
-  the `use_cfvst` / `use_exp2_fast` overrides, `iglp`) all default to their shipped
-  values, and the tri-state ones default to `None` = "ask the policy". A build that
-  never mentions the struct therefore emits byte-identical IR under a byte-identical
-  kernel name.
+- The gfx942-private knobs (`block_m`, the two LDS pads, the `use_cfvst` /
+  `use_exp2_fast` overrides, `iglp`) are flat fields on `Gfx942AttentionDenseSpec`,
+  a frozen subclass of the shared `AttentionDenseSpec`. They all default to their
+  shipped values, and the tri-state ones default to `None` = "ask the policy". A
+  caller that passes a plain `AttentionDenseSpec` is promoted to the subclass at
+  those defaults, so it emits byte-identical IR under a byte-identical kernel name.
 
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
@@ -145,6 +146,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | Fused softmax rescale | all | exp2 → accumulate → cast → pack in one pass instead of materializing a full f32 `p_vals` matrix | **shipped** — pure live-range relief, bit-identical |
 | Per-config `waves_per_eu` | **bf16 D64** → 4 | forces the allocator low enough that a second workgroup co-resides (1 → 2 WG/CU) | **shipped** — large at long sequences |
 | D64 K-bank-conflict pad | **D64 both dtypes** | 2-row-group boundary pad takes the `do_qk` K reads from 32-way to 4-way | **shipped** — large, cross-part confirmed |
+| `lds_k_group_pad` default (8) confirmed | **D64 both dtypes** | gfx942 reuses the shared `AttentionDenseSpec.lds_k_group_pad` field; default 8 inherits from the gfx950 sweep (840 configs, pad ∈ {0,8,16,24,32} × bn × GQA × mode × seqlen). Whole-wave bank model and decision record: `library/builders/gfx950/attention/prefill/README.md §Tuning`. | **adopted** — default unchanged |
 | Persistent grid-stride | all | `num_persistent` CTAs grid-stride over decoded work items; qb-major and hkv-major decodes | **shipped** — large at long sequences; auto-on when work fills the grid |
 
 ### Evaluated and rejected
@@ -157,7 +159,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 | `waves_per_eu=3` at **fp16 D64** | reaches 2 WG/CU but loses more ILP than the second workgroup buys |
 | Drop K/V LDS pads to reach 2 WG/CU at D128 | D128 stays 1 WG/CU even unpadded (register floor co-limits), so it only reintroduces bank conflicts — **catastrophic** |
 | `block_n=32` (all configs) | halving the KV tile doubles the tile/grid count; the extra loop and barrier overhead outweighs the LDS relief. Marginally positive on **bf16 D128** but **part-dependent**, so not wired — it would need a CU-count-aware policy |
-| `iglp_opt` (`Gfx942DenseTuning.iglp`) | resource- and performance-neutral cross-part: the canned GEMM interleave does not match this loop, which is barrier-rendezvous-bound. Kept as a default-off knob |
+| `iglp_opt` (`Gfx942AttentionDenseSpec.iglp`) | resource- and performance-neutral cross-part: the canned GEMM interleave does not match this loop, which is barrier-rendezvous-bound. Kept as a default-off knob |
 | Smaller `BLOCK_M` | a *fully filled* grid at `BLOCK_M=64` measured **slower** than a one-third-filled one at 256 — 2 waves/CTA leaves half the CU's matrix cores unreachable at 1 CTA/CU. `BLOCK_M=128` is a small win on two configs only; not promoted |
 | cfvst load/store chunking | does not bound register pressure: the later chunks' loads carry no dependency on the earlier ones, so LLVM hoists them above the intervening full `s_waitcnt(vmcnt=0)`, which then covers them anyway |
 | PV-only `s_setprio` | **proven-negative** on gfx942 `attention_tiled_2d`. Note this is one lever in one placement — it is *not* a verdict on the scheduling-intrinsic family, and hand-written `sched_group_barrier` remains open |
