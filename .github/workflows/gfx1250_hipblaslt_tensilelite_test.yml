@@ -177,6 +177,8 @@ jobs:
         --group-add 993
         --group-add 992
         --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
     defaults:
       run:
         shell: bash
@@ -217,7 +219,7 @@ jobs:
       - name: Fetch prebuilt gfx1250 ROCm artifact
         id: fetch
         env:
-          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35152274071' }}  # SCRATCH: #12178 build (xfails baked into artifact)
+          BUILD_RUN_ID: ${{ inputs.build_run_id || github.event.workflow_run.id || '35170097210' }}  # SCRATCH: #12178 build w/ #12086 (xfails + gfx942 fix in artifact)
           BUILD_REPO: ${{ inputs.build_repo || 'ROCm/rocm-libraries' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
