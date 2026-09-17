@@ -174,6 +174,7 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"DSStoreB96", "ds_store_b96"},
         {"DSStoreB128", "ds_store_b128"},
         {"DSStoreB192", "ds_store_b192"},
+        {"DSStoreB256", "ds_store_b256"},
         {"SLoadB32", "s_load_b32"},
         {"SLoadB64", "s_load_b64"},
         {"SLoadB128", "s_load_b128"},
