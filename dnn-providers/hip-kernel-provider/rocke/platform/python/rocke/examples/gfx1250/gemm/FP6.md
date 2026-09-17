@@ -75,3 +75,7 @@ Run the focused example with:
 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype fp6
 python -m rocke.examples.gfx1250.gemm.mxfp6_gemm --dtype bf6 --matrix-path wmma_scale16 --compile-route hip
 ```
+
+`mxfp6_gemm` runs both `fp6` (E2M3) and `bf6` (E3M2) by default, as
+separate homogeneous cases. Use `--dtype fp6`, `--dtype bf6`, or explicit
+`--dtype both` to select the encodings.

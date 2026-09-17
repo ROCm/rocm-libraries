@@ -411,6 +411,8 @@ def main(argv: list[str] | None = None) -> int:
         "--dtype",
         default="fp8e4m3",
         choices=(
+            "fp8",
+            "bf8",
             "fp8e4m3",
             "bf8e5m2",
             "fp4",
