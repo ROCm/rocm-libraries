@@ -69,6 +69,31 @@ TEST(IRModuleTest, AddInstructions) {
     EXPECT_EQ(module->getInstructions().size(), 2);
 }
 
+TEST(IRModuleTest, LowersConditionalDirectivesInSourceOrder) {
+    PyLogicalModule module("test_kernel");
+    module.add(makeLogicalInstructionShared(SEndpgm()));
+    module.addIfDirective("0");
+    module.add(makeLogicalInstructionShared(SEndpgm()));
+    module.addEndifDirective("overflowed resources");
+
+    const auto& directives = module.getConditionalDirectives();
+    ASSERT_EQ(directives.size(), 2);
+    EXPECT_EQ(directives[0].position, 1);
+    EXPECT_EQ(directives[0].kind, ConditionalDirectiveKind::IF);
+    EXPECT_EQ(directives[1].position, 2);
+    EXPECT_EQ(directives[1].kind, ConditionalDirectiveKind::ENDIF);
+
+    auto asmModule = lowerLogicalModuleToAsm(module, {12, 5, 0});
+    const std::string assembly = asmModule->emitAssembly();
+    const size_t ifPos = assembly.find(".if 0\n");
+    const std::string endifText =
+        std::string(".endif") + std::string(44, ' ') + " // overflowed resources\n";
+    const size_t endifPos = assembly.find(endifText);
+    ASSERT_NE(ifPos, std::string::npos);
+    ASSERT_NE(endifPos, std::string::npos);
+    EXPECT_LT(ifPos, endifPos);
+}
+
 TEST(IRModuleTest, RecordsCallableMarkersInSourceOrder) {
     PyLogicalModule module("test_kernel");
 
