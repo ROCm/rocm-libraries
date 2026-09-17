@@ -35,7 +35,7 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE)
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE=1)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     set(_recipe_fixture "${PROJECT_SOURCE_DIR}/src/integration_tests/kernel_ingestor_engine/fixtures/rocke_recipe")
-    set(_recipe_staging "${HIPDNN_DESCRIPTOR_BUILD_DIR}/rocke_sdpa")
+    set(_recipe_staging "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/rocke_sdpa")
     file(MAKE_DIRECTORY "${_recipe_staging}")
     foreach(_descriptor IN ITEMS sdpa.ued.json sdpa.kmd.json sdpa.uhd.json
             sdpa.umd.json sdpa.udd.json sdpa.kdp.json)
@@ -57,7 +57,7 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE_RECIPE_EXAMPLE)
         COMMENT "Stage the SDPA recipe")
     add_dependencies(hip_kernel_provider_impl rocke_sdpa_recipe)
     install(DIRECTORY "${_recipe_fixture}/descriptors/"
-        DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/rocke_sdpa")
+        DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/rocke_sdpa")
     install(FILES "${_recipe_staging}/sdpa_dense.cbor"
-        DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}/rocke_sdpa")
+        DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/rocke_sdpa")
 endif()
