@@ -6,7 +6,7 @@
 Characterisation test -- branch_id 4944b8f577187e45cae6f9454baa75d19009c23d
 
 Predicate : not kernel["UseSubtileImpl"]
-Site      : Tensile/KernelWriter.py:2611  (inside setupNewTile)
+Site      : tensilelite/KernelWriter.py:2611  (inside setupNewTile)
 Solver    : z3 -- SAT  (solver-backed-under-assumptions)
 Classification: solver-backed-under-assumptions
 
@@ -131,7 +131,7 @@ def test_solution_usesubtileimpl_derivation_ast():
     """
     import ast
 
-    target_file = resolve_tensile_path("Tensile/SolutionStructs/Solution.py")
+    target_file = resolve_tensile_path("tensilelite/SolutionStructs/Solution.py")
     with open(target_file) as fh:
         source = fh.read()
 
