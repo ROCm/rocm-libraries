@@ -1128,27 +1128,21 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         }
     };
 
-    // Per-WMMA-window DS cap (rule 4) spreads ds_loads across the region's
-    // WMMA windows. When the hide-budget pre-analysis (analyzeWmmaHideBudget)
-    // is enabled, the target comes from it -- the single authoritative source
-    // of "how many ds_loads belong in window w", shared with the
-    // hold-back-next-WMMA decision so the two can't disagree -- and it also
-    // supplies a tail bucket (the segment after the last WMMA fires), so the
-    // cap stays meaningful there instead of going inert. Without the prescan
-    // (standalone/test pipelines that don't opt in), fall back to the
-    // original flat per-arch value AND the original "only while a WMMA is
-    // still pending" gating: that mode has no tail bucket to fall back on, so
-    // disabling the cap once wmmaQueue empties is still the right call there
-    // (matches every pre-existing test not exercising the hide-budget path).
-    // When the DS queue reaches depth, configured transition entries use the
-    // transition factor before full pacing.
+    // Per-WMMA-window DS cap (rule 4) spreads ds_loads across the region's WMMA
+    // windows. When the hide-budget pre-analysis (analyzeWmmaHideBudget) is
+    // enabled, the target comes from it -- the single authoritative source of
+    // "how many ds_loads belong in window w", shared with the
+    // hold-back-next-WMMA decision so the two can't disagree -- otherwise
+    // falls back to the flat per-arch value. It only spreads ds_loads across an
+    // active WMMA co-issue window; it is meaningless when no WMMA is available
+    // to issue, so it is applied only while a WMMA is pending. When the DS
+    // queue reaches depth, configured transition entries use the transition
+    // factor before full pacing.
     int windowCap = maxDsPerWmmaWindow_;
-    const bool useHideBudgetCap = hideBudgetPrescanEnabled() && hasWMMAInRegion_;
-    if (useHideBudgetCap) {
+    if (hideBudgetPrescanEnabled() && hasWMMAInRegion_) {
         windowCap = hideBudget_.dsLoadBudgetFor((int)wmmaIssuedCountThisRegion_);
     }
-    const bool dsCapReached = (useHideBudgetCap ? hasWMMAInRegion_ : !wmmaQueue.empty()) &&
-                              dsInsertedSinceLastWmma_ >= windowCap;
+    const bool dsCapReached = !wmmaQueue.empty() && dsInsertedSinceLastWmma_ >= windowCap;
     const bool dsBaseOk = pickedDS && !dsCapReached && !destOverlapsActiveWmmaSrc(pickedDS);
     int dsThrottleWait = 0;
     if (dsBaseOk) {
