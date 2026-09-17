@@ -58,7 +58,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     sgpr,
     vgpr,
 )
-from rocisa_stinkytofu_adaptor.enum import InstType  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import DelayALUType, InstType  # noqa: E402
 from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     CommonInstruction,
     Instruction,
@@ -73,6 +73,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SAndSaveExecB64,
     SAShiftRightI32,
     SBarrier,
+    SDelayAlu,
     SBitcmp1B32,
     SCmpEQI32,
     SCmpEQU32,
@@ -107,6 +108,9 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SMulI32,
     SMulLOU32,
     SNop,
+    SSetPrior,
+    SSetVgprMsb,
+    SSleep,
     SOrB32,
     SOrB64,
     SOrSaveExecB32,
@@ -942,6 +946,102 @@ class TestSNopConstruction(unittest.TestCase):
         m = SNop(3, "delay")
         self.assertEqual(m.wait_state, 3)
         self.assertEqual(m.comment, "delay")
+
+
+# ===========================================================================
+# SSetPrior / SSleep / SSetVgprMsb / SDelayAlu
+# ===========================================================================
+
+
+class TestSSetPriorConstruction(unittest.TestCase):
+    def test_keyword_prior(self):
+        m = SSetPrior(prior=1, comment="Raise priority while processing macs")
+        self.assertEqual(m.prior, 1)
+        self.assertEqual(m.instStr, "s_setprio")
+        text = str(m)
+        self.assertIn("s_setprio 1", text)
+        self.assertIn("Raise priority while processing macs", text)
+
+    def test_positional(self):
+        m = SSetPrior(0)
+        self.assertEqual(m.getParams(), [0])
+        self.assertEqual(m.getSrcParams(), [0])
+        self.assertEqual(m.getDstParams(), [])
+
+    def test_deepcopy(self):
+        m = SSetPrior(prior=1, comment="x")
+        c = copy.deepcopy(m)
+        self.assertIsInstance(c, SSetPrior)
+        self.assertIsNot(c, m)
+        self.assertEqual(c.prior, 1)
+        self.assertEqual(c.comment, "x")
+
+
+class TestSSleepConstruction(unittest.TestCase):
+    def test_keyword_simm16(self):
+        m = SSleep(simm16=1, comment="idle")
+        self.assertEqual(m.simm16, 1)
+        text = str(m)
+        self.assertIn("s_sleep 1", text)
+        self.assertIn("idle", text)
+
+    def test_positional(self):
+        m = SSleep(3, "pad")
+        self.assertEqual(m.getParams(), [3])
+        self.assertEqual(m.comment, "pad")
+
+
+class TestSSetVgprMsbConstruction(unittest.TestCase):
+    def test_simm16_keyword(self):
+        m = SSetVgprMsb(simm16=5)
+        self.assertEqual(m.simm16, 5)
+        self.assertIn("s_set_vgpr_msb 5", str(m))
+
+    def test_packed_keywords(self):
+        m = SSetVgprMsb(msbSrc0=1, msbSrc1=2, msbSrc2=3, msbDst=1)
+        # (dst<<6)+(src2<<4)+(src1<<2)+src0 = 64+48+8+1 = 121
+        self.assertEqual(m.simm16, 121)
+
+    def test_packed_positional(self):
+        m = SSetVgprMsb(1, 2, 3, 1, "pack")
+        self.assertEqual(m.simm16, 121)
+        self.assertEqual(m.comment, "pack")
+
+
+class TestSDelayAluConstruction(unittest.TestCase):
+    def test_instid0_only(self):
+        m = SDelayAlu(DelayALUType.VALU, 2)
+        self.assertEqual(m.getParams(), [0, 2])
+        self.assertEqual(m.getSrcParams(), [])
+        self.assertFalse(m.hasInstID1())
+        self.assertEqual(m.instStr, "s_delay_alu")
+
+    def test_to_string_respects_cap(self):
+        m = SDelayAlu(instid0type=DelayALUType.VALU, instid0cnt=1)
+        from rocisa_stinkytofu_adaptor import base as _base
+
+        old = _base.getAsmCaps
+        try:
+            _base.getAsmCaps = lambda: {"s_delay_alu": 0}
+            self.assertEqual(m.toString(), "")
+            _base.getAsmCaps = lambda: {"s_delay_alu": 1}
+            self.assertIn("s_delay_alu instid0(VALU_DEP_1)", m.toString())
+        finally:
+            _base.getAsmCaps = old
+
+    def test_set_inst_id1(self):
+        m = SDelayAlu(DelayALUType.VALU, 1)
+        self.assertTrue(m.setInstID1(1, DelayALUType.SALU, 1))
+        self.assertFalse(m.setInstID1(0, DelayALUType.VALU, 1))
+        self.assertEqual(m.getParams(), [0, 1, 1, 2, 1])
+
+    def test_deepcopy(self):
+        m = SDelayAlu(DelayALUType.TRANS, 3, comment="d")
+        c = copy.deepcopy(m)
+        self.assertIsInstance(c, SDelayAlu)
+        self.assertEqual(c.instid0type, int(DelayALUType.TRANS))
+        self.assertEqual(c.instid0cnt, 3)
+        self.assertEqual(c.comment, "d")
 
 
 # ===========================================================================
