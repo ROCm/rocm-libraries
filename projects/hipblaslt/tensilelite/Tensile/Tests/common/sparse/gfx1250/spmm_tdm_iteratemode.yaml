@@ -21,11 +21,9 @@ GlobalParameters:
 
 BenchmarkProblems:
 ########################################################
-# EXPERIMENT: datatype = bf16, Sparse=1 (A compressed to DepthU/2=256, B stays
-# full DepthU=512). VectorWidthB=4 forces LdsBlockSizePerPadB =
-# DepthU(512) * bpe(2) * VW(4) = 4096B, which exceeds the 1024B pad_interval
-# encoding limit. Today (Sparse excluded from TDMIterateMode at
-# Solution.py:3308) this must reject every solution.
+# bf16, TN, Sparse=1 (dense B). VectorWidthB=2 @ DepthU=512 forces
+# LdsBlockSizePerPadB = 512*2*2 = 2048B, over the 1024B pad_interval limit.
+# Gate check: TDMIterateMode=0 must reject; =2 (bit for B) must bypass+pass.
 ########################################################
   -
     -
@@ -61,7 +59,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - TDMInst: [3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [4]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -93,88 +91,12 @@ BenchmarkProblems:
           - [Enum: none]
 
 ########################################################
-# datatype = bf16, TN, sparse A (Sparse=1)
-# "K-dim" coverage test, adapted from tdm_gfx1250.yaml TN block (lines
-# 29-108). MI K doubled 32->64 to match the sparse MFMA shape used elsewhere
-# in this test suite (e.g. spmm_tdm_all.yaml). Full TDMIterateMode sweep
-# [-1,0,1,2,3]; LdsPad*/LdsBlockSizePerPad* left at -1 (brute-force search).
-########################################################
-  -
-    -
-      OperationType: GEMM
-      DataType: b
-      DestDataType: b
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      TransposeA: True
-      TransposeB: False
-      UseBeta: True
-      Batched: True
-      Activation: False
-      SupportUserArgs: True
-      UseBias: 0
-      Sparse: 1
-
-    - # BenchmarkProblemSizeGroup - Standard
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - Groups:
-          -
-            - MatrixInstruction: [16, 16, 64, 1,  1,  1, 1,  1, 1]
-              WorkGroup:
-                - [16, 16, 1]
-                - [16, 16, 4]
-            - MatrixInstruction: [16, 16, 64, 1,  1,  1, 1,  2, 2]
-            - MatrixInstruction: [16, 16, 64, 1,  1,  8, 4,  2, 2]
-        - DepthU: [64, 128]
-        - TransposeLDS: [-1]
-        - LdsPadA: [-1]
-        - LdsPadB: [-1]
-        - LdsPadMetadata: [-1]
-        - LdsBlockSizePerPadA: [-1]
-        - LdsBlockSizePerPadB: [-1]
-        - LdsBlockSizePerPadMetadata: [-1]
-        - LDSTrInst: [False]
-        - TDMInst: [3]
-        - TDMIterateMode: [-1, 0, 1, 2, 3]
-        - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
-        - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [2]
-        - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
-        - LocalReadVectorWidth: [8]
-        - 1LDSBuffer: [0]
-        - SourceSwap: [false]
-        - DirectToVgprSparseMetadata: [false]
-        - WorkGroupMapping: [1]
-        - StoreVectorWidth: [-1]
-        - DirectToVgprA: [False]
-        - DirectToVgprB: [False]
-        - WavefrontSize: [32]
-        - ExpandPointerSwap: [true]
-        - GroupLoadStore: [False]
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [64, 64, 1, 512]
-          - Exact: [64, 64, 1, 124] # K tail vs DepthU=64/128, K must be mult-of-4 for sparse prune
-          - Exact: [127, 127, 1, 128]
-        - ActivationArgs:
-          - [Enum: none]
-
-########################################################
-# datatype = bf16, TN, sparse B (Sparse=2)
-# Same "K-dim" coverage test as above, mirrored for sparse B.
+# bf16, TN, Sparse=2 (dense A). VectorWidthA=4 @ DepthU=256 forces
+# LdsBlockSizePerPadA = 256*2*4 = 2048B, over the 1024B pad_interval limit.
+# MI=[4,1,2,2] is the only shape with MIWaveTile0=4 (divides VectorWidthA)
+# while keeping MacroTile small enough to avoid LDS/VGPR overflow.
+# TDMIterateMode=1 (bit for A) must bypass+pass; DepthU=128 stays a
+# non-overflowing control case. Also sweeps K-tail sizes + ScheduleIterAlg.
 ########################################################
   -
     -
@@ -197,15 +119,9 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - Groups:
-          -
-            - MatrixInstruction: [16, 16, 64, 1,  1,  1, 1,  1, 1]
-              WorkGroup:
-                - [16, 16, 1]
-                - [16, 16, 4]
-            - MatrixInstruction: [16, 16, 64, 1,  1,  1, 1,  2, 2]
-            - MatrixInstruction: [16, 16, 64, 1,  1,  8, 4,  2, 2]
-        - DepthU: [64, 128]
+        - MatrixInstruction:
+          - [16, 16, 64, 1,  1,  4, 1,  2, 2]
+        - DepthU: [128, 256]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -217,7 +133,7 @@ BenchmarkProblems:
         - TDMInst: [3]
         - TDMIterateMode: [-1, 0, 1, 2, 3]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -225,7 +141,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [-1]
+        - VectorWidthA: [4]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [8]
         - 1LDSBuffer: [0]
@@ -244,18 +160,16 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [64, 64, 1, 512]
-          - Exact: [64, 64, 1, 124] # K tail vs DepthU=64/128, K must be mult-of-4 for sparse prune
+          - Exact: [64, 64, 1, 124] # K tail vs DepthU=128/256, K must be mult-of-4 for sparse prune
           - Exact: [127, 127, 1, 128]
         - ActivationArgs:
           - [Enum: none]
 
 ########################################################
-# datatype = bf16, TT + TransposeLDS (tr-load-b), sparse A (Sparse=1)
-# Adapted from tdm_gfx1250.yaml TT+TLDS1 block (lines 267-345). TT layout
-# makes the *dense* tensor B need tr-load (not the sparse/compressed A), so
-# this exercises tr-load on the dense side of a sparse kernel. Exercises the
-# pair-based brute-force (LdsBlockSizePerPad, LdsPad) search combined with
-# TDMIterateMode sweep [-1,0,2]. MI K doubled 32->64 for sparse MFMA shape.
+# bf16, TT, Sparse=1 (dense B uses tr-load / TileMajor LDS). TileMajor's
+# brute-force pad search is capped at 1024B, so it never needs
+# TDMIterateMode; the [-1,0,2] sweep here just confirms that stays a no-op
+# (TDMIterateMode=0 for every surviving solution).
 ########################################################
   -
     -
@@ -293,7 +207,7 @@ BenchmarkProblems:
         - TDMInst: [3]
         - TDMIterateMode: [-1, 0, 2]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
@@ -327,13 +241,9 @@ BenchmarkProblems:
           - [Enum: none]
 
 ########################################################
-# datatype = bf16, NN + TransposeLDS (tr-load-a), sparse B (Sparse=2)
-# NN layout makes the *dense* tensor A need tr-load (not the sparse/
-# compressed B), so this exercises tr-load on the dense side of a sparse
-# kernel, mirroring the Sparse=1 block above (which uses TT/tr-load-b so the
-# dense tensor there is B instead). TDMIterateMode explicit mask sweeps bit 1
-# (A) here, since A is the tensor needing the iterate-mode walk; the
-# Sparse=1/TT block sweeps bit 2 (B) for the same reason.
+# bf16, NN, Sparse=2 (dense A uses tr-load / TileMajor LDS). Mirrors the
+# TT/Sparse=1 block above; the [-1,0,1] sweep again confirms no-op
+# (TDMIterateMode=0 for every surviving solution).
 ########################################################
   -
     -
@@ -371,7 +281,7 @@ BenchmarkProblems:
         - TDMInst: [3]
         - TDMIterateMode: [-1, 0, 1]
         - StaggerU: [0]
-        - ScheduleIterAlg: [0, 4]
+        - ScheduleIterAlg: [4]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
