@@ -491,12 +491,12 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB32ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
         "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB64ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZP_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
-        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT32x32x128_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZP_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4B_BBS_BH_SABB128ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
+        "Custom_Cijk_Alik_Bljk_I4H_HHS_BH_SABB128ZPU8X_UserArgs_MT64x160x64_MI16x16x1_gfx1151",
     }
 )
 
