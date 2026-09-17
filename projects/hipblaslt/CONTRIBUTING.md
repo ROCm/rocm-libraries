@@ -56,7 +56,7 @@ hipBLASLt uses a **build-time** generator (TensileLite, in-repo) to produce GPU 
 
 ### Python environment for building device libraries
 
-The `tensilelite-device-libraries` target runs a Python script (`tensilelite.tensilelite_create_library`) that needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the TensileLite requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
+The `tensilelite-device-libraries` target invokes `python -m tensilelite create-library`, which needs PyYAML, msgpack, etc. The build does not install them; it uses whatever Python CMake found. **Use a venv and install the TensileLite requirements** so both the device-library step and the test-data generator (which also uses Python) have the right deps:
 
 ```bash
 cd projects/hipblaslt
@@ -154,7 +154,7 @@ If your change makes a characterization test fail, do **not** run a blanket `pyt
 |---------|---------------|
 | CMake fails or wrong layout from repo root | Configure from `projects/hipblaslt` instead. |
 | Missing `TensileLibrary_lazy_*.dat` or `.hsaco` | Build `tensilelite-device-libraries` or set `HIPBLASLT_TENSILE_LIBPATH` to a directory that contains them. |
-| TensileCreateLibrary fails with `ModuleNotFoundError` (e.g. `yaml`, `msgpack`) | Use a Python venv, `pip install -r tensilelite/requirements.txt`, and configure with `-DPython_EXECUTABLE=/path/to/venv/bin/python`. |
+| `tensilelite create-library` fails with `ModuleNotFoundError` (e.g. `yaml`, `msgpack`) | Use a Python venv, `pip install -r tensilelite/requirements.txt`, and configure with `-DPython_EXECUTABLE=/path/to/venv/bin/python`. |
 | `hipblaslt_gtest.data` doesn't exist | Build `hipblaslt-test` or `hipblaslt-test-data`. If the generator failed (e.g. missing PyYAML), use the venv and `pip install -r tensilelite/requirements.txt`, then rebuild. |
 | Test can't find test data | Run from `build/clients/` (same directory as the executable and `hipblaslt_gtest.data`). |
 | Test skipped on your GPU | Check `clients/tests/data/known_bugs.yaml` for an entry that matches your test and `known_bug_platforms`. |
