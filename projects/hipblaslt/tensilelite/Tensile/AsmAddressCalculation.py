@@ -193,7 +193,7 @@ class AddrCalculation:
                 bcomment = "coutRowPtrBias.la: += %s*rowInc"%strideW1 if lookahead else "Move coutRowPtrBias to next row"
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrBias), vgpr(kw.vgprs.coutRowPtrBias), \
                           sgpr(strideW1), rowInc, tmpS01, bcomment))
-            if kw.vgprs.coutRowPtrGate != -1:
+            if ss.emitGateResidual and kw.vgprs.coutRowPtrGate != -1:
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrGate), vgpr(kw.vgprs.coutRowPtrGate), \
                             sgpr("GateStride+0"), rowInc, tmpS01, "Move coutRowPtrGate to next row"))
         elif len(kernel["PackedC1IndicesX"]) > 1:
