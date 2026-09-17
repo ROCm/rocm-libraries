@@ -5,8 +5,10 @@
   "graph_match": {
     "native": "hipkernel.gfx950_attention_tiled.graph_match"
   },
+  "sort_kernel_catalog": {
+    "gfx950": "4d0a5cf8-2221-427c-a79d-550a60a5245a"
+  },
   "metadata": "da53dd52-6672-4695-956f-9c97880229ed",
-  "heuristic": "4d0a5cf8-2221-427c-a79d-550a60a5245a",
   "knobs": [
     "head_size",
     "block_size",
