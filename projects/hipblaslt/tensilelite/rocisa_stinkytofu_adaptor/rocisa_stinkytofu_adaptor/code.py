@@ -497,32 +497,6 @@ def _block_3line(comment: str) -> str:
     return out
 
 
-def _format_endif_str(instr: str, comment: str) -> str:
-    """Format an instruction line with an optional trailing comment.
-
-    Used by ``ValueEndif.toString`` for the ``.endif [// <comment>]``
-    rendering. Layout rules:
-
-      * ``comment`` empty OR ``_outputNoComment()`` returns True ->
-        ``"{instr}\\n"`` with no padding.
-      * Otherwise: ``instr`` is right-padded with spaces to width 50
-        (``max(0, 50 - len(instr))`` spaces), then ``" // {comment}\\n"``
-        is appended. Padding width 50 matches the column where rocisa
-        instruction lines align their trailing ``// ...`` notes.
-
-    Currently used only by ``ValueEndif``; Phase 5 (assembly emit)
-    will need the full surface (including an ``outputInlineAsm``
-    branch that wraps the instruction string in ``"...\\n\\t"`` for
-    inline-asm output). When that lands, lift this into a public
-    ``format.py`` module; for now keeping it private to ``code.py``
-    keeps the surface area minimal.
-    """
-    if not comment or _outputNoComment():
-        return instr + "\n"
-    padding = " " * max(0, 50 - len(instr))
-    return f"{instr}{padding} // {comment}\n"
-
-
 def _to_hex_parity(num: int) -> str:
     """Lowercase hex (no ``0x`` prefix) mirroring rocisa's ``std::hex``
     cast over an ``int64_t``.
@@ -546,12 +520,9 @@ def _to_hex_parity(num: int) -> str:
 # Preprocessor conditional blocks -- ValueIf / ValueElseIf / ValueEndif.
 # ---------------------------------------------------------------------------
 #
-# Mirror of rocisa's ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``.
-# These produce the GNU assembler preprocessor directives ``.if`` /
-# ``.elseif`` / ``.endif`` that KernelWriter uses to gate macro /
-# kernel-text sections at assemble time (CustomSchedule.py:448-508
-# chains them; KernelWriterAssembly.py:1827 uses a single ValueEndif
-# for the "overflowed resources" guard).
+# These nodes carry assembler conditional metadata in the adaptor Module tree.
+# ``_populate_one_item`` forwards ValueIf / ValueEndif to PyLogicalModule
+# sidecars; StinkyAsmEmitter owns their final assembly formatting.
 #
 # Parity notes:
 #   * ``Item.name`` is set to the CLASS NAME ("ValueIf" / ... ) rather
@@ -560,16 +531,8 @@ def _to_hex_parity(num: int) -> str:
 #     ``findNamedItem("ValueIf")`` matches every ValueIf node in a
 #     Module; KernelWriter doesn't rely on that today but the parity
 #     keeps any future searcher behaviour identical.
-#   * Subclasses of ``Item`` -- ``__str__`` / ``prettyPrint`` /
-#     ``countType`` / ``countExactType`` / 7 cap-proxy methods all
-#     come from Item's defaults. We override only ``toString``,
-#     ``__deepcopy__``, ``__getstate__``, ``__setstate__`` -- the
-#     same four overrides rocisa's nanobind binding wires up
-#     explicitly.
 #   * ValueIf / ValueElseIf store a ``value`` (the condition
-#     expression); ValueEndif stores a ``comment`` and uses
-#     ``_format_endif_str`` to byte-match rocisa's ``formatStr``
-#     padding semantics.
+#     expression); ValueEndif stores a ``comment``.
 
 class ValueIf(Item):
     """``.if <value>`` directive; mirror of ``rocisa::ValueIf``."""
@@ -581,12 +544,6 @@ class ValueIf(Item):
         # condition expression -- matches rocisa's ctor.
         super().__init__(name="ValueIf")
         self.value: str = value
-
-    def toString(self) -> str:
-        # Raw ``.if`` + value + newline; no padding / comment support
-        # (the condition expression IS the trailing payload on this
-        # line).
-        return f".if {self.value}\n"
 
     def __deepcopy__(self, memo):
         # Copy ctor -- a fresh ValueIf with the same value.
@@ -643,14 +600,7 @@ class ValueElseIf(Item):
 
 
 class ValueEndif(Item):
-    """``.endif [// <comment>]`` directive; mirror of
-    ``rocisa::ValueEndif``.
-
-    The comment is padding-aligned to column 50 to match how rocisa
-    instruction lines align their trailing ``// ...`` notes, and is
-    suppressed entirely when ``outputNoComment`` is set (see
-    ``_format_endif_str`` for the exact rules).
-    """
+    """Carries a ``.endif`` directive's optional comment."""
 
     __slots__ = ("comment",)
 
@@ -661,12 +611,6 @@ class ValueEndif(Item):
         # ctor.
         super().__init__(name="ValueEndif")
         self.comment: str = comment
-
-    def toString(self) -> str:
-        # ``.endif`` + optional ``// <comment>`` padded to column 50;
-        # gated by ``outputNoComment``. See ``_format_endif_str`` for
-        # the byte-level rules.
-        return _format_endif_str(".endif", self.comment)
 
     def __deepcopy__(self, memo):
         clone = ValueEndif(self.comment)
@@ -1519,6 +1463,12 @@ class Module(Item):
             it._populate_logical_module(lm)
             if it.name:
                 lm.end_group(it.name)
+            return
+        if isinstance(it, ValueIf):
+            lm.add_if_directive(it.value)
+            return
+        if isinstance(it, ValueEndif):
+            lm.add_endif_directive(it.comment)
             return
         if isinstance(it, ValueSet):
             text = it.toString().strip()  # ".set <sym>, <val>"
