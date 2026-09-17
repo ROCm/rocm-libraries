@@ -16,4 +16,4 @@
 #
 # Blank lines and lines starting with # are ignored.
 
-GPU_HipdnnShimConvBiasActivApi_FP16.FusedForwardMatchesCpuReference | passed[parity_served_3d-ndhwc=true] | passed[parity_served_3d-ndhwc=false] | MIOpen serves fused conv+bias+activation on this 3-D NDHWC case through a four-operator fusion plan, which the forwarded path cannot build: it emits a three-node hipDNN graph, and MIOpen's only three-operator CK fusion solver is 2-D only. See miopen-hipdnn-conv-forwarding-fused-bias-activation-problem.md.
+GPU_HipdnnShimConvBiasActivApi_FP16.FusedForwardMatchesCpuReference | passed[parity_served_3d-ndhwc=true] | passed[parity_served_3d-ndhwc=false] | MIOpen serves this 3-D NDHWC case with a four-operator plan (conv + scale-add + bias + activation) matched only by ConvCKIgemmFwdBiasResAddActivFused. The forwarded path drops the scale-add, so the provider builds a three-operator plan, and its only CK solver, ConvCKIgemmFwdBiasActivFused, is 2-D only -- hipDNN finds no engine configuration. Closing it needs 3-D instances in that solver, or a case both solver sets cover.
