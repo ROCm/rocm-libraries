@@ -12,7 +12,10 @@ from rocke.examples.gfx1250.gemm import _scaled_gemm_example
 from rocke.instances.gfx1250.block_scaled_gemm import build_block_scaled_gemm
 
 
-@pytest.mark.parametrize("family,dtype", [("mxfp8", "fp8e4m3"), ("mxfp4", "fp4"), ("mxfp6", "fp6"), ("mxfp6", "bf6")])
+@pytest.mark.parametrize(
+    "family,dtype",
+    [("mxfp8", "fp8e4m3"), ("mxfp4", "fp4"), ("mxfp6", "fp6"), ("mxfp6", "bf6")],
+)
 @pytest.mark.parametrize("path,block_k", [("wmma_scale", 32), ("wmma_scale16", 16)])
 def test_example_contract_and_lowering(family, dtype, path, block_k):
     example = importlib.import_module(f"rocke.examples.gfx1250.gemm.{family}_gemm")
@@ -50,10 +53,15 @@ def test_example_all_cases_and_hip_route(monkeypatch):
     assert kwargs == {"compile_route": "hip"}
 
 
-@pytest.mark.parametrize("a,b", [("fp8e4m3", "fp4"), ("fp4", "fp8e4m3"), ("fp6", "bf6")])
+@pytest.mark.parametrize(
+    "a,b", [("fp8e4m3", "fp4"), ("fp4", "fp8e4m3"), ("fp6", "bf6")]
+)
 def test_mixed_example_independent_operands(a, b):
     from rocke.examples.gfx1250.gemm.mixed_scaled_gemm import make_spec
-    args = argparse.Namespace(m=32, n=48, k=256, matrix_path="wmma_scale16", dtype_a=a, dtype_b=b)
+
+    args = argparse.Namespace(
+        m=32, n=48, k=256, matrix_path="wmma_scale16", dtype_a=a, dtype_b=b
+    )
     spec = make_spec(args)
     assert (spec.dtype_a, spec.dtype_b, spec.scale_dtype) == (a, b, "e8m0")
     assert "@llvm.amdgcn.wmma.scale16" in lower_kernel_to_llvm(
@@ -64,5 +72,6 @@ def test_mixed_example_independent_operands(a, b):
 @pytest.mark.parametrize("a,b", [("fp4", "fp4e2m1"), ("fp6", "fp6e2m3")])
 def test_mixed_example_rejects_equal_canonical_formats(a, b):
     from rocke.examples.gfx1250.gemm.mixed_scaled_gemm import make_spec
+
     with pytest.raises(ValueError, match="homogeneous"):
         make_spec(argparse.Namespace(dtype_a=a, dtype_b=b))
