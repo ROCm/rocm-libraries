@@ -306,6 +306,7 @@ jobs:
           ldd "$HIPBLASLT_TEST" 2>&1 | grep -iE "hipblaslt|=> not found" || true
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
+          HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
           "$HIPBLASLT_TEST" "${FILTER[@]}" \
             --gtest_output=xml:test_results/hipblaslt_test.xml 2>&1 \
             | tee test_results/hipblaslt_test.log
@@ -331,11 +332,13 @@ jobs:
           K_ARG=()
           [ -n "$TL_PYTEST_K" ] && K_ARG+=(-k "$TL_PYTEST_K")
           # Common GEMM tests run against the prebuilt client. Per-test cap 2700s (45 min).
+          TL_TARGET="$(python3 -c 'from Tensile.GpuRevisionTarget import detect_gpu_revision_target as d; print(d())' 2>/dev/null || echo gfx1250v0)"
+          echo "TensileLite gpu-target (asic-revision detected): $TL_TARGET"
           pytest -p no:cacheprovider Tensile/Tests/common \
-            -m "$TL_MARKERS" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
+            -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=2700 -n "${TL_WORKERS:-1}" \
             --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
-            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,gfx1250 \
+            --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++",--gpu-targets,$TL_TARGET \
             --junitxml="$GITHUB_WORKSPACE/tensilelite_test_results/common_test.xml" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
 
