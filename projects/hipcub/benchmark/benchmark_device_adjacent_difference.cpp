@@ -150,7 +150,7 @@ class device_adjacent_difference_benchmark : public primbench::benchmark_interfa
                                                    d_input,
                                                    d_output,
                                                    items,
-                                                   hipcub::Sum{},
+                                                   benchmark_utils::plus{},
                                                    stream));
         };
 
