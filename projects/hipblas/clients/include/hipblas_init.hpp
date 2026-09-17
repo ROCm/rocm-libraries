@@ -172,15 +172,18 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
 template <typename T>
 void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t incx)
 {
-    if(incx < 0)
-        x -= (N - 1) * incx;
-
     // Serial pre-fault before the parallel fill (see hipblas_prefault_pages).
+    // Do this on the ORIGINAL x (buffer start) before the incx<0 adjustment: the
+    // fill accesses the whole span x[0 .. (N-1)*|incx|] regardless of sign, so
+    // pre-faulting from the shifted (near-end) x would overrun the allocation.
     if(N > 0)
     {
         const int64_t abs_incx = incx < 0 ? -incx : incx;
         hipblas_prefault_pages(x, (size_t((N - 1) * abs_incx) + 1) * sizeof(*x));
     }
+
+    if(incx < 0)
+        x -= (N - 1) * incx;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -377,17 +380,19 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 template <typename T>
 void hipblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
 {
-    if(incx < 0)
-        x -= (N - 1) * incx;
-
     // Serially migrate this vector's pages back to RAM before the parallel fill
-    // (see hipblas_prefault_pages). After the incx<0 adjustment above, the loop
-    // writes x[0 .. (N-1)*|incx|] inclusive.
+    // (see hipblas_prefault_pages). Do this on the ORIGINAL x (buffer start)
+    // before the incx<0 adjustment: the fill spans x[0 .. (N-1)*|incx|]
+    // regardless of sign, so pre-faulting from the shifted (near-end) x would
+    // overrun the allocation.
     if(N > 0)
     {
         const int64_t abs_incx = incx < 0 ? -incx : incx;
         hipblas_prefault_pages(x, (size_t((N - 1) * abs_incx) + 1) * sizeof(*x));
     }
+
+    if(incx < 0)
+        x -= (N - 1) * incx;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -508,15 +513,17 @@ void hipblas_init_matrix_trig(hipblas_matrix_type matrix_type,
 template <typename T>
 void hipblas_init_vector_trig(T* x, int64_t N, int64_t incx, bool seedReset = false)
 {
-    if(incx < 0)
-        x -= (N - 1) * incx;
-
-    // Serial pre-fault before the parallel fill (see hipblas_prefault_pages).
+    // Serial pre-fault before the parallel fill (see hipblas_prefault_pages), on
+    // the ORIGINAL x (buffer start) before the incx<0 adjustment -- the fill
+    // spans x[0 .. (N-1)*|incx|] regardless of sign.
     if(N > 0)
     {
         const int64_t abs_incx = incx < 0 ? -incx : incx;
         hipblas_prefault_pages(x, (size_t((N - 1) * abs_incx) + 1) * sizeof(*x));
     }
+
+    if(incx < 0)
+        x -= (N - 1) * incx;
 
 #ifdef _OPENMP
 #pragma omp parallel for
