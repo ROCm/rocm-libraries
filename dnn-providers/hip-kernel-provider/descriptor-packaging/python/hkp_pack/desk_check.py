@@ -80,12 +80,12 @@ def _values_agree(field: str, spec_v, meta_v) -> bool:
     return str(spec_v).lower() == str(meta_v).lower()
 
 
-# The last-resort field list, for a bundle that declares no specialization
-# contract at all. A bundle that DOES declare one states exactly which fields
-# its kernels were specialized on, and `load_variant_set` reads that statement
-# instead: a generic guess standing in for the bundle's own declaration is how
-# distinct kernels collapse onto one matcher tuple and a clean bundle reports
-# hundreds of false collisions.
+# One engine's attention-shaped field list. Nothing resolves to it: a bundle's
+# own declaration answers first and `metadata_identity_fields` answers otherwise,
+# because a generic guess standing in for either is how distinct kernels collapse
+# onto one matcher tuple and a clean bundle reports hundreds of false collisions.
+# Kept as the reference the tests measure that failure against, and as the list
+# `--field` exists to let a caller supply deliberately.
 DEFAULT_MATCHER_FIELDS = (
     "dtype",
     "batch",
@@ -132,6 +132,11 @@ def declared_matcher_fields(kdp_doc: dict, entries) -> tuple[str, ...] | None:
     Union across entries, because one shard may carry several consumers and a
     field any of them keys on is distinguishing for the shard.
 
+    Both halves count: `validate_consumer` makes them exhaust the KMD, so a
+    matcher-only field is one the matcher still compares. `KernelIngestorStateManager`
+    keys its catalog on the whole tuple, so a narrower set reports collisions it
+    would not.
+
     Resolution goes through `agreement.resolved_contract`, which already looks
     in both places a contract may live: the kernel's own `provenance`, then the
     enclosing KDP's. The enclosing document is offered only to inline entries,
@@ -148,10 +153,27 @@ def declared_matcher_fields(kdp_doc: dict, entries) -> tuple[str, ...] | None:
         for consumer in contract.get("consumers") or []:
             if not isinstance(consumer, dict):
                 continue
-            for field in consumer.get("metadata_fields") or []:
-                if field not in fields:
-                    fields.append(field)
+            for key in ("metadata_fields", "matcher_only_fields"):
+                for field in consumer.get(key) or []:
+                    if field not in fields:
+                        fields.append(field)
     return tuple(fields) or None
+
+
+def metadata_identity_fields(kernels: list[dict]) -> tuple[str, ...]:
+    """Every field any kernel states in its metadata, first-appearance order.
+
+    The identity for a bundle declaring no contract -- ordinary for a kind the
+    obligation exempts, not degraded. Derived rather than fixed because a fixed
+    list describes one engine's shape and drops every other bundle's
+    distinguishing fields.
+    """
+    fields: list[str] = []
+    for kernel in kernels:
+        for field in kernel.get("metadata") or {}:
+            if field not in fields:
+                fields.append(field)
+    return tuple(fields)
 
 
 def load_variant_set(kdp_path: Path) -> tuple[list[dict], tuple[str, ...] | None]:
@@ -390,12 +412,26 @@ def metadata_spec_drift(kernels: list[dict], fields=None) -> list[tuple[str, str
     return bad
 
 
+def _reachable_together(group: list[dict]) -> int:
+    """The largest number of kernels in `group` one device reaches.
+
+    A tuple shared across disjoint arches is no collision: each kernel is the only
+    candidate on its own device. An absent or empty `arch` is the wildcard
+    `arch_matches` reads it as, so it counts against every arch in the group.
+    """
+    sets = [frozenset(k.get("arch") or ()) for k in group]
+    named = frozenset().union(*sets) if sets else frozenset()
+    if not named:
+        return len(group)
+    return max(sum(1 for s in sets if not s or arch in s) for arch in named)
+
+
 def duplicate_matcher_tuples(
     kernels: list[dict], fields=DEFAULT_MATCHER_FIELDS
 ) -> dict[tuple, int]:
     """Invariant 2: no two kernels may share a matcher tuple on the same
-    arch -- one of them is unreachable. Returns {tuple: count} for every
-    tuple shared by more than one kernel (empty means none).
+    arch -- one of them is unreachable. Returns {tuple: count} for every tuple
+    two kernels reach one device with, the scope the runtime refuses in.
 
     The compared field set is the UNION of `fields` present in ANY kernel's
     metadata, not the fields of ``kernels[0]``. Keying off the first kernel
@@ -407,10 +443,12 @@ def duplicate_matcher_tuples(
     "declares block_n=64" are genuinely different variants.
     """
     present = [f for f in fields if any(f in k.get("metadata", {}) for k in kernels)]
-    tups = collections.Counter(
-        tuple(k.get("metadata", {}).get(f, _ABSENT) for f in present) for k in kernels
-    )
-    return {t: c for t, c in tups.items() if c > 1}
+    groups: dict[tuple, list[dict]] = collections.defaultdict(list)
+    for kernel in kernels:
+        key = tuple(kernel.get("metadata", {}).get(f, _ABSENT) for f in present)
+        groups[key].append(kernel)
+    counts = {t: _reachable_together(g) for t, g in groups.items()}
+    return {t: c for t, c in counts.items() if c > 1}
 
 
 def toc_key_uniqueness(kernels: list[dict]) -> tuple[int, int]:
@@ -482,7 +520,7 @@ class DeskCheckReport:
     def __init__(
         self,
         kernels: list[dict],
-        fields=DEFAULT_MATCHER_FIELDS,
+        fields=None,
         drift_fields=None,
         *,
         mode: str,
@@ -502,7 +540,11 @@ class DeskCheckReport:
         self.agreement_unclaimed = list(agreement_unclaimed or [])
         self.agreement_verified = agreement_verified
         self.kernel_count = len(kernels)
-        self.fields = tuple(fields)
+        # Derived, not a fixed list: a caller that omits `fields` gets the identity
+        # these descriptors carry rather than one engine's shape silently applied.
+        self.fields = (
+            metadata_identity_fields(kernels) if fields is None else tuple(fields)
+        )
         self.drift_fields = (
             drift_comparable_fields(kernels)
             if drift_fields is None

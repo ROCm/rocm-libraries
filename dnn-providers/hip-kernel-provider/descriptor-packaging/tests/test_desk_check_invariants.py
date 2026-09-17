@@ -44,6 +44,7 @@ from hkp_pack.desk_check import (
     duplicate_matcher_tuples,
     load_kernels,
     load_variant_set,
+    metadata_identity_fields,
     metadata_spec_drift,
     symbol_distinctness,
     toc_key_uniqueness,
@@ -180,6 +181,33 @@ class TestInvariant2DuplicateMatcherTuples:
         assert (
             duplicate_matcher_tuples(_kernels(packed_desk_check), _MATCHER_FIELDS) == {}
         )
+
+    @staticmethod
+    def _twins(left_arch, right_arch):
+        """Two kernels identical but for the arches they declare."""
+        return [
+            {"name": n, "metadata": {"dtype": "FLOAT"}, **({"arch": a} if a else {})}
+            for n, a in (("left", left_arch), ("right", right_arch))
+        ]
+
+    def test_one_tuple_on_disjoint_arches_is_not_a_duplicate(self):
+        """Each is the only candidate on its own device, so neither is
+        unreachable and dropping either leaves a device uncovered. The runtime
+        refuses a duplicate only on an arch both kernels reach."""
+        kernels = self._twins(["gfx942"], ["gfx950"])
+        assert duplicate_matcher_tuples(kernels, ("dtype",)) == {}
+
+    def test_one_tuple_on_a_shared_arch_is_still_a_duplicate(self):
+        """The control for the case above: the arch scoping must narrow the
+        check, not switch it off. A single overlapping arch is enough."""
+        kernels = self._twins(["gfx942", "gfx950"], ["gfx950"])
+        assert duplicate_matcher_tuples(kernels, ("dtype",)) == {("FLOAT",): 2}
+
+    def test_an_arch_less_kernel_collides_with_every_arch(self):
+        """An absent arch is the wildcard `arch_matches` reads it as, so it
+        reaches the other kernel's device and the two are a real collision."""
+        kernels = self._twins(None, ["gfx942"])
+        assert duplicate_matcher_tuples(kernels, ("dtype",)) == {("FLOAT",): 2}
 
     def test_real_pack_of_two_identical_matcher_tuples_is_detected(
         self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
@@ -755,16 +783,41 @@ class TestMatcherFieldsComeFromTheBundlesOwnContract:
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "duplicate matcher tuples: none" in proc.stdout
 
-    def test_a_bundle_declaring_no_contract_keeps_the_generic_list(self, tmp_path):
-        """The fallback is what a bundle with nothing to say about its own
-        specialization still gets checked against -- removing it would leave
-        such a bundle with an empty matcher tuple, under which every kernel
-        collides with every other."""
+    def test_a_bundle_declaring_no_contract_is_keyed_on_its_own_metadata(
+        self, tmp_path
+    ):
+        """A bundle with nothing to say about its specialization is still keyed
+        on something, and on the fields it actually carries.
+
+        Keyed on a fixed list instead, these two kernels differ only in a field
+        that list does not carry and report a collision neither the runtime nor
+        the bundle has. Keyed on nothing, every kernel would collide with every
+        other; the derivation is what stands between those two.
+        """
         kdp = self._bundle(tmp_path, None)
         assert load_variant_set(kdp)[1] is None
+        assert metadata_identity_fields(load_kernels(kdp)) == (
+            "head_size",
+            "waves_per_eu",
+        )
         proc = _run_cli(str(kdp))
-        assert proc.returncode == 1, proc.stdout + proc.stderr
-        assert "duplicate matcher tuples: {(64,): 2}" in proc.stdout
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "duplicate matcher tuples: none" in proc.stdout
+
+    def test_a_kernel_carrying_no_metadata_derives_an_empty_identity(self):
+        """Nothing stated is nothing to key on, and the empty identity is the
+        honest answer rather than a placeholder.
+
+        No fallback follows it: `duplicate_matcher_tuples` drops every field no
+        kernel carries, so on this input any list it could fall back to and the
+        empty one produce the same verdict.
+        """
+        assert metadata_identity_fields([{"name": "k"}]) == ()
+        assert duplicate_matcher_tuples(
+            [{"name": "a"}, {"name": "b"}], ()
+        ) == duplicate_matcher_tuples(
+            [{"name": "a"}, {"name": "b"}], ("dtype", "batch")
+        )
 
     def test_an_explicit_field_still_outranks_the_declaration(self, tmp_path):
         """A caller who names the fields is answering a different question

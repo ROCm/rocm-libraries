@@ -69,11 +69,11 @@ while _PKG_ROOT in sys.path:
 sys.path.insert(0, _PKG_ROOT)
 
 from hkp_pack.desk_check import (  # noqa: E402
-    DEFAULT_MATCHER_FIELDS,
     MODES,
     DeskCheckReport,
     compiled_agreement,
     load_variant_set,
+    metadata_identity_fields,
 )
 from hkp_pack.errors import HkpPackError  # noqa: E402
 
@@ -164,9 +164,10 @@ def main(argv=None):
         # a broken tool rather than as a broken artifact.
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
-    # An explicit --field always wins; the bundle's own declaration beats the
-    # generic fallback, which is left for a bundle that declares nothing.
-    fields = tuple(args.fields) or declared_fields or DEFAULT_MATCHER_FIELDS
+    # No generic fallback after the derived one: it is reached only by a bundle
+    # whose kernels carry no metadata, and `duplicate_matcher_tuples` drops every
+    # field absent from all of them, so any list and the empty one agree there.
+    fields = tuple(args.fields) or declared_fields or metadata_identity_fields(kernels)
     report = DeskCheckReport(
         kernels,
         fields,

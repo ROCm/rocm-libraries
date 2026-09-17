@@ -319,12 +319,12 @@ obligations. An authored tree without compiler evidence can receive only an
 explicit structural result; it cannot be labeled compiler-clean.
 
 The matcher field list is resolved in a fixed order of precedence: an explicit
-`--field` outranks everything; otherwise, when the bundle declares
-`specialization_contract.metadata_fields`, **that declaration is the field list**;
-`DEFAULT_MATCHER_FIELDS` is the last-resort fallback left for a bundle that declares
-no contract. Desk-checking a bundle against the fields it actually declares is the
-point — falling back to the generic list for a bundle that states its own would check
-a different set of columns and still print a result.
+`--field` outranks everything; otherwise, when the bundle declares a
+`specialization_contract`, **both halves of its partition are the field list**, since
+a matcher-only field is one the matcher still compares; failing that, the fields the
+descriptors themselves carry. Desk-checking a bundle against the fields it actually
+declares is the point — a generic list standing in for a bundle that states its own
+checks a different set of columns and still prints a result.
 
 The metadata/spec **drift** list (`--drift-field`, invariant 1) resolves separately
 and never inherits any of that. Absent an explicit `--drift-field`, it is every field
