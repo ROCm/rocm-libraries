@@ -43,6 +43,16 @@ struct SetDirectiveEntry {
     std::string value;
 };
 
+enum class ConditionalDirectiveKind { IF, ENDIF };
+
+/// Entry for an assembler conditional directive emitted inline with instructions.
+struct ConditionalDirectiveEntry {
+    size_t position;
+    size_t order;
+    ConditionalDirectiveKind kind;
+    std::string payload;  // Condition for .if; comment for .endif.
+};
+
 /// Entry for a label to be emitted inline with instructions.
 /// @c position is the instruction index before which the label is inserted.
 /// @c order is the global insertion sequence used to interleave with other entry types.
@@ -184,6 +194,11 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @brief Get all recorded .set directive entries (position-tagged).
      */
     const std::vector<SetDirectiveEntry>& getSetDirectives() const;
+
+    /// Record assembler conditional directives at the current source position.
+    void addIfDirective(const std::string& condition);
+    void addEndifDirective(const std::string& comment = "");
+    const std::vector<ConditionalDirectiveEntry>& getConditionalDirectives() const;
 
     /**
      * @brief Record a label to be emitted inline at the current position.

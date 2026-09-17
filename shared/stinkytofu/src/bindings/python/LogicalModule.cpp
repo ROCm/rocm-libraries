@@ -31,6 +31,7 @@ struct PyLogicalModule::Impl {
     std::string name;
     std::vector<std::shared_ptr<LogicalInstruction>> instructions;
     std::vector<SetDirectiveEntry> setDirectives;
+    std::vector<ConditionalDirectiveEntry> conditionalDirectives;
     std::vector<LabelEntry> labels;
     std::vector<TextBlockEntry> textBlocks;
     std::vector<GroupMarkerEntry> groupMarkers;
@@ -91,6 +92,22 @@ void PyLogicalModule::addSetDirective(const std::string& symbol, const std::stri
 
 const std::vector<SetDirectiveEntry>& PyLogicalModule::getSetDirectives() const {
     return pImpl->setDirectives;
+}
+
+void PyLogicalModule::addIfDirective(const std::string& condition) {
+    pImpl->conditionalDirectives.push_back(
+        ConditionalDirectiveEntry{pImpl->instructions.size(), pImpl->globalOrder++,
+                                  ConditionalDirectiveKind::IF, condition});
+}
+
+void PyLogicalModule::addEndifDirective(const std::string& comment) {
+    pImpl->conditionalDirectives.push_back(
+        ConditionalDirectiveEntry{pImpl->instructions.size(), pImpl->globalOrder++,
+                                  ConditionalDirectiveKind::ENDIF, comment});
+}
+
+const std::vector<ConditionalDirectiveEntry>& PyLogicalModule::getConditionalDirectives() const {
+    return pImpl->conditionalDirectives;
 }
 
 void PyLogicalModule::addLabel(const std::string& labelName, uint16_t alignment,
