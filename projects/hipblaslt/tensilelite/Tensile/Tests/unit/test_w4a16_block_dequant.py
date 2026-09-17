@@ -345,6 +345,89 @@ def test_scale_srd_advances_every_nth_iteration(toolchain, depthU, itersPerGroup
         assert got.startswith("s"), f"DepthU={depthU}: unconditional advance by {got}"
 
 
+FP16_EXLLAMA = {
+    "DataType": "H", "MacDataTypeA": "H", "DestDataType": "H",
+    "DataTypeScaleA": "H", "Int4EncodingA": "UnsignedBias8ExLlama",
+}
+
+
+def test_fp16_exllama_dequantizes_in_packed_fp16(toolchain):
+    """An fp16 MAC type plus ExLlama's paired nibbles takes the packed lowering:
+    half the VALU of the f32 one, and no pack at the end."""
+    _, whole = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
+                     problemType=dict(FP16_EXLLAMA))
+    # Scope to the dequantize: the epilogue converts its f32 accumulators to
+    # fp16 too, and that is not what this is about.
+    src = whole[whole.index("w4a16: save packed int4 dword 0"):whole.index("ds_store")]
+
+    # One magic per nibble position, each with the exponent that makes its
+    # nibble's lowest bit worth 1.0: 1024.0 at mantissa bits 0-3, 64.0 at 4-7.
+    # They sit in SGPRs because the fused mask+OR has spent its one literal.
+    for magic in ("0x64006400", "0x54005400"):
+        assert re.search(r"s_mov_b32 s\[sgprScaleAPkMagic\+\d\], " + magic, whole), \
+            "fp16 magic constant %s missing" % magic
+    for mask in ("0xf000f", "0xf000f0"):
+        assert re.search(
+            r"v_and_or_b32 \S+, \S+, " + mask + r", s\[sgprScaleAPkMagic\+\d\]", src), \
+            "no fused mask+OR for nibble mask %s" % mask
+    assert re.search(r"v_pk_add_f16 ", src), "no packed subtract"
+    assert re.search(r"v_pk_mul_f16 ", src), "no packed scale"
+
+    # The f32 lowering's fingerprints must all be gone from the dequantize.
+    assert "0x43004300" not in src, "still using the bf16 magic constant"
+    assert not re.search(r"v_or_b32 ", src), "mask and OR not fused"
+    assert not re.search(r"v_cvt_f16_f32 ", src), "still converting f32 -> fp16"
+
+    # A fused v_pk_fma_f16 would need -(1024+z)*s pre-rounded to fp16, an error
+    # the same size as the answer. Pin that it is not used here.
+    assert not re.search(r"v_pk_fma_f16 ", src), "fused FMA reintroduces the cancellation"
+
+
+def test_fp16_exllama_lifts_nibbles_in_place(toolchain):
+    """Two of the four nibble pairs are lifted where they already lie, by
+    choosing the magic to match the nibble's position rather than shifting it
+    to bit 0. The other two need mantissa bits 8-11, which are the exponent, so
+    one shift per dword remains -- but only one, not three."""
+    _, whole = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
+                     problemType=dict(FP16_EXLLAMA))
+    body = whole[whole.index("w4a16: save packed int4 dword 0"):whole.index("ds_store")]
+    shifts = re.findall(r"v_lshrrev_b32 ", body)
+    assert len(shifts) == 1, (
+        "expected a single shift per dword, found %d" % len(shifts))
+
+
+def test_fp16_exllama_packed_is_half_the_valu(toolchain):
+    """The whole point of the packed lowering. Counted rather than asserted in
+    prose so a later change that quietly reinstates the f32 path is caught."""
+    _, pk = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
+                  problemType=dict(FP16_EXLLAMA))
+    bf = dict(FP16_EXLLAMA)
+    bf.update({"DataType": "B", "MacDataTypeA": "B", "DestDataType": "B",
+               "DataTypeScaleA": "B"})
+    _, f32 = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
+                   problemType=bf)
+
+    def valuBetween(src, first, last):
+        body = src[src.index(first):src.index(last)]
+        return len([l for l in body.splitlines() if l.startswith("v_")])
+
+    pkN = valuBetween(pk, "w4a16: save packed int4 dword 0", "ds_store")
+    f32N = valuBetween(f32, "w4a16: save packed int4 dword 0", "ds_store")
+    assert pkN * 2 <= f32N, (
+        "packed lowering is %d VALU against the f32 path's %d; expected at most half"
+        % (pkN, f32N))
+
+
+def test_fp16_scale_is_masked_before_duplication(toolchain):
+    """The scale arrives via buffer_load_d16_b16, which leaves the upper half of
+    the register at whatever it held. Duplicating without masking first puts
+    that garbage in the low lane and the kernel returns NaN."""
+    _, src = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
+                   problemType=dict(FP16_EXLLAMA))
+    dup = re.search(r"v_and_b32 (\S+), 0xffff, \S+.*\n.*v_lshl_or_b32 \1, \1, 16, \1", src)
+    assert dup, "scale duplicated without masking the stale d16 high half"
+
+
 def test_scale_offset_uses_group_shift(toolchain):
     for blockSize in (32, 128):
         _, src = _emit(toolchain, blockSize=blockSize, depthU=128)

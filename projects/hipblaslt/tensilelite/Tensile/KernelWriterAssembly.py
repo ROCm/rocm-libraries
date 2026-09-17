@@ -49,6 +49,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   FlatLoadD16B16, FlatLoadD16HIB16, FlatStoreB128, FlatStoreB32, FlatStoreB64, \
   FlatStoreD16B16, FlatStoreD16HIB16, GlobalReadInstruction, MXMFMAInstruction, MFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAddU64, SAndB32, \
+  VAddPKF16, VAndOrB32, VMulPKF16, \
   SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
@@ -79,7 +80,7 @@ from .Components.GlobalWriteBatch import GlobalWriteBatchWriter, emitFusedA2AGat
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
-from .SolutionStructs.Problem import blockDequantItersPerGroupA
+from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelSource
@@ -5014,6 +5015,19 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMovB32(dst=sgpr("SrdScaleA+3"), src="Srd127_96",
                        comment="scaleA: set bits 127_96 in SRD"))
 
+    if blockDequantPackedFp16A(kernel["ProblemType"]):
+      n = len(self.FP16_PK_LIFTS)
+      for i, (_m, magicBits, magicVal, _sh) in enumerate(self.FP16_PK_LIFTS):
+        module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % i),
+                           src=hex((magicBits << 16) | magicBits),
+                           comment="w4a16: two fp16 holding %d, for the fused mask+OR"
+                                   % magicVal))
+        neg = 0x8000 | magicBits
+        module.add(SMovB32(dst=sgpr("ScaleAPkMagic+%u" % (n + i)),
+                           src=hex((neg << 16) | neg),
+                           comment="w4a16: two fp16 holding -%d, for the fused bias"
+                                   % magicVal))
+
     if self.blockScaleAItersPerGroup(kernel) > 1:
       # Counts K iterations so the pointer can step every itersPerGroup of
       # them. Starts at 0 so the first increment, which closes iteration 0,
@@ -5249,6 +5263,81 @@ class KernelWriterAssembly(KernelWriter):
     """The IEEE-754 binary32 bit pattern of `value`, for use as an inline literal."""
     return struct.unpack("<I", struct.pack("<f", float(value)))[0]
 
+  # Two fp16 magics, one per nibble position within a byte. Each picks the
+  # exponent that makes its nibble's lowest bit worth exactly 1.0, so OR-ing the
+  # nibble in gives magic+q with no rounding -- the trick 0x4300 plays for bf16
+  # at 128, but chosen so the nibble can be lifted where it already lies:
+  #
+  #   0x6400 = 1024.0, nibble at mantissa bits 0-3 -> 1024 + q
+  #   0x5400 =   64.0, nibble at mantissa bits 4-7 ->   64 + q
+  #
+  # (mask, magic bits, magic value, nibble shift within the half)
+  FP16_PK_LIFTS = (
+      (0x000F000F, 0x6400, 1024, 0),
+      (0x00F000F0, 0x5400,   64, 4),
+  )
+  # Only two per half: a nibble at bits 8-11 would run off the 10-bit mantissa
+  # into the exponent, so the other two are reached by shifting the dword once.
+  FP16_PK_LIFT_SHIFT = 8
+
+  def blockScaleADequantFp16Pk(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx,
+                               numSrcDwords, vSrc, vTmp, vScalePk, vNegZPk):
+    """The packed-fp16 dequantize: ExLlama nibbles -> two fp16 per instruction.
+
+    ExLlama puts elements 2p and 2p+1 at nibble p of the dword's low and high
+    halves, so one mask lifts a pair already laid out the way a packed fp16 op
+    wants it. Three VALU per pair: the mask and the magic OR fused into one
+    v_and_or_b32, then two packed ops -- against ten for the f32 lowering, and
+    the result is already a packed pair so nothing has to pack it.
+
+    Only the first pair of each dword used to avoid a shift. Lifting a nibble
+    in place with a magic chosen per nibble position (FP16_PK_LIFTS) gets that
+    for the second as well; the third and fourth would need mantissa bits 8-11,
+    which are the exponent, so the dword is shifted once and the pair of lifts
+    repeats. One shift per dword rather than three.
+
+    Exact, in the sense that it rounds exactly once, like the f32 path:
+
+      * magic|q is magic+q with no rounding (the magic's ulp is 1 at that
+        exponent, and q <= 15 fits the nibble's mantissa bits).
+      * subtracting magic+z is exact too: both operands are integers within a
+        binade, so Sterbenz applies and the difference q-z is exact.
+      * only the multiply by s rounds, which is the single rounding the f32
+        lowering also ends on.
+
+    Fusing the last two into one v_pk_fma_f16 would NOT be exact: its addend
+    -(magic+z)*s would have to be rounded to fp16 first, and that error -- half
+    an ulp of a quantity around magic*s -- is of the same order as the answer
+    (q-z)*s itself. That is the same cancellation that rules out
+    v_dot2_bf16_bf16 on the f32 path, for the same reason.
+    """
+    module = Module("blockScaleADequantFp16Pk")
+    for d in range(numSrcDwords):
+      src = destVgprPrefix + "+%u+%u" % (g2lIdx + tP["shiftGR"], d)
+      # The expansion writes back over the source dword, so stash it first --
+      # and the stash is what gets shifted, leaving G2L untouched.
+      module.add(VMovB32(dst=vgpr(vSrc), src=vgpr(src),
+                         comment="w4a16: save packed int4 dword %u" % d))
+      for pair in range(4):
+        mask, _magicBits, magicVal, _sh = self.FP16_PK_LIFTS[pair % len(self.FP16_PK_LIFTS)]
+        if pair == len(self.FP16_PK_LIFTS):
+          module.add(VLShiftRightB32(dst=vgpr(vSrc), shiftHex=hex(self.FP16_PK_LIFT_SHIFT),
+                                     src=vgpr(vSrc),
+                                     comment="w4a16: next two nibbles down to bits 0-7"))
+        dst = destVgprPrefix + "+%u+%u" % (g2lIdx, d * 4 + pair)
+        which = pair % len(self.FP16_PK_LIFTS)
+        module.add(VAndOrB32(dst=vgpr(vTmp), src0=vgpr(vSrc), src1=hex(mask),
+                             src2=sgpr("ScaleAPkMagic+%u" % which),
+                             comment="w4a16: int4 #%u and #%u -> two fp16 holding %d+q"
+                                     % (2 * pair, 2 * pair + 1, magicVal)))
+        module.add(VAddPKF16(
+            dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vNegZPk + which),
+            comment="w4a16: q - z (exact: both sides are integers near %d)" % magicVal))
+        module.add(VMulPKF16(
+            dst=vgpr(dst), src0=vgpr(vTmp), src1=vgpr(vScalePk),
+            comment="w4a16: (q - z)*s, packed"))
+    return module
+
   def blockScaleADequant(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords):
     """Expand `numSrcDwords` dwords of packed signed int4 into bf16, scaled by
     this load's group scale.
@@ -5277,14 +5366,32 @@ class KernelWriterAssembly(KernelWriter):
     hasPkBF16CVT = self.states.asmCaps.get(
         "HasPkBF16CVT", self.states.version[:2] in ((9, 5), (12, 5)))
 
+    # ExLlama's magic extraction yields (MAGIC_BIAS + q) rather than q, so the
+    # bias has to absorb it. Everything else is the same arithmetic.
+    magicBias = 128.0 if exLlama else 0.0
+    # The implicit zero-point of the unsigned encodings.
+    implicitZ = 8.0 if unsigned else 0.0
+    needBias = zeroPoint or magicBias or implicitZ
+
     # The unsigned encodings always need the bias register: even with no
     # zero-point tensor they subtract the implicit 8 (and ExLlama's magic 128).
     wantBias = zeroPoint or unsigned
+
+    # An fp16 MAC type plus ExLlama's paired nibble layout lets the whole
+    # dequantize stay in packed fp16: five VALU per nibble pair against the ten
+    # the f32 lowering needs, and the result lands already packed so the pack
+    # disappears too. See blockScaleADequantFp16Pk for why it stays exact.
+    # No capability gate: v_pk_add_f16 / v_pk_mul_f16 / v_and_or_b32 all
+    # assemble on every architecture Tensile targets, gfx90a through gfx1250.
+    fp16Pk = blockDequantPackedFp16A(kernel["ProblemType"])
 
     # 2 f32 lanes + 1 saved source dword + 1 f32 scale (+ 1 f32 -z*s bias),
     # plus the open-coded pack's scratch and its two round/Nan constants.
     needRneScratch = (not macIsHalf) and (not hasPkBF16CVT)
     numTmp = (5 if wantBias else 4) + (0 if not needRneScratch else 3)
+    # The packed lowering carries one bias per lift instead of a single -z*s.
+    if fp16Pk:
+      numTmp = max(numTmp, 4 + len(self.FP16_PK_LIFTS))
     tmp = self.vgprPool.checkOut(numTmp, tag="blockScaleADequant_tmp")
     vLo, vHi, vSrc, vScale = tmp, tmp + 1, tmp + 2, tmp + 3
     vNegZS = tmp + 4 if wantBias else None
@@ -5344,7 +5451,50 @@ class KernelWriterAssembly(KernelWriter):
                                  comment="w4a16: pack 2 bf16"))
       return insts
 
-    if scaleIsHalf:
+    if fp16Pk:
+      # Both operands want the value in each half. The scale was loaded with a
+      # zero-extending ushort load, so duplicating it is one op; the bias is a
+      # bit pattern, not arithmetic -- fp16 -(1024+z) is just 0xE400|z, because
+      # the magic constant puts z straight in the mantissa.
+      # The scale arrives via buffer_load_d16_b16, which writes only the low
+      # half and leaves the upper one at whatever it held, so mask before
+      # duplicating -- the f32 path never noticed because v_cvt_f16_f32 reads
+      # the low half only.
+      module.add(VAndB32(dst=vgpr(vScale), src0=hex(0xFFFF), src1=vgpr(scaleVgpr),
+                         comment="scaleA: drop the stale high half of the d16 load"))
+      module.add(VLShiftLeftOrB32(dst=vgpr(vScale), shiftHex=16, src0=vgpr(vScale),
+                                  src1=vgpr(vScale),
+                                  comment="scaleA: fp16 s -> both halves"))
+      if zeroPoint:
+        module.add(VAndB32(dst=vgpr(vLo), src0=1,
+                           src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx),
+                           comment="scaleZeroA: 0 or 1 from row parity"))
+        module.add(VLShiftLeftB32(dst=vgpr(vLo), shiftHex=2, src=vgpr(vLo),
+                                  comment="scaleZeroA: -> nibble shift 0 or 4"))
+        module.add(VBfeU32(dst=vgpr(vLo), src0=vgpr("G2LScaleZeroA+%u" % loadIdx),
+                           src1=vgpr(vLo), src2=hex(4),
+                           comment="scaleZeroA: extract the selected nibble"))
+        module.add(VLShiftLeftOrB32(dst=vgpr(vLo), shiftHex=16, src0=vgpr(vLo),
+                                    src1=vgpr(vLo),
+                                    comment="scaleZeroA: z -> both halves"))
+      # One bias per lift: the zero-point has to sit at the same mantissa bits
+      # the lift puts the weight nibble in, so -(magic+z) is just the negated
+      # magic with z shifted into place.
+      for i, (_m, magicBits, magicVal, sh) in enumerate(self.FP16_PK_LIFTS):
+        negMagic = 0x8000 | magicBits
+        if zeroPoint:
+          module.add(VLShiftLeftOrB32(
+              dst=vgpr(vNegZS + i), shiftHex=sh, src0=vgpr(vLo),
+              src1=sgpr("ScaleAPkMagic+%u" % (len(self.FP16_PK_LIFTS) + i)),
+              comment="scaleZeroA: two fp16 holding -(%d+z)" % magicVal))
+        else:
+          # No zero-point tensor: the unsigned encodings subtract a constant 8.
+          biasBits = negMagic | (int(implicitZ) << sh)
+          module.add(VMovB32(dst=vgpr(vNegZS + i),
+                             src=hex((biasBits << 16) | biasBits),
+                             comment="w4a16: two fp16 holding -(%d+%d)"
+                                     % (magicVal, int(implicitZ))))
+    elif scaleIsHalf:
       module.add(VCvtF16toF32(dst=vgpr(vScale), src=vgpr(scaleVgpr),
                               comment="scaleA: fp16 -> f32"))
     elif isBf16Scale:
@@ -5354,14 +5504,7 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(VMovB32(dst=vgpr(vScale), src=vgpr(scaleVgpr), comment="scaleA: f32 scale"))
 
-    # ExLlama's magic extraction yields (MAGIC_BIAS + q) rather than q, so the
-    # bias has to absorb it. Everything else is the same arithmetic.
-    magicBias = 128.0 if exLlama else 0.0
-    # The implicit zero-point of the unsigned encodings.
-    implicitZ = 8.0 if unsigned else 0.0
-    needBias = zeroPoint or magicBias or implicitZ
-
-    if needBias:
+    if needBias and not fp16Pk:
       # w = (q - z)*s = q*s + (-z*s). Forming -z*s once per load keeps the
       # per-element cost at one FMA.
       if zeroPoint:
@@ -5397,6 +5540,13 @@ class KernelWriterAssembly(KernelWriter):
                                       " + magic bias" if magicBias else "")))
       module.add(VXorB32(dst=vgpr(vNegZS), src0=hex(0x80000000), src1=vgpr(vNegZS),
                          comment="w4a16: negate -> -z*s"))
+
+    if fp16Pk:
+      module.add(self.blockScaleADequantFp16Pk(
+          kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords,
+          vSrc, vHi, vScale, vNegZS))
+      self.vgprPool.checkIn(tmp)
+      return module
 
     for d in range(numSrcDwords):
       src = destVgprPrefix + "+%u+%u" % (g2lIdx + tP["shiftGR"], d)

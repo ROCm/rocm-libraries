@@ -449,6 +449,20 @@ def blockDequantExLlamaA(problemType):
     """True when A's nibbles use the ExLlama [0,2,4,6,1,3,5,7] dword shuffle."""
     return usesBlockDequantA(problemType) and problemType["Int4EncodingA"] == "UnsignedBias8ExLlama"
 
+
+def blockDequantPackedFp16A(problemType):
+    """True when the dequantize can stay in packed fp16 instead of widening to
+    f32: an fp16 MAC type and scale, plus ExLlama's paired nibble layout, which
+    already puts the two elements of a pair in the two halves of a dword.
+    See ``KernelWriterAssembly.blockScaleADequantFp16Pk``.
+
+    Unlike :func:`usesBlockDequantA` this needs a real ProblemType, not a plain
+    state dict, because it asks the data types what they are.
+    """
+    return (blockDequantExLlamaA(problemType)
+            and problemType["MacDataTypeA"].isHalf()
+            and problemType["DataTypeB"].isHalf())
+
 ################################################################################
 # ProblemType
 # name of solution should begin with name of problemType, and arguments can be listed out explicitly

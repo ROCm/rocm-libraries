@@ -52,7 +52,7 @@ from .Components.ClusterLoad import ClusterLoadTDM
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
 from .SolutionStructs import Solution, isPackedIndex
-from .SolutionStructs.Problem import blockDequantItersPerGroupA
+from .SolutionStructs.Problem import blockDequantItersPerGroupA, blockDequantPackedFp16A
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
@@ -10007,6 +10007,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # dense, so it needs no stride kernel argument), plus its buffer SRD.
       self.defineSgpr("StrideScaleA", 1)
       self.defineSgpr("SrdScaleA", 4, 4)
+      if blockDequantPackedFp16A(kernel["ProblemType"]):
+        # The packed lowering fuses its mask and magic OR into one
+        # v_and_or_b32, which can carry only one literal -- so the magic lives
+        # here rather than inline. An SGPR, not a VGPR: the tile is already
+        # close to the 256-VGPR ceiling and this value is wave-uniform.
+        # Two per nibble position: the magic the lift ORs in, and its negation
+        # for the bias. Both are wave-uniform, and VOP3 has already spent its
+        # one literal on the nibble mask.
+        self.defineSgpr("ScaleAPkMagic", 4)
       if blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"]) > 1:
         # DepthU < ScaleBlockSizeA: one group outlives the iteration, so the
         # scale pointer only steps once every itersPerGroup iterations and
