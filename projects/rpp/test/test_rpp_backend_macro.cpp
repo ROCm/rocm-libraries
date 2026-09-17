@@ -51,8 +51,7 @@ int main() {
     // This test intentionally creates a HOST handle even when RPP was built with
     // HIP support. It must pass on a machine with no GPU device nodes: host handle
     // construction must not call hipInit() or otherwise acquire a HIP context.
-    if (rppCreate(&handle, expectedBatchSize, 0, nullptr, RPP_HOST_BACKEND) !=
-            rppStatusSuccess ||
+    if (rppCreate(&handle, expectedBatchSize, 0, nullptr, RPP_HOST_BACKEND) != rppStatusSuccess ||
         handle == nullptr) {
         std::printf("FAIL: rppCreate() with RPP_HOST_BACKEND did not succeed\n");
         return 1;
