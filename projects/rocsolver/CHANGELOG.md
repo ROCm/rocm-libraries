@@ -15,6 +15,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed a race condition in SYEVJ GPU kernel.
+
 ### Known issues
 ### Upcoming changes
 
