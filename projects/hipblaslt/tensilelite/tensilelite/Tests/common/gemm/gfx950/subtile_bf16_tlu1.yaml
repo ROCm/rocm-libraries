@@ -82,6 +82,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1, 2, 1,  2, 2]   # MT  64x32
+          - [16, 16, 32, 1,  1, 1, 4,  4, 1]   # MT  64x64,
           - [16, 16, 32, 1,  1, 2, 2,  2, 2]   # MT  64x64,  waves share a strip
           - [16, 16, 32, 1,  1, 4, 1,  1, 4]   # MT  64x64,  one wave per strip
           - [16, 16, 32, 1,  1, 2, 4,  2, 2]   # MT  64x128
