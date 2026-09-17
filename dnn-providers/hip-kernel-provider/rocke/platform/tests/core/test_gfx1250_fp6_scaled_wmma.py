@@ -29,9 +29,14 @@ FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 @pytest.mark.parametrize(
     "case,expected_sha",
-    [(case, sha) for case, sha in json.loads(
-        Path(__file__).with_name("gfx1250_scaled_wmma_llvm23.json").read_text()
-    ).items() if case.split("/")[1] == case.split("/")[2] and case.split("/")[1] in ("fp6", "bf6")],
+    [
+        (case, sha)
+        for case, sha in json.loads(
+            Path(__file__).with_name("gfx1250_scaled_wmma_llvm23.json").read_text()
+        ).items()
+        if case.split("/")[1] == case.split("/")[2]
+        and case.split("/")[1] in ("fp6", "bf6")
+    ],
 )
 def test_scaled_wmma_llvm23_golden(case, expected_sha):
     mode, a, b, sa, sb = case.split("/")
