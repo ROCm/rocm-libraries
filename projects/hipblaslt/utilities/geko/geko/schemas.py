@@ -320,22 +320,30 @@ class GemmType:
         }
 
 
+_MX_ONLY_DATA_TYPES = frozenset({"F4"})
+_MX_COMPATIBLE_DATA_TYPES = frozenset({"F4", "F8"})
+
+
 @dataclass(frozen=True)
 class GemmConfig:
     """Full GEMM optimization configuration.
 
     Bundles a GEMM logical type (GemmType) with the concrete set of
-    problem sizes.
+    problem sizes and an optional MX (Microscaling) flag.
 
     Attributes:
         gemm_type (GemmType): Logical GEMM description
             (transpose flags, data types).
         sizes (List[List[int]]): List of GEMM sizes, each formatted as
             [M, N, batch_count, K].
+        mx (bool): Whether Microscaling mode is enabled. Auto-set to True
+            for MX-only data types (F4). Only compatible with FP4 and FP8
+            data types (F4, F8).
     """
 
     gemm_type: GemmType
     sizes: List[List[int]]
+    mx: bool = False
 
     def __post_init__(self):
         # Validate that sizes is a list of lists of length 4
@@ -346,9 +354,25 @@ class GemmConfig:
             if not isinstance(s, list) or len(s) != 4 or not all(isinstance(x, int) and x > 0 for x in s):
                 raise ValueError(f"Each size must be a list of four positive integers [M, N, batch_count, K], got: {s}")
 
-    def workload_log_rows(self) -> List[dict]:
-        """One hipBLASLt-shaped row per size (keys match constants.GEMM_LOG_FIELDS)."""
+        dt = self.gemm_type.data_type
+        if dt in _MX_ONLY_DATA_TYPES:
+            object.__setattr__(self, "mx", True)
+        elif self.mx and dt not in _MX_COMPATIBLE_DATA_TYPES:
+            raise ValueError(
+                f"MX mode is not compatible with data type '{dt}'. "
+                f"MX is only supported for {sorted(_MX_COMPATIBLE_DATA_TYPES)}."
+            )
+
+    def workload_log_rows(self, mx_scale: int = 3) -> List[dict]:
+        """One hipBLASLt-shaped row per size (keys match constants.GEMM_LOG_FIELDS).
+
+        Args:
+            mx_scale: hipblaslt scaleA/scaleB value for MX block scaling.
+                Arch-specific: 1001 for gfx950, 3 for others.
+                Only used when self.mx is True; non-MX always uses 1.
+        """
         base = self.gemm_type.workload_log_type_fields()
+        scale_val = mx_scale if self.mx else 1
         rows: List[dict] = []
         for m, n, b, kk in self.sizes:
             row = {
@@ -357,6 +381,8 @@ class GemmConfig:
                 "M": int(m),
                 "N": int(n),
                 "K": int(kk),
+                "scaleA": scale_val,
+                "scaleB": scale_val,
             }
             if set(row) != set(GEMM_LOG_FIELDS) or len(row) != len(GEMM_LOG_FIELDS):
                 raise ValueError("row keys must match GEMM_LOG_FIELDS exactly")

@@ -51,6 +51,8 @@ def test_configure_sets_skip_ratio_from_latency() -> None:
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 10.0,
             },
             {
@@ -65,6 +67,8 @@ def test_configure_sets_skip_ratio_from_latency() -> None:
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 30.0,
             },
         ]
@@ -133,6 +137,8 @@ def test_run_uses_existing_data_when_all_configs_processed(tmp_path: Path) -> No
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
     }
 
     processed = pd.DataFrame(
@@ -149,6 +155,8 @@ def test_run_uses_existing_data_when_all_configs_processed(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             }
         ]
     )
@@ -168,6 +176,8 @@ def test_run_uses_existing_data_when_all_configs_processed(tmp_path: Path) -> No
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 1.0,
             }
         ]
@@ -195,6 +205,8 @@ def test_run_persists_winners_with_stubbed_runner(monkeypatch: pytest.MonkeyPatc
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
     }
 
     monkeypatch.setattr(search.bench.log, "dump", lambda data, p: yaml.safe_dump(data, Path(p).open("w"), sort_keys=False))
@@ -219,6 +231,8 @@ def test_run_persists_winners_with_stubbed_runner(monkeypatch: pytest.MonkeyPatc
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
                 "us": 2.0,
             }
         ]

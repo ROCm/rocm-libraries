@@ -275,10 +275,9 @@ def test_mx_bias_type_forced_to_s():
 
 
 def test_mx_f8_problem_type_skips_use_scale_ab():
-    """MX F8 should emit BiasDataTypeList instead of UseScaleAB."""
+    """MX F8 should not emit UseScaleAB."""
     gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=True))
     pt = gen._problem_type
-    assert "BiasDataTypeList" in pt
     assert "UseScaleAB" not in pt
 
 
@@ -287,4 +286,3 @@ def test_non_mx_f8_problem_type_has_use_scale_ab():
     gen = csg.ConfigSectionGenerator(_section_cfg_mx(dtype="F8", mx=False))
     pt = gen._problem_type
     assert "UseScaleAB" in pt or any("UseScaleAB" in k for k in pt)
-    assert "BiasDataTypeList" not in pt

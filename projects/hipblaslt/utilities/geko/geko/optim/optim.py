@@ -128,7 +128,6 @@ def configure(
     arch: str = "gfx950",
     backend: str = "ductile",
     search_space: str | None = None,
-    mx: bool = False,
 ) -> dict:
     """Generate tuning YAML configs for one or more GEMM types.
 
@@ -136,6 +135,10 @@ def configure(
     GemmType and size list), applies ARCH-specific defaults via
     apply_input_config_defaults, and runs config_generator.run to write
     tensilelite tuning YAML (and side artifacts) under output_dir.
+
+    Each GemmConfig carries its own ``mx`` flag. MX-only data types (F4)
+    auto-enable MX in GemmConfig.__post_init__; for F8, MX is set by the
+    caller (CLI inline arg, workload log scaleA/scaleB, or YAML config).
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -160,7 +163,7 @@ def configure(
     )
 
     for gc in gcs:
-        logger.info(f"{gc.gemm_type} with {len(gc.sizes)} sizes")
+        logger.info(f"{gc.gemm_type} with {len(gc.sizes)} sizes (mx={gc.mx})")
         gt = gc.gemm_type
         logger.debug(
             f"Preparing optimization config: gemm_type={gc.gemm_type} "
@@ -177,8 +180,6 @@ def configure(
         "backend": backend.lower(),
         "search_space": search_space,
     }
-    if mx:
-        config["MX"] = True
     config["GemmProblems"] = gcs
 
     output_dir = Path(output_dir)

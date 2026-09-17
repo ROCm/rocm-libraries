@@ -246,16 +246,17 @@ _LIBRARY_LOGIC_FIELDS_GFX942 = {
     "DeviceNames": LIBRARY_LOGIC_DEVICE_NAMES_GFX942,
 }
 
-# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields
+# gfx-style ARCH (YAML) → CUs, XCC, dtype→MI allowlist, Tensile LibraryLogic fields, MX scale value
 # (keys align with geko.constants.SUPPORTED_ARCH).
+# mx_scale: hipblaslt scaleA/scaleB value for MX block scaling (0 = MX not supported on this arch).
 _ARCH_SPECS = {
-    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950),
-    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
-    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942),
+    "gfx950": (256, 8, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001),
+    "gfx950_128cu": (128, 4, ONLY_INCLUDE_MIs_GFX950, _LIBRARY_LOGIC_FIELDS_GFX950, 1001),
+    "gfx942": (304, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_80cu": (80, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_38cu": (38, 8, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_20cu": (20, 4, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
+    "gfx942_228cu": (228, 6, ONLY_INCLUDE_MIs_GFX942, _LIBRARY_LOGIC_FIELDS_GFX942, 0),
 }
 
 HARDWARE_MAP = {
@@ -264,8 +265,9 @@ HARDWARE_MAP = {
         "XCC": xcc,
         "ONLY_INCLUDE_MIs": mis,
         "LibraryLogic": ll,
+        "mx_scale": mx_scale,
     }
-    for arch, (cus, xcc, mis, ll) in _ARCH_SPECS.items()
+    for arch, (cus, xcc, mis, ll, mx_scale) in _ARCH_SPECS.items()
 }
 
 assert set(SUPPORTED_ARCH) == set(_ARCH_SPECS), (

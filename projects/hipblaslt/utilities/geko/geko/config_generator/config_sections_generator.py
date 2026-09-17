@@ -100,9 +100,7 @@ class ConfigSectionGenerator:
         pt[f'{epi_tag}ActivationType'] = "hipblaslt_all"
         pt[f'{epi_tag}UseScaleAlphaVec'] = "1"
         pt[f'{epi_tag}UseBias'] = "1"
-        if self._is_mx():
-            pt[f'{epi_tag}BiasDataTypeList'] = "[s]"
-        else:
+        if not self._is_mx():
             if "8" in pt["DataType"] or "8" in pt["DestDataType"]:
                 pt[f'{epi_tag}UseScaleAB'] = "Scalar"
 

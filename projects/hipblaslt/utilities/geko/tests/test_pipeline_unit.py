@@ -492,52 +492,23 @@ def test_run_optimize_skips_cleanup_when_not_needed(monkeypatch: pytest.MonkeyPa
     assert (workdir / "benchmarks" / "keep.txt").is_file()
 
 
-def test_detect_mx_from_log_with_block_scaling(tmp_path: Path) -> None:
-    """_detect_mx_from_log returns True when scaleA >= 3 (Block_32_UE8M0)."""
-    import yaml
+def test_mx_detected_from_scale_columns_in_workload(tmp_path: Path) -> None:
+    """MX should be detected per-GEMM from scaleA/scaleB in workload log."""
+    from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
+    import pandas as pd
 
-    rows = [
-        {
-            "function": "matmul", "a_type": "f8_r", "b_type": "f8_r",
-            "c_type": "f32_r", "d_type": "f32_r", "compute_type": "c_f32_r",
-            "transA": "T", "transB": "N", "M": 256, "N": 256, "K": 256,
-            "batch_count": 1, "scaleA": 3, "scaleB": 3,
-        }
-    ]
-    wf = tmp_path / "mx_workload.yaml"
-    wf.write_text(yaml.dump(rows))
-    assert pipeline._detect_mx_from_log(wf) is True
-
-
-def test_detect_mx_from_log_scalar_scaling(tmp_path: Path) -> None:
-    """_detect_mx_from_log returns False for scalar scaling (scaleA=1)."""
-    import yaml
-
-    rows = [
-        {
-            "function": "matmul", "a_type": "f8_r", "b_type": "f8_r",
-            "c_type": "f32_r", "d_type": "f32_r", "compute_type": "c_f32_r",
-            "transA": "T", "transB": "N", "M": 256, "N": 256, "K": 256,
-            "batch_count": 1, "scaleA": 1, "scaleB": 1,
-        }
-    ]
-    wf = tmp_path / "scalar_workload.yaml"
-    wf.write_text(yaml.dump(rows))
-    assert pipeline._detect_mx_from_log(wf) is False
-
-
-def test_detect_mx_from_log_no_scale_columns(tmp_path: Path) -> None:
-    """_detect_mx_from_log returns False when no scaleA/scaleB columns."""
-    import yaml
-
-    rows = [
-        {
-            "function": "matmul", "a_type": "bf16_r", "b_type": "bf16_r",
-            "c_type": "bf16_r", "d_type": "bf16_r", "compute_type": "c_f32_r",
-            "transA": "N", "transB": "N", "M": 256, "N": 256, "K": 256,
-            "batch_count": 1,
-        }
-    ]
-    wf = tmp_path / "no_scale_workload.yaml"
-    wf.write_text(yaml.dump(rows))
-    assert pipeline._detect_mx_from_log(wf) is False
+    df = pd.DataFrame([
+        {"transA": "T", "transB": "N", "a_type": "f8_r", "b_type": "f8_r",
+         "c_type": "f32_r", "compute_type": "f32_r", "m": 256, "n": 256,
+         "batch_count": 1, "k": 256, "d_type": "f32_r", "scaleA": 3, "scaleB": 3},
+        {"transA": "N", "transB": "N", "a_type": "bf16_r", "b_type": "bf16_r",
+         "c_type": "bf16_r", "compute_type": "f32_r", "m": 512, "n": 512,
+         "batch_count": 1, "k": 256, "d_type": "bf16_r", "scaleA": 1, "scaleB": 1},
+    ])
+    gcs = gemm_configs_from_gemm_dataframe(df)
+    assert len(gcs) == 2
+    mx_gcs = [gc for gc in gcs if gc.mx]
+    non_mx_gcs = [gc for gc in gcs if not gc.mx]
+    assert len(mx_gcs) == 1
+    assert mx_gcs[0].gemm_type.data_type == "F8"
+    assert len(non_mx_gcs) == 1
