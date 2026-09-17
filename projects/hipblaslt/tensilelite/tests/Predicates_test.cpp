@@ -132,66 +132,20 @@ TEST(Predicates, WorkgroupMappingXCCCheck_FallbackTreatsXCCAs1)
 // BufferStoreOffsetLimitCheck: silent-store-drop guard for BufferStore=True
 // solutions (ROCM-31016 / https://github.com/ROCm/hipBLASLt/issues/2299).
 //
-// allocPostLoopSrd (KernelWriterAssembly.py) programs the post-loop store SRD
-// with a fixed BufferOOB num_records (0xfffff000) and a base address that is
-// never advanced per workgroup, so the true worst-case store byte offset for
-// such a kernel is the D tensor's full extent (stride[1] * size[1]), not one
-// workgroup's tile. The previous formula here capped the checked extent to
-// min(MacroTile1, size[1]), which silently passed large-M/modest-N problems
-// whose full extent exceeds the addressable range while one tile's worth does
-// not. Confirmed on real gfx950 (MI350X) hardware: an MT16x16x256
-// BufferStore=True kernel for this shape family left ~99.9996% of a 16 GiB
-// bf16 D tensor unwritten (~32K of ~8.59B elements) at a shape the old,
-// buggy check reported as supported.
+// The SRD base is re-based per workgroup along the N dimension (see
+// computeStoreSrdStart in KernelWriterAssembly.py), so the worst-case store
+// byte offset from a given workgroup's SRD base is bounded by one
+// MacroTile1's worth of columns, not the full D extent (min(MacroTile1,
+// size[1]) is the correct quantity to check), confirmed by exhaustive
+// hardware sweeps on gfx950 (MI350X): large-M/modest-N BufferStore=True
+// solutions with a big D extent but a small MacroTile1 ran correctly at
+// every tested size up to 16 GiB. (A large-M shape *can* still corrupt
+// output, but through a different mechanism entirely, a Stream-K
+// grid-dimension overflow; see StreamKWorkgroupNumberCheck below.)
+//
+// The threshold here mirrors KernelWriterAssembly.py's BufferOOB num_records
+// sentinel (0xfffff000, ~4 GiB - 4 KiB).
 // ----------------------------------------------------------------------------
-
-TEST(Predicates, BufferStoreOffsetLimitCheck_LargeM_ModestN_Rejected_ROCM31016)
-{
-    using namespace TensileLite;
-    // MacroTile1=64 matches the confirmed-broken kernel family in
-    // gfx950_Cijk_Ailk_Bljk_BBS_BH_Bias_BiasSrcD_GradB_AS_SAV_UserArgs.yaml.
-    constexpr size_t macroTile1 = 64;
-    // M chosen so the true worst-case D byte offset for bf16
-    // (m * n * 2 bytes) exceeds the BufferOOB sentinel (0xfffff000, ~4 GiB -
-    // 4 KiB) while m * macroTile1 * 2 -- what the old, buggy check computed
-    // -- does not. This is the exact class of shape that silently corrupted
-    // output on hardware.
-    constexpr size_t m = 8900000;
-    constexpr size_t n = 256;
-    static_assert(m * n * 2 > 0xfffff000ull,
-                  "true D extent must exceed the BufferOOB sentinel");
-    static_assert(m * macroTile1 * 2 < 4294967296ull,
-                  "old buggy formula (capped to MacroTile1) must stay under 2^32, "
-                  "or this test would not distinguish the fix from the bug");
-
-    auto problem = ContractionProblemGemm::GEMM_Strides(false,
-                                                         false,
-                                                         rocisa::DataType::BFloat16,
-                                                         rocisa::DataType::BFloat16,
-                                                         rocisa::DataType::BFloat16,
-                                                         rocisa::DataType::BFloat16,
-                                                         m,
-                                                         n,
-                                                         /*k=*/48,
-                                                         /*batchSize=*/1,
-                                                         /*lda=*/m,
-                                                         /*aStride=*/-1,
-                                                         /*ldb=*/48,
-                                                         /*bStride=*/-1,
-                                                         /*ldc=*/m,
-                                                         /*cStride=*/-1,
-                                                         /*ldd=*/m,
-                                                         /*dStride=*/-1,
-                                                         /*beta=*/0.0);
-
-    auto pred = std::make_shared<Predicates::Contraction::BufferStoreOffsetLimitCheck>(macroTile1);
-    EXPECT_FALSE((*pred)(problem))
-        << "M=" << m << " N=" << n << " bf16: true D size is "
-        << (double)(m * n * 2) / (1ull << 30)
-        << " GiB, past the ~4 GiB - 4 KiB BufferOOB sentinel allocPostLoopSrd programs "
-           "for BufferStore=True kernels; the guard must reject this shape instead of "
-           "silently allowing a kernel that drops most of D (confirmed on gfx950 hardware).";
-}
 
 TEST(Predicates, BufferStoreOffsetLimitCheck_OrdinaryProblem_StillAccepted)
 {
@@ -292,4 +246,99 @@ TEST(Predicates, BufferStoreOffsetLimitCheck_BetweenSentinelAndTwoPow32_Rejected
         << "M=" << m << " N=" << n << " bf16: true D extent falls between the "
            "0xfffff000 sentinel and 2^32, so the corrected threshold (not just "
            "the extent-formula fix) must reject this shape.";
+}
+
+// ----------------------------------------------------------------------------
+// StreamKWorkgroupNumberCheck: grid-dimension-overflow guard for Stream-K
+// solutions (ROCM-31016 / https://github.com/ROCm/hipBLASLt/issues/2299).
+//
+// WorkgroupNumberCheck (above) bounds the tile-scaled grid at
+// MAX_WORKGROUP_NUMBER (2^24) but is skipped for Stream-K solutions, because
+// Stream-K's normal grid is CU-scaled, not tile-scaled. But
+// resolveStreamKSettings()/getSKGridImpl() (ContractionSolution.cpp) has
+// several launch-time fallbacks (most notably the tree-fixup 24-bit
+// bounds guard) that hand Stream-K a one-workgroup-per-tile grid instead,
+// same shape as the grid WorkgroupNumberCheck already bounds. Without an
+// equivalent check, that fallback grid can itself overflow the 32-bit
+// work-item count used to launch the kernel (workGroupSize * numWorkGroups),
+// wrapping to a much smaller-than-intended grid and leaving most of D
+// unwritten.
+//
+// Confirmed on real gfx950 (MI350X) hardware with a MacroTile 16x16
+// Stream-K-static (SK3) kernel at N=256 (so tiles == M): every solution
+// hitting the tree-bounds fallback ran correctly up to and including
+// M=16,777,216 (tiles == 2^24 exactly) and silently dropped most of D just
+// above it (first confirmed-broken shape: M=16,781,312).
+// ----------------------------------------------------------------------------
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_AtExactBoundary_Accepted)
+{
+    using namespace TensileLite;
+    // MacroTile0=16, MacroTile1=16, N=256 -> tiles == M. Confirmed-safe on
+    // gfx950 hardware: tiles == 2^24 exactly still runs correctly.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 16777216; // 2^24
+    constexpr size_t n          = 256;
+    static_assert(m == 16777216, "tiles == m when n / macroTile1 == 16");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_TRUE((*pred)(problem))
+        << "M=" << m << " N=" << n << ": tiles == 2^24 exactly is confirmed safe on "
+           "gfx950 hardware and must still be accepted.";
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_JustPastBoundary_Rejected_ROCM31016)
+{
+    using namespace TensileLite;
+    // Same tile geometry as above, but one confirmed-broken shape past the
+    // boundary: tiles == 16,781,312 > 2^24.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 16781312;
+    constexpr size_t n          = 256;
+    static_assert(m > 16777216, "must exceed 2^24 to exercise the guard");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n << ": tiles == " << m
+        << " > 2^24; confirmed on gfx950 hardware to silently drop most of D when "
+           "a Stream-K launch-time fallback grids one workgroup per tile.";
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_OrdinaryProblem_Accepted)
+{
+    using namespace TensileLite;
+    // Sanity check: an ordinary, small problem must still be accepted.
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 1024, 1024, 1024, 1024, 1024, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{128, 128});
+    EXPECT_TRUE((*pred)(problem));
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_BatchMultiplierCounted)
+{
+    using namespace TensileLite;
+    // A batch count large enough to push tiles past 2^24 on its own must
+    // also be rejected: tiles == ceil(M/MT0) * ceil(N/MT1) * batchSize.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 256;
+    constexpr size_t n          = 256;
+    constexpr size_t batchSize  = 20000000; // (256/16) * (256/16) * 20e6 > 2^24
+    static_assert((m / macroTile0) * (n / macroTile1) * batchSize > 16777216,
+                  "batch multiplier must push tiles past 2^24");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, batchSize);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem));
 }

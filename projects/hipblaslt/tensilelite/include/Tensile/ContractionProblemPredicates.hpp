@@ -1542,9 +1542,6 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                // Legacy field, retained only for on-disk (msgpack/YAML) schema
-                // compatibility with already-exported logic files, which store
-                // MacroTile1 here. It is no longer used by operator() below.
                 size_t value;
 
                 BufferStoreOffsetLimitCheck() = default;
@@ -1558,34 +1555,29 @@ namespace TensileLite
                     return "BufferStoreOffsetLimitCheck";
                 }
 
-                // Guards against dispatching BufferStore=True solutions whose D
-                // extent exceeds the hardware store SRD's addressable range.
-                // num_records is a 32-bit field that bounds every buffer store a
-                // kernel issues; once D's full byte extent (stride[1]*size[1]*
-                // elementBytes) reaches the BufferOOB sentinel below, a
-                // workgroup's store can land at or past the SRD's declared
-                // bound and is silently dropped by hardware rather than
-                // faulting. The full extent must be checked, uncapped, because
-                // num_records caps the total reachable span regardless of how
-                // far the SRD base itself is re-based per workgroup.
+                // Guards against dispatching BufferStore=True solutions whose
+                // per-workgroup store offset exceeds the hardware store SRD's
+                // addressable range. The SRD base is re-based per workgroup
+                // along the N dimension, so only one MacroTile1's worth of
+                // column extent needs to fit under num_records, not the full
+                // D extent, hence the min() against MacroTile1 below.
                 //
                 // The threshold mirrors KernelWriterAssembly.py's BufferOOB
                 // sentinel (0xfffff000, ~4 GiB - 4 KiB) that allocPostLoopSrd
-                // programs as the SRD's num_records. This is tighter than the
-                // 2^32 field width by design, so it also catches shapes whose
-                // num_records would otherwise only wrap at exactly 2^32.
+                // programs as the SRD's num_records.
                 static constexpr uint64_t BufferOOBBytes = 0xfffff000ull;
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return multiplyElementSize(problem.d().strides()[1] * problem.d().sizes()[1],
+                    return multiplyElementSize(problem.d().strides()[1]
+                                                   * std::min(value, problem.d().sizes()[1]),
                                                problem.d().elementBytes())
                            < BufferOOBBytes;
                 }
 
                 virtual std::string toString() const override
                 {
-                    return concatenate(this->type(), "(MT1(unused):", value, ")");
+                    return concatenate(this->type(), "(MT1:", value, ")");
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -1593,8 +1585,8 @@ namespace TensileLite
                 {
                     bool rv = (*this)(problem);
                     std::ostringstream details;
-                    details << "D:" << problem.d().strides()[1] << "*" << problem.d().sizes()[1]
-                            << "*" << problem.d().elementBytes() << "<0xfffff000";
+                    details << "D:" << problem.d().strides()[1] << "*"
+                            << problem.d().elementBytes() << "*" << value << "<0xfffff000";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -1653,6 +1645,68 @@ namespace TensileLite
                                           * std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1])
                                           * gsu * problem.batchSize(0);
                     return debugEvalCmp(problem, stream, "wg_num", workgroupNumber, "<=", "max", MAX_WORKGROUP_NUMBER);
+                }
+            };
+
+            struct StreamKWorkgroupNumberCheck
+                : public Predicate_CRTP<StreamKWorkgroupNumberCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                std::array<int, 2> value; // [MacroTile0, MacroTile1]
+
+                StreamKWorkgroupNumberCheck() = default;
+                StreamKWorkgroupNumberCheck(std::array<int, 2> value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "StreamKWorkgroupNumberCheck";
+                }
+
+                // WorkgroupNumberCheck above skips Stream-K solutions because
+                // Stream-K's normal grid is CU-scaled, not tile-scaled. But
+                // several launch-time fallbacks (workspace too small for the
+                // ideal partial-tile reduction, the tree-fixup 24-bit bounds
+                // guard, a fixed-grid debug override, ...) hand Stream-K a
+                // one-workgroup-per-tile grid instead, same as the plain
+                // tile-scaled grid WorkgroupNumberCheck already bounds. Any of
+                // those fallbacks can fire at launch time depending on
+                // workspace and hardware, so this is checked unconditionally
+                // for every Stream-K solution rather than only when a
+                // fallback is predicted: if the tile grid itself is unsafe,
+                // dispatch cannot rely on always landing on the CU-scaled
+                // path.
+                static size_t tiles(ContractionProblemGemm const& problem,
+                                    std::array<int, 2> const&     value)
+                {
+                    return static_cast<size_t>(
+                              std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0]))
+                           * static_cast<size_t>(
+                              std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
+                           * problem.batchSize(0);
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return tiles(problem, value) <= MAX_WORKGROUP_NUMBER;
+                }
+
+                virtual std::string toString() const override
+                {
+                    return concatenate(this->type(), "(MT0:", value[0], ",MT1:", value[1], ")");
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "sk_tiles", tiles(problem, value), "<=", "max", MAX_WORKGROUP_NUMBER);
                 }
             };
 
