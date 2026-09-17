@@ -1653,6 +1653,10 @@ class SMemLoadInstruction(Instruction):
         self.smem = smem
         self.setInst("s_load_")
 
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
+
     def preStr(self) -> str:
         return self.instStr + _smem_load_type_suffix(self.instType)
 
@@ -1832,6 +1836,10 @@ class SMemStoreInstruction(Instruction):
         self.soffset = soffset
         self.smem = smem
         self.setInst("s_store_")
+
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
 
     def toString(self) -> str:
         parts: List[str] = []
@@ -3295,6 +3303,10 @@ class FlatAtomicDecU32(CommonInstruction):
         self.setInst("flat_atomic_dec_u32")
         self.flat = modifier
 
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
+
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
         dst_reg = _to_stinky_register(self.dst)
@@ -3326,6 +3338,10 @@ class GlobalAtomicIncU32Saddr(CommonInstruction):
         )
         self.setInst("global_atomic_inc_u32")
         self.glob = modifier
+
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
 
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st  # noqa: WPS433
@@ -3360,6 +3376,27 @@ VCvtFP8toF16 = _make_scalar_unary_class("VCvtFP8toF16", "v_cvt_f16_fp8", InstTyp
 # Memory (Buffer/Flat/Global/DS/SMEM) instructions
 # source: rocisa/rocisa/src/instruction/mem.cpp
 # ==========================================================================
+#
+# ``latency=`` on the factories below is rocisa's
+# ``ReadWriteInstruction::issueLatency()`` (quad-cycles). KernelWriter's
+# Python SIA (`scheduleLocalRead` / `localReadsVacancy`) subtracts
+# ``inst.issueLatency() * 2`` from the MFMA hide budget *before* the
+# module is lowered. It is NOT an operand of logical IR and is NOT
+# forwarded through ``to_stinky_logical()``.
+#
+# After lowering, stinkytofu's DAG / EstimateAsmCyclesPass reads the
+# hardware table's ``issueCycles`` / ``latencyCycles`` (e.g. gfx1250
+# ``ds_load_b128`` is issue=1, result-latency=56). Those are a different
+# number answering a different question. Keep this Python value in lockstep
+# with ``rocisa/rocisa/include/instruction/mem.hpp``.
+
+
+def _mem_issue_latency(latency: int) -> dict:
+    """Bind rocisa-style ``issueLatency`` / ``getIssueLatency`` on a factory class."""
+    return {
+        "issueLatency": staticmethod(lambda _lat=latency: _lat),
+        "getIssueLatency": lambda self, _lat=latency: _lat,
+    }
 
 
 def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
@@ -3415,7 +3452,7 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3473,7 +3510,7 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1, b
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3508,7 +3545,7 @@ def _make_flat_load_class(class_name: str, mnemonic: str, latency: int = 1, base
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3544,7 +3581,7 @@ def _make_flat_store_class(class_name: str, mnemonic: str, latency: int = 1, bas
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3580,7 +3617,7 @@ def _make_flat_atomic_class(class_name: str, mnemonic: str, latency: int = 1, ba
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3618,7 +3655,7 @@ def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1, base: 
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3656,7 +3693,7 @@ def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1, base:
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3695,7 +3732,7 @@ def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1, base
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
@@ -3715,7 +3752,22 @@ def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1, base
 #     LocalReadInstruction (DSLoadInstruction)
 #     LocalWriteInstruction (DSStoreInstruction)
 class ReadWriteInstruction(CommonInstruction):
+    """rocisa ``ReadWriteInstruction``: default issue latency is 1 quad-cycle.
+
+    KernelWriter calls ``inst.issueLatency()`` (static, not
+    ``getIssueLatency``) when budgeting MFMA hide slots. Subclasses that
+    need a non-default value must override both, which the ``_make_*``
+    factories below do via ``latency=``.
+    """
+
     __slots__ = ()
+
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
+
+    def getIssueLatency(self) -> int:
+        return self.issueLatency()
 
 
 class GlobalReadInstruction(ReadWriteInstruction):
@@ -3774,42 +3826,42 @@ class DSStoreInstruction(LocalWriteInstruction):
     __slots__ = ()
 
 # --- Buffer Load (MUBUF): rocisa(dst, vaddr, saddr, soffset, mubuf, comment) ---
-BufferLoadU8 = _make_buffer_load_class("BufferLoadU8", "buffer_load_u8")
-BufferLoadI8 = _make_buffer_load_class("BufferLoadI8", "buffer_load_i8")
-BufferLoadD16HIU8 = _make_buffer_load_class("BufferLoadD16HIU8", "buffer_load_d16_hi_u8")
-BufferLoadD16U8 = _make_buffer_load_class("BufferLoadD16U8", "buffer_load_d16_u8")
-BufferLoadD16I8 = _make_buffer_load_class("BufferLoadD16I8", "buffer_load_d16_i8")
-BufferLoadD16HII8 = _make_buffer_load_class("BufferLoadD16HII8", "buffer_load_d16_hi_i8")
-BufferLoadD16HIB16 = _make_buffer_load_class("BufferLoadD16HIB16", "buffer_load_d16_hi_b16")
-BufferLoadD16B16 = _make_buffer_load_class("BufferLoadD16B16", "buffer_load_d16_b16")
+BufferLoadU8 = _make_buffer_load_class("BufferLoadU8", "buffer_load_u8", latency=1)
+BufferLoadI8 = _make_buffer_load_class("BufferLoadI8", "buffer_load_i8", latency=1)
+BufferLoadD16HIU8 = _make_buffer_load_class("BufferLoadD16HIU8", "buffer_load_d16_hi_u8", latency=1)
+BufferLoadD16U8 = _make_buffer_load_class("BufferLoadD16U8", "buffer_load_d16_u8", latency=1)
+BufferLoadD16I8 = _make_buffer_load_class("BufferLoadD16I8", "buffer_load_d16_i8", latency=1)
+BufferLoadD16HII8 = _make_buffer_load_class("BufferLoadD16HII8", "buffer_load_d16_hi_i8", latency=1)
+BufferLoadD16HIB16 = _make_buffer_load_class("BufferLoadD16HIB16", "buffer_load_d16_hi_b16", latency=1)
+BufferLoadD16B16 = _make_buffer_load_class("BufferLoadD16B16", "buffer_load_d16_b16", latency=1)
 # logicalIR: BufferLoadB16
-BufferLoadB16 = _make_buffer_load_class("BufferLoadB16", "buffer_load_b16")
-BufferLoadI16 = _make_buffer_load_class("BufferLoadI16", "buffer_load_i16")
-BufferLoadU16 = _make_buffer_load_class("BufferLoadU16", "buffer_load_u16")
-BufferLoadB32 = _make_buffer_load_class("BufferLoadB32", "buffer_load_b32")
-BufferLoadB64 = _make_buffer_load_class("BufferLoadB64", "buffer_load_b64")
-BufferLoadB96 = _make_buffer_load_class("BufferLoadB96", "buffer_load_b96")
-BufferLoadB128 = _make_buffer_load_class("BufferLoadB128", "buffer_load_b128")
+BufferLoadB16 = _make_buffer_load_class("BufferLoadB16", "buffer_load_b16", latency=1)
+BufferLoadI16 = _make_buffer_load_class("BufferLoadI16", "buffer_load_i16", latency=1)
+BufferLoadU16 = _make_buffer_load_class("BufferLoadU16", "buffer_load_u16", latency=1)
+BufferLoadB32 = _make_buffer_load_class("BufferLoadB32", "buffer_load_b32", latency=1)
+BufferLoadB64 = _make_buffer_load_class("BufferLoadB64", "buffer_load_b64", latency=1)
+BufferLoadB96 = _make_buffer_load_class("BufferLoadB96", "buffer_load_b96", latency=1)
+BufferLoadB128 = _make_buffer_load_class("BufferLoadB128", "buffer_load_b128", latency=1)
 # logicalIR: BufferLoadB192
-BufferLoadB192 = _make_buffer_load_class("BufferLoadB192", "buffer_load_b192")
+BufferLoadB192 = _make_buffer_load_class("BufferLoadB192", "buffer_load_b192", latency=1)
 
 # --- Flat Load: rocisa(dst, vaddr, flat, comment) ---
-FlatLoadU8 = _make_flat_load_class("FlatLoadU8", "flat_load_u8")
-FlatLoadI8 = _make_flat_load_class("FlatLoadI8", "flat_load_i8")
-FlatLoadD16HIU8 = _make_flat_load_class("FlatLoadD16HIU8", "flat_load_d16_hi_u8")
-FlatLoadD16U8 = _make_flat_load_class("FlatLoadD16U8", "flat_load_d16_u8")
-FlatLoadD16I8 = _make_flat_load_class("FlatLoadD16I8", "flat_load_d16_i8")
-FlatLoadD16HII8 = _make_flat_load_class("FlatLoadD16HII8", "flat_load_d16_hi_i8")
-FlatLoadD16HIB16 = _make_flat_load_class("FlatLoadD16HIB16", "flat_load_d16_hi_b16")
-FlatLoadD16B16 = _make_flat_load_class("FlatLoadD16B16", "flat_load_d16_b16")
-FlatLoadU16 = _make_flat_load_class("FlatLoadU16", "flat_load_u16")
-FlatLoadI16 = _make_flat_load_class("FlatLoadI16", "flat_load_i16")
-FlatLoadB32 = _make_flat_load_class("FlatLoadB32", "flat_load_b32")
-FlatLoadB64 = _make_flat_load_class("FlatLoadB64", "flat_load_b64")
-FlatLoadB96 = _make_flat_load_class("FlatLoadB96", "flat_load_b96")
-FlatLoadB128 = _make_flat_load_class("FlatLoadB128", "flat_load_b128")
+FlatLoadU8 = _make_flat_load_class("FlatLoadU8", "flat_load_u8", latency=1)
+FlatLoadI8 = _make_flat_load_class("FlatLoadI8", "flat_load_i8", latency=1)
+FlatLoadD16HIU8 = _make_flat_load_class("FlatLoadD16HIU8", "flat_load_d16_hi_u8", latency=1)
+FlatLoadD16U8 = _make_flat_load_class("FlatLoadD16U8", "flat_load_d16_u8", latency=1)
+FlatLoadD16I8 = _make_flat_load_class("FlatLoadD16I8", "flat_load_d16_i8", latency=1)
+FlatLoadD16HII8 = _make_flat_load_class("FlatLoadD16HII8", "flat_load_d16_hi_i8", latency=1)
+FlatLoadD16HIB16 = _make_flat_load_class("FlatLoadD16HIB16", "flat_load_d16_hi_b16", latency=1)
+FlatLoadD16B16 = _make_flat_load_class("FlatLoadD16B16", "flat_load_d16_b16", latency=1)
+FlatLoadU16 = _make_flat_load_class("FlatLoadU16", "flat_load_u16", latency=1)
+FlatLoadI16 = _make_flat_load_class("FlatLoadI16", "flat_load_i16", latency=1)
+FlatLoadB32 = _make_flat_load_class("FlatLoadB32", "flat_load_b32", latency=1)
+FlatLoadB64 = _make_flat_load_class("FlatLoadB64", "flat_load_b64", latency=1)
+FlatLoadB96 = _make_flat_load_class("FlatLoadB96", "flat_load_b96", latency=1)
+FlatLoadB128 = _make_flat_load_class("FlatLoadB128", "flat_load_b128", latency=1)
 # logicalIR: FlatLoadB192
-FlatLoadB192 = _make_flat_load_class("FlatLoadB192", "flat_load_b192")
+FlatLoadB192 = _make_flat_load_class("FlatLoadB192", "flat_load_b192", latency=1)
 # --- Global Load: rocisa(dst, vaddr, saddr, modifier, comment) ---
 def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for Global load shims: rocisa(dst, vaddr, saddr, modifier, comment)."""
@@ -3841,21 +3893,21 @@ def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1, ba
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
 
 
-GlobalLoadB32 = _make_global_load_class("GlobalLoadB32", "global_load_b32")
-GlobalLoadB64 = _make_global_load_class("GlobalLoadB64", "global_load_b64")
-GlobalLoadB96 = _make_global_load_class("GlobalLoadB96", "global_load_b96")
-GlobalLoadB128 = _make_global_load_class("GlobalLoadB128", "global_load_b128")
-GlobalLoadB192 = _make_global_load_class("GlobalLoadB192", "global_load_b192")
-GlobalLoadD16B16 = _make_global_load_class("GlobalLoadD16B16", "global_load_d16_b16")
-GlobalLoadD16HIB16 = _make_global_load_class("GlobalLoadD16HIB16", "global_load_d16_hi_b16")
-GlobalLoadD16U8 = _make_global_load_class("GlobalLoadD16U8", "global_load_d16_u8")
-GlobalLoadD16HIU8 = _make_global_load_class("GlobalLoadD16HIU8", "global_load_d16_hi_u8")
+GlobalLoadB32 = _make_global_load_class("GlobalLoadB32", "global_load_b32", latency=1)
+GlobalLoadB64 = _make_global_load_class("GlobalLoadB64", "global_load_b64", latency=1)
+GlobalLoadB96 = _make_global_load_class("GlobalLoadB96", "global_load_b96", latency=1)
+GlobalLoadB128 = _make_global_load_class("GlobalLoadB128", "global_load_b128", latency=1)
+GlobalLoadB192 = _make_global_load_class("GlobalLoadB192", "global_load_b192", latency=1)
+GlobalLoadD16B16 = _make_global_load_class("GlobalLoadD16B16", "global_load_d16_b16", latency=1)
+GlobalLoadD16HIB16 = _make_global_load_class("GlobalLoadD16HIB16", "global_load_d16_hi_b16", latency=1)
+GlobalLoadD16U8 = _make_global_load_class("GlobalLoadD16U8", "global_load_d16_u8", latency=1)
+GlobalLoadD16HIU8 = _make_global_load_class("GlobalLoadD16HIU8", "global_load_d16_hi_u8", latency=1)
 
 
 # --- Global Store: rocisa(vaddr, src, saddr, modifier, comment) ---
@@ -3889,22 +3941,22 @@ def _make_global_store_class(class_name: str, mnemonic: str, latency: int = 1, b
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
 
 
-GlobalStoreB8 = _make_global_store_class("GlobalStoreB8", "global_store_b8")
-GlobalStoreB16 = _make_global_store_class("GlobalStoreB16", "global_store_b16")
-GlobalStoreD16HIB16 = _make_global_store_class("GlobalStoreD16HIB16", "global_store_d16_hi_b16")
-GlobalStoreB32 = _make_global_store_class("GlobalStoreB32", "global_store_b32")
-GlobalStoreB64 = _make_global_store_class("GlobalStoreB64", "global_store_b64")
-GlobalStoreB128 = _make_global_store_class("GlobalStoreB128", "global_store_b128")
+GlobalStoreB8 = _make_global_store_class("GlobalStoreB8", "global_store_b8", latency=1)
+GlobalStoreB16 = _make_global_store_class("GlobalStoreB16", "global_store_b16", latency=1)
+GlobalStoreD16HIB16 = _make_global_store_class("GlobalStoreD16HIB16", "global_store_d16_hi_b16", latency=1)
+GlobalStoreB32 = _make_global_store_class("GlobalStoreB32", "global_store_b32", latency=1)
+GlobalStoreB64 = _make_global_store_class("GlobalStoreB64", "global_store_b64", latency=1)
+GlobalStoreB128 = _make_global_store_class("GlobalStoreB128", "global_store_b128", latency=1)
 
 
 # logicalIR: GlobalLoadTR8B64
-def _make_global_load_tr_class(class_name: str, mnemonic: str):
+def _make_global_load_tr_class(class_name: str, mnemonic: str, latency: int = 1):
     """Factory for global_load_tr* shims: rocisa(dst, vaddr, saddr, modifier, comment)."""
 
     def __init__(self, dst: Any = None, vaddr: Any = None,
@@ -3932,73 +3984,74 @@ def _make_global_load_tr_class(class_name: str, mnemonic: str):
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
+        **_mem_issue_latency(latency),
     })
     return cls
 
 
-GlobalLoadTR8B64 = _make_global_load_tr_class("GlobalLoadTR8B64", "global_load_tr_b64_b8")
+GlobalLoadTR8B64 = _make_global_load_tr_class("GlobalLoadTR8B64", "global_load_tr_b64_b8", latency=1)
 # logicalIR: GlobalLoadTR16B128
-GlobalLoadTR16B128 = _make_global_load_tr_class("GlobalLoadTR16B128", "global_load_tr_b128_b16")
+GlobalLoadTR16B128 = _make_global_load_tr_class("GlobalLoadTR16B128", "global_load_tr_b128_b16", latency=1)
 
 # --- Buffer Store / Atomic: rocisa(src, vaddr, saddr, soffset, mubuf, comment) ---
-BufferStoreB8 = _make_buffer_store_class("BufferStoreB8", "buffer_store_b8")
-BufferStoreD16HIU8 = _make_buffer_store_class("BufferStoreD16HIU8", "buffer_store_d16_hi_b8")
+BufferStoreB8 = _make_buffer_store_class("BufferStoreB8", "buffer_store_b8", latency=1)
+BufferStoreD16HIU8 = _make_buffer_store_class("BufferStoreD16HIU8", "buffer_store_d16_hi_b8", latency=1)
 # logicalIR: BufferStoreD16U8
-BufferStoreD16U8 = _make_buffer_store_class("BufferStoreD16U8", "buffer_store_d16_u8")
-BufferStoreD16HIB16 = _make_buffer_store_class("BufferStoreD16HIB16", "buffer_store_d16_hi_b16")
+BufferStoreD16U8 = _make_buffer_store_class("BufferStoreD16U8", "buffer_store_d16_u8", latency=1)
+BufferStoreD16HIB16 = _make_buffer_store_class("BufferStoreD16HIB16", "buffer_store_d16_hi_b16", latency=1)
 # logicalIR: BufferStoreD16B16
-BufferStoreD16B16 = _make_buffer_store_class("BufferStoreD16B16", "buffer_store_d16_b16")
-BufferStoreB16 = _make_buffer_store_class("BufferStoreB16", "buffer_store_b16")
-BufferStoreB32 = _make_buffer_store_class("BufferStoreB32", "buffer_store_b32")
-BufferStoreB64 = _make_buffer_store_class("BufferStoreB64", "buffer_store_b64")
-BufferStoreB96 = _make_buffer_store_class("BufferStoreB96", "buffer_store_b96")
-BufferStoreB128 = _make_buffer_store_class("BufferStoreB128", "buffer_store_b128")
-BufferAtomicAddF32 = _make_buffer_load_class("BufferAtomicAddF32", "buffer_atomic_add_f32")
-BufferAtomicCmpswapB32 = _make_buffer_store_class("BufferAtomicCmpswapB32", "buffer_atomic_cmpswap_b32")
-BufferAtomicCmpswapB64 = _make_buffer_store_class("BufferAtomicCmpswapB64", "buffer_atomic_cmpswap_b64")
+BufferStoreD16B16 = _make_buffer_store_class("BufferStoreD16B16", "buffer_store_d16_b16", latency=1)
+BufferStoreB16 = _make_buffer_store_class("BufferStoreB16", "buffer_store_b16", latency=1)
+BufferStoreB32 = _make_buffer_store_class("BufferStoreB32", "buffer_store_b32", latency=1)
+BufferStoreB64 = _make_buffer_store_class("BufferStoreB64", "buffer_store_b64", latency=1)
+BufferStoreB96 = _make_buffer_store_class("BufferStoreB96", "buffer_store_b96", latency=1)
+BufferStoreB128 = _make_buffer_store_class("BufferStoreB128", "buffer_store_b128", latency=1)
+BufferAtomicAddF32 = _make_buffer_load_class("BufferAtomicAddF32", "buffer_atomic_add_f32", latency=1)
+BufferAtomicCmpswapB32 = _make_buffer_store_class("BufferAtomicCmpswapB32", "buffer_atomic_cmpswap_b32", latency=1)
+BufferAtomicCmpswapB64 = _make_buffer_store_class("BufferAtomicCmpswapB64", "buffer_atomic_cmpswap_b64", latency=1)
 
 # --- Flat Store: rocisa(src, vaddr, flat, comment) ---
-FlatStoreB8 = _make_flat_store_class("FlatStoreB8", "flat_store_b8")
-FlatStoreD16HIB8 = _make_flat_store_class("FlatStoreD16HIB8", "flat_store_d16_hi_b8")
-FlatStoreB16 = _make_flat_store_class("FlatStoreB16", "flat_store_b16")
-FlatStoreD16HIB16 = _make_flat_store_class("FlatStoreD16HIB16", "flat_store_d16_hi_b16")
+FlatStoreB8 = _make_flat_store_class("FlatStoreB8", "flat_store_b8", latency=1)
+FlatStoreD16HIB8 = _make_flat_store_class("FlatStoreD16HIB8", "flat_store_d16_hi_b8", latency=1)
+FlatStoreB16 = _make_flat_store_class("FlatStoreB16", "flat_store_b16", latency=1)
+FlatStoreD16HIB16 = _make_flat_store_class("FlatStoreD16HIB16", "flat_store_d16_hi_b16", latency=1)
 # logicalIR: FlatStoreD16B16
-FlatStoreD16B16 = _make_flat_store_class("FlatStoreD16B16", "flat_store_d16_b16")
-FlatStoreB32 = _make_flat_store_class("FlatStoreB32", "flat_store_b32")
-FlatStoreB64 = _make_flat_store_class("FlatStoreB64", "flat_store_b64")
-FlatStoreB96 = _make_flat_store_class("FlatStoreB96", "flat_store_b96")
-FlatStoreB128 = _make_flat_store_class("FlatStoreB128", "flat_store_b128")
+FlatStoreD16B16 = _make_flat_store_class("FlatStoreD16B16", "flat_store_d16_b16", latency=1)
+FlatStoreB32 = _make_flat_store_class("FlatStoreB32", "flat_store_b32", latency=1)
+FlatStoreB64 = _make_flat_store_class("FlatStoreB64", "flat_store_b64", latency=1)
+FlatStoreB96 = _make_flat_store_class("FlatStoreB96", "flat_store_b96", latency=1)
+FlatStoreB128 = _make_flat_store_class("FlatStoreB128", "flat_store_b128", latency=1)
 
 # --- Flat Atomic: rocisa(vaddr, tmp, src, flat, comment) ---
-FlatAtomicCmpswapB32 = _make_flat_atomic_class("FlatAtomicCmpswapB32", "flat_atomic_cmpswap_b32")
+FlatAtomicCmpswapB32 = _make_flat_atomic_class("FlatAtomicCmpswapB32", "flat_atomic_cmpswap_b32", latency=1)
 
 # --- DS Load: rocisa(dst, src, ds, comment) ---
-DSLoadU8 = _make_ds_load_class("DSLoadU8", "ds_load_u8")
-DSLoadI8 = _make_ds_load_class("DSLoadI8", "ds_load_i8")
+DSLoadU8 = _make_ds_load_class("DSLoadU8", "ds_load_u8", latency=1)
+DSLoadI8 = _make_ds_load_class("DSLoadI8", "ds_load_i8", latency=1)
 # logicalIR: DSLoadD16HIU8
-DSLoadD16HIU8 = _make_ds_load_class("DSLoadD16HIU8", "ds_load_d16_hi_u8")
-DSLoadU16 = _make_ds_load_class("DSLoadU16", "ds_load_u16")
-DSLoadI16 = _make_ds_load_class("DSLoadI16", "ds_load_i16")
+DSLoadD16HIU8 = _make_ds_load_class("DSLoadD16HIU8", "ds_load_d16_hi_u8", latency=1)
+DSLoadU16 = _make_ds_load_class("DSLoadU16", "ds_load_u16", latency=1)
+DSLoadI16 = _make_ds_load_class("DSLoadI16", "ds_load_i16", latency=1)
 # logicalIR: DSLoadD16HIU16
-DSLoadD16HIU16 = _make_ds_load_class("DSLoadD16HIU16", "ds_load_d16_hi_u16")
+DSLoadD16HIU16 = _make_ds_load_class("DSLoadD16HIU16", "ds_load_d16_hi_u16", latency=1)
 # logicalIR: DSLoadB16
-DSLoadB16 = _make_ds_load_class("DSLoadB16", "ds_load_b16")
-DSLoadB32 = _make_ds_load_class("DSLoadB32", "ds_load_b32")
-DSLoadB64 = _make_ds_load_class("DSLoadB64", "ds_load_b64")
-DSLoadB96 = _make_ds_load_class("DSLoadB96", "ds_load_b96")
+DSLoadB16 = _make_ds_load_class("DSLoadB16", "ds_load_b16", latency=1)
+DSLoadB32 = _make_ds_load_class("DSLoadB32", "ds_load_b32", latency=1)
+DSLoadB64 = _make_ds_load_class("DSLoadB64", "ds_load_b64", latency=1)
+DSLoadB96 = _make_ds_load_class("DSLoadB96", "ds_load_b96", latency=1)
 # logicalIR: DSLoadB96TrB6
-DSLoadB96TrB6 = _make_ds_load_class("DSLoadB96TrB6", "ds_load_tr6_b96")
+DSLoadB96TrB6 = _make_ds_load_class("DSLoadB96TrB6", "ds_load_tr6_b96", latency=1)
 # logicalIR: DSLoadB64TrB4
-DSLoadB64TrB4 = _make_ds_load_class("DSLoadB64TrB4", "ds_load_tr4_b64")
+DSLoadB64TrB4 = _make_ds_load_class("DSLoadB64TrB4", "ds_load_tr4_b64", latency=1)
 # logicalIR: DSLoadB64TrB16
-DSLoadB64TrB16 = _make_ds_load_class("DSLoadB64TrB16", "ds_load_tr16_b64")
+DSLoadB64TrB16 = _make_ds_load_class("DSLoadB64TrB16", "ds_load_tr16_b64", latency=1)
 # logicalIR: DSLoadB128TrB16
-DSLoadB128TrB16 = _make_ds_load_class("DSLoadB128TrB16", "ds_load_tr16_b128")
+DSLoadB128TrB16 = _make_ds_load_class("DSLoadB128TrB16", "ds_load_tr16_b128", latency=1)
 # logicalIR: DSLoadB64TrB8
-DSLoadB64TrB8 = _make_ds_load_class("DSLoadB64TrB8", "ds_load_tr8_b64")
+DSLoadB64TrB8 = _make_ds_load_class("DSLoadB64TrB8", "ds_load_tr8_b64", latency=1)
 DSLoadB128 = _make_ds_load_class("DSLoadB128", "ds_load_b128", latency=2)
 # logicalIR: DSLoadB192
-DSLoadB192 = _make_ds_load_class("DSLoadB192", "ds_load_b192", latency=2)
+DSLoadB192 = _make_ds_load_class("DSLoadB192", "ds_load_b192", latency=3)
 def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1, base: type = None):
     """Factory for DS load2 (dual-address): rocisa(dst, src, ds, comment) → logicalIR 3 args."""
     if base is None:
@@ -4039,32 +4092,32 @@ def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1, base:
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
 
 
-DSLoad2B32 = _make_ds_load2_class("DSLoad2B32", "ds_load2_b32")
-DSLoad2B64 = _make_ds_load2_class("DSLoad2B64", "ds_load2_b64")
+DSLoad2B32 = _make_ds_load2_class("DSLoad2B32", "ds_load2_b32", latency=1)
+DSLoad2B64 = _make_ds_load2_class("DSLoad2B64", "ds_load2_b64", latency=1)
 
 # --- DS Store (binary): rocisa(dstAddr, src, ds, comment) ---
 # logicalIR: DSStoreU16
-DSStoreU16 = _make_ds_store_class("DSStoreU16", "ds_store_u16")
-DSStoreB8 = _make_ds_store_class("DSStoreB8", "ds_store_b8")
-DSStoreB16 = _make_ds_store_class("DSStoreB16", "ds_store_b16")
+DSStoreU16 = _make_ds_store_class("DSStoreU16", "ds_store_u16", latency=2)
+DSStoreB8 = _make_ds_store_class("DSStoreB8", "ds_store_b8", latency=1)
+DSStoreB16 = _make_ds_store_class("DSStoreB16", "ds_store_b16", latency=1)
 # logicalIR: DSStoreB8HID16
-DSStoreB8HID16 = _make_ds_store_class("DSStoreB8HID16", "ds_store_b8_d16_hi")
+DSStoreB8HID16 = _make_ds_store_class("DSStoreB8HID16", "ds_store_b8_d16_hi", latency=1)
 # logicalIR: DSStoreD16HIB16
-DSStoreD16HIB16 = _make_ds_store_class("DSStoreD16HIB16", "ds_store_b16_d16_hi")
+DSStoreD16HIB16 = _make_ds_store_class("DSStoreD16HIB16", "ds_store_b16_d16_hi", latency=1)
 DSStoreB32 = _make_ds_store_class("DSStoreB32", "ds_store_b32", latency=2)
 DSStoreB64 = _make_ds_store_class("DSStoreB64", "ds_store_b64", latency=3)
 DSStoreB96 = _make_ds_store_class("DSStoreB96", "ds_store_b96", latency=4)
 DSStoreB128 = _make_ds_store_class("DSStoreB128", "ds_store_b128", latency=5)
 # logicalIR: DSStoreB192
-DSStoreB192 = _make_ds_store_class("DSStoreB192", "ds_store_b192", latency=6)
+DSStoreB192 = _make_ds_store_class("DSStoreB192", "ds_store_b192", latency=8)
 # logicalIR: DSStoreB256
-DSStoreB256 = _make_ds_store_class("DSStoreB256", "ds_store_b256", latency=7)
+DSStoreB256 = _make_ds_store_class("DSStoreB256", "ds_store_b256", latency=10)
 
 # --- DS Store2 / Permute (ternary): rocisa(dstAddr, src0, src1, ds, comment) ---
 DSStore2B32 = _make_ds_store2_class("DSStore2B32", "ds_store2_b32", latency=3)
@@ -4108,13 +4161,13 @@ def _make_ds_permute_class(class_name: str, mnemonic: str, latency: int = 1, bas
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: latency),
+        **_mem_issue_latency(latency),
     })
     cls.__qualname__ = class_name
     return cls
 
 
-DSBPermuteB32 = _make_ds_permute_class("DSBPermuteB32", "ds_bpermute_b32")
+DSBPermuteB32 = _make_ds_permute_class("DSBPermuteB32", "ds_bpermute_b32", latency=1)
 
 # --- SMEM Store / Atomic ---
 # SStoreB32 … SStoreB512 — real classes (``SMemStoreInstruction`` subclasses, defined above).
@@ -4132,6 +4185,10 @@ class SAtomicInc(Instruction):
         self.soffset = soffset
         self.smem = smem
         self.setInst("s_atomic_inc")
+
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
 
     def getParams(self):
         return [self.dst, self.base, self.soffset]
@@ -4185,6 +4242,10 @@ class SAtomicDec(Instruction):
         self.smem = smem
         self.setInst("s_atomic_dec")
 
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
+
     def getParams(self):
         return [self.dst, self.base]
 
@@ -4235,6 +4296,10 @@ class SAtomicCmpswapX2(Instruction):
         self.soffset = soffset
         self.smem = smem
         self.setInst("s_atomic_cmpswap_x2")
+
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
 
     def getParams(self):
         return [self.dst, self.base, self.soffset]
@@ -4288,6 +4353,10 @@ class SAtomicUmaxX2(Instruction):
         self.soffset = soffset
         self.smem = smem
         self.setInst("s_atomic_umax_x2")
+
+    @staticmethod
+    def issueLatency() -> int:
+        return 1
 
     def getParams(self):
         return [self.dst, self.base, self.soffset]
@@ -4365,7 +4434,7 @@ def _make_tensor_load_class():
         "__init__": __init__,
         "to_stinky_logical": to_stinky_logical,
         "__deepcopy__": __deepcopy__,
-        "issueLatency": staticmethod(lambda: 1),
+        **_mem_issue_latency(1),
     })
     cls.__qualname__ = "TensorLoadToLds"
     return cls
@@ -4387,6 +4456,10 @@ def _make_global_prefetch_class():
                 srcs=[vaddr, saddr], dpp=None, sdwa=None, vop3=None, comment=comment)
             self.setInst("global_prefetch_b8")
             self._modifiers = modifiers
+
+        @staticmethod
+        def issueLatency() -> int:
+            return 1
 
         def to_stinky_logical(self) -> Any:
             import stinkytofu as _st

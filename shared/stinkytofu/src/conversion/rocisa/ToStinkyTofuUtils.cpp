@@ -356,6 +356,9 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
         case GFX::ds_store_b192:
             return legalizeDSStoreB192(inst, irBuilder, archId, hasVgprMsb);
 
+        case GFX::ds_store_b256:
+            return legalizeDSStoreB256(inst, irBuilder, archId, hasVgprMsb);
+
         case GFX::s_waitcnt:
             return legalizeWaitCnt(inst, irBuilder, archId);
 
