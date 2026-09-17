@@ -1682,13 +1682,20 @@ namespace TensileLite
                 // fallback is predicted: if the tile grid itself is unsafe,
                 // dispatch cannot rely on always landing on the CU-scaled
                 // path.
+                // Integer ceiling division, exact for every input; a float
+                // ceil() here would lose precision once a dimension exceeds
+                // 2^24 and could undercount tiles right at the boundary this
+                // predicate exists to guard.
+                static size_t ceilDiv(size_t numerator, size_t denominator)
+                {
+                    return (numerator + denominator - 1) / denominator;
+                }
+
                 static size_t tiles(ContractionProblemGemm const& problem,
                                     std::array<int, 2> const&     value)
                 {
-                    return static_cast<size_t>(
-                              std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0]))
-                           * static_cast<size_t>(
-                              std::ceil(static_cast<float>(problem.freeSizeB(0)) / value[1]))
+                    return ceilDiv(problem.freeSizeA(0), value[0])
+                           * ceilDiv(problem.freeSizeB(0), value[1])
                            * problem.batchSize(0);
                 }
 

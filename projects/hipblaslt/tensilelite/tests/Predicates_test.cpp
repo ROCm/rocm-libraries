@@ -344,3 +344,28 @@ TEST(Predicates, StreamKWorkgroupNumberCheck_BatchMultiplierCounted)
         std::array<int, 2>{macroTile0, macroTile1});
     EXPECT_FALSE((*pred)(problem));
 }
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_NonRepresentableDimension_Rejected)
+{
+    using namespace TensileLite;
+    // A float ceil() loses precision once a dimension exceeds 2^24: float
+    // cannot represent 16777217 exactly, so it rounds to 16777216, making
+    // ceil(16777217/16) come out to 1048576 instead of the correct 1048577.
+    // That silently drops tiles from 16,777,232 to exactly 16,777,216 == 2^24,
+    // flipping this predicate from reject to accept. Integer ceiling division
+    // must not repeat that mistake.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 16777217; // 2^24 + 1, not exactly representable in float
+    constexpr size_t n          = 256;
+    static_assert((m + macroTile0 - 1) / macroTile0 * (n / macroTile1) > 16777216,
+                  "true integer tile count must exceed 2^24");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n << ": true tiles == 16,777,232 > 2^24, but a "
+           "float-precision bug would round this down to exactly 2^24 and wrongly accept it.";
+}
