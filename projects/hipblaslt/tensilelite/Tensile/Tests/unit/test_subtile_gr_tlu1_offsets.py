@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 from rocisa.code import Module
+from rocisa.instruction import VAddU32, VAndB32, VLShiftRightB32, VMovB32, VMulLOU32
 
 from Tensile.Components.Subtile.SubtileGREmit import (
     _tluWaveAxisId,
@@ -95,7 +96,27 @@ def _tile(tc="A", **kw):
     return SimpleNamespace(**base)
 
 
+def _count(module, cls):
+    """How many of one logical instruction a module emitted.
+
+    Assert on the instruction type, not the rendered text: the spelling is
+    backend- and ISA-specific (native rocisa renders VAddU32 as v_add_u32 on
+    gfx9, the stinkytofu adaptor always writes v_add_nc_u32), while the logical
+    instruction is what these helpers are contracted to emit.
+    """
+    return sum(1 for i in module.items() if isinstance(i, cls))
+
+
+def _has(module, cls):
+    return _count(module, cls) > 0
+
+
 def _text(module):
+    """Rendered text, for checks on operands rather than mnemonics.
+
+    Register names are stable across backends, so matching them is safe in a
+    way that matching an instruction's spelling is not.
+    """
     return str(module)
 
 
@@ -106,7 +127,7 @@ def test_wave_axis_id_single_wave_axis_is_a_constant_zero():
     module = Module()
     ok = _tluWaveAxisId(_Writer(), _kernel(miWaveGroup=(1, 1)), module, "A", 0)
     assert ok is False
-    assert "v_mov_b32" in _text(module)
+    assert _has(module, VMovB32)
 
 
 def test_wave_axis_id_for_a_masks_and_for_b_shifts():
@@ -115,10 +136,10 @@ def test_wave_axis_id_for_a_masks_and_for_b_shifts():
     modA, modB = Module(), Module()
     assert _tluWaveAxisId(_Writer(), kernel, modA, "A", 0) is True
     assert _tluWaveAxisId(_Writer(), kernel, modB, "B", 0) is True
-    assert "v_and_b32" in _text(modA)
+    assert _has(modA, VAndB32)
     # B divides instead of masking, so it must not reach for the mask.
-    assert "v_and_b32" not in _text(modB)
-    assert _text(modB).count("v_lshrrev_b32") == 2
+    assert not _has(modB, VAndB32)
+    assert _count(modB, VLShiftRightB32) == 2
 
 
 def test_other_axis_id_is_the_mirror_of_the_axis_id():
@@ -127,8 +148,8 @@ def test_other_axis_id_is_the_mirror_of_the_axis_id():
     modA, modB = Module(), Module()
     _tluOtherAxisId(_Writer(), kernel, modA, "A", 0)
     _tluOtherAxisId(_Writer(), kernel, modB, "B", 0)
-    assert "v_and_b32" not in _text(modA)   # A divides here
-    assert "v_and_b32" in _text(modB)       # B masks here
+    assert not _has(modA, VAndB32)   # A divides here
+    assert _has(modB, VAndB32)       # B masks here
 
 
 # --- cooperative fetch index ----------------------------------------------
@@ -137,7 +158,7 @@ def test_coop_wave_id_is_zero_when_one_wave_fetches():
     module = Module()
     ok = _tluCoopWaveId(_Writer(), _kernel(), module, _tile(grCoopWaves=1), 0)
     assert ok is False
-    assert "v_mov_b32" in _text(module)
+    assert _has(module, VMovB32)
 
 
 def test_coop_wave_id_wraps_at_the_strip_when_waves_share_one():
@@ -146,7 +167,7 @@ def test_coop_wave_id_wraps_at_the_strip_when_waves_share_one():
     module = Module()
     ok = _tluCoopWaveId(_Writer(), _kernel(miWaveGroup=(2, 2)), module, ti, 0)
     assert ok is True
-    assert "v_and_b32" in _text(module)
+    assert _has(module, VAndB32)
 
 
 def test_coop_wave_id_combines_axis_and_other_when_k_is_split():
@@ -171,7 +192,7 @@ def test_strip_idx_divides_the_axis_id_by_the_sharing_waves():
     ti = _tile(globalSubtileGrid=(4, 1), grWavesPerStrip=2)
     module = Module()
     assert _tluStripIdx(_Writer(), _kernel(miWaveGroup=(2, 2)), module, "A", ti, 0) is True
-    assert "v_lshrrev_b32" in _text(module)
+    assert _has(module, VLShiftRightB32)
 
 
 def test_strip_idx_rejects_a_non_power_of_two_sharing_count():
@@ -211,7 +232,7 @@ def test_k_slice_terms_emit_nothing_but_a_zero_without_a_split():
     module = Module()
     writer = _Writer()
     _tluKSliceTerms(writer, _kernel(), module, _tile(), 0, 1, 8, 16, "t")
-    assert "v_mov_b32" in _text(module)
+    assert _has(module, VMovB32)
     assert not writer.sgprPool.outstanding
 
 
@@ -221,9 +242,8 @@ def test_k_slice_terms_scale_both_the_slice_and_the_window_run():
     module = Module()
     writer = _Writer()
     _tluKSliceTerms(writer, _kernel(), module, ti, 0, 1, 8, 16, "t")
-    text = _text(module)
-    assert "v_mul_lo_u32" in text
-    assert "v_add_u32" in text, "the window-run term must be folded in"
+    assert _has(module, VMulLOU32)
+    assert _has(module, VAddU32), "the window-run term must be folded in"
     assert not writer.vgprPool.outstanding and not writer.sgprPool.outstanding
 
 
@@ -248,7 +268,7 @@ def test_wave_axis_global_offset_steps_by_whole_strips_per_wave():
     writer = _Writer()
     dst = _tluWaveAxisGlobalOffset(writer, _kernel(miWaveGroup=(2, 2)), module, ti)
     assert dst is not None
-    assert "v_mul_lo_u32" in _text(module)
+    assert _has(module, VMulLOU32)
     assert not writer.sgprPool.outstanding
 
 
@@ -257,7 +277,7 @@ def test_wave_axis_global_offset_steps_by_whole_strips_per_wave():
 def test_dtl_k_slice_is_skipped_when_the_column_is_not_split():
     module = Module()
     _grDTLAddKSlice(_Writer(), _kernel(), module, "A", _tile(subtileShape=(2, 1)), 0)
-    assert _text(module) == "", "nothing to add without a K split"
+    assert module.items() == [], "nothing to add without a K split"
 
 
 def test_dtl_k_slice_mirrors_the_global_k_term():
@@ -267,5 +287,5 @@ def test_dtl_k_slice_mirrors_the_global_k_term():
     module = Module()
     writer = _Writer()
     _grDTLAddKSlice(writer, _kernel(), module, "A", ti, 0)
-    assert "v_add_u32" in _text(module)
+    assert _has(module, VAddU32)
     assert not writer.vgprPool.outstanding and not writer.sgprPool.outstanding
