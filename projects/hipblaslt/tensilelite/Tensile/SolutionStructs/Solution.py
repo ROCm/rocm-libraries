@@ -2845,6 +2845,19 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Currently TDMA and TDMB must be enabled simultaneously")
       return
 
+    for tc in ("A", "B"):
+      expectedUnrollMajorLDS = not state["ProblemType"]["TLU%s" % tc]
+      actualUnrollMajorLDS = bool(state["UnrollMajorLDS%s" % tc])
+      if state["enableTDM%s" % tc] and actualUnrollMajorLDS != expectedUnrollMajorLDS:
+        reject(
+            state,
+            printRejectionReason,
+            "TDM%s layout mismatch: TLU%s=%s requires UnrollMajorLDS%s=%s, "
+            "got %s. Use TransposeLDS=-1 (recommended)."
+            % (tc, tc, state["ProblemType"]["TLU%s" % tc], tc,
+               expectedUnrollMajorLDS, actualUnrollMajorLDS))
+        return
+
     for tc, numBytes in (("A", numBytesA), ("B", numBytesB)):
       if state["enableTDM%s"%tc] and numBytes in _LDS_TR_READ_BYTES \
          and not state["UnrollMajorLDS%s"%tc] and not state["enableLDSTr%s"%tc]:
