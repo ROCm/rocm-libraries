@@ -26,7 +26,7 @@ using namespace gpu_matmul_ref_test;
 template <typename ADataType,
           typename BDataType = ADataType,
           typename CDataType = ADataType,
-          typename ComputeDataType = double>
+          typename ComputeDataType = float>
 void runGpuVsCpuMatmul(const std::vector<int64_t>& aDims,
                        const std::vector<int64_t>& bDims,
                        const std::vector<int64_t>& cDims,
