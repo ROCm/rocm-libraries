@@ -607,6 +607,46 @@ def test_sk_multicast_loads_forced_off_on_gfx1250v0(
     assert sol["ClusterBarrier"] is True
 
 
+@pytest.mark.parametrize("clusterDim", [[2, 1], [1, 2], [2, 2]])
+def test_sk_force_dp_only_0_cluster_without_multicast_on_gfx1250v0(
+    _gp_gfx1250, gfx1250_iim, gfx1250v0_iim, assembler, capsys, clusterDim
+):
+    """ForceDPOnly=0 SK3 clusters follow v0 the same way ForceDPOnly=1 does.
+
+    ForceDPOnly=0 persists the DP tile space and then runs an SK tail, so it is a
+    genuine cluster-multicast path rather than a plain tiled launch. That makes the
+    two predicates diverge on v0 exactly where it matters: the cluster is still
+    launched (``streamKCluster``, ``ClusterBarrier``), but there is no TDM broadcast
+    to keep peers in lockstep (``Multicast`` False, so ``streamKMulticast`` False).
+    Every cooperative-broadcast wait is gated on the latter, so none is emitted --
+    which is the whole point, since on v0 such a wait has nothing to retire.
+
+    The shapes cover the three enabled forms ``streamKCluster`` admits: ``[Cs, 1]``
+    (B-only), ``[1, Ck]`` (A-only) and the 2D ``[Cs, Ck]``. v0 must accept, not
+    reject: ForceDPOnly=0 without broadcast is still correct, just not cooperative.
+    """
+    from Tensile.Common import streamKCluster, streamKMulticast
+
+    skParams = dict(StreamK=3, StreamKForceDPOnly=0, GlobalSplitU=0)
+
+    # v1 leg: the same config does broadcast, so the v0 assertions below are a
+    # capability difference rather than the config simply not deriving.
+    v1, out1 = _derive(gfx1250_iim, assembler, capsys, MULTICAST_MI,
+                       ClusterDim=clusterDim, **skParams)
+    assert v1.get("Valid") is True, f"expected accept on v1, rejected with: {out1!r}"
+    assert v1["Multicast"] is True
+    assert streamKMulticast(v1) is True
+
+    v0, out0 = _derive(gfx1250v0_iim, assembler, capsys, MULTICAST_MI,
+                       ClusterDim=clusterDim, **skParams)
+    assert v0.get("Valid") is True, f"expected accept on v0, rejected with: {out0!r}"
+    assert streamKCluster(v0) is True
+    assert v0["Multicast"] is False
+    assert streamKMulticast(v0) is False
+    # ClusterBarrier is v0-supported and the cluster launch depends on it.
+    assert v0["ClusterBarrier"] is True
+
+
 # =========================================================================== #
 # Naming invariant. The ASIC revisions are separate builds, so their kernels must NOT
 # be named apart -- an ASIC revision token in the name would desynchronize the shipped

@@ -22,6 +22,13 @@ GlobalParameters:
   ForceGenerateKernel: True
 
 BenchmarkProblems:
+  #######################################
+  # TN - StreamK=3, ForceDPOnly=0, cluster multicast, MXF8.
+  # Spatial multicast in the DP window, then ordinary Stream-K
+  # (workspace + global-flag partials). MatrixInstruction matches
+  # sk_mxf8_force_dp_only_cluster_multicast_ext.yaml (no [8,8,2,2]: MT256 F8
+  # exceeds the 1024 VGPR limit). ClusterDim matches that suite. Batch stays 1.
+  #######################################
   -
     -
       OperationType: GEMM
@@ -66,7 +73,6 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - PrefetchAcrossPersistent: [1]
         - ScheduleIterAlg: [0, 4]
         - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
@@ -81,7 +87,8 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
-        - StreamKForceDPOnly: [1]
+        - StreamKForceDPOnly: [0]
+        - StreamKFixupTreeReduction: [0]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
@@ -90,29 +97,22 @@ BenchmarkProblems:
         - TDMInst: [3]
         - MXLoadInst: ["TDM"]
         - MXScaleFormat: ["InMemorySwizzle"]
-        # Under ForceDPOnly=1 only, PAP frees self-only MaskB (Cs==1) / MaskA (Ck==1);
-        # both stay live otherwise, and ForceDPOnly=0 always keeps them for skipPGR2.
         - ClusterDim: [[2, 1], [4, 1], [8, 1], [1, 2], [2, 2], [2, 4], [4, 2]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 256]
-          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 1024]
+          - Exact: [256, 256, 1, 1024]
           - Exact: [128, 128, 1, 512]
-          - Exact: [256, 256, 2, 256]
           - Exact: [256, 256, 1, 1920]
           - Exact: [2048, 256, 1, 1024]
-          - Exact: [2048, 512, 1, 1056]
-          - Exact: [1280, 1280, 1, 256]
-          - Exact: [320, 320, 1, 512]
-          - Exact: [96, 96, 3, 256]
-          - Exact: [256, 256, 1, 1056]
-          - Exact: [512, 512, 1, 1056]
-          - Exact: [2048, 256, 1, 2048]
-          - Exact: [2048, 256, 1, 2080]
+          - Exact: [2048, 512, 1, 1024]
           - Exact: [1280, 1280, 1, 1024]
-          - Exact: [320, 320, 3, 1056]
+          - Exact: [320, 320, 1, 512]
+          - Exact: [96, 96, 1, 1024]
+          - Exact: [512, 512, 1, 1920]
+          - Exact: [2048, 256, 1, 2048]
         - ActivationArgs:
           - [Enum: none]

@@ -372,26 +372,25 @@ def isPow2(n):
 def streamKCluster(d):
     """True when the StreamK=3 cluster launch path is active.
 
-    Single source of truth derived from ClusterDim: on StreamK=3 a spatial
-    cluster (ClusterDim[0] = Cs > 1, i.e. Cs peers sharing B across M-adjacent
-    tiles) IS the cluster launch path, so there is no separate state key to
-    store or serialize.
+    Single source of truth derived from ClusterDim: on StreamK=3 any spatial
+    cluster IS the cluster launch path, so there is no separate state key to
+    store or serialize. ``[Cs, 1]`` pairs B across M-adjacent tiles, ``[1, Ck]``
+    pairs A across N-adjacent tiles, and ``[Cs, Ck]`` does both.
 
-    StreamKForceDPOnly=1 is part of the condition, not an extra gate the callers
-    add: only the DP-only schedule launches over the real M x N tile space that
-    the mask derivation, the tile-index fold and the padded-peer exit assume.
-    The two-tile (FDPO=0) SK3 cluster is cluster *reduction*, which predates this
-    path and must keep emitting exactly what it emits without any of it.
+    StreamKForceDPOnly is NOT part of the condition. FDPO=1 launches over the
+    real M x N tile space directly; FDPO=0 persists that same DP tile space and
+    only then runs an SK tail, so the mask derivation, the tile-index fold and
+    the padded-peer exit apply to both. The FDPO=0 differences (masks held live
+    past the prologue, the DP->SK boundary clear, the skipPGR2 self-only skip)
+    are handled at their own call sites rather than by excluding FDPO=0 here.
 
     TDM-multicast waits are ``streamKMulticast``.
 
     ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
     and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
-    construct a dict without a StreamK / ClusterDim / StreamKForceDPOnly key.
+    construct a dict without a StreamK / ClusterDim key.
     """
-    return (d.get("StreamK", 0) == 3
-            and d.get("ClusterDim", [1, 1])[0] > 1
-            and bool(d.get("StreamKForceDPOnly", 0)))
+    return d.get("StreamK", 0) == 3 and clusterEnabled(d.get("ClusterDim", [1, 1]))
 
 def streamKMulticast(d):
     """True when ``streamKCluster`` also issues TDM-multicast loads.
