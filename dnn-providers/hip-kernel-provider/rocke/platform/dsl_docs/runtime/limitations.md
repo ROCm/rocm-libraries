@@ -174,6 +174,15 @@ Runtime launchers assume:
 
 CI / dev machines without matching ROCm libraries can still build docs, import `rocke`, run the static unit suite, and inspect Python code. They cannot run end-to-end HSACO compile + launch.
 
+**Launcher-cache identity is in-process only.** Kernels that declare `runtime_param_fields` (see [Runtime Param Fields](../instances/attention.md#runtime-param-fields)) are keyed by a semantic key with those fields excluded, not by their symbol name. The two are not equivalent, and the key is the stronger of the pair — `batch` has never appeared in the dense attention symbol on any path, so a spec that bakes `batch` and one that reads it at runtime are **homonyms**: same symbol, different bodies.
+
+That is harmless for in-process dispatch, where the key is the identity. It blocks two things:
+
+- **AOT packaging**, where the symbol *is* the identity and the two bodies collide.
+- **Partial specialization** — baking `batch` for a hot shape while keeping the seqlens runtime. The cache key follows a narrowed `runtime_param_fields` automatically, but `_shape_name_parts()` is all-or-nothing (it emits both seqlen tokens or neither) and does not derive from that tuple.
+
+Precondition for either: make the symbol name derive from `runtime_param_fields` first. Baking the *whole* shape is already safe — it goes through an existing mode flag (persistent / ragged / varlen / paged / sliding-window), which restores both the per-shape key and the `sq`/`sk` name tokens.
+
 ## Multi-GPU and RCCL
 
 The DSL has **no first-class multi-GPU support**. Verified by inspecting the entire `rocke` tree on this checkout:

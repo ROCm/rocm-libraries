@@ -30,6 +30,7 @@ GraphSession
 
     if(auto err = session.graph->from_binary(handle, graphBytes); !err.is_good())
     {
+        session.buildFailed = true;
         session.buildError = err.get_message();
         return session;
     }
