@@ -3,9 +3,14 @@
 
 #include <gtest/gtest.h>
 #include "DataInitialization.hpp"             // isMXTensor / Problem
+#include "ClientProblemFactory.hpp"
 #include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
+#include "ProgramOptions.hpp"
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/KernelLanguageTypes.hpp>
+#include <Tensile/PerformanceMetricTypes.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 #include <algorithm>
@@ -30,7 +35,10 @@
 #endif
 
 using TensileLite::ContractionProblemGemm;
+using TensileLite::ContractionSolution;
 using TensileLite::DataTypeInfo;
+using TensileLite::KernelLanguage;
+using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
@@ -41,6 +49,12 @@ namespace dt = TensileLite::Client::detail;
 #endif
 namespace
 {
+    template <typename T>
+    void setOption(TensileLite::Client::po::variables_map& args, std::string const& name, T value)
+    {
+        args[name].value() = std::move(value);
+    }
+
     // -----------------------------------------------------------------------
     // Helper: build a ContractionProblemGemm with the requested A/B dtypes.
     // Mirrors tests/MXScalePadding_test.cpp::makeMXProblem so the geometry
@@ -77,6 +91,63 @@ namespace
         if(mxBlockB > 0) problem.setMXScaleB(rocisa::DataType::E8, mxBlockB);
         return problem;
     }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
+    {
+        using namespace TensileLite::Client;
+
+        po::variables_map args;
+        setOption(args, "problem-identifier", std::string("Contraction_l_Ailk_Bljk_Cijk_Dijk"));
+        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{128, 128, 1, 512}});
+        setOption(args, "strided-batched", true);
+        setOption(args, "batch-mode", 0);
+        setOption(args, "grouped-gemm", false);
+        setOption(args, "sparse", 0);
+        setOption(args, "high-precision-accumulate", false);
+        setOption(args, "kernel-language", KernelLanguage::Any);
+        setOption(args, "performance-metric", PerformanceMetric::DeviceEfficiency);
+        setOption(args, "deterministic-mode", false);
+        setOption(args, "c-equal-d", false);
+        setOption(args, "type", rocisa::DataType::Float8);
+        setOption(args, "a-type", rocisa::DataType::Float8);
+        setOption(args, "b-type", rocisa::DataType::Float8);
+        setOption(args, "c-type", rocisa::DataType::Float);
+        setOption(args, "d-type", rocisa::DataType::Float);
+        setOption(args, "alpha-type", rocisa::DataType::Float);
+        setOption(args, "beta-type", rocisa::DataType::Float);
+        setOption(args, "compute-input-type-A", rocisa::DataType::Float8);
+        setOption(args, "compute-input-type-B", rocisa::DataType::Float8);
+        setOption(args, "f32-xdl-math-op", rocisa::DataType::Float);
+        setOption(args, "activation-compute-type", rocisa::DataType::Float);
+        setOption(args, "mx-a-block", 32);
+        setOption(args, "mx-b-block", 32);
+        setOption(args, "mx-a-type", rocisa::DataType::E8);
+        setOption(args, "mx-b-type", rocisa::DataType::E8);
+        setOption(args, "mx-scale-format", mxScaleFormat);
+        setOption(args, "fused-gemm-a2a", false);
+        setOption(args, "metadata-layout", 0);
+        setOption(args, "a-ops", TensileLite::TensorOps{});
+        setOption(args, "b-ops", TensileLite::TensorOps{});
+        setOption(args, "c-ops", TensileLite::TensorOps{});
+        setOption(args, "d-ops", TensileLite::TensorOps{});
+        setOption(args, "use-gradient", false);
+        setOption(args, "output-amaxD", false);
+        setOption(args, "use-scaleAB", std::string());
+        setOption(args, "use-scaleCD", false);
+        setOption(args, "use-scaleAlphaVec", 0);
+        setOption(args, "device-idx", 0);
+        setOption(args, "num-elements-to-validate", 0);
+        setOption(args, "pristine-on-gpu", true);
+        setOption(args, "prune-mode", TensileLite::Client::PruneSparseMode::PruneRandom);
+        setOption(args, "rotating-buffer-size", 0);
+        setOption(args, "rotating-buffer-mode", 0);
+        setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
+        return args;
+    }
+
+#endif
+
 } // namespace
 
 // =============================================================================
@@ -245,6 +316,53 @@ TEST(InitializeMXDataForFP4OrFP8_BatchStrideFormula, BFloat8_OneBytePerElement)
         kStrideElems, static_cast<float>(info.elementSize));
     EXPECT_EQ(bytes, kStrideElems);
 }
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+TEST(DataInitializationReferenceRecompute, Gfx950RequiresPerSolutionRecomputeForSwizzledMX)
+{
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx950") == std::string::npos)
+        GTEST_SKIP() << "gfx950-specific recompute behavior is only observable on gfx950";
+
+    auto problem = makeProblem(rocisa::DataType::Float8,
+                               rocisa::DataType::Float8,
+                               /*mxBlockA=*/32,
+                               /*mxBlockB=*/32);
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+
+    ContractionSolution noSwizzleSolution;
+    noSwizzleSolution.problemType.mxScaleFormat = 0;
+    ContractionSolution swizzleSolution;
+    swizzleSolution.problemType.mxScaleFormat = 1;
+
+    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &noSwizzleSolution));
+    EXPECT_TRUE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+}
+
+TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolutions)
+{
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+    if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
+        GTEST_SKIP() << "gfx1250-specific reuse behavior is only observable on gfx1250";
+
+    auto problem = makeProblem(rocisa::DataType::Float8,
+                               rocisa::DataType::Float8,
+                               /*mxBlockA=*/32,
+                               /*mxBlockB=*/32);
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+
+    ContractionSolution swizzleSolution;
+    swizzleSolution.problemType.mxScaleFormat = 1;
+
+    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+}
+#endif
 
 // =============================================================================
 //   Section 4 — direct calls into TensileLite::Client::detail (MX builds only)
