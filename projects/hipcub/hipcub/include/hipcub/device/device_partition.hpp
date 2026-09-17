@@ -29,7 +29,9 @@
 
 #ifndef HIPCUB_DEVICE_PARTITION_HPP_
 #define HIPCUB_DEVICE_PARTITION_HPP_
-#include <iostream>
+
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/device/device_partition.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

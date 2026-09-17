@@ -3,9 +3,8 @@
 
 """Load and normalize input YAML configuration.
 
-Defaults, validation, ARCH-derived hardware (``CUs``, ``XCC``, ``DTYPE_MIs``,
-``WGMUnit``), and GA / kernel-cap rules live here so every entry point shares
-the same behavior.
+Defaults, validation, ARCH-derived hardware, backend / search-space resolution,
+and kernel-cap rules live here so every entry point shares the same behavior.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ from typing import Any, Dict, List
 import pandas as pd
 import yaml
 import logging
+import warnings
 
 from geko.bench.log import parse as parse_gemm_log
 from geko.config_generator.constants import (
@@ -35,6 +35,8 @@ from geko.config_generator.constants import (
     HARDWARE_MAP,
     MAX_NUM_KERNELS_PER_CONFIG,
     REQUIRED_CONFIG_FIELDS,
+    VALID_BACKENDS,
+    VALID_SEARCH_SPACES,
 )
 from geko.config_generator.sizes import get_sizes
 from geko.constants import GEMM_TYPE_FIELDS
@@ -239,14 +241,38 @@ def validate_input_config(config: Dict[str, Any]) -> None:
         )
 
 
+def _resolve_search_space(config: Dict[str, Any]) -> str:
+    """Resolve search_space from explicit value or backend defaults."""
+    backend = config.get("backend", "ductile").lower()
+    if backend not in VALID_BACKENDS:
+        raise ValueError(
+            f"Invalid backend '{backend}'; must be one of {VALID_BACKENDS}"
+        )
+
+    ss = config.get("search_space")
+    if ss is None:
+        ss = "generic" if backend == "ductile" else "heuristic"
+    else:
+        ss = ss.lower()
+        if ss not in VALID_SEARCH_SPACES:
+            raise ValueError(
+                f"Invalid search_space '{ss}'; must be one of {VALID_SEARCH_SPACES}"
+            )
+        if backend == "tensile" and ss == "generic":
+            warnings.warn(
+                "Using generic search space with Tensile backend: exhaustive search "
+                "will most likely fail due to the large number of kernels defined.",
+                stacklevel=3,
+            )
+
+    config["search_space"] = ss
+    return ss
+
+
 def apply_input_config_defaults(config: Dict[str, Any]) -> None:
-    """Apply per-ARCH optional defaults, hardware fields, and kernel-cap rules in place.
+    """Apply per-ARCH defaults, hardware fields, search-space resolution, and kernel-cap rules.
 
-    Run validate_input_config first for YAML-loaded dicts. Callers must set
-    ARCH and either classic GEMM keys or GEMM_LOG_PATH with SIZE_OPTION 2;
-    optional keys are filled from CONFIG_DEFAULTS_BY_ARCH.
-
-    Mutates config.
+    Mutates config in place. Call validate_input_config first for YAML-loaded dicts.
     """
     for key, default in CONFIG_DEFAULTS_BY_ARCH[config["ARCH"]].items():
         config.setdefault(key, default)
@@ -256,10 +282,33 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
     if not config["MACROTILE_OPT"]:
         config["MT_DU"] = None
 
-    if config["MACROTILE_OPT"] and not config["GA"]:
-        raise NotImplementedError("MACROTILE_OPT only valid with GA.")
+    backend = config.get("backend", "ductile").lower()
+    if config["MACROTILE_OPT"] and backend != "ductile":
+        if config.get("SIZE_OPTION", 0) != 0:
+            raise NotImplementedError(
+                "MACROTILE_OPT without the Ductile backend is only supported "
+                "for SIZE_OPTION=0 (explicit Sizes list); got "
+                f"SIZE_OPTION={config.get('SIZE_OPTION')}."
+            )
+    ss = _resolve_search_space(config)
 
-    if config["GA"]:
+    if ss == "heuristic":
+        _complex = ("C", "Z")
+        dt = str(config.get("DataType", ""))
+        if dt in _complex:
+            raise NotImplementedError(
+                f"Heuristic search space is not yet supported for complex data type "
+                f"'{dt}'. Use search_space='generic' instead."
+            )
+        for gp in config.get("GemmProblems", []):
+            gdt = gp.gemm_type.data_type
+            if gdt in _complex:
+                raise NotImplementedError(
+                    f"Heuristic search space is not yet supported for complex data type "
+                    f"'{gdt}'. Use search_space='generic' instead."
+                )
+
+    if ss == "generic":
         config["MAX_NUM_KERNELS_PER_CONFIG"] = sys.maxsize
     else:
         config.setdefault("MAX_NUM_KERNELS_PER_CONFIG", MAX_NUM_KERNELS_PER_CONFIG)

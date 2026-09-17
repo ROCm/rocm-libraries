@@ -441,6 +441,28 @@ class TestCkTileGemmPipeline : public ::testing::Test
         {
             GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test.";
         }
+        // TDM pipelines use cluster launch (multicast), not supported on gfx1250 A0 (revision 0)
+        if constexpr(PipelineType == GemmPipelineType::CompTDMV1 ||
+                     PipelineType == GemmPipelineType::CompTDMV2)
+        {
+            if(ck_tile::get_device_revision() == 0)
+            {
+                GTEST_SKIP() << "TDM pipeline cluster launch is not supported on gfx1250 "
+                                "asicRevision=0";
+            }
+        }
+        // pk_fp4_t with M_Warp_Tile=32 uses dedicated WMMA F4 instructions that are
+        // not supported on gfx1250 asicRevision=0. M_Warp_Tile=16 uses the generic
+        // F8F6F4 path which is not affected.
+        if constexpr(std::is_same_v<ADataType, ck_tile::pk_fp4_t> &&
+                     std::is_same_v<BDataType, ck_tile::pk_fp4_t> && M_Warp_Tile == 32)
+        {
+            if(ck_tile::is_gfx125_supported() && ck_tile::get_device_revision() == 0)
+            {
+                GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test on "
+                                "gfx1250 asicRevision=0.";
+            }
+        }
         // for TDM it used tdm_epilogue which don't support split-k
         if constexpr(PipelineType == GemmPipelineType::CompV4 ||
                      PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||

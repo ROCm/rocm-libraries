@@ -16,17 +16,32 @@ Functions:
 
 import pandas as pd
 import io
+import re
 
 from pathlib import Path
 from geko.constants import GEMM_FIELDS, PERF_FIELDS
 import logging
 logger = logging.getLogger("GEKO")
 
+# Quote parenthesized complex values like (1,0) so embedded commas do not
+# split CSV fields.
+_COMPLEX_CSV_RE = re.compile(r'\(([^()]*,[^()]*)\)')
+
 import yaml
 try:
     SafeLoader = yaml.CSafeLoader
 except (ModuleNotFoundError, AttributeError):
     SafeLoader = yaml.SafeLoader
+
+
+def is_built_custom_library(custom_lib_dir: str | Path) -> bool:
+    """Return True when custom_lib_dir contains compiled Tensile library artifacts."""
+    custom_lib_dir = Path(custom_lib_dir)
+    patterns = (
+        "library/**/TensileLibrary_lazy_gfx*.dat",
+        "library/**/TensileLibrary_lazy_gfx*.dat.zlib",
+    )
+    return any(any(custom_lib_dir.glob(pattern)) for pattern in patterns)
 
 def parse_benchmark_output(file: str | Path) -> pd.DataFrame:
     """
@@ -52,6 +67,7 @@ def parse_benchmark_output(file: str | Path) -> pd.DataFrame:
     try:
         header = blocks[0].split("\n")[0]
         data = [header] + [b.split("\n")[1].strip() for b in blocks]
+        data = [_COMPLEX_CSV_RE.sub(r'"(\1)"', line) for line in data]
         df = pd.read_csv(io.StringIO("\n".join(data)))
         
         kernel_col = []

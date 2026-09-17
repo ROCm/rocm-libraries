@@ -132,6 +132,13 @@ try
             "                           Only applicable to functions with hybrid support.\n"
             "                           ")
 
+        ("hetrd_alg_mode",
+         value<rocblas_int>(&argus.hetrd_alg_mode)->default_value(1),
+            "0 = auto, 1 = 1-stage (default), 2 = 2-stage\n"
+            "                           Controls whether syevd/heevd uses 1-stage (hetrd) or 2-stage\n"
+            "                           (he2hb + hb2st) tridiagonalization.\n"
+            "                           ")
+
         ("matrix",
          value<std::string>(&argus.matrix)->default_value("randint"),
             "Test matrix to generate. Options depend on function; common options are randint (default), identity.\n"
@@ -217,6 +224,28 @@ try
          value<rocblas_int>(),
             "Matrix/vector size parameter.\n"
             "                           Typically, the number of columns of a matrix on the right-hand side of a problem.\n"
+            "                           ")
+
+        // bandwidth options
+        ("kd",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Bandwidth of Hermitian or symmetric matrix,\n"
+            "                           the number of super-diagonals and sub-diagonals.\n"
+            "                           ")
+
+        ("kl",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Lower bandwidth of general matrix,\n"
+            "                           the number of sub-diagonals.\n"
+            "                           ")
+
+        ("ku",
+         value<rocblas_int>(),
+            "Matrix/vector size parameter.\n"
+            "                           Upper bandwidth of general matrix,\n"
+            "                           the number of super-diagonals.\n"
             "                           ")
 
         // increment options
@@ -604,6 +633,19 @@ try
          value<double>()->default_value(0),
             "Value of sigma when provided for the shifted cholqr method .\n"
             "                           Same value is used for all matrices in batched cases.\n"
+            "                           ")
+
+        // Hessenberg decomposition options
+        ("ilo",
+         value<rocblas_int>(),
+            "Lower index of rows and columns to be reduced.\n"
+            "                           Used in Hessenberg decomposition functions.\n"
+            "                           ")
+
+        ("ihi",
+         value<rocblas_int>(),
+            "Upper index of rows and columns to be reduced.\n"
+            "                           Used in Hessenberg decomposition functions.\n"
             "                           ")
 
         // other options

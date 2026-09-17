@@ -71,9 +71,9 @@ public:
 
 private:
     /// Extract Flash2FwdParams from a validated SDPA graph.
-    Flash2FwdParams
+    static Flash2FwdParams
         extractParams(const Handle& handle,
-                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
 };
 
 } // namespace hip_flash2_engine

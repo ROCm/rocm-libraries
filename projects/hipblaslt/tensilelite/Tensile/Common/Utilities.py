@@ -369,12 +369,12 @@ def isPow2(n):
     """True when ``n`` is a positive power of two."""
     return n > 0 and (n & (n - 1)) == 0
 
-def streamKMulticast(d):
-    """True when the StreamK=3 cluster multicast path is active.
+def streamKCluster(d):
+    """True when the StreamK=3 cluster launch path is active.
 
     Single source of truth derived from ClusterDim: on StreamK=3 a spatial
     cluster (ClusterDim[0] = Cs > 1, i.e. Cs peers sharing B across M-adjacent
-    tiles) IS the cluster multicast path, so there is no separate state key to
+    tiles) IS the cluster launch path, so there is no separate state key to
     store or serialize.
 
     StreamKForceDPOnly=1 is part of the condition, not an extra gate the callers
@@ -382,6 +382,8 @@ def streamKMulticast(d):
     the mask derivation, the tile-index fold and the padded-peer exit assume.
     The two-tile (FDPO=0) SK3 cluster is cluster *reduction*, which predates this
     path and must keep emitting exactly what it emits without any of it.
+
+    TDM-multicast waits are ``streamKMulticast``.
 
     ``d`` may be a kernel or a solution ``state`` dict; both expose "StreamK"
     and "ClusterDim". Uses ``.get`` for partial-state derivation call sites that
@@ -391,8 +393,16 @@ def streamKMulticast(d):
             and d.get("ClusterDim", [1, 1])[0] > 1
             and bool(d.get("StreamKForceDPOnly", 0)))
 
-def streamK2DMulticast(d):
-    """True when the cluster multicasts A as well as B, i.e. Ck > 1.
+def streamKMulticast(d):
+    """True when ``streamKCluster`` also issues TDM-multicast loads.
+
+    Requires ``d["Multicast"]``. Missing key defaults True so pre-derivation
+    call sites match ``streamKCluster``.
+    """
+    return streamKCluster(d) and bool(d.get("Multicast", True))
+
+def streamK2DCluster(d):
+    """True when the cluster has both axes > 1, i.e. Ck > 1.
 
     ClusterDim = [Cs, Ck] with BOTH axes > 1: Cs/X peers share B on M-adjacent
     tiles and Ck/Y peers share A on N-adjacent tiles. A 1-D [Cs, 1] cluster is
@@ -477,3 +487,39 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
         assert False, f"Unsupported datatype bitwidth: {dtypeBitWidth}"
     else:
         assert False, f"Unhandled WMMA: {wmma}"
+
+# Bytes moved by one buffer_load_dwordx4, the widest global load we issue.
+SWIZZLE_LOAD_BYTES = 16
+
+def swizzleGeometry(solution, tc: str) -> dict:
+    """Layout of the pre-swizzled (pre-tiled) tensor `tc` ("A" or "B").
+
+    The tensor is a sequence of swizzle blocks; a block is one wave's global load, of
+    MI_{M|N} rows each holding laneSize contiguous unroll elements.
+
+    dupFactor is 2 where the matrix instruction replicates operands across the wave
+    (gfx10/gfx11 WMMA), so only half the lanes are distinct; 1 for MFMA and gfx12.
+    loadsPerLane is >1 where a lane's operand exceeds one load (gfx11 fp16: 32 bytes);
+    the remainder sits in the next block along the unroll dimension.
+
+    `solution` may be a partly derived state; only MIInputPerThread{tc}, MatrixInst{M,N,K},
+    WavefrontSize and ProblemType.DataType{tc} are read.
+    """
+    bpe       = int(solution["ProblemType"][f"DataType{tc}"].numBytes())
+    miInput   = solution[f"MIInputPerThread{tc}"]
+    miMorN    = solution["MatrixInstM"] if tc == "A" else solution["MatrixInstN"]
+    # Pack several MI steps into one load when one operand is narrower than a dwordx4.
+    packK     = max(1, SWIZZLE_LOAD_BYTES // miInput // bpe)
+    miOperand = miInput * packK
+    laneSize  = min(miOperand, SWIZZLE_LOAD_BYTES // bpe)
+    # Elements the wave holds vs. distinct elements the instruction consumes.
+    dupFactor = max(1, (solution["WavefrontSize"] * miInput) // (miMorN * solution["MatrixInstK"]))
+    lanesUsed = solution["WavefrontSize"] // dupFactor
+    return {
+        "packK":        packK,
+        "laneSize":     laneSize,
+        "swizzleK":     max(1, lanesUsed // miMorN) * laneSize,
+        "lanesUsed":    lanesUsed,
+        "dupFactor":    dupFactor,
+        "loadsPerLane": miOperand // laneSize,
+    }

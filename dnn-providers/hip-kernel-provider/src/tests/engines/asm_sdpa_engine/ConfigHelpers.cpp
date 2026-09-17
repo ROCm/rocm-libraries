@@ -32,7 +32,8 @@ static DataType toDataType(const std::string& configDataType)
     return it->second;
 }
 
-flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config)
+flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config,
+                                                       bool withStats)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
@@ -95,6 +96,21 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                      false,
                                      TensorValue::Float32Value,
                                      builder.CreateStruct(scaleVal).Union()));
+
+    // Optional stats (LSE) output tensor: [B, H, Sq, 1], FP32
+    flatbuffers::Optional<int64_t> statsUid = flatbuffers::nullopt;
+    flatbuffers::Optional<bool> generateStats = flatbuffers::nullopt;
+    if(withStats)
+    {
+        const std::vector<int64_t> statsDims = {batch, numHeads, seqQ, 1};
+        const std::vector<int64_t> statsStrides
+            = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+        const auto statsUidVal = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, statsUidVal, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+        statsUid = flatbuffers::Optional<int64_t>(statsUidVal);
+        generateStats = flatbuffers::Optional<bool>(true);
+    }
 
     // Handle GROUP mode - add sequence length tensors
     flatbuffers::Optional<int64_t> seqLenQUid = flatbuffers::nullopt;
@@ -186,13 +202,13 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                flatbuffers::nullopt, // descale_s_tensor_uid
                                flatbuffers::nullopt, // scale_s_tensor_uid
                                flatbuffers::nullopt, // scale_o_tensor_uid
-                               flatbuffers::nullopt, // stats_tensor_uid
+                               statsUid, // stats_tensor_uid
                                flatbuffers::nullopt, // max_tensor_uid
                                flatbuffers::nullopt, // sum_exp_tensor_uid
                                flatbuffers::nullopt, // rng_dump_tensor_uid
                                flatbuffers::nullopt, // amax_s_tensor_uid
                                flatbuffers::nullopt, // amax_o_tensor_uid
-                               flatbuffers::nullopt, // generate_stats
+                               generateStats, // generate_stats
                                false, // alibi_mask
                                false, // padding_mask
                                causalMask,

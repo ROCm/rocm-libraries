@@ -4,8 +4,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstddef>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,6 +17,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "kernel_sources.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
 /**
@@ -26,17 +30,26 @@ namespace
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 
+/// @brief The key of the source that @p operation's kernels compile.
+///
+/// The staged descriptor names its source relative to the set root, and the embedded
+/// source table is keyed on that same string.
+std::string sourceKeyFor(const std::string& operation)
+{
+    return "kernels/Pointwise" + operation + ".cpp";
+}
+
 /// @brief The pack whose kernels compile @p operation, by source file.
 const hipdnn_plugin_sdk::ingestor::KernelDescriptorPack&
     packFor(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set, const std::string& operation)
 {
     const auto match = std::find_if(set.packs.begin(), set.packs.end(), [&](const auto& pack) {
         return !pack.kernels.empty()
-               && pack.kernels.front().source.sourceFile == "Pointwise" + operation + ".cpp";
+               && pack.kernels.front().source.sourceFile == sourceKeyFor(operation);
     });
     if(match == set.packs.end())
     {
-        throw std::runtime_error("no pack whose kernels compile Pointwise" + operation + ".cpp");
+        throw std::runtime_error("no pack whose kernels compile " + sourceKeyFor(operation));
     }
     return *match;
 }
@@ -45,7 +58,7 @@ TEST(TestPointwisePacks, EachPackShipsThreeKernelsCoveringTwoBlockSizesAndTwoDat
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    ASSERT_EQ(set.packs.size(), 3U);
+    ASSERT_EQ(distinctPackIdCount(set), 3U);
     for(const auto& pack : set.packs)
     {
         const auto& kernels = pack.kernels;
@@ -77,13 +90,82 @@ TEST(TestPointwisePacks, EveryKernelNamesItsPacksEmbeddedSource)
         {
             EXPECT_EQ(kernel.source.kind,
                       hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE);
-            EXPECT_EQ(kernel.source.sourceFile, "Pointwise" + operation + ".cpp");
+            EXPECT_EQ(kernel.source.sourceFile, sourceKeyFor(operation));
             EXPECT_EQ(kernel.source.entryPoint, "Pointwise" + operation);
         }
     }
 }
 
-/// The point of three packs under one engine: everything but the operation matcher and
+/// The pack tool writes each kernel's source key. The build generates the table that key
+/// is looked up in. One computation over one descriptor set feeds both, so every staged
+/// key must resolve here. An unresolved key reaches getKernelSrc() at plan-build time
+/// instead, and throws far from the descriptor that carries it.
+TEST(TestPointwisePacks, EveryEmbeddedSourceKeyResolvesInTheCompiledInTable)
+{
+    std::size_t checked = 0;
+
+    for(const auto& set : discoverDescriptorSets())
+    {
+        for(const auto& pack : set.packs)
+        {
+            for(const auto& kernel : pack.kernels)
+            {
+                if(kernel.source.kind
+                   != hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE)
+                {
+                    continue;
+                }
+
+                std::string_view source;
+                EXPECT_NO_THROW(source = hip_plugin::getKernelSrc(kernel.source.sourceFile.c_str()))
+                    << kernel.name << " (id " << hipdnn_plugin_sdk::ingestor::toString(kernel.id)
+                    << ") names '" << kernel.source.sourceFile << "', staged in "
+                    << kernel.originDirectory;
+                EXPECT_FALSE(source.empty()) << kernel.source.sourceFile;
+                ++checked;
+            }
+        }
+    }
+
+    RecordProperty("embeddedSourceKernelsChecked", static_cast<int>(checked));
+    GTEST_LOG_(INFO) << "resolved " << checked << " embedded_source keys";
+    EXPECT_GT(checked, 0U) << "no embedded_source kernel was discovered, so this case "
+                              "proved nothing about the keys";
+}
+
+/// The authored packs claim every architecture. The packer stamps each emitted copy with
+/// the architecture of the shard directory it writes it into, so a pack's stamp must name
+/// a directory it actually sits under.
+///
+/// Asserted as "some component of the path is the stamped arch" rather than against a
+/// directory at a fixed depth, because neither end is fixed. originDirectory is the
+/// descriptor's OWN folder, which equals the shard only for a descriptor staged flat;
+/// treeRoot is whatever root the catalog was loaded from, which is this binary's whole
+/// discovery root here and one arch shard in the packer/loader seam tests. The arch
+/// folder sits between them, at a depth that changes with the authored layout.
+TEST(TestPointwisePacks, EveryPackNamesTheArchitectureItWasPackedFor)
+{
+    const auto& set = loadedSet("hipkernel:Pointwise");
+
+    ASSERT_FALSE(set.packs.empty());
+    for(const auto& pack : set.packs)
+    {
+        // One stamp per emitted copy: the packer writes a shard per arch and narrows each
+        // copy to that one, so a pack carrying two would mean the narrowing was skipped.
+        ASSERT_EQ(pack.arch.size(), 1U) << pack.name;
+        ASSERT_FALSE(pack.kernels.empty()) << pack.name;
+
+        const auto& origin = pack.kernels.front().originDirectory;
+        const auto& stamped = pack.arch.front();
+        EXPECT_TRUE(std::any_of(
+            origin.begin(),
+            origin.end(),
+            [&](const std::filesystem::path& part) { return part.string() == stamped; }))
+            << pack.name << ": stamped '" << stamped << "' but was staged at " << origin;
+    }
+}
+
+/// The point of three packs under one engine: everything but the operation criterion and
 /// the kernels is one descriptor referenced three times, not three copies.
 TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
 {
@@ -101,12 +183,13 @@ TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
     EXPECT_EQ(add.dispatchId, sub.dispatchId);
     ASSERT_EQ(set.dispatches.size(), 1U);
 
-    // Three matchers each: the shared applicability check, the shared kernel-scoped dtype
-    // check, and one operation check of their own. Two shared ids is what makes the
-    // expensive graph work run once per graph instead of once per pack.
-    ASSERT_EQ(add.matcherIds.size(), 3U);
-    ASSERT_EQ(mul.matcherIds.size(), 3U);
-    ASSERT_EQ(sub.matcherIds.size(), 3U);
+    // Two criteria each: one operation check of their own, plus the shared kernel-scoped
+    // dtype check. The expensive graph work is the engine's graph_match, which runs once
+    // per graph for every pack rather than being listed by any of them.
+    EXPECT_FALSE(set.engine.graphMatchNativeSymbol.empty());
+    ASSERT_EQ(add.matcherIds.size(), 2U);
+    ASSERT_EQ(mul.matcherIds.size(), 2U);
+    ASSERT_EQ(sub.matcherIds.size(), 2U);
 
     // Counted rather than set_intersection'd: matcher ids are in the order the pack
     // authored them, not sorted, and a sorted-range algorithm would quietly under-count.
@@ -120,7 +203,7 @@ TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
                                                != other->end();
                                     });
                             }),
-              2);
+              1);
 }
 
 TEST(TestPointwisePacks, ExposesBlockSizeAsAKnobAndDtypeAsInternal)
@@ -136,15 +219,15 @@ TEST(TestPointwisePacks, MatchersCoverBothScopes)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    // Four graph-scoped: one shared applicability check every pack lists, plus one
-    // operation check each. One kernel-scoped, shared, pruning per candidate.
+    // Three graph-scoped: one operation check per pack. Applicability is the engine's
+    // graph_match, not a UMD. One kernel-scoped, shared, pruning per candidate.
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
                                 return matcher.scope
                                        == hipdnn_plugin_sdk::ingestor::MatchScope::GRAPH;
                             }),
-              4);
+              3);
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
@@ -163,12 +246,12 @@ TEST(TestPointwisePacks, SubtractsInTheRightDirection)
     const GraphFixture fixture(
         buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB));
 
-    hipdnn_plugin_sdk::ingestor::BoundTokens bound;
-    ASSERT_TRUE(matchesGraph(POINTWISE_SUB, fixture.context(), bound));
+    const auto bound = matchesGraph(POINTWISE_SUB, fixture.context());
+    ASSERT_TRUE(bound.has_value());
 
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputAToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_SUB.inputAToken),
               INPUT_A_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputBToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_SUB.inputBToken),
               INPUT_B_UID);
 }
 

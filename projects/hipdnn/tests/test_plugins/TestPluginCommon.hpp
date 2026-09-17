@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -373,7 +374,24 @@ public:
     virtual const char* getPluginVersion() const = 0;
     virtual const char* getPluginApiVersion() const = 0;
     virtual int64_t getEngineId() const = 0;
+
+    /// Engine name this plugin reports for its engine, or `nullptr` when the plugin
+    /// supplies no name. Feeds both `hipdnnEnginePluginGetEngineName` and
+    /// `EngineDetails.name`. Overrides must return storage that outlives the call.
+    virtual const char* getEngineName() const
+    {
+        return nullptr;
+    }
+
     virtual uint32_t getNumEngines() const = 0;
+
+    /// The engine IDs `hipdnnEnginePluginGetAllEngineIds` publishes, in the order it
+    /// reports them. Defaults to the single engine `getEngineId()` names.
+    virtual std::vector<int64_t> getAllEngineIds() const
+    {
+        return {getEngineId()};
+    }
+
     virtual uint32_t getNumApplicableEngines() const = 0;
     virtual bool supportsEngineOperations() const
     {
@@ -575,14 +593,57 @@ public:
 
             *numEngines = getInstance()->getNumEngines();
 
-            if(maxEngines >= 1 && *numEngines > 0)
+            // A subclass may override getNumEngines() without overriding getAllEngineIds(),
+            // so the declared count is not a bound on the list. Clamp against both.
+            const auto publishedIds = getInstance()->getAllEngineIds();
+            const auto copied = std::min<uint32_t>(
+                {maxEngines, *numEngines, static_cast<uint32_t>(publishedIds.size())});
+            for(uint32_t i = 0; i < copied; ++i)
             {
-                assert(*numEngines == 1);
-                engineIds[0] = getInstance()->getEngineId();
+                engineIds[i] = publishedIds[i];
             }
 
             LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines);
         });
+    }
+
+    /// Services the optional engine-name entry point emitted by
+    /// `REGISTER_TEST_PLUGIN_ENGINE_NAME_API()`, following the status contract
+    /// documented on `hipdnnEnginePluginGetEngineName`.
+    static hipdnnPluginStatus_t enginePluginGetEngineName(int64_t engineId, const char** name)
+    {
+        LOG_API_ENTRY("engineId=" << engineId << ", name=" << static_cast<const void*>(name));
+
+        hipdnnPluginStatus_t nameStatus = HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+
+        const auto status = hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+            hipdnn_plugin_sdk::throwIfNull(name);
+            hipdnn_plugin_sdk::throwIfNull(getInstance());
+
+            if(engineId == getInstance()->getEngineId())
+            {
+                const char* engineName = getInstance()->getEngineName();
+                if(engineName != nullptr)
+                {
+                    *name = engineName;
+                    nameStatus = HIPDNN_PLUGIN_STATUS_SUCCESS;
+                }
+                else
+                {
+                    nameStatus = HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+                }
+            }
+
+            LOG_API_SUCCESS(apiName,
+                            "engineId=" << engineId << ", status=" << static_cast<int>(nameStatus));
+        });
+
+        if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
+        return nameStatus;
     }
 
     static hipdnnPluginStatus_t enginePluginCreate(hipdnnEnginePluginHandle_t* handle)
@@ -687,7 +748,11 @@ public:
             const std::vector<int32_t> behaviorNotes{
                 static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)};
             auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
-                builder, getInstance()->getEngineId(), nullptr, &behaviorNotes);
+                builder,
+                getInstance()->getEngineId(),
+                nullptr,
+                &behaviorNotes,
+                getInstance()->getEngineName());
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
@@ -1256,4 +1321,15 @@ private:
                                                                        overrideShapes,    \
                                                                        overrideStrides);  \
     }                                                                                     \
+    } // extern "C"
+
+/// Emits only the optional engine-name C symbol, alongside
+/// `REGISTER_TEST_PLUGIN_API()`, for the fake plugins that name their engine.
+#define REGISTER_TEST_PLUGIN_ENGINE_NAME_API()                               \
+    extern "C" {                                                             \
+    HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t        \
+        hipdnnEnginePluginGetEngineName(int64_t engineId, const char** name) \
+    {                                                                        \
+        return TestPluginBase::enginePluginGetEngineName(engineId, name);    \
+    }                                                                        \
     } // extern "C"

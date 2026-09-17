@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # ###########################
@@ -8,6 +8,13 @@
 
 # HIP dependency is handled earlier in the project cmake file
 # when VerifyCompiler.cmake is included.
+
+# NOTE: rocThrust and rocPRIM share CMake options for building tests, benchmarks
+#        and examples. Until that's not fixed, we have to save/restore them.
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  set(${SHARED_OPTION} OFF)
+endforeach()
 
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
@@ -254,7 +261,7 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
       prim
       SOURCE_DIR    ${ROCPRIM_PATH}
       INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DBUILD_BENCHMARK=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_CONFIGURE TRUE
       LOG_BUILD     TRUE
       LOG_INSTALL   TRUE
@@ -269,8 +276,16 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
   endif()
 endif()
 
+# Search for libhipcxx if requested (default: ON)
+if(${ROCTHRUST_USE_LIBHIPCXX})
+  find_package(libhipcxx)
+  if (NOT TARGET libhipcxx::libhipcxx)
+    message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
+  endif()
+endif()
+
 # Test dependencies
-if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
+if(USER_BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Test (https://github.com/google/googletest)
     find_package(GTest QUIET)
@@ -376,7 +391,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Benchmark dependencies
-if(BUILD_BENCHMARK)
+if(USER_BUILD_BENCHMARK)
   set(BENCHMARK_VERSION 1.9.5)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
@@ -415,12 +430,12 @@ if(BUILD_BENCHMARK)
     set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
 	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
     # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
-	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)
-	  if(TARGET benchmark)
-	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)
-	  endif()
-	  if(TARGET benchmark_main)
-	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
+	  if(TARGET benchmark)  
+	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
+	  endif()  
+	  if(TARGET benchmark_main)  
+	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)	
 	  endif()
       if(NOT TARGET benchmark::benchmark)
         add_library(benchmark::benchmark ALIAS benchmark)
@@ -444,23 +459,30 @@ if(BUILD_BENCHMARK)
       set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
     endif()
 
-    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON leaks into
-    # rocrand and causes its benchmarks to build. Suppress that here.
+    # FetchContent runs in-process, so rocthrust's BUILD_BENCHMARK=ON and BUILD_TEST=ON leaks into
+    # rocrand and causes its benchmarks and unit tests to build. Suppress that here.
     set(BUILD_BENCHMARK OFF)
+    set(BUILD_TEST OFF)
     
     FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
       INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
-      CMAKE_ARGS    -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+      CMAKE_ARGS    -DBUILD_BENCHMARK=OFF -DBUILD_TEST=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
       LOG_CONFIGURE TRUE
       LOG_BUILD     TRUE
       LOG_INSTALL   TRUE
     )
     FetchContent_MakeAvailable(rocrand)
     set(BUILD_BENCHMARK ON)
+    set(BUILD_TEST ON)
     if(NOT TARGET roc::rocrand)
       add_library(roc::rocrand ALIAS rocrand)
     endif()
   endif()
 endif()
+
+# Restore user global state
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+endforeach()

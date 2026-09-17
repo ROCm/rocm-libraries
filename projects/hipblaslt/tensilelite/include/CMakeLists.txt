@@ -1,14 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPBLASLT_ENABLE_HOST)
-    set(_tensilelite_header_scope PUBLIC)
-else()
-    set(_tensilelite_header_scope PRIVATE)
-endif()
-
 target_sources(tensilelite-host
-    ${_tensilelite_header_scope}
+    PUBLIC
         FILE_SET tensilelite_public_headers TYPE HEADERS
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
@@ -46,6 +40,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ExactLogicLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FreeSizeLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FusedA2AKernArg.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/GranularitySelectionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelArguments.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelLanguageTypes.hpp"
@@ -104,7 +99,6 @@ target_sources(tensilelite-host
         FILE_SET tensilelite_private_headers TYPE HEADERS
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
-                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ArithmeticUnitTypes.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedData.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionMapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"
@@ -120,7 +114,7 @@ if(HIPBLASLT_ENABLE_YAML)
     )
 else()
     target_sources(tensilelite-host
-        ${_tensilelite_header_scope}
+        PUBLIC
             FILE_SET tensilelite_public_headers TYPE HEADERS
                 FILES
                     "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
@@ -131,15 +125,13 @@ else()
     )
 endif()
 
-if(HIPBLASLT_ENABLE_HOST)
-    get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
-    target_sources(tensilelite-host
-        ${_tensilelite_header_scope}
-            FILE_SET tensilelite_generated_headers TYPE HEADERS
-                BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
-                FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
-            FILE_SET rocisa_public_headers TYPE HEADERS
-                BASE_DIRS "${_rocisa_include_root}"
-                FILES "${_rocisa_include_root}/rocisa/include/enum.hpp"
-    )
-endif()
+get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
+target_sources(tensilelite-host
+    PUBLIC
+        FILE_SET tensilelite_generated_headers TYPE HEADERS
+            BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
+            FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
+        FILE_SET rocisa_public_headers TYPE HEADERS
+            BASE_DIRS "${_rocisa_include_root}"
+            FILES "${_rocisa_include_root}/rocisa/include/enum.hpp"
+)
