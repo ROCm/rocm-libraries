@@ -30,6 +30,7 @@
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
+#include "rocke/wmma_scale_internal.h"
 #include "rocke/scaled_wmma_internal.h"
 
 #include <stdio.h> /* snprintf */
@@ -76,18 +77,20 @@ static const char* h_elem_scalar(const rocke_type_t* t)
  * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
  * op.attrs), so a synthetic op aliasing the same operands/results/regions and
  * reusing the original attrs map reproduces the Python emission exactly. */
-static rocke_status_t
-    h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op, bool scale16, int fmt)
+static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char* op_id
-        = scale16 ? "wmma_scale16_f32_16x16x128_fp8_fp8" : "wmma_scale_f32_16x16x128_fp8_fp8";
-    if(fmt == 4)
+    const rocke_scaled_wmma_op_t* spec = rocke_gfx1250_scaled_wmma_from_op(op);
+    if(!spec)
     {
-        op_id = scale16 ? "wmma_scale16_f32_16x16x128_fp4_fp4" : "wmma_scale_f32_16x16x128_fp4_fp4";
+        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "unsupported scaled WMMA op '%s'", op->name);
     }
+    const char* op_id = spec->op_id;
+    const bool scale16 = spec->scales.block_k == 16;
+    const int fmt_a = spec->matrix_format;
+    const int fmt_b = spec->matrix_format_b;
     int sa = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_a"));
     int sb = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_b"));
-    if(const char* error = rocke_wmma_scale_error(fmt, fmt, sa, sb))
+    if(const char* error = rocke_wmma_scale_error(fmt_a, fmt_b, sa, sb))
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
     }
@@ -110,9 +113,9 @@ static rocke_status_t
                   "0, %d, %s, 0, %d, %s, false, false);",
                   rocke_h_name(lw, op->results[0]),
                   builtin,
-                  fmt,
+                  fmt_a,
                   rocke_h_name(lw, op->operands[0]),
-                  fmt,
+                  fmt_b,
                   rocke_h_name(lw, op->operands[1]),
                   rocke_h_name(lw, op->operands[2]),
                   sa,
@@ -138,21 +141,9 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
     }
-    if(__builtin_strcmp(op_id, "wmma_scale_f32_16x16x128_fp8_fp8") == 0)
+    if(rocke_gfx1250_scaled_wmma(op_id))
     {
-        return h_emit_gfx1250_scaled_wmma(lw, op, false, 0);
-    }
-    if(__builtin_strcmp(op_id, "wmma_scale_f32_16x16x128_fp4_fp4") == 0)
-    {
-        return h_emit_gfx1250_scaled_wmma(lw, op, false, 4);
-    }
-    if(__builtin_strcmp(op_id, "wmma_scale16_f32_16x16x128_fp8_fp8") == 0)
-    {
-        return h_emit_gfx1250_scaled_wmma(lw, op, true, 0);
-    }
-    if(__builtin_strcmp(op_id, "wmma_scale16_f32_16x16x128_fp4_fp4") == 0)
-    {
-        return h_emit_gfx1250_scaled_wmma(lw, op, true, 4);
+        return h_emit_gfx1250_scaled_wmma(lw, op);
     }
     snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
     legacy_opcode = rocke_opcode_from_name(dotted);

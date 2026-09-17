@@ -53,24 +53,7 @@ def gpu_env():
     return env
 
 
-@pytest.mark.parametrize(
-    "dtype,matrix_path,route,m,n,k,case,count",
-    [
-        (dtype, *case)
-        for dtype in ("fp8e4m3", "fp4")
-        for case in [
-            ("wmma_scale", "comgr", 16, 16, 128, "all", 8),
-            ("wmma_scale16", "comgr", 16, 16, 128, "all", 12),
-            ("wmma_scale", "comgr", 32, 48, 256, "mixed", 1),
-            ("wmma_scale16", "comgr", 32, 48, 256, "mixed", 1),
-            ("wmma_scale", "hip", 32, 48, 256, "mixed", 1),
-            ("wmma_scale16", "hip", 32, 48, 256, "mixed", 1),
-            ("wmma", "comgr", 16, 16, 128, "mixed", 1),
-        ]
-        if dtype != "fp4" or case[0] != "wmma"
-    ],
-)
-def test_scaled_wmma_numeric(gpu_env, dtype, matrix_path, route, m, n, k, case, count):
+def _run_numeric(gpu_env, dtype, matrix_path, route, m, n, k, case, count):
     result = subprocess.run(
         [
             sys.executable,
@@ -103,36 +86,9 @@ def test_scaled_wmma_numeric(gpu_env, dtype, matrix_path, route, m, n, k, case, 
     print(output, end="")
 
 
-@pytest.mark.parametrize("route", ["comgr", "hip"])
-@pytest.mark.parametrize("dtype_c", ["bf16", "fp16"])
-@pytest.mark.parametrize("m,n,k", [(16, 16, 128), (32, 48, 256)])
-def test_nvfp4_numeric(gpu_env, route, dtype_c, m, n, k):
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "rocke.examples.gfx1250.gemm.nvfp4_gemm_verify",
-            "--m",
-            str(m),
-            "--n",
-            str(n),
-            "--k",
-            str(k),
-            "--dtype-c",
-            dtype_c,
-            "--compile-route",
-            route,
-            "--case",
-            "all",
-        ],
-        env=gpu_env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    output = result.stdout + result.stderr
-    count = 16 + k // 16
-    assert result.returncode == 0, output
-    assert f"PASS: verified {count} cases" in output, output
-    assert output.count("bad=0") == count, output
-    print(output, end="")
+@pytest.fixture
+def numeric_case(gpu_env):
+    """Run one bounded scaled-GEMM case with the validated GPU environment."""
+    from functools import partial
+
+    return partial(_run_numeric, gpu_env)

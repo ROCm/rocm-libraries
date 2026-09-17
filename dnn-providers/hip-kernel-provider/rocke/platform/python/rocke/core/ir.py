@@ -94,6 +94,9 @@ _MMA_RESULT_HINT: Dict[str, str] = {
 }
 
 
+_MMA_RESULT_HINT.update({op_id: "mxacc" for op_id in SCALED_WMMA_OPS})
+
+
 def _check_u16(op: str, field: str, value: int) -> int:
     """Range-check an immediate the intrinsic declares as ``i16``.
 

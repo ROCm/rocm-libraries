@@ -2,6 +2,8 @@
 
 The [block-scaled GEMM builder](../../../instances/gfx1250/block_scaled_gemm.py)
 accepts `dtype_a="fp4", dtype_b="fp4"` for native gfx1250 SCALE and SCALE16.
+`fp4e2m1` is an equivalent spelling for either matrix dtype and for the verifier
+`--dtype` option; both spellings select the same packed E2M1 contract.
 This path consumes prepacked E2M1 values and E8M0 scale bytes. It does not
 quantize floating-point inputs or provide an A16W4 dequantization kernel.
 
@@ -22,7 +24,11 @@ The pointer ABI is `i8`, with 16-byte-aligned matrix buffers.
 Scale memory has shape `[M, K/block_k]` for A and `[K/block_k, N]` for B.
 Successive K groups occupy successive bytes, starting at the low byte of the
 instruction operand. `scale_dtype="e8m0"` selects this contract; `i8` is its
-storage alias. E4M3/E5M3 scale formats are not exposed by this path.
+storage alias. FP4 also accepts E4M3/E5M3 scale formats. See
+[per-operand scale formats](SCALE_FORMATS.md) for accepted combinations and API.
+The [scaled-WMMA operand descriptor](../../../core/arch/wmma_scale.py) records
+the E8M0 scale count and K-group size. The builder packs from that descriptor,
+and the lowerers derive the integer carrier width from the same contract.
 SCALE with block size 32 is MXFP4. SCALE16 here means FP4 with E8M0 scales
 and block size 16.
 
@@ -33,8 +39,9 @@ are two 16-byte loads, yielding eight i32 words padded with eight zero words
 for the builtin's sixteen-word argument. Both scale modes use this input map.
 Output slot `i` maps to row `8*h+i`, column `l % 16` within the output tile.
 
-M/N must be multiples of 16 and K a multiple of 128. Mixed operand formats,
-partial tiles, a logical FP4 IR type, and quantization conversions are outside
+M/N must be multiples of 16 and K a multiple of 128. Mixed operand formats
+are supported as described in [FP6 and mixed matrix formats](FP6.md).
+Partial tiles, a logical FP4 IR type, and quantization conversions are outside
 this path. The K loop is statically unrolled, as in the existing FP8 builder.
 
 ## Verification
