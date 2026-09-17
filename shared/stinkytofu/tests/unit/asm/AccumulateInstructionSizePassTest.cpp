@@ -119,6 +119,86 @@ TEST_F(InstructionSizeCostingTest, VCvtBf16_Src255_Mod256_Logical255_PromotesTo8
     EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
 }
 
+// ---------------------------------------------------------------------------
+// abs/neg source modifiers force VOP3 (_e64) on compact VALU (8 bytes).
+// Regression: gfx1250 amax epilogue emits `v_max_num_f32 vD, vD, |vSrc|`
+// (VMaxF32(..., isAbs=True)); the abs modifier is VOP3-only, so the assembler
+// encodes _e64 (8 B). The size model previously kept the compact 4 B base,
+// under-counting STINKY_TOTAL_INST_BYTES and tripping CheckASMCodeSize.
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_NoModifier_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 11, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_AbsSrc1_ForcesVop3_8Bytes) {
+    // v_max_num_f32 v118, v118, |v11|  (real amax epilogue instruction)
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 11, 1));
+    inst->addModifier(VOP3Modifiers(/*neg_src0=*/false, /*neg_src1=*/false, /*neg_src2=*/false,
+                                    /*abs_src0=*/false, /*abs_src1=*/true, /*abs_src2=*/false));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_NegSrc0_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 5, 1));
+    inst->addSrcReg(StinkyRegister("v", 9, 1));
+    inst->addSrcReg(StinkyRegister("v", 10, 1));
+    inst->addModifier(VOP3Modifiers(/*neg_src0=*/true));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+// Per-operand register modifier (StinkyRegister::reg.isAbs) is what the
+// rocisa->stinky conversion emits for `vgpr(..., isAbs=True)`; this is the exact
+// shape of the amax epilogue's `v_max_f32 vD, vD, abs(vSrc)` that tripped
+// CheckASMCodeSize (33 such instructions x 4 B under-count = 132 B diff).
+TEST_F(InstructionSizeCostingTest, VMaxF32_OperandAbs_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 118, 1));
+    inst->addSrcReg(StinkyRegister("v", 118, 1));
+    StinkyRegister absSrc("v", 11, 1);
+    absSrc.reg.isAbs = 1;
+    inst->addSrcReg(absSrc);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
+TEST_F(InstructionSizeCostingTest, VMaxF32_OperandNeg_ForcesVop3_8Bytes) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_max_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 5, 1));
+    StinkyRegister negSrc("v", 9, 1);
+    negSrc.reg.isMinus = 1;
+    inst->addSrcReg(negSrc);
+    inst->addSrcReg(StinkyRegister("v", 10, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+}
+
 TEST_F(InstructionSizeCostingTest, VCvtF16F32_OpSel10_ForcesVop3_EvenIfLowVgpr) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
