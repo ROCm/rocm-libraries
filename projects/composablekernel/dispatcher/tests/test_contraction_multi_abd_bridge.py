@@ -45,8 +45,11 @@ from contraction_multi_abd_utils import (  # noqa: E402
     ContractionMultiABDDispatcherLib,
     ContractionMultiABDRunner,
     default_warp_tile_for_arch,
+    warp_tile_supported_on_arch,
     _SUPPORTED_ARCHS,
     _validate_arch,
+    _validate_warp_tiles_for_arch,
+    _detect_gpu_arch,
 )
 from unified_contraction_multi_abd_codegen import (  # noqa: E402
     SUPPORTED_EPILOGUES,
@@ -578,6 +581,81 @@ class TestArchSupport(unittest.TestCase):
         self.assertEqual(tc["warp_tile_m"]["values"], [16])
         self.assertEqual(tc["warp_tile_n"]["values"], [16])
         self.assertEqual(tc["warp_tile_k"]["values"], [32])
+
+
+class TestArchNameNormalization(unittest.TestCase):
+    """Feature-suffixed target names must resolve, not raise.
+
+    rocm_agent_enumerator and CMake both emit forms like 'gfx942:sramecc+:xnack-'.
+    """
+
+    def test_suffixed_name_accepted_and_stripped(self):
+        for raw, bare in (
+            ("gfx1250:xnack-", "gfx1250"),
+            ("gfx942:sramecc+:xnack-", "gfx942"),
+            ("gfx950:sramecc+", "gfx950"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(_validate_arch(raw), bare)
+
+    def test_suffix_does_not_smuggle_in_an_unsupported_arch(self):
+        with self.assertRaises(ValueError):
+            _validate_arch("gfx999:xnack-")
+
+    def test_detect_gpu_arch_handles_suffixed_enumerator_output(self):
+        completed = mock.Mock(stdout="gfx942:sramecc+:xnack-\n", returncode=0)
+        with mock.patch("contraction_multi_abd_utils.subprocess.run",
+                        return_value=completed):
+            self.assertEqual(_detect_gpu_arch(), "gfx942")
+
+
+class TestWarpTileDtypeGating(unittest.TestCase):
+    """Tile legality is per dtype width, not per arch alone."""
+
+    def test_gfx1250_accepts_wmma_tile_for_16_bit(self):
+        for dtype in ("fp16", "bf16"):
+            with self.subTest(dtype=dtype):
+                self.assertTrue(
+                    warp_tile_supported_on_arch((16, 16, 32), "gfx1250", dtype)
+                )
+
+    def test_gfx1250_rejects_gfx9_mfma_tile(self):
+        self.assertFalse(
+            warp_tile_supported_on_arch((32, 32, 16), "gfx1250", "fp16")
+        )
+
+    def test_gfx1250_refuses_8_bit_entirely(self):
+        # No 8-bit warp tile has been established for this operator on gfx1250,
+        # so every shape is refused -- including the valid 16-bit one.
+        for dtype in ("fp8", "bf8"):
+            with self.subTest(dtype=dtype):
+                self.assertFalse(
+                    warp_tile_supported_on_arch((16, 16, 32), "gfx1250", dtype)
+                )
+
+    def test_gfx9_stays_unconstrained(self):
+        for arch in ("gfx90a", "gfx942", "gfx950"):
+            for tile in ((32, 32, 16), (16, 16, 32), (32, 32, 8)):
+                with self.subTest(arch=arch, tile=tile):
+                    self.assertTrue(
+                        warp_tile_supported_on_arch(tile, arch, "fp16")
+                    )
+
+    def test_validator_rejects_fp8_config_on_gfx1250(self):
+        cfg = _base_config(dtype="fp8", warp_tile_m=16, warp_tile_n=16, warp_tile_k=32)
+        with self.assertRaises(ValueError) as ctx:
+            _validate_warp_tiles_for_arch([cfg], "gfx1250")
+        self.assertIn("fp8", str(ctx.exception))
+
+    def test_validator_accepts_fp16_wmma_config_on_gfx1250(self):
+        cfg = _base_config(warp_tile_m=16, warp_tile_n=16, warp_tile_k=32)
+        _validate_warp_tiles_for_arch([cfg], "gfx1250")  # must not raise
+
+    def test_validator_rejects_mfma_config_on_gfx1250(self):
+        cfg = _base_config()  # defaults to the gfx9 32x32x16 tile
+        with self.assertRaises(ValueError) as ctx:
+            _validate_warp_tiles_for_arch([cfg], "gfx1250")
+        self.assertIn("16x16x32", str(ctx.exception))
 
 
 class TestExpandNestedConfig(unittest.TestCase):
