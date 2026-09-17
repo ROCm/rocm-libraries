@@ -70,6 +70,11 @@ add_subdirectory(atomic_add_op)
 if(BUILD_CK_TILE_FMHA_TESTS)
     add_subdirectory(fmha)
 endif()
+# Sparse attention tests link the example's kernel instance libraries, so they require
+# BUILD_CK_EXAMPLES (which defines those targets, added before this test subdirectory).
+if(BUILD_CK_TILE_SPARSE_ATTN_TESTS AND BUILD_CK_EXAMPLES)
+    add_subdirectory(sparse_attn)
+endif()
 if(BUILD_CK_TILE_ENGINE_TESTS)
 # TODO: The Universal GEMM tile engine test will be either removed
 # or moved to the appropriate location in future work.

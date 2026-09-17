@@ -90,7 +90,7 @@ def showCompilerInfo(boolean deferBinaryInfo = false, String dockerImage = "") {
 
 
 //launch develop branch daily jobs
-CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
+CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_CK_TILE_SPARSE_ATTN_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
                                               0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 21 * * * % RUN_GROUPED_CONV_LARGE_CASES_TESTS=true;hipTensor_test=true;BUILD_GFX101=false;BUILD_GFX908=false;BUILD_GFX942=true;BUILD_GFX950=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true;BUILD_PACKAGES=true
                                               0 19 * * * % BUILD_DOCKER=true;COMPILER_VERSION=develop;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
@@ -181,6 +181,10 @@ pipeline {
             name: "RUN_CK_TILE_FMHA_TESTS",
             defaultValue: false,
             description: "Run the ck_tile FMHA tests (default: OFF)")
+        booleanParam(
+            name: "RUN_CK_TILE_SPARSE_ATTN_TESTS",
+            defaultValue: false,
+            description: "Run the ck_tile sparse attention tests (default: OFF)")
         booleanParam(
             name: "RUN_TILE_ENGINE_BASIC_TESTS",
             defaultValue: true,
@@ -635,6 +639,19 @@ pipeline {
                             }
                         }
                     }
+                }
+            }
+        }
+        stage("Run CK_TILE_SPARSE_ATTN Tests")
+        {
+            when {
+                beforeAgent true
+                expression { env.SHOULD_RUN_CI.toBoolean() && params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
+            }
+            steps{
+                script {
+                    loadCk()
+                    ck.runSparseAttnStages(["gfx90a", "gfx942", "gfx950"], params.BUILD_COMPILER)
                 }
             }
         }
