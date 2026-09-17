@@ -10,8 +10,19 @@ gives an exact validation recipe using tools already proven to work in this
 environment.
 
 **Status of T2-01 (block-diagonal WMMA packing)**: implemented and verified
-for `grouped_conv2d_fwd` only (commit `932dce7b168`, ~97x speedup at the
-target shape). **Not yet ported to `grouped_conv2d_bwd_weight`** — see Task 4.
+for `grouped_conv2d_fwd` (commit `932dce7b168`, ~97x speedup at the target
+shape). **Task 4 (`grouped_conv2d_bwd_weight`): resolved, but not via a
+literal port** — bwd_weight's GEMM-K axis carries no channel content
+(see Task 4's Resolution), so T2-01's K-axis packing mechanism cannot
+apply; instead extended and validated CK's existing, previously-dormant
+`NumGroupsToMerge` block-diagonal M/N packing for the depthwise shape
+family T2-01's fwd precedent targets, 1.2x-2.2x measured on gfx1250.
+
+**Task 6 (atomic scope stress test)**: run per its own recipe; the
+DEVICE-vs-SYSTEM hypothesis it set out to test was ruled out, but the test
+surfaced a real, reproducible, previously-undocumented correctness bug in
+`DeviceGroupedConvBwdWeight_Wmma_CShuffleV3`'s split-K atomic-add path under
+high per-destination contention — see **Task 8** (new).
 
 ## Environment / tooling recap (so an agent can move immediately)
 
@@ -482,6 +493,96 @@ analogously to the bwd_weight device-op family:
 # since GroupsPerWmma=1 (untouched path) must remain bit-identical in behavior.
 ```
 
+### Resolution
+
+**T2-01's literal mechanism does not port to `bwd_weight` — this is a
+mathematical fact, not an engineering gap.** fwd's GEMM-K axis is
+`C_per_group*Y*X` (channel-bearing, hence the small-channel K-padding
+waste T2-01 closes by packing groups block-diagonally into K).
+`bwd_weight`'s GEMM-K axis is `N*Ho*Wo` (batch/spatial) —
+`get_bwd_weight_gemm_sizes()` (`split_k_utils.hpp:65-92`) and
+`TransformConvBwdWeightToGemmV2::MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N`
+confirm `GemmM = K_per_group`, `GemmN = C_per_group*Y*X`, `GemmK =
+N*Ho*Wo` — channels appear only in M and N, **never** in K, because
+weight-gradient reduction is over batch and space, not channels. There is
+no small-channel K content to pack block-diagonally for this GEMM, at any
+implementation choice; a literal port (new K-axis prepass kernel, per the
+design doc's §3) would be solving a problem this GEMM shape does not have.
+
+**The structurally-analogous inefficiency, and its existing fix**: since
+both channel axes live in M/N which share one group-independent K, the
+real padding waste for small-channels-per-group `bwd_weight` is
+plain MPerBlock/NPerBlock tile underutilization — and CK already has a
+proven, descriptor-only block-diagonal packing mechanism for exactly that:
+`NumGroupsToMerge` (xor+pad trick,
+`TransformConvBwdWeightToGemmV2::make_wei_grid_desc`), already wired into
+`DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3`'s template parameter
+list. It was, however, gated at `IsSupportedArgument()`
+(`device_grouped_conv_bwd_weight_two_stage_wmma_cshuffle_v3.hpp:1355`) to
+`Conv_C_==1 && Conv_K_==1` (pure depthwise) and **never exercised with
+`NumGroupsToMerge > 1` by any registered instance** — every instance in
+both the active and commented-out tables in
+`device_grouped_conv_bwd_weight_two_stage_wmma_instance.hpp` uses
+`NumGroupsToMerge=1`. This dormant capability is exactly what the
+roadmap's cited depthwise shapes (M06/M14/M15/M19/M25 — all
+`C_per_group=K_per_group=1`) need, so the actual "port" of T2-01's intent
+(dense packing instead of instance tuning around a fixed waste factor) is
+to exercise and register it, not to invent a new K-axis prepass.
+
+**What was done**: added
+`example/71_grouped_conv_bwd_weight_wmma_group_merge/` (mirrors fwd's own
+standalone-example validation pattern), exercising
+`DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3` with
+`NumGroupsToMerge=16` for the 3x3 depthwise shape family
+(`C_per_group=K_per_group=1`): `GemmM = 16*K_per_group = 16` exactly fills
+`MPerBlock=16` (was `K_per_group=1` padded 16x), `GemmN =
+16*C_per_group*Y*X = 144` exactly fills `NPerBlock=144 =
+NRepeat(9)*NPerWmma(16)` (was `C_per_group*Y*X=9` padded ~1.8x) — all
+other tile parameters are the existing `NumGroupsToMerge=1` instance's,
+unchanged (the epilogue loops `NRepeat` times over the same 16x16 pass
+shape, so only B's N-extent needed retuning). Verified correct against
+`ReferenceConvBwdWeight` (CPU reference, bf16) at G=192/256/512. Registered
+the validated config as a second bf16 instance in
+`device_grouped_conv_bwd_weight_two_stage_wmma_instance.hpp` (existing
+`NumGroupsToMerge=1` instance left completely unchanged, zero risk to it).
+
+**Validated on gfx1250 hardware** (`ckProfiler ... verify=1`, standard
+auto split_k `-1`, no manual tuning — real end-user path):
+
+| Shape | Before (TFlops) | After (TFlops) | Speedup |
+|---|---|---|---|
+| M06 (g=192, 120x160, s2) | 0.335 | 0.591 | 1.76x |
+| M14 (g=256, 60x80, s1) | 0.400 | 0.836 | 2.09x |
+| M15 (g=256, 60x80, s2) | 0.413 | 0.493 | 1.19x |
+| M25 (g=512, 30x40, s1) | 0.361 | 0.783 | 2.17x |
+
+Manual split_k tuning (via the new example) finds still more headroom
+(e.g. M06 up to 1.08 TFlops at split_k=256, ~3.2x) — left as future
+auto-heuristic work (same class of gap as Task 1, not re-solved here).
+
+**Full 29-shape regression sweep** (`miopen_wrw_shapes.txt`, `verify=1`,
+`-1` auto split_k, avoiding `all`-splitK mode — see hazard note below):
+27/29 shapes within noise of baseline or better; the 4 `NumGroupsToMerge=1`-
+eligible depthwise shapes this instance targets all improved as above with
+zero incorrect-result reports across the whole corpus. Two shapes
+(`M00`, `M01`) measured 7-9% below `miopen_baseline_results.csv`'s
+recorded numbers; both select instances this change never touches
+(`DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32,16,16,32,...,1>`
+and `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<512,128,256,256,...>`
+respectively) and reproduced consistently at the lower figure across 3
+repeats each post-reboot — i.e. environment drift between the original
+baseline capture and now (this session hit a real GPU hang mid-validation,
+requiring a machine reboot; post-reboot clock/thermal state differs), not
+a regression from this change.
+
+**Hazard note for future work on this file**: `ckProfiler ... all` (full
+splitK sweep, all instances) reproducibly crashes with
+`HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION` on the M06 shape on this
+machine, **independent of this change** (reproduces against the
+unmodified pre-existing instance set) — consistent with Task 2's
+documented hardware-crash hazard for this instance family. Always use
+explicit or `-1` (auto) split_k values against this op, never `all`.
+
 ---
 
 ## Task 5 — `LargeTensors` grouped-conv backward-weight disabled on gfx1250 — investigate rocKE's `ds_load_tr16_b128` hazard as root cause
@@ -699,6 +800,76 @@ done 2>&1 | grep -c "Error\|Incorrect"
 # Expect 0. Repeat with coherence_flag forced to SYSTEM and compare.
 ```
 
+### Resolution
+
+**Status: tested, hypothesis ruled out — but the stress test surfaced a
+different, real, previously-undocumented correctness bug (see Task 8).**
+
+Step 1's suggested repro shape (`G=1,N=42,K=24,C=3,...`, Task 1's narrow-C
+example) turned out **not** to exercise the atomic path at all: ckProfiler's
+automatic instance selection picks
+`DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3` for this shape, which
+**never uses atomics** for split-K (it writes each split's partial sum to a
+distinct workspace slice and reduces with an ordinary read in stage 2 -
+that's the entire reason `TwoStage` exists, per Task 7's context). 30/30
+`verify=1` runs at `SplitK=2048` passed, but this data point says nothing
+about atomic-scope correctness.
+
+To actually test the atomic path, built a standalone example
+(`example/72_grouped_conv_bwd_weight_wmma_atomic_stress/`) directly
+instantiating `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3` (confirmed via
+`grep AtomicAdd` to dispatch `InMemoryDataOperationEnum::AtomicAdd` whenever
+`KBatch > 1`) at a deliberately adversarial shape: `G=1, K_per_group =
+C_per_group = 32, Y=X=1` — `GemmM = GemmN = 32`, exactly one `MPerBlock x
+NPerBlock` tile (the smallest registered bf16 instance), so every split-K
+workgroup atomic-adds into the *same* destination range.
+
+**Found a real, reproducible, split_k-dependent correctness bug** (10 reps
+per `split_k`, same shape, DEVICE scope - CK's current default):
+
+| split_k | pass/10 | | split_k | pass/10 |
+|---|---|---|---|---|
+| 2 | 20/20 (extra reps) | | 10 | 4/10 |
+| 4 | 20/20 (extra reps) | | 12 | 0/10 |
+| 6 | 9/10 | | 16 | 0/10 |
+| 8 | 6/10 | | 32-1024 | 0/10 |
+
+Below `split_k≈6` always passes; `6-10` is genuinely non-deterministic
+(the classic race signature); `≥12` fails every time. Error magnitude scales
+with `split_k` (a few `~1%`-magnitude wrong elements at `split_k=16`, up to
+53% of all elements wrong by up to `~30%` at `split_k=1024`) - consistent
+with atomic adds being dropped under contention, not a one-off logic bug.
+
+**Tested this doc's exact hypothesis (SYSTEM vs DEVICE scope) directly**:
+forced `coherence_flag` to `SYSTEM` (24) at `amd_buffer_addressing.hpp:602`,
+rebuilt, re-ran the same `split_k` sweep. **No improvement** - `split_k=16`
+through `1024` still fail 10/10 at SYSTEM scope, and `split_k=8` was
+similarly non-deterministic (9/10 pass) rather than fixed. **This rules out
+DEVICE-vs-SYSTEM buffer-atomic coherence scope as the root cause** of what
+was found; MISA's SYSTEM-scope requirement for `global_atomic_add_f32`
+(a different instruction class) does not appear to transfer to CK's
+`raw_buffer_atomic_add` on this hardware, at least not as the fix for this
+bug. Reverted the SYSTEM-scope change in full (confirmed clean `git diff`).
+
+**Also checked**: is this specific to the single-tile (`GemmM=GemmN=
+MPerBlock=NPerBlock`) edge case? No - reproduces identically with
+`K_per_group=64` (2 M-tiles) and `128` (4 M-tiles), all still 0/3 pass at
+`split_k=16`. **Also checked**: does a "normal" wider shape (M01-equivalent,
+`C=K=128`, `GemmM=128, GemmN=1152`) show any failures at high split_k? No -
+`ckProfiler ... verify=1` at `split_k=16/32/64` for that shape reports
+`valids: 20` (all candidate instances, including the atomic-based XDL/WMMA
+one, pass) every time. **The bug is specific to high per-destination atomic
+contention (few, or fully saturated, M/N destinations)**, not split-K or
+atomics in general - i.e. it's a real latent risk specifically for
+narrow-channel/depthwise shapes (the exact regime Task 3/4 target) if a
+caller or future auto-heuristic ever pushes `split_k` past roughly 10-12 for
+such a shape on the one-stage atomic device op.
+
+This is a new, more concrete, better-evidenced correctness lead than the
+original DEVICE-vs-SYSTEM hypothesis. See **Task 8** for the writeup and
+next steps (full root-cause requires disassembly-level investigation,
+scoped out of this task per its own "this is fundamentally a test" framing).
+
 ---
 
 ## Task 7 (lower priority, speculative) — TwoStage's extra global read/write pass
@@ -734,3 +905,331 @@ if it turns out to be a meaningful fraction of total time at high split-K,
 Task 1's fix indirectly addresses this too and no separate work is needed;
 if stage 2 remains a small fraction even at high split-K, this item can be
 closed as "not worth pursuing" with that evidence recorded.
+
+---
+
+## Task 8 (new, high priority) — Real split-K atomic-add correctness bug under high per-destination contention, `DeviceGroupedConvBwdWeight_Wmma_CShuffleV3`
+
+**Priority**: high (confirmed, reproducible correctness bug in shipping
+code, not a perf item; discovered while executing Task 6's stress test).
+**Risk to fix**: unknown until root-caused - could be anywhere from a small
+targeted fix (if it's the rocKE `ds_load_tr16_b128` LDS-load hazard Task 5
+describes, manifesting here instead of via `LargeTensors`) to a deeper
+split-K/atomic design issue. **Root-causing this is a genuinely large task
+(disassembly-level investigation) - not attempted here; this section is the
+bounded, well-evidenced repro + diagnosis handoff**, consistent with Task
+5's own "document the negative/positive result precisely" convention.
+
+### Problem
+
+`DeviceGroupedConvBwdWeight_Wmma_CShuffleV3` (one-stage WMMA bwd-weight,
+`device_grouped_conv_bwd_weight_wmma_cshuffle_v3.hpp`), when split-K forces
+its `InMemoryDataOperationEnum::AtomicAdd` epilogue (`KBatch > 1`), produces
+**wrong results** once per-destination atomic contention gets high enough -
+concretely, once the number of concurrent split-K workgroups per M/N tile
+(`split_k` for a shape whose `GemmM<=MPerBlock` and `GemmN<=NPerBlock`, i.e.
+everything lands in one tile) exceeds roughly 10-12. Below that it's
+correct; `6-10` is flakily wrong (non-deterministic - the classic race
+signature); at and above `~12` it is wrong on every single run, with error
+magnitude scaling with `split_k` (up to 53% of all elements wrong, up to
+~30% relative error, at `split_k=1024`). Full evidence, exact repro
+commands, and what was ruled out (SYSTEM vs DEVICE atomic scope; the
+single-tile-grid edge case) are in Task 6's Resolution above - this task
+exists to make the finding trackable independent of Task 6's original
+(now-superseded) hypothesis.
+
+**Reproducer**: `example/72_grouped_conv_bwd_weight_wmma_atomic_stress/`
+(new, added alongside this finding). Usage:
+`./bin/example_grouped_conv_bwd_weight_wmma_atomic_stress_bf16
+<split_k> [K_per_group]` (defaults: `split_k=1024`, `K_per_group=32`).
+Prints `PASS`/`FAIL split_k=N` and returns a matching exit code; loop it to
+see the non-deterministic band.
+
+**Blast radius, not yet checked**: only `DeviceGroupedConvBwdWeight_Wmma_
+CShuffleV3` (plain WMMA one-stage) was tested. `device_grouped_conv_bwd_
+weight_xdl_cshuffle_v3.hpp` (confirmed, via its own `GetTypeString()`
+appending `_WmmaPorted` whenever `get_warp_size() != 64`, to *also* lower to
+WMMA on gfx1250 - directly validating Task 5's caveat that this nominally-
+"Xdl" template is WMMA-backed here) uses the identical `AtomicAdd`-on-
+`KBatch>1` dispatch pattern and was **not** observed to fail in a quick check
+at `split_k` up to 64 - but that check used a "normal" wide shape (`GemmM=
+128, GemmN=1152`), not a saturated single-tile shape; it has not been tested
+at matching per-destination contention (`GemmM<=MPerBlock, GemmN<=NPerBlock`)
+the way the one-stage WMMA op was. Do that check before assuming XDL/
+WmmaPorted is unaffected - if it is affected too, this is very likely the
+same underlying hazard as Task 5 (both device ops sharing gfx1250 WMMA
+codegen for their LDS→MMA feed), which would make Task 5's disassembly
+investigation directly applicable here as well and vice versa.
+
+### Concrete implementation plan
+
+1. Confirm/deny the same failure on `device_grouped_conv_bwd_weight_xdl_
+   cshuffle_v3.hpp` at matching contention (small `GemmM`/`GemmN`, `split_k`
+   swept 4-64) - determines whether this is one device op's bug or a shared
+   hazard.
+2. Follow Task 5's disassembly playbook: dump the compiled kernel for the
+   failing `AtomicAdd`-dispatched instantiation and check whether the
+   atomic-add source/destination registers are fed by a `ds_load_tr16_b128`
+   auto-substitution (same rocKE hazard) rather than investigating atomics
+   in isolation - a corrupted *operand* to the atomic add would produce
+   exactly this "wrong sum, worse under more concurrent workgroups" pattern
+   just as plausibly as a genuine dropped-atomic race would.
+3. If the LDS-load hazard is confirmed: apply rocKE's `volatile`-marking fix
+   at the relevant load site(s) in the shared blockwise/threadwise LDS-read
+   path this device op includes; re-run the exact repro sweep above
+   (`split_k` 2 through 1024, 10+ reps each) and confirm the pass rate goes
+   to 100% at every level, not just the previously-failing ones.
+4. If not confirmed: this remains a genuine atomic/split-K correctness bug
+   independent of Task 5's hazard - escalate as its own investigation
+   (possibly CU-vs-DEVICE-vs-SYSTEM was the wrong axis entirely; consider
+   whether the epilogue's read-modify-write ordering, or the zero-
+   initialization of the destination buffer before the first atomic add,
+   has a visibility gap under high contention).
+
+### Validation recipe
+
+```bash
+# Reproduce (expect a mix of PASS/FAIL around split_k=6-10, all-FAIL at >=12):
+for sk in 2 4 6 8 10 12 16 32 1024; do
+  echo "split_k=$sk:"
+  for i in $(seq 1 10); do ./bin/example_grouped_conv_bwd_weight_wmma_atomic_stress_bf16 $sk; done | sort | uniq -c
+done
+```
+
+---
+
+## Task 9 — Port ck_tile's 8-wave async-load GEMM pipeline to convolution (fwd first, then bwd-weight), pairing `global_load_async` for A with TDM for B
+
+**Priority**: medium-high (large potential upside per the ck_tile GEMM
+precedent this is modeled on; scoped as new pipeline engineering, not a
+tuning knob).
+**Risk**: medium — new pipeline code, but follows an existing, working
+ck_tile GEMM pattern closely rather than inventing from scratch.
+
+### Problem / opportunity
+
+ck_tile already has a compute-optimized **8-wave** GEMM pipeline,
+`GemmPipelineAgBgCrCompAsyncEightWaves`
+(`include/ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_waves.hpp`,
+policy at `gemm_pipeline_ag_bg_cr_comp_async_eight_waves_policy.hpp`, shared
+base at `gemm_pipeline_ag_bg_cr_eight_waves_base.hpp`). Its defining feature
+(per its own doc comment) is *"asynchronous load from global memory to LDS,
+skipping the intermediate loading into pipeline registers"* — i.e. it uses
+`async_load_tile`/`async_load_tile_raw`
+(`include/ck_tile/core/tensor/load_tile.hpp:165-215`, which lower to a
+direct global→LDS copy instruction, fenced with `s_waitcnt vmcnt`) for
+**both** A and B today
+(`MakeAsyncLoadADramWindow`/`MakeAsyncLoadBDramWindow`, referenced at
+`gemm_pipeline_ag_bg_cr_eight_waves_base.hpp:125,159`). This pipeline is
+MFMA-based (`BlockGemm`/`WarpGemm` selection via
+`Policy::GetBlockGemm<Problem, IsScaledGemm>()`) and its 8-wave occupancy
+profile (large `BlockGemmShape::BlockWarps` product) is the kind of
+configuration that benefits most from MI355/gfx950's larger per-CU register
+file and LDS capacity — this needs to be re-confirmed for gfx1250
+specifically (gfx1250 is WMMA/wave32, not MFMA/wave64 — see the caveat
+below) rather than assumed to transfer directly.
+
+ck_tile also already has **separate** TDM-based GEMM pipelines
+(`gemm_pipeline_ag_bg_cr_comp_tdm_v1.hpp`, `_v2.hpp`,
+`gemm_pipeline_ag_bg_cr_comp_tdm_default_policy.hpp`, and
+`wp_pipeline_agmem_bgmem_creg_tdm.hpp` + its policy), demonstrating the TDM
+load API (`load_tile_tdm` /
+`tile_window.tdm_load_to_lds(tdm_config, lds_tile, ...)`,
+`include/ck_tile/core/tensor/load_tile.hpp:179-198`) as a working,
+in-tree alternative bulk-transfer mechanism to plain async-copy. TDM is
+already used for gfx1250 elsewhere in ck_tile (the FMHA TDM pipeline,
+per recent commits touching `qr_tdm`/`fp8 quantization scales on gfx1250
+FMHA TDM pipeline` — confirms TDM is a real, exercised gfx1250 hardware
+feature, not just a gfx950 one).
+
+**The specific idea to scope**: today's 8-wave pipeline uses the *same*
+load mechanism (async-copy) for both A and B. The suggestion is a **hybrid**
+pipeline — `global_load_async` (direct-to-LDS async copy) for the A operand,
+TDM for the B operand — applied to **convolution** (fwd first, per the
+request; this doc's own scope is wrd/bwd-weight, so bwd-weight is the
+natural second target once fwd is proven, mirroring how Task 4 ported
+block-diagonal packing from a proven fwd implementation). No such hybrid
+pipeline currently exists in ck_tile for GEMM or for convolution — this is
+new engineering informed by two existing, separately-proven building
+blocks, not a port of a single existing pipeline.
+
+### Concrete implementation plan
+
+1. **Establish the gfx1250 applicability of "8 waves" first**, independent
+   of the async/TDM question: `GemmPipelineAgBgCrCompAsyncEightWaves` is
+   MFMA-typed (`BlockGemm`/`WarpGemm` selection implies MFMA warp-tiles).
+   gfx1250 is WMMA/wave32 hardware (confirmed repeatedly across this
+   investigation series — see Task 5's caveat and
+   `HIPCONV_GFX1250_CONV_LEARNINGS.md`'s "CDNA5" classification). Before
+   porting anything: determine whether "8 waves" as a *concept* (high wave
+   occupancy per block to hide async-load latency behind compute) is
+   separable from the MFMA-specific implementation, and what the
+   WMMA/wave32 equivalent occupancy target should be (likely not literally
+   "8" — wave32 vs wave64 changes the wave-count-to-thread-count and
+   register-pressure-per-wave arithmetic; consult
+   `GFX1250_GEMM_OPTIMIZATION_PRINCIPLES.md` for any documented gfx1250
+   occupancy/wave-count guidance before picking a number). Do not assume
+   "8" is the right constant for gfx1250 without this check.
+2. **Build the conv-fwd GEMM-transform pipeline** using ck_tile's tile-API
+   conventions (this is `ck_tile`, not old `ck::` — confirm which
+   namespace/layer conv-fwd's WMMA path actually lives in for gfx1250
+   today; if it's still old `ck::` only, this task additionally requires
+   either porting the relevant conv-fwd device op into `ck_tile`, or
+   building the hybrid pipeline in old `ck::`'s pipeline/policy idiom
+   instead — check which is true before starting, since the two codebases'
+   pipeline APIs are not interchangeable).
+3. **A-operand loading**: reuse `async_load_tile`/`async_load_tile_raw`
+   exactly as `GemmPipelineAgBgCrCompAsyncEightWaves` does today — this half
+   is a direct port, not new design.
+4. **B-operand loading**: adapt `load_tile_tdm` from
+   `gemm_pipeline_ag_bg_cr_comp_tdm_v1.hpp`/`_v2.hpp` (read both — v1/v2
+   likely differ in prefetch depth or TDM config shape; pick whichever
+   matches this hybrid pipeline's intended prefetch structure) into the new
+   pipeline's B-loading path. Pay attention to `TDMConfig_` construction
+   (`load_tile_tdm`'s first argument) — this encodes the hardware
+   descriptor for the bulk transfer and will need a policy method analogous
+   to `GetBlockGemm`/`GetVectorSizeA`/`GetVectorSizeB` to compute correctly
+   for whatever B-operand shape (weight tensor, in fwd's A/B/E convention)
+   the conv-to-GEMM transform produces.
+5. **New pipeline scheduling**: since A and B now use two different load
+   mechanisms with likely different latency profiles, the hot-loop
+   scheduler (`__builtin_amdgcn_sched_group_barrier`/`sched_barrier` hints,
+   see the existing pipeline's `hot_loop_scheduler` lambda,
+   `gemm_pipeline_ag_bg_cr_comp_async_eight_waves.hpp:198-209`, and this
+   investigation's own T1-03 finding that CK's `HotLoopScheduler()` is dead
+   code on every arch today per `include/ck_tile/core/arch/arch.hpp`'s
+   `s_wave_barrier`) will need new, gfx1250-specific tuning — don't assume
+   the existing async-eight-waves scheduler hints transfer unchanged to a
+   mixed async+TDM load pattern.
+6. **New instance/example scaffolding**: mirror how Task 4's fwd
+   block-diagonal port added `example/70_grouped_conv2d_fwd_wmma_block_diagonal/`
+   as a standalone correctness+perf validation harness before touching any
+   production instance file — do the same here (a new numbered example
+   under `example/ck_tile/` or `example/`, whichever matches where the
+   target conv-fwd WMMA pipeline actually lives per step 2's finding).
+
+### Validation recipe
+
+```bash
+# Correctness: new standalone example against CPU reference (ReferenceConvFwd),
+# mirroring Task 4's example/70_grouped_conv2d_fwd_wmma_block_diagonal/ harness.
+
+# Perf: before/after against the current best conv-fwd WMMA pipeline at a range
+# of shapes (small and large M/N/K - the whole point of "8 waves" is hiding
+# load latency behind compute, so it should show most benefit at large K
+# where there's plenty of hot-loop iterations to overlap into).
+
+# Once fwd is validated: port to grouped_conv_bwd_weight's own GEMM-transform
+# pipeline/device-op (device_grouped_conv_bwd_weight_wmma_cshuffle_v3.hpp or
+# its ck_tile equivalent if one exists), re-run the full 29-shape sweep
+# (miopen_wrw_shapes.txt) plus the depthwise shapes Task 4 targets, since
+# those are exactly the shapes with the most K-reduction depth to hide load
+# latency behind.
+```
+
+---
+
+## Task 10 — Extend the old-`ck::` wavelet-model conv pipeline with `global_load_async` direct-to-LDS loads and double LDS buffering
+
+**Priority**: medium (real, well-scoped extension of an existing, already-
+wrw-applicable pipeline; bounded to one file family).
+**Risk**: medium — touches a working, shipping pipeline
+(`device_grouped_conv_bwd_weight_xdl_waveletmodel_cshuffle_v3.hpp` is
+registered and presumably in active use); must not regress the existing
+`wavelet_default`/`wavelet_pad0`/`wavelet_4w2_default`/`wavelet_4w2_pad0`
+instances.
+
+### Problem
+
+`include/ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_waveletmodel_cshuffle_conv_v3.hpp`
+implements a wave-specialized ("wavelet model") gridwise GEMM already used
+by **both** `device_grouped_conv_bwd_weight_xdl_waveletmodel_cshuffle_v3.hpp`
+(wrw — directly relevant to this doc) and
+`device_grouped_conv_fwd_multiple_abd_xdl_waveletmodel_cshuffle_v3.hpp`
+(fwd). Its own doc comment (lines 25-33) describes the design: dedicated
+**load waves** run the conv-to-GEMM descriptor transforms (`RunRead` +
+`MoveSrcSliceWindow` + `RunWrite`) and write to LDS, while separate **math
+waves** read LDS and do MFMA + CShuffle epilogue — splitting VALU-heavy
+descriptor work off of the MFMA-issuing waves specifically to avoid
+MFMA/VALU issue-slot conflicts. **Confirmed current limitations**, straight
+from the source:
+- `DirectLoadEnabled = false;  // DirectLoad is not supported, wavelet model
+  requires LDS as the sync boundary` (line 184-185) — loads today are
+  ordinary two-phase buffer loads (`RunRead` reads global→registers, then
+  `RunWrite` writes registers→LDS;
+  `include/ck/tensor_operation/gpu/grid/gridwise_gemm_waveletmodel.hpp:59-98`),
+  not a direct-to-LDS async copy.
+- Only one LDS tile per operand is referenced throughout
+  `gridwise_gemm_waveletmodel.hpp`'s `RunLoadWavePipeline` (`a_block_buf`,
+  `b_block_buf`, singular, no `[0]`/`[1]` alternation) — confirmed **single**
+  LDS buffer, and the load-wave struct is explicitly named for **1-stage
+  prefetch** (`template <typename TileLoadThreadGroup> struct
+  GridwiseGemmLoadWave<TileLoadThreadGroup, 1>`) — i.e. no double-buffered
+  overlap between "write this iteration's LDS tile" and "read last
+  iteration's LDS tile" exists today; math waves must wait for load waves to
+  finish writing before consuming, once per iteration, serializing what
+  double-buffering would otherwise overlap.
+
+### Concrete implementation plan
+
+1. **Direct-to-LDS async load for the load-wave's global read.** Replace
+   the load wave's `RunRead`-then-`RunWrite` two-phase copy
+   (`gridwise_gemm_waveletmodel.hpp:59-98`) with a direct global→LDS async
+   copy analogous to ck_tile's `async_load_tile`/`async_load_tile_raw`
+   (Task 9 above uses the same primitive family, `ck_tile`-side — for this
+   old-`ck::` pipeline, find or add the equivalent low-level intrinsic
+   wrapper; check `include/ck/tensor_operation/gpu/thread/` and
+   `include/ck/tensor_operation/gpu/block/` for any existing `ck::`-side
+   direct-to-LDS copy primitive before writing a new one — CK's `XDL`
+   direct-load device ops (e.g. the `_direct_load_instance.cpp` files
+   already registered for bwd_weight, `xdl/nhwgc_gkyxc_nhwgk/
+   device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_{bf16,f16}_direct_load.cpp`)
+   likely already wrap whatever primitive this needs — reuse it rather than
+   reinventing). This changes the wave-specialization boundary's *cost*
+   (load waves no longer hold data in registers before writing LDS) but not
+   its *structure* (load waves vs math waves stays the same).
+2. **Double LDS buffer.** Extend `GridwiseGemmLoadWave`/`GridwiseGemmMathWave`
+   (`gridwise_gemm_waveletmodel.hpp`) to alternate between two LDS tiles per
+   operand (the conventional `NumGemmKPrefetchStage=2` ping-pong pattern
+   already used elsewhere in CK's non-wavelet pipelines — e.g.
+   `BlkGemmPipelinePrefetchStages` in the WMMA `CShuffleV3` pipelines this
+   whole investigation has repeatedly referenced). This is the change that
+   actually lets load waves work on iteration `i+1` while math waves consume
+   iteration `i`'s already-written LDS tile — today's 1-stage design cannot
+   do this even with faster (async) loads, since there is nowhere to put the
+   next tile until the current one is fully consumed. **This is the
+   higher-value half of this task** — the async-load change alone reduces
+   the load wave's own latency, but without double buffering, math waves
+   still stall waiting for load waves each iteration; only the combination
+   unlocks true overlap.
+3. **Synchronization**: identify and update whatever mechanism currently
+   signals "LDS tile ready" between load and math waves (likely an
+   `__syncthreads()`-equivalent or explicit LDS-based semaphore, given the
+   two thread groups are disjoint subsets of one block, not separate
+   blocks) to handle two independent buffer slots' readiness instead of one
+   — this needs its own pair of ready/consumed flags (or a single
+   flip-flopping flag scheme) rather than one shared barrier.
+4. **Do not touch `DirectLoadEnabled` semantics elsewhere** — this flag
+   likely gates other pipelines' behavior too (grep all call sites before
+   assuming it's safe to flip for this device op alone); prefer a
+   wavelet-model-local mechanism if the existing flag is shared broader
+   than this file.
+
+### Validation recipe
+
+```bash
+# Correctness: the wavelet model already has registered instances for wrw -
+# rebuild and verify=1 across the miopen_wrw_shapes.txt corpus plus the
+# existing wavelet-specific instance files' own target shapes:
+#   xdl/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_{bf16,f16}_wavelet_default_instance.cpp
+#   ..._wavelet_pad0_instance.cpp, ..._wavelet_4w2_default_instance.cpp, ..._wavelet_4w2_pad0_instance.cpp
+
+# Perf: interleaved A/B (per this doc's rigor note) old-single-buffer vs new
+# double-buffer+async binaries, across a range of K-depths - benefit should
+# scale with how many main-loop iterations there are to overlap (shallow-K
+# shapes won't show much; deep-K shapes should show the most).
+
+# Also validate the fwd wavelet-model sibling
+# (device_grouped_conv_fwd_multiple_abd_xdl_waveletmodel_cshuffle_v3.hpp)
+# is unaffected or also benefits, since it shares the same gridwise kernel.
+```
