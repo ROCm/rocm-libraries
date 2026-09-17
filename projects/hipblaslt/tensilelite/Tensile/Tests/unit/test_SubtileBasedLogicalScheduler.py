@@ -3398,7 +3398,8 @@ class TestIntegration:
 
         Fast path (K>=DepthU): GR issue -> initC -> SBranch PreloopEnd -> WaitGR/Sync/LR.
         Slow path (K<DepthU):  SkipPreloop label -> initC -> tail-jump.
-        Both paths converge at PreloopEnd before WaitGR/Sync/LR.
+        The paths converge at PreloopEnd ahead of the tail-jump, so the PLSIN guard
+        fold that sits between the two runs on either route.
         """
         kernel = create_kernel(256, 256, fp4=True)
         assert not kernel["NoTailLoop"]
@@ -3426,15 +3427,15 @@ class TestIntegration:
                 "initC must appear on both fast path and slow path"
 
             # Structural ordering: GRs -> fast initC -> SBranch PreloopEnd ->
-            #                      SkipPreloop -> slow initC -> tail-jump -> PreloopEnd.
+            #                      SkipPreloop -> slow initC -> PreloopEnd -> tail-jump.
             fast_zero_idx  = asm.index("vgprTiles to zero")
             branch_end_idx = asm.index("PreloopEnd", fast_zero_idx)
             skip_idx       = asm.index("SkipPreloop:", branch_end_idx)
             slow_zero_idx  = asm.index("vgprTiles to zero", skip_idx)
-            tail_idx       = asm.index("K < DepthU: jump to tail loop", slow_zero_idx)
-            preloop_end_idx = asm.index("PreloopEnd:", tail_idx)
-            assert fast_zero_idx < branch_end_idx < skip_idx < slow_zero_idx < tail_idx < preloop_end_idx, \
-                "expected: fast initC -> SBranch PreloopEnd -> SkipPreloop -> slow initC -> tail-jump -> PreloopEnd:"
+            preloop_end_idx = asm.index("PreloopEnd:", slow_zero_idx)
+            tail_idx       = asm.index("K < DepthU: jump to tail loop", preloop_end_idx)
+            assert fast_zero_idx < branch_end_idx < skip_idx < slow_zero_idx < preloop_end_idx < tail_idx, \
+                "expected: fast initC -> SBranch PreloopEnd -> SkipPreloop -> slow initC -> PreloopEnd: -> tail-jump"
         finally:
             sched.deallocVgprTiles(writer)
 
