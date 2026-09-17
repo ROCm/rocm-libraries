@@ -148,6 +148,9 @@ class TestKernelNameIdentity(unittest.TestCase):
             "simple": dc.replace(base, simple=True),
             "num_k_heads": dc.replace(base, num_k_heads=8),
             "head_k_dim": dc.replace(base, head_k_dim=64),
+            "gate_kind": dc.replace(base, gate_kind="kda"),
+            "lower_bound": dc.replace(base, gate_kind="kda", lower_bound=-3.0),
+            "fuse_gate": dc.replace(base, gate_kind="kda", fuse_gate=False),
         }
         names = {}
         for label, spec in variants.items():
@@ -167,6 +170,89 @@ class TestKernelNameIdentity(unittest.TestCase):
             GdnDecodeSpec().kernel_name(),
             "rocke_gdn_decode_bf16_kh16_vh32_dk128_dv128_w2k16b8_l2",
         )
+
+
+class TestGateKind(unittest.TestCase):
+    """The KDA gate kind must be purely additive to the GDN one.
+
+    GDN applies one scalar decay per head; KDA applies a per-channel DK-vector
+    decay. GDN is the special case of KDA where every channel shares a value,
+    so one emitter serves both -- but only if selecting the general case cannot
+    disturb the special one. These tests pin that boundary.
+    """
+
+    def test_defaults_select_the_gdn_gate(self):
+        spec = GdnDecodeSpec()
+        self.assertEqual(spec.gate_kind, "gdn")
+        self.assertEqual(spec.lower_bound, -5.0)
+        self.assertTrue(spec.fuse_gate)
+
+    def test_defaults_contribute_nothing_to_the_name(self):
+        # test_default_spec_name_is_stable pins the exact string; this states
+        # the reason that string must not move, so a failure reads as intent
+        # rather than as an unexplained constant mismatch.
+        name = GdnDecodeSpec().kernel_name()
+        for token in ("kda", "lb", "nofg"):
+            self.assertNotIn(token, name)
+
+    def test_lower_bound_cannot_move_a_gdn_name(self):
+        # lower_bound has no effect on the GDN path, so it must not reach the
+        # cache key there -- otherwise two byte-identical kernels get two names.
+        base = GdnDecodeSpec()
+        self.assertEqual(
+            dc.replace(base, lower_bound=-3.0).kernel_name(), base.kernel_name()
+        )
+
+    def test_lower_bound_reaches_only_a_fused_kda_name(self):
+        fused = dc.replace(GdnDecodeSpec(), gate_kind="kda")
+        self.assertNotIn("lb", fused.kernel_name())
+        self.assertIn("lb-3", dc.replace(fused, lower_bound=-3.0).kernel_name())
+
+        raw = dc.replace(fused, fuse_gate=False)
+        self.assertEqual(
+            dc.replace(raw, lower_bound=-3.0).kernel_name(),
+            dc.replace(raw, lower_bound=0.0).kernel_name(),
+        )
+
+    def test_rejects_unknown_gate_kind(self):
+        ok, msg = is_valid_spec(dc.replace(GdnDecodeSpec(), gate_kind="mamba"), ARCH)
+        self.assertFalse(ok)
+        self.assertIn("gate_kind", msg)
+
+    def test_rejects_precomputed_gate_for_gdn(self):
+        spec = dc.replace(GdnDecodeSpec(), gate_kind="gdn", fuse_gate=False)
+        ok, msg = is_valid_spec(spec, ARCH)
+        self.assertFalse(ok)
+        self.assertIn("requires fuse_gate=True", msg)
+
+    def test_fused_kda_requires_finite_negative_lower_bound(self):
+        for bound in (0.0, 1.0, float("nan"), float("inf"), float("-inf")):
+            spec = dc.replace(
+                GdnDecodeSpec(),
+                gate_kind="kda",
+                fuse_gate=True,
+                lower_bound=bound,
+            )
+            ok, msg = is_valid_spec(spec, ARCH)
+            self.assertFalse(ok, f"lower_bound={bound} must be rejected")
+            self.assertIn("finite negative", msg)
+
+    def test_raw_kda_ignores_lower_bound(self):
+        for bound in (0.0, 1.0, float("nan"), float("inf")):
+            spec = dc.replace(
+                GdnDecodeSpec(),
+                gate_kind="kda",
+                fuse_gate=False,
+                lower_bound=bound,
+            )
+            ok, why = is_valid_spec(spec, ARCH)
+            self.assertTrue(ok, why)
+
+    def test_gdn_ignores_lower_bound(self):
+        ok, why = is_valid_spec(
+            dc.replace(GdnDecodeSpec(), lower_bound=float("nan")), ARCH
+        )
+        self.assertTrue(ok, why)
 
 
 class TestLaunchShape(unittest.TestCase):
@@ -219,17 +305,24 @@ class TestEmission(unittest.TestCase):
                 self.assertIn("define amdgpu_kernel", llvm)
 
     def test_every_tuned_tile_emits(self):
-        from dispatch.gdn.gfx950 import _TUNED_TILES
+        # Both tables, each with its own gate kind: a tile is only ever selected
+        # together with the gate it was tuned for, so that is how it is checked.
+        from dispatch.gdn.gfx950 import _TUNED_TILES_GDN, _TUNED_TILES_KDA
 
-        for _, tile, spec_id in _TUNED_TILES:
-            with self.subTest(spec_id=spec_id):
-                spec = dc.replace(
-                    GdnDecodeSpec(),
-                    num_warps=tile[0],
-                    warp_threads_k=tile[1],
-                    blocks_per_v_dim=tile[2],
-                )
-                self.assertIn("define amdgpu_kernel", _lower(spec))
+        for gate_kind, table in (
+            ("gdn", _TUNED_TILES_GDN),
+            ("kda", _TUNED_TILES_KDA),
+        ):
+            for _, tile, spec_id in table:
+                with self.subTest(spec_id=spec_id, gate_kind=gate_kind):
+                    spec = dc.replace(
+                        GdnDecodeSpec(),
+                        gate_kind=gate_kind,
+                        num_warps=tile[0],
+                        warp_threads_k=tile[1],
+                        blocks_per_v_dim=tile[2],
+                    )
+                    self.assertIn("define amdgpu_kernel", _lower(spec))
 
     def test_distinct_tiles_emit_distinct_code(self):
         # If two tiles produced identical IR the tuning table would be choosing
