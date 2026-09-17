@@ -287,7 +287,7 @@ jobs:
 
       - name: Run TensileLite common tests
         timeout-minutes: 120
-        if: ${{ steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
+        if: ${{ always() && steps.fetch.outputs.artifact_ready == 'true' && needs.scope.outputs.run_tensilelite == 'true' }}
         env:
           TL_MARKERS: ${{ inputs.tensilelite_markers || 'common' }}
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
