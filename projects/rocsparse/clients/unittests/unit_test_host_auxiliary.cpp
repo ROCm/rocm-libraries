@@ -1226,6 +1226,14 @@ class AuxiliaryBranchHandle : public HandleTest
 {
 };
 
+TEST_F(AuxiliaryBranchHandle, default_stream_is_default)
+{
+    hipStream_t default_stream{};
+    hipStream_t stream = reinterpret_cast<hipStream_t>(0x1);
+    EXPECT_EQ(rocsparse_get_stream(handle, &stream), rocsparse_status_success);
+    EXPECT_EQ(default_stream, stream);
+}
+
 TEST_F(AuxiliaryBranchHandle, stream_get_set_roundtrip)
 {
     hipStream_t stream = nullptr;
