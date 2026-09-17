@@ -393,7 +393,7 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.2)
         ->check(CLI::NonNegativeNumber);
     constexpr auto emulation_quick      = "quick";
     constexpr auto emulation_smoke      = "smoke";
