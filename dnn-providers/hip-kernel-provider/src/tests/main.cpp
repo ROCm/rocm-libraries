@@ -52,7 +52,8 @@ int main(int argc, char** argv)
         std::error_code ec;
         if(std::filesystem::is_directory(candidate, ec))
         {
-            hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", candidate.string());
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR",
+                                                  candidate.string().c_str());
         }
     }
 #endif
