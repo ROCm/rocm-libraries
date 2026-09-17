@@ -216,7 +216,8 @@ def main():
             op_enum=cfg["op_enum"],
             run_fn_maker=cfg["run_fn_maker"],
             is_supported_fn_maker=cfg["is_supported_fn_maker"],
-            register_fn_name=cfg["register_fn_name"],
+            register_fn_name=f"{cfg['register_fn_name']}_{args.arch}",
+            arch=args.arch,
         )
         registration_count = sum(
             path.read_text().count("registry.register_kernel(key, inst)")

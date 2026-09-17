@@ -297,7 +297,8 @@ def make_registration_block(kname, global_idx, op_enum, run_fn_maker, is_support
 
 def generate_chunked_registration(headers, output_dir, variant, op_enum,
                                    run_fn_maker, is_supported_fn_maker,
-                                   register_fn_name, chunk_size=CHUNK_SIZE):
+                                   register_fn_name, chunk_size=CHUNK_SIZE,
+                                   arch: str = ""):
     """Generate chunked registration .cpp files for parallel compilation.
 
     Args:
@@ -309,18 +310,24 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
         is_supported_fn_maker: C++ template function like "backends::make_conv_bwd_weight_is_supported_fn"
         register_fn_name: C++ function name like "register_all_grouped_conv_bwd_weight_kernels"
         chunk_size: number of kernels per chunk file
+        arch: optional architecture suffix for per-arch OBJECT libraries.
+            When non-empty, chunk symbols are register_{variant}_{arch}_chunk_{i}
+            and register_fn_name is emitted as-is (caller passes the mangled name).
+            Unmangled public register_all_grouped_conv_<variant>_kernels names are
+            owned by the CMake dispatcher TU, not this generator.
 
     Returns:
         list of generated .cpp file paths
     """
     output_dir = Path(output_dir)
     generated_files = []
+    arch_suffix = f"_{arch}" if arch else ""
 
     # Split headers into chunks
     chunks = [headers[i:i + chunk_size] for i in range(0, len(headers), chunk_size)]
 
     for chunk_idx, chunk_headers in enumerate(chunks):
-        chunk_fn = f"register_{variant}_chunk_{chunk_idx}"
+        chunk_fn = f"register_{variant}{arch_suffix}_chunk_{chunk_idx}"
         chunk_cpp = output_dir / f"register_{variant}_chunk_{chunk_idx}.cpp"
 
         lines = [
@@ -376,7 +383,7 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
     ]
     # Forward-declare chunk functions
     for chunk_idx in range(len(chunks)):
-        chunk_fn = f"register_{variant}_chunk_{chunk_idx}"
+        chunk_fn = f"register_{variant}{arch_suffix}_chunk_{chunk_idx}"
         lines.append(f"void {chunk_fn}(GroupedConvRegistry& registry, const std::string& arch);")
     lines.append("")
 
@@ -385,7 +392,7 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
     lines.append(f"    GroupedConvRegistry& registry, const std::string& arch)")
     lines.append("{")
     for chunk_idx in range(len(chunks)):
-        chunk_fn = f"register_{variant}_chunk_{chunk_idx}"
+        chunk_fn = f"register_{variant}{arch_suffix}_chunk_{chunk_idx}"
         lines.append(f"    {chunk_fn}(registry, arch);")
     lines.append("}")
     lines.append("")

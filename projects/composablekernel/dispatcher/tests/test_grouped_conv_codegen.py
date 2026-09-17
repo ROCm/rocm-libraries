@@ -836,5 +836,34 @@ class TestRdnaFailClosed(unittest.TestCase):
         self.assertTrue(results["failed"])
 
 
+class TestPerArchRegistrationSymbols(unittest.TestCase):
+    def test_chunk_and_register_all_symbols_include_arch(self):
+        import tempfile
+        from registration_codegen import generate_chunked_registration
+
+        with tempfile.TemporaryDirectory() as tmp:
+            header = Path(tmp) / "grouped_conv_fwd_fp16_nhwgc_2d_compv3_cshuffle_intrawave_32x64x32_2x4x1_16x16x16.hpp"
+            header.write_text("// stub\n")
+            files = generate_chunked_registration(
+                [header],
+                tmp,
+                variant="fwd",
+                op_enum="GroupedConvOp::Forward",
+                run_fn_maker="backends::make_conv_fwd_run_fn",
+                is_supported_fn_maker="backends::make_conv_fwd_is_supported_fn",
+                register_fn_name="register_all_grouped_conv_fwd_kernels_gfx1100",
+                arch="gfx1100",
+            )
+            texts = [Path(p).read_text() for p in files]
+            joined = "\n".join(texts)
+            self.assertIn("void register_fwd_gfx1100_chunk_0(", joined)
+            self.assertIn("void register_all_grouped_conv_fwd_kernels_gfx1100(", joined)
+            self.assertNotIn("void register_fwd_chunk_0(", joined)
+            self.assertNotIn(
+                "void register_all_grouped_conv_fwd_kernels(GroupedConvRegistry& registry, const std::string& arch)",
+                joined,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
