@@ -241,12 +241,12 @@ struct HIPOCKernel
         : program(p), name(kernel_name)
     {
         if(local_dims.empty() || local_dims.size() > ldims.size())
-            MIOPEN_THROW(miopenStatusBadParm,
+            MIOPEN_THROW(miopenStatusInternalError,
                          "Invalid local work dimensions: size " +
                              std::to_string(local_dims.size()) + " (expected 1.." +
                              std::to_string(ldims.size()) + ").");
         if(global_dims.empty() || global_dims.size() > gdims.size())
-            MIOPEN_THROW(miopenStatusBadParm,
+            MIOPEN_THROW(miopenStatusInternalError,
                          "Invalid global work dimensions: size " +
                              std::to_string(global_dims.size()) + " (expected 1.." +
                              std::to_string(gdims.size()) + ").");
