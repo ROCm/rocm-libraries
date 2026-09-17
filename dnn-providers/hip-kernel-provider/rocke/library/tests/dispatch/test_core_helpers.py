@@ -169,3 +169,43 @@ def test_registry_rejects_a_candidate_from_another_family():
     registry = CandidateRegistry("kda_chunkwise")
     with pytest.raises(ValueError, match="family"):
         registry.register(_registrable_candidate(family="attention_unified"))
+
+
+def test_a_non_string_pin_raises_rather_than_rejecting_every_candidate():
+    """A pin that is not a string is a wiring bug and must surface as one.
+
+    ``str(request.algorithm).strip()`` would turn ``None`` into ``"none"`` and
+    ``0`` into ``"0"``, matching no candidate -- so the caller sees "no candidate
+    supports request", a routing failure pointing at the registry instead of at
+    their malformed request. Reading the attribute directly raises at the bug.
+    The sibling test covers a MISSING attribute; this covers a present one of
+    the wrong type.
+    """
+    cand = _candidate(algorithm="chunk_scan", spec_id="b4")
+    for bad in (None, 0, 3.5, ["chunk_scan"]):
+        req = _request(algorithm=bad)
+        with pytest.raises(AttributeError):
+            selector_matches(req, cand)
+
+
+def test_the_pin_contract_is_stated_on_the_helpers():
+    """The three fields the shared helpers read are declared somewhere.
+
+    Before the hoist each family's private copy was annotated with its own
+    request type, so the requirement lived where it was used. Hoisting made the
+    consumers shared; without PinnableRequest the contract would be stated
+    nowhere and a new family would learn it from an AttributeError at first
+    dispatch.
+    """
+    from rocke.dispatch.core import PinnableRequest, make_kernel_id
+
+    for field in ("arch", "algorithm", "spec_id"):
+        assert field in PinnableRequest.__annotations__, field
+
+    # resolve the annotation rather than string-matching it: core.py uses
+    # `from __future__ import annotations`, and a string compare would pass on
+    # a shadowed or misspelled name -- it could not fail for the reason named
+    import typing
+
+    assert typing.get_type_hints(selector_matches)["request"] is PinnableRequest
+    assert typing.get_type_hints(make_kernel_id)["request"] is PinnableRequest

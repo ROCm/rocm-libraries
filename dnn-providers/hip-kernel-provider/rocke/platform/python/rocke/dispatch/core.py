@@ -13,7 +13,16 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Iterable, Mapping, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Mapping,
+    Protocol,
+    Sequence,
+    Tuple,
+    runtime_checkable,
+)
 
 from ..core.arch import known_arches
 
@@ -400,8 +409,36 @@ class KernelCandidate:
         return self._supports(request)
 
 
+@runtime_checkable
+class PinnableRequest(Protocol):
+    """What the shared selector/identity helpers actually read off a request.
+
+    ``OperatorRequest`` declares only :meth:`normalized`, but
+    :func:`selector_matches` and :func:`make_kernel_id` also read ``algorithm``,
+    ``spec_id`` and ``arch``. While each family owned a private copy of those
+    helpers, the annotation was that family's concrete request type and the
+    requirement was stated where it was used. Hoisting made the consumers
+    shared, which left the contract stated nowhere -- a new family learns it
+    from an ``AttributeError`` at first dispatch.
+
+    A Protocol rather than base-class fields because the fields cannot go on the
+    frozen base: every family declares ``arch`` WITHOUT a default, and a
+    defaulted inherited field in front of it is a ``TypeError`` at class
+    creation ("non-default argument 'arch' follows default argument").
+
+    Structural, so no family has to inherit anything: a request that carries the
+    three attributes satisfies it.
+    """
+
+    arch: str
+    algorithm: str
+    spec_id: str
+
+    def normalized(self) -> dict: ...
+
+
 def selector_matches(
-    request: OperatorRequest, candidate: KernelCandidate
+    request: PinnableRequest, candidate: KernelCandidate
 ) -> Tuple[bool, str]:
     """Match an explicit ``algorithm``/``spec_id`` pin against one candidate.
 
@@ -409,14 +446,18 @@ def selector_matches(
     set value must equal the candidate's. Shared by every operator family so the
     pin semantics cannot drift between them.
 
-    Both fields are read directly, not via ``getattr`` with a default: a
-    request type that never declared them is a family wiring bug, and it should
-    raise here as it did when each family had its own copy. Defaulting to
-    ``"auto"`` would make it match every candidate instead -- a pin silently
-    ignored, which is the worst failure this function has.
+    Both fields are read directly, not via ``getattr`` with a default, and
+    ``.strip()`` is called on the attribute itself rather than on ``str(...)``:
+    a request whose pin is missing OR not a string is a family wiring bug, and
+    it should raise here as it did when each family had its own copy. Wrapping
+    in ``str()`` would turn ``None`` into ``"none"`` and reject every candidate
+    instead, so the caller sees "no candidate supports request" -- a routing
+    failure pointing at the registry rather than at their malformed request.
+    Defaulting to ``"auto"`` is the same mistake one step worse: a pin silently
+    ignored.
     """
-    algorithm = str(request.algorithm).strip().lower()
-    spec_id = str(request.spec_id).strip().lower()
+    algorithm = request.algorithm.strip().lower()
+    spec_id = request.spec_id.strip().lower()
     if algorithm not in ("auto", candidate.algorithm):
         return (
             False,
@@ -428,7 +469,7 @@ def selector_matches(
 
 
 def make_kernel_id(
-    request: OperatorRequest, candidate: KernelCandidate, spec: Any, *, op: str
+    request: PinnableRequest, candidate: KernelCandidate, spec: Any, *, op: str
 ) -> KernelId:
     """The stable identity shared by caches/manifests/benchmarks for one pick.
 
