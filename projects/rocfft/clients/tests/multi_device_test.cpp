@@ -105,10 +105,8 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
         ooffset_range_zero,
         place_range,
         false,
-        // function pointer callbacks need -fgpu-rdc, but that causes build
-        // nondeterminism in kpack.
-        // JIT callbacks are not yet supported on multi-GPU transforms
-        {fft_callback_type_none, /*fft_callback_type_funcptr, fft_callback_type_jit*/});
+        // function pointer callbacks are not supported for multi-GPU
+        {fft_callback_type_none, fft_callback_type_jit /*, fft_callback_type_funcptr*/});
 
     std::vector<fft_params> all_params;
 
@@ -321,6 +319,11 @@ TEST(multi_gpu_validate, catch_validation_errors)
         for(size_t i = 0; i < params.size(); ++i)
         {
             auto& param = params[i];
+
+            // We're only validating split types and these tests
+            // won't specify callbacks
+            if(param.run_callbacks != fft_callback_type_none)
+                continue;
 
             // this validation runs in rocfft-test itself and
             // multi-process libs are not initialized.

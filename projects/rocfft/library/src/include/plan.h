@@ -560,7 +560,7 @@ private:
     std::vector<size_t>
         CreateOutputScatteringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
                                             const rocfft_location_t&   exec_plan_location,
-                                            const std::vector<size_t>& antecedents);
+                                            const std::vector<size_t>& antecedents = {});
 
     // Transform (complex-complex FFT) a whole field along specified
     // dimensions.  Input and output ptrs are provided as a vector of

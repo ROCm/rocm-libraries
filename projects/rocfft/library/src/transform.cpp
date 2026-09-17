@@ -502,9 +502,14 @@ try
     {
         rocfft_execution_info_internal info_internal(info, *plan);
 
-        // disallow combining JIT callbacks and legacy callbacks
-        if((plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv())
-           && (info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns()))
+        // disallow combining legacy function pointer callbacks with:
+        // - JIT callbacks
+        // - multi-GPU transforms
+        bool have_funcptr_callbacks
+            = info_internal.get_load_cb_fns() || info_internal.get_store_cb_fns();
+        bool have_jit_callbacks = plan->desc.loadOps.has_spirv() || plan->desc.storeOps.has_spirv();
+        bool have_multigpu_plan = !plan->desc.has_undistributed_io_on_current_location();
+        if(have_funcptr_callbacks && (have_jit_callbacks || have_multigpu_plan))
         {
             return rocfft_status_invalid_arg_value;
         }
