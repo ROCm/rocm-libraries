@@ -13,11 +13,8 @@ const std::vector<IngestorPack>& ingestorPacks()
     // Function-local static: entries are plain function pointers, so this cannot fail
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
-        {"hipkernel:Pointwise", &registerPointwiseSymbols, true, &resetPointwiseModuleCache},
-        // Packaged/kpack since the conv pack moved to lowered rocKE builders: it owns a
-        // module cache (ConvNative.cpp's convFwdKpackModuleCache), so the reset sweep must
-        // reach it.
-        {"hipkernel:ConvFwd", &registerConvFwdSymbols, true, &resetConvFwdModuleCache},
+        {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
     };
     return s_packs;
 }
