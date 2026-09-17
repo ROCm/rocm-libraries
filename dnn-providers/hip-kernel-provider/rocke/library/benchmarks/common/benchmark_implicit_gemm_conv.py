@@ -77,16 +77,7 @@ _EPILOGUES = ("default", "cshuffle")
 # _PIPELINES there. "mem" is the neutral one: no scheduling hints.
 _ASYNC_PIPELINE = "mem"
 # Split-K degrees swept when --split-k 0 (auto) is passed for wgrad.
-#
-# The ladder has to reach well past the CU count. When the per-group GEMM is
-# small enough to fit one M x N tile, the tile grid is 1 x 1 and split-K is the
-# *only* source of parallelism, so the degree is what decides how much of the
-# machine is used -- a ladder topping out at 128 pins such a shape to at most
-# 128 workgroups regardless of how many CUs the part has. Thin-K wgrad shapes
-# (large N*Ho*Wo reducing onto a small kpg x Y*X*cpg output) land exactly there.
-# Degrees above the grid-z limit are clamped per-shape by the builders, so
-# listing large values costs nothing on shapes that cannot use them.
-_SPLIT_K_AUTO = (1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1)
+_SPLIT_K_AUTO = (128, 64, 32, 16, 8, 4, 2, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -1604,10 +1595,17 @@ def _build_wgrad_two_stage_one(args_tuple):
         return None
 
     s2_spec = WgradReduceSpec(problem=problem, dtype_d=dtype, groups=problem.groups)
-    try:
-        s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
-    except (ValueError, Exception):
-        return None
+    # WgradReduceSpec carries no tile configuration -- it is a function of
+    # (problem, dtype_d, groups) alone -- so every combo in a sweep produces a
+    # bit-identical Stage-2 kernel. Memoise it; see _S2_IR_CACHE.
+    _s2_key = (arch, s2_spec.kernel_name())
+    s2_kernel = _S2_IR_CACHE.get(_s2_key)
+    if s2_kernel is None:
+        try:
+            s2_kernel = build_conv_wgrad_workspace_reduce(s2_spec, arch=arch)
+        except (ValueError, Exception):
+            return None
+        _S2_IR_CACHE[_s2_key] = s2_kernel
 
     return combo, spec, resolved_split_k, s1_kernel, s2_kernel
 
@@ -1718,6 +1716,23 @@ def _build_dgrad_one(args_tuple):
     return combo, spec, resolved_split_k, kernel
 
 
+# Process-local memo for the two-stage Stage-2 (workspace-reduce) kernel.
+#
+# WgradReduceSpec is a function of (problem, dtype_d, groups) only -- it carries
+# no tile/warp/pipeline configuration -- so every combination in a wgrad sweep
+# produces the same Stage-2 kernel. Building and compiling it per combination
+# costs one redundant compile per combination (over a thousand on a large
+# sweep) for a kernel that is bit-identical every time, and the two-stage leg is
+# exactly the deterministic path taken by odd-cpg/depthwise shapes.
+#
+# Keyed by (arch, kernel_name) so a run that sweeps several shapes or arches in
+# one process cannot alias them. These live for the lifetime of a pool worker;
+# with N workers the kernel is built and compiled N times rather than once per
+# combination.
+_S2_IR_CACHE: dict = {}
+_S2_ART_CACHE: dict = {}
+
+
 def _build_and_compile_fwd_one(args_tuple):
     """Merged worker: validate + build IR + compile for one fwd combo.
 
@@ -1763,7 +1778,12 @@ def _build_and_compile_wgrad_two_stage_one(args_tuple):
 
     arch = args_tuple[3]
     s1_artifact = _compile_kernel(s1_kernel, arch=arch)
-    s2_artifact = _compile_kernel(s2_kernel, arch=arch)
+    # Stage 2 is identical for every combo -- see _S2_CACHE.
+    _s2_key = (arch, s2_kernel.name)
+    s2_artifact = _S2_ART_CACHE.get(_s2_key)
+    if s2_artifact is None:
+        s2_artifact = _compile_kernel(s2_kernel, arch=arch)
+        _S2_ART_CACHE[_s2_key] = s2_artifact
     return combo, spec, resolved_split_k, s1_artifact, s2_artifact
 
 
@@ -2293,14 +2313,21 @@ def _run_wgrad_sweep(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
+    # dW is the PyTorch grouped-weight layout [K, (Z,) Y, X, C/groups]: the filter
+    # of output channel k spans only its own group's input channels, so the inner
+    # dim is cpg, not the dense C. Using C here over-allocates by a factor of
+    # `groups` AND gives the comparison a different stride from the reference
+    # (wgrad_reference returns [K, Y, X, cpg]), so --verify reported a constant
+    # large rel_err for every grouped shape regardless of kernel correctness.
+    _cpg = p.C // p.groups
     if p.is_3d:
         _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Do, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, p.C, dtype=_torch_dtype_d)
+        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, _cpg, dtype=_torch_dtype_d)
     else:
         _X_f32 = _make(p.N, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype_d)
+        dW_t = torch.empty(p.K, p.Y, p.X, _cpg, dtype=_torch_dtype_d)
 
     X_t = _X_f32.to(_torch_dtype)
     dY_t = _dY_f32.to(_torch_dtype)

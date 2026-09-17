@@ -195,12 +195,12 @@ def wgrad_atomic_epilogue_available(
     if wgN % 2 != 0 or sv % 2 != 0:
         return False, (
             f"split_k atomic with dtype_d={dtype_d!r} requires an even dW row "
-            f"length wg_N=Y*X*(C/groups) and an even store-vector width (packed "
+            f"length wg_N=Z*Y*X*(C/groups) and an even store-vector width (packed "
             f"<2 x dtype> atomic pairs are dword-aligned only on an even row, and "
             f"sv=1 leaves no partner); got wg_N={wgN}, store_vec={sv} "
-            f"(Y={p.Y}, X={p.X}, cpg={p.cpg}). Use two_stage=True (or "
-            f"force_deterministic=True) to reach split-K via the f32 workspace "
-            f"path, which emits no atomics."
+            f"(Z={p.Z if p.is_3d else 1}, Y={p.Y}, X={p.X}, cpg={p.cpg}). Use "
+            f"two_stage=True (or force_deterministic=True) to reach split-K via "
+            f"the f32 workspace path, which emits no atomics."
         )
     return True, "ok"
 

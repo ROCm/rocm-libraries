@@ -26,6 +26,7 @@
  */
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 
+#include <cstdint> /* int64_t */
 #include <cstdio> /* snprintf */
 #include <cstring> /* strcmp, memset, memcpy */
 
@@ -391,19 +392,50 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             const int groups_v = s->problem.groups > 0 ? s->problem.groups : 1;
             const int cpg_v = s->problem.C / groups_v;
             const int z_v = s->problem.is_3d ? s->problem.Z : 1;
-            const int wg_N_v = z_v * s->problem.Y * s->problem.X * cpg_v;
-            if(wg_N_v % 2 != 0)
+            /* 64-bit: every factor is an int from the problem description, so a
+             * 32-bit product is UB on a pathological shape even though no real
+             * conv reaches it. The comparison below only needs the parity. */
+            const int64_t wg_N_v = (int64_t)z_v * s->problem.Y * s->problem.X * cpg_v;
+
+            /* The packed atomic needs BOTH halves of "can this problem form
+             * pairs at all", mirroring Python wgrad_atomic_epilogue_available():
+             *   - an even dW row length wg_N = Z*Y*X*(C/groups), so the flat
+             *     `m * wg_N + n` pair index stays dword-aligned; and
+             *   - an even store-vector width, because the epilogue emits sv/2
+             *     pairs per thread and sv == 1 (what cpg == 1 yields) leaves no
+             *     partner.
+             * Checking only wg_N admits a spec that CShuffleEpilogue::atomic_store
+             * then rejects -- the same admits/build split this gate exists to
+             * close. store_vec mirrors default_vector_sizes(..., split_k=1):
+             * widest of 8/4/2/1 dividing the channel run (per-group when grouped). */
+            int store_vec;
+            if(s->has_vector_size_c)
+            {
+                store_vec = s->vector_size_c;
+            }
+            else
+            {
+                /* vec_c is sized by the C run only (dW's last dim is the C axis). */
+                const int vc_c = (s->problem.groups > 1) ? cpg_v : s->problem.C;
+                store_vec = (vc_c % 8 == 0) ? 8 : (vc_c % 4 == 0) ? 4 : (vc_c % 2 == 0) ? 2 : 1;
+            }
+
+            if(wg_N_v % 2 != 0 || store_vec % 2 != 0)
             {
                 if(reason && reason_cap)
                     snprintf(reason,
                              reason_cap,
                              "split_k atomic with dtype_d=%s requires an even dW row length "
-                             "wg_N=Y*X*(C/groups) (packed <2 x dtype> atomic pairs are "
-                             "dword-aligned only on an even row); got wg_N=%d (Y=%d, X=%d, "
-                             "cpg=%d). Use two_stage=true (or force_deterministic=true) to "
-                             "reach split-K via the f32 workspace path, which emits no atomics.",
+                             "wg_N=Z*Y*X*(C/groups) and an even store-vector width (packed "
+                             "<2 x dtype> atomic pairs are dword-aligned only on an even row, "
+                             "and sv=1 leaves no partner); got wg_N=%lld, store_vec=%d "
+                             "(Z=%d, Y=%d, X=%d, cpg=%d). Use two_stage=true (or "
+                             "force_deterministic=true) to reach split-K via the f32 "
+                             "workspace path, which emits no atomics.",
                              dt,
-                             wg_N_v,
+                             (long long)wg_N_v,
+                             store_vec,
+                             z_v,
                              s->problem.Y,
                              s->problem.X,
                              cpg_v);
