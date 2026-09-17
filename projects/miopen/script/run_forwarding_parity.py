@@ -85,6 +85,9 @@ def main():
     )
     parser.add_argument("--compare", default=SCRIPT_DIR / "compare_forwarding_runs.py")
     parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
+    parser.add_argument(
+        "--known-divergences", default=SCRIPT_DIR / "known_forwarding_divergences.txt"
+    )
     parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")
     parser.add_argument(
         "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
@@ -160,7 +163,15 @@ def main():
     # so the harness and the scripts it drives cannot end up on different Pythons,
     # and a lost exec bit becomes a FAIL line instead of a PermissionError traceback.
     ok = run(
-        [sys.executable, args.compare, *reports, "--newer-than", gtest],
+        [
+            sys.executable,
+            args.compare,
+            *reports,
+            "--newer-than",
+            gtest,
+            "--known-divergences",
+            args.known_divergences,
+        ],
         "forwarding parity comparison",
     )
 

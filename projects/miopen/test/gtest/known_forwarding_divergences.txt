@@ -1,0 +1,19 @@
+# Divergences between the two forwarding replays that are known and accepted.
+#
+# One per line, four fields:
+#
+#   <test name> | <disabled outcome> | <enabled outcome> | <why it is accepted>
+#
+# The outcomes are what compare_forwarding_runs.py prints for a divergence, so the
+# quickest way to write a line is to run the harness, take the failing line, and add
+# the reason. Both outcomes are pinned deliberately: a line that named only the test
+# would also silence a different divergence appearing in it later.
+#
+# A line here is not a permanent exemption. If the test it names stops diverging, the
+# comparison fails and asks for the line to be deleted -- so the list describes gaps
+# that are open today, not ones that were open once. A run that tolerates a line says
+# so in its output; it never reports an ordinary clean pass.
+#
+# Blank lines and lines starting with # are ignored.
+
+GPU_HipdnnShimConvBiasActivApi_FP16.FusedForwardMatchesCpuReference | passed[parity_served_3d-ndhwc=true] | passed[parity_served_3d-ndhwc=false] | MIOpen serves fused conv+bias+activation on this 3-D NDHWC case through a four-operator fusion plan, which the forwarded path cannot build: it emits a three-node hipDNN graph, and MIOpen's only three-operator CK fusion solver is 2-D only. See miopen-hipdnn-conv-forwarding-fused-bias-activation-problem.md.

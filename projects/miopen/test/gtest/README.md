@@ -62,3 +62,32 @@ To qualify, a shim-surface test must:
    bit-reproducibility.
 
 See `hipdnn_shim_conv.cpp` for worked examples.
+
+### Saying more than pass or fail
+
+A test that reaches an ending the gtest verdict does not distinguish should record it with
+`RecordProperty("parity_<something>", ...)`. gtest writes the property into the `<testcase>`
+element, and `compare_forwarding_runs.py` folds every `parity_*` property into the outcome it
+compares. The fused convolution test uses this: it passes whether the library
+computed a result or declined the problem, and without the property the two replays look like
+they agreed when one of them did no work.
+
+Record a property from within the test's own execution, keyed so that two cases in one test
+cannot overwrite each other — gtest replaces a property recorded twice under the same key.
+
+### Known divergences
+
+`known_forwarding_divergences.txt` lists divergences that are accepted for now. Each line names
+a test, the outcome expected from each replay, and why the gap exists. A matching divergence is
+printed and tolerated; anything else still fails.
+
+Two rules make the list safe to have:
+
+- A line that stops applying fails the comparison, which asks for it to be deleted. The list
+  therefore describes gaps that are open today rather than accumulating history.
+- A run that tolerates a line says so in its output and does not print the ordinary success
+  line, so a known divergence never reads as a clean pass.
+
+To add one, run the harness, copy the failing line's test name and both outcomes into the
+file, and write down the reason. To check the list itself, run
+`python -m pytest script/test_compare_forwarding_runs.py`, which needs no build or GPU.

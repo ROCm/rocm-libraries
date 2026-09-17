@@ -337,6 +337,7 @@ function(add_gtest TEST_NAME TEST_CPP)
           --filter ${MIOPEN_FORWARDING_PARITY_FILTER}
           --output-dir ${PROJECT_BINARY_DIR}/test_results
           --lib-dir $<TARGET_FILE_DIR:MIOpen>
+          --known-divergences ${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt
           --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
           --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
           --needed-baseline ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline
@@ -584,7 +585,9 @@ if( NOT ENABLE_ASAN_PACKAGING )
   # Everything the mirrored parity entry reaches for, under the entry's own gate: it is the
   # only caller, so a wider gate would ship files nothing invokes, and with the flag off none
   # of this is installed at all. run_forwarding_parity.py is the entry's command; it runs the
-  # other two and reads the baseline and exclusion list. The ABI check ships here rather than
+  # other two and reads the baseline, the exclusion list and the known-divergence list. The
+  # installed entry passes none of those paths, so each file has to land beside the scripts for
+  # their defaults to find it. The ABI check ships here rather than
   # staying a build-time step so it inspects the libraries that actually ship, and its data
   # files sit alongside it rather than in a data directory so both land in the one artifact
   # component a test job fetches.
@@ -602,6 +605,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_needed.baseline"
+          "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT tests
     )
