@@ -573,14 +573,30 @@ class TestArchSupport(unittest.TestCase):
             with self.subTest(arch=arch):
                 self.assertIsNotNone(default_warp_tile_for_arch(arch))
 
-    def test_gfx1250_smoke_config_uses_wmma_warp_tile(self):
-        path = _CONFIG_DIR / "smoke_ci_config_gfx1250.json"
-        self.assertTrue(path.is_file(), f"missing gfx1250 config: {path}")
+    def _default_config(self) -> dict:
+        path = _CONFIG_DIR / "default_config.json"
+        self.assertTrue(path.is_file(), f"missing default config: {path}")
         with open(path) as f:
-            tc = json.load(f)["tile_config"]
-        self.assertEqual(tc["warp_tile_m"]["values"], [16])
-        self.assertEqual(tc["warp_tile_n"]["values"], [16])
-        self.assertEqual(tc["warp_tile_k"]["values"], [32])
+            return json.load(f)
+
+    def test_default_config_yields_only_wmma_tile_on_gfx1250(self):
+        # default_config.json is the config CMake consumes, so its
+        # arch_tile_config block is what actually puts the WMMA tile on gfx1250.
+        tiles = {
+            (s.warp_tile_m, s.warp_tile_n, s.warp_tile_k)
+            for s in build_specs(self._default_config(), "gfx1250")
+        }
+        self.assertEqual(tiles, {(16, 16, 32)})
+
+    def test_default_config_keeps_mfma_tiles_on_gfx9(self):
+        # gfx9 is absent from the codegen's arch table, so it stays
+        # unconstrained: it keeps the MFMA tile and is not narrowed to gfx1250's.
+        tiles = {
+            (s.warp_tile_m, s.warp_tile_n, s.warp_tile_k)
+            for s in build_specs(self._default_config(), "gfx942")
+        }
+        self.assertIn((32, 32, 16), tiles)
+        self.assertGreater(len(tiles), 1)
 
 
 class TestArchNameNormalization(unittest.TestCase):
