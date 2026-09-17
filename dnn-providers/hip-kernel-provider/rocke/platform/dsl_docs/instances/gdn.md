@@ -1,14 +1,15 @@
-# Gated DeltaNet
+# Gated DeltaNet and KDA Decode
 
-Gated DeltaNet (GDN) is a **linear-attention** layer. Where softmax attention
-re-reads every past token, linear attention carries a fixed-size **recurrent
-state** per value head -- a `head_v_dim x head_k_dim` matrix that compresses
-everything seen so far. Each new token reads the state to produce an output and
-then updates it, so cost per token does not grow with sequence length.
+Gated DeltaNet (GDN) and KDA are **linear-attention** layers. Where softmax
+attention re-reads every past token, linear attention carries a fixed-size
+**recurrent state** per value head -- a `head_v_dim x head_k_dim` matrix that
+compresses everything seen so far. Each new token reads and updates that state,
+so cost per token does not grow with sequence length.
 
 One page per family, as with [`kda.md`](kda.md) and
-[`attention.md`](attention.md): each kernel in the family gets a section here.
-Today that is **decode** and **prefill**.
+[`attention.md`](attention.md). The **Decode** section documents the shared
+gfx950 GDN/KDA emitter; the **Prefill** section documents GDN mode on the shared
+KDA chunkwise pair.
 
 For the equation and GPU-mapping walkthrough, see
 [`library/builders/gfx950/gdn/ALGORITHM.md`](../../../library/builders/gfx950/gdn/ALGORITHM.md).
@@ -17,16 +18,18 @@ For commands and output interpretation, see
 
 ## Decode
 
-One token per sequence, for a batch of sequences generated concurrently.
-Kernel and drivers live under `library/` (`library -> platform` one-way):
+One token per sequence, for a batch of sequences generated concurrently. GDN
+uses one scalar decay per head; KDA uses one decay per K channel. Kernel and
+drivers live under `library/` (`library -> platform` one-way):
 
-- `library/kernels/gfx950/gdn_decode.py` -- spec, validator and emitter
-- `library/builders/gfx950/gdn/gdn_decode.py` -- host driver and fp32 reference
-- `library/builders/gfx950/gdn/tune.py` -- tile sweep behind the tuned table
-- `library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py` -- benchmark scenario
+- `library/kernels/gfx950/gdn_decode.py` -- shared spec, validator and emitter
+- `library/builders/gfx950/gdn/gdn_decode.py` -- host driver and independent fp32 reference
+- `library/builders/gfx950/gdn/tune.py` -- exhaustive GDN/KDA tile sweep
+- `library/benchmarks/gfx950/gdn/benchmark_gdn_decode.py` -- GDN benchmark
+- `library/benchmarks/gfx950/gdn/benchmark_kda_decode.py` -- KDA benchmark
 - `library/dispatch/gdn/` -- request, candidates and `dispatch_gdn_decode`
 
-Sections below cover decode:
+Sections below cover both decode gate kinds:
 
 - [Tensor contract](#tensor-contract)
 - [Spec and validation](#spec-and-validation)
@@ -46,17 +49,18 @@ instance needs.
 
 ## Tensor contract
 
-All tensors are contiguous (row-major).
+All tensors are contiguous row-major. `gate_kind` changes only the gate input:
 
-| Tensor | Shape | Dtype |
+| Tensor | GDN shape/type | KDA shape/type |
 |---|---|---|
-| `query`, `key` | `[B, 1, num_k_heads, head_k_dim]` | `dtype` |
-| `value`, `out` | `[B, 1, num_v_heads, head_v_dim]` | `dtype` |
-| `a`, `b` | `[B, 1, num_v_heads]` | `dtype` |
-| `dt_bias` | `[num_v_heads]` | `dtype` |
-| `A_log` | `[num_v_heads]` | `f32` |
-| `read_indices`, `write_indices` | `[B]` | `i32` |
-| `state` | `[pool, num_v_heads, head_v_dim, head_k_dim]` | `state_dtype` |
+| `query`, `key` | `[B, 1, num_k_heads, head_k_dim]`, `dtype` | same |
+| `value`, `out` | `[B, 1, num_v_heads, head_v_dim]`, `dtype` | same |
+| `a` | `[B, 1, num_v_heads]`, `dtype` | `[B, 1, num_v_heads, head_k_dim]`, `dtype` |
+| `b` | `[B, 1, num_v_heads]`, `dtype` | same |
+| `dt_bias` | `[num_v_heads]`, `dtype` | `[num_v_heads, head_k_dim]`, `f32` |
+| `A_log` | `[num_v_heads]`, `f32` | same |
+| `read_indices`, `write_indices` | `[B]`, `i32` | same |
+| `state` | `[pool, num_v_heads, head_v_dim, head_k_dim]`, `state_dtype` | same |
 
 The `1` is the sequence length: decode is one token per sequence.
 
@@ -69,24 +73,32 @@ The kernel has **two** outputs: `out`, and `state`, which it updates in place.
 
 ## Spec and validation
 
-`GdnDecodeSpec` carries the head geometry, dtypes, `use_qk_l2norm`, and three
-tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
-`simple=True` selects a one-thread-per-state-row reference body instead of the
-warp-tiled default. `use_qk_l2norm=False` drops the `q`/`k` normalisation --
-it changes the emitted code, is reachable through the request, and has its own
-golden case and numeric test.
+`GdnDecodeSpec.gate_kind` selects `gdn` or `kda`. `fuse_gate=True` is the
+dispatched production mode; `fuse_gate=False` accepts precomputed natural-log
+decay and exists only to benchmark the recurrence at an identical work
+boundary. `lower_bound` controls the fused KDA sigmoid gate.
 
-`is_valid_spec(spec, arch)` rejects unbuildable configurations before any IR is
-built, and is also the final authority for dispatch: a candidate's support
-predicate ends in this call, so what the kernel can emit and what the
-dispatcher will offer cannot drift apart. The rules and the reason for each are
-listed once, in
-[`ALGORITHM.md` §4.8](../../../library/builders/gfx950/gdn/ALGORITHM.md) --
-read them there rather than from a copy that can fall behind the validator.
+The remaining spec fields carry head geometry, dtypes, `use_qk_l2norm`, and
+three tiling knobs: `num_warps`, `warp_threads_k` and `blocks_per_v_dim`.
+`simple=True` selects the one-thread-per-state-row reference body.
 
-`kernel_name()` encodes every field that changes emitted code. The name is the
-compile and launcher cache key, so two specs sharing one name would mean one
-silently executes the other's code object.
+`is_valid_spec(spec, arch)` rejects unbuildable configurations before IR
+construction and is the final authority for dispatch. The host `prepare()`
+also validates the state pool, index values, and the gate-kind-dependent KDA
+buffers:
+
+```text
+a        [B,1,HV,DK]  dtype, contiguous
+dt_bias  [HV,DK]      f32, contiguous
+```
+
+Those buffers must share `query`'s device. The full validator rules and reasons
+live once in
+[`ALGORITHM.md` §4.8](../../../library/builders/gfx950/gdn/ALGORITHM.md).
+
+`kernel_name()` encodes every field that changes emitted code. Default GDN
+fields add no suffix, so its existing names remain stable while KDA gets a
+distinct compile/launcher cache key.
 
 ## Thread mapping
 
@@ -105,35 +117,39 @@ only the first lane of each group stores the output scalar.
 
 ## Tuned tile selection
 
-`blocks_per_v_dim` splits one head's value dimension across several workgroups
-purely to **manufacture parallelism**, duplicating some work per split. At small
-batch there are too few sequences to fill the machine and that trade pays for
-itself. At large batch the launch already has ample workgroups and the split is
-pure overhead, so the tuned tile collapses to one workgroup per head and widens
-the workgroup instead.
+`blocks_per_v_dim` splits one head's value dimension across workgroups to
+manufacture parallelism when the natural grid is small.
 
-No single tile is therefore right across the decode batch range. The dispatcher
-holds a table of coarse batch bands, measured by sweeping every legal tile at a
-set of batch anchors with each configuration correctness-gated before it is
-timed. Bands are coarse deliberately: neighbouring configurations sit close
-enough that a finer table would encode run-to-run variation. Re-measure with
-`library/builders/gfx950/gdn/tune.py`.
+The gate kinds use separate tables because KDA's per-channel gate has a
+different load/register profile:
+
+- **GDN:** original batch-keyed table. Existing routing stays unchanged.
+- **KDA:** keyed by `work = batch * num_v_heads`, so tensor-parallel head
+  sharding maps to the same key as an equivalent amount of batch work.
+
+Both tables come from exhaustive legal-tile sweeps with every configuration
+checked against the fp32 reference before timing. Re-measure with
+`library/builders/gfx950/gdn/tune.py`; exact measurements live outside the
+public source tree.
 
 ## Dispatch
 
-`dispatch_gdn_decode(GdnDecodeRequest(...))` returns a result carrying the
-selected spec, the built kernel, its signature, and the launch grid and block.
-Selection is: capability prefilter (arch, dtype) -> support predicate (ending in
-`is_valid_spec`) -> tuned tile for the request's batch.
+`dispatch_gdn_decode(GdnDecodeRequest(...))` returns the selected candidate,
+spec, signature, grid and block. Set `gate_kind="kda"` for per-channel decode.
+Selection is:
 
-An explicit `spec_id` on the request bypasses the table and forces a registered
-tile, which is what lets the tuning be re-measured or challenged.
+```text
+capability -> request/support checks -> gate-specific tuned table -> spec
+```
+
+An explicit `spec_id` forces a registered tile of the same gate kind.
 
 ## Coverage
 
-gfx950 only. `bf16` and `f16` for both the activation and state dtypes; the two
-need not match. Head geometry is constrained by the validator rules above rather
-than by a fixed list.
+gfx950 only. `bf16` and `f16` activation/state dtypes are supported and need
+not match. Head geometry is constrained by the validator. KDA's production
+fused mode and benchmark-only precomputed-log-decay mode are both numerically
+covered.
 
 ## Failure modes
 
@@ -141,6 +157,8 @@ than by a fixed list.
   a head dim or `blocks_per_v_dim` that does not divide.
 - **Wrong arch.** Candidates declare gfx950; another arch is rejected by the
   capability prefilter before a spec is built.
+- **Malformed KDA gate buffers.** `prepare()` requires per-channel `a` and f32
+  `dt_bias` with exact contiguous shapes and the same device as `query`.
 - **State appears corrupted on the following step.** The kernel writes `out` and
   mutates `state`; a driver that checks only `out` will not see a bad state
   write until the next decode step reads it. The numeric test compares both.
