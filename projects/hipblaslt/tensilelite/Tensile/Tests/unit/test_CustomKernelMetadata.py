@@ -274,6 +274,16 @@ def test_problem_predicate_drops_value_one():
     assert ProblemPredicate.FromOriginalKeyPair(("AssertFree0ElementMultiple", 1)) is None
 
 
+def test_problem_predicate_emits_size_equal_for_assert_free0_size():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertFree0SizeEqual", 1))
+
+    assert pred is not None
+    assert pred.tag == "SizeEqual"
+    assert pred.index == 0
+    assert pred.value == 1
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertFree0SizeEqual", 0)) is None
+
+
 def _write_minimal_yaml_with_predicate(yaml_path, predicate_value):
     yaml_path.write_text(dedent(f"""\
         BenchmarkProblems:
@@ -335,6 +345,8 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
         },
         "AssertFree0ElementMultiple": 256,
         "AssertFree1ElementMultiple": 256,
+        "AssertFree0SizeEqual": 1,
+        "StaggerU": 0,
         "WavefrontSize": 64,
     }
 
@@ -343,12 +355,18 @@ def test_build_custom_config_yaml_emits_predicate_after_mi():
     mi_idx = rendered.index("MatrixInstruction:")
     f0_idx = rendered.index("AssertFree0ElementMultiple:")
     f1_idx = rendered.index("AssertFree1ElementMultiple:")
+    size_idx = rendered.index("AssertFree0SizeEqual:")
+    stagger_idx = rendered.index("StaggerU:")
     wf_idx = rendered.index("WavefrontSize:")
 
     assert mi_idx < f0_idx < wf_idx
     assert mi_idx < f1_idx < wf_idx
+    assert mi_idx < size_idx < wf_idx
+    assert mi_idx < stagger_idx < wf_idx
     assert "AssertFree0ElementMultiple: 256" in rendered
     assert "AssertFree1ElementMultiple: 256" in rendered
+    assert "AssertFree0SizeEqual: 1" in rendered
+    assert "StaggerU: 0" in rendered
 
 
 # --------------------------------------------------------------------------- #
@@ -396,7 +414,7 @@ def test_fmt_yaml_args_empty_single_multiple():
 def test_build_config_provenance_only():
     out = build_custom_config_yaml("aiter", None, repository="http://x", version="2.0")
     assert "Origin: aiter" in out
-    assert "Repository: http://x" in out
+    assert 'Repository: "http://x"' in out
     assert "Version: 2.0" in out
     assert "SupportsBias: false" in out
     assert "KernArgsVersion: 0" in out
@@ -602,6 +620,11 @@ def test_metadata_arg_default_uint32():
     assert _metadataArgToCustomArg(_meta_arg("alpha", 4)) == {
         "type": "uint32", "semantic": "Alpha"
     }
+
+
+def test_metadata_arg_cucount_is_compute_units():
+    assert _metadataArgToCustomArg(_meta_arg("cuCount", 4))["semantic"] == "ComputeUnits"
+    assert _metadataArgToCustomArg(_meta_arg("ComputeUnits", 4))["semantic"] == "ComputeUnits"
 
 
 def test_metadata_arg_activation_index():
@@ -963,3 +986,28 @@ def test_parse_tensile_yaml_skips_non_dict_and_nameless_entries(tmp_path):
         """))
     config = _parse_tensile_yaml(str(p), "real_kernel")
     assert "CustomKernel" in config
+
+
+def test_wvspltk_hf_m1_shipped_config():
+    """The rocBLAS M=1 GEMV kernel must stay loadable with the CU-count interface."""
+    ck_root = os.path.join(os.path.dirname(Tensile.__file__), "CustomKernels")
+    valid, msg = validateCustomKernelMetadata("wvSpltK_hf_m1", ck_root)
+    assert valid, msg
+
+    config = getCustomKernelConfig("wvSpltK_hf_m1", {}, ck_root)
+    ck = config["CustomKernel"]
+    assert ck["grid"] == ["ComputeUnits", "One", "One"]
+    assert ck["threads"] == [64, 16, 1]
+    assert config["AssertFree0SizeEqual"] == 1
+    assert config["AssertSummationElementMultiple"] == 8
+    assert config["StaggerU"] == 0
+    assert [a["semantic"] for a in ck["args"]] == [
+        "SizeSum",
+        "SizeFree1",
+        "AddressB",
+        "AddressA",
+        "AddressD",
+        "Alpha",
+        "Beta",
+        "ComputeUnits",
+    ]
