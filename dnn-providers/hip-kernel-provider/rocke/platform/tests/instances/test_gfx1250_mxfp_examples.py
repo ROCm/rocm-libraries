@@ -75,3 +75,36 @@ def test_mixed_example_rejects_equal_canonical_formats(a, b):
 
     with pytest.raises(ValueError, match="homogeneous"):
         make_spec(argparse.Namespace(dtype_a=a, dtype_b=b))
+
+
+@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp8e4m3", "bf8e5m2"])
+@pytest.mark.parametrize("operand", ["a", "b"])
+def test_mixed_scaled_gemm_cli_accepts_eight_bit_names(monkeypatch, dtype, operand):
+    from rocke.examples.gfx1250.gemm import mixed_scaled_gemm as example
+
+    calls = []
+
+    def verify(spec, args):
+        calls.append(spec)
+        llvm = lower_kernel_to_llvm(
+            build_block_scaled_gemm(spec), arch="gfx1250", llvm_flavor="llvm23"
+        )
+        assert "@llvm.amdgcn.wmma.scale" in llvm
+        return 0
+
+    monkeypatch.setattr(example, "verify", verify)
+    argv = ["--dtype-a", "fp4", "--dtype-b", "fp4"]
+    argv += [f"--dtype-{operand}", dtype]
+    assert example.main(argv) == 0
+    assert len(calls) == 1
+    assert getattr(calls[0], f"dtype_{operand}") == dtype
+
+
+@pytest.mark.parametrize("dtype,alias", [("fp8", "fp8e4m3"), ("bf8", "bf8e5m2")])
+def test_mixed_cli_rejects_equal_eight_bit_aliases(capsys, dtype, alias):
+    from rocke.examples.gfx1250.gemm.mixed_scaled_gemm import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["--dtype-a", dtype, "--dtype-b", alias])
+    assert error.value.code == 2
+    assert "choose different A/B formats" in capsys.readouterr().err

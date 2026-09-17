@@ -7,7 +7,7 @@ from __future__ import annotations
 from ....instances.gfx1250.block_scaled_gemm import BlockScaledGemmSpec
 from ._scaled_gemm_example import argument_parser, verify
 
-FORMATS = ("fp8e4m3", "bf8e5m2", "fp6", "bf6", "fp4")
+FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4", "fp8e4m3", "bf8e5m2")
 
 
 def make_spec(args) -> BlockScaledGemmSpec:
