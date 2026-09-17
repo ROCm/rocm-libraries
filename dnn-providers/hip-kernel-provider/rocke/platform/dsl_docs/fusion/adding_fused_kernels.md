@@ -95,8 +95,9 @@ producer's store. This is the most common and most reusable form.
 - The store path itself is `DirectEpilogue` / `CShuffleEpilogue`
   (`helpers/epilogues.py`), which move accumulators to global memory; the fused
   ops are applied post-accumulate before the store.
-- Adding a new activation is one `EpilogueOp.emit` and (for graph capture) a
-  `_PATTERN_TABLE` entry — not a new kernel. See
+- Adding a new activation is an `EpilogueOp` subclass implementing `apply_element`
+  and `tag` (plus `declare_params` when it needs kernel arguments) and, for graph
+  capture, a `_PATTERN_TABLE` entry — not a new kernel. See
   [`fusion/overview.md`](./overview.md) and
   [`development/extending.md`](../development/extending.md) §4.
 
@@ -109,20 +110,22 @@ stages that share a grid and tile-compatible shapes.
 - The realized pattern is the warp-specialized GEMM pipeline
   (`instances/common/gemm_wsp3.py`, `wsp3`), where a subset of warps does the
   global→LDS load and the rest consume, tuned via `CK_WSP3_*` env flags.
-- Composed from `MfmaAtom` / `WmmaAtom` (`helpers/atoms.py`), a `SchedulePolicy`
-  (`helpers/schedule.py`), and a `SoftwarePipeline` (`helpers/pipeline.py`) — the
-  same building blocks any instance uses.
+- Note the current `wsp3` emits directly with `IRBuilder` and reuses the GEMM
+  helpers `_resolve_mma_op`, `_emit_smem_load`, `_emit_mma`, and
+  `_emit_epilogue_default` from `gemm_universal`; it does not instantiate the
+  generic `MfmaAtom` / `SchedulePolicy` / `SoftwarePipeline` classes.
 
 ### 3. Whole-pipeline fusion
 
 When stages cannot share on-chip state but the launch/sync overhead is the cost,
 fuse at the pipeline level rather than the kernel level.
 
-- Graph-level: the driver in `helpers/fuse.py` plus `fusion_ir.py`,
-  `fusion_scheduler.py` (picks region boundaries), `fusion_lowering.py`, and
-  `fusion_memory.py` (workspace for intermediates that escape a region).
-  Entry points `compile_fn` / `explain_fn`; use `explain_fn` first to see what
-  the planner matched.
+- Graph-level: `compile_fn` / `explain_fn` in `helpers/fuse.py` currently match
+  `_PATTERN_TABLE` directly and support a single GEMM-plus-epilogue kernel; use
+  `explain_fn` first to see what matched. The `fusion_ir.py`, `fusion_scheduler.py`,
+  `fusion_lowering.py`, and `fusion_memory.py` modules are multi-region planning
+  scaffolding (region boundaries, workspace for escaping intermediates) but are not
+  wired into those entry points yet.
 - Launch-level: chain the stages on a single stream (`PipelineLauncher`) so they
   run in FIFO order without host-side synchronization between them, when kernels
   stay distinct but always run together. Note this does not eliminate per-dispatch
@@ -135,12 +138,15 @@ fuse at the pipeline level rather than the kernel level.
   [`development/invariants.md`](../development/invariants.md)): the Python engine
   (`core/lower_llvm.py`) and the C++ engine (`platform/cpp/`) must emit
   byte-identical LLVM-IR. Any op / atom / epilogue / fusion / attribute change
-  lands in both engines in the same change. Exception: kernels under
-  `library/kernels/` have no C++ mirror by design, there the Python lowering is
-  the ground truth, but they still gate the golden.
+  lands in both engines in the same change. Nuance: some `library/kernels/` paths
+  (e.g. `attention_dense`) have no C++ builder mirror and take Python lowering as
+  ground truth, but that is per-kernel and settled at port time — in general the
+  serialized IR is still lowered by the C++ backend, so a new IR op needs matching
+  C++ lowerer support or an explicit `BackendCoverageGap`. The golden still gates
+  either way.
 - **Re-run the gate.** `tools/check_byte_identity.py` GREEN for every family at
-  every LLVM flavor (`llvm20` and `llvm22`). If the emission is meant to change,
-  re-bless the golden IR hash in the same change, never separately.
+  every LLVM flavor (`llvm20`, `llvm22`, and `llvm23`). If the emission is meant to
+  change, re-bless the golden IR hash in the same change, never separately.
 - **Keep the unfused path as the correctness reference.** Byte-identity and the
   golden are blind to a wrong-but-stable kernel, they pin stability, not
   correctness. Correctness is only established against an independent numpy/torch
@@ -232,11 +238,12 @@ shares nothing.
 4. **Compose over bespoke** — add an `EpilogueOp` / pattern entry / schedule choice
    rather than a monolithic kernel; parameterize the case-specific stage.
 5. **Mirror both engines** and re-run `tools/check_byte_identity.py` GREEN at
-   `llvm20` and `llvm22`; re-bless the golden in the same change if emission
-   changed.
-6. **Verify correctness before claiming a win** — fused vs. unfused vs.
-   numpy/torch reference via `run_fusion_validation_matrix` / the numeric lanes,
-   within tolerance.
+   `llvm20`, `llvm22`, and `llvm23`; re-bless the golden in the same change if
+   emission changed.
+6. **Verify correctness before claiming a win** — run fused and unfused paths
+   against a numpy/torch reference and explicitly assert every reported error
+   against tolerance. Note `run_fusion_validation_matrix` records `max_abs` but does
+   not itself enforce `atol` / `rtol`, so the assertion is on you.
 7. **Record the measurement** per the compliance policy — methodology and levers
    in-repo, measured numbers to the protected location only.
 8. **Keep the unfused path** as the reference oracle.
