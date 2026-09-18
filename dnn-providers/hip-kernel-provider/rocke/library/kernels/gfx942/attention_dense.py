@@ -584,6 +584,10 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
 
+# 32-bit addressing ceiling. The dense ABI bakes every extent at build time, so the
+# limits below are static properties of the spec, not runtime conditions.
+_INT32_LIMIT = 2**31
+
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
 # / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
 # (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
@@ -856,8 +860,8 @@ def supports_attention_dense(
     In scope for this port: gfx942, bf16/fp16, D64/D128, MHA/GQA including
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
     grid-stride variant, ``block_n`` dividing the ``block_m`` query tile, within the
-    LDS budget and 32-bit addressing. varlen / ragged / sliding-window are later
-    follow-ups (rejected below).
+    LDS budget and 32-bit addressing, and sliding-window (KV-loop prune + window mask).
+    varlen / ragged / sinks are later follow-ups (rejected below).
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
@@ -901,8 +905,8 @@ def supports_attention_dense(
         return False, "gfx942 attention_dense: varlen not yet supported"
     if spec.ragged:
         return False, "gfx942 attention_dense: ragged not yet supported"
-    if spec.sliding_window:
-        return False, "gfx942 attention_dense: sliding_window not yet supported"
+    # sliding_window is supported (KV-loop prune + window mask); the shared spec
+    # __post_init__ re-run above enforces its constraints (W % block_n, causal).
     if spec.use_sinks:
         return False, "gfx942 attention_dense: sinks not yet supported"
 
@@ -1032,6 +1036,38 @@ def supports_attention_dense(
             f"D={spec.head_size}, which exceeds the {arch} LDS capacity ({capacity} B)"
         )
 
+    # --- 32-bit addressing. Every offset below is built from IRBuilder add/mul, which
+    # lower to `add nsw` / `mul nsw` i32 -- signed overflow is UB, not a wrap, so LLVM
+    # may poison the whole address chain rather than merely read the wrong place. The
+    # buffer-resource num_records field is unsigned in hardware, but it is emitted via
+    # const_i32 (no range check) and the voffset feeding it is signed i32 arithmetic,
+    # so the signed bound is the binding one on both paths.
+    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
+    if kv_bytes >= _INT32_LIMIT:
+        return False, (
+            f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
+            f"limit ({_INT32_LIMIT} B)"
+        )
+    qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
+    if qo_elems >= _INT32_LIMIT:
+        return False, (
+            f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
+            f"limit ({_INT32_LIMIT})"
+        )
+    # Sliding-window + causal: the last query block's window can start past
+    # seqlen_kv (start_tile >= n_up), giving a zero-trip KV loop -> l == 0 ->
+    # rcp(0) -> NaN. Same class as the block_m % block_n gate above; reject.
+    if spec.sliding_window and spec.causal:
+        _n_q = spec.seqlen_q // spec.block_m
+        _n_ktiles = (spec.seqlen_kv + spec.block_n - 1) // spec.block_n
+        _n_per = spec.block_m // spec.block_n
+        _swt = spec.sliding_window // spec.block_n
+        if (_n_q - 1) * _n_per - _swt >= _n_ktiles:
+            return False, (
+                f"sliding_window={spec.sliding_window}: last query block's window "
+                f"starts at tile {(_n_q - 1) * _n_per - _swt}, past seqlen_kv tile "
+                f"count {_n_ktiles} -> zero-trip KV loop -> NaN"
+            )
     return True, ""
 
 
@@ -1186,6 +1222,17 @@ def _build_attention_dense_single_buffer(
 
     n_ktiles = Skv // BN
     n_per = BLOCK_M // BN
+    # Sliding-window left-context length. SW == 0 is full causal (the byte-identical
+    # always-on path -- every SW-gated block below is elided so the emitted IR is
+    # unchanged). SW > 0 attends keys k in (q - SW, q]; the KV loop is pruned to skip
+    # tiles fully below the window (see start_tile in _run_work_item) and do_mask
+    # applies the extra lower bound. The shared spec __post_init__ guarantees
+    # SW % BN == 0 and causal, so SWt is exact. NOTE: named SW/SWt, not W -- the
+    # persistent grid-stride path below rebinds `W` to the work-item count
+    # (NQB*Hq*B), and _run_work_item closes over it with late binding; reusing `W`
+    # here would make the window logic read that work count on the persistent path.
+    SW = spec.sliding_window
+    SWt = SW // BN  # window length in KV tiles (0 when disabled)
 
     # ---- async DMA loaders (arch-neutral; width=1 = CDNA3 legal) ----
     K_LDROW_BYTES = LDROW * 2
@@ -1491,26 +1538,53 @@ def _build_attention_dense_single_buffer(
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
             return s_reg
 
-        def do_mask(s_reg, tile_idx):
+        def do_mask(s_reg, tile_idx, lower=False, upper=True):
+            # upper: causal bound (ktok <= query_tok). lower: sliding-window bound
+            # (ktok > query_tok - W), only emitted when lower=True. With the default
+            # lower=False/upper=True the emitted IR is exactly the pre-window causal
+            # mask, so the W == 0 path stays byte-identical. Mirrors the gfx950 dense
+            # do_mask (gfx950/attention_dense.py). The mask is on the QK output S
+            # (N_SUB x 16 regs) and is independent of the doubled 32x32x8 K/PV loops.
             if not causal:
                 return
             tile_key0 = b.mul(tile_idx, b.const_i32(BN))
             query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+            win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
                     ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
-                    s_reg[nsub][i] = b.select(
-                        b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
-                    )
+                    if upper:
+                        s_reg[nsub][i] = b.select(
+                            b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
+                        )
+                    if lower:
+                        s_reg[nsub][i] = b.select(
+                            b.cmp_gt(ktok, win_lo), s_reg[nsub][i], neg_inf
+                        )
 
         # n_up: causal clamps the KV loop to the diagonal tile of this query block.
+        # The window does not move the upper diagonal, only the lower edge, so n_up
+        # is unchanged by W.
         n_ktiles_c = b.const_i32(n_ktiles)
         if causal:
             n_up = b.add(b.mul(qb, b.const_i32(n_per)), b.const_i32(n_per))
             n_up = b.select(b.cmp_lt(n_up, n_ktiles_c), n_up, n_ktiles_c)
         else:
             n_up = n_ktiles_c
+
+        # start_tile: sliding-window lower bound on the KV loop. Tiles fully below
+        # the window (< diag_start - Wt) are all -inf, so the loop skips them. Uses
+        # the per-work-item qb, so the persistent grid-stride path is covered too.
+        # W == 0 emits NOTHING here; the loop's lower bound const is created inline
+        # below at its original position so the W == 0 IR stays byte-identical (an
+        # earlier const_i32 would shift the shared SSA counter and rename o0..o3).
+        if SW:
+            _diag_start = b.mul(qb, b.const_i32(n_per))
+            _lo_raw = b.sub(_diag_start, b.const_i32(SWt))
+            start_tile = b.select(
+                b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
+            )
 
         # ---- online-softmax main loop (non-pipelined, single buffer) ----
         m0 = neg_inf
@@ -1528,7 +1602,7 @@ def _build_attention_dense_single_buffer(
         # unroll=True (P3) or a sync_lds_only->sync swap cannot silently delete it.
         # Verified byte-identical codegen with and without the flag today.
         loop = b.scf_for_iter(
-            b.const_i32(0),
+            start_tile if SW else b.const_i32(0),
             n_up,
             b.const_i32(1),
             iter_args,
@@ -1574,7 +1648,13 @@ def _build_attention_dense_single_buffer(
                 b.s_barrier_bare()
 
             s = do_qk()
-            do_mask(s, j)
+            # Every visited tile gets the causal upper bound; W > 0 additionally
+            # applies the window lower bound (redundant no-op compares on tiles
+            # fully inside the window). W == 0 -> lower=False, byte-identical.
+            # do_mask early-returns when non-causal, so upper is only read on the
+            # causal path (where it is the causal bound); the arg is kept for
+            # signature parity with the gfx950 do_mask, which does use upper=False.
+            do_mask(s, j, lower=(SW > 0), upper=True)
 
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
