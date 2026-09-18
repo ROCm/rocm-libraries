@@ -437,6 +437,11 @@ class PinnableRequest(Protocol):
     def normalized(self) -> dict: ...
 
 
+def normalize_selector(value: str) -> str:
+    """Normalize an algorithm or spec-id selector for matching and identity."""
+    return value.strip().lower()
+
+
 def selector_matches(
     request: PinnableRequest, candidate: KernelCandidate
 ) -> Tuple[bool, str]:
@@ -456,8 +461,8 @@ def selector_matches(
     Defaulting to ``"auto"`` is the same mistake one step worse: a pin silently
     ignored.
     """
-    algorithm = request.algorithm.strip().lower()
-    spec_id = request.spec_id.strip().lower()
+    algorithm = normalize_selector(request.algorithm)
+    spec_id = normalize_selector(request.spec_id)
     if algorithm not in ("auto", candidate.algorithm):
         return (
             False,

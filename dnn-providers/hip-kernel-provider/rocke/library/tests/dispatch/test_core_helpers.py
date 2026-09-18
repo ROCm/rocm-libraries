@@ -18,8 +18,10 @@ spec exercise exactly the code path a real request/candidate does.
 from __future__ import annotations
 
 import dataclasses
+import importlib
 from types import SimpleNamespace
 
+import rocke.dispatch.core as dispatch_core
 import pytest
 
 from rocke.dispatch.core import (
@@ -125,6 +127,31 @@ def test_pin_is_case_and_whitespace_insensitive():
     assert ok
     ok, _ = selector_matches(_request(spec_id="  B4  "), _candidate(spec_id="b4"))
     assert ok
+
+
+def test_selector_normalization_lives_in_core():
+    """Pin matching and GEMM request hashing share one normalizer."""
+    gemm_common = importlib.import_module("rocke.dispatch.gemm.common")
+    assert gemm_common.normalize_selector is dispatch_core.normalize_selector
+    assert dispatch_core.normalize_selector("  Chunk_Scan  ") == "chunk_scan"
+
+
+@pytest.mark.parametrize(
+    "module_name, attribute",
+    (
+        ("dispatch.attention.common", "_selector_matches"),
+        ("dispatch.kda.common", "_selector_matches"),
+        ("dispatch.grouped_convolution", "selector_matches"),
+        ("rocke.dispatch.families.moe", "selector_matches"),
+        ("rocke.dispatch.families.norm", "selector_matches"),
+        ("rocke.dispatch.gemm.bf16_rcr", "selector_matches"),
+        ("rocke.dispatch.gemm.fp16_rcr", "selector_matches"),
+    ),
+)
+def test_every_family_uses_the_core_selector(module_name, attribute):
+    """Every family must bind the canonical helper, not maintain a copy."""
+    module = importlib.import_module(module_name)
+    assert getattr(module, attribute) is selector_matches
 
 
 # --- make_kernel_id ---------------------------------------------------------
