@@ -132,6 +132,27 @@ TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableFalseWhenTensorTypeMismatched)
     EXPECT_FALSE(patient.isApplicable(graph.getNode(0), graph.getTensorMap()));
 }
 
+TEST(TestGpuRMSNormFwdPlanBuilder, IsApplicableAcceptsEpsilonTypeDifferentFromComputeType)
+{
+    // Helper uses float for epsilon type, which differs for double type we've passed for compute
+    auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph({150528, 50176, 224, 1},
+                                                                       {1, 3, 224, 224},
+                                                                       DataType::FLOAT, // input
+                                                                       DataType::DOUBLE // compute
+    );
+
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuRMSNormFwdPlanBuilder<DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::DOUBLE>
+        planBuilder;
+
+    EXPECT_TRUE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
+}
+
 // =============================================================
 // Test GpuRMSNormBwdPlan
 // =============================================================

@@ -104,6 +104,7 @@ TEST(TestGpuLayernormBwdSignatureKey, CreateFromNodeAndTensorMap)
                                                 DataType::BFLOAT16,
                                                 DataType::HALF,
                                                 DataType::DOUBLE,
+                                                DataType::DOUBLE,
                                                 DataType::DOUBLE);
 
     auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(

@@ -42,7 +42,8 @@ inline flatbuffers::FlatBufferBuilder
                             const DataType yDataType,
                             const DataType scaleBiasDataType,
                             const std::optional<DataType> meanInvVarianceDataType,
-                            const DataType computeDataType)
+                            const DataType computeDataType,
+                            const DataType epsilonDataType)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -60,7 +61,7 @@ inline flatbuffers::FlatBufferBuilder
         CreateTensorAttributesDirect(builder,
                                      epsilonUid,
                                      "epsilon",
-                                     DataType::FLOAT,
+                                     epsilonDataType,
                                      &epsilonDimsStrides,
                                      &epsilonDimsStrides,
                                      false,
@@ -135,7 +136,8 @@ inline flatbuffers::FlatBufferBuilder
                             const DataType yDataType,
                             const DataType scaleBiasDataType,
                             const std::optional<DataType> meanInvVarianceDataType,
-                            const DataType computeDataType)
+                            const DataType computeDataType,
+                            const DataType epsilonDataType)
 {
     const auto normalizedDim = static_cast<int64_t>(ioDims.size()) - normalizedDimCount;
 
@@ -182,7 +184,8 @@ inline flatbuffers::FlatBufferBuilder
                                    yDataType,
                                    scaleBiasDataType,
                                    meanInvVarianceDataType,
-                                   computeDataType);
+                                   computeDataType,
+                                   epsilonDataType);
 }
 
 } // namespace hipdnn_integration_tests::test_utils
