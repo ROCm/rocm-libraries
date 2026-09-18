@@ -361,6 +361,13 @@ bool SdpaFwdPlanBuilder::isApplicable(
         return false;
     }
 
+    // The current causal kernel binaries do not compute LSE stats correctly
+    // when s_lse=1 is set at runtime. Decline causal+stats until the upstream
+    // ASM kernels support this combination.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        hasStats && maskType != plan_utils::MaskType::NO_MASK,
+        "stats (LSE) output is not supported with causal masks on the current ASM kernels");
+
     auto key = getKernelNameKey(deviceString,
                                 dataTypeId,
                                 static_cast<int>(qTensor->dims()->Get(3)),
