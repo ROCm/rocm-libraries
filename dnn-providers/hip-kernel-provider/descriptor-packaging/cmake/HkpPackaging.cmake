@@ -482,6 +482,54 @@ function(hkp_verify_embedded_sources)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# hkp_default_rocke_comgr_lib()
+#   Give HIPKERNELPROVIDER_ROCKE_COMGR_LIB a package-derived default in the
+#   CALLER's scope, so a correctly configured build needs no explicit path.
+#   Does nothing when the variable already holds a value.
+#
+#   The result is a plain (non-cache) variable on purpose. It has to be visible
+#   both to hkp_probe_comgr_resolvable, whose assertion only runs when the
+#   override is non-empty, and to the pack step and ctest entries -- one value,
+#   or configure validates something the build does not use. A cached FORCE
+#   would instead persist, read back as a user override, and go stale on the
+#   next non-fresh reconfigure.
+# ---------------------------------------------------------------------------
+function(hkp_default_rocke_comgr_lib)
+    if(HIPKERNELPROVIDER_ROCKE_COMGR_LIB)
+        return()
+    endif()
+    # hip's config supplies the target on Linux but not on Windows, so the
+    # package is searched for only when it is genuinely absent.
+    if(NOT TARGET amd_comgr)
+        find_package(amd_comgr CONFIG QUIET)
+    endif()
+    if(NOT TARGET amd_comgr)
+        return()
+    endif()
+    set(_derived "")
+    # The exported configuration is RELEASE under TheRock and RELWITHDEBINFO
+    # elsewhere, so it is read rather than assumed. list(GET) on a NOTFOUND
+    # property is a hard error, which is what the guard prevents.
+    get_target_property(_cfgs amd_comgr IMPORTED_CONFIGURATIONS)
+    if(_cfgs)
+        list(GET _cfgs 0 _cfg)
+        get_target_property(_derived amd_comgr IMPORTED_LOCATION_${_cfg})
+    endif()
+    if(NOT _derived)
+        get_target_property(_derived amd_comgr IMPORTED_LOCATION)
+    endif()
+    # IMPORTED_IMPLIB is deliberately not a fallback: rocke ctypes.CDLLs this
+    # value and a Windows import library is not loadable. Staying empty lets
+    # rocke resolve normally, which a dead path would not.
+    if(_derived AND EXISTS "${_derived}")
+        set(HIPKERNELPROVIDER_ROCKE_COMGR_LIB "${_derived}" PARENT_SCOPE)
+        message(STATUS
+            "hkp: HIPKERNELPROVIDER_ROCKE_COMGR_LIB derived from the "
+            "amd_comgr package: ${_derived}")
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_probe_comgr_resolvable(<out_ok> <out_detail>)
 #   Configure-time gate for the rocKE producer, scoped to what is knowable at
 #   configure time.
@@ -901,6 +949,10 @@ where a System32 amd_comgr.dll can shadow the ROCm one; empty lets rocke \
 resolve normally. rocke itself treats this as the first CANDIDATE and falls \
 through when it does not load, so configure asserts that the library which \
 loaded is the one named here.")
+
+    # Runs before the copy below and before the probe, so the derived value is
+    # what both of them see. An explicitly-set value is left alone.
+    hkp_default_rocke_comgr_lib()
 
     # ROCKE_COMGR_LIB is rocke's runtime environment variable, not a CMake variable: the
     # value comes from our own cache entry and is forwarded into the environment rocke
