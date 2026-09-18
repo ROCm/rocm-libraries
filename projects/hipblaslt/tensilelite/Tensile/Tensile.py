@@ -225,11 +225,13 @@ def addCommonArguments(argParser):
     argParser.add_argument("--runtime-language", dest="RuntimeLanguage", \
         choices=["HIP"], help="override which runtime language to use")
     argParser.add_argument("--code-object-version", dest="CodeObjectVersion", \
-        choices=["4", "5", "V4", "V5", "default"], action="store", default="4", help="HSA code-object version")
+        choices=["4", "5", "6", "V4", "V5", "V6", "default"], action="store", default="4", help="HSA code-object version")
     argParser.add_argument("-v", "--verbose", action="store_true", \
         help="set PrintLevel=2")
     argParser.add_argument("--debug", dest="debug", action="store_true", \
         help="set PrintLevel=2 and CMakeBuildType=Debug")
+    argParser.add_argument("--validate-metadata", dest="ValidateMetadata", action="store_true", \
+        help="enable build-time validation of custom kernel metadata (custom.config blocks)")
     argParser.add_argument("--cxx-compiler", dest="CxxCompiler", \
         action="store", default=ToolchainDefaults.CXX_COMPILER, help="select which C++/HIP compiler to use")
     argParser.add_argument("--c-compiler", dest="CCompiler", \
@@ -275,6 +277,9 @@ def argUpdatedGlobalParameters(args):
     if args.debug:
         print1("# Command-line override: Debug")
         rv["CMakeBuildType"] = "Debug"
+    if args.ValidateMetadata:
+        print1("# Command-line override: ValidateMetadata")
+        rv["ValidateMetadata"] = True
     if args.client_lock:
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:

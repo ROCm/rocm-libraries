@@ -76,7 +76,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     argParser.add_argument(
         "--code-object-version",
         dest="CodeObjectVersion",
-        choices=["4", "5", "V4", "V5", "default"],
+        choices=["4", "5", "V4", "V5", "6", "V6", "default"],
         default="4",
         action="store",
     )
