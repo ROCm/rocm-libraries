@@ -1084,6 +1084,42 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPISplit(const BaseVector<int>&  CFmap,
+                                               const BaseVector<bool>& S,
+                                               BaseVector<int>*        f2c,
+                                               BaseVector<int>*        f2f,
+                                               BaseMatrix<ValueType>*  A_FF,
+                                               BaseMatrix<ValueType>*  A_FC) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                               const BaseVector<int>&       f2f,
+                                               const BaseMatrix<ValueType>& A_FC,
+                                               BaseMatrix<ValueType>*       A_FF) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSInterpolationTruncation(float trunc_factor, int max_elmts)
+    {
+        return false;
+    }
+
+    template <typename ValueType>
+    bool BaseMatrix<ValueType>::RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                                   const BaseVector<int>&       f2c,
+                                                   const BaseVector<int>&       f2f,
+                                                   const BaseMatrix<ValueType>& W,
+                                                   BaseMatrix<ValueType>*       prolong) const
+    {
+        return false;
+    }
+
+    template <typename ValueType>
     bool BaseMatrix<ValueType>::InitialPairwiseAggregation(ValueType        beta,
                                                            int&             nc,
                                                            BaseVector<int>* G,

@@ -2116,6 +2116,389 @@ namespace rocalution
         }
     }
 
+    // Flag coarse and fine points, so that a following exclusive sum turns these into the
+    // fine to coarse and fine to fine index maps
+    template <unsigned int BLOCKSIZE, typename I>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_cf_flags(I nrow,
+                                            const int* __restrict__ cf,
+                                            I* __restrict__ f2c,
+                                            I* __restrict__ f2f)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        bool coarse = (cf[row] == COARSE);
+
+        f2c[row] = coarse ? 1 : 0;
+        f2f[row] = coarse ? 0 : 1;
+    }
+
+    // Number of entries per row of the strongly connected F-F and F-C blocks. The diagonal
+    // of A always belongs to the F-F block, every other entry contributes only if it is a
+    // strong connection.
+    template <unsigned int BLOCKSIZE, typename I, typename J>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_split_nnz(I nrow,
+                                             const J* __restrict__ csr_row_ptr,
+                                             const I* __restrict__ csr_col_ind,
+                                             const bool* __restrict__ S,
+                                             const int* __restrict__ cf,
+                                             const I* __restrict__ f2f,
+                                             J* __restrict__ ff_row_ptr,
+                                             J* __restrict__ fc_row_ptr)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        J nnz_ff = 0;
+        J nnz_fc = 0;
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            I col = csr_col_ind[k];
+
+            if(col == row)
+            {
+                ++nnz_ff;
+                continue;
+            }
+
+            if(S[k] == false)
+            {
+                continue;
+            }
+
+            if(cf[col] == COARSE)
+            {
+                ++nnz_fc;
+            }
+            else
+            {
+                ++nnz_ff;
+            }
+        }
+
+        ff_row_ptr[f2f[row]] = nnz_ff;
+        fc_row_ptr[f2f[row]] = nnz_fc;
+    }
+
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_split_fill(I nrow,
+                                              const J* __restrict__ csr_row_ptr,
+                                              const I* __restrict__ csr_col_ind,
+                                              const T* __restrict__ csr_val,
+                                              const bool* __restrict__ S,
+                                              const int* __restrict__ cf,
+                                              const I* __restrict__ f2c,
+                                              const I* __restrict__ f2f,
+                                              const J* __restrict__ ff_row_ptr,
+                                              I* __restrict__ ff_col_ind,
+                                              T* __restrict__ ff_val,
+                                              const J* __restrict__ fc_row_ptr,
+                                              I* __restrict__ fc_col_ind,
+                                              T* __restrict__ fc_val)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        I frow = f2f[row];
+
+        J idx_ff = ff_row_ptr[frow];
+        J idx_fc = fc_row_ptr[frow];
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            I col = csr_col_ind[k];
+
+            if(col == row)
+            {
+                ff_col_ind[idx_ff] = frow;
+                ff_val[idx_ff]     = csr_val[k];
+                ++idx_ff;
+                continue;
+            }
+
+            if(S[k] == false)
+            {
+                continue;
+            }
+
+            if(cf[col] == COARSE)
+            {
+                fc_col_ind[idx_fc] = f2c[col];
+                fc_val[idx_fc]     = csr_val[k];
+                ++idx_fc;
+            }
+            else
+            {
+                ff_col_ind[idx_ff] = f2f[col];
+                ff_val[idx_ff]     = csr_val[k];
+                ++idx_ff;
+            }
+        }
+    }
+
+    // Row sums of the F-C block, and what remains of the row sum of A once all strong
+    // connections have been accounted for
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_diagonals(I nrow,
+                                             const J* __restrict__ csr_row_ptr,
+                                             const T* __restrict__ csr_val,
+                                             const int* __restrict__ cf,
+                                             const I* __restrict__ f2f,
+                                             const J* __restrict__ ff_row_ptr,
+                                             const I* __restrict__ ff_col_ind,
+                                             const T* __restrict__ ff_val,
+                                             const J* __restrict__ fc_row_ptr,
+                                             const T* __restrict__ fc_val,
+                                             T* __restrict__ D_q,
+                                             T* __restrict__ D_w)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            return;
+        }
+
+        I r = f2f[row];
+
+        T q = static_cast<T>(0);
+
+        for(J j = fc_row_ptr[r]; j < fc_row_ptr[r + 1]; ++j)
+        {
+            q = q + fc_val[j];
+        }
+
+        T sum = static_cast<T>(0);
+
+        for(J k = csr_row_ptr[row]; k < csr_row_ptr[row + 1]; ++k)
+        {
+            sum = sum + csr_val[k];
+        }
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            // The diagonal of row r of the F-F block sits at column r
+            if(ff_col_ind[j] != r)
+            {
+                sum = sum - ff_val[j];
+            }
+        }
+
+        D_q[r] = q;
+        D_w[r] = sum - q;
+    }
+
+    // Divide each off-diagonal of the F-F block by the denominator of its neighbour and
+    // accumulate the correction that distinguishes ext+i from plain extended interpolation
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_scale_ff(I nf,
+                                            const J* __restrict__ ff_row_ptr,
+                                            const I* __restrict__ ff_col_ind,
+                                            T* __restrict__ ff_val,
+                                            const T* __restrict__ ff_val_orig,
+                                            const T* __restrict__ D_q,
+                                            T* __restrict__ D_theta)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        constexpr T zero = static_cast<T>(0);
+
+        T theta = zero;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            I jj = ff_col_ind[j];
+
+            if(jj == r)
+            {
+                continue;
+            }
+
+            T value = D_q[jj];
+
+            // Locate the entry of row jj that points back at r
+            for(J k = ff_row_ptr[jj]; k < ff_row_ptr[jj + 1]; ++k)
+            {
+                if(ff_col_ind[k] == jj)
+                {
+                    continue;
+                }
+
+                if(ff_col_ind[k] == r)
+                {
+                    T value1 = ff_val_orig[k];
+                    value    = value + value1;
+                    theta    = theta + ff_val[j] * value1 / value;
+                    break;
+                }
+            }
+
+            if(value != zero)
+            {
+                ff_val[j] = ff_val[j] / value;
+            }
+        }
+
+        D_theta[r] = theta;
+
+        for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+        {
+            if(ff_col_ind[j] == r)
+            {
+                ff_val[j] = static_cast<T>(1);
+                break;
+            }
+        }
+    }
+
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_scale_rows(I nf,
+                                              const J* __restrict__ ff_row_ptr,
+                                              T* __restrict__ ff_val,
+                                              const T* __restrict__ D_theta,
+                                              const T* __restrict__ D_w)
+    {
+        I r = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(r >= nf)
+        {
+            return;
+        }
+
+        constexpr T zero = static_cast<T>(0);
+
+        T theta = D_theta[r] + D_w[r];
+
+        if(theta != zero)
+        {
+            theta = static_cast<T>(-1) / theta;
+
+            for(J j = ff_row_ptr[r]; j < ff_row_ptr[r + 1]; ++j)
+            {
+                ff_val[j] = ff_val[j] * theta;
+            }
+        }
+    }
+
+    // Coarse points are injected, fine points take their row of interpolation weights
+    template <unsigned int BLOCKSIZE, typename I, typename J>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_prolong_nnz(I nrow,
+                                               const int* __restrict__ cf,
+                                               const I* __restrict__ f2f,
+                                               const J* __restrict__ w_row_ptr,
+                                               J* __restrict__ csr_row_ptr_P)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        if(cf[row] == COARSE)
+        {
+            csr_row_ptr_P[row] = 1;
+        }
+        else
+        {
+            I r = f2f[row];
+
+            csr_row_ptr_P[row] = w_row_ptr[r + 1] - w_row_ptr[r];
+        }
+    }
+
+    template <unsigned int BLOCKSIZE, typename I, typename J, typename T>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void kernel_csr_rs_mmextpi_prolong_fill(I nrow,
+                                                const int* __restrict__ cf,
+                                                const I* __restrict__ f2c,
+                                                const I* __restrict__ f2f,
+                                                const J* __restrict__ w_row_ptr,
+                                                const I* __restrict__ w_col_ind,
+                                                const T* __restrict__ w_val,
+                                                const J* __restrict__ csr_row_ptr_P,
+                                                I* __restrict__ csr_col_ind_P,
+                                                T* __restrict__ csr_val_P)
+    {
+        I row = blockIdx.x * BLOCKSIZE + threadIdx.x;
+
+        if(row >= nrow)
+        {
+            return;
+        }
+
+        constexpr int COARSE = 1;
+
+        J idx = csr_row_ptr_P[row];
+
+        if(cf[row] == COARSE)
+        {
+            csr_col_ind_P[idx] = f2c[row];
+            csr_val_P[idx]     = static_cast<T>(1);
+
+            return;
+        }
+
+        I r = f2f[row];
+
+        for(J j = w_row_ptr[r]; j < w_row_ptr[r + 1]; ++j)
+        {
+            csr_col_ind_P[idx] = w_col_ind[j];
+            csr_val_P[idx]     = w_val[j];
+            ++idx;
+        }
+    }
+
 } // namespace rocalution
 
 #endif // ROCALUTION_HIP_HIP_KERNELS_RSAMG_CSR_HPP_

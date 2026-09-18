@@ -724,6 +724,37 @@ namespace rocalution
                                         BaseMatrix<ValueType>*       prolong_gst,
                                         BaseVector<int64_t>*         global_ghost_col) const;
 
+        /** \brief Split A into its strongly connected F-F and F-C blocks, as required by
+        * the matrix-matrix formulation of extended+i interpolation. Additionally computes
+        * the fine to coarse and fine to fine index maps. */
+        virtual bool RSMMExtPISplit(const BaseVector<int>&  CFmap,
+                                    const BaseVector<bool>& S,
+                                    BaseVector<int>*        f2c,
+                                    BaseVector<int>*        f2f,
+                                    BaseMatrix<ValueType>*  A_FF,
+                                    BaseMatrix<ValueType>*  A_FC) const;
+
+        /** \brief Scale the F-F block in-place such that the product with the F-C block
+        * yields the extended+i interpolation weights */
+        virtual bool RSMMExtPIScale(const BaseVector<int>&       CFmap,
+                                    const BaseVector<int>&       f2f,
+                                    const BaseMatrix<ValueType>& A_FC,
+                                    BaseMatrix<ValueType>*       A_FF) const;
+
+        /** \brief Truncate the rows of an interpolation operator, dropping entries below
+        * trunc_factor times the largest magnitude of their row and keeping at most
+        * max_elmts of them. The surviving entries are rescaled so that the row sum is
+        * preserved. */
+        virtual bool RSInterpolationTruncation(float trunc_factor, int max_elmts);
+
+        /** \brief Assemble the prolongation operator from the F-point interpolation
+        * weights, inserting the identity at the coarse points */
+        virtual bool RSMMExtPIAssembleP(const BaseVector<int>&       CFmap,
+                                       const BaseVector<int>&       f2c,
+                                       const BaseVector<int>&       f2f,
+                                       const BaseMatrix<ValueType>& W,
+                                       BaseMatrix<ValueType>*       prolong) const;
+
         /** \brief Factorized Sparse Approximate Inverse assembly for given system
         * matrix power pattern or external sparsity pattern */
         virtual bool FSAI(int power, const BaseMatrix<ValueType>* pattern);

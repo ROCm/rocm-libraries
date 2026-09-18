@@ -68,6 +68,16 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetInterpolationFF1Limit(bool FF1);
 
+        /** \brief Drop interpolation weights below \p factor times the largest magnitude
+        * of their row (default: 0, no truncation) */
+        ROCALUTION_EXPORT
+        void SetInterpolationTruncationFactor(float factor);
+
+        /** \brief Keep at most \p max_elmts weights per interpolation row
+        * (default: 0, unlimited) */
+        ROCALUTION_EXPORT
+        void SetInterpolationMaxElmts(int max_elmts);
+
         ROCALUTION_EXPORT
         virtual void ReBuildNumeric(void);
 
@@ -93,6 +103,10 @@ namespace rocalution
 
         /** \brief Interpolation type */
         InterpolationType interpolation_;
+
+        /** \brief Interpolation truncation */
+        float trunc_factor_;
+        int   p_max_elmts_;
     };
 
 } // namespace rocalution

@@ -4042,6 +4042,78 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSMMExtPIInterpolation(const LocalVector<int>&  CFmap,
+                                                         const LocalVector<bool>& S,
+                                                         GlobalMatrix<ValueType>* prolong) const
+    {
+        log_debug(this,
+                  "GlobalMatrix::RSMMExtPIInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        assert(prolong != NULL);
+        assert(this != prolong);
+
+        assert(prolong->GetFormat() == CSR);
+
+        assert(this->is_host_() == prolong->is_host_());
+        assert(this->is_host_() == CFmap.is_host_());
+        assert(this->is_host_() == S.is_host_());
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+
+        // The matrix-matrix formulation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSMMExtPIInterpolation() is not implemented for more than "
+                     "one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSMMExtPIInterpolation(CFmap, S, &prolong->matrix_interior_);
+
+        // Prolongation PM
+        prolong->CreateParallelManager_();
+        prolong->pm_self_->SetMPICommunicator(this->pm_->comm_);
+
+        prolong->pm_self_->SetGlobalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetGlobalNcol(prolong->matrix_interior_.GetN());
+
+        prolong->pm_self_->SetLocalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetLocalNcol(prolong->matrix_interior_.GetN());
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSInterpolationTruncation(float trunc_factor, int max_elmts)
+    {
+        log_debug(this, "GlobalMatrix::RSInterpolationTruncation()", trunc_factor, max_elmts);
+
+        if(trunc_factor <= 0.0f && max_elmts <= 0)
+        {
+            return;
+        }
+
+        // Truncation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSInterpolationTruncation() is not implemented for more "
+                     "than one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSInterpolationTruncation(trunc_factor, max_elmts);
+
+        this->nnz_ = this->matrix_interior_.GetNnz();
+    }
+
+    template <typename ValueType>
     void GlobalMatrix<ValueType>::RSExtPIInterpolation(const LocalVector<int>&  CFmap,
                                                        const LocalVector<bool>& S,
                                                        bool                     FF1,

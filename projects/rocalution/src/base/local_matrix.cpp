@@ -6963,10 +6963,28 @@ namespace rocalution
                                                                       prolong->matrix_,
                                                                       NULL);
 
+        if(err == true)
+        {
+            // Fill P
+            err = csr_ptr->matrix_->AMGSmoothedAggregationProlongFill(global_col_begin,
+                                                                      global_col_end,
+                                                                      lumping_strat,
+                                                                      relax,
+                                                                      *connections.vector_,
+                                                                      *aggregates.vector_,
+                                                                      *aggregate_root_nodes.vector_,
+                                                                      *i64zero_vec.vector_,
+                                                                      *f2c_map.vector_,
+                                                                      *zero_mat.matrix_,
+                                                                      prolong->matrix_,
+                                                                      NULL,
+                                                                      NULL);
+        }
+
         // LCOV_EXCL_START
         if((err == false) && (csr_ptr->is_host_() == true) && (csr_ptr->GetFormat() == CSR))
         {
-            LOG_INFO("Computation of LocalMatrix::ILU0Factorize() failed");
+            LOG_INFO("Computation of LocalMatrix::AMGSmoothedAggregation() failed");
             csr_ptr->Info();
             FATAL_ERROR(__FILE__, __LINE__);
         }
@@ -7054,23 +7072,6 @@ namespace rocalution
                 prolong->MoveToAccelerator();
             }
             // LCOV_EXCL_STOP
-        }
-        else
-        {
-            // Fill P
-            csr_ptr->matrix_->AMGSmoothedAggregationProlongFill(global_col_begin,
-                                                                global_col_end,
-                                                                lumping_strat,
-                                                                relax,
-                                                                *connections.vector_,
-                                                                *aggregates.vector_,
-                                                                *aggregate_root_nodes.vector_,
-                                                                *i64zero_vec.vector_,
-                                                                *f2c_map.vector_,
-                                                                *zero_mat.matrix_,
-                                                                prolong->matrix_,
-                                                                NULL,
-                                                                NULL);
         }
 
 #ifdef DEBUG_MODE
@@ -7538,6 +7539,169 @@ namespace rocalution
                                 prolong,
                                 NULL,
                                 NULL);
+
+        std::string prolong_name = "Prolongation Operator of " + mat->object_name_;
+        prolong->object_name_    = prolong_name;
+
+#ifdef DEBUG_MODE
+        prolong->Check();
+#endif
+    }
+
+    template <typename ValueType>
+    void LocalMatrix<ValueType>::RSMMExtPIInterpolation(const LocalVector<int>&  CFmap,
+                                                        const LocalVector<bool>& S,
+                                                        LocalMatrix<ValueType>*  prolong) const
+    {
+        log_debug(this,
+                  "LocalMatrix::RSMMExtPIInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        this->RSMMExtInterpolation_(CFmap, S, prolong);
+    }
+
+    template <typename ValueType>
+    void LocalMatrix<ValueType>::RSInterpolationTruncation(float trunc_factor, int max_elmts)
+    {
+        log_debug(this, "LocalMatrix::RSInterpolationTruncation()", trunc_factor, max_elmts);
+
+        if(trunc_factor <= 0.0f && max_elmts <= 0)
+        {
+            return;
+        }
+
+        assert(this->GetFormat() == CSR);
+
+        bool err = this->matrix_->RSInterpolationTruncation(trunc_factor, max_elmts);
+
+        // LCOV_EXCL_START
+        if(err == false)
+        {
+            // The accelerator backend may not implement this yet, so fall back to the host
+            if(this->is_accel_())
+            {
+                this->MoveToHost();
+
+                if(this->matrix_->RSInterpolationTruncation(trunc_factor, max_elmts) == false)
+                {
+                    LOG_INFO("Computation of LocalMatrix::RSInterpolationTruncation() failed");
+                    this->Info();
+                    FATAL_ERROR(__FILE__, __LINE__);
+                }
+
+                this->MoveToAccelerator();
+
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: LocalMatrix::RSInterpolationTruncation() is "
+                                 "performed on the host");
+            }
+            else
+            {
+                LOG_INFO("Computation of LocalMatrix::RSInterpolationTruncation() failed");
+                this->Info();
+                FATAL_ERROR(__FILE__, __LINE__);
+            }
+        }
+        // LCOV_EXCL_STOP
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+    }
+
+    template <typename ValueType>
+    void LocalMatrix<ValueType>::RSMMExtInterpolation_(const LocalVector<int>&  CFmap,
+                                                       const LocalVector<bool>& S,
+                                                       LocalMatrix<ValueType>*  prolong) const
+    {
+        assert(prolong != NULL);
+        assert(this != prolong);
+        assert(this->is_host_() == CFmap.is_host_());
+        assert(this->is_host_() == S.is_host_());
+        assert(this->is_host_() == prolong->is_host_());
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+
+        // Only CSR matrices are supported
+        LocalMatrix<ValueType>        csr_mat;
+        const LocalMatrix<ValueType>* mat = this;
+
+        if(this->GetFormat() != CSR)
+        {
+            csr_mat.CloneFrom(*this);
+            csr_mat.ConvertToCSR();
+            mat = &csr_mat;
+
+            LOG_VERBOSE_INFO(2, "*** warning: RSMMExtInterpolation is performed in CSR format");
+        }
+
+        // Fine to coarse and fine to fine maps
+        LocalVector<int> f2c;
+        LocalVector<int> f2f;
+
+        f2c.CloneBackend(*mat);
+        f2f.CloneBackend(*mat);
+
+        f2c.Allocate("f2c map", mat->GetM() + 1);
+        f2f.Allocate("f2f map", mat->GetM() + 1);
+
+        // Strongly connected F-F and F-C blocks of A
+        LocalMatrix<ValueType> A_FF;
+        LocalMatrix<ValueType> A_FC;
+
+        A_FF.CloneBackend(*mat);
+        A_FC.CloneBackend(*mat);
+
+        bool err = mat->matrix_->RSMMExtPISplit(
+            *CFmap.vector_, *S.vector_, f2c.vector_, f2f.vector_, A_FF.matrix_, A_FC.matrix_);
+
+        // LCOV_EXCL_START
+        if(err == false)
+        {
+            LOG_INFO("Computation of RSMMExtInterpolation failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+
+        err = mat->matrix_->RSMMExtPIScale(
+            *CFmap.vector_, *f2f.vector_, *A_FC.matrix_, A_FF.matrix_);
+
+        // LCOV_EXCL_START
+        if(err == false)
+        {
+            LOG_INFO("Computation of RSMMExtInterpolation failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        // The interpolation weights are the product of the two scaled blocks
+        LocalMatrix<ValueType> W;
+
+        W.CloneBackend(*mat);
+
+        W.MatrixMult(A_FF, A_FC);
+
+        A_FF.Clear();
+        A_FC.Clear();
+
+        err = mat->matrix_->RSMMExtPIAssembleP(
+            *CFmap.vector_, *f2c.vector_, *f2f.vector_, *W.matrix_, prolong->matrix_);
+
+        // LCOV_EXCL_START
+        if(err == false)
+        {
+            LOG_INFO("Computation of RSMMExtInterpolation failed");
+            this->Info();
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
 
         std::string prolong_name = "Prolongation Operator of " + mat->object_name_;
         prolong->object_name_    = prolong_name;

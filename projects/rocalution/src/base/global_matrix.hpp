@@ -409,6 +409,18 @@ namespace rocalution
                                   bool                     FF1,
                                   GlobalMatrix<ValueType>* prolong) const;
 
+        /** \brief Ruge Stueben Ext+i Interpolation, in matrix-matrix formulation.
+        * Not implemented for distributed matrices. */
+        ROCALUTION_EXPORT
+        void RSMMExtPIInterpolation(const LocalVector<int>&  CFmap,
+                                    const LocalVector<bool>& S,
+                                    GlobalMatrix<ValueType>* prolong) const;
+
+        /** \brief Truncate an interpolation operator. Not implemented for distributed
+        * matrices. */
+        ROCALUTION_EXPORT
+        void RSInterpolationTruncation(float trunc_factor, int max_elmts);
+
     protected:
         /** \brief Return true if the object is on the host */
         virtual bool is_host_(void) const;

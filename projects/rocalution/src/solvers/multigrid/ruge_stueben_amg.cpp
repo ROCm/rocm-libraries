@@ -54,6 +54,10 @@ namespace rocalution
         // Interpolation type default
         this->interpolation_ = Direct;
 
+        // No interpolation truncation by default
+        this->trunc_factor_ = 0.0f;
+        this->p_max_elmts_  = 0;
+
         // Disable scaling
         this->scaling_ = false;
     }
@@ -94,6 +98,9 @@ namespace rocalution
             case ExtPI:
                 interpolation = "Ext+i";
                 break;
+            case MMExtPI:
+                interpolation = "MM Ext+i";
+                break;
             }
 
             LOG_INFO("AMG number of levels " << this->levels_);
@@ -132,6 +139,9 @@ namespace rocalution
             break;
         case ExtPI:
             interpolation = "Ext+i";
+            break;
+        case MMExtPI:
+            interpolation = "MM Ext+i";
             break;
         }
 
@@ -186,6 +196,28 @@ namespace rocalution
         assert(this->build_ == false);
 
         this->FF1_ = FF1;
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void RugeStuebenAMG<OperatorType, VectorType, ValueType>::SetInterpolationTruncationFactor(
+        float factor)
+    {
+        log_debug(this, "RugeStuebenAMG::SetInterpolationTruncationFactor()", factor);
+
+        assert(factor >= 0.0f);
+
+        this->trunc_factor_ = factor;
+    }
+
+    template <class OperatorType, class VectorType, typename ValueType>
+    void RugeStuebenAMG<OperatorType, VectorType, ValueType>::SetInterpolationMaxElmts(
+        int max_elmts)
+    {
+        log_debug(this, "RugeStuebenAMG::SetInterpolationMaxElmts()", max_elmts);
+
+        assert(max_elmts >= 0);
+
+        this->p_max_elmts_ = max_elmts;
     }
 
     template <class OperatorType, class VectorType, typename ValueType>
@@ -314,7 +346,14 @@ namespace rocalution
         case ExtPI:
             op.RSExtPIInterpolation(CFmap, S, this->FF1_, pro);
             break;
+        case MMExtPI:
+            op.RSMMExtPIInterpolation(CFmap, S, pro);
+            break;
         }
+
+        // Truncation is a post-pass on the assembled operator, so it applies to every
+        // interpolation type alike
+        pro->RSInterpolationTruncation(this->trunc_factor_, this->p_max_elmts_);
 
         // Clean up
         CFmap.Clear();
