@@ -50,9 +50,12 @@
  *        Mutually exclusive with EnableSwInstructionPrefetchRelStatic.
  * @note SwInstructionPrefetchAbsBaseSgpr: low index of the reserved 3-SGPR
  * abs-prefetch base (even-aligned pair s[base:base+1] + scratch s[base+2]),
- * auto-allocated in Tensile
- *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K /
- * non-gfx1250).
+ * auto-allocated in Tensile `_initKernel`. -1 = not reserved / pass no-ops
+ * (also -1 for Stream-K). After SGPR compact this reservation no longer
+ * describes the kernel, so the passes ignore the index and pick their own
+ * block: one emitted at kernel entry reuses registers from inside the kernel's
+ * range, one emitted mid-kernel takes registers above every index the kernel
+ * names.
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \

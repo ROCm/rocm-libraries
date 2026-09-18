@@ -364,36 +364,42 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
         // SwInstructionPrefetchRelStaticPass handles multiple functions directly.
         pm.addPass(createFlattenCalleesPass(module.getFunctions()));
-        // gfx1250 hardware-entrypoint prologue: `s_mov_b64 s[64:65], 0` + `v_nop` +
-        // `global_prefetch_b8 v0, [s64, s65] scope:SCOPE_SE th:TH_LOAD_RT`.
-        // global_prefetch_b8 makes the first VMEM instruction non-clause-bound (it
-        // is a VMEM op that ignores EXEC); s[64:65] is never HW-initialized so
-        // zeroing it is free, and v_nop is a safe first VALU instruction that also
-        // covers the write-to-use delay before the prefetch reads the pair. Runs
-        // after flatten (so the entry's first instruction is the kernel's first)
-        // and before SW-prefetch insertion so the prefetch pass anchors its byte
-        // layout on the final entry (prologue included) and its CP-boundary
-        // coverage stays gap-free.
-        pm.addPass(createInsertInitialUnclausedVmemPass());
+        // Hardware-entrypoint prologue: `s_mov_b64` of an SGPR pair + `v_nop` +
+        // `global_prefetch_b8 v0, [pair] scope:SCOPE_SE th:TH_LOAD_RT`, which
+        // ignores EXEC and so leaves the first VMEM instruction non-clause-bound.
+        // v_nop is a safe first VALU instruction and covers the write-to-use delay
+        // before the prefetch reads the pair.
+        //
+        // Without RA the pair is s[64:65], which the hardware never initializes, so
+        // zeroing it is free. After SGPR compact those indexes may hold values, so
+        // the pass takes the top pair inside the kernel's own range instead — also
+        // free, since nothing has run at entry and no SGPR above the dispatch-filled
+        // line holds a value yet.
+        //
+        // Runs after flatten, so the entry's first instruction really is the
+        // kernel's, and before SW prefetch, so that pass lays out its bytes over the
+        // final entry and its CP-boundary coverage stays gap-free.
+        pm.addPass(createInsertInitialUnclausedVmemPass(moduleOptions.RegisterAllocation >= 2));
 
         // SW instruction prefetch — abs and PC-rel are mutually exclusive.
         // Priority: abs (EnableSwInstructionPrefetchAbs) > PC-rel
         // (EnableSwInstructionPrefetchRelStatic).
         if (moduleOptions.EnableSwInstructionPrefetchAbs) {
-            // One knob enables both abs passes; they are mutually exclusive by
-            // regime:
-            //   - static  : entry-burst grid, emits for (32640, 65536]; no-ops for >
-            //   65536.
-            //   - dynamic : run-time-targeted (post-CP) policy. Runs the read-only
-            //   analysis dump for
-            //     total > P(0)=32640; emits the predicated prefetch ladder (after
-            //     label_MultiGemmEnd) for total > 65536. Dumps to
+            // One knob enables both abs passes, which split by kernel size:
+            //   - static : entry-burst grid, emits for (32640, 65536].
+            //   - dynamic: run-time-targeted (post-CP) policy. Dumps its read-only
+            //     analysis for total > P(0)=32640 and emits the predicated ladder
+            //     (after label_MultiGemmEnd) for total > 65536, to
             //     <outputDir>/<kernel>/sw_prefetch_abs_dynamic_pass.txt.
-            // Both use the module overload (reads SwInstructionPrefetchAbsBaseSgpr +
-            // debug path). Dynamic runs FIRST so its analysis dump reflects the
-            // PRISTINE layout (before the static pass's entry burst shifts offsets).
-            // At any given size exactly one pass emits, so there is no co-mutation or
-            // baseSgpr contention.
+            //
+            // Dynamic runs FIRST so that dump reflects the PRISTINE layout, before
+            // the static pass's entry burst shifts offsets. Only one of the two ever
+            // emits, so they neither co-mutate nor contend for baseSgpr.
+            //
+            // After SGPR compact the Tensile-reserved triple means nothing and each
+            // burst picks its own block: an entry burst reuses one inside the
+            // kernel's range, the mid-kernel ladder takes one above every register
+            // named (see absPrefetchEntrySgprBase).
             pm.addPass(createSwInstructionPrefetchAbsDynamicPass(module));
             pm.addPass(createSwInstructionPrefetchAbsStaticPass(module));
         } else if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
