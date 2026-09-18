@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from rocke.core.lower_hip import lower_kernel_to_hip
+from rocke.core.arch.target import normalize_dtype
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm import _scaled_gemm_example, mxfp8_gemm
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
@@ -32,7 +33,7 @@ def test_mxfp8_formats_and_existing_golden(dtype, selector, ml_name, path):
     spec = mxfp8_gemm.make_spec(
         argparse.Namespace(m=32, n=48, k=256, dtype=dtype, matrix_path=path)
     )
-    assert spec.dtype_a == spec.dtype_b == dtype
+    assert spec.dtype_a == spec.dtype_b == normalize_dtype(dtype)
     kernel = build_block_scaled_gemm(replace(spec, name="fp6_test"))
     llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
     assert (
