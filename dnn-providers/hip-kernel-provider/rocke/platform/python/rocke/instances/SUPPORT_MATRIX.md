@@ -47,6 +47,8 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 `gfx1250/block_scaled_gemm` supports packed FP4, FP6 E2M3/E3M2, FP8 E4M3/E5M2,
 and mixed A/B formats through SCALE and SCALE16 with LLVM 23 and E8M0 scales.
 See the [packed FP6 input contract](../examples/gfx1250/gemm/FP6.md).
+FP4 also accepts E4M3 and E5M3 scales with per-operand selection; see
+[scale formats and evidence](../examples/gfx1250/gemm/SCALE_FORMATS.md).
 
 ## GEMM family
 

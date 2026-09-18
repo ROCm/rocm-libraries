@@ -64,6 +64,18 @@ ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.mixed_scaled_gemm
 The verifier's `mixed` case means combined A/B scale variation; the example's
 matrix choices determine whether the input dtypes are homogeneous or mixed.
 
+## Independent scale formats
+
+`scale_formats_gemm` defaults to FP4 x FP4 with E4M3 scales. Choose
+`--scale-dtype-a` and `--scale-dtype-b` explicitly for mixed inputs. E4M3/E5M3
+requires an FP4 operand, and FP4 x FP4 requires matching scale formats.
+See [SCALE_FORMATS.md](SCALE_FORMATS.md) for the supported combinations.
+
+```bash
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --dtype-a fp6 --scale-dtype-a e8m0 --scale-dtype-b e5m3
+```
+
 `mxfp8_gemm` runs both FP8 E4M3 and BF8 E5M2 by default, as separate
 homogeneous cases. Use `--dtype fp8` or `--dtype bf8` to run one encoding,
 or `--dtype both` explicitly. The names follow the FP6/BF6 convention.

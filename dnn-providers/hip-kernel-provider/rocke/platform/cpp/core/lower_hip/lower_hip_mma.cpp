@@ -87,6 +87,12 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     const bool scale16 = spec->scales.block_k == 16;
     const int fmt_a = spec->matrix_format;
     const int fmt_b = spec->matrix_format_b;
+    int sa = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_a"));
+    int sb = rocke_wmma_scale_format(rocke_attr_get_str(&op->attrs, "scale_dtype_b"));
+    if(const char* error = rocke_wmma_scale_error(fmt_a, fmt_b, sa, sb))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+    }
     const char* builtin = scale16 ? "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
                                   : "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4";
     if(!lw->arch.gfx || __builtin_strcmp(lw->arch.gfx, "gfx1250") != 0)
@@ -103,7 +109,7 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     }
     rocke_h_emitf(lw,
                   "f32x8 %s = %s(%d, %s, %d, %s, (int16_t)0, %s, "
-                  "0, 0, %s, 0, 0, %s, false, false);",
+                  "0, %d, %s, 0, %d, %s, false, false);",
                   rocke_h_name(lw, op->results[0]),
                   builtin,
                   fmt_a,
@@ -111,7 +117,9 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
                   fmt_b,
                   rocke_h_name(lw, op->operands[1]),
                   rocke_h_name(lw, op->operands[2]),
+                  sa,
                   rocke_h_name(lw, op->operands[3]),
+                  sb,
                   rocke_h_name(lw, op->operands[4]));
     return lw->status;
 }

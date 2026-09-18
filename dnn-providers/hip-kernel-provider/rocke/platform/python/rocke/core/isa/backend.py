@@ -32,6 +32,7 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
+from ..arch.wmma_scale import scale_formats
 
 
 class ISABackend:
@@ -628,6 +629,12 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         intrinsic = f"llvm.amdgcn.wmma.{mode}.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
         scale_ty = spec.scales.llvm_type
         fmt_a, fmt_b = spec.matrix_format, spec.matrix_format_b
+        sa, sb = scale_formats(
+            fmt_a,
+            fmt_b,
+            op.attrs.get("scale_dtype_a", "e8m0"),
+            op.attrs.get("scale_dtype_b", "e8m0"),
+        )
         a, b, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
             raise ValueError(
@@ -640,8 +647,8 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             f"i32 {fmt_a}, <16 x i32> {lowerer._operand(a)}, "
             f"i32 {fmt_b}, <16 x i32> {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i32 0, i32 0, {scale_ty} {lowerer._operand(a_scale)}, "
-            f"i32 0, i32 0, {scale_ty} {lowerer._operand(b_scale)}, "
+            f"i32 0, i32 {sa}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 {sb}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 

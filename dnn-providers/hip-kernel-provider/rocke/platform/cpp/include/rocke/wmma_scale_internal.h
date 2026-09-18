@@ -112,4 +112,45 @@ static inline int rocke_e8m0_scale_word_bits(const rocke_e8m0_scale_packing_t* p
     return packing->count * 8;
 }
 
+static inline bool rocke_wmma_scaled_formats(const char* op_id, bool* scale16, int* a, int* b)
+{
+    const rocke_scaled_wmma_op_t* spec = rocke_gfx1250_scaled_wmma(op_id);
+    if(!spec)
+        return false;
+    *scale16 = spec->scales.block_k == 16;
+    *a = spec->matrix_format;
+    *b = spec->matrix_format_b;
+    return true;
+}
+
+static inline int rocke_wmma_scale_format(const char* dtype)
+{
+    if(!dtype || strcmp(dtype, "e8m0") == 0 || strcmp(dtype, "i8") == 0)
+    {
+        return 0;
+    }
+    if(strcmp(dtype, "e5m3") == 0)
+    {
+        return 1;
+    }
+    return strcmp(dtype, "e4m3") == 0 ? 2 : -1;
+}
+
+static inline const char* rocke_wmma_scale_error(int a, int b, int sa, int sb)
+{
+    if(sa < 0 || sb < 0)
+    {
+        return "scaled WMMA scale types must be e8m0, e5m3, or e4m3";
+    }
+    if((a != 4 && sa != 0) || (b != 4 && sb != 0))
+    {
+        return "scaled WMMA e5m3/e4m3 scales require an FP4 operand";
+    }
+    if(a == 4 && b == 4 && sa != sb)
+    {
+        return "scaled WMMA FP4 x FP4 requires matching scale formats";
+    }
+    return NULL;
+}
+
 #endif /* ROCKE_WMMA_SCALE_INTERNAL_H */

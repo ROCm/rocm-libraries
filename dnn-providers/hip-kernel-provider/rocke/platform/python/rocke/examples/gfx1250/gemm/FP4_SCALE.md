@@ -24,7 +24,8 @@ The pointer ABI is `i8`, with 16-byte-aligned matrix buffers.
 Scale memory has shape `[M, K/block_k]` for A and `[K/block_k, N]` for B.
 Successive K groups occupy successive bytes, starting at the low byte of the
 instruction operand. `scale_dtype="e8m0"` selects this contract; `i8` is its
-storage alias. E4M3/E5M3 scale formats are not exposed by this path.
+storage alias. FP4 also accepts E4M3/E5M3 scale formats. See
+[per-operand scale formats](SCALE_FORMATS.md) for accepted combinations and API.
 The [scaled-WMMA operand descriptor](../../../core/arch/wmma_scale.py) records
 the E8M0 scale count and K-group size. The builder packs from that descriptor,
 and the lowerers derive the integer carrier width from the same contract.
