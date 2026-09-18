@@ -440,11 +440,11 @@ class ProblemType:
 
 def extractDimPredicate(cls, key, value, predicateName):
     """
-    Extract the predicate for AssertStrideEqual*
-    Value is a dictionary
+    Extract predicates for dict-valued Assert* maps (AssertSizeEqual, ...).
+    Value is a dictionary of {index: size}. A value of -1 skips that index.
     """
     predicates = []
-    for pos,val in value.items():
+    for pos, val in value.items():
         if val != -1:
             predicates.append(cls(predicateName, index=pos, value=val))
     if len(predicates) == 1:
@@ -487,6 +487,12 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertSizeEqual":
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "AssertSizeEqual must be a dict of {{index: size}}, got {!r}".format(value)
+                )
+            return extractDimPredicate(cls, key, value, "SizeEqual")
 
         if key.endswith('Multiple'):
             if value == 1:

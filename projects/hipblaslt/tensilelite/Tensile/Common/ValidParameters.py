@@ -652,6 +652,11 @@ validParameters = { # we need to make sure this matches develop
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
     "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+    # Exact size for one or more problem dimensions. Dict of {index: size}
+    # where index is a global assignment (0=M, 1=N, 2=batch, 3=K).
+    # Empty dict is unset. Fork YAML: AssertSizeEqual: [{0: 1}]  # M==1
+    # A value of -1 for a given index is ignored (classic Tensile).
+    "AssertSizeEqual": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1353,6 +1358,23 @@ _skipTypeCheck = {
 }
 
 
+def checkAssertSizeMapIsValid(name, value):
+    """AssertSizeEqual is a dict of {index: size}; both keys and values are int."""
+    if type(value) is not dict:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a dict of {{index: size}}"
+        raise Exception(msgBase.format(name, value))
+    for pos, val in value.items():
+        if type(pos) is not int:
+            msgBase = "Invalid parameter value: {} = {}\nIndex must be int, got {}"
+            raise Exception(msgBase.format(name, value, type(pos).__name__))
+        if pos < 0:
+            msgBase = "Invalid parameter value: {} = {}\nIndex must be >= 0"
+            raise Exception(msgBase.format(name, value))
+        if type(val) is not int:
+            msgBase = "Invalid parameter value: {} = {}\nSize must be int, got {}"
+            raise Exception(msgBase.format(name, value, type(val).__name__))
+
+
 def checkSpaceFillAlgoIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
@@ -1441,6 +1463,8 @@ def checkParametersAreValid(
                 else ""
             )
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
+        elif name == "AssertSizeEqual":
+            checkAssertSizeMapIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":

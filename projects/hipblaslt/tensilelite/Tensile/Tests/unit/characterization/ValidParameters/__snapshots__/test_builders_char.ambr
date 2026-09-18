@@ -1369,6 +1369,7 @@
     'AssertAILessThanEqual',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
+    'AssertSizeEqual',
     'AssertSummationElementMultiple',
     'BufferLoad',
     'BufferStore',
@@ -1615,6 +1616,10 @@
       ]),
       'len': 9,
       'type': 'list',
+    }),
+    'AssertSizeEqual': dict({
+      'type': 'int',
+      'value': -1,
     }),
     'AssertSummationElementMultiple': dict({
       'head': list([
