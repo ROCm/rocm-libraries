@@ -769,6 +769,21 @@ def is_tile_config_valid(
             return False
 
     # Additional operator-specific validation (runs after pipeline validation)
+    # These limits come from the two grouped quant bridges' code generation,
+    # not from gfx1250 hardware or the shared RowColQuant fragment rules. Keep
+    # them at the routing boundary so plain gemm_rowcolquant is not filtered.
+    if kernel_name_prefix in ("grouped_gemm_rowcolquant", "grouped_gemm_tensorquant") and (
+        _base_gfx_arch(gpu_target) == "gfx1250"
+    ):
+        if warp_m * warp_n * warp_k > 4:
+            logging.debug(
+                "gfx1250 grouped quant bridges require at most four warps per block"
+            )
+            return False
+        if warp_k > 1:
+            logging.debug("gfx1250 grouped quant bridges require warp_k=1")
+            return False
+
     if (
         kernel_name_prefix == "gemm_rowcolquant"
         or kernel_name_prefix == "grouped_gemm_rowcolquant"
@@ -1522,31 +1537,6 @@ def validate_gemm_rowcol_tensor_quant(
     gpu_target: str,
 ) -> Tuple[bool, str]:
     """Validate RowColQuant / TensorQuant GEMM-specific constraints."""
-    # gfx1250 warp-map restriction, deliberately scoped to THIS operator rather than
-    # placed in WARP_SUPPORTED_COMBINATIONS. That table is shared by seven instance
-    # builders, and plain GEMM's default gfx1250 WMMA config is an 8-warp 4x2x1 map
-    # that issue #11161 / PR #11175 fixed and verified correct on device -- removing
-    # it from the shared table would delete another operator's working default.
-    #
-    # These two grouped quant bridges are different: their codegen does not emit a
-    # loadable entry for >4-warp blocks on gfx1250, so those kernels abort at launch
-    # with "cannot find symbol" -- 3,352 of the 4,320 8-warp rows in a 14,208-row
-    # sweep, and 2,168 of those even when paired with an otherwise legal tile. That
-    # is a property of this bridge's code generation, not of the hardware, so the
-    # rule belongs here. (Both figures come from the same archive; an earlier draft
-    # of this comment quoted 3,220, which is from a different, smaller sweep.)
-    if _base_gfx_arch(gpu_target) == "gfx1250":
-        if warp_m * warp_n * warp_k > 4:
-            return False, (
-                f"On gfx1250 these grouped quant bridges do not emit a loadable "
-                f"kernel entry for blocks of more than four warps; got "
-                f"{warp_m}x{warp_n}x{warp_k} ({warp_m * warp_n * warp_k} warps)"
-            )
-        if warp_k > 1:
-            return False, (
-                f"On gfx1250 warp_k must be 1 for these bridges; got warp_k={warp_k}"
-            )
-
     whole_workgroup_cover_valid, whole_workgroup_cover_error = (
         validate_whole_wg_cover_configuration(
             tile_m,

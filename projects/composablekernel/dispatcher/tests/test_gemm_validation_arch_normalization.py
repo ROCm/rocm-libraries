@@ -211,6 +211,45 @@ class TestWarpConfigurationLookupIsUnchangedOnGfx9(unittest.TestCase):
         self.assertTrue(all(self._decisions(_SUFFIXES["gfx1201"]).values()))
 
 
+@unittest.skipIf(gvu is None, "tile_engine tree not present")
+class TestGroupedQuantWarpRestrictionScope(unittest.TestCase):
+    """Exercise operator routing, not just the shared quant validator."""
+
+    PREFIXES = ("gemm_rowcolquant", "grouped_gemm_rowcolquant", "grouped_gemm_tensorquant")
+
+    @staticmethod
+    def config(arch, dtype, warp):
+        return dict(
+            tile_m=128, tile_n=128, tile_k=256,
+            warp_m=warp[0], warp_n=warp[1], warp_k=warp[2],
+            warp_tile_m=16, warp_tile_n=16, warp_tile_k=128,
+            a_datatype=dtype, b_datatype=dtype, c_datatype="fp16",
+            pipeline="compv3", layout="rcr", gpu_target=arch,
+        )
+
+    def test_grouped_limits_do_not_filter_plain_rowcolquant(self):
+        for arch, dtype, prefix, warp in itertools.product(
+            ("gfx1250", "gfx1250:xnack-"), ("fp8", "bf8"), self.PREFIXES,
+            ((4, 2, 1), (1, 2, 2), (1, 4, 1)),
+        ):
+            with self.subTest(arch=arch, dtype=dtype, prefix=prefix, warp=warp):
+                # Eight warps and warp_k=2 are grouped-bridge restrictions.
+                # Four warps with warp_k=1 remain valid for all three operators.
+                expected = prefix == "gemm_rowcolquant" or warp == (1, 4, 1)
+                self.assertEqual(gvu.is_tile_config_valid(
+                    **self.config(arch, dtype, warp), kernel_name_prefix=prefix,
+                ), expected)
+
+    def test_shared_fragment_validation_still_applies_to_all_quant_operators(self):
+        for arch, dtype, prefix in itertools.product(
+            ("gfx1250", "gfx1250:xnack-"), ("fp8", "bf8"), self.PREFIXES,
+        ):
+            with self.subTest(arch=arch, dtype=dtype, prefix=prefix):
+                cfg = self.config(arch, dtype, (1, 4, 1))
+                cfg.update(warp_tile_m=32, warp_tile_n=32)
+                self.assertFalse(gvu.is_tile_config_valid(**cfg, kernel_name_prefix=prefix))
+
+
 if __name__ == "__main__":
     logging.disable(logging.CRITICAL)
     sys.exit(unittest.main())
