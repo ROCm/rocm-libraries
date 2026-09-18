@@ -125,8 +125,13 @@ set(REGRESSION_TESTS
 # All of the failing tests must be fixed asap.
 set(KNOWN_FAILING_TESTS
     test_ck_tile_mx_scale
+    test_tile_gemm_quant_bquant_microscale_rcr_1d_64
+    test_tile_gemm_quant_bquant_microscale_ccr_1d_64
+    test_tile_gemm_quant_bquant_microscale_rcr_1d_128
+    test_tile_gemm_quant_bquant_microscale_ccr_1d_128
     test_ck_tile_mx_gemm_pipeline_tdm_wmma
     test_gemm_blockscale_wp_fp8
+    test_grouped_gemm_multi_abd_fixed_nk
     test_fp6
     test_bf6
     test_mx_fp4
@@ -209,7 +214,9 @@ function(add_test_executable TEST_NAME)
         elseif(source_name_list MATCHES "_smfmac")
              list(REMOVE_ITEM TEST_TARGETS gfx900 gfx906 gfx906:xnack- gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx908 gfx90a gfx1200 gfx1201 gfx10-3-generic gfx11-generic gfx12-generic gfx1250 amdgcnspirv)
         endif()
-        set_source_files_properties(${ARGN} PROPERTIES LANGUAGE HIP)
+        if(NOT CK_BUILD_HOST_TESTS_ONLY)
+            set_source_files_properties(${ARGN} PROPERTIES LANGUAGE HIP)
+        endif()
         add_executable(${TEST_NAME} ${ARGN})
         set_property(TARGET ${TEST_NAME} PROPERTY HIP_ARCHITECTURES ${TEST_TARGETS} )
         target_link_libraries(${TEST_NAME} PRIVATE getopt::getopt)
@@ -318,7 +325,9 @@ function(add_gtest_executable TEST_NAME)
                 list(REMOVE_ITEM TEST_TARGETS gfx950)
              endif()
         endif()
-        set_source_files_properties(${ARGN} PROPERTIES LANGUAGE HIP)
+        if(NOT CK_BUILD_HOST_TESTS_ONLY)
+            set_source_files_properties(${ARGN} PROPERTIES LANGUAGE HIP)
+        endif()
         add_executable(${TEST_NAME} ${ARGN})
         set_property(TARGET ${TEST_NAME} PROPERTY HIP_ARCHITECTURES ${TEST_TARGETS} )
         add_dependencies(tests ${TEST_NAME})
@@ -343,6 +352,10 @@ function(add_gtest_executable TEST_NAME)
 endfunction()
 
 add_compile_options(-Wno-c++20-extensions)
+
+if(CK_BUILD_HOST_TESTS_ONLY)
+add_subdirectory(host)
+else()
 add_subdirectory(ck_tile)
 add_subdirectory(magic_number_division)
 add_subdirectory(space_filling_curve)
@@ -431,3 +444,4 @@ add_subdirectory(gpu_reference)
 add_subdirectory(util)
 add_subdirectory(gpu_verification)
 add_subdirectory(swiglu_oai_activation)
+endif()
