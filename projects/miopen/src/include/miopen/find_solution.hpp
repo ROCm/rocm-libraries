@@ -39,6 +39,7 @@
 #include <miopen/solver.hpp>
 #include <miopen/env.hpp>
 #include <miopen/generic_search_controls.hpp>
+#include <miopen/timer.hpp>
 
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
@@ -78,6 +79,8 @@ auto FindSolutionImpl(rank<1>,
 {
     static_assert(std::is_invocable_v<Db>,
                   "db is meant to be a functor returning a reference to perfdb");
+
+    ScopedTimeLogger find_solution_timer(s.SolverDbId() + " FindSolutionImpl(total)");
 
     const auto enforce = [&]() {
         if(options && options->find_enforce)
@@ -201,8 +204,14 @@ auto FindSolutionImpl(rank<1>,
         if(perf_cfg.empty() && !enforce.IsDbClean(context) &&
            !(context.do_search || enforce.IsSearch(context)))
         {
-            const auto ranked =
-                ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
+            std::remove_const_t<decltype(ai::lgbm::pcfg::MaybePickConfig(
+                s.SolverDbId(), problem, context.GetStream()))>
+                ranked;
+            {
+                ScopedTimeLogger pcfg_pick_timer(s.SolverDbId() + " lgbm_pcfg.MaybePickConfig");
+                ranked =
+                    ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
+            }
             const bool stop_on_default = env::enabled(MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT);
             using PerformanceConfig    = decltype(s.GetDefaultPerformanceConfig(context, problem));
             for(const auto& desc : ranked)
@@ -236,7 +245,17 @@ auto FindSolutionImpl(rank<1>,
     }
 #endif
 
-    return s.GetSolution(context, problem, s.GetDefaultPerformanceConfig(context, problem));
+    {
+        using PerformanceConfig = decltype(s.GetDefaultPerformanceConfig(context, problem));
+        PerformanceConfig default_config{};
+        {
+            ScopedTimeLogger default_cfg_timer(s.SolverDbId() +
+                                               " GetDefaultPerformanceConfig(default path)");
+            default_config = s.GetDefaultPerformanceConfig(context, problem);
+        }
+        ScopedTimeLogger get_solution_timer(s.SolverDbId() + " GetSolution(default path)");
+        return s.GetSolution(context, problem, default_config);
+    }
 }
 
 template <class Solver, class Context, class Problem, class Db>
