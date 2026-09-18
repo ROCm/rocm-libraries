@@ -56,6 +56,8 @@ class ComparisonAccumulator {
                  std::optional<bool> allCloseDecision = std::nullopt,
                  const ExactRealEvidence* exactEvidence = nullptr);
 
+    void merge(ComparisonAccumulator&& other);
+
     ComparisonReport finish();
 
    private:
