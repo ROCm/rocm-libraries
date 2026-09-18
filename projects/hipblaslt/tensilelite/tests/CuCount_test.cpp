@@ -238,12 +238,13 @@ TEST_F(CuCountFallbackTest, CpxAndSpxIndependent)
 TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
 {
     ContractionSolution solution;
-    solution.sizeMapping.streamK            = 3;
-    solution.sizeMapping.streamKForceDPOnly = 1;
-    solution.sizeMapping.macroTile          = TensileLite::dim3(128, 128, 1);
-    solution.sizeMapping.depthU             = 64;
-    solution.sizeMapping.matrixInstruction  = {16, 16, 32, 1};
-    solution.sizeMapping.CUOccupancy        = 1;
+    solution.sizeMapping.streamK               = 3;
+    solution.sizeMapping.streamKForceDPOnly     = 1;
+    solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
+    solution.sizeMapping.depthU                = 64;
+    solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
+    solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
 
     auto problem         = dummyProblem();
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
@@ -257,12 +258,13 @@ TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
 TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
 {
     ContractionSolution solution;
-    solution.sizeMapping.streamK            = 3;
-    solution.sizeMapping.streamKForceDPOnly = 1;
-    solution.sizeMapping.macroTile          = TensileLite::dim3(128, 128, 1);
-    solution.sizeMapping.depthU             = 64;
-    solution.sizeMapping.matrixInstruction  = {16, 16, 32, 1};
-    solution.sizeMapping.CUOccupancy        = 1;
+    solution.sizeMapping.streamK               = 3;
+    solution.sizeMapping.streamKForceDPOnly     = 1;
+    solution.sizeMapping.macroTile             = TensileLite::dim3(128, 128, 1);
+    solution.sizeMapping.depthU                = 64;
+    solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
+    solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
 
     auto problem         = dummyProblem();
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
@@ -284,6 +286,7 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
     solution.sizeMapping.CUOccupancy           = 1;
+    solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
     solution.sizeMapping.workspaceSizePerElemC = 4;
 
     auto problem         = dummyProblem();
@@ -356,6 +359,7 @@ namespace
         solution.sizeMapping.streamK           = 5;
         solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
         solution.sizeMapping.depthU            = 64;
+        solution.sizeMapping.workGroupSize     = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
         solution.sizeMapping.CUOccupancy       = 1;
     }
@@ -457,6 +461,7 @@ namespace
         solution.sizeMapping.streamK            = streamK;
         solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
         solution.sizeMapping.depthU             = 16;
+        solution.sizeMapping.workGroupSize      = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.matrixInstruction  = {16, 16, 4, 1};
         solution.sizeMapping.workGroupMapping   = 1;
         solution.sizeMapping.CUOccupancy        = -1;
@@ -1224,8 +1229,8 @@ TEST(SKLaunchGridLimitsTest, CapsGridWithAnalyticalOrigamiPath)
 TEST(SKLaunchGridLimitsTest, StillUsesDpFallbackBelowTileThreshold)
 {
     ContractionSolution solution;
+    initBenchStreamK5Solution(solution, TensileLite::dim3(16, 16, 1), 32);
     solution.sizeMapping.workGroupSize = TensileLite::dim3(128, 1, 1);
-    initBenchStreamK5Solution(solution, TensileLite::dim3(16, 16, 1), 128);
     const size_t tpg               = threadsPerWorkGroup(solution);
     const size_t maxTilesBeforeCap = (size_t{std::numeric_limits<uint32_t>::max()} + 1) / tpg;
 

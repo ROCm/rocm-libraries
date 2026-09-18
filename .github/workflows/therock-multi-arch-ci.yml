@@ -15,9 +15,10 @@
 name: TheRock Multi-Arch CI
 
 # TheRock ref: POC TEST -- temporarily pointed at ROCm/TheRock branch
-# users/SreecharanGundaboluAMD/miopen-subshard-poc (commit ad33c061de0da1b10ededbfdd7640896d3986efc),
-# which is pinned baseline df3d451a3c054e14705ddf94e58498e1208df8d5 + a single commit that lets
-# the miopen linux test job run concurrent gtest sub-shards per GPU runner. Revert to the plain
+# users/SreecharanGundaboluAMD/miopen-subshard-poc (commit b1ba900684f73147e150679b16d9d029a94e81c5),
+# rebased onto the current baseline 3abd365b9c2cda5bcb5ddf52208eb3a31cd41b3d (2026-09-17) plus the
+# POC commits that scope test_type=exhaustive to gfx94X and run its 16 gtest shards across the
+# stock 4 physical GHA jobs/GPU-runners (no process-level GPU sharing). Revert to the plain
 # pinned SHA (or a real reviewed bump) once the POC run is evaluated.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
@@ -96,7 +97,9 @@ jobs:
     name: Load CI Environment
     runs-on: ubuntu-24.04
     outputs:
-      baseline-run-id: ${{ steps.ci-env.outputs.baseline-run-id }}
+      # Use the manually supplied or bot-maintained baseline. An empty value
+      # causes artifact reuse to be disabled and triggers a full stage build.
+      baseline-run-id: ${{ inputs.baseline_run_id || steps.ci-env.outputs.baseline-run-id }}
       linux-runner: ${{ steps.ci-env.outputs.linux-runner }}
       therock-ref: ${{ steps.ci-env.outputs.therock-ref }}
     steps:
@@ -136,7 +139,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+          ref: b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -155,7 +158,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     with:
       build_variant: "release"
       # POC (ALMIOPEN sharding investigation): scoped to gfx94X only so this
@@ -188,20 +191,26 @@ jobs:
       # rocm-libraries only affects math-libs and ml-libs source sets
       # RPP owns cv-libs, so rebuild that stage when projects/rpp changes.
       # Note: compiler-runtime excluded due to hardcoded CMake paths (fftw3, etc.)
-      # When baseline-run-id is empty, clear prebuilt_stages to force full rebuild
-      prebuilt_stages: ${{ inputs.prebuilt_stages || (needs.ci-env.outputs.baseline-run-id != '' && (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
-      # Pull baseline run ID from ci-env (updated by assistant-librarian[bot] on submodule bumps)
-      baseline_run_id: ${{ inputs.baseline_run_id || needs.ci-env.outputs.baseline-run-id }}
+      # Copy prebuilt stages only when the resolved reuse policy provides a
+      # baseline run ID. Otherwise, leave this empty for a full stage build.
+      prebuilt_stages: ${{ needs.ci-env.outputs.baseline-run-id != '' && (inputs.prebuilt_stages || (contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/rpp,') && 'runtime-tests,comm-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg' || 'runtime-tests,comm-libs,cv-libs,storage-libs,debug-tools,dctools-core,profiler-apps,media-libs,wsl-rocdxg')) || '' }}
+      # Use the baseline selected by the artifact reuse policy above.
+      baseline_run_id: ${{ needs.ci-env.outputs.baseline-run-id }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       build_python_packages: ${{ inputs.build_python_packages || false }}
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
       build_native_linux: ${{ inputs.build_native_linux || false }}
-      # Enable automatic stage reuse - TheRock finds commit-compatible baselines
-      # and determines which stages to rebuild based on changed files
-      stage_reuse_mode: reuse-stage
+      # A missing baseline disables artifact reuse and causes TheRock to
+      # perform a full stage build.
+      stage_reuse_mode: >-
+        ${{
+          needs.ci-env.outputs.baseline-run-id != '' &&
+          'reuse-stage' ||
+          'off'
+        }}
       repository: ROCm/TheRock
-      ref: ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+      ref: b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
       # Pass external repo info for stage-impact analysis.
       # extra_cmake_options is appended to the cmake configure line of every
       # build stage, scoped to this repository's CI runs. TheRock keeps
@@ -227,7 +236,7 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -241,7 +250,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+      ref: b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     permissions:
       contents: read
       id-token: write
@@ -263,7 +272,7 @@ jobs:
     #       needs.configure.outputs.skip_tests != 'true'
     #     }}
     if: false
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -275,7 +284,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+      ref: b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
     permissions:
       contents: read
       id-token: write
@@ -322,7 +331,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: ad33c061de0da1b10ededbfdd7640896d3986efc # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
+          ref: b1ba900684f73147e150679b16d9d029a94e81c5 # POC: users/SreecharanGundaboluAMD/miopen-subshard-poc
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

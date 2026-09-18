@@ -4,6 +4,9 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ## hipTensor 2.5.0
 
+### Added
+* Added `gfx1250-strict` as a supported offload target and classified its device pass as `gfx1250`.
+
 ### Resolved issues
 * Fixed `hiptensorPermute` and the element-wise binary/trinary execute paths ignoring user-supplied output tensor strides, which caused the output to always be written contiguously regardless of the strides set on the output descriptor.
 

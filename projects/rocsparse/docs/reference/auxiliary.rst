@@ -20,12 +20,26 @@ rocsparse_create_handle()
 
 .. doxygenfunction:: rocsparse_create_handle
 
+.. _rocsparse_handle_create_:
+
+rocsparse_handle_create()
+-------------------------
+
+.. doxygenfunction:: rocsparse_handle_create
+
 .. _rocsparse_destroy_handle_:
 
 rocsparse_destroy_handle()
 --------------------------
 
 .. doxygenfunction:: rocsparse_destroy_handle
+
+.. _rocsparse_handle_destroy_:
+
+rocsparse_handle_destroy()
+--------------------------
+
+.. doxygenfunction:: rocsparse_handle_destroy
 
 .. _rocsparse_set_stream_:
 
