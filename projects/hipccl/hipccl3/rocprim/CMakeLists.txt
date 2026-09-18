@@ -193,7 +193,11 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${
 find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
 # Setup VERSION
-set(VERSION_STRING "4.7.0")
+# NOTE(hipccl3): guarded so a unified hipCCL superbuild can force VERSION_STRING
+# via a CACHE variable before add_subdirectory(rocprim); standalone builds keep 4.7.0.
+if(NOT DEFINED VERSION_STRING)
+  set(VERSION_STRING "4.7.0")
+endif()
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 

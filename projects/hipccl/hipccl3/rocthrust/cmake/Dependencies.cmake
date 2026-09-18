@@ -245,26 +245,44 @@ function(fetch_dep method repo_name repo_path package_min_ver_variable download_
 endfunction()
 
 if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
-  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH MIN_ROCPRIM_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
+  # NOTE(hipccl3): if rocprim is already a target in this build (e.g. the
+  # unified hipccl3 superbuild, which runs add_subdirectory(rocprim) before
+  # rocthrust), reuse it directly instead of calling fetch_dep(). fetch_dep()'s
+  # DOWNLOAD/MONOREPO paths call FetchContent_MakeAvailable()/add_subdirectory()
+  # on a second copy of rocprim's source, which would try to re-declare the
+  # `rocprim`/`rocprim_hip` targets and fatally collide with the ones already
+  # defined by the sibling add_subdirectory(rocprim) call.
+  if(TARGET rocprim)
+    message(STATUS "rocprim target already exists in this build - reusing it instead of fetching a separate copy")
 
-  if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
-    # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
-    message(STATUS "Configuring rocPRIM")
-    FetchContent_Declare(
-      prim
-      SOURCE_DIR    ${ROCPRIM_PATH}
-      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-      CMAKE_ARGS    -DBUILD_TEST=OFF -DBUILD_BENCHMARK=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
-      LOG_CONFIGURE TRUE
-      LOG_BUILD     TRUE
-      LOG_INSTALL   TRUE
-    )
-    FetchContent_MakeAvailable(prim)
     if(NOT TARGET roc::rocprim)
       add_library(roc::rocprim ALIAS rocprim)
     endif()
-    if(NOT TARGET roc::rocprim_hip)
+    if(TARGET rocprim_hip AND NOT TARGET roc::rocprim_hip)
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
+    endif()
+  else()
+    fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH MIN_ROCPRIM_PACKAGE_VERSION ROCM_DEP_RELEASE_BRANCH)
+
+    if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
+      # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
+      message(STATUS "Configuring rocPRIM")
+      FetchContent_Declare(
+        prim
+        SOURCE_DIR    ${ROCPRIM_PATH}
+        INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
+        CMAKE_ARGS    -DBUILD_TEST=OFF -DBUILD_BENCHMARK=OFF -DBUILD_EXAMPLE=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+        LOG_CONFIGURE TRUE
+        LOG_BUILD     TRUE
+        LOG_INSTALL   TRUE
+      )
+      FetchContent_MakeAvailable(prim)
+      if(NOT TARGET roc::rocprim)
+        add_library(roc::rocprim ALIAS rocprim)
+      endif()
+      if(NOT TARGET roc::rocprim_hip)
+        add_library(roc::rocprim_hip ALIAS rocprim_hip)
+      endif()
     endif()
   endif()
 endif()
