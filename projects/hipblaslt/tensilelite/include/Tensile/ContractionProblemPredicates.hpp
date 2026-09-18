@@ -1600,7 +1600,8 @@ namespace TensileLite
                     // min() against N. Reading strides()[1] * value directly would
                     // print a larger number than the one that decided the result
                     // whenever N is below MacroTile1.
-                    details << "D:" << storeExtentBytes(problem, value) << "<0xfffff000";
+                    details << "D:" << storeExtentBytes(problem, value) << "<0x" << std::hex
+                            << BufferOOBBytes << std::dec;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
