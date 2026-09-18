@@ -54,6 +54,8 @@ bool contains(const std::string& text, const std::string& needle) {
 constexpr const char* kSmemRule = "SmemSelfOverlapUnderXnackReplay";
 constexpr const char* kAlignRule = "ScalarTupleAlignment";
 constexpr const char* kVectorAlignRule = "VectorTupleAlignment";
+constexpr const char* kWmmaRule = "WmmaAccumulatorReuse";
+constexpr const char* kPinRule = "ProducerPinMatrix";
 
 /// Looked up by name rather than by index, so adding a rule does not renumber
 /// every other test.
@@ -139,6 +141,16 @@ TEST_F(Gfx1250AllocationRulesTest, DeclaresEveryRuleWithTheRightKind) {
         EXPECT_FALSE(align->description.empty()) << name;
         EXPECT_EQ(align->kind(), RuleKind::Placement) << name;
     }
+
+    const AllocationRule* wmma = findRule(rules, kWmmaRule);
+    ASSERT_NE(wmma, nullptr) << rules.toString();
+    EXPECT_FALSE(wmma->description.empty());
+    EXPECT_EQ(wmma->kind(), RuleKind::Pairing);
+
+    const AllocationRule* pin = findRule(rules, kPinRule);
+    ASSERT_NE(pin, nullptr) << rules.toString();
+    EXPECT_FALSE(pin->description.empty());
+    EXPECT_EQ(pin->kind(), RuleKind::Pin);
 }
 
 TEST_F(Gfx1250AllocationRulesTest, EveryRuleIsActive) {
@@ -146,7 +158,7 @@ TEST_F(Gfx1250AllocationRulesTest, EveryRuleIsActive) {
     // rows are encoding requirements that were never optional. Demoting any of
     // them should have to change this line and say why.
     const AllocationRules rules = gfx1250Rules(/*xnack=*/true);
-    for (const char* name : {kSmemRule, kAlignRule, kVectorAlignRule}) {
+    for (const char* name : {kSmemRule, kAlignRule, kVectorAlignRule, kPinRule}) {
         ASSERT_NE(findRule(rules, name), nullptr) << name;
         EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Active) << name;
     }
@@ -161,8 +173,8 @@ TEST_F(Gfx1250AllocationRulesTest, WithoutXnackReplayOnlyTheGatedRuleGoesInert) 
     EXPECT_EQ(findRule(rules, kSmemRule)->status, RuleStatus::Off);
 
     // Both alignment rows are encoding requirements of every gfx1250 module, so
-    // no capability can switch either off.
-    for (const char* name : {kAlignRule, kVectorAlignRule}) {
+    // no capability can switch either off. The pin row is ungated the same way.
+    for (const char* name : {kAlignRule, kVectorAlignRule, kPinRule}) {
         ASSERT_NE(findRule(rules, name), nullptr) << name;
         EXPECT_EQ(findRule(rules, name)->status, RuleStatus::Active) << name;
     }
@@ -531,9 +543,12 @@ AllocationRules gfx1250RulesWithAccumulatorReuse(bool on = true) {
     AllocationRules rules = gfx1250Rules(/*xnack=*/true);
     RuleOverrides forced;
     if (on)
-        forced.activate = {"WmmaAccumulatorReuse"};
+        forced.activate = {kWmmaRule};
     else
-        forced.disable = {"WmmaAccumulatorReuse"};
+        forced.disable = {kWmmaRule};
+    // ProducerPinMatrix would freeze dest at its producer index and so hide the
+    // reuse the rest of this block is about.
+    forced.disable.push_back(kPinRule);
     rules.force(forced);
     return rules;
 }
@@ -851,4 +866,56 @@ TEST_F(Gfx1250AllocationRulesTest, FollowingHintsStillReproducesTheProducer) {
     Expected<AllocationResult> coloured = allocator.allocate(on.context());
     ASSERT_TRUE(coloured.hasValue()) << coloured.getError();
     EXPECT_EQ(coloured->assignmentOf(dest->valueId()).idx, 100u) << coloured->toString();
+}
+
+// ---------------------------------------------------------------------------
+// ProducerPinMatrix
+// ---------------------------------------------------------------------------
+
+namespace {
+
+AllocationRules gfx1250RulesWithProducerPin(bool on = true) {
+    AllocationRules rules = gfx1250Rules(/*xnack=*/true);
+    RuleOverrides forced;
+    if (on)
+        forced.activate = {kPinRule};
+    else
+        forced.disable = {kPinRule};
+    // Reuse would send dest onto C, which is not what this block is measuring.
+    forced.disable.push_back(kWmmaRule);
+    rules.force(forced);
+    return rules;
+}
+
+}  // namespace
+
+TEST_F(Gfx1250AllocationRulesTest, CompactionKeepsAPinnedMatrixDestinationAtTheProducerRegister) {
+    // Dest is defined by the WMMA, so it is free to move. Compaction without the
+    // pin takes v0. The pin is what keeps v[100:107]. The add is not a matrix
+    // instruction, so it stays free to pack.
+    BasicBlock* entry = block("entry");
+    StinkyInstruction* wmma = createWmmaBf16(entry, /*dst=*/100, /*a=*/300, /*b=*/320, /*c=*/340);
+    StinkyInstruction* add =
+        createVAddInBlock(entry, kRaTestArch, /*dest=*/40, /*src0=*/100, /*src1=*/101);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    const StinkySSAValue* dest = ssaDefinedValue(*wmma, 0);
+    const StinkySSAValue* addDest = ssaDefinedValue(*add, 0);
+    ASSERT_NE(dest, nullptr);
+    ASSERT_NE(addDest, nullptr);
+    CompactingGreedyAllocator allocator;
+
+    AllocationSetup off(*func, RegClassSet::only(RegType::V), {},
+                        gfx1250RulesWithProducerPin(/*on=*/false));
+    Expected<AllocationResult> without = allocator.allocate(off.context());
+    ASSERT_TRUE(without.hasValue()) << without.getError();
+    EXPECT_EQ(without->assignmentOf(dest->valueId()).idx, 0u) << without->toString();
+
+    AllocationSetup on(*func, RegClassSet::only(RegType::V), {}, gfx1250RulesWithProducerPin());
+    EXPECT_TRUE(on.constraints().isPinned(dest->valueId())) << on.constraints().toString();
+    EXPECT_FALSE(on.constraints().isPinned(addDest->valueId())) << on.constraints().toString();
+    Expected<AllocationResult> with = allocator.allocate(on.context());
+    ASSERT_TRUE(with.hasValue()) << with.getError();
+    EXPECT_TRUE(verifyAllocation(*func, *with, on.context()).ok());
+    EXPECT_EQ(with->assignmentOf(dest->valueId()).idx, 100u) << with->toString();
 }
