@@ -39,6 +39,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <vector>
@@ -1635,6 +1636,109 @@ namespace TensileLite
                     return debugEvalCmp(problem, stream, "wg_num", workgroupNumber, "<=", "max", MAX_WORKGROUP_NUMBER);
                 }
             };
+
+            struct StreamKWorkgroupNumberCheck
+                : public Predicate_CRTP<StreamKWorkgroupNumberCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                std::array<int, 2> value; // [MacroTile0, MacroTile1]
+
+                StreamKWorkgroupNumberCheck() = default;
+                StreamKWorkgroupNumberCheck(std::array<int, 2> value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "StreamKWorkgroupNumberCheck";
+                }
+
+                // WorkgroupNumberCheck above skips Stream-K solutions because
+                // Stream-K's normal grid is CU-scaled, not tile-scaled. But
+                // several launch-time fallbacks (workspace too small for the
+                // ideal partial-tile reduction, the tree-fixup 24-bit bounds
+                // guard, a fixed-grid debug override, ...) hand Stream-K a
+                // one-workgroup-per-tile grid instead, same as the plain
+                // tile-scaled grid WorkgroupNumberCheck already bounds. Any of
+                // those fallbacks can fire at launch time depending on
+                // workspace and hardware, so this is checked unconditionally
+                // for every Stream-K solution rather than only when a
+                // fallback is predicted: if the tile grid itself is unsafe,
+                // dispatch cannot rely on always landing on the CU-scaled
+                // path.
+
+                // Integer ceiling division, exact for every input; a float
+                // ceil() here would lose precision once a dimension exceeds
+                // 2^24 and could undercount tiles right at the boundary this
+                // predicate exists to guard.
+                static size_t ceilDiv(size_t numerator, size_t denominator)
+                {
+                    return (numerator + denominator - 1) / denominator;
+                }
+
+                // Mirrors ContractionProblemGemm::getNumTiles(sizeMapping, 1),
+                // the count solve() uses to build the fallback grid. Kept
+                // separate because a predicate is handed MacroTile0/MacroTile1
+                // as its value rather than the solution's sizeMapping.
+                static size_t tiles(ContractionProblemGemm const& problem,
+                                    std::array<int, 2> const&     value)
+                {
+                    return ceilDiv(problem.freeSizeA(0), value[0])
+                           * ceilDiv(problem.freeSizeB(0), value[1])
+                           * problem.batchSize(0);
+                }
+
+                // The launch narrows the 64-bit work-item count
+                // (workGroupSize * numWorkGroups, both size_t) to the
+                // `unsigned int` globalWorkSize parameters of
+                // hipExtModuleLaunchKernel, so a tile-scaled Stream-K grid is
+                // only safe while that product still fits in 32 bits.
+                // Measured on gfx950 at 256 threads: 2^24 + 16 workgroups
+                // wraps to a 16-workgroup grid and leaves the other
+                // 16,777,216 workgroups' worth of D unwritten with no error
+                // reported, and 2^24 workgroups lands on exactly 2^32, which
+                // narrows to 0 and HIP rejects outright.
+                //
+                // NumThreads is not carried in this predicate's value, so the
+                // bound assumes the 256-thread configuration that dominates
+                // the shipped Stream-K solutions. That is exact at 256
+                // threads, conservative at 64 and 128 (whose real limits are
+                // 2^26 and 2^25), and still too loose for the one 512-thread
+                // family, MacroTile 448x128, which wraps at 2^23 but needs
+                // roughly 896 GiB of D to get there. Deliberately *not*
+                // MAX_WORKGROUP_NUMBER: that constant happens to have the
+                // same magnitude but guards an unrelated fp32 conversion.
+                static constexpr size_t MAX_STREAMK_TILE_COUNT
+                    = std::numeric_limits<uint32_t>::max() / 256;
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return tiles(problem, value) <= MAX_STREAMK_TILE_COUNT;
+                }
+
+                virtual std::string toString() const override
+                {
+                    return concatenate(this->type(), "(MT0:", value[0], ",MT1:", value[1], ")");
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "sk_tiles",
+                                        tiles(problem, value),
+                                        "<=",
+                                        "max",
+                                        MAX_STREAMK_TILE_COUNT);
+                }
+            };
+
 
             struct PersistentKernelCheck
                 : public Predicate_CRTP<PersistentKernelCheck, ContractionProblemGemm>

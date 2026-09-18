@@ -127,3 +127,192 @@ TEST(Predicates, WorkgroupMappingXCCCheck_FallbackTreatsXCCAs1)
     problem.setParams().setFallbackStatus(true);
     EXPECT_TRUE((*pred)(problem)) << "With fallback status, effective XCC=1 so 38 % 1 == 0";
 }
+// ----------------------------------------------------------------------------
+// StreamKWorkgroupNumberCheck: grid-dimension-overflow guard for Stream-K
+// solutions (ROCM-31290).
+//
+// WorkgroupNumberCheck (above) bounds the tile-scaled grid at
+// MAX_WORKGROUP_NUMBER (2^24) but is skipped for Stream-K solutions, because
+// Stream-K's normal grid is CU-scaled, not tile-scaled. But
+// resolveStreamKSettings()/getSKGridImpl() (ContractionSolution.cpp) has
+// several launch-time fallbacks (most notably the tree-fixup 24-bit
+// bounds guard) that hand Stream-K a one-workgroup-per-tile grid instead,
+// same shape as the grid WorkgroupNumberCheck already bounds. Without an
+// equivalent check, that fallback grid can itself overflow the 32-bit
+// work-item count used to launch the kernel: numWorkItems is computed as
+// workGroupSize * numWorkGroups in size_t, then narrowed to the
+// `unsigned int` globalWorkSize parameters of hipExtModuleLaunchKernel.
+//
+// Measured directly against that API on gfx950 (MI350X) at 256 threads,
+// the thread count of the MacroTile 16x16 Stream-K-static (SK3) kernels
+// this shape selects:
+//
+//   tiles         work items    narrowed   observed
+//   2^24 - 1      2^32 - 256    unchanged  correct
+//   2^24          2^32          0          launch rejected, invalid argument
+//   2^24 + 16     2^32 + 4096   4096       16 workgroups ran, 16,777,216
+//                                          missing, no error reported
+//
+// The last row is this bug. Note that 2^24 tiles is *not* safe at 256
+// threads, so the bound below is 2^24 - 1, not 2^24. At 64 threads the
+// same tile counts are all fine (confirmed: 2^24 + 16 workgroups ran
+// complete), which is why the limit tracks the work-item product rather
+// than the tile count alone.
+//
+// Both regimes are visible through the library as well. Sweeping every
+// algorithm the heuristic offers for a bf16 NN shape with N = 256, K = 48
+// and ldd = M, against the 10.1.0a20260822 tuned library: at M = 16,777,216
+// (tiles exactly 2^24) 25 of 568 fail the launch and none corrupts, while at
+// M = 19,398,656 (past 2^24) 39 of 545 return success with part of D never
+// written and none reports an error.
+// ----------------------------------------------------------------------------
+
+// The next two tests bracket the limit exactly, one tile apart. They use
+// N == MacroTile1 so the N factor of the tile product is 1 and the tile count
+// is just ceil(M/MacroTile0); with the N=256 geometry used elsewhere in this
+// file the tile count is always a multiple of 16 and cannot land on an
+// arbitrary boundary value.
+TEST(Predicates, StreamKWorkgroupNumberCheck_AtLargestSafeTileCount_Accepted)
+{
+    using namespace TensileLite;
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t tiles      = (size_t(1) << 24) - 1;
+    constexpr size_t m          = tiles * macroTile0;
+    constexpr size_t n          = macroTile1; // exactly one tile in N
+    static_assert(tiles * 256 < (size_t(1) << 32),
+                  "largest tile count whose 256-thread work-item product fits in uint32");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_TRUE((*pred)(problem))
+        << "M=" << m << " N=" << n << ": tiles == " << tiles
+        << " gives 2^32 - 256 work items at 256 threads, which still fits in 32 bits "
+           "and must be accepted.";
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_OneTilePastLargestSafeCount_Rejected)
+{
+    using namespace TensileLite;
+    // One tile more than the test above: 2^24 tiles is exactly 2^32 work
+    // items at 256 threads, which narrows to a zero-sized grid. HIP rejects
+    // that with an invalid-argument error rather than dropping stores, but it
+    // is still a shape dispatch must not select. An earlier revision of this
+    // guard compared `<= 2^24` and wrongly admitted it.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t tiles      = size_t(1) << 24;
+    constexpr size_t m          = tiles * macroTile0;
+    constexpr size_t n          = macroTile1; // exactly one tile in N
+    static_assert(tiles * 256 == (size_t(1) << 32), "must land on exactly 2^32 work items");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n << ": tiles == " << tiles
+        << " gives exactly 2^32 work items at 256 threads, which narrows to a "
+           "zero-sized grid and fails to launch.";
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_AtHardwareConfirmedBoundaryShape_Rejected)
+{
+    using namespace TensileLite;
+    // The shape the hardware investigation used: MacroTile 16x16 at N=256, so
+    // tiles == M. M == 2^24 is the smallest tile count in this geometry that
+    // reaches 2^32 work items at 256 threads.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 16777216; // 2^24
+    constexpr size_t n          = 256;
+    static_assert(m / macroTile0 * (n / macroTile1) == (size_t(1) << 24),
+                  "tiles == M for this geometry");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n
+        << ": a realistic 8.6 GiB shape that reaches exactly 2^32 work items.";
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_JustPastBoundary_Rejected_ROCM31290)
+{
+    using namespace TensileLite;
+    // Same tile geometry as above, but one confirmed-broken shape past the
+    // boundary: tiles == 16,781,312 > 2^24.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 16781312;
+    constexpr size_t n          = 256;
+    static_assert(m > 16777216, "must exceed 2^24 to exercise the guard");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n << ": tiles == " << m
+        << " > 2^24; confirmed on gfx950 hardware to silently drop most of D when "
+           "a Stream-K launch-time fallback uses one workgroup per tile.";
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_OrdinaryProblem_Accepted)
+{
+    using namespace TensileLite;
+    // Sanity check: an ordinary, small problem must still be accepted.
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 1024, 1024, 1024, 1024, 1024, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{128, 128});
+    EXPECT_TRUE((*pred)(problem));
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_BatchMultiplierCounted)
+{
+    using namespace TensileLite;
+    // A batch count large enough to push tiles past 2^24 on its own must
+    // also be rejected: tiles == ceil(M/MT0) * ceil(N/MT1) * batchSize.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 256;
+    constexpr size_t n          = 256;
+    constexpr size_t batchSize  = 20000000; // (256/16) * (256/16) * 20e6 > 2^24
+    static_assert((m / macroTile0) * (n / macroTile1) * batchSize > 16777216,
+                  "batch multiplier must push tiles past 2^24");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, batchSize);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem));
+}
+
+TEST(Predicates, StreamKWorkgroupNumberCheck_NonRepresentableDimension_Rejected)
+{
+    using namespace TensileLite;
+    // A float ceil() loses precision once a dimension exceeds 2^24: float
+    // cannot represent 16777217 exactly, so it rounds to 16777216, making
+    // ceil(16777217/16) come out to 1048576 instead of the correct 1048577.
+    // That silently drops tiles from 16,777,232 to exactly 16,777,216 == 2^24,
+    // flipping this predicate from reject to accept. Integer ceiling division
+    // must not repeat that mistake.
+    constexpr int    macroTile0 = 16;
+    constexpr int    macroTile1 = 16;
+    constexpr size_t m          = 16777217; // 2^24 + 1, not exactly representable in float
+    constexpr size_t n          = 256;
+    static_assert((m + macroTile0 - 1) / macroTile0 * (n / macroTile1) > 16777216,
+                  "true integer tile count must exceed 2^24");
+
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, m, n, /*k=*/48, m, /*ldb=*/48, m, 0.0, false, /*batchSize=*/1);
+    auto pred = std::make_shared<Predicates::Contraction::StreamKWorkgroupNumberCheck>(
+        std::array<int, 2>{macroTile0, macroTile1});
+    EXPECT_FALSE((*pred)(problem))
+        << "M=" << m << " N=" << n << ": true tiles == 16,777,232 > 2^24, but a "
+           "float-precision bug would round this down to exactly 2^24 and wrongly accept it.";
+}
