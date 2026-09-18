@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,8 @@ namespace rocsparse
         void*               m_row_ptr{};
 
     public:
-        const void* get_row_ptr() const;
+        rocsparse_indextype get_row_ptr_indextype() const;
+        const void*         get_row_ptr() const;
         sorted_coo2csr_info_t() = delete;
 
         sorted_coo2csr_info_t(int64_t             num_rows,
